@@ -28,7 +28,7 @@ export async function publishScheduledGuestMessageChange(
   type: 'MESSAGE_CREATE' | 'MESSAGE_UPDATE' = 'MESSAGE_UPDATE',
 ): Promise<void> {
   if (conversationId === null) messagingError(500, 'INVALID_MESSAGE_BOOKING', 'The scheduled message has no conversation; open apps could not be updated', 'conversationId')
-  await publishConversationEvent(env, db, { conversationId, type })
+  await publishConversationEvent(env, db, { conversationId, type, ...(type === 'MESSAGE_UPDATE' && { scheduled: true }) })
 }
 
 function validTimestamp(value: string, field: string): void {

@@ -28,7 +28,6 @@ import { formatTimestamp } from '~/utils/timezone'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 import { guestThreadChannel, replyThroughChannex, type ChannelThreadMapping } from './channel-messages'
-import { respondToStayChangeRequest } from './stay-change-requests'
 import type { ChannexEnv, ChannexError } from '~/server/integrations/channex/client'
 import { announceContentReport, assertSameReport, contentReportId, contentReportInsert, guestThreadExcerpt, reportReason, type ContentReportEnv } from '~/server/domain/content-reports'
 import type {
@@ -42,7 +41,7 @@ import type {
 // (server/domain/tasks.ts): a reply, a cancellation, archiving or blocking
 // closes it. There is no separate resolve or reopen. Archiving is each
 // person's own (conversations.ts archiveQuery), not an operation here.
-export const GUEST_THREAD_ACTIONS = new Set(['report', 'block', 'unblock', 'accept_change', 'decline_change', 'retry'])
+export const GUEST_THREAD_ACTIONS = new Set(['report', 'block', 'unblock', 'retry'])
 
 type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[]; message?: MessageRow }
 
@@ -68,11 +67,7 @@ export type ExecuteOperationInput = {
   body?: string
   /** Why a member reports or blocks the guest. */
   reason?: string
-  /** The change request a member accepts or declines. */
-  requestId?: string
   retryMessageId?: string
-  /** The member may change stays (owners and admins). */
-  stayManager?: boolean
   /** The photos a reply carries, in the order they were chosen. */
   photos?: MessagePhotoInput
   env: ReplyEmailEnv & UploadResolvedMediaInput['env'] & ChannexEnv & ContentReportEnv & CloudflareEnv
@@ -737,14 +732,6 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
   if (input.action === 'report' || input.action === 'block') return await executeReport(db, context, input, input.action === 'block')
   if (input.action === 'unblock') return await executeUnblock(db, context)
   if (input.action === 'no_show') return await executeNoShow(db, context, input)
-  if (input.action === 'accept_change' || input.action === 'decline_change') {
-    // A guest's request on their channel; a business's proposal is answered by its guest.
-    if (context.record?.unit !== 'nights') return conflict('Only a stay’s guest change requests are answered here')
-    if (!input.stayManager) throw new HTTPError({ statusCode: 403, message: 'Only organization owners and admins can change stays', data: { code: 'STAY_ROLE_REQUIRED', field: 'role' } })
-    if (!input.requestId) throw new HTTPError({ statusCode: 400, message: 'Name the change request to answer', data: { code: 'VALIDATION_ERROR', field: 'message_id' } })
-    await respondToStayChangeRequest(db, input.env, { thread: context.thread, requestId: input.requestId, decision: input.action === 'accept_change' ? 'accept' : 'decline', actorUserId: input.actorUserId })
-    return await successfulOutcome(db, context)
-  }
   return await executeSourceMutation(db, context, input)
 }
 

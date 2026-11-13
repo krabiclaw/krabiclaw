@@ -17,7 +17,7 @@ import { loadOwnerPictures } from '~/server/notifications/hero'
 import { addLocalDays, isValidCalendarDate, localDateTimeToInstant, localPartsAt } from '~/utils/timezone'
 import { listBookableSessions } from '~/server/utils/availability'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
-import { bookingChangeViews } from '~/server/domain/guest-threads/booking-changes'
+import { pendingBookingChangeView } from '~/server/domain/guest-threads/booking-changes'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { readPaymentDetails } from '~/server/domain/payments'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
@@ -220,8 +220,8 @@ async function pendingBookingChange(db: DbClient, threadId: string | null): Prom
   if (!row) return null
   const thread = await getGuestRequest(db, threadId)
   if (!thread) return null
-  const proposal = (await bookingChangeViews(db, thread, [row])).get(row.id)
-  if (!proposal || proposal.status !== 'pending') return null
+  const proposal = await pendingBookingChangeView(db, thread, row)
+  if (!proposal) return null
   return { message_id: row.id, created_at: row.created_at, before_label: proposal.before.when_label, after_label: proposal.after.when_label, party_size: proposal.after.party_size,
     before_assigned_member_name: proposal.before.assigned_member_name, after_assigned_member_name: proposal.after.assigned_member_name }
 }

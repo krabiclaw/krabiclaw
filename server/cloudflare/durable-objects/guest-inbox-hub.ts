@@ -219,6 +219,7 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
         revoke = !permission
         if (permission && (!permission.can_see_message || event.type === 'access.changed' || event.type === 'CONVERSATION_LEAVE')) continue
         if (scope.role === 'guest' && (event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE')) {
+          if (permission && event.scheduled) continue
           eventToSend = JSON.stringify({ ...event, location_id: null })
         }
       } else if (membership && !await canReceive(this.env, attachment, membership, event)) continue

@@ -52,7 +52,6 @@
         </template>
 
         <div class="mt-6 flex flex-col border-t border-default">
-          <NuxtLink v-if="details.actions.show_reservation && reservationTo" :to="reservationTo" class="border-b border-default py-4 text-base font-medium text-highlighted" @click="open = false">Show reservation</NuxtLink>
           <button v-if="details.actions.archive" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" :disabled="saving !== null" @click="move('archive')">Archive</button>
           <button v-if="details.actions.unarchive" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" :disabled="saving !== null" @click="move('unarchive')">Move to Messages</button>
           <button v-if="details.actions.report" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" :disabled="saving !== null" @click="reporting = { block: false }">Report</button>
@@ -77,7 +76,6 @@
 </template>
 
 <script setup lang="ts">
-import type { RouteLocationRaw } from 'vue-router'
 import type { ConversationParticipant } from '~/shared/messages-contract'
 import InboxAvatar from './InboxAvatar.vue'
 import { getErrorMessage } from '~/utils/errors'
@@ -89,7 +87,6 @@ import ReportDialog from './ReportDialog.vue'
 const props = withDefaults(defineProps<{
   threadId: string
   participants: ConversationParticipant[]
-  reservationTo: RouteLocationRaw | null
   canInvite?: boolean
   support?: boolean
   personalScope?: boolean

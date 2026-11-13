@@ -1,14 +1,32 @@
 <template>
-  <!-- One stay at a place to stay: who is coming, when, and what the host has collected. A member looking after the home reads its turnover. -->
-  <!-- Inside the guest thread's leaf, which owns the column, it is the body alone. -->
-  <component :is="embedded ? 'div' : DashboardIndexPanel" v-bind="embedded ? {} : { id: 'stay-details', title, column: 'record' }">
+  <DashboardIndexPanel id="stay-details" :title="title" column="record">
     <template #right>
-      <UButton v-if="!embedded && recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close stay details" />
+      <UButton v-if="recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close stay details" />
     </template>
     <UAlert v-if="error" color="error" variant="soft" title="This stay could not be loaded" :description="getErrorMessage(error, 'Stay request failed')" />
     <div v-else-if="stay" class="min-w-0 [overflow-wrap:anywhere]">
       <UAlert v-if="actionError" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError" />
       <UAlert v-if="homeError" class="mb-5" color="error" variant="soft" title="The home could not be loaded" :description="getErrorMessage(homeError, 'Home request failed')" />
+      <p v-if="changeResult" class="mb-5 text-sm text-highlighted" role="status">{{ changeResult }}</p>
+      <section v-for="change in pendingChanges" :key="change.id" class="mb-5 rounded-2xl border border-default bg-elevated p-5" :aria-labelledby="`change-title-${change.id}`" data-testid="booking-change-request">
+        <h3 :id="`change-title-${change.id}`" class="font-semibold text-highlighted">{{ t('booking.change_review') }}</h3>
+        <p v-if="change.requested_by === 'guest'" class="mt-1 text-sm text-muted">{{ t('booking.change_requested_by_guest', { guest: detail?.guest_name, channel: 'Airbnb' }) }}</p>
+        <div class="mt-4 grid grid-cols-2 gap-4 text-sm">
+          <div v-for="{ label, terms } in [{ label: 'booking.change_before', terms: change.before }, { label: 'booking.change_proposed', terms: change.after }]" :key="label">
+            <h4 class="font-medium text-highlighted">{{ t(label) }}</h4>
+            <dl class="mt-2 space-y-2">
+              <div><dt class="sr-only">Dates</dt><dd>{{ terms.dates }}</dd></div>
+              <div><dt class="text-muted">{{ t('stay.guests') }}</dt><dd>{{ terms.guests }}</dd></div>
+              <div><dt class="text-muted">{{ t('booking.change_total') }}</dt><dd>{{ terms.total }}</dd></div>
+            </dl>
+          </div>
+        </div>
+        <p class="mt-4 text-sm text-muted">{{ t(change.requested_by === 'guest' ? 'booking.change_guest_waiting' : 'booking.change_host_waiting', { channel: 'Airbnb' }) }}</p>
+        <div v-if="change.requested_by === 'guest'" class="mt-4 flex flex-wrap gap-3">
+          <UButton :label="t('booking.change_accept')" :loading="busy === `accept-${change.id}`" :disabled="busy !== null" @click="answerChange(change.id, 'accept')" />
+          <UButton :label="t('booking.change_decline')" color="neutral" variant="outline" :loading="busy === `decline-${change.id}`" :disabled="busy !== null" @click="answerChange(change.id, 'decline')" />
+        </div>
+      </section>
       <!-- A channel stay overlapping another is the host's to resolve; it never resolves itself. -->
       <UAlert
         v-if="detail?.overbooked"
@@ -206,21 +224,17 @@
         Payments, changes and cancellations for this stay are managed on
         <ULink v-if="detail.channel_booking_url" :to="detail.channel_booking_url" target="_blank" rel="noopener noreferrer" class="text-highlighted underline">{{ channelName }}</ULink><template v-else>{{ channelName }}</template>.
       </p>
-      <div v-if="embedded && (messagePath || callPhone)" class="mt-6 flex flex-wrap justify-center gap-3">
-        <UButton v-if="messagePath" :to="messagePath" color="neutral" variant="solid" class="h-14 rounded-full px-8 shadow-lg" :label="personalScope ? t('stay.message_host') : 'Message'" :aria-label="personalScope ? t('stay.message_host') : 'Message guest'" />
-        <UButton v-if="callPhone" :to="`tel:${callPhone}`" color="neutral" variant="solid" class="h-14 rounded-full px-8 shadow-lg" label="Call" />
-      </div>
       </UCard>
       </template>
       </div>
     </div>
-    <template v-if="!embedded && stay && !error && (messagePath || callPhone)" #footer>
+    <template v-if="stay && !error && (messagePath || callPhone)" #footer>
       <div class="flex flex-wrap justify-center gap-3">
         <UButton v-if="messagePath" :to="messagePath" color="neutral" variant="solid" class="pointer-events-auto h-14 rounded-full px-8 shadow-lg" :label="personalScope ? t('stay.message_host') : 'Message'" :aria-label="personalScope ? t('stay.message_host') : 'Message guest'" />
         <UButton v-if="callPhone" :to="`tel:${callPhone}`" color="neutral" variant="solid" class="pointer-events-auto h-14 rounded-full px-8 shadow-lg" label="Call" />
       </div>
     </template>
-  </component>
+  </DashboardIndexPanel>
   <DashboardListItemDialog v-model:open="manageOpen" :title="t('booking.manage')" :show-actions="false" :error="actionError">
     <div v-if="detail" class="divide-y divide-default">
       <p v-if="channelManaged" class="py-4 text-base text-muted">{{ t('booking.channel_manage', { channel: channelName }) }}</p>
@@ -254,8 +268,6 @@ import { ApiClientError } from '~/utils/api-clients'
 
 const props = defineProps<{
   stayId: string
-  /** Mounted inside the guest thread's leaf, which already owns the column and its padding. */
-  embedded?: boolean
   /** The guest's own stay, read and cancelled from their account; stayId is then its activity ID. */
   personalScope?: boolean
 }>()
@@ -290,6 +302,7 @@ const data = computed(() => {
 const stay = computed(() => data.value?.stay ?? null)
 /** The whole stay: the guest's own, or a manager's. Null for a member's turnover. */
 const detail = computed(() => !data.value ? null : 'home' in data.value ? data.value.stay : data.value.manage ? data.value.stay : null)
+const pendingChanges = computed(() => data.value && 'manage' in data.value && data.value.manage ? data.value.stay.pending_changes : [])
 const channelManaged = computed(() => detail.value !== null && isChannelManagedStay(detail.value))
 const manage = computed(() => !props.personalScope && data.value !== null && 'manage' in data.value! && data.value.manage === true)
 const home = computed(() => data.value && 'home' in data.value ? data.value.home : null)
@@ -337,6 +350,13 @@ const canRequestChange = computed(() => props.personalScope && detail.value !== 
 const policy = computed(() => detail.value?.cancellation_policy ? bookedPolicyTerms(detail.value.cancellation_policy) : null)
 const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.org_slug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
 watch(realtime.event, event => {
+  if (canonical && (event?.type === 'access.changed' || (event?.type === 'CONVERSATION_LEAVE' && event.conversation_id === detail.value?.conversation_id))) {
+    canonical.clear()
+    void refresh()
+  }
+  if (canonical && detail.value?.channel === 'airbnb' && event?.type === 'MESSAGE_CREATE' && !event.message && event.conversation_id === detail.value.conversation_id) {
+    void refresh()
+  }
   if (event?.type === 'stay.changed' && (event.booking_id === props.stayId || (event.booking_id === null && event.product_id === stay.value?.product_id))) {
     void refresh()
     if (!props.personalScope && event.booking_id === null) void refreshHostHome()
@@ -391,6 +411,7 @@ function methodLabel(method: StayPaymentMethod) { return STAY_PAYMENT_METHOD_LAB
 
 const actionError = ref<string | null>(null)
 const busy = ref<string | null>(null)
+const changeResult = ref<string | null>(null)
 // The payment day defaults to today where the home is; one key per payment being entered, kept across retries.
 const homeToday = () => stay.value ? localDateAt(new Date(), stay.value.timezone) : ''
 const draft = reactive({ amount: '', method: 'cash' as StayPaymentMethod, paid_on: homeToday(), reference: '', key: crypto.randomUUID() })
@@ -405,7 +426,7 @@ async function run(key: string, action: () => Promise<unknown>, failure: string)
     if (error.value) throw error.value
   } catch (cause) {
     actionError.value = getErrorMessage(cause, failure)
-    if (cause instanceof ApiClientError && (cause.data.committed === true || (isRecord(cause.data.data) && cause.data.data.committed === true))) {
+    if (cause instanceof ApiClientError && (cause.code === 'CHANGE_REQUEST_RESOLVED' || cause.data.committed === true || (isRecord(cause.data.data) && cause.data.data.committed === true))) {
       try {
         await refresh()
         if (error.value) throw error.value
@@ -416,6 +437,20 @@ async function run(key: string, action: () => Promise<unknown>, failure: string)
   } finally {
     busy.value = null
   }
+}
+
+async function answerChange(messageId: string, decision: 'accept' | 'decline') {
+  if (busy.value !== null || !detail.value) return
+  const bookingId = detail.value.id
+  changeResult.value = null
+  await run(`${decision}-${messageId}`, async () => {
+    await dashboardApi(`${dashboardBookingPath(bookingId)}/${decision}_change`, {
+      method: 'POST',
+      body: { message_id: messageId },
+      validate: (value): value is undefined => value === undefined,
+    })
+    changeResult.value = decision === 'accept' ? t('booking.change_guest_accepted', { channel: 'Airbnb' }) : t('booking.change_declined')
+  }, t('booking.change_failed'))
 }
 
 async function recordPayment() {

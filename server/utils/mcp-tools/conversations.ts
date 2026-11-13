@@ -35,8 +35,8 @@ const unreadCounts = { type: 'object', properties: { all: { type: 'integer' }, g
 const cursor = { type: ['integer', 'null'], minimum: 1 }
 const messagePage = { type: 'object', properties: {
   conversation: { type: 'object', properties: { id: text, organization_id: text, title: text, kind: { type: 'string', enum: ['guest', 'support', 'team'] }, participants: { type: 'array' } }, required: ['id', 'organization_id', 'title', 'kind', 'participants'] },
-  entries: { type: 'array', items: { type: 'object', properties: { id: text, type: { type: 'string', enum: ['message', 'day', 'event', 'change'] } }, required: ['id', 'type'] } },
-  page: { type: 'object', properties: { before: cursor, oldest: cursor, newest: cursor, failed_messages: { type: 'array', items: text }, booking_actions: { type: 'array' } }, required: ['before', 'oldest', 'newest', 'failed_messages', 'booking_actions'] },
+  entries: { type: 'array', items: { type: 'object', properties: { id: text, type: { type: 'string', enum: ['message', 'day', 'event'] } }, required: ['id', 'type'] } },
+  page: { type: 'object', properties: { before: cursor, oldest: cursor, newest: cursor, failed_messages: { type: 'array', items: text } }, required: ['before', 'oldest', 'newest', 'failed_messages'] },
   viewer_role: { const: 'member' },
 }, required: ['conversation', 'entries', 'page', 'viewer_role'] }
 const readState = { type: 'object', properties: { conversation_id: text, unread: { type: 'boolean' }, last_read_message_id: nullableText }, required: ['conversation_id', 'unread', 'last_read_message_id'], additionalProperties: false }

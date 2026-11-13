@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { z } from 'zod'
-import { queryFirst, type DbClient } from '~/server/db'
+import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { bookingDay } from '~/server/domain/requests'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
@@ -14,11 +14,9 @@ import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { formatCalendarDate } from '~/utils/timezone'
-import { appendMessage, findMessageByDedupeKey, getMessage, type MessageRow } from '~/server/domain/conversations'
+import { appendMessage, conversationAccessSql, findMessageByDedupeKey, getMessage, type MessageRow } from '~/server/domain/conversations'
 import { mirrorChannexThread } from './channel-messages'
 import { conversationTaskQueries } from './repository'
-import type { BookingChangeStatus } from './booking-change-state'
-import type { BookingChangeView } from './booking-changes'
 import type { GuestThreadRow } from './types'
 
 /**
@@ -219,10 +217,11 @@ export async function runAlterationRequestFeed(db: DbClient, env: CloudflareEnv,
  * withdrawn on Airbnb; the answer recorded is the outcome Channex holds
  * afterwards, and an answer that differs from the host's is refused naming it.
  */
-export async function respondToStayChangeRequest(db: DbClient, env: AnswerEnv, input: { thread: GuestThreadRow; requestId: string; decision: 'accept' | 'decline'; actorUserId: string }): Promise<void> {
+export async function respondToStayChangeRequest(db: DbClient, env: AnswerEnv, input: { thread: Pick<GuestThreadRow, 'id' | 'booking_id'>; requestId: string; decision: 'accept' | 'decline'; actorUserId: string }): Promise<void> {
   const entry = await getMessage(db, input.requestId)
   if (!entry || entry.conversation_id !== input.thread.id || !isStayChangeRequest(entry)) throw new HTTPError({ statusCode: 404, message: 'Change request not found', data: { code: 'CHANGE_REQUEST_NOT_FOUND', field: 'requestId' } })
   const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
+  if (proposal.stay_id !== input.thread.booking_id) throw new Error(`Change request ${entry.id} does not match its stay`)
   if (proposal.initiated_by === 'host') throw new HTTPError({ statusCode: 409, message: 'This change was proposed on Airbnb by the host; the guest answers it there.', data: { code: 'CHANGE_REQUEST_AWAITS_GUEST', field: 'requestId' } })
   const wanted: Outcome = input.decision === 'accept' ? 'accepted' : 'declined'
   let decision = await findMessageByDedupeKey(db, `booking-change-decision:${entry.id}`)
@@ -238,17 +237,21 @@ export async function respondToStayChangeRequest(db: DbClient, env: AnswerEnv, i
   if (outcome !== wanted) throw new HTTPError({ statusCode: 409, message: `This change request was already ${outcome} on Airbnb.`, data: { code: 'CHANGE_REQUEST_RESOLVED', field: 'decision', outcome } })
 }
 
-/** The conversation's view of each request: before and after, and the answer Airbnb holds. */
-export async function stayChangeView(db: DbClient, thread: GuestThreadRow, entry: MessageRow, status: BookingChangeStatus): Promise<BookingChangeView> {
-  const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
-  const organization = await queryFirst<{ vertical: string | null }>(db, 'SELECT vertical FROM organization WHERE id = ?', [thread.organization_id])
-  const home = await queryFirst<{ name: string }>(db, 'SELECT p.name FROM bookings s JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id WHERE s.id = ? AND s.organization_id = ?', [proposal.stay_id, thread.organization_id])
-  if (!organization || !home) throw new Error(`Change request ${entry.id} has no organization or home to show`)
-  if (!thread.payload.guest.name) throw new Error(`Change request ${entry.id} is in a conversation with no guest name`)
-  const { locale } = await getPersistedSourceLocale(db, thread.organization_id)
-  const side = (terms: Terms) => ({ when_label: nightsLabel(terms, locale), party_size: terms.adults + terms.children, total_label: formatMinorAmount(terms.total_minor, terms.currency, locale), assigned_member_id: null, assigned_member_name: null })
-  return {
-    type: 'stay', noun: 'stay', guest_name: thread.payload.guest.name, locale, vertical: organization.vertical, requested_by: proposal.initiated_by === 'guest' ? 'guest' : 'business', channel: 'airbnb',
-    before: side(proposal.before), after: side(proposal.after), location_title: home.name, original_location_title: home.name, status,
-  }
+/** A channel decides when its request closes. Until its recorded answer arrives, show it on the authorized stay. */
+export async function pendingStayChanges(db: DbClient, input: { bookingId: string; conversationId: string; organizationId: string; userId: string }) {
+  const access = conversationAccessSql('c', input)
+  const entries = await queryAll<Pick<MessageRow, 'id' | 'payload_json'>>(db, `SELECT proposal.id, proposal.payload_json
+    FROM conversations c JOIN messages proposal ON proposal.conversation_id = c.id
+    WHERE c.id = ? AND c.organization_id = ? AND c.booking_id = ? AND ${access.sql}
+      AND proposal.event_name = 'booking_change.requested' AND proposal.dedupe_key GLOB ?
+      AND NOT EXISTS (SELECT 1 FROM messages decision WHERE decision.conversation_id = c.id AND decision.dedupe_key = 'booking-change-decision:' || proposal.id)
+    ORDER BY proposal.sequence DESC`, [input.conversationId, input.organizationId, input.bookingId, ...access.params, `${PREFIX}*`])
+  if (!entries.length) return []
+  const { locale } = await getPersistedSourceLocale(db, input.organizationId)
+  const side = (terms: Terms) => ({ dates: nightsLabel(terms, locale), guests: terms.adults + terms.children, total: formatMinorAmount(terms.total_minor, terms.currency, locale) })
+  return entries.map(entry => {
+    const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
+    if (proposal.stay_id !== input.bookingId) throw new Error(`Change request ${entry.id} does not match its stay`)
+    return { id: entry.id, requested_by: proposal.initiated_by, before: side(proposal.before), after: side(proposal.after) }
+  })
 }

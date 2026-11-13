@@ -278,10 +278,9 @@ export function visibleScheduledMessagesSql(alias: string, access: StayAccess): 
 }
 
 /** The outbox, newest first: every automatic message for managers, and each member's own send-later replies. */
-export async function listScheduledGuestMessages(db: DbClient, access: StayAccess, query: MessageListQuery, conversationId: string | null) {
-  if (conversationId !== null && !await getGuestRequest(db, conversationId, access.organizationId)) {
-    messagingError(404, 'THREAD_NOT_FOUND', 'This conversation is not in the workspace', 'conversation_id')
-  }
+export async function listScheduledGuestMessages(db: DbClient, principal: MemberAccessPrincipal, query: MessageListQuery, conversationId: string | null) {
+  const access = await stayAccessFor(principal)
+  if (conversationId !== null) await assertConversationAccess(db, principal, conversationId, true)
   const visible = visibleScheduledMessagesSql('m', access)
   const rows = await queryAll<ScheduledGuestMessageRow>(db, `${SCHEDULED_MESSAGE_VIEW_SQL}
     WHERE m.organization_id = ? AND ${visible.query} ${conversationId === null ? '' : `AND ${SCHEDULED_MESSAGE_CONVERSATION_SQL} = ?`}

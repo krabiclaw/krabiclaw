@@ -38,7 +38,6 @@
         "role": "member"
       }
     ],
-    "pending": [],
     "record_kind": "stay",
     "record_title": "Reservation",
     "title": "Ana Ruiz",
@@ -47,7 +46,7 @@
   },
   "entries": [
     {
-      "id": "day:00000000-0000-4000-8000-000000000013",
+      "id": "day:00000000-0000-4000-8000-000000000012",
       "label": "Today",
       "type": "day"
     },
@@ -57,7 +56,7 @@
       "automatic": false,
       "body": "74 D · Sky from Fri, Nov 20 to Mon, Nov 23 for 2 guests. Ana Ruiz, +1 303 555 0123.",
       "deliveries": [],
-      "id": "00000000-0000-4000-8000-000000000013",
+      "id": "00000000-0000-4000-8000-000000000012",
       "label": null,
       "photos": [],
       "receipt": null,
@@ -76,7 +75,7 @@
       "automatic": false,
       "body": "We arrive late, around 9 PM.",
       "deliveries": [],
-      "id": "00000000-0000-4000-8000-000000000014",
+      "id": "00000000-0000-4000-8000-000000000013",
       "label": null,
       "photos": [],
       "receipt": null,
@@ -92,7 +91,6 @@
   ],
   "page": {
     "before": null,
-    "booking_actions": [],
     "failed_messages": [],
     "newest": 2,
     "oldest": 1,

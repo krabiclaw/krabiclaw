@@ -88,7 +88,7 @@ export async function loadConversationPage(
       )),
       page: {
         ...page,
-        read_through: readThrough, failed_messages: [], booking_actions: [],
+        read_through: readThrough, failed_messages: [],
       },
       viewer_role: role,
       capabilities: {

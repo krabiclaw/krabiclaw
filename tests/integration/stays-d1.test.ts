@@ -1502,15 +1502,18 @@ test('a member reads a stay at a home they look after as its turnover on every r
     assert.deepEqual(await getStay(db, manager, stay.id), whole)
     // The outbox shows a member only their own replies: none of the business's automatic messages the manager reads.
     await saveMessageTemplate(db, env, manager, null, { title: 'After your stay', body: 'Thanks for staying.', schedule: { trigger: 'check_out', offset_days: 1, local_time: '10:00', product_ids: [cabin.id] } })
-    const managerOutbox = await listScheduledGuestMessages(db, manager, { limit: 20, offset: 0 }, null)
-    assert.ok(managerOutbox.messages.some(message => message.booking_id === stay.id && message.author_user_id === null))
-    assert.deepEqual((await listScheduledGuestMessages(db, cleaner, { limit: 20, offset: 0 }, null)).messages, [])
-
-    // The stay's guest conversation is not the member's, and its alerts do not reach them.
     const [ownerMembership, cleanerMembership] = await Promise.all([OWNER, CLEANER].map(userId => resolveOrganizationMembership(env, { organizationId: ORG, userId })))
     assert(ownerMembership && cleanerMembership)
-    await assert.rejects(assertConversationAccess(db, memberAccessPrincipal(cleanerMembership, { env }), stay.conversation_id), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
-    await assertConversationAccess(db, memberAccessPrincipal(ownerMembership, { env }), stay.conversation_id)
+    const ownerPrincipal = memberAccessPrincipal(ownerMembership, { env })
+    const cleanerPrincipal = memberAccessPrincipal(cleanerMembership, { env })
+    const managerOutbox = await listScheduledGuestMessages(db, ownerPrincipal, { limit: 20, offset: 0 }, null)
+    assert.ok(managerOutbox.messages.some(message => message.booking_id === stay.id && message.author_user_id === null))
+    assert.deepEqual((await listScheduledGuestMessages(db, cleanerPrincipal, { limit: 20, offset: 0 }, null)).messages, [])
+
+    // The stay's guest conversation is not the member's, and its alerts do not reach them.
+    await assert.rejects(listScheduledGuestMessages(db, cleanerPrincipal, { limit: 20, offset: 0 }, stay.conversation_id), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
+    await assert.rejects(assertConversationAccess(db, cleanerPrincipal, stay.conversation_id), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
+    await assertConversationAccess(db, ownerPrincipal, stay.conversation_id)
     assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.conversation_id })).map(member => member.userId), [OWNER])
 
     // Today names the guest by first name for the member and in full for the owner.

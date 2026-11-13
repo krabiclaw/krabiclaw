@@ -80,11 +80,6 @@ export function transcriptDays(timeZone: string, now: Date) {
   }
 }
 
-/** "Fri, Nov 6, 3:00 PM": when a pending message goes out. */
-export function sendTime(instant: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(LOCALE, { timeZone, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(instant))
-}
-
 /** One calendar date: "Jul 20". */
 export function calendarDate(date: string): string {
   return formatCalendarDate(date, LOCALE, { month: 'short', day: 'numeric' })

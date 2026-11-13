@@ -164,7 +164,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
       payload: { payment_id: 'contract-payment', status: 'succeeded', amount: 45000, currency: 'USD' }, dedupeKey: 'financial-operation:contract', occurredAt: NOW })
     const refused = await executeGuestThreadOperation(db, { threadId, organizationId: ORG, action: 'reply', body: 'Check-in is from 4 PM.', actorUserId: OWNER, idempotencyKey: 'contract-reply', env })
     assert.equal(refused.ok, false)
-    // A message the host set to send later is the pending row above the composer.
+    // The outbox has a pending reply that does not appear in delivered chat history.
     await scheduleGuestReply(db, principal, threadId, { body: 'Enjoy your stay!', due_at: '2026-11-08T23:00:00.000Z' })
 
     // A stay booked and paid on the site, as its captured payment converts it: the stay's own message, then the guest's note.
@@ -191,8 +191,9 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     if (thread.conversation.kind === 'team') throw new Error('Expected the Airbnb stay conversation')
     // Every item type the clients draw is in the contract thread.
     const kinds = new Set(thread.entries.map(item => item.type === 'message' ? `${item.type}:${item.side}${item.label ? ':automatic' : ''}${item.photos.length ? ':photo' : ''}${item.translated ? ':translated' : ''}${item.retryable ? ':retryable' : ''}` : item.type))
-    for (const kind of ['day', 'event', 'change', 'message:guest:translated', 'message:guest:photo', 'message:business:automatic', 'message:business:retryable']) assert.ok(kinds.has(kind), `the contract thread has no ${kind}`)
-    assert.equal(thread.conversation.pending.length, 1)
+    for (const kind of ['day', 'event', 'message:guest:translated', 'message:guest:photo', 'message:business:automatic', 'message:business:retryable']) assert.ok(kinds.has(kind), `the contract thread has no ${kind}`)
+    assert.ok(thread.entries.some(item => item.type === 'event' && /on Airbnb to change the stay/.test(item.text)))
+    assert.ok(!JSON.stringify(thread).includes('Enjoy your stay!'))
 
     const opened = await conversationPageFor(db, principal, siteThreadId, { before: null, limit: 40 }, new Date(NOW))
     assert.deepEqual(opened.entries.flatMap(item => item.type === 'message' ? [[item.side, item.body?.split('\n')[0]]] : []),

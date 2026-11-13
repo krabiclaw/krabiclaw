@@ -24,7 +24,7 @@ import { occurrenceChangeDifferences } from '~/server/notifications/events'
 import { organizationLogo } from '~/server/notifications/hero'
 import { getPlatformDomain, buildBuyerRequestActivityUrl } from '~/server/utils/dashboard-notification-links'
 import { bookingChangeStates, type BookingChangeStatus } from './booking-change-state'
-import { isStayChangeRequest, stayChangeView } from './stay-change-requests'
+import { isStayChangeRequest } from './stay-change-requests'
 import { conversationTaskQueries, reconcileConversationTasks } from './repository'
 import { getGuestRequest, getThreadOperationalRecord, readBookedRecord, requestSummary } from '~/server/domain/requests'
 import type { StayAccess } from '~/server/domain/stays'
@@ -564,10 +564,8 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
 
 type ChangeSide = { when_label: string; party_size: number; assigned_member_id: string | null; assigned_member_name: string | null; total_label?: string }
 export type BookingChangeView = {
-  /** A stay's change (its channel's request) or any other booking's. */
-  type: 'booking' | 'stay'; noun: string; guest_name: string; locale: string; vertical: string | null
-  /** The business proposes and the guest answers; a guest's request on their channel is answered by the business. */
-  requested_by: 'business' | 'guest'; channel?: 'airbnb'
+  type: 'booking'; noun: string; guest_name: string; locale: string; vertical: string | null
+  requested_by: 'business'
   before: ChangeSide
   after: ChangeSide
   location_title: string; original_location_title: string
@@ -581,23 +579,13 @@ async function proposalView(db: DbClient, thread: GuestThreadRow, proposal: z.in
     before: guest.before, after: guest.after, location_title: guest.location_title, original_location_title: guest.original_location_title, ...state }
 }
 
-/** Conversation readers reuse the response operation's immutable details and state. */
-export async function bookingChangeViews(db: DbClient, thread: GuestThreadRow, entries: MessageRow[], now = new Date().toISOString()): Promise<Map<string, BookingChangeView>> {
-  const proposals = entries.filter(entry => entry.event_name === 'booking_change.requested')
-  const views = new Map<string, BookingChangeView>()
-  if (!proposals.length) return views
-  const states = await bookingChangeStates(db, proposals.map(entry => entry.id), now)
-  for (const entry of proposals) {
-    const state = states.get(entry.id)
-    if (!state) throw new Error('The booking change proposal disappeared')
-    if (isStayChangeRequest(entry)) {
-      views.set(entry.id, await stayChangeView(db, thread, entry, state.status))
-      continue
-    }
-    const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
-    views.set(entry.id, await proposalView(db, thread, proposal, state))
-  }
-  return views
+/** The booking record reuses the direct change response's immutable terms and state. */
+export async function pendingBookingChangeView(db: DbClient, thread: GuestThreadRow, entry: MessageRow): Promise<BookingChangeView | null> {
+  const state = (await bookingChangeStates(db, [entry.id])).get(entry.id)
+  if (!state) throw new Error('The booking change proposal disappeared')
+  if (state.status !== 'pending') return null
+  const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
+  return proposalView(db, thread, proposal, state)
 }
 
 /** GET only reads the immutable proposal. POST records one idempotent guest decision. */
@@ -695,6 +683,7 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
     }
     // Told once the answer and its analytics are recorded, so a send that fails cannot skip them.
     await deliverEmail(db, env, thread as GuestThreadRow, result.id, entry.id, accepted ? 'accepted' : 'declined', proposal, noun)
+    await publishConversationEvent(env, db, { conversationId: thread.id, type: 'MESSAGE_CREATE', message: { id: result.id, sequence: result.sequence } })
   }
   const finalState = (await bookingChangeStates(db, [entry.id])).get(entry.id)
   if (!finalState) throw new Error('The booking change proposal disappeared')

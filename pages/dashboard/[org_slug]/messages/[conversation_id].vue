@@ -10,12 +10,13 @@
       </div>
     </template>
     <template v-if="conversation" #right>
+      <UButton v-if="reservationTo" :to="reservationTo" label="Show reservation" color="neutral" variant="soft" class="rounded-full" />
       <UButton v-if="conversation.kind !== 'team'" icon="i-lucide-chevron-right" color="neutral" variant="outline" class="size-12! rounded-full bg-elevated" aria-label="In this conversation" @click="sheetOpen = true" />
       <UButton v-else-if="conversation.is_group && !conversation.booking_id && !conversation.location_id" :to="{ path: `${level.path.value}/group`, query: route.query }" icon="i-lucide-info" aria-label="Conversation details" color="neutral" variant="ghost" />
     </template>
 
     <ConversationThread :key="threadId" :thread-id="threadId" :history="history" />
-    <ConversationSheet v-if="guestConversation" v-model:open="sheetOpen" :thread-id="threadId" :participants="guestConversation.participants" :support="guestConversation.kind === 'support'" :reservation-to="reservationTo" :can-invite="data?.capabilities.can_invite_guest ?? false" @moved="moved" @participants-changed="refresh()" />
+    <ConversationSheet v-if="guestConversation" v-model:open="sheetOpen" :thread-id="threadId" :participants="guestConversation.participants" :support="guestConversation.kind === 'support'" :can-invite="data?.capabilities.can_invite_guest ?? false" @moved="moved" @participants-changed="refresh()" />
   </DashboardIndexPanel>
 </template>
 
@@ -35,7 +36,9 @@ const { data, refresh } = await history.request
 const conversation = computed(() => data.value?.conversation)
 const guestConversation = computed(() => conversation.value?.kind === 'team' ? null : conversation.value)
 const sheetOpen = ref(false)
-const reservationTo = computed(() => guestConversation.value?.booking_id ? { path: `${level.path.value}/details`, query: route.query } : null)
+const reservationTo = computed(() => guestConversation.value?.booking_id
+  ? `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/bookings/${encodeURIComponent(guestConversation.value.booking_id)}`
+  : null)
 
 async function moved(transition: string) {
   if (transition === 'archive' || transition === 'block') {

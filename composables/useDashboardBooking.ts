@@ -1,10 +1,12 @@
 import type { DashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
 import type { StayDetail, StayTurnover } from '~/server/domain/stays'
+import type { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
 import { isRecord } from '~/utils/api-clients'
 
 type NightBooking<T> = Omit<T, 'id'> & { booking_id: string; unit: 'nights' }
+type StayChange = Awaited<ReturnType<typeof pendingStayChanges>>[number]
 export type DashboardNightBooking =
-  | { booking: NightBooking<StayDetail>; manage: true; can_message_guest: boolean }
+  | { booking: NightBooking<StayDetail> & { pending_changes: StayChange[] }; manage: true; can_message_guest: boolean }
   | { booking: NightBooking<StayTurnover>; manage: false }
 export type DashboardBooking = DashboardNightBooking | { booking: DashboardBookingDetails & { unit: 'slot' }; manage: boolean }
 
@@ -32,7 +34,14 @@ export function isBookingDetailsResponse(value: unknown): value is { booking: Da
 
 export function isDashboardBooking(value: unknown): value is DashboardBooking {
   if (!isRecord(value) || !isRecord(value.booking) || typeof value.manage !== 'boolean' || typeof value.booking.booking_id !== 'string') return false
-  if (value.booking.unit === 'nights') return !value.manage || (typeof value.can_message_guest === 'boolean' && isNightBooking(value))
+  if (value.booking.unit === 'nights') {
+    if (!value.manage) return true
+    const isTerms = (terms: unknown) => isRecord(terms) && typeof terms.dates === 'string' && Number.isInteger(terms.guests) && typeof terms.total === 'string'
+    return typeof value.can_message_guest === 'boolean'
+      && Array.isArray(value.booking.pending_changes) && value.booking.pending_changes.every(change => isRecord(change) && typeof change.id === 'string'
+        && (change.requested_by === 'guest' || change.requested_by === 'host') && isTerms(change.before) && isTerms(change.after))
+      && isNightBooking(value)
+  }
   return value.booking.unit === 'slot' && isBookingDetailsResponse(value)
 }
 

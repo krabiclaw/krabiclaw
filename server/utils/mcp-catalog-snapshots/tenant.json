@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:a1744b79321bc0f7b987b6bcf102f6900e115bea71c5d244b18b64a19546c5ee",
-  "documentationFingerprint": "sha256:f99e4be5b29bc1af1be594eff18e7ce5d017be3889b76cce72610dc4baa253f8",
+  "fingerprint": "sha256:f811cca362242d17c1f4547c69f2630e8ef3ec8bcc32c1af9e067d108d306f42",
+  "documentationFingerprint": "sha256:83bdce44abccc8dda9b226a7c78a3c6a7beca12ed46bec27568e7f9db6ac772b",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -47715,8 +47715,7 @@
                   "enum": [
                     "message",
                     "day",
-                    "event",
-                    "change"
+                    "event"
                   ],
                   "type": "string"
                 }
@@ -47737,9 +47736,6 @@
                   "integer",
                   "null"
                 ]
-              },
-              "booking_actions": {
-                "type": "array"
               },
               "failed_messages": {
                 "items": {
@@ -47766,8 +47762,7 @@
               "before",
               "oldest",
               "newest",
-              "failed_messages",
-              "booking_actions"
+              "failed_messages"
             ],
             "type": "object"
           },
@@ -127426,7 +127421,7 @@
       "toolContracts": {
         "cancel_product_booking": "sha256:117436c3b77b52e28d4c7baa8f2a7b128c044f4265fc20d038ef5a8e72ddd0f6",
         "confirm_product_booking": "sha256:44be0ae50ae38e0e7f9610cd8eff82af1212af3eb160c66d082804673dafd71e",
-        "get_conversation": "sha256:19c11fcc7041d48e7ec509d979e3c95107893672d7cc5b9444b3a6aab2f3fe72",
+        "get_conversation": "sha256:e11cc7a96a999e502c71e835faddbd0ef06c6590d8db3d9acfe32e185638dc29",
         "get_product_booking": "sha256:dc627db96028c7e276e50d86819579fe2e1ec552cda94ea7e3b75edab8ceae15",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
@@ -127556,7 +127551,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:a2a95f5e752b47a10f2d42dfaaca0caca19afd2a4110adc3fd97dad2eb8a763a",
-        "get_conversation": "sha256:19c11fcc7041d48e7ec509d979e3c95107893672d7cc5b9444b3a6aab2f3fe72",
+        "get_conversation": "sha256:e11cc7a96a999e502c71e835faddbd0ef06c6590d8db3d9acfe32e185638dc29",
         "get_organization_analytics": "sha256:4fcc7f6cef537aa552200cc74b666d866684657015427e256651d7791140b814",
         "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",

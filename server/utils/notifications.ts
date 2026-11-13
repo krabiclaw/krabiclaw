@@ -1604,7 +1604,9 @@ export async function notifyBookingChangeOwner(
   const { submissionType, change } = opts
   // A stay's members read its changes without money; the projection needs the stay.
   if (submissionType === 'stay' && !opts.stay) throw new HTTPError({ statusCode: 500, message: 'A stay change alert needs its stay to tell the members who look after the home', data: { code: 'STAY_REQUIRED', field: 'stay', conversation_id: opts.threadId } })
-  const replyUrl = await buildOwnerThreadInboxUrl(env, db, opts)
+  const replyUrl = opts.stay
+    ? await dashboardPathUrl(env, db, opts.organizationId, `/bookings/${encodeURIComponent(opts.stay.id)}`)
+    : await buildOwnerThreadInboxUrl(env, db, opts)
   // The record's own noun, which its presentation resolved from what was booked: a table's is a reservation.
   const presentation = change.recordKind === 'consultation' || opts.vertical === 'service'
     ? resolveBookingPresentation('service', 'service')

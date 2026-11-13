@@ -740,7 +740,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       const waiting = entry.author_kind !== 'guest' && row.starts_at !== null && row.starts_at > now.toISOString()
       status_line = [entry.author_kind === 'guest' ? 'Change requested' : waiting ? 'Change proposal waiting on the guest' : 'Change proposal expired', place].filter(Boolean).join(' · ')
       detail = record ? `${day(record.starts_at)}, ${time(record.starts_at)}` : null
-      path = conversation(conversation_id)
+      path = booking_id ? stayPath(booking_id) : null
       // A change closes when it is answered or proposed again.
       action = { type: 'open', label: 'Review', path: path! }
       sheet = { heading: 'Change', title, date: null, checkout: null, checkin: null }

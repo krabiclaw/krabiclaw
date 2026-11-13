@@ -18,12 +18,9 @@ export type ConversationMessage = Extract<InboxStreamItem, { type: 'message' }> 
   deliveries: ConversationDelivery[]
 }
 
-export type ConversationChange = Extract<InboxStreamItem, { type: 'change' }> & { sequence: number }
-
 export type ConversationEntry =
   | Extract<InboxStreamItem, { type: 'day' }>
   | (Extract<InboxStreamItem, { type: 'event' }> & { sequence: number })
-  | ConversationChange
   | ConversationMessage
 
 export interface ConversationParticipant {
@@ -48,7 +45,6 @@ export interface ConversationPage {
     newest: number | null
     read_through: number | null
     failed_messages: string[]
-    booking_actions: ConversationChange[]
   }
   viewer_role: ConversationViewerRole
   capabilities: {

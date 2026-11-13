@@ -1,8 +1,6 @@
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
-import { SCHEDULED_MESSAGE_CONVERSATION_SQL, visibleScheduledMessagesSql } from '~/server/domain/guest-messaging'
-import { stayAccessFor } from '~/server/domain/stays'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import { loadGuestThreadDetail, type TranscriptView } from './detail'
 import type { ConversationHistory } from '~/server/domain/conversation-history-data'
@@ -11,14 +9,13 @@ import { MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EV
 import { formatFormAnswer } from '~/shared/form-questions'
 import { EXPERIENCE_PRESENTATION } from '~/utils/product-presentation'
 import { normalizeVertical } from '~/utils/vertical-copy'
-import { calendarDate, clockTime, firstName, initial, localDateKey, providerInstant, sendTime, stayWhen, transcriptDays } from './presentation'
-import type { ConversationChange, ConversationEntry, ConversationMessage, ConversationPage, ConversationParticipant, ConversationViewerRole } from '~/shared/messages-contract'
+import { calendarDate, clockTime, firstName, initial, localDateKey, providerInstant, stayWhen, transcriptDays } from './presentation'
+import type { ConversationEntry, ConversationMessage, ConversationPage, ConversationParticipant, ConversationViewerRole } from '~/shared/messages-contract'
 import { formatCalendarRange } from '~/utils/timezone'
 import type {
   GuestThreadDetailViewModel,
   GuestThreadEntryViewModel,
   InboxChannel,
-  InboxPendingMessage,
   InboxThread,
   InboxThreadDetails,
   InboxThreadKind,
@@ -187,7 +184,7 @@ function eventSentence(entry: GuestThreadEntryViewModel, facts: ThreadFacts, vie
   invalid(`The conversation activity ${name || entry.kind} has nothing to say`, 'event_name', entry.id)
 }
 
-/** Builds the stream: day headers, runs of messages with one time each, events as sentences, change requests. */
+/** Builds the stream: day headers, runs of messages with one time each, and events as sentences. */
 function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean): ConversationEntry[] {
   const { raw, timeZone } = facts
   const items: ConversationEntry[] = []
@@ -271,13 +268,6 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
       newestBusiness = { item, entry }
       continue
     }
-    if (entry.bookingChange) {
-      const sentAt = entry.occurredAt
-      place(new Date(sentAt), entry.id)
-      items.push({ type: 'change', id: entry.id, sequence: entry.sequence, sent_at: sentAt, change: entry.bookingChange })
-      previous = null
-      continue
-    }
     const sentence = eventSentence(entry, facts, viewer)
     place(new Date(entry.occurredAt), entry.id)
     items.push({ type: 'event', id: entry.id, sequence: entry.sequence, text: sentence, sent_at: entry.occurredAt })
@@ -290,32 +280,12 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
   return items
 }
 
-/** The thread's messages still to go out: its automatic messages for managers, and the viewer's own send-later replies. */
-async function readPendingMessages(db: DbClient, threadId: string, organizationId: string, principal: MemberAccessPrincipal) {
-  const visible = visibleScheduledMessagesSql('m', await stayAccessFor(principal))
-  return queryAll<{ id: string; author_user_id: string | null; template_title: string | null; body: string; due_at: string; timezone: string | null; status: string }>(db, `
-    SELECT m.id, m.author_user_id, m.template_title, m.body, m.due_at, m.timezone, m.status FROM scheduled_guest_messages m
-     WHERE m.organization_id = ? AND ${SCHEDULED_MESSAGE_CONVERSATION_SQL} = ? AND ${visible.query} AND m.due_at IS NOT NULL
-       AND (m.status = 'pending' OR (m.status = 'sending' AND m.author_user_id IS NOT NULL)) ORDER BY m.due_at, m.id`, [organizationId, threadId, ...visible.params])
-}
-
-function pendingMessages(rows: Awaited<ReturnType<typeof readPendingMessages>>, timeZone: string): InboxPendingMessage[] {
-  return rows.map(row => row.author_user_id === null
-    ? { id: row.id, source: 'automatic' as const, label: row.template_title!, due_at: row.due_at, time: sendTime(row.due_at, row.timezone!), body: row.body, cancellable: true }
-    : { id: row.id, source: 'later' as const, label: row.body, due_at: row.due_at, time: sendTime(row.due_at, timeZone), body: row.body, cancellable: row.status === 'pending' })
-}
-
 /** Booking and contact context for the shared conversation history. */
 export async function projectGuestConversation(db: DbClient, conversation: ConversationRow, viewer: Viewer, now: Date, window: ConversationWindow | undefined, history: Promise<ConversationHistory>) {
   const { id: threadId, organization_id: organizationId } = conversation
-  const [detail, scheduled] = await Promise.all([
-    loadGuestThreadDetail(db, threadId, organizationId, viewer.audience === 'buyer'
-      ? { buyerUserId: viewer.userId, conversation }
-      : { memberUserId: viewer.userId, conversation }, now, true, window, history),
-    viewer.audience === 'member'
-      ? readPendingMessages(db, threadId, organizationId, viewer.principal)
-      : [],
-  ])
+  const detail = await loadGuestThreadDetail(db, threadId, organizationId, viewer.audience === 'buyer'
+    ? { buyerUserId: viewer.userId, conversation }
+    : { memberUserId: viewer.userId, conversation }, now, true, window, history)
   if (!detail) return null
   const { view: raw, timeZone } = detail
   const [facts, replyComposer, { page }] = await Promise.all([
@@ -342,9 +312,7 @@ export async function projectGuestConversation(db: DbClient, conversation: Conve
     page: {
       ...page,
       failed_messages: raw.window?.failedMessages ?? [],
-      booking_actions: (raw.window?.bookingActions ?? []).map(entry => ({ type: 'change', id: entry.id, sequence: entry.sequence, sent_at: entry.occurredAt, change: entry.bookingChange! }) satisfies ConversationChange),
     },
-    pending: pendingMessages(scheduled, timeZone),
     composer: {
       channel: viewer.audience === 'member' && raw.conversationChannel === 'airbnb' ? 'airbnb' : 'email',
       available: replyComposer?.channel !== null,
@@ -396,7 +364,6 @@ export async function getInboxThreadDetails(db: DbClient, threadId: string, orga
     participants,
     photos,
     actions: {
-      show_reservation: raw.operationalRecord !== null,
       archive: raw.canArchive,
       unarchive: raw.canUnarchive,
       report: !support,

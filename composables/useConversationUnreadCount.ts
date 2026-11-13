@@ -67,6 +67,7 @@ export function useConversationUnreadCount(connection?: DashboardInvalidationCon
 
   watch(realtime.event, event => {
     if (!event || event.organization_id !== orgId.value) return
+    if (event.type === 'MESSAGE_UPDATE' && event.scheduled) return
     if ((event.type === 'MESSAGE_ACK' || event.type === 'CONVERSATION_LEAVE') && event.user_id !== reader.value) return
     if (event.type === 'access.changed') inbox.value = null
     if (['MESSAGE_CREATE', 'MESSAGE_UPDATE', 'MESSAGE_ACK', 'CONVERSATION_LEAVE', 'access.changed'].includes(event.type)) void refresh()

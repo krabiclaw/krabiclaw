@@ -5,7 +5,7 @@
       <UButton icon="i-lucide-info" color="neutral" variant="ghost" aria-label="In this conversation" @click="sheetOpen = true" />
     </template>
     <ConversationThread :key="threadId" :thread-id="threadId" :history="history" personal-scope />
-    <ConversationSheet v-if="guestConversation" v-model:open="sheetOpen" :thread-id="threadId" :participants="guestConversation.participants" :reservation-to="null" personal-scope />
+    <ConversationSheet v-if="guestConversation" v-model:open="sheetOpen" :thread-id="threadId" :participants="guestConversation.participants" personal-scope />
   </DashboardIndexPanel>
 </template>
 

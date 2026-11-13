@@ -428,6 +428,7 @@ watch([pending, loadingMore], () => { void drainChanges() })
 
 watch(realtime.event, event => {
   if (props.personalScope || !event || event.organization_id !== organizationId.value) return
+  if (event.type === 'MESSAGE_UPDATE' && event.scheduled) return
   if ((event.type === 'MESSAGE_ACK' || event.type === 'CONVERSATION_LEAVE') && event.user_id !== session.value.data?.user.id) return
   if (event.type === 'access.changed') {
     generation++

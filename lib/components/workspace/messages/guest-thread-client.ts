@@ -78,8 +78,6 @@ function isStreamItem(value: unknown): value is InboxStreamItem {
   if (!isRecord(value) || !isText(value.id)) return false
   if (value.type === 'day') return isText(value.label)
   if (value.type === 'event') return isText(value.text) && isText(value.sent_at)
-  if (value.type === 'change') return isText(value.sent_at) && isRecord(value.change)
-    && ['pending', 'accepted', 'declined', 'withdrawn', 'stale', 'expired'].includes(String(value.change.status))
   return value.type === 'message' && (value.side === 'guest' || value.side === 'business') && isText(value.author)
     && isNullableText(value.label) && isText(value.sent_at) && isNullableText(value.time) && isNullableText(value.body)
     && Array.isArray(value.photos) && value.photos.every(isPhoto)
@@ -99,8 +97,6 @@ function isGuestConversation(thread: unknown): thread is Omit<ThreadDetail, 'str
     && isNullableText(thread.home) && isNullableText(thread.when) && typeof thread.translated === 'boolean'
     && isNullableText(thread.booking_id) && isNullableText(thread.record_title) && (thread.record_kind === null || ['stay', 'booking'].includes(String(thread.record_kind)))
     && isNullableText(thread.activity_path)
-    && Array.isArray(thread.pending) && thread.pending.every(item => isRecord(item) && isText(item.id) && (item.source === 'automatic' || item.source === 'later')
-      && isText(item.label) && isText(item.due_at) && isText(item.time) && typeof item.body === 'string' && typeof item.cancellable === 'boolean')
     && isRecord(thread.composer) && (thread.composer.channel === 'airbnb' || thread.composer.channel === 'email') && typeof thread.composer.available === 'boolean' && (thread.composer.reason === null || typeof thread.composer.reason === 'string')
 }
 
@@ -140,7 +136,6 @@ export function isConversationPage(value: unknown): value is ConversationPage {
     && (page.before === null || page.before === page.oldest)
     && (page.oldest === null ? page.newest === null : Number(page.oldest) <= Number(page.newest))
     && Array.isArray(page.failed_messages) && page.failed_messages.every(isText)
-    && Array.isArray(page.booking_actions) && page.booking_actions.every(item => isConversationEntry(item) && item.type === 'change')
 }
 
 export function isThreadDetails(value: unknown): value is ThreadDetails {
@@ -148,5 +143,5 @@ export function isThreadDetails(value: unknown): value is ThreadDetails {
     && Array.isArray(value.participants) && value.participants.every(person => isRecord(person) && isText(person.name) && isText(person.initial)
       && ['Guest', 'Host', 'Co-host', 'Airbnb Support'].includes(String(person.role)))
     && Array.isArray(value.photos) && value.photos.every(photo => isPhoto(photo) && isRecord(photo) && isText(photo.sent_at))
-    && isRecord(value.actions) && ['show_reservation', 'archive', 'unarchive', 'report', 'block', 'unblock'].every(key => typeof (value.actions as Record<string, unknown>)[key] === 'boolean')
+    && isRecord(value.actions) && ['archive', 'unarchive', 'report', 'block', 'unblock'].every(key => typeof (value.actions as Record<string, unknown>)[key] === 'boolean')
 }

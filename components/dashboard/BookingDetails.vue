@@ -1,16 +1,7 @@
 <template>
-  <!--
-    One record, opened beneath Today, Calendar or the guest thread it belongs
-    to. Changes and guest details open beneath its canonical URL.
-  -->
-  <!--
-    The provider owns its chrome: the levels below inject what this component
-    holds, and `<NuxtPage>` reaches them only from inside its own subtree. In
-    the thread's leaf there is no column to own, so it is the body alone.
-  -->
-  <component :is="embedded ? 'div' : DashboardIndexPanel" v-bind="chrome">
+  <DashboardIndexPanel :id="personalScope ? 'account-booking-details' : 'booking-details'" :title="pageTitle" column="record">
     <template #right>
-      <UButton v-if="!embedded && recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close booking details" />
+      <UButton v-if="recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close booking details" />
     </template>
     <UAlert v-if="error" color="error" variant="soft" title="Booking details could not be loaded" :description="getErrorMessage(error, 'Booking request failed')" />
     <div v-else class="min-w-0 [overflow-wrap:anywhere]">
@@ -28,8 +19,10 @@
         </div>
 
         <div class="space-y-4">
+          <p v-if="changeResult" class="text-sm text-highlighted" role="status">{{ changeResult }}</p>
           <UAlert
             v-if="booking.pending_change"
+            data-testid="booking-change-request"
             color="info"
             variant="soft"
             icon="i-lucide-clock"
@@ -139,19 +132,15 @@
             <p class="mt-1 text-sm text-muted">{{ formatCreatedAt(booking.created_at) }}</p>
           </UCard>
         </div>
-        <div v-if="embedded && (messageTo || contactCallTo)" class="mt-8 flex flex-wrap justify-center gap-3">
-          <UButton v-if="messageTo" :to="messageTo" label="Message" :aria-label="personalScope ? 'Message' : `Message ${recordCopy?.guestLabel}`" color="neutral" class="h-14 rounded-full px-8 shadow-lg" />
-          <UButton v-if="contactCallTo" :to="contactCallTo" label="Call" color="neutral" class="h-14 rounded-full px-8 shadow-lg" />
-        </div>
       </template>
     </div>
-    <template v-if="!embedded && booking && (messageTo || contactCallTo)" #footer>
+    <template v-if="booking && (messageTo || contactCallTo)" #footer>
       <div class="flex flex-wrap justify-center gap-3">
         <UButton v-if="messageTo" :to="messageTo" label="Message" :aria-label="personalScope ? 'Message' : `Message ${recordCopy?.guestLabel}`" color="neutral" class="pointer-events-auto h-14 rounded-full px-8 shadow-lg" />
         <UButton v-if="contactCallTo" :to="contactCallTo" label="Call" color="neutral" class="pointer-events-auto h-14 rounded-full px-8 shadow-lg" />
       </div>
     </template>
-  </component>
+  </DashboardIndexPanel>
 
   <DashboardListItemDialog v-model:open="manageOpen" :title="`Manage ${noun}`" :show-actions="false" :error="actionError">
     <div v-if="booking" class="divide-y divide-default">
@@ -251,8 +240,6 @@ const props = defineProps<{
   bookingId: string
   /** The record's canonical URL, which the rows that change it link into. */
   editorPath: string
-  /** Mounted inside the guest thread's leaf, which already owns the column and its padding. */
-  embedded?: boolean
   /** The account that booked, reading its own record: no team controls, its own cancel. */
   personalScope?: boolean
 }>()
@@ -265,11 +252,6 @@ const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const realtime = useDashboardInvalidations()
 const actionError = ref<string | null>(null)
 const editorPath = computed(() => props.editorPath)
-// Owning the column means owning its header; inside the thread's leaf it is that leaf's body.
-const chrome = computed(() => (props.embedded
-  ? {}
-  : { id: props.personalScope ? 'account-booking-details' : 'booking-details', title: pageTitle.value, column: 'record' as const }))
-
 const { resource, booking, error, presentation, noun, pageTitle, orgSlug, purchase, refresh: refreshDetails } = await useBookingDetails(props.bookingType, props.bookingId, props.personalScope)
 watchEffect(() => {
   if (error.value && !booking.value) showError(error.value)
@@ -318,6 +300,7 @@ const manageOpen = ref(false)
 const session = authClient.useSession()
 // The buyer's answer to a change, on the record itself; the email link records the same decision.
 const answering = ref<'accept' | 'decline' | null>(null)
+const changeResult = ref<string | null>(null)
 const pendingChangeDescription = computed(() => {
   const change = booking.value?.pending_change
   if (!change) return ''
@@ -332,17 +315,19 @@ async function answerChange(decision: 'accept' | 'decline') {
   if (!change || !booking.value?.conversation_id || answering.value) return
   answering.value = decision
   actionError.value = null
+  changeResult.value = null
   try {
     await applicationFetch(`/api/public/booking-changes/${encodeURIComponent(booking.value.conversation_id)}/${encodeURIComponent(change.message_id)}`, {
       method: 'POST',
       body: { decision },
-      validate: (value: unknown): value is Record<string, unknown> => isRecord(value),
+      validate: (value): value is { status: 'accepted' | 'declined' } => isRecord(value) && value.status === (decision === 'accept' ? 'accepted' : 'declined'),
     })
     await refreshDetails()
-    await refreshNuxtData(`account-guest-thread:${session.value.data?.user.id}:${booking.value?.conversation_id}`)
+    if (error.value) throw error.value
+    changeResult.value = decision === 'accept' ? t('booking.change_accepted') : t('booking.change_declined')
   } catch (cause) {
     actionError.value = getErrorMessage(cause, 'Your answer could not be saved')
-    await refreshDetails()
+    if (!error.value) await refreshDetails()
   } finally {
     answering.value = null
   }
@@ -407,7 +392,7 @@ function openCancel() {
 }
 
 watch(realtime.event, (event) => {
-  if (!event || (event.type !== 'MESSAGE_CREATE' && event.type !== 'MESSAGE_UPDATE')) return
+  if (!event || (event.type !== 'MESSAGE_CREATE' && event.type !== 'MESSAGE_UPDATE') || event.scheduled) return
   if (event.conversation_id === booking.value?.conversation_id) void refreshDetails()
 })
 watch(realtime.connectionEpoch, (epoch) => {

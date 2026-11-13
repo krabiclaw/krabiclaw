@@ -899,7 +899,7 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   assert.deepEqual(thread.entries.filter(item=>item.type!=='day').map(item=>item.type==='message'?[item.side,item.author,item.body]:item.type==='event'?['event',item.text]:[item.type]),
    [['guest','You','My question'],['business','Payments','Public host reply'],['event','Payment received']])
   if(thread.conversation.kind==='team')throw new Error('Expected the buyer’s conversation')
-  assert.deepEqual([thread.conversation.pending,thread.conversation.composer],[[],{channel:'email',available:true,reason:null}])
+  assert.deepEqual(thread.conversation.composer,{channel:'email',available:true,reason:null})
   for(const secret of secrets)assert.equal(JSON.stringify(thread).includes(secret),false,secret)
   const inbox=await listConversations(db,null,{userId:'verified',buyerAudience:true})
   // The newest messages are the internal note and the dispute; the buyer's row previews the newest message they can read

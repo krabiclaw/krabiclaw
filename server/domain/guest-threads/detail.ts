@@ -4,13 +4,12 @@ import { queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/d
 import { bookingDay, getThreadOperationalRecord, requestSummary, requestLocationQuery, requestActions, stayPreview, validateGuestRequest, type GuestRequest, type RequestLocation } from '~/server/domain/requests'
 import { formatOperationalStatusLabel } from './status-labels'
 import { resolveGuestThreadMailbox } from './mailbox'
-import { GUEST_NOTE_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, isEventMessage, guestVisibleSql, messageHasContentSql, messageRole, participantGuard, readConversation, readGuestConversation, parseMessagePayload, type ConversationRow, type ConversationWindow, type MessageRow } from '~/server/domain/conversations'
+import { GUEST_NOTE_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, isEventMessage, messageHasContentSql, messageRole, participantGuard, readConversation, readGuestConversation, parseMessagePayload, type ConversationRow, type ConversationWindow, type MessageRow } from '~/server/domain/conversations'
 import { enrichConversationHistory, readConversationHistory, type ConversationHistory } from '~/server/domain/conversation-history-data'
 import { isDeliverySent, isVisibleDeliveryFailure, readConversationEnrichment } from './deliveries'
 import type { GuestThreadDetailViewModel, GuestThreadEntryViewModel } from './types'
 import { HTTPError } from 'nitro'
 import { providerTimestamp } from '~/server/integrations/channex/messages'
-import { bookingChangeViews } from './booking-changes'
 import { guestThreadChannel } from './channel-messages'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 
@@ -54,7 +53,6 @@ interface TranscriptWindow {
   channelGuestName: string | null
   translated: boolean
   failedMessages: string[]
-  bookingActions: GuestThreadEntryViewModel[]
 }
 
 /** Request and routing facts stay beside the view so they never enter its guest projection. */
@@ -132,7 +130,7 @@ export async function loadGuestThreadDetail(
   if (!channelThread) throw new Error('Conversation has no channel facts')
   if (window && !audience && !windowFacts) throw new Error('Transcript window is missing thread facts')
 
-  const [enrichment, answers, summary, home, activityPath, failedMessages, pendingProposals] = await Promise.all([
+  const [enrichment, answers, summary, home, activityPath, failedMessages] = await Promise.all([
     enrichConversationHistory(db, conversation, entryRows, guestUserId, window),
     !traveler && (!transcript || entryRows.some(entry => entry.event_name === SUBMISSION_EVENT)) ? threadAnswers(db, thread) : [],
     requestSummary(db, thread, record, location),
@@ -141,13 +139,7 @@ export async function loadGuestThreadDetail(
     audience && !traveler && thread.kind !== 'contact' ? buyerRequestActivityPath(db, audience.buyerUserId, thread.id) : null,
     window && !audience ? queryAll<{ id: string }>(db, `SELECT DISTINCT m.id FROM messages m JOIN guest_thread_deliveries d ON d.message_id = m.id
       WHERE m.conversation_id = ? AND (d.status = 'failed' OR (d.channel = 'email' AND d.status <> 'skipped' AND length(d.error) > 0))`, [threadId]) : [],
-    !traveler && window?.before === null && thread.kind === 'booking' ? queryAll<MessageRow>(db, `SELECT m.* FROM messages m WHERE m.conversation_id = ? AND m.event_name = 'booking_change.requested'
-      AND NOT EXISTS (SELECT 1 FROM messages decision WHERE decision.dedupe_key = 'booking-change-decision:' || m.id)
-      ${audience ? `AND ${guestVisibleSql('m', '1')}` : ''}`, [threadId]) : [],
   ])
-  const inWindow = new Set(entryRows.map(entry => entry.id))
-  const olderProposals = pendingProposals.filter(entry => !inWindow.has(entry.id))
-  const changes = traveler ? new Map() : await bookingChangeViews(db, thread, [...entryRows, ...olderProposals], now)
   const { photos, actors: actorRows, deliveries: deliveryRows, deliveriesByMessage } = enrichment
   if (windowFacts?.invalid_receipt || deliveryRows.some(delivery => delivery.provider === 'channex' && isDeliverySent(delivery) && !delivery.provider_message_id?.trim())) {
     throw new HTTPError({ statusCode: 500, message: 'A successful channel reply has no provider message ID', data: { code: 'CHANNEL_RECEIPT_INVALID', field: 'delivery.provider_message_id' } })
@@ -156,7 +148,7 @@ export async function loadGuestThreadDetail(
 
   const actorNames = new Map(actorRows.map(row => [row.id, row.name]))
 
-  const projectEntry = (entry: MessageRow): GuestThreadEntryViewModel => {
+  const entries = entryRows.map((entry): GuestThreadEntryViewModel => {
     const payload = parseMessagePayload(entry)
     delete payload.email
     const mirrored = entry.event_name === MIRRORED_EVENT
@@ -188,10 +180,8 @@ export async function loadGuestThreadDetail(
       providerTimestamp: providerRecordedAt,
       deliveries: (deliveriesByMessage.get(entry.id) ?? []).map(({ id, channel, provider, purpose, status, error, updated_at }) => ({ id, channel, provider, purpose, status, error, updated_at })),
       attachments,
-      bookingChange: changes.get(entry.id) ?? null,
     }
-  }
-  const entries = entryRows.map(projectEntry)
+  })
 
   if (!audience) {
     const named = record?.unit === 'nights' ? { internal_name: record.product_internal_name } : home
@@ -220,7 +210,6 @@ export async function loadGuestThreadDetail(
         channelGuestName: windowFacts?.channel_guest_name?.trim() ?? null,
         translated: Boolean(windowFacts?.translated),
         failedMessages: failedMessages.map(row => row.id),
-        bookingActions: olderProposals.filter(entry => changes.get(entry.id)?.status === 'pending').map(projectEntry),
       }
     }
     return { ...context, view: { ...sharedView, answers, ...windowView && { window: windowView } } }

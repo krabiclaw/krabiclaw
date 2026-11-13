@@ -38,17 +38,6 @@
         "role": "member"
       }
     ],
-    "pending": [
-      {
-        "body": "Enjoy your stay!",
-        "cancellable": true,
-        "due_at": "2026-11-08T23:00:00.000Z",
-        "id": "00000000-0000-4000-8000-000000000004",
-        "label": "Enjoy your stay!",
-        "source": "later",
-        "time": "Sun, Nov 8, 4:00 PM"
-      }
-    ],
     "record_kind": "stay",
     "record_title": "Reservation",
     "title": "Mililani",
@@ -57,7 +46,7 @@
   },
   "entries": [
     {
-      "id": "day:00000000-0000-4000-8000-000000000005",
+      "id": "day:00000000-0000-4000-8000-000000000004",
       "label": "Yesterday",
       "type": "day"
     },
@@ -67,7 +56,7 @@
       "automatic": false,
       "body": "In winter, can we park on the street?",
       "deliveries": [],
-      "id": "00000000-0000-4000-8000-000000000005",
+      "id": "00000000-0000-4000-8000-000000000004",
       "label": null,
       "photos": [],
       "receipt": null,
@@ -88,14 +77,14 @@
       "automatic": false,
       "body": null,
       "deliveries": [],
-      "id": "00000000-0000-4000-8000-000000000006",
+      "id": "00000000-0000-4000-8000-000000000005",
       "label": null,
       "photos": [
         {
           "height": 3,
-          "id": "00000000-0000-4000-8000-000000000007",
-          "thumbnail_url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
-          "url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
+          "id": "00000000-0000-4000-8000-000000000006",
+          "thumbnail_url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000006.avif",
+          "url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000006.avif",
           "width": 4
         }
       ],
@@ -115,7 +104,7 @@
       "automatic": false,
       "body": "Yes, the street facing downhill is easiest.",
       "deliveries": [],
-      "id": "00000000-0000-4000-8000-000000000008",
+      "id": "00000000-0000-4000-8000-000000000007",
       "label": null,
       "photos": [],
       "receipt": null,
@@ -134,7 +123,7 @@
       "automatic": false,
       "body": "Thank you! What time is check-in?",
       "deliveries": [],
-      "id": "00000000-0000-4000-8000-000000000009",
+      "id": "00000000-0000-4000-8000-000000000008",
       "label": null,
       "photos": [],
       "receipt": null,
@@ -172,39 +161,14 @@
       "unshown_files": 0
     },
     {
-      "change": {
-        "after": {
-          "assigned_member_id": null,
-          "assigned_member_name": null,
-          "party_size": 2,
-          "total_label": "$900.00",
-          "when_label": "Nov 8, 2026 – Nov 14, 2026"
-        },
-        "before": {
-          "assigned_member_id": null,
-          "assigned_member_name": null,
-          "party_size": 2,
-          "total_label": "$600.00",
-          "when_label": "Nov 8, 2026 – Nov 12, 2026"
-        },
-        "channel": "airbnb",
-        "guest_name": "Mililani Garcia",
-        "locale": "en",
-        "location_title": "74 D · Sky",
-        "noun": "stay",
-        "original_location_title": "74 D · Sky",
-        "requested_by": "guest",
-        "status": "pending",
-        "type": "stay",
-        "vertical": "lodging"
-      },
-      "id": "00000000-0000-4000-8000-000000000010",
+      "id": "00000000-0000-4000-8000-000000000009",
       "sent_at": "2026-11-05T19:00:00.000Z",
       "sequence": 6,
-      "type": "change"
+      "text": "Asked on Airbnb to change the stay to Nov 8, 2026 – Nov 14, 2026 for 2 guests ($900.00).",
+      "type": "event"
     },
     {
-      "id": "00000000-0000-4000-8000-000000000011",
+      "id": "00000000-0000-4000-8000-000000000010",
       "sent_at": "2026-11-05T19:00:00.000Z",
       "sequence": 7,
       "text": "Payment received",
@@ -216,7 +180,7 @@
       "automatic": false,
       "body": "Check-in is from 4 PM.",
       "deliveries": [],
-      "id": "00000000-0000-4000-8000-000000000012",
+      "id": "00000000-0000-4000-8000-000000000011",
       "label": null,
       "photos": [],
       "receipt": "Not delivered",
@@ -232,9 +196,8 @@
   ],
   "page": {
     "before": null,
-    "booking_actions": [],
     "failed_messages": [
-      "00000000-0000-4000-8000-000000000012"
+      "00000000-0000-4000-8000-000000000011"
     ],
     "newest": 8,
     "oldest": 1,

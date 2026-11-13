@@ -56,9 +56,6 @@ export default defineHandler(async (event) => {
     body: retried?.body,
     retryMessageId: retried?.id,
     reason: field('reason'),
-    requestId: field('message_id'),
-    // Who may change a stay (stayAccessFor): the role that updates operations.
-    stayManager: await roleAllows({ ...principal, permissions: { operations: ['update'] } }),
     idempotencyKey: retried ? retried.idempotencyKey : idempotencyKey,
     env,
   })

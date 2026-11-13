@@ -31,25 +31,6 @@
 
             <p v-else-if="item.type === 'event'" class="my-2 text-center text-xs text-muted">{{ item.text }}</p>
 
-            <section v-else-if="item.type === 'change'" class="mx-auto my-4 max-w-xl rounded-2xl border border-default bg-elevated p-5" :aria-labelledby="`change-title-${item.key}`" data-testid="booking-change-request">
-              <h3 :id="`change-title-${item.key}`" class="font-semibold text-highlighted">{{ t('booking.change_review') }}</h3>
-              <p class="mt-1 text-sm text-muted">{{ item.change.requested_by === 'guest' ? t('booking.change_requested_by_guest', { guest: item.change.guest_name, channel: 'Airbnb' }) : t('booking.change_requested_by', { organization: currentBusiness }) }}</p>
-              <dl class="mt-4 space-y-4 text-sm">
-                <div v-for="field in changeFields(item.change)" :key="field.label">
-                  <dt class="font-medium text-highlighted">{{ field.label }}</dt>
-                  <dd class="mt-1 grid grid-cols-2 gap-4">
-                    <div><span class="block text-xs text-muted">{{ t('booking.change_before') }}</span><span>{{ field.before }}</span></div>
-                    <div><span class="block text-xs text-muted">{{ t('booking.change_proposed') }}</span><span>{{ field.after }}</span></div>
-                  </dd>
-                </div>
-              </dl>
-              <p class="mt-4 text-sm" :class="item.change.status === 'pending' ? 'text-muted' : 'text-highlighted'" role="status">{{ changeStatus(item.change) }}</p>
-              <div v-if="item.change.status === 'pending' && (personalScope ? item.change.requested_by === 'business' && !item.change.channel : item.change.requested_by === 'guest')" class="mt-4 flex gap-3">
-                <UButton :label="t('booking.change_accept')" :loading="answeringChange?.requestId === item.key && answeringChange.decision === 'accept'" :disabled="answeringChange !== null" @click="answerChange(item.key, 'accept')" />
-                <UButton :label="t('booking.change_decline')" color="neutral" variant="outline" :loading="answeringChange?.requestId === item.key && answeringChange.decision === 'decline'" :disabled="answeringChange !== null" @click="answerChange(item.key, 'decline')" />
-              </div>
-            </section>
-
             <div v-else class="flex min-w-0 max-w-[76%] flex-col gap-0.5" :class="item.mine ? 'items-end self-end' : 'relative items-start self-start pl-10'" :data-message="item.key">
               <span v-if="!item.mine" class="absolute bottom-0 left-0"><InboxAvatar :name="item.runs[0]!.author" :initial="initialOf(item.runs[0]!.author)" :support="thread.kind === 'support'" size="sm" /></span>
               <p class="mb-1 mt-2.5 text-sm text-muted"><span class="text-highlighted">{{ item.runs[0]!.label ? `${item.runs[0]!.author} · ${item.runs[0]!.label}` : item.runs[0]!.author }}</span> {{ item.runs[0]!.time }}</p>
@@ -100,14 +81,7 @@
         <UAlert v-if="actionError || readError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError ?? readError ?? undefined" class="mb-2" />
         <UButton v-if="readError" class="mb-2" color="neutral" variant="ghost" @click="readThroughNewest">Retry read receipt</UButton>
 
-        <!-- A message still to go out: one row per message, the only place it appears. -->
-        <div v-for="later in guestThread?.pending ?? []" :key="later.id" class="mb-2 flex min-h-12 items-center gap-3 rounded-2xl bg-elevated px-4 py-3 text-base text-highlighted">
-          <UIcon name="i-lucide-clock" class="size-4 shrink-0 text-muted" />
-          <span class="min-w-0 flex-1 truncate">{{ later.label }} · {{ later.time }}</span>
-          <button v-if="later.cancellable" type="button" class="flex size-6 shrink-0 items-center justify-center text-highlighted disabled:opacity-50" :aria-label="`Cancel ${later.label}`" :disabled="cancelling === later.id" @click="cancelPending(later)">
-            <UIcon name="i-lucide-x" class="size-4" />
-          </button>
-        </div>
+        <UButton v-if="scheduledTo" :to="scheduledTo" label="Sent and upcoming" icon="i-lucide-clock" color="neutral" variant="link" size="sm" class="mb-1" />
 
         <!-- Suggested replies: rows above the composer, never side by side; one fills the field and does not send. -->
         <div v-if="shownSuggestions.length" class="mb-2">
@@ -148,8 +122,6 @@ import type { MessageIdentity } from '~/shared/dashboard-invalidations'
 
 import { useDocumentVisibility } from '@vueuse/core'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
-import type { BookingChangeView } from '~/server/domain/guest-threads/booking-changes'
-import type { InboxPendingMessage } from '~/server/domain/guest-threads/types'
 import { useConversationInvalidations } from '~/composables/useDashboardInvalidations'
 import { authClient } from '~/lib/auth-client'
 import MessageComposer, { messageReplyForm, sameMessagePhotos, useMessagePhotoDraft, type MessagePhotoDraft } from './MessageComposer.vue'
@@ -166,6 +138,7 @@ const props = withDefaults(defineProps<{ threadId: string; personalScope?: boole
 const dashboard = useDashboardOrganization()
 const route = useRoute()
 const dashboardApi = useDashboardApi()
+const toast = useToast()
 const { locale, t } = useI18n()
 const session = authClient.useSession()
 const userId = computed(() => session.value.data?.user.id)
@@ -175,6 +148,10 @@ const thread = computed(() => data.value?.conversation ?? null)
 const conversationOrganization = computed(() => thread.value?.organization_id ?? organizationId.value ?? undefined)
 const realtime = useConversationInvalidations(computed(() => props.threadId), conversationOrganization, props.personalScope)
 const guestThread = computed(() => thread.value?.kind === 'team' ? null : thread.value)
+const scheduledTo = computed(() => !props.personalScope && guestThread.value ? {
+  path: `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages/scheduled`,
+  query: { ...route.query, conversation_id: props.threadId },
+} : null)
 const entries = computed(() => data.value?.entries ?? [])
 const canSend = computed(() => data.value?.capabilities.can_send === true)
 const dateFormat = computed(() => new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }))
@@ -293,8 +270,6 @@ const requestingChange = computed(() => props.personalScope && route.query.inten
 const changeRequestSent = ref(false)
 watch(() => `${props.threadId}:${String(route.query.intent)}`, () => { changeRequestSent.value = false })
 const sendAt = ref<string | null>(null)
-// The business that asked for a change: the one whose inbox this is, or, in a guest's own inbox, the one they are writing to.
-const currentBusiness = computed(() => props.personalScope ? guestThread.value?.title : dashboard.organization.value?.name)
 const actionError = ref<string | null>(null)
 const readError = ref<string | null>(null)
 
@@ -303,7 +278,6 @@ const failedDeliveries = (message: MessageItem) => message.deliveries.filter(del
 type Row =
   | { type: 'day'; key: string; label: string }
   | { type: 'event'; key: string; text: string }
-  | { type: 'change'; key: string; change: BookingChangeView }
   | { type: 'run'; key: string; mine: boolean; runs: MessageItem[] }
 
 /*
@@ -377,9 +351,6 @@ const rows = computed<Row[]>(() => {
     } else items.push(item)
     seen.add(item.id)
   }
-  for (const action of [...(transcriptPage.value?.booking_actions ?? [])].reverse()) {
-    if (!seen.has(action.id)) items.unshift(action)
-  }
   if (attempt.value && sending.value && !items.some(item => item.type === 'message' && settledKeys.value[item.id] === `pending:${attempt.value?.key}`)) {
     items.push({
       type: 'message', id: `pending:${attempt.value.key}`, sequence: Number.MAX_SAFE_INTEGER, side: mineSide.value, author: 'You', author_user_id: userId.value ?? null, automatic: false, deliveries: [], label: null, sent_at: new Date().toISOString(),
@@ -392,7 +363,6 @@ const rows = computed<Row[]>(() => {
     const key = settledKeys.value[item.id] ?? item.id
     if (item.type === 'day') out.push({ type: 'day', key, label: item.label })
     else if (item.type === 'event') out.push({ type: 'event', key, text: item.text })
-    else if (item.type === 'change') out.push({ type: 'change', key, change: item.change })
     else {
       const last = out.at(-1)
       const mine = current.kind === 'team' ? item.author === 'You' : item.side === mineSide.value
@@ -457,84 +427,6 @@ watch([latestGuestMessage, suggestionsOn, suggestionAttempt], async ([messageId,
   }
 }, { immediate: true })
 
-// A pending message is cancelled in the one outbox: an automatic message by the business, one sent later by its author.
-const cancelling = ref<string | null>(null)
-async function cancelPending(later: InboxPendingMessage) {
-  cancelling.value = later.id
-  actionError.value = null
-  try {
-    await dashboardApi(`/api/dashboard/scheduled-guest-messages/${encodeURIComponent(later.id)}/cancel`, { method: 'POST', validate: isScheduledMessageResponse })
-    await refresh()
-  } catch (err) {
-    actionError.value = getErrorMessage(err, 'The message could not be cancelled')
-  } finally {
-    cancelling.value = null
-  }
-}
-
-const answeringChange = ref<{ requestId: string; decision: 'accept' | 'decline' } | null>(null)
-async function answerChange(requestId: string, decision: 'accept' | 'decline') {
-  if (answeringChange.value) return
-  const revision = accessRevision
-  answeringChange.value = { requestId, decision }
-  actionError.value = null
-  try {
-    // The host answers a guest's request on their channel through the conversation's operations.
-    if (!props.personalScope) {
-      await dashboardApi(`${guestActions.value}/operations/${decision}_change`, {
-        method: 'POST',
-        body: { message_id: requestId, idempotency_key: `${requestId}:${decision}` },
-        validate: isConversationOperation,
-      })
-      if (revision === accessRevision) await refresh()
-      return
-    }
-    await applicationFetch(`/api/public/booking-changes/${encodeURIComponent(props.threadId)}/${encodeURIComponent(requestId)}`, {
-      method: 'POST',
-      body: { decision },
-      validate: (value: unknown): value is BookingChangeView => isRecord(value) && ['accepted', 'declined'].includes(String(value.status)),
-    })
-    // Read the conversation after the answer, not through a refresh that a read
-    // started before the answer could satisfy with the pending card.
-    await refresh()
-    await refreshNuxtData(`account-activity:${session.value.data?.user.id}`)
-  } catch (cause) {
-    actionError.value = getErrorMessage(cause, 'Your answer could not be saved')
-    // A concurrent answer or changed destination must be shown after the failed action.
-    await refresh()
-  } finally {
-    answeringChange.value = null
-  }
-}
-
-function changeFields(change: BookingChangeView) {
-  const copy = getVerticalCopy(change.vertical, locale.value)
-  const fields = [
-    { label: copy.locationLabel, before: change.original_location_title, after: change.location_title },
-    { label: copy.dateLabel, before: change.before.when_label, after: change.after.when_label },
-    { label: copy.guestsLabel, before: String(change.before.party_size), after: String(change.after.party_size) },
-    ...change.before.total_label && change.after.total_label ? [{ label: t('booking.change_total'), before: change.before.total_label, after: change.after.total_label }] : [],
-  ]
-  if (change.type === 'booking') fields.push({
-    label: copy.assigneeLabel,
-    before: change.before.assigned_member_name ?? t('booking.change_unassigned'),
-    after: change.after.assigned_member_name ?? t('booking.change_unassigned'),
-  })
-  return fields.filter(field => field.label === copy.dateLabel || field.label === copy.assigneeLabel || field.before !== field.after)
-}
-function changeStatus(change: BookingChangeView) {
-  if (change.channel) {
-    if (change.status === 'pending') return t(change.requested_by === 'guest' ? 'booking.change_guest_waiting' : 'booking.change_host_waiting', { channel: 'Airbnb' })
-    if (change.status === 'accepted') return t('booking.change_guest_accepted', { channel: 'Airbnb' })
-    if (change.status === 'declined') return `${t('booking.change_declined')} ${t('booking.change_unchanged')}`
-    return t('booking.change_withdrawn', { channel: 'Airbnb' })
-  }
-  if (change.status === 'pending') return t(props.personalScope ? 'booking.change_pending' : 'booking.change_waiting')
-  if (change.status === 'accepted') return `${t('booking.change_accepted')} ${t('booking.change_updated')}`
-  if (change.status === 'declined') return `${t('booking.change_declined')} ${t('booking.change_unchanged')}`
-  return t(change.status === 'expired' ? 'booking.change_expired' : 'booking.change_stale')
-}
-
 async function sendReply() {
   const body = draft.value.trim()
   const photos = chosen.value
@@ -547,7 +439,7 @@ async function sendReply() {
       draft.value = ''
       usedSuggestion.value = null
       sendAt.value = null
-      await refresh()
+      toast.add({ title: 'Message scheduled', color: 'success' })
     } catch (err) {
       actionError.value = getErrorMessage(err, 'The message could not be scheduled')
     } finally {
@@ -660,7 +552,7 @@ watch(realtime.event, event => {
     if (event.type === 'access.changed') reconcileThread()
     return
   }
-  if ((event.type !== 'MESSAGE_CREATE' && event.type !== 'MESSAGE_UPDATE') || event.conversation_id !== props.threadId) return
+  if ((event.type !== 'MESSAGE_CREATE' && event.type !== 'MESSAGE_UPDATE') || event.scheduled || event.conversation_id !== props.threadId) return
   if (event.type === 'MESSAGE_CREATE' && event.message) {
     const message = event.message
     if (sending.value) { deferredCreates.push(message); return }
