@@ -1,20 +1,21 @@
 import { applicationFetch } from '~/composables/dashboardFetch'
 import { ApiClientError, isRecord } from '~/utils/api-clients'
-import { ONBOARDING_STEP_IDS, type OnboardingFlow, type OnboardingStepId } from '~/shared/onboarding-flow'
+import { ONBOARDING_STEP_IDS, WEBSITE_ONBOARDING_PATH, type OnboardingFlow, type OnboardingStepId, type WebsiteOnboardingResumeAction } from '~/shared/onboarding-flow'
 import { isCurrencyCode } from '~/shared/currencies'
 import { emptyOnboardingState, useOnboardingState, type OnboardingPlacePreview } from '~/composables/useOnboardingFlow'
 import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 
 type ActiveWebsiteDraft = { success: true } & (
   | { draft: null; resume_action: null }
-  | { draft: Record<string, unknown>; resume_action: { label: string; to: string } }
+  | { draft: Record<string, unknown>; resume_action: WebsiteOnboardingResumeAction }
 )
 
 export function readActiveWebsiteDraft() {
   return applicationFetch<ActiveWebsiteDraft>('/api/dashboard/onboarding/drafts/active', {
     validate: (value): value is ActiveWebsiteDraft => isRecord(value) && value.success === true
       && (value.draft === null ? value.resume_action === null : isRecord(value.draft)
-        && isRecord(value.resume_action) && typeof value.resume_action.label === 'string' && typeof value.resume_action.to === 'string'),
+        && isRecord(value.resume_action) && typeof value.resume_action.title === 'string'
+        && typeof value.resume_action.label === 'string' && value.resume_action.to === WEBSITE_ONBOARDING_PATH),
   })
 }
 
@@ -95,7 +96,6 @@ export function useOnboardingDraft() {
         state.value.languageLocked = true
         state.value.subdomain = undefined
       }
-      clearNuxtData('personal-website-setup')
       return true
     } catch (cause) {
       subdomainConflict.value = cause instanceof ApiClientError && cause.code === 'SUBDOMAIN_TAKEN'
@@ -155,7 +155,6 @@ export function useOnboardingDraft() {
         throw new Error(typeof res.error === 'string' ? res.error : 'The private website could not be read.')
       }
       state.value.created = { organization_slug: res.organization_slug, subdomain: res.subdomain, next_url: res.next_url }
-      clearNuxtData('personal-website-setup')
       trackOrganizationCreated(res.organization_id)
       return true
     } catch (cause) {

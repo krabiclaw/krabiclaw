@@ -2,6 +2,15 @@ import type { OrganizationVertical } from '~/utils/vertical-copy'
 import type { PhoneCountry } from '~/utils/phone'
 import type { CurrencyCode } from '~/shared/currencies'
 
+export const WEBSITE_ONBOARDING_PATH = '/dashboard/onboarding'
+export const WEBSITE_ONBOARDING_SAVED_PATH = '/dashboard/onboarding/saved'
+
+export interface WebsiteOnboardingResumeAction {
+  title: string
+  label: string
+  to: typeof WEBSITE_ONBOARDING_PATH
+}
+
 export const ONBOARDING_STEP_IDS = ['type', 'business', 'location', 'timezone', 'language', 'currency'] as const
 export type OnboardingStepId = typeof ONBOARDING_STEP_IDS[number]
 

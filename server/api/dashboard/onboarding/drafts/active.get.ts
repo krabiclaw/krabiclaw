@@ -8,8 +8,14 @@ import { getDraftMedia, parseStoredOnboardingDraftPayload, readActiveOnboardingD
 import { createPreviewToken, PREVIEW_TOKEN_TTL_MS, previewSecretOf } from '~/server/utils/preview-token'
 import { defineHandler, HTTPError } from 'nitro'
 import { deleteAbandonedDraftTenant } from '~/server/utils/tenant-deletion'
+import { WEBSITE_ONBOARDING_PATH, type WebsiteOnboardingResumeAction } from '~/shared/onboarding-flow'
 
 const noDraft = { success: true, draft: null, resume_action: null }
+const resumeAction: WebsiteOnboardingResumeAction = {
+  title: 'Your website setup is saved',
+  label: 'Continue website setup',
+  to: WEBSITE_ONBOARDING_PATH,
+}
 
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
@@ -56,7 +62,7 @@ export default defineHandler(async (event) => {
 
   return jsonResponse({
     success: true,
-    resume_action: { label: 'Continue website setup', to: '/dashboard/onboarding' },
+    resume_action: resumeAction,
     draft: {
       draft_id: row.id,
       updated_at: row.updated_at,

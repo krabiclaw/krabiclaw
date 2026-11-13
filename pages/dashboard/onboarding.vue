@@ -24,6 +24,7 @@
 import GuidedSetupShell from '~/components/dashboard/GuidedSetupShell.vue'
 import { onboardingStepPath, useOnboardingPlan, useOnboardingState } from '~/composables/useOnboardingFlow'
 import { useOnboardingDraft } from '~/composables/useOnboardingDraft'
+import { WEBSITE_ONBOARDING_SAVED_PATH } from '~/shared/onboarding-flow'
 
 definePageMeta({ layout: 'dashboard', tabs: false })
 
@@ -125,6 +126,10 @@ async function saveAndExit() {
       const flow = await draft.readFlow()
       plan.value = flow
       if (flow.canSave && !await saveOrReopenBusiness(flow, currentStep.value?.id)) return
+      if (state.value.draftId) {
+        await router.replace(WEBSITE_ONBOARDING_SAVED_PATH)
+        return
+      }
     }
     await router.push('/dashboard/account')
   } catch (error) {

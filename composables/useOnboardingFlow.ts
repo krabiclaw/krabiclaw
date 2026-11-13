@@ -1,7 +1,7 @@
 import type { CurrencyCode } from '~/shared/currencies'
 import type { PostalAddress } from '~/utils/postal-address'
 import type { OpeningHours } from '~/shared/reservation-hours'
-import type { OnboardingFlow, OnboardingStepId } from '~/shared/onboarding-flow'
+import { WEBSITE_ONBOARDING_PATH, type OnboardingFlow, type OnboardingStepId } from '~/shared/onboarding-flow'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
 
 /** The place the business picker hands back: Place Details for the chosen prediction. */
@@ -73,5 +73,5 @@ export function useOnboardingPlan() {
 }
 
 export function onboardingStepPath(id: OnboardingStepId) {
-  return id === 'type' ? '/dashboard/onboarding' : `/dashboard/onboarding/${id}`
+  return id === 'type' ? WEBSITE_ONBOARDING_PATH : `${WEBSITE_ONBOARDING_PATH}/${id}`
 }
