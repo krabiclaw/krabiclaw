@@ -61,13 +61,24 @@ if (route.query.verified === '1' && route.query.error) operationError.value = 'T
 else if (route.query.verified === '1') notice.value = 'Your email is verified. You can sign in now.'
 else if (route.query.reset === 'success') notice.value = 'Your password was updated. Sign in with your new password.'
 
-// The session is read through applicationFetch, which forwards the visitor's
-// cookie during SSR: Better Auth's client resolves an absolute base URL on the
-// server, and useFetch does not forward cookies to one, so the server never saw
-// the session and the redirect only ever happened after hydration.
-const session = await applicationFetch<typeof authClient.$Infer.Session | null>('/api/auth/get-session', {
-  validate: (value): value is typeof authClient.$Infer.Session | null => value === null || typeof value === 'object',
-})
+// Use Better Auth in the current Worker request during SSR. A dashboard deep
+// link can reach this page before the browser has its own session.
+const session = await readSession()
+
+async function readSession() {
+  if (import.meta.server) {
+    const event = useRequestEvent()
+    if (!event) throw new Error('Sign-in requires the current request.')
+    const [{ getAuthSession }, { cloudflareEnv }] = await Promise.all([
+      import('~/server/utils/auth'),
+      import('~/server/utils/api-response'),
+    ])
+    return await getAuthSession(event, cloudflareEnv(event))
+  }
+  return await applicationFetch<typeof authClient.$infer.Session | null>('/api/auth/get-session', {
+    validate: (value): value is typeof authClient.$infer.Session | null => value === null || typeof value === 'object',
+  })
+}
 // Keep an anonymous session while signing in so Better Auth can link its purchases.
 const isAuthenticated = computed(() => Boolean(session?.user?.id && !session.user.isAnonymous))
 if (isAuthenticated.value) await navigateTo(postLoginUrl.value, { external: true, redirectCode: 302 })
