@@ -533,7 +533,7 @@ test('an owner changes their restaurant draft to lodging and saves their first h
   await expect(page.getByRole('textbox', { name: 'Street address' })).toHaveValue('88 Moo 2')
   const homeCity = page.getByRole('textbox', { name: 'City or town' })
   await expect(homeCity).toHaveValue('Ao Nang')
-  const homeTimezone = page.getByRole('combobox', { name: 'Time zone' })
+  const homeTimezone = page.getByRole('button', { name: 'Time zone', exact: true })
   await expect(homeTimezone).toContainText('Bangkok · GMT+7')
   await homeCity.fill('Krabi')
   await expect(homeTimezone).toContainText('Select time zone')
