@@ -83,6 +83,7 @@ export async function loadDashboardCatalog(event: H3Event) {
           edit('section-name', 'Name', section.name),
           edit('section-description', 'Description', section.description ?? undefined),
           { ...edit('section-photo', 'Photo'), image: mediaStillUrl(section.image) },
+          edit('section-membership', 'Choose dishes'),
           edit('section-items', 'Order items'),
           edit('delete-section', 'Delete section'),
         )

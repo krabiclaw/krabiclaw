@@ -2,7 +2,7 @@ import { HTTPError, type H3Event } from 'nitro'
 import { getQuery } from 'nitro/h3'
 import { getDashboardMemberContext, listDashboardLocations } from '~/server/utils/dashboard-context'
 import { assertProductAccess, isOrganizationWideRole, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
-import { createCollection, deleteCollection, getProduct, hydrateProductMedia, listCollectionProducts, listCollections, reorderCollections, setCollectionProducts, setProductLocation, setProductPublication, updateCollection, updateProduct } from '~/server/utils/product-management'
+import { createCollection, deleteCollection, getProduct, hydrateProductMedia, listCollectionProducts, listCollections, listOrganizationProducts, reorderCollections, setCollectionProducts, setProductLocation, setProductPublication, updateCollection, updateProduct } from '~/server/utils/product-management'
 import { createSession, deleteProductBookingConfig, getScheduleSession, listAvailabilityRules, listScheduleSessions, replaceWeeklySchedule, setProductBookingConfig, updateSession } from '~/server/utils/availability'
 import { attachMediaPlacement, removeMediaPlacement, reorderMediaPlacements, setSingleMediaPlacement } from '~/server/utils/media-placement'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
@@ -199,10 +199,11 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
-  if (['section-name', 'section-description', 'section-photo', 'section-items', 'delete-section'].includes(view)) {
+  if (['section-name', 'section-description', 'section-photo', 'section-items', 'section-membership', 'delete-section'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Section not found')
     const section = (await listCollections(db, { organizationId: organization.id })).find(section => section.id === query.section_id) ?? missing('Section not found')
-    const products = view === 'section-items' ? await listCollectionProducts(db, { organizationId: organization.id, collectionId: section.id }) : []
+    const membership = view === 'section-membership'
+    const products = view === 'section-items' || membership ? await listCollectionProducts(db, { organizationId: organization.id, collectionId: section.id }) : []
     const ids = products.map(product => product.id)
     const media = view === 'section-photo'
     const order = view === 'section-items'
@@ -215,10 +216,23 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         ? field('value', title, 'order', ids.join('\n'), { choices: products.map(product => ({ value: product.id, label: product.name })) })
         : deleting ? field('value', `Delete ${section.name}`, 'toggle', false, { hint: 'Its items stay in the catalog.' })
           : field('value', title, name ? 'text' : 'textarea', name ? section.name : section.description, { optional: !name })
-    const revision = order ? JSON.stringify(ids) : media ? JSON.stringify(section.image?.asset_id ?? null) : section.updated_at
-    const screen = { title, fields: [input], rows: [], save_label: 'Save', revision }
+    const dishes = membership ? (await listOrganizationProducts(db, { organizationId: organization.id, kind: 'dish' }))
+      .filter(product => ids.includes(product.id) || section.location_id === null || product.locations.some(place => place.location_id === section.location_id)) : []
+    const revision = membership ? JSON.stringify([ids, dishes.map(dish => dish.id)]) : order ? JSON.stringify(ids) : media ? JSON.stringify(section.image?.asset_id ?? null) : section.updated_at
+    const fields = membership ? dishes.map(dish => field(dish.id, dish.name, 'toggle', ids.includes(dish.id))) : [input]
+    const screen = { title: membership ? 'Choose dishes' : title, fields, rows: [], save_label: 'Save', revision }
     if (!answer) return screen
     if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This section changed. Reopen this setting before saving.' })
+    if (membership) {
+      if (fields.length !== Object.keys(answer.values).length || fields.some(row => !['true', 'false'].includes(answer.values[row.key] ?? ''))) invalid('The saved dishes do not match this section')
+      const productIds = [
+        ...ids.filter(id => answer.values[id] !== 'false'),
+        ...dishes.filter(dish => !ids.includes(dish.id) && answer.values[dish.id] === 'true').map(dish => dish.id),
+      ]
+      await setCollectionProducts(db, { organizationId: organization.id, collectionId: section.id, productIds, expectedProductIds: ids, actor: { actorId: userId } })
+      await purgePublicResourceCacheNow(env, organization.id)
+      return screen
+    }
     const value = answer.values.value ?? invalid('Missing section value')
     if (deleting) {
       if (value !== 'true') invalid('Confirm deletion')
