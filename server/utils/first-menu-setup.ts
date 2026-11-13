@@ -36,7 +36,7 @@ async function readMenuSetup(db: DbClient, organizationId: string, locationId: s
     : (dishesWithSkips.length === 1 ? dishesWithSkips[0] : undefined)
       ?? (draftDishes.length === 1 && products.length === 1 ? draftDishes[0] : undefined)
   if (products.length && !dish) return null
-  const selectedSectionId = !payload.first_menu_location_id || payload.first_menu_location_id === locationId ? payload.first_menu_section_id : undefined
+  const selectedSectionId = payload.first_menu_section_ids?.[locationId]
   const section = menuSections.find(candidate => candidate.id === selectedSectionId
     && (!dish || dish.collections.some(row => row.collection_id === candidate.id)))
     ?? (dish ? menuSections.find(candidate => dish.collections.some(row => row.collection_id === candidate.id)) : undefined)
@@ -66,17 +66,17 @@ export async function firstMenuSetupLocation(db: DbClient, organizationId: strin
     ) AS has_draft_dish
     FROM business_locations l
     WHERE l.organization_id = ? AND l.status = 'active'
-    ORDER BY CASE WHEN l.id = ? THEN 0
-      WHEN EXISTS (SELECT 1 FROM collections c WHERE c.organization_id = l.organization_id AND c.id = ? AND c.location_id = l.id) THEN 1
-      ELSE 2 END, l.created_at, l.id
-  `, [organizationId, payload.first_menu_location_id ?? null, payload.first_menu_section_id ?? null])
-  for (const [index, candidate] of candidates.entries()) {
-    if (index > 0 && !candidate.has_draft_dish) continue
+    ORDER BY l.created_at, l.id
+  `, [organizationId])
+  const started = candidates.filter(candidate => candidate.has_draft_dish || payload.first_menu_section_ids?.[candidate.id])
+  for (const candidate of started) {
     const setup = await readMenuSetup(db, organizationId, candidate.id)
-    const started = Boolean(setup?.dish || setup?.chosenSectionId)
-    if (setup?.resume && (started || !begunOnly && index === 0)) return { id: candidate.id, started }
+    if (setup?.resume) return { id: candidate.id, started: true }
   }
-  return null
+  const first = candidates[0]
+  if (begunOnly || started.length || !first) return null
+  const setup = await readMenuSetup(db, organizationId, first.id)
+  return setup?.resume ? { id: first.id, started: false } : null
 }
 
 export async function firstMenuSetup(context: OfferingSetupContext, locationId: string | undefined, requested: string | undefined, answer: OfferingSetupAnswer | null): Promise<OfferingSetupResponse> {
@@ -101,7 +101,7 @@ export async function firstMenuSetup(context: OfferingSetupContext, locationId: 
   const step = steps[index]!
   const guide = firstMenuSectionSetupPath(orgSlug, locationId)
   const stepPath = (next: Step) => `${guide}&step=${next}`
-  const revision = JSON.stringify([section?.id, section?.updated_at, dish?.id, dish?.updated_at, photo?.asset_id, menuSections.map(row => row.id)])
+  const revision = JSON.stringify([chosenSectionId, section?.id, section?.updated_at, dish?.id, dish?.updated_at, photo?.asset_id, menuSections.map(row => row.id)])
   const actor = { actorId }
   const questions = {
     section: menuSections.length > 1 ? { title: 'Which menu section does this dish belong in?', fields: [
@@ -149,8 +149,15 @@ export async function firstMenuSetup(context: OfferingSetupContext, locationId: 
       else if (selected.location_id !== locationId) throw offeringSetupChanged()
       else if (name !== selected.name) await updateCollection(db, { organizationId, collectionId: selected.id, patch: { name }, actor, expectedUpdatedAt: selected.updated_at })
     }
-    const result = await execute(db, "UPDATE onboarding_drafts SET payload_json = json_set(payload_json, '$.first_menu_section_id', ?, '$.first_menu_location_id', ?) WHERE id = ? AND organization_id = ? AND status = 'committed'", [selected.id, locationId, draft.id, organizationId])
-    if (result.meta.changes !== 1) throw offeringSetupChanged()
+    if (!dish && selected.id !== chosenSectionId) {
+      const result = await execute(db, `UPDATE onboarding_drafts
+        SET payload_json = json_set(payload_json, '$.first_menu_section_ids', json_patch(
+          COALESCE(json_extract(payload_json, '$.first_menu_section_ids'), json('{}')), json_object(?, ?)))
+        WHERE id = ? AND organization_id = ? AND status = 'committed'
+          AND (SELECT value FROM json_each(payload_json, '$.first_menu_section_ids') WHERE key = ?) IS ?`,
+      [locationId, selected.id, draft.id, organizationId, locationId, chosenSectionId ?? null])
+      if (result.meta.changes !== 1) throw offeringSetupChanged()
+    }
   } else if (step === 'dish') {
     const name = requireTrimmedProductString(value, 'dish name', PRODUCT_LIMITS.name)
     if (!dish) {
@@ -160,8 +167,6 @@ export async function firstMenuSetup(context: OfferingSetupContext, locationId: 
         organizationId, env, actor, product: { kind: 'dish', name }, publication: { published: false },
         firstMenuSection: { id: section.id, locationId, expectedProductIds: existing.map(row => row.id) }, idempotencyKey: creationKey,
       })
-      const scoped = await execute(db, "UPDATE onboarding_drafts SET payload_json = json_set(payload_json, '$.first_menu_location_id', ?) WHERE id = ? AND organization_id = ? AND status = 'committed'", [locationId, draft.id, organizationId])
-      if (scoped.meta.changes !== 1) throw offeringSetupChanged()
     } else if (name !== dish.name) {
       await updateProduct(db, { organizationId, env, actor, productId: dish.id, patch: { name, updated_at: dish.updated_at } })
     }

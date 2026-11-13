@@ -9,7 +9,7 @@ import { listTodayReservations } from '~/server/utils/dashboard-agenda'
 import { todayReservationsTitle } from '~/shared/dashboard-today'
 import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
 import { organizationPublicUrl } from '~/server/utils/domains'
-import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS, previewSecretOf } from '~/server/utils/preview-token'
+import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS, previewSecretOf, PUBLIC_WEBSITE_QUERY } from '~/server/utils/preview-token'
 import { isDemoOrganization } from '~/shared/demo'
 
 /**
@@ -61,7 +61,7 @@ export default defineHandler(async (event) => {
         status_label: privateSite ? 'Private' : 'Live',
         action: privateSite
           ? { label: 'Publish website', to: `/dashboard/${encodeURIComponent(organization.slug)}/website?publish=1`, type: 'publish' as const }
-          : { label: 'View website', to: address, type: 'visit' as const },
+          : { label: 'View website', to: address + PUBLIC_WEBSITE_QUERY, type: 'visit' as const },
       }
     }
   }

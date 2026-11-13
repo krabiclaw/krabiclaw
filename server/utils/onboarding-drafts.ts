@@ -169,8 +169,7 @@ export interface OnboardingDraftPayload {
   version: 3
   partial?: false
   timezone_step_visited?: boolean
-  first_menu_section_id?: string
-  first_menu_location_id?: string
+  first_menu_section_ids?: Record<string, string>
   first_menu_skips?: FirstMenuSkipsByDish | (FirstMenuSkips & { dish_id: string })
   first_experience_photo_skipped?: string
   first_experience_venue_address?: {

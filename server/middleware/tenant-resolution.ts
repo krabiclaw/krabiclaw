@@ -5,7 +5,7 @@ import { PUBLIC_CACHE_REVISION_SQL, publicCacheRevision } from '~/server/utils/e
 
 import { HTTPError, defineHandler  } from 'nitro';
 import type { H3Event } from 'nitro';
-import { redirect } from 'nitro/h3';
+import { redirect, setResponseHeader } from 'nitro/h3';
 import { queryFirst, type DbClient } from "~/server/db";
 import { TENANT_TYPES } from "~/utils/tenant-routing";
 import { cloudflareEnv, isInternalSelfFetch } from "../utils/api-response";
@@ -15,7 +15,7 @@ import {
   isPlatformHost,
   usesTenantHeader,
 } from "../utils/tenant-hosts";
-import { previewSecretOf, resolvePreviewAuthorization } from "../utils/preview-token";
+import { clearPreviewAuthorization, previewSecretOf, PUBLIC_WEBSITE_QUERY, resolvePreviewAuthorization } from "../utils/preview-token";
 import { PLATFORM_SITE, resolvePublicSite } from "~/utils/site-routing";
 import { organizationSocialMediaFromJson } from '~/server/utils/public-social-image'
 import { resolveOrganizationFontPreset } from '~/shared/organization-fonts'
@@ -304,6 +304,12 @@ export default defineHandler(async (event) => {
       return redirect(`https://${tenant.successorDomain}${url.pathname}${url.search}`, 301)
     }
     throw new HTTPError({ statusCode: 410, statusMessage: 'Gone' })
+  }
+
+  if (tenant && !isPlatformRequest && event.method === 'GET' && tenantPath === '/' && url.search === PUBLIC_WEBSITE_QUERY) {
+    clearPreviewAuthorization(event)
+    setResponseHeader(event, 'cache-control', 'private, no-store')
+    return redirect('/', 303)
   }
 
   if (tenant && await authorizeTenant(event, tenant)) {

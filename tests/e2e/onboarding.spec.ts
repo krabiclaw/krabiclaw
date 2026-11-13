@@ -279,7 +279,34 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   const visit = website.getByRole('link', { name: 'View website' })
   const publicAddress = new URL(baseURL!)
   publicAddress.hostname = subdomain + '.' + publicAddress.hostname
-  await expect(visit).toHaveAttribute('href', publicAddress.href)
+  const draftDishName = 'Preview-only tamarind prawns'
+  const catalogUrl = `/api/editor/organizations/${organizationId}`
+  const locations = await page.request.get(`/api/dashboard/locations?org=${created!.slug}`)
+  expect(locations.status(), await locations.text()).toBe(200)
+  const { locations: [{ id: locationId }] } = await locations.json() as { locations: [{ id: string }] }
+  const draftDish = await page.request.post(`${catalogUrl}/products`, { data: {
+    kind: 'dish', name: draftDishName, variants: [{ name: 'Standard', prices: [{ unit_amount: 20000, currency: 'THB' }] }],
+  } })
+  expect(draftDish.status(), await draftDish.text()).toBe(201)
+  const { product: { id: dishId } } = await draftDish.json() as { product: Product }
+  const placement = await page.request.put(`${catalogUrl}/products/${dishId}/locations/${locationId}`, { data: { active: true, published: false } })
+  expect(placement.status(), await placement.text()).toBe(200)
+  const expandedPromise = page.waitForEvent('popup')
+  await website.getByRole('link', { name: 'Website preview' }).click()
+  const expanded = await expandedPromise
+  await expect(expanded.locator('body')).toContainText(name)
+  const menuAddress = new URL('/menu', publicAddress)
+  await expanded.goto(menuAddress.href)
+  await expect(expanded.getByText(draftDishName, { exact: true })).toBeVisible()
+  const publicPagePromise = page.waitForEvent('popup')
+  await visit.click()
+  const publicPage = await publicPagePromise
+  await expect(publicPage).toHaveURL(publicAddress.href)
+  await publicPage.goto(menuAddress.href)
+  await expect(publicPage.getByText('Grilled squid', { exact: true })).toBeVisible()
+  await expect(publicPage.getByText(draftDishName, { exact: true })).toHaveCount(0)
+  await publicPage.close()
+  await expanded.close()
   // Publishing makes the same site public, without a preview token.
   const live = await readLocalTenant(request, subdomain, '/')
   expect(live.status()).toBe(200)
@@ -406,11 +433,38 @@ for (const setup of [
       await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
       await expect(page).toHaveURL(`${baseURL}${caller}`)
       if (setup.vertical === 'restaurant') {
+        const org = outcome.organization_slug
+        const mainLocation = guide.searchParams.get('location_id')
+        expect(mainLocation).toEqual(expect.any(String))
+        const branch = await page.request.post('/api/dashboard/locations', {
+          params: { org }, data: { title: 'Second location', timezone: 'Asia/Bangkok' },
+        })
+        expect(branch.status(), await branch.text()).toBe(201)
+        const { location: { id: branchLocation } } = await branch.json() as { location: { id: string } }
+        const branchGuide = new URL(guide)
+        branchGuide.searchParams.set('location_id', branchLocation)
+        const exit = page.getByRole('button', { name: 'Save & exit', exact: true })
+        const section = page.getByRole('textbox', { name: 'Section name', exact: true })
+        const dish = page.getByRole('textbox', { name: 'Dish name', exact: true })
+        const resume = page.getByRole('link', { name: 'Continue your menu setup', exact: true })
         await page.goto(guide.href)
+        await section.fill('Lunch menu')
+        await exit.click()
+        await expect(page).toHaveURL(`${baseURL}${caller}`)
+        const otherSection = await page.request.post(`/api/editor/organizations/${organizationId}/collections`, {
+          data: { name: 'Drinks menu', location_id: mainLocation },
+        })
+        expect(otherSection.status(), await otherSection.text()).toBe(201)
+        await page.goto(branchGuide.href)
+        await section.fill('Dinner menu')
+        await exit.click()
+        await expect(page).toHaveURL(`${baseURL}${caller}`)
+
+        await page.goto(`/dashboard/${org}`)
+        await resume.click()
+        await expect(page).toHaveURL(url => url.searchParams.get('location_id') === mainLocation)
+        await dish.fill('Tamarind prawns')
         const next = page.getByRole('button', { name: 'Next', exact: true })
-        await page.getByRole('textbox', { name: 'Section name', exact: true }).fill('Lunch menu')
-        await next.click()
-        await page.getByRole('textbox', { name: 'Dish name', exact: true }).fill('Tamarind prawns')
         await next.click()
         await expect(page.getByRole('heading', { name: 'Add a photo of the dish' })).toBeVisible()
         await next.click()
@@ -419,9 +473,14 @@ for (const setup of [
         await page.getByRole('textbox', { name: 'Price', exact: true }).fill('240')
         await page.getByRole('button', { name: 'Finish', exact: true }).click()
         await expect(page).toHaveURL(`${baseURL}${caller}?kind=menu`)
-        await page.locator('a[href*="/products/menu?"]').first().click()
+        await page.locator(`a[href*="/products/menu?location_id=${mainLocation}"]`).click()
         await page.getByText('Lunch menu', { exact: true }).click()
         await expect(page.getByText('Tamarind prawns', { exact: true })).toBeVisible()
+
+        await page.goto(`/dashboard/${org}`)
+        await resume.click()
+        await expect(page).toHaveURL(url => url.searchParams.get('location_id') === branchLocation)
+        await expect(dish).toBeVisible()
       }
       if (setup.vertical === 'experience') {
         await page.goto(guide.href)
