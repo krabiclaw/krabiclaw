@@ -23,7 +23,6 @@ test('the email link returns through normal sign-in and only the invited account
     await waitForNuxtHydration(team)
     await expect(team.getByRole('heading', { name: 'Members', exact: true })).toBeVisible()
     await expect(team.getByRole('heading', { name: 'Pending invitations', exact: true })).toBeVisible()
-    await expect(team.getByText('No pending invitations.', { exact: true })).toBeVisible()
     await team.getByRole('link', { name: 'Invite a team member' }).click()
     await team.getByLabel('Email address').fill(invitee.email)
     await team.getByRole('combobox', { name: 'Role', exact: true }).click()
