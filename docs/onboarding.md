@@ -45,9 +45,9 @@ Evaluate the CMS on Android as well as desktop.
 
 | Moment | Existing surface / owner | Outcome and independent readback |
 | --- | --- | --- |
-| Arrive or resume | `/dashboard/onboarding` and Booky Boo | A new owner starts on Business type with a neutral illustration. Selecting a type shows an example website. A saved draft opens at its first incomplete question or Pricing currency. |
+| Arrive or resume | `/api/post-login`, `/dashboard/onboarding`, and the iOS guide | A new owner starts on Business type with a neutral illustration. Selecting a type shows an example website. **Continue website setup** opens the saved question, or the first incomplete one if a prerequisite is missing. |
 | Describe the business | Server flow projection, web step controls and native iOS views | Collect type, name, country, a time zone, website language and pricing currency. Address fields are optional. An unambiguous time zone appears in the address screen. |
-| Save | **Save & exit** or **Finish**, through shared provisioning | Create or update the pending organization. Read the saved draft through the existing active-draft reader. The same draft retains prior contact, hours, brand and authored products. |
+| Save | **Save & exit** or **Finish**, through the shared draft operation | Save answers from Business type onward. A partial save leaves organization creation until the answers are complete. Read the saved draft through the active-draft endpoint. The same draft retains prior contact, hours, brand and authored products. |
 | Finish | Existing activation operation | Activate the organization, set session scope and close the draft. The site is private. The server routes the owner to their first offering where applicable. |
 | Personalize the account | `/dashboard/account/profile/personal`; `AccountProfilePage` | Save name through Better Auth, photo through the account-avatar operation, and phone through verification. |
 
@@ -132,11 +132,16 @@ Each question occupies one screen. The web paths live under
 | `language` | What language is your website in? | Select a supported language. The source language of existing draft content is fixed. |
 | `currency` | What currency do you price in? | Confirm or change the proposed pricing currency and select **Finish**. |
 
+`GET /api/post-login` sends new owners to the business picker. iOS requests
+`?format=json` to read the same destination without changing the active
+organization. `GET /api/dashboard/onboarding/drafts/active` supplies the saved
+answers and the **Continue website setup** action for both clients.
+
 `POST /api/dashboard/onboarding/flow` evaluates the current answers and returns
 the ordered steps, field labels, business and language choices, currency and
-time zone proposals, and the resume step. **Exit** is available while required
-answers are incomplete. **Save & exit** saves a complete set of answers.
-A failed save leaves edits and the error visible.
+time zone proposals, and the resume step. **Exit** closes setup before a type
+is selected. **Save & exit** saves the current answers and question once a type
+is selected. A failed save leaves edits and the error visible.
 
 - **Import from Google Maps** uses the existing Places autocomplete and
   details operations. The chosen place seeds editable name and location fields.
