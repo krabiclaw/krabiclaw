@@ -185,12 +185,14 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     let eligible = 0
     const failures: string[] = []
     for (const socket of this.ctx.getWebSockets()) {
+      if (socket.readyState !== WebSocket.OPEN) continue
       const attachment: unknown = socket.deserializeAttachment()
       if (!isSocketAttachment(attachment)) {
         socket.close(1008, 'Authentication required')
         continue
       }
       const membership = await socketMembership(this.env, attachment)
+      if (socket.readyState !== WebSocket.OPEN) continue
       if (!membership) {
         // This message carries no resource data. Send it before closing so
         // the client can clear its views even if the close frame is lost.
