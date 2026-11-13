@@ -75,8 +75,8 @@ async function readSession() {
     ])
     return await getAuthSession(event, cloudflareEnv(event))
   }
-  return await applicationFetch<typeof authClient.$infer.Session | null>('/api/auth/get-session', {
-    validate: (value): value is typeof authClient.$infer.Session | null => value === null || typeof value === 'object',
+  return await applicationFetch<typeof authClient.$Infer.Session | null>('/api/auth/get-session', {
+    validate: (value): value is typeof authClient.$Infer.Session | null => value === null || typeof value === 'object',
   })
 }
 // Keep an anonymous session while signing in so Better Auth can link its purchases.
