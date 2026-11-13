@@ -1,4 +1,3 @@
-import type { InboxTranscriptPage } from '~/server/domain/guest-threads/types'
 import { isRecord } from '~/utils/api-clients'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import type {
@@ -6,6 +5,7 @@ import type {
   InboxListPage,
   InboxRow,
   InboxStreamItem,
+  InboxTranscriptPage,
   InboxThread,
   InboxThreadDetails,
   InboxUnreadCounts,
