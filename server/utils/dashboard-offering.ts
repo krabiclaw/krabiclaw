@@ -11,7 +11,7 @@ import { memberSchedulingList } from '~/server/domain/member-scheduling'
 import { editableProductKinds, PRODUCT_KIND_LABELS, productDetailFields, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS, STAY_QUIET_HOUR_TIMES, type ProductDetailsPatch } from '~/shared/product-details'
 import { STAY_SAFETY_FIELDS, STAY_SAFETY_SECTIONS, staySafetySectionKeys, type StaySafetySection } from '~/shared/stay-safety'
 import { formatMinorAmount, majorAmountToMinor, minorAmountToMajor, scopedPriceAmountPatch, selectPrice } from '~/shared/prices'
-import { isCurrencyCode } from '~/shared/currencies'
+import { CURRENCY_OPTIONS, isCurrencyCode } from '~/shared/currencies'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import type { CatalogAnswer, CatalogField, CatalogRow, CatalogScreen } from '~/shared/catalog-screen'
 import type { UpdateProductInput } from '~/server/types/products'
@@ -26,7 +26,7 @@ import { addOrganizationLanguage, disableOrganizationLanguage, getOrganizationLa
 import { getOrganizationLocalizationProgress } from '~/server/utils/organization-localization-opportunities'
 import { isDemoOrganization } from '~/shared/demo'
 import { hasPlatformEventPermission } from '~/server/utils/platform-admin-users'
-import { FORM_QUESTION_LIMITS, FORM_QUESTION_TYPES, isChoiceQuestionType } from '~/shared/form-questions'
+import { FORM_QUESTION_LIMITS, FORM_QUESTION_TYPES, isChoiceQuestionType, type FormQuestion } from '~/shared/form-questions'
 import { FORM_QUESTION_TYPE_LABELS, formQuestionRowSummary, formQuestionsSummary } from '~/utils/form-question-editing'
 import { queryAll } from '~/server/db'
 import { assertOrganizationLanguage, findResourceLocalization, getLocalizationForAuthoring, getProductCatalogLocalization, putLocalizationForAuthoring, putResourceLocalization } from '~/server/utils/localization'
@@ -40,9 +40,23 @@ import { MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { getLocation } from '~/server/utils/location-management'
 import { getContentDocumentById, getContentEditorSnapshotForDocument, getContentRepresentation, type ContentBlockInput } from '~/server/utils/content/documents'
 import { listArticleCategories } from '~/server/utils/content/article-categories'
+import { articleCollectionOf, createBlogPost, deleteBlogPost, getBlogPost, updateBlogLifecycle, updateBlogPost } from '~/server/utils/content/publishing'
+import { loadDashboardBlogPosts } from '~/server/utils/dashboard-editor-resources'
+import { createPost, deletePost, getPost, listPosts, updatePost } from '~/server/utils/post-management'
+import { publishPost } from '~/server/utils/social-publication'
+import { PostValidationError } from '~/shared/posts'
+import { createQa, deleteQa, listQa, updateQa } from '~/server/utils/location-qa'
+import { mcpPageWindow } from '~/server/utils/mcp-pagination'
+import { readLocalizedFormQuestions } from '~/server/domain/form-questions'
+import { loadSettingsPayload, updateOrganizationSettingsFields } from '~/server/utils/organization-settings'
+import type { UpdateOrganizationSettingsRequest } from '~/server/types/organization'
 import { getLinksPage, OrganizationLinksValidationError, upsertLinksPage } from '~/server/utils/links-page'
-import { blankBlogLocalizedText, blogLocalizedTextFields, readBlogLocalizedText, writeBlogLocalizedText } from '~/utils/blog-editor'
+import { blankBlogLocalizedText, blogLocalizedTextFields, initialBlogEditorBlocks, type EditorContentBlock, readBlogLocalizedText, writeBlogLocalizedText } from '~/utils/blog-editor'
 import { PRICING_CALCULATOR_COLUMNS, pricingCalculatorConfig, pricingCalculatorRows, updatePricingCalculator } from '~/utils/pricing-calculator'
+import { SITE_PALETTE_MODES, SITE_PALETTE_ROLES, type SitePalettePatch } from '~/shared/site-palette'
+import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset } from '~/shared/organization-fonts'
+import { getOrganizationDomains } from '~/server/utils/domain-read-model'
+import { listOrganizationReviews, setReviewStatus } from '~/server/utils/organization-reviews'
 import { isPlatformSite } from '~/utils/site-routing'
 import { isRecord } from '~/server/utils/type-guards'
 
@@ -53,8 +67,75 @@ const missing = (message: string): never => { throw new HTTPError({ statusCode: 
 const field = (key: string, label: string, kind: CatalogField['kind'], value: unknown, options: Partial<CatalogField> = {}): CatalogField =>
   ({ key, label, kind, value: value == null ? '' : String(value), ...options })
 
+async function questionEditor(
+  view: string, query: { question_id?: unknown }, scope: Record<string, string>, title: string,
+  questions: FormQuestion[], revision: string, answer: CatalogAnswer | undefined,
+  write: (next: unknown) => Promise<void>,
+): Promise<CatalogScreen> {
+  const inquiry = view.startsWith('inquiry-')
+  const listView = inquiry ? 'inquiry-questions' : 'questions'
+  const itemView = inquiry ? 'inquiry-question' : 'question'
+  const orderView = inquiry ? 'inquiry-question-order' : 'question-order'
+  let screen: CatalogScreen
+  let save: ((value: (key: string) => string) => Promise<void>) | undefined
+  const form = (title: string, fields: CatalogField[], submit: NonNullable<typeof save>) => {
+    screen = { title, fields, rows: [], revision, save_label: 'Save' }
+    save = submit
+  }
+  const bool = (value: string) => value === 'true' ? true : value === 'false' ? false : invalid('Choose On or Off')
+  if (view === listView) {
+    if (answer) return missing('Choose a question')
+    return { title, fields: [], rows: [
+      ...questions.map(question => ({ id: question.id, label: question.label, summary: formQuestionRowSummary(question), native: itemView, query: { ...scope, question_id: question.id } })),
+      ...(questions.length < FORM_QUESTION_LIMITS.questions ? [{ id: 'add-question', label: 'Add question', native: itemView, query: scope }] : []),
+      ...(questions.length > 1 ? [{ id: 'question-order', label: 'Reorder questions', native: orderView, query: scope }] : []),
+    ] }
+  } else if (view === orderView) {
+    form('Reorder questions', [field('order', 'Question order', 'order', questions.map(question => question.id).join('\n'), {
+      choices: questions.map(question => ({ value: question.id, label: question.label })),
+    })], async values => {
+      const ids = values('order').split('\n')
+      if (ids.length !== questions.length || new Set(ids).size !== questions.length) invalid('Include each question once')
+      await write(ids.map(id => questions.find(question => question.id === id) ?? invalid('Question not found')))
+    })
+  } else {
+    const question = query.question_id === undefined ? undefined : questions.find(question => question.id === query.question_id) ?? missing('Question not found')
+    form(question ? 'Edit question' : 'Add question', [
+      field('label', 'Question', 'text', question?.label),
+      field('type', 'Answer type', 'select', question?.type ?? 'short_text', {
+        choices: FORM_QUESTION_TYPES.map(value => ({ value, label: FORM_QUESTION_TYPE_LABELS[value].label })),
+      }),
+      field('help', 'Help text', 'textarea', question?.help_text, { optional: true }),
+      field('required', 'Required', 'toggle', question?.required ?? false),
+      ...(question?.choices.map(choice => field(`choice:${choice.id}`, 'Saved option (clear to remove)', 'text', choice.label, { optional: true })) ?? []),
+      field('choices', 'New options (one per line)', 'textarea', null, { optional: true }),
+      ...(question ? [field('remove', 'Remove this question', 'toggle', false)] : []),
+    ], async values => {
+      if (question && bool(values('remove'))) {
+        await write(questions.filter(item => item.id !== question.id))
+        return
+      }
+      const type = FORM_QUESTION_TYPES.find(type => type === values('type')) ?? invalid('Choose an answer type')
+      const choices = isChoiceQuestionType(type) ? [
+        ...(question?.choices ?? []).flatMap(choice => {
+          const label = values(`choice:${choice.id}`).trim()
+          return label ? [{ id: choice.id, label }] : []
+        }),
+        ...values('choices').split('\n').map(label => label.trim()).filter(Boolean).map(label => ({ label })),
+      ] : []
+      const next = { ...(question ? { id: question.id } : {}), type, choices, label: values('label'), help_text: values('help').trim() || null, required: bool(values('required')) }
+      await write(question ? questions.map(item => item.id === question.id ? next : item) : [...questions, next])
+    })
+  }
+  if (!answer) return screen!
+  if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The questions changed. Reopen the editor before saving.' })
+  if (screen!.fields.length !== Object.keys(answer.values).length || screen!.fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this editor')
+  await save!(key => answer.values[key]!)
+  return screen!
+}
+
 export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer): Promise<CatalogScreen> {
-  const { db, env, organization, userId } = await getDashboardMemberContext(event)
+  const { db, env, organization, userId, session } = await getDashboardMemberContext(event)
   const principal = memberAccessPrincipal(organization, { env, event })
   const query = getQuery(event)
   const view = typeof query.view === 'string' ? query.view : ''
@@ -428,6 +509,236 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     }
     await putResourceLocalization(env, db, { organizationId: organization.id, resourceType: 'organization', resourceId: organization.id, locale: language.locale, values: next, userId })
     await purgePublicResourceCacheNow(env, organization.id)
+    return screen
+  }
+  if (['inquiry-questions', 'inquiry-question', 'inquiry-question-order'].includes(view)) {
+    if (!isOrganizationWideRole(organization.role)) return missing('Inquiry form not found')
+    const { questions, questions_revision: revision } = await readLocalizedFormQuestions(db, { kind: 'inquiry', organizationId: organization.id }, null)
+    return await questionEditor(view, query, {}, 'Intake questions', questions, revision, answer, async next => {
+      const result = await updateOrganizationSettingsFields(db, env, organization.id, {
+        inquiry_questions: next, expected_inquiry_questions_revision: revision,
+      }, userId)
+      if (result.status >= 400) throw new HTTPError({ statusCode: result.status, message: String(result.data.error), data: result.data })
+    })
+  }
+  if (['website-blog', 'website-posts', 'website-qa', 'website-content'].includes(view)) {
+    if (!isOrganizationWideRole(organization.role)) return missing('Website content not found')
+    const scope = { organizationId: organization.id, locationId: null }
+    const kind = view === 'website-blog' ? 'article' : view === 'website-posts' ? 'post' : view === 'website-qa' ? 'qa' : query.kind
+    if (kind !== 'article' && kind !== 'post' && kind !== 'qa') return missing('Content not found')
+    const title = kind === 'article' ? 'Blog' : kind === 'post' ? 'Social posts' : 'Q&A'
+    const row = (id: string, label: string, summary?: string): CatalogRow => ({
+      id, label, summary, native: 'website-content', query: { kind, ...(id === 'new' ? {} : { content_id: id }) },
+    })
+    if (view !== 'website-content') {
+      if (answer) return missing('Choose content to edit')
+      const cursor = typeof query.cursor === 'string' ? query.cursor : undefined
+      const resource = { resource: `native-posts:${organization.id}` }
+      const page = kind === 'article' ? await loadDashboardBlogPosts(event, organization.id, { cursor })
+        : kind === 'post' ? await listPosts(db, env, organization.id, {}, mcpPageWindow(cursor ? { cursor } : {}, resource), resource)
+        : null
+      const rows = page ? page.posts.map(item => row(String(item.id), String(item.title || ('body' in item && item.body) || title), item.status === 'published' ? 'Published' : 'Draft'))
+        : (await listQa(db, organization.id, null)).filter(item => item.source === 'manual').map(item => row(item.id, item.question, item.answer ?? undefined))
+      return { title, fields: [], rows: [
+        ...rows, row('new', kind === 'article' ? 'New article' : kind === 'post' ? 'New post' : 'Add a question'),
+        ...(kind === 'qa' ? [{ id: 'reviews', label: 'Reviews', native: 'website-reviews' }] : []),
+        ...(page?.page_info.next_cursor ? [{ id: 'more', label: 'More', native: view, query: { cursor: page.page_info.next_cursor } }] : []),
+      ] }
+    }
+    const id = query.content_id === undefined ? null : typeof query.content_id === 'string' ? query.content_id : missing('Content not found')
+    const article = kind === 'article' && id ? await getBlogPost(db, id, organization.id, env) : null
+    const post = kind === 'post' && id ? await getPost(db, env, organization.id, id) ?? missing('Post not found') : null
+    const qa = kind === 'qa' && id ? (await listQa(db, organization.id, null, false, null, undefined, id))
+      .find(item => item.source === 'manual' && item.location_id === null) ?? missing('Question not found') : null
+    const stored = article ?? post ?? qa
+    const contentTitle = typeof article?.title === 'string' ? article.title : post?.title ?? qa?.question ?? ''
+    const revision = typeof stored?.updated_at === 'string' ? stored.updated_at : 'new'
+    const action = query.action
+    if (action !== undefined && action !== 'edit' && action !== 'delete' && action !== 'publish') return missing('Content action not found')
+    const categories = kind === 'article' ? await listArticleCategories(db, organization.id, articleCollectionOf(article?.collection)) : []
+    const blocks: EditorContentBlock[] = article?.content_document.blocks ?? initialBlogEditorBlocks()
+    const articleEdits = kind === 'article' ? blocks.flatMap((block, index) => blogLocalizedTextFields(block).map(item => ({
+      ...item, block, key: `block:${index}:${item.path.join('.')}`,
+    }))) : []
+    const fields = action === 'publish' || action === 'delete' ? [field('confirm', action === 'publish' ? 'Publish on website' : 'Confirm deletion', 'toggle', false)] : [
+      field('title', kind === 'qa' ? 'Question' : 'Title', 'text', contentTitle, { optional: kind === 'post' }),
+      ...(kind === 'article' ? [
+        field('excerpt', 'Excerpt', 'textarea', article?.excerpt, { optional: true }),
+        field('category', 'Category', 'select', article?.category?.id, { optional: true, choices: [{ value: '', label: 'Choose later' }, ...categories.map(item => ({ value: item.id, label: item.name }))] }),
+        ...articleEdits.map(item => field(item.key, item.label, 'textarea', item.value)),
+      ] : kind === 'post' ? [
+        field('body', 'Caption', 'textarea', post?.body),
+        field('button_label', 'Button label', 'text', post?.call_to_action?.label, { optional: true }),
+        field('button_url', 'Button URL', 'text', post?.call_to_action?.url, { optional: true }),
+      ] : [
+        field('answer', 'Answer', 'textarea', qa?.answer, { optional: true }),
+        field('visible', 'Show on website', 'toggle', qa?.status !== 'hidden'),
+      ]),
+    ]
+    if (id && action === undefined) {
+      if (answer) return missing('Choose a content setting')
+      return { title: contentTitle || title, fields: [], rows: [
+        { id: 'edit', label: 'Edit content', native: view, query: { kind, content_id: id, action: 'edit' } },
+        ...(stored?.status === 'draft' ? [{ id: 'publish', label: 'Publish on website', native: view, query: { kind, content_id: id, action: 'publish' } }] : []),
+        { id: 'delete', label: 'Delete', native: view, query: { kind, content_id: id, action: 'delete' } },
+      ] }
+    }
+    if ((action === 'delete' || action === 'publish') && (!stored || !id || (action === 'publish' && qa))) return missing('Content not found')
+    const screen = { title: contentTitle || title, fields, rows: [], revision, save_label: action === 'publish' ? 'Publish' : action === 'delete' ? 'Delete' : 'Save' }
+    if (!answer) return screen
+    if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The content changed. Reopen it before saving.' })
+    if (fields.length !== Object.keys(answer.values).length || fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this editor')
+    const values = answer.values
+    try {
+      if (action === 'delete') {
+        if (values.confirm !== 'true') return invalid('Confirm deletion')
+        if (article) await deleteBlogPost(db, id!, organization.id)
+        else if (post) await deletePost(db, organization.id, id!, userId)
+        else if (qa) await deleteQa(db, { ...scope, pagePath: qa.page_path }, id!)
+      } else if (action === 'publish') {
+        if (values.confirm !== 'true') return invalid('Confirm publication')
+        if (article) await updateBlogLifecycle(db, id!, { updated_at: revision }, organization.id, userId)
+        else if (post) {
+          const result = await publishPost(env, organization.id, id!, { expectedUpdatedAt: revision, targets: [{ channel: 'organization' }] }, userId)
+          if (!result.ok) return invalid(result.outcomes.find(item => item.message)?.message ?? 'The post could not be published')
+        }
+      } else if (kind === 'article') {
+        for (const edit of articleEdits) writeBlogLocalizedText(edit.block.data, edit.path, values[edit.key]!)
+        const content = {
+          title: values.title!, excerpt: values.excerpt || null,
+          ...(values.category ? { category_id: values.category } : {}),
+          content_blocks: blocks as ContentBlockInput[],
+        }
+        if (article) await updateBlogPost(db, id!, { ...content, updated_at: revision }, organization.id, userId, env)
+        else await createBlogPost(db, userId, { ...content, idempotency_key: answer.idempotency_key }, { organization_id: organization.id }, env)
+      } else if (kind === 'post') {
+        const changes = {
+          title: values.title || null, body: values.body || null,
+          call_to_action: values.button_label || values.button_url ? { label: values.button_label, url: values.button_url } : null,
+        }
+        if (post) await updatePost(db, env, organization.id, post.id, { changes, expectedUpdatedAt: revision }, userId)
+        else await createPost(db, env, organization.id, { post: changes, idempotencyKey: answer.idempotency_key }, userId)
+      } else {
+        const data = { question: values.title, answer: values.answer || null, status: values.visible === 'true' ? 'published' : 'hidden' }
+        if (qa) await updateQa(db, { ...scope, pagePath: qa.page_path }, qa.id, data, session.user)
+        else await createQa(db, scope, data, session.user)
+      }
+    } catch (error) {
+      if (error instanceof PostValidationError) throw new HTTPError({ statusCode: error.statusCode, message: error.message })
+      throw error
+    }
+    await purgePublicResourceCacheNow(env, organization.id)
+    return screen
+  }
+  if (view === 'website-domains') {
+    if (!isOrganizationWideRole(organization.role) || answer) return missing('Domains not found')
+    const domains = await getOrganizationDomains(db, organization.id)
+    return { title: 'Domains', fields: [], empty_title: 'No connected domains', rows: domains.map(domain => ({
+      id: domain.id, label: domain.domain, summary: domain.status === 'active' ? domain.role === 'canonical' ? 'Primary' : 'Connected' : domain.status,
+    })) }
+  }
+  if (view === 'website-reviews' || view === 'website-review') {
+    if (!isOrganizationWideRole(organization.role)) return missing('Reviews not found')
+    const reviews = await listOrganizationReviews(db, organization.id)
+    if (view === 'website-reviews') {
+      if (answer) return missing('Choose a review')
+      return { title: 'Reviews', fields: [], rows: reviews.map(review => ({
+        id: String(review.id), label: String(review.title || review.author_name || 'Review'), summary: String(review.status),
+        native: 'website-review', query: { review_id: String(review.id) },
+      })) }
+    }
+    const review = reviews.find(item => item.id === query.review_id) ?? missing('Review not found')
+    const title = String(review.title || review.author_name || 'Review')
+    if (review.status === 'private') {
+      if (answer) return invalid('This guest shared their review privately')
+      return { title, fields: [], rows: [{ id: 'private', label: 'Private feedback', summary: String(review.private_feedback ?? '') }] }
+    }
+    const revision = String(review.updated_at)
+    const screen = { title, fields: [field('status', 'Visibility', 'select', review.status, {
+      hint: typeof review.content === 'string' ? review.content : undefined,
+      choices: [{ value: 'approved', label: 'Show on website' }, { value: 'rejected', label: 'Hide' }],
+    })], rows: [], revision, save_label: 'Save' }
+    if (!answer) return screen
+    if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This review changed. Reopen it before saving.' })
+    await setReviewStatus(db, organization.id, String(review.id), answer.values.status)
+    await purgePublicResourceCacheNow(env, organization.id)
+    return screen
+  }
+  if (['website-brand', 'website-brand-field', 'website-seo', 'website-currency', 'website-announcement', 'website-colors'].includes(view)) {
+    if (!isOrganizationWideRole(organization.role)) return missing('Brand not found')
+    const settings = await loadSettingsPayload(db, env, organization.id)
+    const descriptors = [
+      field('name', 'Name', 'text', settings.name),
+      field('brand_description', 'Description', 'textarea', settings.brand_description, { optional: true }),
+      field('contact_email', 'Contact email', 'text', settings.contact_email, { optional: true }),
+      field('font_preset', 'Website font', 'select', settings.font_preset, { choices: [...ORGANIZATION_FONT_OPTIONS] }),
+      ...(['logo', 'logo_dark', 'favicon', 'social_share'] as const).map((slot, index) => {
+        const asset = settings.media.find(item => item.slot === slot)
+        return field(slot, ['Logo', 'Dark logo', 'Favicon', 'Sharing image'][index]!, 'photo', asset?.asset_id, { optional: true, display_url: mediaStillUrl(asset) })
+      }),
+    ]
+    if (view === 'website-brand') {
+      if (answer) return missing('Choose a brand setting')
+      return { title: 'Brand', fields: [], rows: descriptors.map(item => ({
+        id: item.key, label: item.label, summary: item.kind === 'photo' ? undefined : item.value || undefined,
+        image: item.display_url, native: 'website-brand-field', query: { field: item.key },
+      })).concat([
+        { id: 'announcement', label: 'Announcement', summary: settings.announcement?.headline ?? undefined, image: undefined, native: 'website-announcement', query: { field: 'announcement' } },
+        ...(settings.palette ? [{ id: 'colors', label: 'Colors', summary: settings.palette_source ?? undefined, image: undefined, native: 'website-colors', query: { field: 'colors' } }] : []),
+      ]) }
+    }
+    const seo = view === 'website-seo'
+    const currency = view === 'website-currency'
+    const announcement = view === 'website-announcement'
+    const colors = view === 'website-colors'
+    const palette = colors ? settings.palette ?? missing('This website has fixed colors') : null
+    const announcementMedia = announcement ? settings.media.find(item => item.slot === 'announcement') : null
+    const fields = announcement ? [
+      field('enabled', 'Show announcement', 'toggle', settings.announcement?.enabled === true),
+      field('headline', 'Headline', 'text', settings.announcement?.headline, { optional: true }),
+      field('description', 'Description', 'textarea', settings.announcement?.description, { optional: true }),
+      field('cta_label', 'Button label', 'text', settings.announcement?.cta_label, { optional: true }),
+      field('cta_url', 'Button URL', 'text', settings.announcement?.cta_url, { optional: true }),
+      field('format', 'Format', 'select', settings.announcement?.format ?? 'modal', { choices: [{ value: 'modal', label: 'Popup' }, { value: 'banner', label: 'Banner' }] }),
+      field('dismissible', 'Allow visitors to dismiss', 'toggle', settings.announcement?.dismissible !== false),
+      field('image', 'Image', 'photo', announcementMedia?.asset_id, { optional: true, display_url: mediaStillUrl(announcementMedia) }),
+    ] : palette ? [
+      ...SITE_PALETTE_MODES.flatMap(mode => SITE_PALETTE_ROLES.map(role => field(`${mode}.${role.role}`, `${role.label} (${mode})`, 'text', palette[mode][role.role], { hint: role.rule }))),
+      field('reset', 'Restore default colors', 'toggle', false),
+    ] : seo ? [
+      field('seo_title', 'Search title', 'text', settings.seo_title, { optional: true }),
+      field('seo_description', 'Search description', 'textarea', settings.seo_description, { optional: true }),
+      field('canonical_url', 'Canonical URL', 'text', settings.canonical_url, { optional: true }),
+    ] : currency ? [
+      field('default_currency', 'Currency', 'select', settings.default_currency, { choices: CURRENCY_OPTIONS }),
+    ] : [descriptors.find(item => item.key === query.field) ?? missing('Brand setting not found')]
+    const item = fields[0]!
+    const revision = JSON.stringify(fields.map(item => [item.key, item.value]))
+    const screen = { title: announcement ? 'Announcement' : colors ? 'Colors' : seo ? 'Search engine optimization' : item.label, fields, rows: [], revision, save_label: 'Save' }
+    if (!answer) return screen
+    if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The brand setting changed. Reopen it before saving.' })
+    const value = answer.values[item.key] ?? invalid('Missing brand value')
+    if (fields.length !== Object.keys(answer.values).length || fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this editor')
+    const values = answer.values
+    const format = values.format === 'banner' ? 'banner' : 'modal'
+    const patch: UpdateOrganizationSettingsRequest = announcement ? {
+      announcement: values.enabled === 'false' && !values.headline?.trim() ? null : {
+        enabled: values.enabled === 'true', headline: values.headline!, description: values.description || null,
+        cta_label: values.cta_label || null, cta_url: values.cta_url || null, dismissible: values.dismissible === 'true', format,
+      },
+      ...(values.image !== announcementMedia?.asset_id ? { media: [{ slot: 'announcement', asset_id: values.image || null }] } : {}),
+    } : colors ? {
+      palette: values.reset === 'true' ? null : Object.fromEntries(SITE_PALETTE_MODES.map(mode => [
+        mode, Object.fromEntries(SITE_PALETTE_ROLES.map(({ role }) => [role, values[`${mode}.${role}`]])),
+      ])) as SitePalettePatch,
+    } : seo
+      ? Object.fromEntries(fields.map(item => [item.key, answer.values[item.key]!.trim() || null]))
+      : item.kind === 'photo'
+        ? { media: [{ slot: item.key as 'logo' | 'logo_dark' | 'favicon' | 'social_share', asset_id: value || null }] }
+        : { [item.key]: value }
+    if (item.key === 'font_preset' && !isOrganizationFontPreset(value)) return invalid('Choose a website font')
+    const result = await updateOrganizationSettingsFields(db, env, organization.id, patch, userId)
+    if (result.status >= 400) throw new HTTPError({ statusCode: result.status, message: String(result.data.error), data: result.data })
     return screen
   }
   if (['links-page', 'links-title', 'links-item', 'links-order'].includes(view)) {
@@ -1499,49 +1810,8 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       const changes = { questions: next, expected_questions_revision: owner.questions_revision }
       return product.kind === 'stay' ? patch({ stay: changes }) : setBooking(changes)
     }
-    if (view === 'questions') {
-      screen = { title: 'Questions', fields: [], rows: [
-        ...questions.map(question => leaf(question.id, question.label, formQuestionRowSummary(question), { view: 'question', query: { question_id: question.id } })),
-        ...(questions.length < FORM_QUESTION_LIMITS.questions ? [leaf('add-question', 'Add question', undefined, { view: 'question' })] : []),
-        ...(questions.length > 1 ? [leaf('question-order', 'Reorder questions')] : []),
-      ] }
-    } else if (view === 'question-order') {
-      form('Reorder questions', [field('order', 'Question order', 'order', questions.map(question => question.id).join('\n'), {
-        choices: questions.map(question => ({ value: question.id, label: question.label })),
-      })], async values => {
-        const ids = values('order').split('\n')
-        if (ids.length !== questions.length || new Set(ids).size !== questions.length) invalid('Include each question once')
-        await write(ids.map(id => questions.find(question => question.id === id) ?? invalid('Question not found')))
-      })
-    } else {
-      const question = query.question_id === undefined ? undefined : questions.find(question => question.id === query.question_id) ?? missing('Question not found')
-      form(question ? 'Edit question' : 'Add question', [
-        field('label', 'Question', 'text', question?.label),
-        field('type', 'Answer type', 'select', question?.type ?? 'short_text', {
-          choices: FORM_QUESTION_TYPES.map(value => ({ value, label: FORM_QUESTION_TYPE_LABELS[value].label })),
-        }),
-        field('help', 'Help text', 'textarea', question?.help_text, { optional: true }),
-        field('required', 'Required', 'toggle', question?.required ?? false),
-        ...(question?.choices.map(choice => field(`choice:${choice.id}`, 'Saved option (clear to remove)', 'text', choice.label, { optional: true })) ?? []),
-        field('choices', 'New options (one per line)', 'textarea', null, { optional: true }),
-        ...(question ? [field('remove', 'Remove this question', 'toggle', false)] : []),
-      ], async values => {
-        if (question && bool(values('remove'))) {
-          await write(questions.filter(item => item.id !== question.id))
-          return
-        }
-        const type = FORM_QUESTION_TYPES.find(type => type === values('type')) ?? invalid('Choose an answer type')
-        const choices = isChoiceQuestionType(type) ? [
-          ...(question?.choices ?? []).flatMap(choice => {
-            const label = values(`choice:${choice.id}`).trim()
-            return label ? [{ id: choice.id, label }] : []
-          }),
-          ...values('choices').split('\n').map(label => label.trim()).filter(Boolean).map(label => ({ label })),
-        ] : []
-        const next = { ...(question ? { id: question.id } : {}), type, choices, label: values('label'), help_text: values('help').trim() || null, required: bool(values('required')) }
-        await write(question ? questions.map(item => item.id === question.id ? next : item) : [...questions, next])
-      })
-    }
+    screen = await questionEditor(view, query, params, 'Questions', questions, revision, answer, write)
+    return screen
   } else if (['duration', 'seatings', 'capacity', 'confirmation', 'meeting', 'party', 'guest-terms', 'notice', 'payment'].includes(view)) {
     if (!booking) return missing('Booking calendar not found')
     if ((view === 'duration' && product.kind === 'table') || (view === 'seatings' && product.kind !== 'table')) return missing('Booking duration not found')
