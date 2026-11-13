@@ -16,7 +16,8 @@ import type { CatalogAnswer, CatalogField, CatalogRow, CatalogScreen } from '~/s
 import type { UpdateProductInput } from '~/server/types/products'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 import { NOTICE_OPTIONS, noticeSummary } from '~/shared/availability-settings'
-import { createTenantPage, getTenantPageById, listTenantPages, updateTenantPage } from '~/server/utils/content/pages'
+import { createTenantPage, deleteTenantPage, getTenantPageById, listTenantPages, updateTenantPage } from '~/server/utils/content/pages'
+import { slugifyTitle } from '~/utils/post-slugs'
 import { alignTenantPageTranslationBlocks, createTenantPageBlock, createTenantPageTranslationBlocks, isTenantPageBlockAllowed, TENANT_PAGE_BLOCK_REGISTRY, tenantPageLocalizedTextFields, tenantPageTranslationSourceBlockId, writeTenantPageLocalizedText } from '~/utils/tenant-page-blocks'
 import { reorderTenantPageRecords, tenantPageBlockLabel, tenantPageRecordTitle, TENANT_PAGE_RECORD_NOUNS, type TenantPageBlockCollection } from '~/utils/tenant-page-block-sections'
 import { createTenantPageEditorData, validateTenantPageBlock } from '~/utils/tenant-page-editor'
@@ -376,20 +377,44 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
-  if (['pages', 'page', 'page-content', 'page-sections', 'page-order', 'page-section-add', 'page-section-remove', 'page-media', 'page-media-item', 'page-media-order', 'page-records', 'page-record', 'page-record-order', 'page-settings'].includes(view)) {
+  if (['pages', 'page', 'page-add', 'page-delete', 'page-content', 'page-sections', 'page-order', 'page-section-add', 'page-section-remove', 'page-media', 'page-media-item', 'page-media-order', 'page-records', 'page-record', 'page-record-order', 'page-settings'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Page not found')
     const scope = { organizationId: organization.id }
     const locale = typeof query.locale === 'string' ? query.locale : undefined
     if (view === 'pages') {
       if (answer) return missing('Choose a page to edit')
       const pages = await listTenantPages(db, organization.id)
-      return { title: 'Pages', fields: [], rows: pages.map(page => ({
+      return { title: 'Pages', fields: [], rows: [...pages.map(page => ({
         id: page.id, label: page.title, summary: page.path, native: locale ? 'page-content' : 'page',
         query: { page_id: page.id, ...(locale ? { locale } : {}) },
-      })) }
+      })), ...(!locale ? [{ id: 'add', label: 'Add a page', native: 'page-add', query: {} }] : [])] }
+    }
+    if (view === 'page-add') {
+      if (locale) return missing('Create the source page first')
+      const screen = { title: 'Add a page', fields: [field('title', 'Title', 'text', '')], rows: [], revision: 'new', save_label: 'Create' }
+      if (!answer) return screen
+      if (answer.revision !== screen.revision) return invalid('Open the new page editor')
+      const title = (answer.values.title ?? '').trim()
+      const slug = slugifyTitle(title)
+      if (!slug) return invalid('Choose a more specific page title')
+      await createTenantPage(db, { organizationId: organization.id, userId, env, data: {
+        title, path: `/${slug}`, page_type: 'custom', recipe: null, blocks: [],
+      } })
+      return screen
     }
     const sourceId = typeof query.page_id === 'string' ? query.page_id : missing('Choose a page')
     const source = await getTenantPageById(db, sourceId, scope)
+    const removable = async () => (await listTenantPages(db, organization.id)).find(page => page.id === source.id)?.removable === true
+    if (view === 'page-delete') {
+      if (locale || !await removable()) return missing('This page cannot be removed')
+      const revision = source.document.updated_at
+      const screen = { title: 'Delete page', fields: [field('confirm', `Delete ${source.title}`, 'toggle', false)], rows: [], revision, save_label: 'Delete' }
+      if (!answer) return screen
+      if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This page changed. Reopen it before deleting.' })
+      if (answer.values.confirm !== 'true') return invalid('Confirm deletion')
+      await deleteTenantPage(db, source.id, { scope, expectedUpdatedAt: revision, env })
+      return screen
+    }
     if (view === 'page-settings') {
       if (locale) return missing('Edit section settings in the source language')
       const block = source.blocks.find(block => block.id === query.block_id) ?? missing('Section not found')
@@ -569,6 +594,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       return { title: source.title, fields: [], rows: [
         { id: 'copy', label: 'Page text', summary: source.summary ?? undefined, native: 'page-content', query: { page_id: source.id } },
         { id: 'sections', label: 'Sections', summary: String(source.blocks.length), native: 'page-sections', query: { page_id: source.id } },
+        ...(await removable() ? [{ id: 'delete', label: 'Delete page', native: 'page-delete', query: { page_id: source.id } }] : []),
       ] }
     }
     if (['page-sections', 'page-order', 'page-section-add', 'page-section-remove'].includes(view)) {
