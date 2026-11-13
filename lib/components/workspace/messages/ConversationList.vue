@@ -116,6 +116,7 @@ import { useInboxUnread } from './inbox-unread'
 const props = withDefaults(defineProps<{ personalScope?: boolean }>(), { personalScope: false })
 const session = authClient.useSession()
 const emit = defineEmits<{ first: [target: { path: string; query: LocationQueryRaw } | null] }>()
+defineExpose({ removeConversation })
 
 const dashboard = useDashboardOrganization()
 const route = useRoute()
@@ -377,7 +378,6 @@ function removeConversation(id: string) {
   if (pending.value) void refresh({ dedupe: 'cancel' })
   else reconcile(current.pagination.has_more ? undefined : id)
 }
-defineExpose({ removeConversation })
 
 async function drainChanges() {
   if (disposed || reconciling || pending.value || loadingMore.value || (!fullRefresh && !changedIds.size)) return
