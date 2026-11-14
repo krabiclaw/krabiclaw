@@ -26,6 +26,7 @@ import { getMediaAsset } from '../../server/utils/media-asset-manager.ts'
 import uploadMedia from '../../server/api/editor/organizations/[organization_id]/media/upload.post.ts'
 import { listLinkedFacebookPages, facebookPageToken } from '../../server/utils/facebook-pages.ts'
 import connectionAuthorization from '../../server/api/dashboard/connection-authorization.ts'
+import disconnectFacebook from '../../server/api/organizations/[organization_id]/integrations/facebook/disconnect.post.ts'
 import selectFacebook from '../../server/api/organizations/[organization_id]/integrations/facebook/select.post.ts'
 import deauthorizeCallback from '../../server/api/integrations/meta/deauthorize.post.ts'
 import { loadInstagramInsights } from '../../server/utils/instagram-insights.ts'
@@ -793,7 +794,8 @@ test('the shared Facebook selection route preserves the current connection until
       .bind('facebook-reconnect', session, 'owner', Date.now() + 60_000, Date.now(), Date.now()).run()
     const app = new H3()
     app.post('/api/organizations/:organization_id/integrations/facebook/select', selectFacebook)
-    const select = (body: Record<string, string>) => app.request(Object.assign(new Request('https://proof.example/api/organizations/org-a/integrations/facebook/select', {
+    app.post('/api/organizations/:organization_id/integrations/facebook/disconnect', disconnectFacebook)
+    const select = (body: Record<string, string>, action = 'select') => app.request(Object.assign(new Request(`https://proof.example/api/organizations/org-a/integrations/facebook/${action}`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}` }, body: JSON.stringify(body),
     }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     const before = await readIntegration(db, 'org-a', 'facebook')
@@ -812,6 +814,9 @@ test('the shared Facebook selection route preserves the current connection until
     assert.equal(saved?.target_name, 'Replacement Page')
     assert.equal(saved?.account_id, 'fb-account')
     assert.notEqual(saved?.revision, before.revision)
+    const staleDisconnect = await select({ revision: before.revision }, 'disconnect')
+    assert.equal(staleDisconnect.status, 409)
+    assert.deepEqual(await readIntegration(db, 'org-a', 'facebook'), saved)
   } finally {
     restore()
     await runtime.dispose()

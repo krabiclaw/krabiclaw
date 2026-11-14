@@ -21,6 +21,10 @@ export default defineHandler(async (event) => {
     return jsonResponse({ error: 'Choose a Google account and a Google Ads account.' }, { status: 400 })
   }
 
+  const managedAds = body?.service === 'managed-ads'
+  if (managedAds && body?.revision === undefined) {
+    return jsonResponse({ error: 'Reload the Google Ads account before selecting it.', code: 'GOOGLE_ADS_REVISION_REQUIRED' }, { status: 400 })
+  }
   if (body?.revision !== undefined && body.revision !== null && typeof body.revision !== 'string') {
     return jsonResponse({ error: 'Invalid account revision' }, { status: 400 })
   }
@@ -32,7 +36,7 @@ export default defineHandler(async (event) => {
   })
 
   try {
-    await selectGoogleAdsCustomer(env, organization.id, accountId, customerId, customerName, body?.service === 'managed-ads',
+    await selectGoogleAdsCustomer(env, organization.id, accountId, customerId, customerName, managedAds,
       body?.revision === undefined ? undefined : { revision: body.revision })
     return jsonResponse({ success: true, customer_id: customerId, customer_name: customerName })
   } catch (error) {

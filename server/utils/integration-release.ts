@@ -1,3 +1,4 @@
+import { HTTPError } from 'nitro'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { IntegrationProvider } from '~/shared/organization-settings'
@@ -49,9 +50,11 @@ export async function releaseIntegration(
   env: CloudflareEnv,
   organizationId: string,
   product: IntegrationProduct,
+  expected?: { revision: string },
 ): Promise<ReleaseIntegrationResult> {
   if (product === 'google-ads' || product === 'meta-ads') await requireRecordedManagedSpend(env.DB, env, organizationId, product)
-  const released = await deleteIntegration(env.DB, organizationId, PROVIDER[product])
+  const released = await deleteIntegration(env.DB, organizationId, PROVIDER[product], expected)
+  if (expected && !released) throw new HTTPError({ statusCode: 409, message: 'The connection changed. Reload it before disconnecting.' })
 
   // Zaraz serves the measurement id of connected sites, so losing Analytics
   // has to withdraw the tag rather than keep collecting for a tenant who

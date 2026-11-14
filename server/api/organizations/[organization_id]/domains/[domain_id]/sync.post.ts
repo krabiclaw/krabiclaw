@@ -1,5 +1,5 @@
 import { checkDashboardDomainGroup } from '~/server/utils/domain-dashboard-actions'
-import { jsonResponse } from '~/server/utils/api-response'
+import { jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
 import { queryFirst } from '~/server/db'
 import { domainInstructions } from '~/server/utils/domain-read-model'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
@@ -31,6 +31,7 @@ export default defineHandler(async (event) => {
     }, domainRecord)
     return jsonResponse({ success: true, domain: { ...domain, instructions: domainInstructions(domain) } })
   } catch (error) {
+    rethrowHttpError(error)
     const normalizedError = error instanceof Error ? error : new Error('Unknown error')
     console.error('domain_sync_failed', {
       organizationId, domainId, userId: session.user.id, error: normalizedError.message, stack: normalizedError.stack ?? null

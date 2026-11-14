@@ -2157,10 +2157,11 @@ test.describe('dashboard pane hierarchy', () => {
       const values = { ...Object.fromEntries(editor.fields.map(field => [field.key, field.value])), ...changes }
       return page.request.post(endpoint, { params: { ...query, view }, data: { revision: editor.revision, values, idempotency_key: randomUUID() } })
     }
-    const original = await read('business-location-contact')
-    const originalEmail = original.fields.find(field => field.key === 'email')!.value
-    const email = `location-editor-${randomUUID()}@playwright.example`
+    let originalEmail: string | undefined
     try {
+      const original = await read('business-location-contact')
+      originalEmail = original.fields.find(field => field.key === 'email')!.value
+      const email = `location-editor-${randomUUID()}@playwright.example`
       const web = await page.request.get(overviewPath, { params: { org: tenant.slug } })
       expect(web.status(), await web.text()).toBe(200)
       const overview = await web.json() as { rows: CatalogScreen['rows']; settings: CatalogScreen['rows'][number] }
@@ -2190,9 +2191,11 @@ test.describe('dashboard pane hierarchy', () => {
       expect(foreign.status(), await foreign.text()).toBe(404)
     } finally {
       try {
-        const current = await read('business-location-contact')
-        const restored = await save('business-location-contact', current, { email: originalEmail })
-        expect(restored.status(), await restored.text()).toBe(200)
+        if (originalEmail !== undefined) {
+          const current = await read('business-location-contact')
+          const restored = await save('business-location-contact', current, { email: originalEmail })
+          expect(restored.status(), await restored.text()).toBe(200)
+        }
       } finally {
         await release()
       }

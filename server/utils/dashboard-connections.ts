@@ -245,11 +245,13 @@ export async function dashboardConnections(
     const action = query.action
     if (action !== 'disconnect' && !(action === 'sync' && calendar)) return invalid('Action unavailable', 404)
     const title = action === 'disconnect' ? 'Disconnect' : 'Retry sync'
-    const revision = JSON.stringify([connection, calendarState?.calendar?.revision])
+    const current = social ? await readIntegration(db, organization.id, integration) : null
+    if (social && !current) return invalid('Connection not found', 404)
+    const revision = JSON.stringify([connection, calendarState?.calendar?.revision, current?.revision])
     const screen = form(title, revision, [{ key: 'confirm', label: `${title} ${definition.name}`, kind: 'toggle', value: 'false' }], title)
     if (!answer) return screen
     if (answer.revision !== revision || answer.values.confirm !== 'true') return invalid('Review and confirm the current connection')
-    await api(`${path}/${action}`, {})
+    await api(`${path}/${action}`, current ? { revision: current.revision } : {})
     return screen
   }
   if (view !== 'connection-select' || !accountId || !entitled) return invalid('Link an eligible account first', 403)

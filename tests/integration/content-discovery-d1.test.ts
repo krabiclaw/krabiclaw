@@ -11,7 +11,7 @@ import { getPublishedBlogPost, listPublishedArticles } from '../../server/utils/
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { createDb } from '../../server/db/index.ts'
 import { recordTenantPageview, resolvePublicPageIdentity } from '../../server/utils/pageview-tracking.ts'
-import { putLocalizationForAuthoring, putResourceLocalization, resolveLocalizedPublicRoute } from '../../server/utils/localization.ts'
+import { findResourceLocalization, putLocalizationForAuthoring, putResourceLocalization, resolveLocalizedPublicRoute } from '../../server/utils/localization.ts'
 import { createTenantPage, getPublishedTenantPage } from '../../server/utils/content/pages.ts'
 import { createProduct, setProductLocation } from '../../server/utils/product-management.ts'
 import { addOrganizationLanguage, disableOrganizationLanguage, publishOrganizationLanguage } from '../../server/utils/organization-languages.ts'
@@ -94,6 +94,9 @@ test('public discovery resolves translations through current publication owners'
     const savedTranslation = await putResourceLocalization(env, createDb(db), { ...translationTarget, expectedResourceUpdatedAt: initial.updated_at, values: { name: 'Translated branch workshop' } })
     assert.notEqual(savedTranslation.updated_at, initial.updated_at)
     await assert.rejects(putResourceLocalization(env, createDb(db), { ...translationTarget, expectedResourceUpdatedAt: initial.updated_at, values: { name: 'Stale edit' } }), { status: 409 })
+    const readback = await findResourceLocalization(db, 'tenant', 'product', experience.id, 'th')
+    assert.deepEqual(readback?.values, { name: 'Translated branch workshop' })
+    assert.equal(readback?.updated_at, savedTranslation.updated_at)
     await createContentDocumentWithBlocks(db, { id: 'branch-qa', organizationId: 'tenant', kind: 'qa', rowRole: 'root', locale: 'en',
       locationId: 'branch', title: 'Where is the workshop?', summary: 'At this branch.', status: 'published', source: 'manual' }, [])
     await createContentDocumentWithBlocks(db, { id: 'branch-qa-th', organizationId: 'tenant', kind: 'qa', rowRole: 'representation', rootId: 'branch-qa',
