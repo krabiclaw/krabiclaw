@@ -536,7 +536,7 @@ watch(error, cause => {
   if (cause?.statusCode === 403 || cause?.statusCode === 404) resetTranscriptState()
 }, { flush: 'sync' })
 
-watch(realtime.connectionEpoch, () => {
+watch(realtime.reconnectEpoch, () => {
   if (props.history.missedEvents()) reconcileThread(true)
 }, { immediate: true })
 

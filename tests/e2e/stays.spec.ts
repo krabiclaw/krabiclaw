@@ -175,6 +175,25 @@ test('listing messaging grants and verified trip invites use the live conversati
     await expectStatus(currentGrants, 200)
     expect(await currentGrants.json()).toEqual({ member_ids: [memberId] })
     const cohostPage = await cohost.newPage()
+    // Replay the first open after the server-rendered transcript is on screen.
+    // A real reconnect is tested below, with a message written while offline.
+    await cohostPage.addInitScript(() => {
+      const subscribe = WebSocket.prototype.addEventListener
+      WebSocket.prototype.addEventListener = function (type, listener, options) {
+        if (type === 'open' && typeof listener === 'function' && new URL(this.url).pathname === '/api/dashboard/guest-inbox/socket') {
+          const socket = this
+          return subscribe.call(socket, type, event => {
+            window.addEventListener('test:open-dashboard-socket', () => listener.call(socket, event), { once: true })
+            document.documentElement.dataset.dashboardSocketReady = 'true'
+          }, options)
+        }
+        return subscribe.call(this, type, listener, options)
+      }
+    })
+    const transcriptReads: Request[] = []
+    cohostPage.on('request', request => {
+      if (request.method() === 'GET' && new URL(request.url()).pathname === path) transcriptReads.push(request)
+    })
     const socketCapture = cohostPage.waitForEvent('websocket', {
       predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket',
     })
@@ -182,6 +201,14 @@ test('listing messaging grants and verified trip invites use the live conversati
     const socket = await socketCapture
     await expect(cohostPage.getByText(reply, { exact: true })).toBeVisible()
     await expect(cohostPage.getByRole('textbox', { name: 'Write a message…' })).toBeVisible()
+    await waitForNuxtHydration(cohostPage)
+    await expect(cohostPage.locator('html')).toHaveAttribute('data-dashboard-socket-ready', 'true')
+    const readsBeforeOpen = transcriptReads.length
+    await cohostPage.evaluate(async () => {
+      window.dispatchEvent(new Event('test:open-dashboard-socket'))
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    })
+    expect(transcriptReads).toHaveLength(readsBeforeOpen)
 
     const invitation = await page.request.post(`${path}/invite`, { headers, data: { email: travelerEmail } })
     await expectStatus(invitation, 201)

@@ -11,6 +11,8 @@ export interface DashboardInvalidationConnection {
    * first gap between their initial read and the completed socket upgrade.
    */
   connectionEpoch: Ref<number>
+  /** Last successful reconnect in the current workspace or account scope. */
+  reconnectEpoch: Ref<number>
   accessEnded: Ref<number>
   connect: () => void
   waitForFirstOpen: (signal: AbortSignal) => Promise<void>
@@ -28,13 +30,15 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
   // `yarn dev:worker`, staging and production; here the dashboard stays on its
   // reads instead of retrying a connection that cannot open and reporting it.
   if (import.meta.dev) {
-    return { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), accessEnded: ref(0), connect: () => {}, waitForFirstOpen: async () => {} }
+    return { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), reconnectEpoch: ref(0), accessEnded: ref(0), connect: () => {}, waitForFirstOpen: async () => {} }
   }
 
   const status = ref<DashboardInvalidationStatus>('closed')
   const event = shallowRef<DashboardInvalidation | null>(null)
   const connectionEpoch = ref(0)
+  const reconnectEpoch = ref(0)
   const accessEnded = ref(0)
+  let opened = false
   let receivedAccessChange = false
   const seenEventIds = new Set<string>()
   let socket: WebSocket | null = null
@@ -101,6 +105,8 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
       if (socket !== nextSocket) return
       reconnectAttempt = 0
       connectionEpoch.value += 1
+      if (opened) reconnectEpoch.value = connectionEpoch.value
+      opened = true
       status.value = 'open'
       scheduleHeartbeat(nextSocket)
     })
@@ -180,6 +186,8 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     socket = null
     activeSocket?.close(1000, 'Dashboard scope changed')
     reconnectAttempt = 0
+    opened = false
+    reconnectEpoch.value = 0
     seenEventIds.clear()
     event.value = null
     status.value = path.value ? 'connecting' : 'closed'
@@ -224,7 +232,7 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     status.value = 'closed'
   })
 
-  return { status, event, connectionEpoch, accessEnded, connect, waitForFirstOpen }
+  return { status, event, connectionEpoch, reconnectEpoch, accessEnded, connect, waitForFirstOpen }
 }
 
 export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>, personal: Readonly<Ref<boolean>>, reader: Readonly<Ref<string | undefined>>, sessionPending: Readonly<Ref<boolean>>): DashboardInvalidationConnection {
