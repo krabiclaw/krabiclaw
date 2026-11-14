@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type APIResponse, type Page, type Request, type WebSocket } from '@playwright/test'
+import { expect, test, type APIRequestContext, type APIResponse, type Page, type Request, type Route, type WebSocket } from '@playwright/test'
 import Ajv from 'ajv'
 import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import sharp from 'sharp'
@@ -246,6 +246,11 @@ test('listing messaging grants and verified trip invites use the live conversati
     expect(token).toBeTruthy()
     await expectStatus(await cohost.request.post('/api/messages/invites/accept', { headers, data: { token } }), 404)
     const travelerPage = await traveler.newPage()
+    const travelerThreadPath = `/dashboard/account/messages/${booking.conversation_id}`
+    const travelerThread = travelerPage.locator('#dashboard-panel-organization-messages-thread')
+    const travelerRow = travelerPage.locator(`a[href='${travelerThreadPath}']`)
+    const transcriptUrl = (url: URL) => url.pathname === path && !url.searchParams.has('before')
+    const transcriptRequest = (request: Request) => request.method() === 'GET' && transcriptUrl(new URL(request.url()))
     await travelerPage.goto(inviteLink.pathname + inviteLink.search)
     const personalSocket = travelerPage.waitForEvent('websocket', {
       predicate: socket => {
@@ -254,7 +259,7 @@ test('listing messaging grants and verified trip invites use the live conversati
       },
     })
     await travelerPage.getByRole('button', { name: 'Accept invitation', exact: true }).click()
-    await expect(travelerPage).toHaveURL(`/dashboard/account/messages/${booking.conversation_id}`)
+    await expect(travelerPage).toHaveURL(travelerThreadPath)
     await expect(travelerPage.getByText(reply, { exact: true })).toBeVisible()
     const travelerSocket = await personalSocket
     const followUp = 'The door code is in your arrival guide.'
@@ -272,6 +277,7 @@ test('listing messaging grants and verified trip invites use the live conversati
     await expectStatus(otherMade, 201)
     const { booking: otherBooking } = await otherMade.json() as { booking: NightBooking }
     const otherPath = `/api/messages/${otherBooking.conversation_id}`
+    const otherRow = travelerPage.locator(`a[href='/dashboard/account/messages/${otherBooking.conversation_id}']`)
     const otherReply = 'The cabin has a separate arrival guide.'
     await expectStatus(await page.request.post(otherPath, { headers, data: { body: otherReply, idempotency_key: crypto.randomUUID() } }), 200)
     expect(received.has(otherBooking.conversation_id)).toBe(false)
@@ -285,16 +291,18 @@ test('listing messaging grants and verified trip invites use the live conversati
     } })
     await expectStatus(await traveler.request.post('/api/messages/invites/accept', { headers, data: { token: otherToken } }), 200)
     await otherAppears
-    await expect(travelerPage.locator(`a[href='/dashboard/account/messages/${otherBooking.conversation_id}']`)).toContainText(otherReply)
+    await expect(otherRow).toContainText(otherReply)
     const disconnected = travelerSocket.waitForEvent('close')
     await travelerPage.evaluate(() => window.dispatchEvent(new Event('offline')))
     await disconnected
     const reconnectText = 'Your second arrival guide was updated.'
     await expectStatus(await page.request.post(otherPath, { headers, data: { body: reconnectText, idempotency_key: crypto.randomUUID() } }), 200)
     const reconnectedSocket = travelerPage.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).searchParams.get('scope') === 'account' })
+    const reconnectedTranscript = travelerPage.waitForResponse(response => transcriptRequest(response.request()))
     await travelerPage.evaluate(() => window.dispatchEvent(new Event('online')))
     const activeTravelerSocket = await reconnectedSocket
-    await expect(travelerPage.locator(`a[href='/dashboard/account/messages/${otherBooking.conversation_id}']`)).toContainText(reconnectText)
+    await expectStatus(await reconnectedTranscript, 200)
+    await expect(otherRow).toContainText(reconnectText)
 
     const revoked = socket.waitForEvent('framereceived', { predicate: frame => {
       if (frame.payload === 'pong') return false
@@ -311,6 +319,53 @@ test('listing messaging grants and verified trip invites use the live conversati
     await expectStatus(accepted, 200)
     expect(await accepted.json()).toMatchObject({ viewer_role: 'guest', conversation: { id: booking.conversation_id } })
 
+    await otherRow.click()
+    await expect(travelerThread.getByText(reconnectText, { exact: true })).toBeVisible()
+    const releaseReopen = Promise.withResolvers<undefined>()
+    let reopenReads = 0
+    const holdReopen = async (route: Route) => {
+      if (transcriptRequest(route.request())) {
+        reopenReads++
+        await releaseReopen.promise
+      }
+      await route.continue()
+    }
+    await travelerPage.route(transcriptUrl, holdReopen)
+    try {
+      await Promise.all([travelerPage.waitForRequest(transcriptRequest), travelerRow.click()])
+      await expect(travelerPage).toHaveURL(travelerThreadPath)
+      const heldText = travelerThread.getByText(followUp, { exact: true })
+      await expect.soft.poll(async () => {
+        if (!await heldText.isVisible()) return false
+        return heldText.evaluate(element => {
+          for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) {
+            if (Number(getComputedStyle(ancestor).opacity) < 0.95) return false
+          }
+          return true
+        })
+      }, { timeout: 3500 }).toBe(true)
+      const incoming = activeTravelerSocket.waitForEvent('framereceived', { predicate: frame => {
+        if (frame.payload === 'pong') return false
+        const event: unknown = JSON.parse(String(frame.payload))
+        return isDashboardInvalidation(event) && event.type === 'MESSAGE_CREATE' && event.conversation_id === booking.conversation_id
+      } })
+      const duringReopen = 'The updated guide is ready.'
+      await expectStatus(await page.request.post(path, { headers, data: { body: duringReopen, idempotency_key: crypto.randomUUID() } }), 200)
+      await incoming
+      await expect(travelerRow).toContainText(duringReopen)
+      const revalidated = travelerPage.waitForResponse(response => transcriptRequest(response.request()))
+      releaseReopen.resolve(undefined)
+      await expectStatus(await revalidated, 200)
+      await expect(travelerThread.getByText(duringReopen, { exact: true })).toHaveCount(1)
+      await travelerPage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+      expect.soft(reopenReads).toBe(1)
+    } finally {
+      releaseReopen.resolve(undefined)
+      await travelerPage.unroute(transcriptUrl, holdReopen)
+    }
+
+    await otherRow.click()
+    await expect(travelerThread.getByText(reconnectText, { exact: true })).toBeVisible()
     const travelerId = 'user-e2e-buyer'
     const left = activeTravelerSocket.waitForEvent('framereceived', { predicate: frame => {
       if (frame.payload === 'pong') return false
@@ -329,10 +384,25 @@ test('listing messaging grants and verified trip invites use the live conversati
     await expectStatus(removed, 200)
     expect(await removed.json()).toEqual({ removed: true })
     await left
-    await expect(travelerPage.getByText(followUp, { exact: true })).toHaveCount(0)
-    await expect(travelerPage.getByRole('textbox', { name: 'Write a message…' })).toHaveCount(0)
-    await expect(travelerPage.locator(`a[href='/dashboard/account/messages/${booking.conversation_id}']`)).toHaveCount(0)
-    await expect(travelerPage.locator(`a[href='/dashboard/account/messages/${otherBooking.conversation_id}']`)).toContainText(reconnectText)
+    await expect(travelerRow).toHaveCount(0)
+    await expect(travelerThread.getByText(reconnectText, { exact: true })).toBeVisible()
+    const releaseDenied = Promise.withResolvers<undefined>()
+    await travelerPage.route(transcriptUrl, async route => {
+      if (transcriptRequest(route.request())) await releaseDenied.promise
+      await route.continue()
+    }, { times: 1 })
+    try {
+      await Promise.all([travelerPage.waitForRequest(transcriptRequest), travelerPage.goBack()])
+      await expect(travelerPage).toHaveURL(travelerThreadPath)
+      await expect(travelerThread.getByRole('heading', { name: 'Conversation', exact: true })).toBeVisible()
+      await expect(travelerThread.getByText(followUp, { exact: true })).toHaveCount(0)
+      await expect(travelerThread.getByRole('textbox', { name: 'Write a message…' })).toHaveCount(0)
+      expect(activeTravelerSocket.isClosed()).toBe(false)
+      const denied = travelerPage.waitForResponse(response => transcriptRequest(response.request()))
+      releaseDenied.resolve(undefined)
+      await expectStatus(await denied, 404)
+      await expect(travelerThread.getByText('This conversation is no longer available', { exact: true })).toBeVisible()
+    } finally { releaseDenied.resolve(undefined) }
     await expectStatus(await traveler.request.get(path), 404)
     await expectStatus(await traveler.request.post('/api/messages/invites/accept', { headers, data: { token } }), 404)
     await expectStatus(await page.request.delete(participant, { headers }), 200)

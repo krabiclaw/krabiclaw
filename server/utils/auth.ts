@@ -120,6 +120,7 @@ function organizationDeletionCleanupPlugin(env: CloudflareEnv): BetterAuthPlugin
         },
         afterDeleteOrganization: async (data, hookCtx) => {
           await afterDeleteOrganization?.(data, hookCtx)
+          await publishAccessInvalidation(env, { organizationId: data.organization.id })
           await reconcileZarazAnalytics(env, env.DB)
         },
       }

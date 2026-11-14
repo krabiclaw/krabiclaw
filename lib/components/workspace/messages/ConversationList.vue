@@ -18,16 +18,11 @@
         :description="getErrorMessage(threadsError || nextPageError, 'Guest thread request failed')"
       />
 
-      <!-- A conversation that gains a message slides to its new place; one
-           that leaves this list fades and the rest close up behind it. -->
+      <!-- Reordering animates. New previews and access removals take effect immediately. -->
       <TransitionGroup
         tag="div"
         class="relative -mx-3"
         move-class="transition-transform duration-300 ease-out motion-reduce:transition-none"
-        enter-from-class="opacity-0 -translate-y-1"
-        enter-active-class="transition duration-300 ease-out motion-reduce:transition-none"
-        leave-to-class="opacity-0"
-        leave-active-class="absolute inset-x-0 transition-opacity duration-200 motion-reduce:transition-none"
       >
         <MessageRowActions
           v-for="thread in threads"
@@ -114,6 +109,7 @@ import { useInboxUnread, usePersonalInboxUnread } from './inbox-unread'
 */
 const props = withDefaults(defineProps<{ personalScope?: boolean }>(), { personalScope: false })
 const session = authClient.useSession()
+const reader = computed(() => session.value.data?.user.id)
 const emit = defineEmits<{ first: [target: { path: string; query: LocationQueryRaw } | null] }>()
 defineExpose({ removeConversation })
 
@@ -160,15 +156,17 @@ const listQuery = computed(() => ({
   unread: unreadOnly.value ? '1' as const : undefined,
 }))
 
-const listKey = computed(() => [
-  props.personalScope ? `account-conversations:${session.value.data?.user.id}` : 'dashboard-conversations',
+const listKey = computed(() => JSON.stringify([
+  'messages-list',
+  reader.value,
+  props.personalScope,
   String(route.params.org_slug ?? ''),
   organizationId.value,
   kind.value ?? 'all',
   search.value ?? '',
   blockedOnly.value ? 'blocked' : pastOnly.value ? 'past' : 'current',
   unreadOnly.value ? 'unread' : 'any',
-].join(':'))
+]))
 
 // One loader for the list: the first render, a filter change and a live
 // update all go through it, and a refresh keeps the rows already on screen.
@@ -178,6 +176,7 @@ let pageController: AbortController | null = null
 let loadedScope = listKey.value
 let loadedPages = 1
 let readConnectionEpoch: number | null = null
+let reuseExpiresAt: number | undefined
 const listScope = computed(() => props.personalScope ? {} : { organization_id: organizationId.value })
 async function loadPage(offset: number, signal?: AbortSignal): Promise<ThreadListPage> {
   if (!props.personalScope && !organizationId.value) throw createError({ statusCode: 400, statusMessage: 'Messages require a workspace' })
@@ -218,11 +217,22 @@ async function loadWindow(pages: number, scope: string, signal: AbortSignal): Pr
 // its rows; a different list (another mailbox, filter or search) shows the
 // loading state until its own rows arrive, never the previous list's.
 const rowsKey = ref(listKey.value)
-const { data, pending, error: threadsError, refresh, clear } = await useAsyncData<ThreadListPage>(listKey, async (_app, { signal }) => {
+const { data, pending, status, error: threadsError, refresh, clear } = await useAsyncData<ThreadListPage>(listKey, async (_app, { signal }) => {
   pageController?.abort()
   nextPageError.value = null
   const scope = listKey.value
-  if (readConnectionEpoch === null) await realtime.waitForFirstOpen(signal)
+  if (readConnectionEpoch === null) {
+    const held = realtime.recentInbox.snapshot
+    realtime.recentInbox.snapshot = undefined
+    if (held?.key === scope && held.expiresAt > Date.now() && realtime.status.value === 'open') {
+      readConnectionEpoch = realtime.connectionEpoch.value
+      reuseExpiresAt = held.expiresAt
+      loadedPages = 1 + held.page.pagination.offset / held.page.pagination.limit
+      rowsKey.value = scope
+      return held.page
+    }
+    await realtime.waitForFirstOpen(signal)
+  }
   if (signal.aborted || scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
   readConnectionEpoch = realtime.connectionEpoch.value
   if (loadedScope !== scope) { loadedScope = scope; loadedPages = 1 }
@@ -230,21 +240,11 @@ const { data, pending, error: threadsError, refresh, clear } = await useAsyncDat
   if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
   loadedPages = fetched
   rowsKey.value = scope
+  reuseExpiresAt = undefined
   return page
 }, {
   server: !props.personalScope,
   lazy: true,
-  getCachedData(cacheKey, nuxtApp, ctx) {
-    if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-    const cached = nuxtApp.payload.data[cacheKey] as ThreadListPage | undefined
-    if (cached) {
-      rowsKey.value = cacheKey
-      // A rendered snapshot has no browser subscription. Repair its gap once
-      // the socket opens. A fresh client read below can start after the open.
-      readConnectionEpoch = 0
-    }
-    return cached
-  },
 })
 
 const page = computed(() => rowsKey.value === listKey.value ? data.value ?? null : null)
@@ -370,9 +370,21 @@ watch(page, value => publishUnread(value ?? undefined), { immediate: true })
 watch(listKey, () => {
   generation++
   changedIds.clear()
+  fullRefresh = false
   reconcileAbort?.abort()
 }, { flush: 'sync' })
-onScopeDispose(() => { disposed = true; reconcileAbort?.abort() })
+onScopeDispose(() => {
+  disposed = true
+  reconcileAbort?.abort()
+  const current = page.value
+  if (!props.personalScope && current && reader.value && status.value === 'success' && !loadingMore.value && !reconciling
+    && !nextPageError.value && !toggling.size && !fullRefresh && !changedIds.size && realtime.status.value === 'open'
+    && readConnectionEpoch === realtime.connectionEpoch.value) {
+    // Mailboxes and labels change with time. Reusing a snapshot does not extend its life.
+    const expiresAt = reuseExpiresAt ?? Date.now() + 30_000
+    if (expiresAt > Date.now()) realtime.recentInbox.snapshot = { key: listKey.value, page: current, expiresAt }
+  }
+})
 
 function reconcile(id?: string) {
   if (id) changedIds.add(id)
@@ -460,7 +472,7 @@ function clearInbox() {
 watch(realtime.event, event => {
   if (!event || (!props.personalScope && event.organization_id !== organizationId.value)) return
   if (event.type === 'MESSAGE_UPDATE' && event.scheduled) return
-  if ((event.type === 'MESSAGE_ACK' || event.type === 'CONVERSATION_LEAVE') && event.user_id !== session.value.data?.user.id) return
+  if ((event.type === 'MESSAGE_ACK' || event.type === 'CONVERSATION_LEAVE') && event.user_id !== reader.value) return
   if (event.type === 'access.changed') {
     clearInbox()
     reconcile()
