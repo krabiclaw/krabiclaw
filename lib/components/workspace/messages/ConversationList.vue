@@ -377,8 +377,8 @@ onScopeDispose(() => {
   disposed = true
   reconcileAbort?.abort()
   const current = page.value
-  if (current && reader.value && status.value === 'success' && !loadingMore.value && !reconciling
-    && !nextPageError.value && !fullRefresh && !changedIds.size && realtime.status.value === 'open'
+  if (!props.personalScope && current && reader.value && status.value === 'success' && !loadingMore.value && !reconciling
+    && !nextPageError.value && !toggling.size && !fullRefresh && !changedIds.size && realtime.status.value === 'open'
     && readConnectionEpoch === realtime.connectionEpoch.value) {
     // Mailboxes and labels change with time. Reusing a snapshot does not extend its life.
     const expiresAt = reuseExpiresAt ?? Date.now() + 30_000

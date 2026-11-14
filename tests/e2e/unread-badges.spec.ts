@@ -105,6 +105,22 @@ test('a signed-in reader sees an empty inbox until a message arrives and loses w
     const retained = await inbox(owner)
     expect(retained.status(), await retained.text()).toBe(200)
     expect(await retained.json()).toMatchObject({ threads: [{ id: conversationId, preview: message }] })
+    const ownerPage = await browser.newPage({ baseURL: origin, storageState: await owner.storageState() })
+    try {
+      const connected = ownerPage.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket' })
+      await ownerPage.goto(`/dashboard/${slug}/messages/${conversationId}`)
+      const ownerSocket = await connected
+      const ownerRow = ownerPage.locator(`[data-thread-row="${conversationId}"]`)
+      await expect(ownerRow).toContainText(message)
+      const disconnected = ownerSocket.waitForEvent('close')
+      const deleted = await owner.post('/api/auth/organization/delete', { headers, data: { organizationId } })
+      expect(deleted.status(), await deleted.text()).toBe(200)
+      organizationId = undefined
+      await disconnected
+      await expect(ownerRow).toHaveCount(0)
+    } finally {
+      await ownerPage.close()
+    }
   } finally {
     try {
       if (organizationId) {
@@ -290,6 +306,28 @@ test('a new booking, its cancellation and a guest message are unread until read,
     expect((await readAfterChange).status()).toBe(200)
     await expect(listRow.getByLabel('Unread badge proof: unread')).toHaveCount(0)
     expect(await row(threadId)).toMatchObject({ unread: false })
+
+    // An unconfirmed row toggle must never be retained across navigation.
+    const unreadPath = `${conversations}/${threadId}/unread`
+    const rejectedToggle = Promise.withResolvers<undefined>()
+    await page.route(url => url.pathname === unreadPath, async route => {
+      await rejectedToggle.promise
+      await route.fulfill({ status: 409, json: { message: 'Read state was not changed' } })
+    }, { times: 1 })
+    try {
+      await listRow.hover()
+      await listRow.locator('xpath=../..').getByRole('button', { name: 'Mark as unread: Unread badge proof', exact: true }).click()
+      await expect(listRow.getByLabel('Unread badge proof: unread')).toBeVisible()
+      await leaveInbox()
+      const snapshot = page.waitForResponse(response => response.request().method() === 'GET' && firstPageUrl(new URL(response.url())))
+      await messages.click()
+      const current = await snapshot
+      expect(current.status()).toBe(200)
+      await expect(listRow).toBeVisible()
+      await expect(listRow.getByLabel('Unread badge proof: unread')).toHaveCount(0)
+    } finally {
+      rejectedToggle.resolve(undefined)
+    }
   } finally {
     await dashboard.close()
     await owner.dispose()

@@ -317,6 +317,32 @@ test.describe('lodging identity boundary', () => {
       expect(prior.page.before).toBeNull()
       expect(prior.page.newest).toBeLessThan(retained.page.before!)
       expect(await page.locator('[data-team-message]').evaluateAll(rows => rows.map(row => row.getAttribute('data-team-message')))).toEqual([...messages(prior), ...messages(retained)].map(message => message.id))
+
+      // An earlier-page denial clears the held head even if the socket has no access event yet.
+      const isOlderPage = (url: URL) => url.pathname === teamPath && url.searchParams.has('before')
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.reload()
+      await expect(liveRow).toBeVisible()
+      await page.route(isOlderPage, route => route.fulfill({ status: 404, json: { message: 'Conversation not found' } }), { times: 1 })
+      await earlierMessages.click()
+      await expect(liveRow).toHaveCount(0)
+      const nav = page.getByTestId('dashboard-top-nav')
+      await nav.getByRole('link', { name: 'Calendar', exact: true }).click()
+      await expect(liveRow).toHaveCount(0)
+      const releaseHead = Promise.withResolvers<undefined>()
+      const isHead = (url: URL) => url.pathname === teamPath && !url.searchParams.has('before')
+      await page.route(isHead, async route => {
+        await releaseHead.promise
+        await route.continue()
+      }, { times: 1 })
+      try {
+        await Promise.all([page.waitForRequest(request => request.method() === 'GET' && isHead(new URL(request.url()))), nav.getByRole('link', { name: 'Messages', exact: true }).click()])
+        await expect(page).toHaveURL(new RegExp(`/messages/${threadId}(?:\\?|$)`))
+        await expect(liveRow).toHaveCount(0)
+      } finally {
+        releaseHead.resolve(undefined)
+      }
+      await expect(liveRow).toBeVisible()
       const reused = await api.post('/api/auth/organization/accept-invitation', { headers: inviteeBearer, data: { invitationId } })
       expect(reused.status).toBe(400)
       expect(await reused.json()).toMatchObject({ code: 'INVITATION_NOT_FOUND' })

@@ -146,6 +146,7 @@ const before = computed(() => older.value.length ? older.value[0]!.page.before :
 let olderRequest: AbortController | undefined
 
 function clearTranscript() {
+  realtime.recentConversations.delete(props.threadId)
   olderRequest?.abort()
   older.value = []
   clear()
@@ -170,7 +171,7 @@ async function loadOlder() {
   } catch (cause) {
     if (!controller.signal.aborted) {
       olderError.value = getErrorMessage(cause, 'Older messages could not be loaded')
-      if (isNotFoundError(cause) || (isRecord(cause) && cause.statusCode === 403)) clearTranscript()
+      if (isNotFoundError(cause) || (isRecord(cause) && (cause.statusCode === 401 || cause.statusCode === 403))) clearTranscript()
     }
   } finally {
     loadingOlder.value = false
@@ -224,7 +225,7 @@ async function reconcileOlder(previousHead: typeof transcriptPage.value | undefi
     } catch (cause) {
       if (!controller.signal.aborted) {
         olderError.value = getErrorMessage(cause, 'Loaded messages could not be refreshed')
-        if (isNotFoundError(cause) || (isRecord(cause) && cause.statusCode === 403)) clearTranscript()
+        if (isNotFoundError(cause) || (isRecord(cause) && (cause.statusCode === 401 || cause.statusCode === 403))) clearTranscript()
       }
     }
   }
@@ -541,7 +542,7 @@ watch(realtime.event, event => {
 }, { flush: 'sync' })
 
 watch(error, cause => {
-  if (cause?.statusCode === 403 || cause?.statusCode === 404) resetTranscriptState()
+  if (cause?.statusCode === 401 || cause?.statusCode === 403 || cause?.statusCode === 404) resetTranscriptState()
 }, { flush: 'sync' })
 
 watch(realtime.reconnectEpoch, () => {
