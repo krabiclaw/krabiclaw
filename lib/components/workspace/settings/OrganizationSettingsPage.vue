@@ -291,6 +291,7 @@
         </div>
       </div>
 
+      <UAlert v-if="preferencesError" color="error" variant="soft" :description="getErrorMessage(preferencesError, 'Preferences could not be loaded')" />
       <EditorNavigationList :groups="navigationGroups" :active-item="detailKey" />
 
       <!-- Airbnb Parity: Featured Brand ("About the business") card -->
@@ -578,6 +579,7 @@ import PageTasksModal from '~/components/dashboard/PageTasksModal.vue'
 import { isTenantPageListResponse, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
 import { getVerticalLabel } from '~/utils/vertical-copy'
 import type { BlogPost } from '~/lib/components/workspace/blog/types'
+import type { CatalogScreen } from '~/shared/catalog-screen'
 
 const props = withDefaults(defineProps<{ surface?: 'brand' | 'settings' | 'preferences' }>(), { surface: 'settings' })
 const surface = computed(() => props.surface)
@@ -692,8 +694,6 @@ const nameCharactersRemaining = computed(() => 50 - form.name.length)
 const descriptionCharactersRemaining = computed(() => 500 - form.brand_description.length)
 
 function explicitSummary(value: string | null | undefined, empty = 'Not set') { return value?.trim() || empty }
-const STATUS_LABELS: Record<OrganizationStatus, string> = { active: 'Published', inactive: 'Draft', suspended: 'Suspended' }
-const domainSummary = computed(() => dashboard.organization.value?.custom_domain || dashboard.organization.value?.public_url || 'Not connected')
 const brandItems = computed<EditorNavigationItem[]>(() => [
   { id: 'name', label: 'Brand name', summary: explicitSummary(loadedSettings.value?.name), icon: 'i-lucide-building-2', to: `${brandPath.value}/name` },
   { id: 'description', label: 'Description', summary: explicitSummary(loadedSettings.value?.brand_description), icon: 'i-lucide-file-text', to: `${brandPath.value}/description` },
@@ -888,40 +888,17 @@ const brandYearsActive = computed(() => {
   return Math.max(1, diff)
 })
 
-const currencyIcon = computed(() => {
-  const code = loadedSettings.value?.default_currency?.toUpperCase()
-  if (code === 'EUR') return 'i-lucide-euro'
-  if (code === 'GBP') return 'i-lucide-pound-sterling'
-  if (code === 'JPY' || code === 'CNY') return 'i-lucide-japanese-yen'
-  return 'i-lucide-dollar-sign'
-})
-
-const preferencesItems = computed<EditorNavigationItem[]>(() => [
-  {
-    id: 'status',
-    label: 'Status',
-    summary: loadedSettings.value ? STATUS_LABELS[loadedSettings.value.status] : 'Not set',
-    status: form.status === 'active' ? 'success' : form.status === 'suspended' ? 'error' : 'neutral',
-    to: `${preferencesPath.value}/status`,
-  },
-  { id: 'localization', label: 'Languages', summary: 'Languages the site is published in', icon: 'i-lucide-languages', to: `${preferencesPath.value}/localization` },
-  { id: 'domains', label: 'Domains', summary: domainSummary.value, icon: 'i-lucide-globe-2', to: `${preferencesPath.value}/domains` },
-  { id: 'currency', label: 'Currency', summary: explicitSummary(loadedSettings.value?.default_currency), icon: currencyIcon.value, to: `${preferencesPath.value}/currency` },
-  {
-    id: 'booking',
-    label: bookingCardTitle.value,
-    summary: bookingCardSubtitle.value,
-    icon: 'i-lucide-calendar-check',
-    to: `${settingsPath.value}/booking`,
-  },
-  {
-    id: 'reviews',
-    label: 'Review settings',
-    summary: 'Manual approval',
-    icon: 'i-lucide-star',
-    to: `${preferencesPath.value}/reviews`,
-  },
-])
+const { data: preferences, error: preferencesError, refresh: refreshPreferences } = await useAsyncData(
+  `website-preferences:${organizationId}:${surface.value}`,
+  () => surface.value === 'preferences'
+    ? dashboardApi('/api/dashboard/offering', {
+        query: { view: 'website-preferences' },
+        validate: (value): value is CatalogScreen => isRecord(value) && Array.isArray(value.rows)
+          && value.rows.every(row => isRecord(row) && typeof row.id === 'string' && typeof row.label === 'string'),
+      })
+    : Promise.resolve(null),
+)
+const preferencesItems = computed(() => (preferences.value?.rows ?? []).filter(row => row.to))
 
 const navigationGroups = computed(() => {
   if (surface.value === 'brand') return [{ id: 'brand', items: brandItems.value }]
@@ -1061,6 +1038,10 @@ async function patchSettings(body: Record<string, unknown>) {
   // through it keeps the other list's rows on the saved values.
   settingsResource.value = { settings: response }
   await dashboard.refresh()
+  if (surface.value === 'preferences') {
+    await refreshPreferences()
+    if (preferencesError.value) throw preferencesError.value
+  }
 }
 async function refreshSettings() {
   await refreshSettingsResource()

@@ -42,7 +42,7 @@ import { getLocation } from '~/server/utils/location-management'
 import { getContentDocumentById, getContentEditorSnapshotForDocument, getContentRepresentation, type ContentBlockInput } from '~/server/utils/content/documents'
 import { createArticleCategory, deleteArticleCategory, listArticleCategories, reorderArticleCategories, updateArticleCategory } from '~/server/utils/content/article-categories'
 import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS, isArticleCollection } from '~/utils/article-collections'
-import { articleCollectionOf, createBlogPost, deleteBlogPost, getBlogPost, updateBlogLifecycle, updateBlogPost } from '~/server/utils/content/publishing'
+import { articleCollectionOf, createBlogPost, deleteBlogPost, getBlogPost, reorderArticles, updateBlogLifecycle, updateBlogPost } from '~/server/utils/content/publishing'
 import { loadDashboardBlogPosts } from '~/server/utils/dashboard-editor-resources'
 import { createPost, deletePost, getPost, listPosts, updatePost } from '~/server/utils/post-management'
 import { getSocialConnections, publishPost, type PublishTarget } from '~/server/utils/social-publication'
@@ -165,10 +165,22 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         statusRow, row('pages', 'Pages'), row('website-blog', 'Blog'), row('website-posts', 'Social posts'), booking,
         row('website-brand', 'Brand', settings.name ?? undefined), row('website-reviews', 'Reviews'), row('website-qa', 'Q&A'), row('website-preferences', 'Preferences'),
       ] }
-      if (view === 'website-preferences') return { title: 'Preferences', fields: [], rows: [
-        statusRow, row('languages', 'Languages'), row('website-domains', 'Domains'), row('website-currency', 'Currency', settings.default_currency),
-        booking, row('website-reviews', 'Manage published reviews'), row('website-seo', 'Search engine optimization'),
-      ] }
+      if (view === 'website-preferences') {
+        const site = `/dashboard/${encodeURIComponent(organization.slug)}/website`
+        const preferences = `${site}/preferences`
+        const link = (id: string, item: CatalogRow, icon: string, path = `${preferences}/${id}`): CatalogRow => ({ ...item, id, icon, to: path })
+        const currency = settings.default_currency
+        const currencyIcon = currency === 'EUR' ? 'euro' : currency === 'GBP' ? 'pound-sterling' : currency === 'JPY' || currency === 'CNY' ? 'japanese-yen' : 'dollar-sign'
+        return { title: 'Preferences', fields: [], rows: [
+          { ...link('status', statusRow, 'i-lucide-eye'), status: settings.status === 'active' ? 'success' : 'neutral' },
+          link('localization', row('languages', 'Languages', 'Languages the site is published in'), 'i-lucide-languages'),
+          link('domains', row('website-domains', 'Domains', settings.public_url ?? 'Not connected'), 'i-lucide-globe-2'),
+          link('currency', row('website-currency', 'Currency', currency), `i-lucide-${currencyIcon}`),
+          link('booking', booking, 'i-lucide-calendar-check', `${site}/booking`),
+          link('reviews', row('website-reviews', 'Review settings', 'Manual approval'), 'i-lucide-star'),
+          row('website-seo', 'Search engine optimization'),
+        ] }
+      }
       return { title: bookingTitle, fields: [], rows: [
         ...(lodging || settings.consultation_mode ? [row('website-booking-mode', 'Confirmation', booking.summary)] : []),
         ...(lodging ? [row('payout-method', 'How you get paid', 'Manage your Stripe account and payouts')] : []),
@@ -685,29 +697,61 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
+  if (view === 'article-order') {
+    if (!isOrganizationWideRole(organization.role)) return missing('Blog not found')
+    const collection = isArticleCollection(query.collection) ? query.collection : invalid('Choose an article collection')
+    if (collection === 'docs' && !isPlatformSite({ themeId: organization.theme_id })) return missing('Collection not found')
+    const first = await loadDashboardBlogPosts(event, organization.id, { collection, limit: 100 })
+    const posts = [...first.posts]
+    let cursor = first.page_info.next_cursor
+    while (cursor) {
+      const next = await loadDashboardBlogPosts(event, organization.id, { collection, limit: 100, cursor })
+      posts.push(...next.posts)
+      cursor = next.page_info.next_cursor
+    }
+    const choices = posts.map(post => ({ value: String(post.id), label: String(post.title) }))
+    const order = choices.map(choice => choice.value).join('\n')
+    const revision = JSON.stringify(posts.map(post => [post.id, post.updated_at]))
+    const screen = { title: 'Reorder articles', fields: [field('order', 'Articles', 'order', order, { choices })], rows: [], revision, save_label: 'Save' }
+    if (!answer) return screen
+    if (answer.revision !== revision || typeof answer.values.order !== 'string') return invalid('The articles changed. Reopen them before saving.')
+    await reorderArticles(db, organization.id, collection, answer.values.order.split('\n'))
+    await purgePublicResourceCacheNow(env, organization.id)
+    return screen
+  }
   if (['website-blog', 'website-posts', 'website-qa', 'website-content', 'post-destinations', 'post-publish', 'post-media', 'post-media-item', 'post-media-order'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Website content not found')
     const scope = { organizationId: organization.id, locationId: null }
     const kind = view === 'website-blog' ? 'article' : ['website-posts', 'post-destinations', 'post-publish', 'post-media', 'post-media-item', 'post-media-order'].includes(view) ? 'post' : view === 'website-qa' ? 'qa' : query.kind
     if (kind !== 'article' && kind !== 'post' && kind !== 'qa') return missing('Content not found')
+    const articleCollection = kind === 'article' && query.collection !== undefined
+      ? isArticleCollection(query.collection) ? query.collection : invalid('Choose an article collection') : undefined
+    const platformBlog = kind === 'article' && isPlatformSite({ themeId: organization.theme_id })
+    if (articleCollection === 'docs' && !platformBlog) return missing('Collection not found')
+    const articleStatus = query.status === 'draft' || query.status === 'published' ? query.status : undefined
     const title = kind === 'article' ? 'Blog' : kind === 'post' ? 'Social posts' : 'Q&A'
     const row = (id: string, label: string, summary?: string): CatalogRow => ({
-      id, label, summary, native: 'website-content', query: { kind, ...(id === 'new' ? {} : { content_id: id }) },
+      id, label, summary, native: 'website-content', query: { kind, ...(id === 'new' ? articleCollection ? { collection: articleCollection } : {} : { content_id: id }) },
     })
     if (['website-blog', 'website-posts', 'website-qa'].includes(view)) {
       if (answer) return missing('Choose content to edit')
       const cursor = typeof query.cursor === 'string' ? query.cursor : undefined
       const resource = { resource: `native-posts:${organization.id}` }
-      const page = kind === 'article' ? await loadDashboardBlogPosts(event, organization.id, { cursor })
+      const page = kind === 'article' ? await loadDashboardBlogPosts(event, organization.id, { cursor, status: articleStatus, collection: articleCollection })
         : kind === 'post' ? await listPosts(db, env, organization.id, {}, mcpPageWindow(cursor ? { cursor } : {}, resource), resource)
         : null
       const rows = page ? page.posts.map(item => row(String(item.id), String(item.title || ('body' in item && item.body) || title), item.status === 'published' ? 'Published' : 'Draft'))
         : (await listQa(db, organization.id, null)).filter(item => item.source === 'manual').map(item => row(item.id, item.question, item.answer ?? undefined))
       return { title, fields: [], rows: [
+        ...(kind === 'article' && !cursor && !articleStatus && !articleCollection ? [
+          ...([{ id: 'draft', label: 'Drafts' }, { id: 'published', label: 'Published' }]).map(filter => ({ ...filter, native: view, query: { status: filter.id } })),
+          ...(platformBlog ? ARTICLE_COLLECTION_SLUGS : ['blog'] as const).map(collection => ({ id: collection, label: ARTICLE_COLLECTIONS[collection].label, native: view, query: { collection } })),
+        ] : []),
         ...rows, row('new', kind === 'article' ? 'New article' : kind === 'post' ? 'New post' : 'Add a question'),
-        ...(kind === 'article' ? [{ id: 'categories', label: 'Categories', native: 'article-categories' }] : []),
+        ...(kind === 'article' ? [{ id: 'categories', label: 'Categories', native: 'article-categories', query: articleCollection ? { collection: articleCollection } : {} }] : []),
+        ...(articleCollection && !cursor && ((page?.posts.length ?? 0) > 1 || page?.page_info.next_cursor) ? [{ id: 'reorder', label: 'Reorder articles', native: 'article-order', query: { collection: articleCollection } }] : []),
         ...(kind === 'qa' ? [{ id: 'reviews', label: 'Reviews', native: 'website-reviews' }] : []),
-        ...(page?.page_info.next_cursor ? [{ id: 'more', label: 'More', native: view, query: { cursor: page.page_info.next_cursor } }] : []),
+        ...(page?.page_info.next_cursor ? [{ id: 'more', label: 'More', native: view, query: { cursor: page.page_info.next_cursor, ...(articleStatus ? { status: articleStatus } : {}), ...(articleCollection ? { collection: articleCollection } : {}) } }] : []),
       ] }
     }
     const id = query.content_id === undefined ? null : typeof query.content_id === 'string' ? query.content_id : missing('Content not found')
@@ -816,7 +860,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     const revision = typeof stored?.updated_at === 'string' ? stored.updated_at : 'new'
     const action = query.action
     if (action !== undefined && action !== 'edit' && action !== 'delete' && action !== 'publish') return missing('Content action not found')
-    const categories = kind === 'article' ? await listArticleCategories(db, organization.id, articleCollectionOf(article?.collection)) : []
+    const categories = kind === 'article' ? await listArticleCategories(db, organization.id, articleCollectionOf(article?.collection ?? articleCollection)) : []
     const postLocations = kind === 'post' ? await listDashboardLocations(db, organization.id, undefined, true) : []
     const blocks: EditorContentBlock[] = article?.content_document.blocks ?? initialBlogEditorBlocks()
     const articleEdits = kind === 'article' ? blocks.flatMap((block, index) => blogLocalizedTextFields(block).map(item => ({
@@ -885,7 +929,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
           ...(id ? {} : { content_blocks: blocks as ContentBlockInput[] }),
         }
         if (article) await updateBlogPost(db, id!, { ...content, updated_at: revision }, organization.id, userId, env)
-        else await createBlogPost(db, userId, { ...content, content_blocks: blocks as ContentBlockInput[], idempotency_key: answer.idempotency_key }, { organization_id: organization.id }, env)
+        else await createBlogPost(db, userId, { ...content, collection: articleCollection, content_blocks: blocks as ContentBlockInput[], idempotency_key: answer.idempotency_key }, { organization_id: organization.id }, env)
       } else if (kind === 'post') {
         const locationId = values.location || null
         await assertResourceAccess(db, { ...principal, resourceLocationId: locationId })
