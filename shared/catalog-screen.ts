@@ -13,6 +13,7 @@ export interface CatalogRow {
   to?: string
   authorization?: string
   native?: string
+  replace?: boolean
   query?: Record<string, string>
   status?: 'success' | 'neutral' | 'error'
   placeholder?: boolean
@@ -28,6 +29,7 @@ export interface CatalogField {
   display_url?: string | null
   playback_url?: string | null
   hint?: string
+  timezone?: string
   media_kind?: 'image' | 'video' | 'any'
 }
 

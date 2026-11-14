@@ -1,3 +1,4 @@
+import { sessionCalendarMonth } from '~/utils/session-contract'
 import { dashboardConnections } from '~/server/utils/dashboard-connections'
 import { PUBLICATION_CONTENT_BLOCK_TYPES } from '~/shared/content-registries'
 import { HTTPError, type H3Event } from 'nitro'
@@ -38,7 +39,7 @@ import { createStayPhotoRoom, moveStayPhotos, readStayHome, removeStayPhotoRoom,
 import { isStayHomeAccessibilityFeature, isStayRoomAccessibilityFeature, STAY_HOME_ACCESSIBILITY_FEATURES, STAY_ROOM_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
 import { STAY_BED_TYPES, STAY_PHOTO_ROOM_TYPES, stayPhotoRoomName, type StayBedType } from '~/shared/stay-photos'
 import { STAY_AMENITIES, STAY_LISTING_TYPES, STAY_MAP_SHARING_MODES, STAY_PROPERTY_SIZE_UNITS } from '~/shared/stay-listing'
-import { isValidInstant, MINUTE_TIME_PATTERN, timezoneLabel } from '~/utils/timezone'
+import { formatCalendarDate, formatTimestamp, isValidCalendarDate, isValidInstant, isValidTimezone, localNow, MINUTE_TIME_PATTERN, timezoneLabel } from '~/utils/timezone'
 import { createLocation, getLocation, updateLocation, type LocationRecord, type UpdateLocationInput } from '~/server/utils/location-management'
 import { getContentDocumentById, getContentEditorSnapshotForDocument, getContentRepresentation, type ContentBlockInput } from '~/server/utils/content/documents'
 import { createArticleCategory, deleteArticleCategory, listArticleCategories, reorderArticleCategories, updateArticleCategory } from '~/server/utils/content/article-categories'
@@ -234,6 +235,16 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
   const view = typeof query.view === 'string' ? query.view : ''
   if (view === 'connections' || view === 'connection' || view.startsWith('connection-')) {
     return dashboardConnections(event, context, view, query, answer)
+  }
+  if (view === 'session-calendars') {
+    if (answer) invalid('Choose a calendar')
+    const canUpdate = await roleAllows({ ...principal, permissions: { products: ['update'] } })
+    const canEditAssigned = canUpdate || await roleAllows({ ...principal, permissions: { products: ['assigned'] } })
+    const products = canEditAssigned ? (await listOrganizationProducts(db, { organizationId: organization.id,
+      assignedUserId: canUpdate ? undefined : userId })).filter(product => product.booking && (product.kind === 'experience' || product.kind === 'service')) : []
+    return { title: 'Availability', fields: [], empty_title: 'No offerings with a booking calendar', rows: products.map(product => ({
+      id: product.id, label: product.name, native: 'sessions', query: { product_id: product.id },
+    })) }
   }
   if (view === 'member-profile' || view === 'member-profile-field' || view === 'member-hours' || view === 'member-time-off') {
     const memberId = typeof query.member_id === 'string' && query.member_id ? query.member_id : missing('Member not found')
@@ -2780,34 +2791,76 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     form(`Availability at ${place.title}`, days.map((day, index) => field(String(index), `${day} (HH:MM, one per line)`, 'textarea', rules.filter(row => row.weekday === index).map(row => row.start_time.slice(0, 5)).join('\n'), { optional: true })), async values => {
       await replaceWeeklySchedule(db, { ...target, locationId: place.id, actorId: userId, slots: days.flatMap((_, weekday) => values(String(weekday)).split('\n').map(time => time.trim()).filter(Boolean).map(start_time => ({ weekday, start_time }))) })
     })
-  } else if (view === 'sessions' || view === 'session') {
+  } else if (view === 'sessions' || view === 'session' || view === 'session-location') {
     if ((!experience && !service) || !booking) return missing('Sessions not found')
     const sessionId = typeof query.session_id === 'string' ? query.session_id : null
+    const activeLocations = locationsUsed.filter(entry => entry.status === 'active' && isValidTimezone(entry.timezone))
+    const scope = (typeof query.scope === 'string' ? query.scope : locationId) || undefined
+    const physicalLocation = locationsUsed.find(entry => entry.id === scope)
+    if (scope && (scope === 'online' ? !booking.held_online : !physicalLocation)) return missing('Calendar location not found')
+    const month = typeof query.month === 'string' ? query.month : localNow('UTC').date.slice(0, 7)
+    if (!isValidCalendarDate(`${month}-01`)) invalid('Choose a valid calendar month')
+    const range = sessionCalendarMonth(month)
+    const monthQuery = { month, scope: scope ?? '' }
+    const canCreate = scope !== 'online' && (physicalLocation ? activeLocations.some(entry => entry.id === physicalLocation.id) : activeLocations.length > 0)
     if (view === 'sessions') {
-      const from = new Date()
-      const sessions = await listScheduleSessions(db, { ...target, env, fromInstant: from.toISOString(), toInstant: new Date(from.getTime() + 90 * 86400000).toISOString() })
-      screen = { title: service ? 'Consultation times' : 'Sessions', fields: [], rows: [
-        ...(locationsUsed.length ? [leaf('add', service ? 'Add a consultation time' : 'Add a session', undefined, { view: 'session' })] : []),
-        ...sessions.map(session => leaf(session.id, new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short', timeZone: session.timezone }).format(new Date(session.starts_at)), session.status === 'cancelled' ? 'Cancelled' : session.timezone, { view: 'session', query: { session_id: session.id } })),
+      const sessions = await listScheduleSessions(db, { ...target, env, fromInstant: range.from, toInstant: range.to,
+        locationId: scope === 'online' ? null : scope })
+      const visibleSessions = sessions.filter(session => range.dayOf(session))
+      const scopeTitle = physicalLocation?.title ?? (scope === 'online' ? 'Online' : 'All locations')
+      screen = { title: formatCalendarDate(range.labelStart, 'en', { month: 'long', year: 'numeric' }), fields: [], rows: [
+        { ...leaf('previous', 'Previous month', undefined, { view: 'sessions', query: { ...monthQuery, month: range.previous } }), replace: true },
+        { ...leaf('next', 'Next month', undefined, { view: 'sessions', query: { ...monthQuery, month: range.next } }), replace: true },
+        leaf('location', 'Location', scopeTitle, { view: 'session-location', query: monthQuery }),
+        ...(canCreate ? [leaf('add', 'Add availability', undefined, { view: physicalLocation ? 'session' : 'session-location', query: { ...monthQuery, mode: 'add' } })] : []),
+        ...(booking.held_online && booking.assigned_member_id && !canCreate && (!scope || scope === 'online')
+          ? [leaf('hours', 'Bookable times', 'Working hours', { view: 'member-hours', query: { member_id: booking.assigned_member_id } })] : []),
+        ...visibleSessions.map(session => {
+          const venue = session.location_id === null ? 'Online' : locations.find(entry => entry.id === session.location_id)?.title
+            ?? missing('The saved session location could not be loaded')
+          return leaf(session.id, formatTimestamp(session.starts_at, 'en', session.timezone),
+            [venue, session.status === 'cancelled' ? 'Cancelled' : `${session.claimed} reserved`].join(' · '),
+            { view: 'session', query: { ...monthQuery, session_id: session.id } })
+        }),
+        ...(!visibleSessions.length ? [leaf('empty', 'No availability this month', undefined, { readonly: true })] : []),
+      ] }
+    } else if (view === 'session-location') {
+      const adding = query.mode === 'add'
+      screen = { title: adding ? service ? 'Choose an office' : 'Choose a location' : 'Location', fields: [], rows: [
+        ...(!adding ? [leaf('all', 'All locations', undefined, { view: 'sessions', query: { ...monthQuery, scope: '' } })] : []),
+        ...(adding ? activeLocations : locationsUsed).map(entry => leaf(entry.id, entry.title, entry.status === 'active' ? undefined : 'Inactive',
+          { view: adding ? 'session' : 'sessions', query: adding ? { ...monthQuery, venue: entry.id } : { ...monthQuery, scope: entry.id } })),
+        ...(!adding && booking.held_online ? [leaf('online', 'Online', undefined, { view: 'sessions', query: { ...monthQuery, scope: 'online' } })] : []),
       ] }
     } else {
       const session = sessionId ? await getScheduleSession(db, env, { ...target, sessionId }) : null
-      revision = session?.updated_at ?? (session ? session.id : product.updated_at)
+      if (session && scope && session.location_id !== (scope === 'online' ? null : scope)) return missing('Session not found at this location')
+      const venue = query.venue === undefined ? physicalLocation : activeLocations.find(entry => entry.id === query.venue)
+      const timezone = session?.timezone ?? venue?.timezone
+      if (!isValidTimezone(timezone) || (!session && (!venue || !canCreate || !activeLocations.some(entry => entry.id === venue.id)))) return missing('Choose an active location with a timezone')
+      revision = JSON.stringify([session?.id, session?.updated_at, booking.duration_minutes, booking.default_capacity, venue?.id, timezone])
+      const time = { timezone, hint: timezoneLabel(timezone) }
       const fields = [
-        ...(!session ? [field('venue', 'Venue', 'select', null, { choices: locationsUsed.map(entry => ({ value: entry.id, label: entry.title })) })] : []),
-        field('starts', 'Starts', 'datetime', session?.starts_at ?? new Date(Math.ceil(Date.now() / 3600000) * 3600000).toISOString()),
-        field('ends', 'Ends', 'datetime', session?.ends_at ?? new Date(Math.ceil(Date.now() / 3600000) * 3600000 + (booking.duration_minutes ?? invalid('Set a duration first')) * 60000).toISOString()),
-        field('capacity', 'Capacity', 'number', session?.capacity, { optional: true }),
-        ...(session ? [field('status', 'Scheduled', 'toggle', session.status === 'scheduled')] : []),
+        field('starts', 'Starts', 'datetime', session?.starts_at, time),
+        field('ends', 'Ends', 'datetime', session?.ends_at, time),
+        field('capacity', service ? 'Client limit' : 'Guest limit', 'number', session ? session.capacity : booking.default_capacity, { optional: true, hint: 'Leave blank for no limit' }),
+        ...(session && session.claimed === 0 ? [field('status', 'Status', 'select', session.status, { choices: [{ value: 'scheduled', label: 'Scheduled' }, { value: 'cancelled', label: 'Cancelled' }] })] : []),
       ]
-      form(session ? 'Edit session' : 'Add a session', fields, async values => {
+      form(session ? 'Edit availability' : 'Add availability', fields, async values => {
         const dates = { startsAt: values('starts'), endsAt: values('ends'), capacity: count(values('capacity')) }
-        if (session) await updateSession(db, { ...target, env, actorId: userId, ...dates, sessionId: session.id, expectedUpdatedAt: session.updated_at, status: bool(values('status')) ? 'scheduled' : 'cancelled' })
-        else {
-          const venue = locationsUsed.find(place => place.id === values('venue')) ?? invalid('Choose an assigned location')
-          await createSession(db, { ...target, env, actorId: userId, ...dates, locationId: venue.id, idempotencyKey: answer!.idempotency_key })
-        }
+        const saved = session ? await updateSession(db, { ...target, env, actorId: userId, ...dates, sessionId: session.id, expectedUpdatedAt: session.updated_at,
+          status: session.claimed || values('status') === session.status ? session.status
+            : values('status') === 'scheduled' ? 'scheduled' : values('status') === 'cancelled' ? 'cancelled' : invalid('Choose a session status') })
+          : (await createSession(db, { ...target, env, actorId: userId, ...dates,
+            locationId: venue?.id ?? invalid('Choose an active location'), idempotencyKey: answer!.idempotency_key }))[0]
+        if (!saved) throw new Error('The saved availability could not be identified')
         await purgePublicResourceCacheNow(env, organization.id)
+        const savedMonth = localNow(saved.timezone, new Date(saved.starts_at)).date.slice(0, 7)
+        const savedRange = sessionCalendarMonth(savedMonth)
+        const calendar = await listScheduleSessions(db, { ...target, env, fromInstant: savedRange.from, toInstant: savedRange.to,
+          locationId: scope === 'online' ? null : scope })
+        if (!calendar.some(entry => entry.id === saved.id && savedRange.dayOf(entry))) throw new Error('The saved availability could not be read from the calendar')
+        if (savedMonth !== month) screen.destination = { view: 'sessions', query: { ...params, ...monthQuery, month: savedMonth } }
       })
     }
   } else return missing('Editor section not found')

@@ -805,6 +805,21 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(page).toHaveURL(`${schedulePath}?location_id=${location!.id}`)
 
       const sessionMonth = sessionDay.slice(0, 7)
+      const nativeRead = async (view: string, params: Record<string, string> = {}) => {
+        const response = await page.request.get('/api/dashboard/offering', { params: { org: seededTenant('experience').slug, view, ...params } })
+        expect(response.status(), await response.text()).toBe(200)
+        return await response.json() as CatalogScreen
+      }
+      const nativeIndex = await nativeRead('session-calendars')
+      expect(nativeIndex.rows).toContainEqual({ id: productId, label: product.name, native: 'sessions', query: { product_id: productId } })
+      const nativeCalendar = await nativeRead('sessions', { product_id: productId, month: sessionMonth, scope: location!.id })
+      expect(nativeCalendar.rows).toContainEqual(expect.objectContaining({ id: original!.id, native: 'session', query: expect.objectContaining({ scope: location!.id }) }))
+      const nativeEdit = await nativeRead('session', { product_id: productId, session_id: original!.id, month: sessionMonth, scope: location!.id })
+      expect(nativeEdit.fields.find(field => field.key === 'starts')).toMatchObject({ timezone: original!.timezone, value: original!.starts_at })
+      const futureMonth = new Date(Date.now() + 180 * 86_400_000).toISOString().slice(0, 7)
+      const future = await nativeRead('sessions', { product_id: productId, month: futureMonth, scope: location!.id })
+      expect(future.rows.find(row => row.id === 'next')).toMatchObject({ replace: true, native: 'sessions', query: { scope: location!.id } })
+      expect(future.rows.some(row => row.id === original!.id)).toBe(false)
       await open(page, `${calendarPath}?product_id=${productId}&month=${sessionMonth}`)
       const calendar = page.locator('#dashboard-panel-org-calendar')
       const locationFilter = calendar.getByRole('combobox', { name: 'Location', exact: true })
@@ -1004,6 +1019,22 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('date') === sessionDay && url.searchParams.get('location_id') === original!.location_id)
       expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, location_id: original!.location_id, month: sessionDay.slice(0, 7), date: sessionDay })
       await expect(page.locator('#dashboard-panel-org-calendar').getByRole('button', { name: 'View: Month', exact: true })).toBeVisible()
+    }
+    const nativeEditorPath = '/api/dashboard/offering'
+    const nativeQuery = { org: restore.slug, view: 'session', product_id: productId, session_id: original!.id,
+      month: sessionDay.slice(0, 7), scope: original!.location_id! }
+    const nativeResponse = await page.request.get(nativeEditorPath, { params: nativeQuery })
+    expect(nativeResponse.status(), await nativeResponse.text()).toBe(200)
+    const nativeEditor = await nativeResponse.json() as CatalogScreen
+    const values = Object.fromEntries(nativeEditor.fields.map(field => [field.key, field.value]))
+    for (const capacity of ['9', '8']) {
+      const read = await page.request.get(nativeEditorPath, { params: nativeQuery })
+      expect(read.status(), await read.text()).toBe(200)
+      const revision = (await read.json() as CatalogScreen).revision
+      const saved = await page.request.post(nativeEditorPath, { params: nativeQuery,
+        data: { values: { ...values, capacity }, revision, idempotency_key: randomUUID() } })
+      expect(saved.status(), await saved.text()).toBe(200)
+      expect((await list()).find(row => row.id === original!.id)).toMatchObject({ capacity: Number(capacity), starts_at: original!.starts_at })
     }
     await page.setViewportSize(NARROW)
     await open(page, `${path}&view=year`)
