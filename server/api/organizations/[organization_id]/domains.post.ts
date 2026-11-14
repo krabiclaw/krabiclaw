@@ -1,6 +1,6 @@
 import { jsonResponse } from '~/server/utils/api-response'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
-import { HTTPError } from 'nitro'
+import { defineHandler, HTTPError } from 'nitro'
 import { connectDashboardDomain } from '~/server/utils/domain-dashboard-actions'
 import { domainPair } from '~/server/utils/domain-shared'
 import { domainInstructions, groupCustomDomains } from '~/server/utils/domain-read-model'
@@ -43,5 +43,4 @@ export default defineHandler(async (event) => {
     return jsonResponse({ error: 'Failed to add domain' }, { status: 500 })
   }
 })
-import { defineHandler } from 'nitro';
 import { getRouterParam, readBody  } from 'nitro/h3';

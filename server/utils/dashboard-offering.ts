@@ -1547,7 +1547,10 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
   const priceLabel = location ? `Price at ${location.title}` : service ? 'Consultation pricing' : 'Price'
   const title = dish ? 'Dish editor' : service ? 'Legal Services editor' : experience ? 'Experience editor' : 'Table editor'
   const web = `/dashboard/${encodeURIComponent(organization.slug)}/products/${encodeURIComponent(productId)}`
-  const webQuery = location ? `?location_id=${encodeURIComponent(location.id)}&kind=dish` : ''
+  const webParams = new URLSearchParams()
+  if (locationId) webParams.set('location_id', locationId)
+  if (query.kind === 'dish') webParams.set('kind', 'dish')
+  const webQuery = webParams.size ? `?${webParams}` : ''
   const params = { product_id: productId, ...(locationId ? { location_id: locationId } : {}) }
   const leaf = (id: string, label: string, summary?: string, options: { view?: string; web?: string; query?: Record<string, string>; readonly?: boolean } = {}): CatalogRow => ({
     id, label, summary, ...(options.readonly ? {} : {
@@ -1816,7 +1819,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       const price = chosenPrice(variant)
       const amount = price ? formatMinorAmount(price.unit_amount, currency) : text(detail('pricing_note')) || 'No price set'
       return product.variants.length === 1 ? amount : `${variant.name}: ${amount}`
-    }).join('\n')
+    }).join('\n') || 'No price set'
     const photo = leaf('photo', 'Media', product.gallery.length || product.image ? 'View media' : 'Add media', { readonly: !wide })
     photo.image = mediaStillUrl(product.image)
     const definitions = productDetailFields(product.kind).filter(definition => !['pricing_note', 'tagline'].includes(definition.key))
@@ -1829,15 +1832,18 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         to: product.page ? `/dashboard/${organization.slug}/website/pages/${product.page.id}` : `${web}/page`,
         ...(product.page ? { native: 'page', query: { page_id: product.page.id } } : { native: 'create-page', query: params }),
       } : {}) }] : []),
-      leaf('price', priceLabel, prices),
-      ...(!dish && (booking || manages) ? [
+      { ...leaf('price', priceLabel, prices), optional_detail: service && !booking && prices === 'No price set' },
+      ...(!dish && (!service || booking) ? [
         ...(booking ? [leaf('assignment', copy.assigneeLabel, assigned ?? 'Unassigned', { web: 'booking/assignment', readonly: !manages })] : []),
         leaf('booking', bookingLabel, booking ? `${booking.duration_minutes} minutes` : 'No booking calendar'),
       ] : []),
+      ...(service && !booking && manages ? [{ ...leaf('booking', 'Set up consultations', 'No booking calendar'), optional_detail: true }] : []),
+      ...(service && !booking && !product.locations.length && wide ? [{ ...leaf('locations', placeLabel), optional_detail: true }] : []),
       ...definitions.map(definition => leaf(definition.key, definition.name, text(detail(definition.key)) || undefined, { view: 'attribute', web: `attributes/${definition.id}`, query: { field: definition.key } })),
       ...(wide && service ? [photo] : []),
-      ...(wide ? [leaf('collections', dish ? 'Menu sections' : 'Collections', collections.filter(section => product.collections.some(row => row.collection_id === section.id)).map(section => section.name).join(', '))] : []),
-      leaf('locations', placeLabel, [...locationsUsed.map(entry => entry.title), ...(booking?.held_online ? ['Online'] : [])].join(', ')),
+      ...(wide ? [{ ...leaf('collections', dish ? 'Menu sections' : 'Collections', collections.filter(section => product.collections.some(row => row.collection_id === section.id)).map(section => section.name).join(', ')),
+        optional_detail: !dish && !product.collections.length }] : []),
+      ...(!service || booking || product.locations.length ? [leaf('locations', placeLabel, [...locationsUsed.map(entry => entry.title), ...(booking?.held_online ? ['Online'] : [])].join(', '))] : []),
       { ...leaf('publication', 'Website visibility', published ? 'Published' : 'Hidden'), status: published ? 'success' : 'neutral' },
       leaf('order-url', dish ? 'Ordering link' : service ? 'External consultation link' : 'External booking link', product.order_url ?? undefined),
       ...(manages ? [leaf('kind', 'Type', PRODUCT_KIND_LABELS[product.kind])] : []),

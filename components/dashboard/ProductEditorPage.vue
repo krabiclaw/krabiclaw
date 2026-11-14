@@ -429,7 +429,6 @@ export const productEditorKey = Symbol('product-editor') as InjectionKey<Product
 
 <script setup lang="ts">
 import { MAX_STAY_NIGHTS, STAY_DIRECT_DISCOUNTS, parseStayCalendarRules, type StayCalendarRules } from '~/shared/bookings'
-import { noticeSummary } from '~/shared/availability-settings'
 import { cloneFnJSON } from '@vueuse/core'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
@@ -1226,7 +1225,9 @@ function hasDetail(field: ProductDetailField): boolean {
 
 const additionalDetails = computed(() => {
   const row = product.value
-  if (!row || row.kind !== 'stay' || arrivalTab.value) return []
+  if (!row || arrivalTab.value) return []
+  if (row.kind !== 'stay') return (offeringScreen.value?.rows ?? []).filter(item => item.optional_detail && item.to)
+    .map(item => ({ id: item.id, label: item.label, to: item.to! }))
   const visible = new Set(navigationGroups.value.flatMap(group => group.items.map(item => item.id)))
   return [
     ...definitions.value.filter(field => ![PRICING_NOTE_HANDLE, 'tagline'].includes(field.key) && !isStayFocusedDetail(field.key) && !visible.has(field.key)).map(field => ({ id: field.key, label: field.name, icon: field.icon, to: sectionPath(`attributes/${field.id}`) })),
@@ -1238,7 +1239,7 @@ const { data: offeringScreen, error: offeringScreenError, refresh: refreshOfferi
   () => `offering-screen:${organizationId}:${locationId.value ?? ''}:${productId.value}`,
   () => product.value && product.value.kind !== 'stay'
     ? dashboardApi('/api/dashboard/offering', {
-        query: { product_id: productId.value, location_id: locationId.value ?? undefined },
+        query: { product_id: productId.value, location_id: locationId.value ?? undefined, ...(route.query.kind === 'dish' ? { kind: 'dish' } : {}) },
         validate: (value): value is CatalogScreen => isRecord(value) && typeof value.title === 'string' && Array.isArray(value.rows),
       })
     : Promise.resolve(null),
@@ -1250,7 +1251,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   if (!product.value || loadError.value) return []
   if (product.value.kind !== 'stay') {
     const screen = offeringScreen.value
-    return screen ? [{ id: product.value.kind, items: screen.rows }] : []
+    return screen ? [{ id: product.value.kind, items: screen.rows.filter(item => !item.optional_detail) }] : []
   }
   if (arrivalTab.value) {
     const home = arrivalHome.value

@@ -89,7 +89,7 @@ const newProductTo = computed(() => router.resolve({ path: `${level.path.value}/
 const activeFilterLabel = computed(() => catalog.value?.filters.find(item => item.value === catalog.value?.kind)?.label ?? 'offerings')
 const items = computed<OrganizationLocationSelectorItem[]>(() => (catalog.value?.screen.rows ?? []).map(row => {
   if (!row.to) throw new Error('The Catalog row has no dashboard destination')
-  return { id: row.id, label: row.label, imageUrl: row.image ?? null, eyebrow: '', summary: row.summary ?? '', to: row.to }
+  return { id: row.id, label: row.label, imageUrl: row.image ?? null, eyebrow: row.eyebrow ?? '', summary: row.summary ?? '', to: row.to }
 }))
 
 interface HomeSetupAction { label: string; detail: string; to: string }

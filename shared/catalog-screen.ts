@@ -4,6 +4,8 @@ export interface CatalogRow {
   id: string
   label: string
   summary?: string
+  eyebrow?: string
+  optional_detail?: boolean
   image?: string | null
   to?: string
   native?: string

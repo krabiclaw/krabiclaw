@@ -51,8 +51,9 @@ export async function loadDashboardCatalog(event: H3Event) {
     const scopes = locationId ? [locationId] : [null, ...locations.map(place => place.id)]
     const price = formatProductPriceRange(summarizeProductPrices(product.variants, scopes.map(location_id => ({ currency, location_id }))))
     return {
-      id: product.id, label: product.stay?.internal_name ?? product.name,
-      summary: [price, product.booking?.held_online ? 'Online' : null, ...bindings].filter(Boolean).join(' · '),
+      id: product.id, label: product.name,
+      summary: [price ?? 'No price set', product.booking?.held_online ? 'Online' : null, ...bindings,
+        ...(!bindings.length && !product.booking?.held_online ? ['No locations set'] : [])].filter(Boolean).join(' · '),
       image: mediaStillUrl(product.image),
       to: `${base}/${product.id}${locationId ? `?location_id=${encodeURIComponent(locationId)}&kind=dish` : ''}`,
       native: product.kind === 'stay' ? 'stay' : 'offering',
@@ -107,15 +108,17 @@ export async function loadDashboardCatalog(event: H3Event) {
       id: 'create-offering', label: 'Add offering', native: 'create-offering', query: {},
     })
     if ((kind === 'all' || kind === 'menu') && offers('menu')) {
-      const menuLocations = locations.length
-        ? [...locations, ...(menu.some(section => section.location_id === null) ? [null] : [])]
-        : [null]
-      screen.rows.push(...menuLocations.map((place): CatalogRow => ({
-        id: place ? `menu-${place.id}` : 'menu', label: place?.title ?? (locations.length ? 'Shared menu' : 'Menu'),
-        summary: 'Menu', image: place?.picture_url ?? null,
-        to: `${base}/menu${place ? `?location_id=${encodeURIComponent(place.id)}` : ''}`,
-        native: 'menu', query: place ? { location_id: place.id } : {},
-      })))
+      const menuLocations = locations.length ? locations : [null]
+      screen.rows.push(...menuLocations.map((place): CatalogRow => {
+        const count = menu.filter(section => section.location_id === null || section.location_id === place?.id).length
+        return {
+          id: place ? `menu-${place.id}` : 'menu', label: place?.title ?? 'Menu',
+          eyebrow: place && place.status !== 'active' ? `Menu (${place.status})` : 'Menu',
+          summary: `${count} ${count === 1 ? 'section' : 'sections'}`, image: place?.picture_url ?? null,
+          to: `${base}/menu${place ? `?location_id=${encodeURIComponent(place.id)}` : ''}`,
+          native: 'menu', query: place ? { location_id: place.id } : {},
+        }
+      }))
     }
     screen.rows.push(...products.filter(product => product.kind !== 'dish' && (kind === 'all' || kind === product.kind)).map(product => item(product)))
   }
