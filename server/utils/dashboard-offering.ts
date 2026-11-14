@@ -2,7 +2,7 @@ import { PUBLICATION_CONTENT_BLOCK_TYPES } from '~/shared/content-registries'
 import { HTTPError, type H3Event } from 'nitro'
 import { getQuery } from 'nitro/h3'
 import { getDashboardMemberContext, listDashboardLocations } from '~/server/utils/dashboard-context'
-import { assertProductAccess, isOrganizationWideRole, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
+import { assertProductAccess, assertResourceAccess, isOrganizationWideRole, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { createCollection, createProduct, deleteCollection, getProduct, hydrateProductMedia, listCollectionProducts, listCollections, listOrganizationProducts, reorderCollections, setCollectionProducts, setProductLocation, setProductPublication, updateCollection, updateProduct } from '~/server/utils/product-management'
 import { createSession, deleteProductBookingConfig, getScheduleSession, listAvailabilityRules, listScheduleSessions, replaceWeeklySchedule, setProductBookingConfig, updateSession } from '~/server/utils/availability'
 import { attachMediaPlacement, removeMediaPlacement, reorderMediaPlacements, setSingleMediaPlacement } from '~/server/utils/media-placement'
@@ -40,7 +40,8 @@ import { STAY_AMENITIES, STAY_LISTING_TYPES, STAY_MAP_SHARING_MODES, STAY_PROPER
 import { MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { getLocation } from '~/server/utils/location-management'
 import { getContentDocumentById, getContentEditorSnapshotForDocument, getContentRepresentation, type ContentBlockInput } from '~/server/utils/content/documents'
-import { listArticleCategories } from '~/server/utils/content/article-categories'
+import { createArticleCategory, deleteArticleCategory, listArticleCategories, reorderArticleCategories, updateArticleCategory } from '~/server/utils/content/article-categories'
+import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS, isArticleCollection } from '~/utils/article-collections'
 import { articleCollectionOf, createBlogPost, deleteBlogPost, getBlogPost, updateBlogLifecycle, updateBlogPost } from '~/server/utils/content/publishing'
 import { loadDashboardBlogPosts } from '~/server/utils/dashboard-editor-resources'
 import { createPost, deletePost, getPost, listPosts, updatePost } from '~/server/utils/post-management'
@@ -49,6 +50,8 @@ import { PostValidationError } from '~/shared/posts'
 import { createQa, deleteQa, listQa, updateQa } from '~/server/utils/location-qa'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { readLocalizedFormQuestions } from '~/server/domain/form-questions'
+import { setPublicConsultationMode } from '~/server/utils/professional-services'
+import { isLodgingConfirmationMode } from '~/shared/lodging-booking'
 import { loadSettingsPayload, updateOrganizationSettingsFields } from '~/server/utils/organization-settings'
 import type { UpdateOrganizationSettingsRequest } from '~/server/types/organization'
 import { getLinksPage, OrganizationLinksValidationError, upsertLinksPage } from '~/server/utils/links-page'
@@ -57,13 +60,14 @@ import { PRICING_CALCULATOR_COLUMNS, pricingCalculatorConfig, pricingCalculatorR
 import { SITE_PALETTE_MODES, SITE_PALETTE_ROLES, type SitePalettePatch } from '~/shared/site-palette'
 import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset } from '~/shared/organization-fonts'
 import { getOrganizationDomainsDashboardPayload } from '~/server/utils/domain-read-model'
-import { setCanonicalDomain } from '~/server/utils/domains'
+import { organizationPublicUrl, setCanonicalDomain } from '~/server/utils/domains'
 import { changeDashboardDomain, connectDashboardDomain } from '~/server/utils/domain-dashboard-actions'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
 import { listOrganizationReviews, setReviewStatus } from '~/server/utils/organization-reviews'
 import { isPlatformSite } from '~/utils/site-routing'
 import { isRecord } from '~/server/utils/type-guards'
+import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS, previewSecretOf } from '~/server/utils/preview-token'
 
 const STAY_ROOM_VIEWS = ['stay-rooms', 'stay-room', 'stay-room-add', 'stay-room-beds', 'stay-room-privacy', 'stay-room-remove', 'stay-photo-room', 'stay-room-amenities', 'stay-room-accessibility']
 
@@ -144,6 +148,75 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
   const principal = memberAccessPrincipal(organization, { env, event })
   const query = getQuery(event)
   const view = typeof query.view === 'string' ? query.view : ''
+  if (['website', 'website-preferences', 'website-status', 'website-booking', 'website-booking-mode'].includes(view)) {
+    if (!isOrganizationWideRole(organization.role)) return missing('Website not found')
+    const settings = await loadSettingsPayload(db, env, organization.id)
+    const lodging = settings.vertical === 'lodging'
+    const bookingTitle = settings.vertical === 'service' ? 'Consultation settings' : settings.vertical === 'restaurant' ? 'Reservation settings' : 'Booking settings'
+    const status = settings.status === 'active' ? 'Published' : settings.status === 'suspended' ? 'Suspended' : 'Draft'
+    const row = (native: string, label: string, summary?: string): CatalogRow => ({ id: native, native, label, summary })
+    const booking = row('website-booking', bookingTitle, lodging
+      ? settings.lodging_booking_choices?.find(choice => choice.value === settings.lodging_booking?.confirmation_mode)?.label
+      : settings.consultation_mode === 'native' ? 'Accepting consultation requests online' : undefined)
+    const statusRow = settings.status === 'suspended' ? { id: 'status', label: 'Status', summary: status } : row('website-status', 'Status', status)
+    if (view === 'website' || view === 'website-preferences' || view === 'website-booking') {
+      if (answer) return invalid('Choose a website setting')
+      if (view === 'website') return { title: 'Website', fields: [], preview_url: settings.public_url, rows: [
+        statusRow, row('pages', 'Pages'), row('website-blog', 'Blog'), row('website-posts', 'Social posts'), booking,
+        row('website-brand', 'Brand', settings.name ?? undefined), row('website-reviews', 'Reviews'), row('website-qa', 'Q&A'), row('website-preferences', 'Preferences'),
+      ] }
+      if (view === 'website-preferences') return { title: 'Preferences', fields: [], rows: [
+        statusRow, row('languages', 'Languages'), row('website-domains', 'Domains'), row('website-currency', 'Currency', settings.default_currency),
+        booking, row('website-reviews', 'Manage published reviews'), row('website-seo', 'Search engine optimization'),
+      ] }
+      return { title: bookingTitle, fields: [], rows: [
+        ...(lodging || settings.consultation_mode ? [row('website-booking-mode', 'Confirmation', booking.summary)] : []),
+        ...(lodging ? [row('payout-method', 'How you get paid', 'Manage your Stripe account and payouts')] : []),
+        row('inquiry-questions', 'Intake questions', formQuestionsSummary(settings.inquiry_questions)),
+      ] }
+    }
+    const statusEditor = view === 'website-status'
+    if (statusEditor && query.current_address !== undefined && (await organizationPublicUrl(env, db, organization.id) !== query.current_address || settings.status !== 'inactive')) {
+      return invalid('Website details changed. Reopen Today to see the current status.')
+    }
+    if (statusEditor && settings.status !== 'active' && settings.status !== 'inactive') return invalid('This website cannot change its publication status.')
+    const lodgingPolicy = settings.lodging_booking
+    const lodgingChoices = settings.lodging_booking_choices
+    const consultation = settings.consultation_mode
+    if (!statusEditor && (lodging ? !lodgingPolicy || !lodgingChoices : !consultation)) return missing('Booking settings not found')
+    const revision = JSON.stringify([settings.updated_at, statusEditor ? settings.status : lodging ? lodgingPolicy?.confirmation_mode : consultation])
+    let previewUrl: string | undefined
+    if (statusEditor && !answer && settings.status === 'inactive' && settings.public_url) {
+      const secret = previewSecretOf(env)
+      if (!secret) throw new Error('Website preview signing is unavailable')
+      const url = new URL(settings.public_url)
+      url.searchParams.set(PREVIEW_TOKEN_QUERY, await createPreviewToken(secret, organization.id, Date.now() + PREVIEW_TOKEN_TTL_MS))
+      previewUrl = url.toString()
+    }
+    const screen = { title: statusEditor ? 'Status' : bookingTitle, preview_url: previewUrl, fields: [statusEditor
+      ? field('value', 'Status', 'select', settings.status, { choices: [{ value: 'inactive', label: 'Draft' }, { value: 'active', label: 'Published' }] })
+      : lodging ? field('value', 'Booking settings', 'select', lodgingPolicy!.confirmation_mode, { choices: lodgingChoices!.map(({ value, label }) => ({ value, label })) })
+        : field('value', 'Consultations', 'select', consultation === 'native' ? 'online' : 'offline', { choices: [
+          { value: 'online', label: 'Accept consultation requests online' }, { value: 'offline', label: 'Inquiries only (offline scheduling)' },
+        ] })], rows: [], revision, save_label: 'Save' }
+    if (!answer) return screen
+    if (answer.revision !== revision) return invalid('Website settings changed. Reopen this setting before saving.')
+    const value = answer.values.value
+    if (Object.keys(answer.values).length !== 1) return invalid('Choose a setting')
+    if (!statusEditor && !lodging) {
+      if (value !== 'online' && value !== 'offline') return invalid('Choose a consultation mode')
+      if (value === 'online') await setPublicConsultationMode(db, organization.id, 'native')
+      else if (consultation === 'native') await setPublicConsultationMode(db, organization.id, 'native_disabled')
+      await purgePublicResourceCacheNow(env, organization.id)
+    } else {
+      const updates: UpdateOrganizationSettingsRequest = statusEditor
+        ? { status: value === 'active' || value === 'inactive' ? value : invalid('Choose a website status') }
+        : { lodging_booking: { confirmation_mode: isLodgingConfirmationMode(value) ? value : invalid('Choose a booking mode') } }
+      const saved = await updateOrganizationSettingsFields(db, env, organization.id, updates, userId)
+      if (saved.status >= 400) throw new HTTPError({ statusCode: saved.status, message: String(saved.data.error), data: saved.data })
+    }
+    return screen
+  }
   if (view === 'create-offering' || view === 'section-move') {
     if (!isOrganizationWideRole(organization.role)) return missing('Catalog not found')
     const scope = { organizationId: organization.id }
@@ -526,6 +599,92 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       if (result.status >= 400) throw new HTTPError({ statusCode: result.status, message: String(result.data.error), data: result.data })
     })
   }
+  if (view === 'article-categories' || view === 'article-category' || view === 'article-category-order') {
+    if (!isOrganizationWideRole(organization.role)) return missing('Categories not found')
+    const platform = isPlatformSite({ themeId: organization.theme_id })
+    if (view === 'article-categories' && platform && query.collection === undefined) {
+      if (answer) return invalid('Choose an article collection')
+      return { title: 'Categories', fields: [], rows: ARTICLE_COLLECTION_SLUGS.map(collection => ({
+        id: collection, label: ARTICLE_COLLECTIONS[collection].label, native: view, query: { collection },
+      })) }
+    }
+    const collection = query.collection === undefined ? 'blog' : isArticleCollection(query.collection) ? query.collection : invalid('Choose an article collection')
+    if (collection === 'docs' && !platform) return missing('Categories not found')
+    const categories = await listArticleCategories(db, organization.id, collection)
+    const base = { collection }
+    if (view === 'article-categories') {
+      if (answer) return invalid('Choose a category')
+      const rows: CatalogRow[] = []
+      const append = (parentId: string | null, depth: number) => {
+        for (const category of categories.filter(row => row.parent_id === parentId)) {
+          rows.push({ id: category.id, label: category.name, summary: depth ? categories.find(row => row.id === parentId)?.name : undefined,
+            native: 'article-category', query: { ...base, category_id: category.id } })
+          append(category.id, depth + 1)
+        }
+      }
+      append(null, 0)
+      rows.push({ id: 'add', label: 'Add a category', native: 'article-category', query: base })
+      for (const parent of [null, ...categories]) {
+        if (categories.filter(row => row.parent_id === (parent?.id ?? null)).length < 2) continue
+        rows.push({ id: `order-${parent?.id ?? 'root'}`, label: parent ? `Reorder categories in ${parent.name}` : 'Reorder top-level categories',
+          native: 'article-category-order', query: { ...base, ...(parent ? { parent_id: parent.id } : {}) } })
+      }
+      return { title: 'Categories', rows, fields: [] }
+    }
+    if (view === 'article-category-order') {
+      const parent = query.parent_id === undefined ? null : categories.find(row => row.id === query.parent_id) ?? missing('Category not found')
+      const rows = categories.filter(row => row.parent_id === (parent?.id ?? null))
+      const ids = rows.map(row => row.id)
+      const revision = JSON.stringify(rows.map(row => [row.id, row.updated_at]))
+      const screen = { title: 'Reorder categories', rows: [], revision, save_label: 'Save', fields: [
+        field('order', 'Categories', 'order', ids.join('\n'), { choices: rows.map(row => ({ value: row.id, label: row.name })) }),
+      ] }
+      if (!answer) return screen
+      if (answer.revision !== revision) return invalid('The categories changed. Reopen them before saving.')
+      await reorderArticleCategories(db, { organizationId: organization.id, collection, parentId: parent?.id, categoryIds: answer.values.order?.split('\n'), actorId: userId })
+      await purgePublicResourceCacheNow(env, organization.id)
+      return screen
+    }
+    const category = query.category_id === undefined ? null : categories.find(row => row.id === query.category_id) ?? missing('Category not found')
+    const deleting = query.action === 'delete'
+    if ((deleting || query.action === 'edit') && !category) return missing('Category not found')
+    if (query.action !== undefined && !deleting && query.action !== 'edit') return missing('Category action not found')
+    if (category && query.action === undefined) {
+      if (answer) return invalid('Choose a category setting')
+      return { title: category.name, fields: [], rows: [
+        { id: 'edit', label: 'Category details', summary: category.description ?? undefined, native: view, query: { ...base, category_id: category.id, action: 'edit' } },
+        { id: 'delete', label: 'Delete category', native: view, query: { ...base, category_id: category.id, action: 'delete' } },
+      ] }
+    }
+    const excluded = new Set(category ? [category.id] : [])
+    const excludeDescendants = (parentId: string) => {
+      for (const child of categories.filter(row => row.parent_id === parentId)) {
+        excluded.add(child.id)
+        excludeDescendants(child.id)
+      }
+    }
+    if (category) excludeDescendants(category.id)
+    const choices = [{ value: '', label: 'Top level' }, ...categories.filter(row => !excluded.has(row.id)).map(row => ({ value: row.id, label: row.name }))]
+    const revision = category?.updated_at ?? 'new'
+    const screen = { title: deleting ? 'Delete category' : category?.name ?? 'New category', revision, rows: [],
+      save_label: deleting ? 'Delete' : category ? 'Save' : 'Create',
+      fields: deleting ? [field('confirm', `Delete ${category!.name}`, 'toggle', false)] : [
+        field('name', 'Name', 'text', category?.name), field('description', 'Description', 'textarea', category?.description, { optional: true }),
+        field('parent', 'Parent category', 'select', category?.parent_id, { choices, optional: true }),
+      ],
+    }
+    if (!answer) return screen
+    if (answer.revision !== revision) return invalid('The category changed. Reopen it before saving.')
+    if (screen.fields.length !== Object.keys(answer.values).length || screen.fields.some(item => typeof answer.values[item.key] !== 'string')) return invalid('The saved fields do not match this editor')
+    const input = { organizationId: organization.id, name: answer.values.name, description: answer.values.description || null, parentId: answer.values.parent || null, actorId: userId }
+    if (deleting) {
+      if (answer.values.confirm !== 'true') return invalid('Confirm deletion')
+      await deleteArticleCategory(db, { organizationId: organization.id, categoryId: category!.id })
+    } else if (category) await updateArticleCategory(db, { ...input, categoryId: category.id })
+    else await createArticleCategory(db, { ...input, collection })
+    await purgePublicResourceCacheNow(env, organization.id)
+    return screen
+  }
   if (['website-blog', 'website-posts', 'website-qa', 'website-content', 'post-destinations', 'post-publish', 'post-media', 'post-media-item', 'post-media-order'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Website content not found')
     const scope = { organizationId: organization.id, locationId: null }
@@ -546,13 +705,15 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         : (await listQa(db, organization.id, null)).filter(item => item.source === 'manual').map(item => row(item.id, item.question, item.answer ?? undefined))
       return { title, fields: [], rows: [
         ...rows, row('new', kind === 'article' ? 'New article' : kind === 'post' ? 'New post' : 'Add a question'),
+        ...(kind === 'article' ? [{ id: 'categories', label: 'Categories', native: 'article-categories' }] : []),
         ...(kind === 'qa' ? [{ id: 'reviews', label: 'Reviews', native: 'website-reviews' }] : []),
         ...(page?.page_info.next_cursor ? [{ id: 'more', label: 'More', native: view, query: { cursor: page.page_info.next_cursor } }] : []),
       ] }
     }
     const id = query.content_id === undefined ? null : typeof query.content_id === 'string' ? query.content_id : missing('Content not found')
-    const article = kind === 'article' && id ? await getBlogPost(db, id, organization.id, env) : null
+    const article = kind === 'article' && id ? await getBlogPost(db, id, organization.id, env) ?? missing('Article not found') : null
     const post = kind === 'post' && id ? await getPost(db, env, organization.id, id) ?? missing('Post not found') : null
+    if (post) await assertResourceAccess(db, { ...principal, resourceLocationId: post.location_id })
     if (['post-media', 'post-media-item', 'post-media-order'].includes(view)) {
       if (!post) return missing('Post not found')
       const row = (id: string, label: string, slot: 'cover' | 'gallery', asset?: typeof post.media[number]): CatalogRow => ({
@@ -656,17 +817,21 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     const action = query.action
     if (action !== undefined && action !== 'edit' && action !== 'delete' && action !== 'publish') return missing('Content action not found')
     const categories = kind === 'article' ? await listArticleCategories(db, organization.id, articleCollectionOf(article?.collection)) : []
+    const postLocations = kind === 'post' ? await listDashboardLocations(db, organization.id, undefined, true) : []
     const blocks: EditorContentBlock[] = article?.content_document.blocks ?? initialBlogEditorBlocks()
     const articleEdits = kind === 'article' ? blocks.flatMap((block, index) => blogLocalizedTextFields(block).map(item => ({
       ...item, block, key: `block:${index}:${item.path.join('.')}`,
     }))) : []
-    const fields = action === 'publish' || action === 'delete' ? [field('confirm', action === 'publish' ? 'Publish on website' : 'Confirm deletion', 'toggle', false)] : [
+    const fields = action === 'publish' ? [field('visibility', 'Visibility', 'select', article?.visibility, { choices: [
+      { value: 'listed', label: 'Listed' }, { value: 'unlisted', label: 'Unlisted' },
+    ] })] : action === 'delete' ? [field('confirm', 'Confirm deletion', 'toggle', false)] : [
       field('title', kind === 'qa' ? 'Question' : 'Title', 'text', contentTitle, { optional: kind === 'post' }),
       ...(kind === 'article' ? [
         field('excerpt', 'Excerpt', 'textarea', article?.excerpt, { optional: true }),
         field('category', 'Category', 'select', article?.category?.id, { optional: true, choices: [{ value: '', label: 'Choose later' }, ...categories.map(item => ({ value: item.id, label: item.name }))] }),
         ...(!id ? articleEdits.map(item => field(item.key, item.label, 'textarea', item.value)) : []),
       ] : kind === 'post' ? [
+        field('location', 'Location', 'select', post?.location_id, { optional: true, choices: [{ value: '', label: 'Whole website' }, ...postLocations.map(location => ({ value: location.id, label: location.title }))] }),
         field('body', 'Caption', 'textarea', post?.body),
         field('button_label', 'Button label', 'text', post?.call_to_action?.label, { optional: true }),
         field('button_url', 'Button URL', 'text', post?.call_to_action?.url, { optional: true }),
@@ -677,19 +842,22 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     ]
     if (id && action === undefined) {
       if (answer) return missing('Choose a content setting')
-      return { title: contentTitle || title, fields: [], rows: [
+      const preview = article ? article.preview_url ?? article.public_url : post?.preview_url ?? post?.canonical_url
+      return { title: contentTitle || title, fields: [], preview_url: typeof preview === 'string' ? preview : null, rows: [
         { id: 'edit', label: article ? 'Article details' : 'Edit content', native: view, query: { kind, content_id: id, action: 'edit' } },
         ...(article ? [{ id: 'sections', label: 'Article blocks', native: 'page-sections', query: { article_id: id } }] : []),
         ...(post ? [
           { id: 'media', label: 'Media', native: 'post-media', query: { content_id: id } },
           { id: 'destinations', label: 'Publish to', native: 'post-destinations', query: { content_id: id } },
         ] : []),
-        ...(article?.status === 'draft' ? [{ id: 'publish', label: 'Publish on website', native: view, query: { kind, content_id: id, action: 'publish' } }] : []),
+        ...(article ? [{ id: 'publish', label: 'Visibility', summary: article.status === 'draft' ? 'Draft' : article.visibility === 'unlisted' ? 'Unlisted' : 'Published', native: view, query: { kind, content_id: id, action: 'publish' } }] : []),
         { id: 'delete', label: 'Delete', native: view, query: { kind, content_id: id, action: 'delete' } },
       ] }
     }
     if ((action === 'delete' || action === 'publish') && (!stored || !id || (action === 'publish' && !article))) return missing('Content not found')
-    const screen = { title: contentTitle || title, fields, rows: [], revision, save_label: action === 'publish' ? 'Publish' : action === 'delete' ? 'Delete' : 'Save' }
+    const screen = { title: action === 'publish' ? 'Visibility' : contentTitle || title, fields, rows: [], revision,
+      allow_unchanged: action === 'publish' && article?.status === 'draft',
+      save_label: action === 'publish' && article?.status === 'draft' ? 'Publish' : action === 'delete' ? 'Delete' : 'Save' }
     if (!answer) return screen
     if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The content changed. Reopen it before saving.' })
     if (fields.length !== Object.keys(answer.values).length || fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this editor')
@@ -701,9 +869,14 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         else if (post) await deletePost(db, organization.id, id!, userId)
         else if (qa) await deleteQa(db, { ...scope, pagePath: qa.page_path }, id!)
       } else if (action === 'publish') {
-        if (values.confirm !== 'true') return invalid('Confirm publication')
-        if (article) await updateBlogLifecycle(db, id!, { updated_at: revision }, organization.id, userId)
-
+        const visibility = values.visibility
+        if (visibility !== 'listed' && visibility !== 'unlisted') return invalid('Choose article visibility')
+        if (!article || !id) return missing('Article not found')
+        if (article.status === 'draft' && !article.category) return invalid('Choose a category before publishing')
+        const changed = visibility !== article.visibility
+          ? await updateBlogPost(db, id, { visibility, updated_at: revision }, organization.id, userId, env)
+          : null
+        if (article.status === 'draft') await updateBlogLifecycle(db, id, { updated_at: changed?.post.updated_at ?? revision }, organization.id, userId)
       } else if (kind === 'article') {
         for (const edit of id ? [] : articleEdits) writeBlogLocalizedText(edit.block.data, edit.path, values[edit.key]!)
         const content = {
@@ -714,7 +887,10 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         if (article) await updateBlogPost(db, id!, { ...content, updated_at: revision }, organization.id, userId, env)
         else await createBlogPost(db, userId, { ...content, content_blocks: blocks as ContentBlockInput[], idempotency_key: answer.idempotency_key }, { organization_id: organization.id }, env)
       } else if (kind === 'post') {
+        const locationId = values.location || null
+        await assertResourceAccess(db, { ...principal, resourceLocationId: locationId })
         const changes = {
+          location_id: locationId,
           title: values.title || null, body: values.body || null,
           call_to_action: values.button_label || values.button_url ? { label: values.button_label, url: values.button_url } : null,
         }

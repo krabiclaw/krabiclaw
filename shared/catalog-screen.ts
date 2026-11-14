@@ -29,6 +29,7 @@ export interface CatalogField {
 
 export interface CatalogScreen {
   title: string
+  preview_url?: string | null
   rows: CatalogRow[]
   fields: CatalogField[]
   revision?: string
