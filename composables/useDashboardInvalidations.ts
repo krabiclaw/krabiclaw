@@ -163,15 +163,13 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
       if (socket !== nextSocket) return
       clearHealthTimer()
       socket = null
+      status.value = path.value ? 'failed' : 'closed'
       if (closed.code === 1008 && !receivedAccessChange) {
         if (organizationId.value) {
           event.value = { type: 'access.changed', organization_id: organizationId.value, event_id: crypto.randomUUID(), occurred_at: new Date().toISOString() }
         } else accessEnded.value++
       }
-      if (stopped || !path.value) {
-        status.value = 'closed'
-        return
-      }
+      if (stopped || !path.value) return
       scheduleReconnect()
     })
 

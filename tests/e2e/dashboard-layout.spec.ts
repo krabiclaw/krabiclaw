@@ -79,9 +79,24 @@ test.describe('dashboard pane hierarchy', () => {
     await page.keyboard.press(shortcut)
     await expect(dialog).toBeHidden()
 
-    await open(page, `${ORG}/messages`)
-    await page.getByTestId('dashboard-top-nav-menu-button').click()
-    await page.getByTestId('dashboard-search').click()
+    const inboxApi = (url: URL) => url.pathname === '/api/messages' && url.searchParams.get('offset') === '0' && !url.searchParams.has('ids')
+    const releaseInbox = Promise.withResolvers<undefined>()
+    let initialReads = 0
+    await page.route(inboxApi, async route => {
+      initialReads++
+      await releaseInbox.promise
+      await route.continue()
+    })
+    try {
+      await open(page, `${ORG}/messages`)
+      await page.getByTestId('dashboard-top-nav-menu-button').click()
+    } finally {
+      releaseInbox.resolve(undefined)
+    }
+    await expect(page.locator('[data-thread-row][aria-current="page"]')).toHaveCount(1)
+    expect(initialReads).toBe(1)
+    await page.unroute(inboxApi)
+    await page.getByRole('dialog', { name: 'Menu', exact: true }).getByTestId('dashboard-search').click()
     await expect(input).toBeFocused()
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()

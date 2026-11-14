@@ -12,10 +12,10 @@
       <UButton v-if="!personalScope && canManageMessages" icon="i-lucide-settings" color="neutral" variant="soft" class="rounded-full" aria-label="Messaging settings" @click="settingsOpen = true" />
       <UButton v-if="!personalScope && hasWorkspaceMembership" :to="`${listPath}/new`" icon="i-lucide-square-pen" color="neutral" variant="soft" class="rounded-full" aria-label="New conversation" />
     </template>
-    <ConversationList v-if="personalScope || hasWorkspaceMembership" ref="conversationList" :personal-scope="personalScope" @first="firstThread = $event">
+    <ConversationList v-if="session.data?.user.id && (personalScope || hasWorkspaceMembership)" ref="conversationList" :personal-scope="personalScope" @first="firstThread = $event">
       <template #filters><ReuseControls /></template>
     </ConversationList>
-    <UAlert v-else class="m-6" color="error" title="Messages are unavailable" description="Your membership does not allow access to conversations." />
+    <UAlert v-else-if="!session.isPending" class="m-6" color="error" title="Messages are unavailable" description="Your membership does not allow access to conversations." />
     <UAlert v-if="accessError" class="m-6" color="error" title="Conversation access changed" :description="accessError" />
     <UModal v-model:open="settingsOpen" title="Messaging settings">
       <template #body><MessagingSettings :manage="canManageMessages && dashboard.hasFeature('stays')" @navigate="settingsOpen = false" /></template>
