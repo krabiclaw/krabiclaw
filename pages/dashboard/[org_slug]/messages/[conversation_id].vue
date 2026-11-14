@@ -31,7 +31,7 @@ const listPath = personalScope ? '/dashboard/account/messages' : `/dashboard/${e
 const removeInboxConversation = inject(removeInboxConversationKey)
 const threadId = computed(() => String(route.params.conversation_id))
 const history = useConversation(threadId, personalScope)
-const { data, refresh } = await history.request
+const { data, refresh } = history.request
 const conversation = computed(() => data.value?.conversation)
 const sheetOpen = ref(false)
 const bookingTo = computed(() => personalScope ? conversation.value?.activity_path

@@ -177,11 +177,11 @@ async function loadOlder() {
   }
 }
 
-async function refresh(options?: Parameters<typeof refreshHead>[0], rebuild = true) {
+async function refresh(rebuild = true) {
   olderRequest?.abort()
   const previous = data.value ?? null
   const revision = accessRevision
-  await refreshHead(options)
+  await refreshHead()
   if (revision !== accessRevision) return
   if (!rebuild && retainOlder(previous)) return
   await reconcileOlder(previous?.page, older.value.length)
@@ -283,7 +283,7 @@ async function drainThreadChanges() {
       reconcileRequested = false
       const rebuild = rebuildRequested
       rebuildRequested = false
-      await refresh({ dedupe: 'defer' }, rebuild)
+      await refresh(rebuild)
     }
   } finally {
     reconciling = false
@@ -515,7 +515,10 @@ function resetTranscriptState() {
 
 watch(realtime.accessEnded, clearAccess, { flush: 'sync' })
 watch(realtime.event, event => {
-  if (!event || event.organization_id !== conversationOrganization.value) return
+  if (!event) return
+  const organization = conversationOrganization.value
+  if (organization !== undefined && event.organization_id !== organization) return
+  if (event.type === 'access.changed' && organization === undefined) return
   if (event.type === 'access.changed' || (event.type === 'CONVERSATION_LEAVE' && event.conversation_id === props.threadId && event.user_id === userId.value)) {
     clearAccess()
     if (event.type === 'access.changed') reconcileThread()
@@ -536,7 +539,7 @@ watch(error, cause => {
   if (cause?.statusCode === 403 || cause?.statusCode === 404) resetTranscriptState()
 }, { flush: 'sync' })
 
-watch(realtime.connectionEpoch, () => {
+watch(realtime.reconnectEpoch, () => {
   if (props.history.missedEvents()) reconcileThread(true)
 }, { immediate: true })
 
@@ -587,7 +590,7 @@ async function scrollToLatest(behavior: ScrollBehavior = 'smooth') {
   await nextTick()
   scroller.value?.scrollTo({ top: scroller.value.scrollHeight, behavior })
 }
-onMounted(() => { void scrollToLatest('instant') })
+watch(scroller, element => { if (element) void scrollToLatest('instant') }, { flush: 'post' })
 watch(() => newestShown.value?.id, () => {
   const el = scroller.value
   if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 120) void scrollToLatest()

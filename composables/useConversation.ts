@@ -24,5 +24,5 @@ export function useConversation(threadId: Ref<string> | ComputedRef<string>, per
     if (error?.statusCode === 403 || error?.statusCode === 404) request.data.value = undefined
   }, { flush: 'sync' })
 
-  return { request, readPage, path, organizationId, missedEvents: () => realtime.connectionEpoch.value > readConnectionEpoch }
+  return { request, readPage, path, organizationId, missedEvents: () => realtime.reconnectEpoch.value > readConnectionEpoch }
 }
