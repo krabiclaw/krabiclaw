@@ -192,47 +192,6 @@ test('the conversation migration grants only known guests, owners, and team seat
   }
 })
 
-test('removing reply tasks keeps messages and unrelated task deliveries', () => {
-  const database = new Database(':memory:')
-  database.pragma('foreign_keys = ON')
-  try {
-    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
-    for (const entry of journal.entries.slice(0, journal.entries.findIndex(entry => entry.tag === '0005_remove_guest_reply_tasks'))) {
-      database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
-    }
-    database.exec(`
-      INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org', 'Studio', 'studio', 'USD', 'UTC');
-      INSERT INTO conversations (id, organization_id, kind, payload_json, last_message_at)
-        VALUES ('contact', 'org', 'contact', '{"guest":{"name":"Guest","email":"guest@example.test","phone":null}}', '2026-11-13T00:00:00.000Z');
-      INSERT INTO messages (id, organization_id, conversation_id, sequence, author_kind, body, dedupe_key, occurred_at)
-        VALUES ('m', 'org', 'contact', 1, 'guest', 'Is this available?', 'guest-question', '2026-11-13T00:00:00.000Z');
-      INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, title, timezone, status, dedupe_key, created_at, updated_at)
-        VALUES ('reply', 'org', 'guest_reply', 'conversation', 'contact', NULL, 'UTC', 'open', 'guest_reply:contact:m', '2026-11-13T00:00:00.000Z', '2026-11-13T00:00:00.000Z'),
-          ('other', 'org', 'custom', NULL, NULL, 'Restock supplies', 'UTC', 'open', 'restock', '2026-11-13T00:00:00.000Z', '2026-11-13T00:00:00.000Z');
-      INSERT INTO guest_thread_deliveries (id, task_id, message_id, channel, provider, purpose, status)
-        VALUES ('other-alert', 'other', NULL, 'email', 'log_only', 'task_assigned', 'sent'),
-          ('old-reply-alert', 'reply', NULL, 'email', 'log_only', 'task_assigned', 'sent'),
-          ('message-alert', NULL, 'm', 'email', 'log_only', 'owner_alert', 'sent');
-      INSERT INTO media_assets (id, organization_id, kind, provider, source) VALUES ('photo', 'org', 'image', 'cloudflare_r2', 'upload');
-      INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id)
-        VALUES ('retired-photo', 'org', 'task', 'reply', 'attachments', 'photo'),
-          ('retained-photo', 'org', 'task', 'other', 'attachments', 'photo');
-    `)
-    database.transaction(() => database.exec(readFileSync('migrations/0005_remove_guest_reply_tasks.sql', 'utf8')))()
-    assert.deepEqual(database.prepare('SELECT id, kind, title FROM tasks').all(), [{ id: 'other', kind: 'custom', title: 'Restock supplies' }])
-    assert.deepEqual(database.prepare('SELECT id, task_id, message_id, status FROM guest_thread_deliveries ORDER BY id').all(), [
-      { id: 'message-alert', task_id: null, message_id: 'm', status: 'sent' },
-      { id: 'other-alert', task_id: 'other', message_id: null, status: 'sent' },
-    ])
-    assert.deepEqual(database.prepare('SELECT id, owner_id FROM media_placements').all(), [{ id: 'retained-photo', owner_id: 'other' }])
-    assert.equal(database.prepare("SELECT body FROM messages WHERE id = 'm'").pluck().get(), 'Is this available?')
-    assert.deepEqual(database.pragma('foreign_key_check'), [])
-    assert.throws(() => database.prepare("UPDATE tasks SET kind = 'guest_reply' WHERE id = 'other'").run(), /tasks_kind_check/)
-  } finally {
-    database.close()
-  }
-})
-
 test('the v25 forward migration initializes the internal name of an existing home', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')

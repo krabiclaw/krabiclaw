@@ -12,7 +12,7 @@ import { createProduct, deleteProduct, getProduct, removeProductLocation, setPro
 import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayGapCandidates, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { readBusinessProgressReference } from '../../server/utils/business-outcomes.ts'
 import { dismissOpportunity, listOpportunities } from '../../server/domain/opportunities.ts'
-import { listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
+import { getTask, listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { H3Event } from 'h3'
@@ -1408,7 +1408,12 @@ test('unknown home clocks preserve turnover dates without inventing task instant
     const membership = await resolveMembership(env, { organizationId: ORG, userId: CLEANER })
     const viewer = await taskViewer(memberAccessPrincipal(membership!, { env }))
     const before = new Date('2026-11-02T18:00:00.000Z')
+    // An earlier deployed Worker can still write an old reply task during the rollout.
+    await db.prepare(`INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, assigned_member_id, timezone, status, dedupe_key, created_at, updated_at)
+      VALUES ('retired-reply', ?, 'guest_reply', 'conversation', ?, ?, 'UTC', 'open', 'retired-reply', ?, ?)`)
+      .bind(ORG, first.conversation_id, `m-${CLEANER}`, before.toISOString(), before.toISOString()).run()
     assert.deepEqual((await listTasks(db, viewer, parseTaskListQuery({}), before)).sections, [])
+    await assert.rejects(getTask(db, viewer, 'retired-reply', before), { status: 404 })
     const upcoming = await listTasks(db, viewer, parseTaskListQuery({ range: 'upcoming' }), before)
     assert.deepEqual(upcoming.sections.map(section => [section.id, section.tasks.map(task => task.booking_id)]), [['2026-11-03', [first.id]], ['2026-11-05', [next.id]]])
     assert.equal(upcoming.sections[0]!.title, 'Tomorrow')

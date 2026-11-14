@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "dcc04aa1-68e7-4a61-aaaa-7daffc92cf15",
+  "id": "2b3bbda1-eef5-40a2-89e7-d7d2e01caed7",
   "prevId": "6d720722-e050-4b29-8847-8fd20b3efcea",
   "tables": {
     "account": {
@@ -6340,7 +6340,16 @@
           "name": "messages_conversation_event_idx",
           "columns": [
             "conversation_id",
-            "event_name"
+            "event_name",
+            "author_kind"
+          ],
+          "isUnique": false
+        },
+        "messages_conversation_author_idx": {
+          "name": "messages_conversation_author_idx",
+          "columns": [
+            "conversation_id",
+            "author_kind"
           ],
           "isUnique": false
         }
@@ -16269,7 +16278,7 @@
       "checkConstraints": {
         "tasks_kind_check": {
           "name": "tasks_kind_check",
-          "value": "kind IN ('turnover', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up')\n    AND (subject_type IS NULL) = (subject_id IS NULL)\n    AND (subject_type IS NULL OR subject_type IN ('conversation', 'scheduled_guest_message', 'booking', 'product_session', 'article', 'post', 'product'))\n    AND (kind <> 'custom' OR subject_type IS NULL)\n    AND ((kind = 'opportunity') = (opportunity_id IS NOT NULL))"
+          "value": "kind IN ('turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up')\n    AND (subject_type IS NULL) = (subject_id IS NULL)\n    AND (subject_type IS NULL OR subject_type IN ('conversation', 'scheduled_guest_message', 'booking', 'product_session', 'article', 'post', 'product'))\n    AND (kind <> 'custom' OR subject_type IS NULL)\n    AND ((kind = 'opportunity') = (opportunity_id IS NOT NULL))"
         },
         "tasks_text_check": {
           "name": "tasks_text_check",

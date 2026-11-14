@@ -40,15 +40,8 @@
     {
       "idx": 5,
       "version": "6",
-      "when": 1794633928534,
-      "tag": "0005_remove_guest_reply_tasks",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1794636572416,
-      "tag": "0006_index_support_conversation_messages",
+      "when": 1794638164396,
+      "tag": "0005_index_support_conversation_messages",
       "breakpoints": true
     }
   ]

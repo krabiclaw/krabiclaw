@@ -378,7 +378,7 @@ export const opportunities = sqliteTable('opportunities', {
 export const tasks = sqliteTable('tasks', {
   id: text().primaryKey(),
   organization_id: text().notNull().references(() => organization.id, { onDelete: 'cascade' }),
-  kind: text({ enum: ['turnover', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up'] }).notNull(),
+  kind: text({ enum: ['turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up'] }).notNull(),
   subject_type: text({ enum: ['conversation', 'scheduled_guest_message', 'booking', 'product_session', 'article', 'post', 'product'] }),
   subject_id: text(),
   product_id: text(),
@@ -407,7 +407,7 @@ export const tasks = sqliteTable('tasks', {
   index('tasks_status_due_idx').on(table.organization_id, table.status, table.due_at),
   index('tasks_member_status_due_idx').on(table.organization_id, table.assigned_member_id, table.status, table.due_at),
   index('tasks_subject_idx').on(table.subject_type, table.subject_id),
-  check('tasks_kind_check', sql`kind IN ('turnover', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up')
+  check('tasks_kind_check', sql`kind IN ('turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up')
     AND (subject_type IS NULL) = (subject_id IS NULL)
     AND (subject_type IS NULL OR subject_type IN ('conversation', 'scheduled_guest_message', 'booking', 'product_session', 'article', 'post', 'product'))
     AND (kind <> 'custom' OR subject_type IS NULL)

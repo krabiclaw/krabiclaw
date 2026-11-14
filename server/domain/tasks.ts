@@ -22,6 +22,7 @@ import { getVerticalCopy } from '~/utils/vertical-copy'
 */
 
 export const TASK_KINDS = ['turnover', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up'] as const
+export const SUPPORTED_TASK_KIND_SQL = `IN (${TASK_KINDS.map(kind => `'${kind}'`).join(', ')})`
 export type TaskKind = typeof TASK_KINDS[number]
 export type TaskStatus = 'open' | 'done' | 'skipped' | 'cancelled'
 
@@ -284,7 +285,7 @@ export async function taskViewer(principal: MemberAccessPrincipal): Promise<Task
 /** A member reads the tasks given to them, every task at an offering or location they are responsible for. */
 function scopeSql(viewer: TaskViewer, alias = 't'): { sql: string; params: unknown[] } {
   const { organizationId, userId } = viewer.principal
-  const membership = 'EXISTS (SELECT 1 FROM member m WHERE m.id = ? AND m.organizationId = ? AND m.userId = ?)'
+  const membership = `${alias}.kind ${SUPPORTED_TASK_KIND_SQL} AND EXISTS (SELECT 1 FROM member m WHERE m.id = ? AND m.organizationId = ? AND m.userId = ?)`
   const memberParams = [viewer.memberId, organizationId, userId]
   if (viewer.manage) return { sql: membership, params: memberParams }
   return {
@@ -829,7 +830,7 @@ export async function describeTaskForAlert(db: DbClient, organizationId: string,
 
 /** A task as one member sees it, from a server path with no caller: the member projection, with no guest's full name or contact. */
 export async function taskViewForUser(db: DbClient, organizationId: string, taskId: string, userId: string | null, now = new Date()): Promise<TaskView> {
-  const row = await queryFirst<TaskRow>(db, 'SELECT * FROM tasks WHERE organization_id = ? AND id = ?', [organizationId, taskId])
+  const row = await queryFirst<TaskRow>(db, `SELECT * FROM tasks WHERE organization_id = ? AND id = ? AND kind ${SUPPORTED_TASK_KIND_SQL}`, [organizationId, taskId])
   if (!row) throw new Error(`Task ${taskId} is not in organization ${organizationId}`)
   // The recipient's own membership answers what they may read; a view for nobody (a job with no people yet) reads as a member with no role.
   const member = userId === null ? null : await queryFirst<{ id: string; role: string }>(db, 'SELECT id, role FROM member WHERE organizationId = ? AND userId = ?', [organizationId, userId])
