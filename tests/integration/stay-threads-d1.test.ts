@@ -57,9 +57,8 @@ test('a stay opens its guest conversation in the one inbox', async () => {
       stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: `m-${CLEANER}` },
     } })
     const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, role, organizationId: ORG }, { env })
-    const thread = (requestId: string) => db.prepare(`SELECT kind, location_id, payload_json,
-      (SELECT count(*) FROM tasks WHERE kind = 'guest_reply' AND subject_type = 'conversation' AND subject_id = conversations.id AND status = 'open') AS open_replies
-      FROM conversations WHERE id = ?`).bind(requestId).first<{ kind: string; location_id: string; payload_json: string; open_replies: number }>()
+    const thread = (requestId: string) => db.prepare('SELECT kind, location_id, payload_json FROM conversations WHERE id = ?')
+      .bind(requestId).first<{ kind: string; location_id: string; payload_json: string }>()
     const messageCount = (requestId: string) => db.prepare('SELECT count(*) AS n FROM messages WHERE conversation_id = ?').bind(requestId).first('n')
 
     // A host stay opens its guest conversation, with nothing said in it yet. Every booking has one.
@@ -68,7 +67,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
       guest_name: 'Ana Silva', guest_email: 'ana@example.test', guest_phone: '+61491570150', total_minor: 45_000 })
     const anaThread = await thread(ana.conversation_id)
     assert.deepEqual({ ...anaThread, payload_json: JSON.parse(anaThread!.payload_json) }, {
-      kind: 'booking', location_id: 'cabin-site', open_replies: 0,
+      kind: 'booking', location_id: 'cabin-site',
       payload_json: { guest: { name: 'Ana Silva', email: 'ana@example.test', phone: '+61491570150' }, ...unanswered },
     })
     assert.equal(await messageCount(ana.conversation_id), 0)

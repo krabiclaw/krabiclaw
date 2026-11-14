@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:ed72b4937569562c88e3e8f0594a5907acb6a7f9cd567c5e2f67e8f40dcab019",
-  "documentationFingerprint": "sha256:f0a06b05817c0ecf93e5d2fdc4d7617be48fd0983544bd533d326aa606d87559",
+  "fingerprint": "sha256:7880b3fde97ecfcea1bd211290d3715fbe1942deb167f2565ea4addca27f05e5",
+  "documentationFingerprint": "sha256:a7839b1d01bbe1b0d55ac8afd9bd0510afc141050dec8e8672f37dcf4dc6e72a",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -171,7 +171,6 @@
               "kind": {
                 "enum": [
                   "turnover",
-                  "guest_reply",
                   "message_delivery",
                   "booking_review",
                   "booking_change",
@@ -13629,7 +13628,7 @@
     {
       "name": "complete_task",
       "title": "Complete task",
-      "description": "Mark a task done, with what you found and an optional photo. A guest reply or a failed message is done when the reply goes out or the message is fixed, so it cannot be completed here.",
+      "description": "Mark a task done, with what you found and an optional photo. Fix failed scheduled messages from their conversation.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -13806,7 +13805,6 @@
               "kind": {
                 "enum": [
                   "turnover",
-                  "guest_reply",
                   "message_delivery",
                   "booking_review",
                   "booking_change",
@@ -37759,7 +37757,6 @@
               "kind": {
                 "enum": [
                   "turnover",
-                  "guest_reply",
                   "message_delivery",
                   "booking_review",
                   "booking_change",
@@ -71523,7 +71520,7 @@
     {
       "name": "list_tasks",
       "title": "List tasks",
-      "description": "Read Today or Upcoming as stored tasks: turnovers, guest questions awaiting a reply, scheduled messages that did not send, accepted opportunities and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them and the turnovers at homes they look after. assignees lists who a manager can give work to.",
+      "description": "Read Today or Upcoming as stored tasks: turnovers, booking decisions, scheduled messages that did not send, accepted opportunities and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them and the turnovers at homes they look after. assignees lists who a manager can give work to.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -71534,7 +71531,6 @@
           "kind": {
             "enum": [
               "turnover",
-              "guest_reply",
               "message_delivery",
               "booking_review",
               "booking_change",
@@ -71756,7 +71752,6 @@
                       "kind": {
                         "enum": [
                           "turnover",
-                          "guest_reply",
                           "message_delivery",
                           "booking_review",
                           "booking_change",
@@ -99942,7 +99937,7 @@
     {
       "name": "set_conversation_archived",
       "title": "Set conversation archived",
-      "description": "Archive a conversation for yourself (it moves to Past until someone else writes in it) or restore it. Archiving a guest conversation also dismisses its open reply task. It cancels no booking, sends nothing and leaves everyone else’s Messages unchanged. A conversation quiet for 30 days stays in Past; a blocked one is in Blocked.",
+      "description": "Archive a conversation for yourself (it moves to Past until someone else writes in it) or restore it. It cancels no booking, sends nothing and leaves everyone else’s Messages unchanged. A conversation quiet for 30 days stays in Past; a blocked one is in Blocked.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -102625,7 +102620,7 @@
     {
       "name": "skip_task",
       "title": "Skip task",
-      "description": "Skip or dismiss a task, optionally saying why. A dismissed guest question stays dismissed until the guest writes again.",
+      "description": "Skip or dismiss a task, optionally saying why.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -102780,7 +102775,6 @@
               "kind": {
                 "enum": [
                   "turnover",
-                  "guest_reply",
                   "message_delivery",
                   "booking_review",
                   "booking_change",
@@ -127501,7 +127495,6 @@
               "kind": {
                 "enum": [
                   "turnover",
-                  "guest_reply",
                   "message_delivery",
                   "booking_review",
                   "booking_change",

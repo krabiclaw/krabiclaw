@@ -177,7 +177,7 @@ const loadingMore = ref(false)
 let pageController: AbortController | null = null
 let loadedScope = listKey.value
 let loadedPages = 1
-let readConnectionEpoch = 0
+let readConnectionEpoch: number | null = null
 const listScope = computed(() => props.personalScope ? {} : { organization_id: organizationId.value })
 async function loadPage(offset: number, signal?: AbortSignal): Promise<ThreadListPage> {
   if (!props.personalScope && !organizationId.value) throw createError({ statusCode: 400, statusMessage: 'Messages require a workspace' })
@@ -222,6 +222,8 @@ const { data, pending, error: threadsError, refresh, clear } = await useAsyncDat
   pageController?.abort()
   nextPageError.value = null
   const scope = listKey.value
+  if (readConnectionEpoch === null) await realtime.waitForFirstOpen(signal)
+  if (signal.aborted || scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
   readConnectionEpoch = realtime.connectionEpoch.value
   if (loadedScope !== scope) { loadedScope = scope; loadedPages = 1 }
   const { page, fetched } = await loadWindow(loadedPages, scope, signal)
@@ -231,10 +233,16 @@ const { data, pending, error: threadsError, refresh, clear } = await useAsyncDat
   return page
 }, {
   server: !props.personalScope,
+  lazy: true,
   getCachedData(cacheKey, nuxtApp, ctx) {
     if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
     const cached = nuxtApp.payload.data[cacheKey] as ThreadListPage | undefined
-    if (cached) rowsKey.value = cacheKey
+    if (cached) {
+      rowsKey.value = cacheKey
+      // A rendered snapshot has no browser subscription. Repair its gap once
+      // the socket opens. A fresh client read below can start after the open.
+      readConnectionEpoch = 0
+    }
     return cached
   },
 })
@@ -477,6 +485,6 @@ watch(realtime.event, event => {
 
 watch(realtime.accessEnded, clearInbox, { flush: 'sync' })
 watch(realtime.connectionEpoch, epoch => {
-  if (epoch > readConnectionEpoch) reconcile()
+  if (readConnectionEpoch !== null && epoch > readConnectionEpoch) reconcile()
 }, { immediate: true })
 </script>

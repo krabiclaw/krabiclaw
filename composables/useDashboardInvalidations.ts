@@ -13,10 +13,12 @@ export interface DashboardInvalidationConnection {
   connectionEpoch: Ref<number>
   accessEnded: Ref<number>
   connect: () => void
+  waitForFirstOpen: (signal: AbortSignal) => Promise<void>
 }
 
 const dashboardInvalidationKey: InjectionKey<DashboardInvalidationConnection> = Symbol('dashboard-invalidations')
 const CONNECT_TIMEOUT_MS = 8_000
+const INITIAL_READ_WAIT_MS = 350
 const HEARTBEAT_INTERVAL_MS = 20_000
 const HEARTBEAT_TIMEOUT_MS = 8_000
 
@@ -26,7 +28,7 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
   // `yarn dev:worker`, staging and production; here the dashboard stays on its
   // reads instead of retrying a connection that cannot open and reporting it.
   if (import.meta.dev) {
-    return { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), accessEnded: ref(0), connect: () => {} }
+    return { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), accessEnded: ref(0), connect: () => {}, waitForFirstOpen: async () => {} }
   }
 
   const status = ref<DashboardInvalidationStatus>('closed')
@@ -98,8 +100,8 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     nextSocket.addEventListener('open', () => {
       if (socket !== nextSocket) return
       reconnectAttempt = 0
-      status.value = 'open'
       connectionEpoch.value += 1
+      status.value = 'open'
       scheduleHeartbeat(nextSocket)
     })
 
@@ -152,6 +154,25 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     })
   }
 
+  /** Start a cold read after its subscription, unless the socket is slow or unavailable. */
+  async function waitForFirstOpen(signal: AbortSignal) {
+    if (!import.meta.client || signal.aborted || status.value === 'open' || status.value === 'failed' || !window.navigator.onLine) return
+    connect()
+    await new Promise<void>(resolve => {
+      const stop = watch(status, value => {
+        if (value === 'open' || value === 'failed' || value === 'closed') finish()
+      }, { flush: 'sync' })
+      const timer = setTimeout(finish, INITIAL_READ_WAIT_MS)
+      signal.addEventListener('abort', finish, { once: true })
+      function finish() {
+        clearTimeout(timer)
+        stop()
+        signal.removeEventListener('abort', finish)
+        resolve()
+      }
+    })
+  }
+
   function resetConnection() {
     clearReconnectTimer()
     clearHealthTimer()
@@ -179,7 +200,11 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     if (!stopped && path.value) connect()
   }
 
-  watch([path, reader], resetConnection, { flush: 'sync' })
+  watch(path, resetConnection, { flush: 'sync' })
+  watch(reader, (next, previous) => {
+    // Learning the identity of the session already used in the handshake does not change it.
+    if (previous !== undefined && next !== undefined && next !== previous) resetConnection()
+  }, { flush: 'sync' })
 
   onMounted(() => {
     mounted = true
@@ -199,12 +224,12 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     status.value = 'closed'
   })
 
-  return { status, event, connectionEpoch, accessEnded, connect }
+  return { status, event, connectionEpoch, accessEnded, connect, waitForFirstOpen }
 }
 
-export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>, personal: Readonly<Ref<boolean>>, reader: Readonly<Ref<string | undefined>>): DashboardInvalidationConnection {
+export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>, personal: Readonly<Ref<boolean>>, reader: Readonly<Ref<string | undefined>>, sessionPending: Readonly<Ref<boolean>>): DashboardInvalidationConnection {
   const path = computed(() => {
-    if (!reader.value) return null
+    if (!reader.value && !sessionPending.value) return null
     if (organizationSlug.value) return `/api/dashboard/guest-inbox/socket?org=${encodeURIComponent(organizationSlug.value)}`
     return personal.value ? '/api/dashboard/guest-inbox/socket?scope=account' : null
   })

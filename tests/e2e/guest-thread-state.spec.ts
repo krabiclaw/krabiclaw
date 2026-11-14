@@ -169,13 +169,6 @@ type StreamEvent = Extract<ConversationEntry, { type: 'event' }>
 const streamMessages = (thread: ConversationHeader & { stream: ConversationEntry[] }) => thread.stream.filter((item): item is StreamMessage => item.type === 'message')
 const streamEvents = (thread: ConversationHeader & { stream: ConversationEntry[] }, text: string) => thread.stream.filter((item): item is StreamEvent => item.type === 'event' && item.text === text)
 
-/** The owner's reply tasks on Today, open and done today, for one conversation. */
-async function loadReplyTasks(request: APIRequestContext, slug: string, threadId: string) {
-  const response = await request.get('/api/dashboard/today', { params: { org: slug, kind: 'guest_reply' } })
-  await expectStatus(response, 200)
-  return (await response.json() as BusinessToday).tasks.map(section => ({ section: section.id, tasks: section.tasks.filter(task => task.conversation_id === threadId) })).filter(section => section.tasks.length)
-}
-
 /** Opening a conversation reads it through to the newest message shown; the GET that showed it wrote nothing. */
 async function readThrough(request: APIRequestContext, thread: ConversationHeader & { stream: ConversationEntry[] }) {
   const newest = thread.stream.filter(item => item.type !== 'day').at(-1)!.id
@@ -239,14 +232,6 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     })
     // The guest's own words open the conversation, once, as their message.
     expect(streamMessages(detail)).toMatchObject([{ side: 'guest', author: guestName, body: message, photos: [] }])
-    // The guest's question is the business's to answer: one open reply task on Today, which opens the conversation.
-    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({
-      kind: 'guest_reply', status: 'open', title: `Thread${nonce}`, detail: message, conversation_id: threadId, outcome: null,
-      action: { type: 'open', label: 'Reply', path: expect.stringContaining(threadId) },
-      can: expect.objectContaining({ complete: false }),
-    })] }])
-    const replyTask = (await loadReplyTasks(owner, organizationSlug(), threadId))[0]!.tasks[0]!
-
     // Showing the conversation wrote nothing; reading it through is this owner's alone.
     expect((await loadThreadList(owner, guestName)).threads[0]).toMatchObject({ id: threadId, unread: true })
     await readThrough(owner, detail)
@@ -310,10 +295,6 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
       preview_from: 'You',
       unread: false,
     })
-    // A reply is an answer once a provider accepted it. This environment delivers email log-only, so the record
-    // shows no delivered answer: the one reply task stays open, for every owner alike.
-    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open', outcome: null })] }])
-    expect(await loadReplyTasks(secondOwner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open' })] }])
   } finally {
     await Promise.all([owner.dispose(), guest.dispose(), secondOwner.dispose(), foreignOwner.dispose()])
   }
@@ -381,10 +362,6 @@ test('archive and Move to messages file a conversation for the one member, witho
     expect((await loadMailbox(owner, 'current')).some(thread => thread.id === threadId)).toBe(false)
     expect((await loadMailbox(owner, 'past')).some(thread => thread.id === threadId)).toBe(true)
     expect((await loadMailbox(secondOwner, 'current')).some(thread => thread.id === threadId)).toBe(true)
-    // Archiving dismisses the reply the owner owed, as Dismiss does.
-    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'done', tasks: [
-      expect.objectContaining({ kind: 'guest_reply', status: 'skipped', conversation_id: threadId, outcome: expect.objectContaining({ closed_by: 'You' }) }),
-    ] }])
     expect(await loadThreadActions(owner, threadId)).toMatchObject({ archive: false, unarchive: true })
 
     const unarchive = () => owner.post(archiveUrl, { headers: authRequestHeaders(baseURL), data: { archived: false } })
@@ -969,10 +946,6 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     // A guest's request is a message for the business to answer; the reservation itself has not moved.
     const requested = await loadThreadDetail(owner, threadId, demoOrganizationId())
     expect(await read()).toMatchObject({ party_size: 2, booking_date: original.booking_date, booking_time: original.booking_time })
-    // It is the owner's open reply task on Today, quoting the guest's words.
-    expect(await loadReplyTasks(owner, demoSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({
-      kind: 'guest_reply', status: 'open', detail: changeMessage, conversation_id: threadId,
-    })] }])
     const customerRequest = streamMessages(requested).filter(item => item.side === 'guest' && item.body === changeMessage)
     expect(customerRequest).toMatchObject([{ author: 'E2E Buyer' }])
     const requestDelivery = await owner.get('/api/dev/notifications', { headers: devLoginHeaders(), params: { organization_id: demoOrganizationId(), since: sent_at } })

@@ -2,7 +2,7 @@
   <article class="tc" :class="[`is-${face}`, { 'is-closed': task && task.status !== 'open', 'is-reservation': reservation }]" :data-testid="booking ? 'today-reservation' : opportunity ? 'today-opportunity' : 'today-task'" :data-task-id="task?.id" :data-task-kind="task?.kind" :data-opportunity-id="opportunity?.id" :data-reservation-kind="booking?.kind">
     <NuxtLink v-if="destination" :to="destination" class="tc-target" :aria-label="title" />
     <button v-else type="button" class="tc-target" :aria-label="title" @click="emit('open')" />
-    <button v-if="opportunity || task?.dismiss?.card" type="button" class="tc-dismiss" :aria-label="opportunity ? 'Dismiss suggestion' : `${task!.dismiss!.label} task`" :disabled="busy" :data-testid="opportunity ? 'today-opportunity-dismiss' : 'today-task-dismiss'" @click="opportunity ? emit('dismiss') : emit('skip')">
+    <button v-if="opportunity" type="button" class="tc-dismiss" aria-label="Dismiss suggestion" :disabled="busy" data-testid="today-opportunity-dismiss" @click="emit('dismiss')">
       <UIcon name="i-lucide-x" class="size-4" />
     </button>
     <div v-if="reservation" class="tc-reservation-main">
@@ -12,7 +12,6 @@
       <span v-if="reservation.name" class="mt-3 block text-base font-medium">{{ reservation.name }}</span>
       <span v-if="reservation.status_label" class="mt-2 block text-sm text-muted">{{ reservation.status_label }}</span>
       <span v-if="reservation.note_label" class="mt-2 inline-flex items-center gap-1.5 text-sm text-muted"><UIcon name="i-lucide-square-pen" class="size-4" />{{ reservation.note_label }}</span>
-      <span v-if="reservation.conversation?.description" class="mt-5 block text-sm text-muted">{{ reservation.conversation.description }}</span>
     </div>
     <!-- The suggestion for this booking: it opens the conversation with its message written for the owner to review and send. -->
     <div v-if="booking?.suggestion" class="tc-suggest">
@@ -62,7 +61,7 @@ import { isOfferingSetupPath, withOfferingReturnTo } from '~/shared/offering-set
 
 /** A task, an opportunity, or a booking with the suggestion at its foot. */
 const props = defineProps<{ task?: TaskView; opportunity?: OpportunityView; booking?: TodayReservation; busy?: boolean }>()
-const emit = defineEmits<{ open: []; skip: []; dismiss: [] }>()
+const emit = defineEmits<{ open: []; dismiss: [] }>()
 
 const face = computed(() => props.task?.face ?? 'compact')
 const route = useRoute()
@@ -70,10 +69,7 @@ const destination = computed(() => {
   const path = props.booking?.to ?? props.opportunity?.path ?? (props.task?.action?.type === 'open' ? props.task.action.path : null)
   return path && isOfferingSetupPath(path.split(/[?#]/, 1)[0]!) ? withOfferingReturnTo(path, route.fullPath) : path
 })
-// A booking and a guest's reply about a stay draw the same reservation face.
-const reservation = computed(() => props.booking
-  ? { ...props.booking, conversation: null }
-  : props.task?.reservation ? { ...props.task.reservation, note_label: null } : null)
+const reservation = computed(() => props.booking)
 const statusLine = computed(() => props.task?.status_line ?? null)
 const title = computed(() => props.booking?.headline ?? props.task?.title ?? props.opportunity!.title)
 const detail = computed(() => props.task?.detail ?? props.opportunity?.detail ?? null)

@@ -79,7 +79,7 @@ export const CONVERSATION_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'mark_conversation_unread', domain: 'conversations', minimumRole: 'member', description: 'Mark a conversation unread for you: its newest message from someone else is unread again. Needs a message from someone else (409 NOTHING_TO_MARK). Changes only your own read position.',
     inputSchema: { conversation_id: conversationId }, required: ['conversation_id'], outputSchema: readState,
   }),
-  organizationTool({ name: 'set_conversation_archived', domain: 'conversations', minimumRole: 'member', description: 'Archive a conversation for yourself (it moves to Past until someone else writes in it) or restore it. Archiving a guest conversation also dismisses its open reply task. It cancels no booking, sends nothing and leaves everyone else’s Messages unchanged. A conversation quiet for 30 days stays in Past; a blocked one is in Blocked.',
+  organizationTool({ name: 'set_conversation_archived', domain: 'conversations', minimumRole: 'member', description: 'Archive a conversation for yourself (it moves to Past until someone else writes in it) or restore it. It cancels no booking, sends nothing and leaves everyone else’s Messages unchanged. A conversation quiet for 30 days stays in Past; a blocked one is in Blocked.',
     inputSchema: { conversation_id: conversationId, archived: { type: 'boolean' } }, required: ['conversation_id', 'archived'],
     outputSchema: { type: 'object', properties: { conversation_id: text, archived: { type: 'boolean' } }, required: ['conversation_id', 'archived'], additionalProperties: false },
   }),

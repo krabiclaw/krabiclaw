@@ -12,7 +12,7 @@ import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deli
 import { MEMBER_REPLY_EVENT, SCHEDULED_MESSAGE_EVENT, MessageDedupeConflictError, MessageStateConflictError, appendChatMessage, conversationMessageGuard, findMessageByDedupeKey, messageQueries, parseMessagePayload, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
 import { listMessagePhotos, MessagePhotoRejection, messagePhotoCount, messagePhotoHashes, type MessagePhotoInput } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
-import { conversationReplyTaskQueries, conversationTaskQueries, reconcileConversationTasks } from './repository'
+import { conversationTaskQueries, reconcileConversationTasks } from './repository'
 import { renderNotificationEmail } from '~/server/emails/render'
 import { guestThreadReplyMessage, guestThreadStatusMessage } from '~/server/notifications/guest-events'
 import { organizationLogo } from '~/server/notifications/hero'
@@ -37,10 +37,6 @@ import type {
   GuestThreadSubmissionType,
 } from './types'
 
-// Whether the business owes a reply is its open guest_reply task
-// (server/domain/tasks.ts): a reply, a cancellation, archiving or blocking
-// closes it. There is no separate resolve or reopen. Archiving is each
-// person's own (conversations.ts archiveQuery), not an operation here.
 type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[] }
 
 export type OperationFailure =
@@ -712,7 +708,7 @@ export async function moderateGuestThread(db: DbClient, input: {
     const [update] = await executeBatch(db, [{
       query: 'UPDATE conversations SET blocked_at = NULL WHERE organization_id = ? AND id = ? AND blocked_at IS NOT NULL',
       params: [thread.organization_id, thread.id],
-    }, ...conversationReplyTaskQueries(thread.id, now)], { operation: 'Unblock a guest' })
+    }], { operation: 'Unblock a guest' })
     if ((update?.meta?.changes ?? 0) === 0 && thread.blocked_at === null) return conflict('This guest is not blocked')
     return { ok: true, status: 200 }
   }
@@ -730,7 +726,7 @@ export async function moderateGuestThread(db: DbClient, input: {
     ...(block ? [{
       query: 'UPDATE conversations SET blocked_at = COALESCE(blocked_at, ?) WHERE organization_id = ? AND id = ? AND changes() = 1',
       params: [now, thread.organization_id, thread.id],
-    }, ...conversationReplyTaskQueries(thread.id, now)] : []),
+    }] : []),
   ], { operation: block ? 'Block and report a guest' : 'Report a guest conversation' })
   await assertSameReport(db, id, { subject: 'conversation', conversationId: thread.id, messageId: null, reason, blocked: block })
   await announceContentReport(input.env, db, id)

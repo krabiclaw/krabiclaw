@@ -278,7 +278,7 @@ const realtimeOrganizationSlug = computed(() => {
 })
 const realtimePersonal = computed(() => !stoppingImpersonation.value && !realtimeOrganizationSlug.value
   && /^\/dashboard\/account\/(messages|activity)(\/|$)/.test(router.currentRoute.value.path))
-const realtime = provideDashboardInvalidations(realtimeOrganizationSlug, realtimePersonal, computed(() => sessionData.value?.user.id))
+const realtime = provideDashboardInvalidations(realtimeOrganizationSlug, realtimePersonal, computed(() => sessionData.value?.user.id), computed(() => session.value.isPending))
 
 // A failed background refetch leaves the shell on what it had and says so;
 // a dropped live connection leaves every screen on its last read. Either is

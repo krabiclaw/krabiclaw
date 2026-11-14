@@ -157,10 +157,9 @@ Business Today and Upcoming show two stored things
 (`project/tasks-and-opportunities.md` in the design system):
 
 - **Tasks** (`tasks`, `server/domain/tasks.ts`): work someone has to do, with
-  an assignee, a window, and who closed it and when. A turnover, a guest's
-  unanswered question and a scheduled message that did not send are opened and
-  closed by the batch that changes their subject; an accepted opportunity and a
-  task a person adds are closed by a person.
+  an assignee, a window, and who closed it and when. A turnover and a failed
+  scheduled delivery follow their source records. A person closes an accepted
+  opportunity or a task they add.
 - **Opportunities** (`opportunities`, `server/domain/opportunities.ts`): what
   `readBusinessRecommendations` finds the business could do, recorded against
   its evidence revision. Owners and admins see suggestions in the same card
@@ -175,30 +174,22 @@ links to its public address. Before publishing, a workspace created through
 onboarding can see up to three suggestions. Stripe setup, a custom domain,
 and the first catalog item for its business type take priority when they apply.
 The task sheet holds assignment and completion controls for work that a person
-tracks there. A reply card opens the conversation. A payment card opens that
-offering's Payment settings. Saving the payment requirement completes its
-accepted task in the booking configuration batch.
+tracks there. Guest messages enter Messages and update its unread count. A
+payment card opens that offering's Payment settings. Saving the payment
+requirement completes its accepted task in the booking configuration batch.
 
 Each active experience can show one catalog suggestion for its current
 publication blocker. The server uses the catalog’s published-host and booking
 readiness checks. The card opens the editor for the current blocker and
 advances or clears as the catalog state changes.
 
-An open reply with an authorized linked stay includes reservation context in
-the same TaskView. TaskCard shows its dates, guest portrait, group, internal
-home name, status and message preview. The card opens the conversation.
-Unknown clocks read "Time not set". The task ID, schedule and actions remain
-owned by the stored task. An inquiry without a stay remains a compact reply.
-
-Owner Today orders failed deliveries, then turnovers, then replies, in one
-column. Opportunities follow, then Done. A member sees only
-their own tasks and Done. The shared header holds Today/Upcoming, a round +
+Owner Today shows failed deliveries, turnovers and booking decisions before
+opportunities and Done. A member sees the work in their scope and Done.
+The shared header holds Today/Upcoming, a round +
 for the permitted Add task and Add stay actions, and a task kind filter.
 `TodayTaskSheet` uses Airbnb's Checkout | Check-in split, followed by Assigned
-with Change. A task someone completes adds "What you found", Skip and Done; a
-reply adds Dismiss and Reply. Either close needs no note. A reply closes itself
-30 days after the question, and a dismissed one stays closed until the guest
-writes again. Upcoming groups by day
+with Change. A task someone completes adds "What you found", Skip and Done.
+Closing a task needs no note. Upcoming groups by day
 ("Tomorrow · Sat, Nov 7"). Arrivals and bookings
 stay in Calendar.
 

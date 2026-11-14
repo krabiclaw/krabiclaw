@@ -34,16 +34,9 @@ export default defineHandler(async (event) => {
   ])
   const suggestions = new Map((opportunities?.opportunities ?? []).flatMap(opportunity => opportunity.conversation_id ? [[opportunity.conversation_id, opportunity]] : []))
   const cards = reservations.map(card => ({ ...card, suggestion: card.conversation_id ? suggestions.get(card.conversation_id) ?? null : null }))
-  // A guest's reply about a stay on a card here is drawn once, by the card.
-  const carded = new Set(cards.flatMap(card => card.kind === 'stay' && card.booking_id ? [card.booking_id] : []))
-  const tasks = list.sections.map(section => ({ ...section, tasks: section.tasks.map(task => {
-    if (!task.reservation || !task.booking_id || !carded.has(task.booking_id)) return task
-    const { reservation: _drawnByCard, ...compact } = task
-    return compact
-  }) }))
   let website = null
   const privateSite = organization.status === 'inactive'
-  const hasOpenWork = cards.length > 0 || tasks.some(section => section.id === 'open' && section.tasks.length > 0)
+  const hasOpenWork = cards.length > 0 || list.sections.some(section => section.id === 'open' && section.tasks.length > 0)
   if (query.range === 'today' && !query.kind && !query.location_id && isOrganizationWideRole(organization.role)
     && organization.onboarding_status === 'active' && (privateSite || organization.status === 'active' && !hasOpenWork)
     && !isDemoOrganization(organization)) {
@@ -69,7 +62,7 @@ export default defineHandler(async (event) => {
   const today = {
     website,
     reservations: { title: todayReservationsTitle(cards.length, query.range, organization.vertical), cards },
-    tasks,
+    tasks: list.sections,
     // A booking's suggestion is on its card; the rest are Today's.
     opportunities: query.range === 'today' ? standaloneOpportunities.slice(0, privateSite ? 3 : undefined) : [],
     opportunity_issues: query.range === 'today' ? opportunities?.issues ?? [] : [],

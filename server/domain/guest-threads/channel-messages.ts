@@ -7,7 +7,7 @@ import { landBookingRevision, pendingBookingRevisions } from '~/server/integrati
 import { getChannexThread, listChannexMessages, listChannexThreads, sendChannexMessage, type ChannexMessage, type ChannexMessageThread } from '~/server/integrations/channex/messages'
 import { MIRRORED_EVENT, MessageDedupeConflictError, SCHEDULED_MESSAGE_EVENT, appendMessage, assertMessageWriteAccess, findMessageByDedupeKey, getMessage, parseMessagePayload, type ConversationGuard, type MessageRow } from '~/server/domain/conversations'
 import { getDeliveryById, getDeliveryByProviderMessageId, isDeliverySent, recordDeliveryOutcome } from './deliveries'
-import { conversationReplyTaskQueries } from './repository'
+import { resolveScheduledDeliveryFailure } from './repository'
 import { assertMessagePhotos, attachGuestPhotos, isMessagePhoto, listMessagePhotos, sortGuestFiles, type MessagePhoto } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { getMediaAsset, readMediaPlacements } from '~/server/utils/media-asset-manager'
@@ -133,8 +133,6 @@ export async function joinBookingConversationQueries(db: DbClient, input: { orga
       query: `UPDATE ${table} SET conversation_id = ? WHERE conversation_id = ? AND ${owned}`, params: [input.into, input.from, ...ownedParams],
     })),
     { query: `UPDATE google_calendar_event_links SET request_id = ? WHERE request_id = ? AND ${owned}`, params: [input.into, input.from, ...ownedParams] },
-    { query: `UPDATE tasks SET subject_id = ?, dedupe_key = 'guest_reply:' || ? || substr(dedupe_key, length('guest_reply:' || ?) + 1)
-        WHERE kind = 'guest_reply' AND subject_type = 'conversation' AND subject_id = ? AND ${owned}`, params: [input.into, input.into, input.from, input.from, ...ownedParams] },
     // The booking is the inquiry's conversation's: unlinked from its own, then linked, then its own is gone.
     { query: "UPDATE conversations SET booking_id = NULL WHERE id = ? AND organization_id = ? AND booking_id = ? AND kind = 'booking'", params: [input.from, input.organizationId, input.bookingId] },
     { query: 'UPDATE conversations SET booking_id = ? WHERE id = ? AND organization_id = ? AND booking_id IS NULL AND changes() = 1', params: [input.bookingId, input.into, input.organizationId] },
@@ -237,7 +235,7 @@ async function mirrorMessage(db: DbClient, env: ChannelEnv, mapping: ChannelThre
     // retained exactly as Channex sent them: zoneless UTC.
     payload: { provider_message_id: message.id, provider_inserted_at: message.insertedAt, provider_updated_at: message.updatedAt,
       attachments: message.attachments, ...(message.meta === undefined ? {} : { meta: message.meta }) },
-  }, conversationReplyTaskQueries(mapping.conversation_id, new Date().toISOString())).catch(async (error: unknown) => {
+  }, authorKind === 'member' ? [resolveScheduledDeliveryFailure({ query: 'SELECT id FROM messages WHERE dedupe_key = ?', params: [`channex-message:${message.id}`] }, new Date().toISOString())] : []).catch(async (error: unknown) => {
     if (error instanceof MessageDedupeConflictError) fail(409, 'CHANNEL_MESSAGE_ID_CONFLICT', 'The provider message ID differs from its immutable recorded fact; review the conversation', 'message.id')
     if (await alreadySent()) return null
     throw error

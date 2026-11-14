@@ -4,7 +4,6 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import { H3 } from 'h3'
 import { createHmac } from 'node:crypto'
-import { hashPassword } from 'better-auth/crypto'
 import sharp from 'sharp'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
@@ -12,15 +11,11 @@ import { applyChannelBooking, createStay, type ChannelBooking } from '../../serv
 import { backfillChannexMessages, mirrorChannexMessageEvent, mirrorChannexThread } from '../../server/domain/guest-threads/channel-messages.ts'
 import { sendGuestThreadReply, sendScheduledGuestReply } from '../../server/domain/guest-threads/operations.ts'
 import { conversationPageFor } from './support/conversation-page.ts'
-import { executeBatch } from '../../server/db/index.ts'
-import { conversationTaskQueries, expireReplyTasks, listConversations } from '../../server/domain/guest-threads/repository.ts'
+import { listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { appendMessage, assertConversationAccess, type MessageRow } from '../../server/domain/conversations.ts'
 import { createDeliveryReceipt, listThreadDeliveries, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { getGuestRequest } from '../../server/domain/requests.ts'
-import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
-import todayRoute from '../../server/api/dashboard/today.get.ts'
-import { closeTask, listTasks, reopenTask, parseTaskListQuery, taskViewer, type TaskSection } from '../../server/domain/tasks.ts'
-import type { OpportunityView } from '../../server/domain/opportunities.ts'
+import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { guestThreadListPage, parseGuestThreadListQuery } from '../../server/utils/dashboard-guest-threads.ts'
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
@@ -40,22 +35,6 @@ const RAW = '2026-10-15T23:12:00.123456'
  * which only production configures.
  */
 const GUEST_PHOTO = Uint8Array.from(await sharp({ create: { width: 4, height: 3, channels: 3, background: '#16a34a' } }).avif().toBuffer())
-type TodayPayload = { tasks: TaskSection[]; opportunities: OpportunityView[] }
-/** Today in outline: each task as its kind and conversation, each opportunity as the operation it records. */
-async function todayOutline(db: D1Database, today: TodayPayload) {
-  const operations = new Map((await db.prepare('SELECT id, operation FROM opportunities WHERE organization_id = ?').bind(ORG).all<{ id: string; operation: string }>()).results.map(row => [row.id, row.operation]))
-  return { tasks: today.tasks.flatMap(section => section.tasks.map(task => [task.kind, task.conversation_id])), opportunities: today.opportunities.map(opportunity => operations.get(opportunity.id)) }
-}
-/** The guest message each open reply task is about, by its ledger dedupe key, and the organization the task belongs to. */
-const openReplies = (db: D1Database, threadId: string) => db.prepare(`SELECT t.organization_id, e.dedupe_key AS entry FROM tasks t JOIN messages e ON t.dedupe_key = 'guest_reply:' || t.subject_id || ':' || e.id
-  WHERE t.kind = 'guest_reply' AND t.subject_type = 'conversation' AND t.subject_id = ? AND t.status = 'open' ORDER BY e.sequence`).bind(threadId).all<{ organization_id: string; entry: string }>().then(rows => rows.results)
-const waitingOn = async (db: D1Database, threadId: string) => (await openReplies(db, threadId)).map(row => row.entry)
-/** The reply tasks on Today as the owner reads them at `now`: conversation and status line ("Asked 1d ago · home"). */
-async function replyEyebrows(db: D1Database, env: CloudflareEnv, now: Date) {
-  const viewer = await taskViewer(memberAccessPrincipal({ userId: OWNER, organizationId: ORG, memberId: 'owner-member', role: 'owner' }, { env }))
-  return (await listTasks(db, viewer, parseTaskListQuery({}), now)).sections.flatMap(section => section.tasks).filter(task => task.kind === 'guest_reply').map(task => [task.conversation_id, task.status_line])
-}
-const GROWTH = ['post.create', 'social.connect', 'article.create']
 const code = (expected: string) => (error: unknown) => (error as { data?: { code?: string } }).data?.code === expected
 
 class Provider {
@@ -234,33 +213,6 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     assert.deepEqual(visible.find(entry => entry.id === entries[1]!.id)!.photos.map(item => [item.id, item.url]), [[photo.id, photo.public_url]])
     assert.equal(visible.some(entry => entry.photos.some(item => item.url.startsWith('https://channex.test/'))), false, 'no Channex link reaches the conversation')
     assert.notEqual(entries[0]!.occurred_at, RAW)
-    // The actual imported inquiry has no guest identity or linked stay. Today
-    // displays its recorded conversation title without inventing either one.
-    const password = 'ChannelInquiryProof123!'
-    await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('owner-credential', ?, 'credential', ?, ?, 0, 0)").bind(OWNER, OWNER, await hashPassword(password)).run()
-    const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password }, asResponse: true })
-    assert.equal(login.status, 200)
-    const token = login.headers.get('set-auth-token')
-    assert.ok(token)
-    const app = new H3()
-    app.get('/api/dashboard/today', todayRoute)
-    const readToday = async () => {
-      const response = await app.request(Object.assign(new Request('https://proof.example/api/dashboard/today?org=org', { headers: { authorization: `Bearer ${token}` } }),
-        { runtime: { name: 'cloudflare', cloudflare: { env } } }))
-      assert.equal(response.status, 200)
-      return await response.json() as TodayPayload
-    }
-    // The inquiry arrived just now and has no reply: it is due. Today shows its
-    // recorded conversation title without inventing a guest identity.
-    const today = await readToday()
-    const replies = today.tasks.flatMap(section => section.tasks).filter(task => task.kind === 'guest_reply')
-    assert.deepEqual(replies.map(task => ({ status: task.status, title: task.title, detail: task.detail, path: task.path, action: task.action, conversation_id: task.conversation_id, booking_id: task.booking_id, starts_at: task.starts_at, due_at: task.due_at, avatar: task.avatar })), [{
-      status: 'open', title: 'Conversation supplied by Airbnb', detail: 'Hello', path: `/dashboard/org/messages/${rows[0]!.id}`, action: { type: 'open', label: 'Reply', path: `/dashboard/org/messages/${rows[0]!.id}` },
-      conversation_id: rows[0]!.id, booking_id: null, starts_at: null, due_at: null, avatar: { initial: 'C', tone: 'warm' },
-    }])
-    assert.match(replies[0]!.status_line!, /^Asked .+$/)
-    const afterToday = (await getGuestRequest(db, rows[0]!.id, ORG))!
-    assert.deepEqual([afterToday.payload.guest.name, afterToday.payload.guest.email, afterToday.payload.guest.phone, afterToday.booking_id], [null, null, null, null])
     assert.equal(await db.prepare('SELECT count(*) FROM bookings').first('count(*)'), 0)
     // The host has a seat from creation. Another member's booking duties cannot grant one.
     const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, organizationId: ORG, role }, { env })
@@ -283,7 +235,7 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
-test('empty Channex host actions stay recorded without clearing reply work; a real photo reply clears it', async () => {
+test('empty Channex host actions are recorded, and a real photo reply appears in the conversation', async () => {
   const { runtime, db, env } = await boot()
   const provider = new Provider(), realFetch = globalThis.fetch
   globalThis.fetch = provider.fetch as typeof fetch
@@ -299,25 +251,6 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
     const recorded = await db.prepare("SELECT author_kind, body FROM messages WHERE dedupe_key = 'channex-message:host-action'").first<{ author_kind: string; body: string | null }>()
     assert.deepEqual(recorded, { author_kind: 'member', body: null })
 
-    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:first'])
-
-    const password = 'EmptyHostActionProof123!'
-    await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('owner-credential', ?, 'credential', ?, ?, 0, 0)").bind(OWNER, OWNER, await hashPassword(password)).run()
-    const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password }, asResponse: true })
-    assert.equal(login.status, 200)
-    const token = login.headers.get('set-auth-token')
-    assert.ok(token)
-    const app = new H3()
-    app.get('/api/dashboard/today', todayRoute)
-    const readToday = async () => {
-      const response = await app.request(Object.assign(new Request('https://proof.example/api/dashboard/today?org=org', { headers: { authorization: `Bearer ${token}` } }),
-        { runtime: { name: 'cloudflare', cloudflare: { env } } }))
-      assert.equal(response.status, 200)
-      return await response.json() as TodayPayload
-    }
-    const afterEmpty = await readToday()
-    assert.deepEqual(await todayOutline(db, afterEmpty), { tasks: [['guest_reply', requestId]], opportunities: GROWTH })
-
     // The conversation reads as the guest's words alone, and the list previews them.
     const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
     const thread = await conversationPageFor(db, owner, requestId)
@@ -331,9 +264,7 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
 
     provider.messages.push(provider.message('blank-host-action', 'property', '   ', [], new Date(receivedAt + 2).toISOString()))
     await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:first'])
-    const afterBlank = await readToday()
-    assert.deepEqual(await todayOutline(db, afterBlank), { tasks: [['guest_reply', requestId]], opportunities: GROWTH })
+    assert.deepEqual((await hostMessages(db, env, requestId)).map(entry => entry.body), ['Hello'])
 
     // A real image-only host reply is downloaded and placed on its message.
     provider.messages.push(provider.message('host-photo', 'property', null, ['/attachment/file'], new Date(receivedAt + 3).toISOString()))
@@ -343,95 +274,6 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
     assert.equal(photoReply.photos.length, 1)
     assert.ok(photoReply.photos[0]!.url.startsWith('https://media.example.test/'))
     assert.deepEqual(provider.fileReads, ['/attachment/file'])
-    assert.deepEqual(await waitingOn(db, requestId), [])
-    const afterPhoto = await readToday()
-    // The reply closed its task today, so Today shows it done; the growth opportunities remain.
-    assert.deepEqual(afterPhoto.tasks.flatMap(section => section.tasks).map(task => [task.kind, task.status, task.conversation_id]), [['guest_reply', 'done', requestId]])
-    assert.deepEqual((await todayOutline(db, afterPhoto)).opportunities, GROWTH, 'the real photo reply clears only its reply task; useful growth opportunities remain')
-  } finally { globalThis.fetch = realFetch; await runtime.dispose() }
-})
-
-test('a dismissed question needs no note and stays closed until the guest writes again; an unanswered one expires after 30 days', async () => {
-  const { runtime, db, env } = await boot()
-  const provider = new Provider(), realFetch = globalThis.fetch
-  globalThis.fetch = provider.fetch as typeof fetch
-  const at = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString()
-  try {
-    const first = provider.message('first', 'guest', 'Hello', [], at(0))
-    provider.messages = [first]
-    await backfillChannexMessages(db, env, 'property', ORG)
-    const requestId = await db.prepare("SELECT conversation_id AS conversation_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('conversation_id')
-    assert.ok(requestId)
-    const second = provider.message('second', 'guest', 'Are you there?', [], at(0))
-    provider.messages = [first, second]
-    await backfillChannexMessages(db, env, 'property', ORG)
-    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:first'])
-
-    const viewer = await taskViewer(memberAccessPrincipal({ userId: OWNER, organizationId: ORG, memberId: 'owner-member', role: 'owner' }, { env }))
-    const taskId = await db.prepare("SELECT id FROM tasks WHERE kind = 'guest_reply' AND subject_id = ? AND status = 'open'").bind(requestId).first<string>('id')
-    assert.ok(taskId)
-    const dismissed = await closeTask(db, viewer, taskId, { status: 'skipped', note: '', photos: [], env })
-    assert.deepEqual([dismissed.status, dismissed.outcome?.note, dismissed.action, dismissed.dismiss], ['skipped', null, { type: 'reopen', label: 'Undo' }, null])
-    assert.match(dismissed.status_line ?? '', /^Dismissed at /)
-    assert.deepEqual(await db.prepare('SELECT status, outcome_note FROM tasks WHERE id = ?').bind(taskId).first(), { status: 'skipped', outcome_note: null })
-
-    // Everything said before the dismissal stays closed, whatever touches the conversation next.
-    await executeBatch(db, conversationTaskQueries(requestId, at(0)), { operation: 'Touch conversation' })
-    assert.deepEqual(await waitingOn(db, requestId), [])
-
-    const third = provider.message('third', 'guest', 'One more question', [], at(0))
-    provider.messages = [first, second, third]
-    await backfillChannexMessages(db, env, 'property', ORG)
-    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:third'])
-
-    // A message recorded at the dismissal's own instant is still something new to answer.
-    const dismissedAt = await db.prepare('SELECT closed_at FROM tasks WHERE id = ?').bind(taskId).first<string>('closed_at')
-    assert.ok(dismissedAt)
-    await db.prepare("UPDATE messages SET occurred_at = ? WHERE dedupe_key = 'channex-message:third'").bind(dismissedAt).run()
-    await db.prepare("DELETE FROM tasks WHERE kind = 'guest_reply' AND subject_id = ? AND status = 'open'").bind(requestId).run()
-    await executeBatch(db, conversationTaskQueries(requestId, at(0)), { operation: 'Touch conversation' })
-    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:third'])
-
-    // An omitted note dismisses the same way an empty one does.
-    const thirdTask = await db.prepare("SELECT id FROM tasks WHERE kind = 'guest_reply' AND subject_id = ? AND status = 'open'").bind(requestId).first<string>('id')
-    assert.ok(thirdTask)
-    const omitted = await closeTask(db, viewer, thirdTask, { status: 'skipped', note: undefined, photos: [], env })
-    assert.deepEqual(await db.prepare('SELECT status, outcome_note FROM tasks WHERE id = ?').bind(thirdTask).first(), { status: 'skipped', outcome_note: null })
-    await reopenTask(db, viewer, thirdTask, { version: omitted.version })
-    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:third'])
-
-    // Thirty-one days on the open question has aged out, and the newer one behind it becomes the work.
-    const fourth = provider.message('fourth', 'guest', 'Still hoping to hear back', [], at(29))
-    provider.messages = [first, second, third, fourth]
-    await backfillChannexMessages(db, env, 'property', ORG)
-    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:third'])
-    assert.deepEqual(await expireReplyTasks(db, at(31)), { conversations: 1 })
-    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:fourth'])
-    const expired = await db.prepare("SELECT status, closed_by_user_id FROM tasks WHERE dedupe_key LIKE 'guest_reply:%' AND subject_id = ? AND status <> 'open' AND status <> 'skipped'").bind(requestId).first()
-    assert.deepEqual(expired, { status: 'cancelled', closed_by_user_id: null })
-
-    // Nothing left to expire closes nothing, and an aged question does not reopen when the conversation is touched.
-    assert.deepEqual(await expireReplyTasks(db, at(31)), { conversations: 0 })
-    assert.deepEqual(await expireReplyTasks(db, at(60)), { conversations: 1 })
-    await executeBatch(db, conversationTaskQueries(requestId, at(60)), { operation: 'Touch conversation' })
-    assert.deepEqual(await waitingOn(db, requestId), [])
-  } finally { globalThis.fetch = realFetch; await runtime.dispose() }
-})
-
-test('a zoneless Channex time is UTC: an imported question is as old as Airbnb says, and expires from then', async () => {
-  const { runtime, db, env } = await boot()
-  const provider = new Provider(), realFetch = globalThis.fetch
-  globalThis.fetch = provider.fetch as typeof fetch
-  try {
-    // Channex sends inserted_at without a zone; this question was asked 60 days before it was imported.
-    const askedAt = new Date(Date.now() - 60 * 86_400_000).toISOString().replace('Z', '000')
-    provider.messages = [provider.message('old', 'guest', 'Is the hot tub working?', [], askedAt)]
-    await backfillChannexMessages(db, env, 'property', ORG)
-    const requestId = await db.prepare("SELECT conversation_id AS conversation_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('conversation_id')
-    assert.ok(requestId)
-    assert.deepEqual(await waitingOn(db, requestId), [])
-    assert.equal(await db.prepare("SELECT count(*) n FROM tasks WHERE kind = 'guest_reply' AND subject_id = ?").bind(requestId).first<number>('n'), 0,
-      'a question asked more than 30 days ago opens no task, however recently it was imported')
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
@@ -974,78 +816,22 @@ test('an in-flight or interrupted reply never blocks actual provider messages an
   } finally { release(); globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
-test('customer work follows actual provider replies, keeps the first waiting instant, and survives failed or automatic sends', async () => {
+test('a scheduled Airbnb message and its provider echo appear once in the conversation', async () => {
   const { runtime, db, env } = await boot()
   const provider = new Provider(), realFetch = globalThis.fetch
   globalThis.fetch = provider.fetch as typeof fetch
   try {
-    provider.messages = [provider.message('waiting-guest', 'guest', 'Can we check in early?', [], '2026-10-15T23:12:00.123456')]
+    provider.messages = [provider.message('waiting-guest', 'guest', 'Can we check in early?')]
     const mirrored = await mirrorChannexThread(db, env, 'thread', 'property')
     if (mirrored.status !== 'mirrored') throw new Error('Expected mapped inquiry')
     const threadId = mirrored.conversation_id
-    const waiting = () => waitingOn(db, threadId)
-    const first = 'channex-message:waiting-guest'
-    assert.deepEqual(await openReplies(db, threadId), [{ organization_id: ORG, entry: first }], 'the reply task belongs to the organization that owns the conversation')
-
-    provider.messages.push(provider.message('followup-guest', 'guest', 'We would arrive at noon.', [], '2026-10-15T23:13:00.123456'))
+    const body = 'Your scheduled check-in instructions'
+    const scheduled = await sendScheduledGuestReply(db, { threadId, organizationId: ORG, body, idempotencyKey: 'automatic-instructions', env })
+    assert.equal(scheduled.outcome.ok, true)
     await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.deepEqual(await waiting(), [first], 'a follow-up does not reset how long this customer has waited')
-
-    // An old provider resource can first become visible during a later pull.
-    provider.messages.unshift(provider.message('historical-host', 'property', 'A previous conversation reply', [], '2026-10-15T23:10:00.123456'))
-    await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.deepEqual(await waiting(), [first], 'late-imported history cannot answer a newer guest message')
-
-    provider.refuseMessage = true
-    const failed = await sendGuestThreadReply(db, { threadId, organizationId: ORG, body: 'An attempted reply', idempotencyKey: 'failed-response', actorUserId: OWNER, env })
-    assert.equal(failed.ok, false)
-    assert.deepEqual(await waiting(), [first], 'a failed delivery leaves the guest waiting')
-    provider.refuseMessage = false
-
-    const logged = await appendMessage(db, { conversationId: threadId, authorKind: 'member', authorUserId: OWNER,
-      channel: 'email', eventName: 'thread.member_reply', body: 'Logged response only', dedupeKey: 'logged-response-only' })
-    const loggedReceipt = await createDeliveryReceipt(db, { subject: { messageId: logged.id }, channel: 'email', provider: 'log_only', purpose: 'member_reply', idempotencyKey: 'logged-response-only' })
-    await recordDeliveryOutcome(db, { deliveryId: loggedReceipt.id, status: 'sent', providerMessageId: 'log-only:response' })
-    assert.deepEqual(await waiting(), [first], 'a log-only send does not reach the guest')
-    provider.replyAt = '2026-10-15T23:13:30.123456'
-    const automatic = await sendScheduledGuestReply(db, { threadId, organizationId: ORG, body: 'Your scheduled check-in instructions', idempotencyKey: 'automatic-instructions', env })
-    assert.equal(automatic.outcome.ok, true)
-    await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.deepEqual(await waiting(), [first], 'a template and its mirrored provider echo are not a response to this question')
-
-    provider.messages.push(provider.message('answered-on-airbnb', 'property', 'Yes, noon is fine.', [], '2026-10-15T23:14:00.123456'))
-    await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.deepEqual(await waiting(), [], 'the actual host response on Airbnb clears the outstanding reply')
-
-    provider.messages.push(provider.message('new-guest-question', 'guest', 'Can we leave our bags later?', [], '2026-10-15T23:15:00.123456'))
-    await mirrorChannexThread(db, env, 'thread', 'property')
-    const newFirst = 'channex-message:new-guest-question'
-    assert.deepEqual(await waiting(), [newFirst], 'new guest work reopens after a successful response')
-    provider.messages.push(provider.message('airbnb-agent', 'agent', 'Support has updated the thread.', [], '2026-10-15T23:16:00.123456'))
-    await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.deepEqual(await waiting(), [newFirst], 'Airbnb Support is not a business response to the customer')
-
-    provider.replyAt = '2026-10-15T23:17:00.123456'
-    const replied = await sendGuestThreadReply(db, { threadId, organizationId: ORG, body: 'Yes, we can store them.', idempotencyKey: 'successful-response', actorUserId: OWNER, env })
-    assert.equal(replied.ok, true)
-    assert.deepEqual(await waiting(), [], 'a provider-accepted reply made through KrabiClaw also clears the work')
-  } finally { globalThis.fetch = realFetch; await runtime.dispose() }
-})
-
-test('explicit provider instants order replies across offsets without losing submillisecond precision', async () => {
-  const { runtime, db, env } = await boot()
-  const provider = new Provider(), realFetch = globalThis.fetch
-  globalThis.fetch = provider.fetch as typeof fetch
-  try {
-    provider.messages = [provider.message('offset-guest', 'guest', 'Are you open?', [], '2026-10-15T23:12:00.123456+07:00')]
-    const mirrored = await mirrorChannexThread(db, env, 'thread', 'property')
-    if (mirrored.status !== 'mirrored') throw new Error('Expected mapped inquiry')
-    assert.deepEqual(await waitingOn(db, mirrored.conversation_id), ['channex-message:offset-guest'])
-    // Asked at 2026-10-15T16:12:00.123Z by its explicit offset; read exactly a day later it is a day old, however recently it was imported.
-    assert.deepEqual(await replyEyebrows(db, env, new Date('2026-10-16T16:12:00.123Z')), [[mirrored.conversation_id, 'Asked 1d ago · Cabin']], 'an explicit original instant supplies the waiting age instead of the later import time')
-    provider.messages.push(provider.message('offset-answer', 'property', 'Yes.', [], '2026-10-15T16:12:00.123457Z'))
-    await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.deepEqual(await waitingOn(db, mirrored.conversation_id), [])
+    assert.deepEqual((await hostMessages(db, env, threadId)).filter(entry => entry.body === body).map(entry => entry.id), [scheduled.messageId])
+    assert.deepEqual((await listThreadDeliveries(db, threadId)).filter(delivery => delivery.message_id === scheduled.messageId).map(delivery => [delivery.status, delivery.provider_message_id]),
+      [['accepted', 'accepted-1']])
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 

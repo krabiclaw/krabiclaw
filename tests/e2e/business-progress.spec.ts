@@ -238,16 +238,6 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     expect(afterMedia.reference.evidence).toMatchObject({ kind: 'article', updated_at: publishedRead.post.updated_at, media: [expect.objectContaining({ asset_id: asset.asset_id })] })
     expect(afterMedia.reference.evidence_revision).not.toBe(beforeMedia.reference.evidence_revision)
 
-    // The client's enquiry is the owner's open reply task on Today, read through the dashboard and through MCP alike.
-    const replyTasks = async () => {
-      const { tasks } = await responseBody<{ tasks: TaskSection[] }>(await request.get('/api/dashboard/today', { params: { org: slug, kind: 'guest_reply' } }))
-      const listed = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'list_tasks', args: { organization_id: organization.id, range: 'today', kind: 'guest_reply' } })
-      expect(listed.status(), await listed.text()).toBe(200)
-      expect(mcpData<{ sections: TaskSection[] }>(await listed.json()).sections).toEqual(tasks)
-      return tasks.map(section => ({ section: section.id, tasks: section.tasks.filter(task => task.conversation_id === threadId).map(task => ({ id: task.id, status: task.status, detail: task.detail })) })).filter(section => section.tasks.length)
-    }
-    const unanswered = await replyTasks()
-    expect(unanswered).toEqual([{ section: 'open', tasks: [{ id: expect.any(String), status: 'open', detail: 'Which documents should I bring to my legal consultation?' }] }])
     const replyBody = 'Please bring the relevant documents and any prior correspondence.'
     const replyKey = crypto.randomUUID()
     await responseBody(await request.post(threadUrl, { headers: authRequestHeaders(baseURL!), data: { body: replyBody, idempotency_key: replyKey } }))
@@ -260,9 +250,6 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     })])
     const { reference: repliedReference } = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'guest_thread.reply', subject_id: threadId } }))
     expect(repliedReference.evidence).toMatchObject({ kind: 'guest_thread', latest_guest_entry_id: expect.any(String), latest_reply_entry_id: replies[0]!.id })
-    // A reply is an answer once a provider accepted it. Here its only receipt is log-only (unconfirmed, above),
-    // so the record shows no delivered answer and the question is still owed.
-    expect(await replyTasks()).toEqual(unanswered)
     const guestReply = 'I found another letter with a deadline tomorrow; should I send it now?'
     await responseBody(await member.post(threadUrl, { headers: authRequestHeaders(baseURL!), data: { body: guestReply, idempotency_key: crypto.randomUUID() } }))
     const { reference: inboundReference } = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'guest_thread.reply', subject_id: threadId } }))
@@ -270,9 +257,6 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     if (inboundReference.evidence.kind !== 'guest_thread' || repliedReference.evidence.kind !== 'guest_thread') throw new Error('The explicit thread reference must describe thread evidence')
     expect(inboundReference.evidence.latest_guest_entry_id).not.toBe(repliedReference.evidence.latest_guest_entry_id)
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
-    // The client writing again does not add a second task: the one task stays on the first question still owed.
-    const reasked = await replyTasks()
-    expect(reasked).toEqual(unanswered)
     expect(progress.outcomes.filter(outcome => outcome.event === 'thread.member_reply' && outcome.subject.id === threadId)).toEqual(replies)
     // The conversation keeps one copy of each side's message: the owner's retried reply and the client's answer.
     const preserved = await responseBody<ConversationPage>(await request.get(threadUrl))

@@ -96,8 +96,6 @@ export interface ListGuestThreadsOptions {
   principal?: Pick<MemberAccessPrincipal, 'organizationId' | 'role' | 'userId'> | null
   userId: string
   type?: GuestThreadSubmissionType | null
-  /** Only conversations with an open guest_reply task. */
-  needsReply?: boolean
   unreadOnly?: boolean
   /** Current or Past, as `resolveGuestThreadMailbox` defines them. Null lists both. */
   mailbox?: GuestThreadMailbox | null

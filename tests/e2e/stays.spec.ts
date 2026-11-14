@@ -19,7 +19,7 @@ import type { StayPhotoRoom } from '../../shared/stay-photos'
 import type { TodayReservation } from '../../shared/dashboard-today'
 import type { StayHomeAccessibility } from '../../shared/stay-accessibility'
 import { formatMinorAmount } from '../../shared/prices'
-import type { TaskPerson, TaskSection, TaskView } from '../../server/domain/tasks'
+import type { TaskPerson, TaskSection } from '../../server/domain/tasks'
 import type { ConversationPage } from '../../shared/messages-contract'
 import type { InboxRow } from '../../server/domain/guest-threads/types'
 import type { OpportunityView } from '../../server/domain/opportunities'
@@ -348,7 +348,7 @@ test('a home keeps zero beds and unknown provider times through editing and the 
   await expect(preview.locator('article')).toContainText('Checkout before')
 })
 
-test('a home keeps its operator name independent from its public title across CMS, calendar and reservation-backed tasks', async ({ page, baseURL }, testInfo) => {
+test('a home keeps its operator name independent from its public title across CMS, Calendar, reservations and Messages', async ({ page, baseURL }, testInfo) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, slug, organizationId, call, api, productId } = await createStayHome(page, baseURL!, { createInForm: true, internalName: 'Cabin 3' })
@@ -408,52 +408,17 @@ test('a home keeps its operator name independent from its public title across CM
     organization_id: organizationId, from: '+66812345001', body: questionText, message_id: crypto.randomUUID(),
   } })
   await expectStatus(question, 200)
-  const today = await request.get(api('today'))
-  await expectStatus(today, 200)
-  const todayTasks = (await today.json() as BusinessToday).tasks.flatMap(section => section.tasks)
-  const task = todayTasks.find(item => item.kind === 'guest_reply' && item.conversation_id === stay.conversation_id)!
-  expect(task).toMatchObject({
-    status: 'open',
-    booking_id: stay.booking_id,
-    action: { type: 'open', label: 'Reply', path: `/dashboard/${slug}/messages/${stay.conversation_id}` },
-    detail: questionText,
-    reservation: {
-      headline: 'Ana’s group of 3', name: internalName, status_label: 'Checking in · 3:00 PM',
-      conversation: { label: 'Reply', description: questionText, to: `/dashboard/${slug}/messages/${stay.conversation_id}` },
-    },
-  })
-  expect(task.can.edit).toBe(true)
-  await page.goto(`/dashboard/${slug}`)
-  const replyCard = page.locator(`[data-task-id="${task.id}"]`)
-  await expect(replyCard).toContainText('Ana’s group of 3')
-  await expect(replyCard.getByText(questionText, { exact: true })).toHaveCount(1)
-  await waitForNuxtHydration(page)
-  await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-today-reservation-task.png') })
-  const taskPath = `/api/organizations/${organizationId}/tasks/${task.id}`
-  const startsAt = new Date(Date.now() + 86_400_000).toISOString()
-  const scheduled = await request.patch(taskPath, { data: { version: task.version, starts_at: startsAt, due_at: startsAt } })
-  await expectStatus(scheduled, 200)
-  expect((await scheduled.json() as { task: TaskView }).task).toMatchObject({ id: task.id, version: task.version + 1, starts_at: startsAt, due_at: startsAt, action: task.action })
   const upcoming = await request.get(api('today?range=upcoming'))
   await expectStatus(upcoming, 200)
   const upcomingToday = await upcoming.json() as BusinessToday
-  const upcomingTasks = upcomingToday.tasks.flatMap(section => section.tasks)
-  expect(upcomingTasks.filter(item => item.booking_id === stay.booking_id).map(item => item.kind).sort()).toEqual(['guest_reply', 'turnover'])
-  // Upcoming draws the stay once, as its reservation card; the reply under it is the question alone.
-  const upcomingReply = upcomingTasks.find(item => item.id === task.id)!
-  expect(upcomingReply).toMatchObject({ version: task.version + 1, action: task.action, detail: task.detail })
-  expect(upcomingReply.reservation).toBeUndefined()
-  expect(upcomingToday.reservations.cards.filter(card => card.booking_id === stay.booking_id).map(card => [card.headline, card.name])).toEqual([['Ana’s group of 3', internalName]])
-  expect(upcomingTasks.find(item => item.kind === 'turnover' && item.booking_id === stay.booking_id)).toMatchObject({
-    face: 'photo', action: { type: 'complete', label: 'Done' },
-  })
-  const remaining = await request.get(api('today?kind=guest_reply'))
-  await expectStatus(remaining, 200)
-  expect((await remaining.json() as BusinessToday).tasks.flatMap(section => section.tasks).some(item => item.id === task.id)).toBe(false)
+  const upcomingTasks = upcomingToday.tasks.flatMap(section => section.tasks).filter(item => item.booking_id === stay.booking_id)
+  expect(upcomingTasks).toEqual([expect.objectContaining({ kind: 'turnover', face: 'photo', action: { type: 'complete', label: 'Done' } })])
+  const reservations = upcomingToday.reservations.cards.filter(card => card.booking_id === stay.booking_id)
+  expect(reservations).toMatchObject([{ headline: 'Ana’s group of 3', name: internalName }])
 
   await page.goto(`/dashboard/${slug}?range=upcoming`)
   await waitForNuxtHydration(page)
-  const turnoverCard = page.locator(`[data-task-id="${upcomingTasks.find(item => item.kind === 'turnover' && item.booking_id === stay.booking_id)!.id}"]`)
+  const turnoverCard = page.locator(`[data-task-id="${upcomingTasks[0]!.id}"]`)
   await expect(turnoverCard.locator('.tc-media')).toHaveCount(0)
   await expect(turnoverCard.getByText('Turnover', { exact: true })).toBeVisible()
   // The card opens its sheet, which holds Done for work a person completes.
@@ -464,19 +429,20 @@ test('a home keeps its operator name independent from its public title across CM
   await expect(turnoverSheet).toHaveCount(0)
   await turnoverCard.scrollIntoViewIfNeeded()
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-upcoming-no-photo-turnover.png') })
-  await page.getByRole('button', { name: 'Filter tasks' }).click()
-  await page.getByRole('menuitemcheckbox', { name: 'Guest replies', exact: true }).click()
-  await expect(page).toHaveURL(url => url.searchParams.get('range') === 'upcoming' && url.searchParams.get('kind') === 'guest_reply')
-  await expect(page.locator('[data-task-kind="turnover"]')).toHaveCount(0)
-  await expect(replyCard).toContainText('Ana’s group of 3')
-  await expect(replyCard.getByText(questionText, { exact: true })).toHaveCount(1)
-  await waitForNuxtHydration(page)
+  const reservationCard = page.getByTestId('today-reservation').filter({ has: page.getByRole('link', { name: 'Ana’s group of 3', exact: true }) })
+  await expect(reservationCard).toContainText(internalName)
   await expect(page.getByRole('link', { name: 'Calendar', exact: true })).toBeVisible()
-  await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-upcoming-reservation-task.png') })
-  // The whole reply card opens its conversation.
-  await replyCard.locator('a.tc-target').click()
+  await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-upcoming-reservation.png') })
+  await reservationCard.getByRole('link', { name: 'Ana’s group of 3', exact: true }).click()
+  await expect(page).toHaveURL(reservations[0]!.to)
+  await page.getByRole('link', { name: 'Message guest', exact: true }).click()
   await expect(page).toHaveURL(url => url.pathname === `/dashboard/${slug}/messages/${stay.conversation_id}`)
-  await expect(page.getByText(internalName, { exact: true }).first()).toBeVisible()
+  await expect(page.getByText(questionText, { exact: true })).toBeVisible()
+  // Mobile shows a single panel. The home label belongs to the inbox row.
+  await page.getByRole('link', { name: 'Back', exact: true }).click()
+  const conversationRow = page.locator(`[data-thread-row="${stay.conversation_id}"]`)
+  await expect(conversationRow).toContainText(internalName)
+  await expect(conversationRow).not.toContainText(publicTitle)
   await waitForNuxtHydration(page)
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-messages-internal-name.png') })
   const after = await call<{ product: Product }>('get_product', { product_id: productId })
@@ -497,41 +463,27 @@ test('a home keeps its operator name independent from its public title across CM
 
   const recordedArrival = await call<NightBookingReceipt>('update_product_booking', { booking_id: stay.booking_id, version: stay.version, arrival_time: '18:30' })
   expect(recordedArrival.error).toBeNull()
-  const replyWithArrival = await request.get(taskPath)
-  await expectStatus(replyWithArrival, 200)
-  expect((await replyWithArrival.json() as { task: TaskView }).task.reservation?.status_label).toBe('Checking in · 6:30 PM')
 
   const unsetClocks = await request.patch(api(`stay-homes/${productId}`), { data: { check_in_time: null, check_out_time: null } })
   await expectStatus(unsetClocks, 200)
   const savedClocks = await call<{ product: Product }>('get_product', { product_id: productId })
   expect(savedClocks.error).toBeNull()
   expect(savedClocks.data!.product.stay).toMatchObject({ check_in_time: null, check_out_time: null })
-  await page.goto(`/dashboard/${slug}?range=upcoming&kind=guest_reply`)
-  await expect(replyCard.getByText('Checking in · 6:30 PM', { exact: true })).toBeVisible()
+  await page.goto(reservations[0]!.to)
+  const stayPanel = page.locator('#dashboard-panel-stay-details')
+  await expect(stayPanel.getByText('Arriving', { exact: true })).toBeVisible()
+  await expect(stayPanel.getByText('6:30 PM', { exact: true })).toBeVisible()
   const clearedArrival = await call<NightBookingReceipt>('update_product_booking', { booking_id: stay.booking_id, version: recordedArrival.data!.version, arrival_time: null })
   expect(clearedArrival.error).toBeNull()
   await page.reload()
-  await expect(replyCard.getByText('Checking in · Time not set', { exact: true })).toBeVisible()
-  await expect(replyCard.getByText(questionText, { exact: true })).toHaveCount(1)
+  await expect(stayPanel.getByRole('heading', { name: 'Check-in', exact: true })).toBeVisible()
+  await expect(stayPanel.getByText('Arriving', { exact: true })).toHaveCount(0)
 
   const cancelled = await call<{ status: string }>('cancel_product_booking', { booking_id: stay.booking_id, version: clearedArrival.data!.version, idempotency_key: crypto.randomUUID() })
   expect(cancelled.error).toBeNull()
   expect(cancelled.data!.status).toBe('cancelled')
-  const cancelledWork = await request.get(taskPath)
-  await expectStatus(cancelledWork, 200)
-  expect((await cancelledWork.json() as { task: TaskView }).task).toMatchObject({ id: task.id, action: task.action, reservation: { status_label: 'Cancelled' } })
-  const past = await request.post(api('bookings'), { data: { product_id: productId, check_in_date: localDay(-5), check_out_date: localDay(-3), adults: 1, children: 0, infants: 0,
-    guest_name: 'Bo', guest_phone: '+66812345002', guest_email: `bo-${slug}@playwright.example`, total_minor: 100_00, idempotency_key: crypto.randomUUID() } })
-  await expectStatus(past, 201)
-  const pastStay = (await past.json() as { booking: NightBooking }).booking
-  const pastQuestion = await request.post('/api/dev/inbound-whatsapp', { headers: devLoginHeaders(), data: {
-    organization_id: organizationId, from: '+66812345002', body: 'Can you send the receipt for my stay?', message_id: crypto.randomUUID(),
-  } })
-  await expectStatus(pastQuestion, 200)
-  const pastWork = await request.get(api('today'))
-  await expectStatus(pastWork, 200)
-  expect((await pastWork.json() as BusinessToday).tasks.flatMap(section => section.tasks).find(item => item.kind === 'guest_reply' && item.conversation_id === pastStay.conversation_id)?.reservation)
-    .toMatchObject({ name: internalName, headline: 'Bo', status_label: 'Stay ended' })
+  await page.reload()
+  await expect(stayPanel.getByRole('heading', { name: 'Cancelled', exact: true })).toBeVisible()
 })
 
 // A member responsible for a home reads turnover details while owners and

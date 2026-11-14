@@ -286,12 +286,11 @@ export function compareDeliveryStatus(current: string | null, incoming: GuestThr
  * delivery cannot both write and a regression cannot land between the read
  * and the write. Returns whether the stored status changed.
  */
-/** Whether a reply reached the guest decides whether the business still owes one: the reply tasks change with the receipt. */
-async function deliveryTaskQueries(deliveryId: string): Promise<BatchQuery[]> {
-  // The conversation repository reads receipts through this module; it is loaded when used, not at import.
-  const { conversationReplyTaskQueries } = await import('./repository')
-  return conversationReplyTaskQueries({ query: `(SELECT m.conversation_id FROM guest_thread_deliveries d
-    JOIN messages m ON m.id = d.message_id WHERE d.id = ? AND d.purpose = 'member_reply')`, params: [deliveryId] }, new Date().toISOString())
+async function scheduledDeliveryRecovery(deliveryId: string, status: GuestThreadDeliveryStatus): Promise<BatchQuery[]> {
+  if (!isDeliverySent({ status })) return []
+  const { resolveScheduledDeliveryFailure } = await import('./repository')
+  return [resolveScheduledDeliveryFailure({ query: `SELECT d.message_id FROM guest_thread_deliveries d
+    WHERE d.id = ? AND d.purpose = 'member_reply' AND d.provider <> 'log_only'`, params: [deliveryId] }, new Date().toISOString())]
 }
 
 export async function advanceDeliveryStatus(
@@ -302,7 +301,7 @@ export async function advanceDeliveryStatus(
 ): Promise<boolean> {
   let observed = delivery.status
   if (!compareDeliveryStatus(observed, incoming)) return false
-  const tasks = await deliveryTaskQueries(delivery.id)
+  const tasks = await scheduledDeliveryRecovery(delivery.id, incoming)
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (!compareDeliveryStatus(observed, incoming)) return false
     const [result] = await executeBatch(db, [{
@@ -395,7 +394,7 @@ export async function recordDeliveryOutcome(
       SET status = ?, provider_message_id = COALESCE(?, provider_message_id), error = ?, updated_at = ?
       WHERE id = ? AND status NOT IN ('accepted', 'sent', 'delivered', 'read')`,
     params: [input.status, input.providerMessageId ?? null, input.error ?? null, new Date().toISOString(), input.deliveryId],
-  }, ...more, ...await deliveryTaskQueries(input.deliveryId), {
+  }, ...more, ...await scheduledDeliveryRecovery(input.deliveryId, input.status), {
     query: 'SELECT * FROM guest_thread_deliveries WHERE id = ?', params: [input.deliveryId],
   }], { operation: 'Record delivery outcome' })
   const updated = results.at(-1)?.results[0] as GuestThreadDeliveryRow | undefined

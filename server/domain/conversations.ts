@@ -326,15 +326,13 @@ export async function appendChatMessage(db: DbClient, input: Omit<MessageInput, 
 }, send: Omit<MessageSendWrite, 'organizationId' | 'extra'>): Promise<MessageRow> {
   const { conversation, role, ...message } = input
   if (conversation.kind === 'team' && role !== 'member') conversationAccessDenied()
-  const occurredAt = message.occurredAt ?? new Date().toISOString()
   const id = message.id ?? crypto.randomUUID()
-  const extra = conversation.kind !== 'team' && (role === 'guest' || message.channel === 'web')
-    ? (await import('./guest-threads/repository')).conversationReplyTaskQueries({
-      query: '(SELECT conversation_id FROM messages WHERE id = ?)', params: [id],
-    }, occurredAt)
-    : []
+  const now = message.occurredAt ?? new Date().toISOString()
+  const extra = conversation.kind === 'booking' && message.eventName === MEMBER_REPLY_EVENT && message.channel === 'web'
+    ? [(await import('./guest-threads/repository')).resolveScheduledDeliveryFailure({ query: '?', params: [id] }, now)]
+    : undefined
   return appendMessage(db, {
-    ...message, id, occurredAt, conversationId: conversation.id,
+    ...message, id, occurredAt: now, conversationId: conversation.id,
     guard: conversationMessageGuard(conversation, send.uploaderUserId, role),
   }, { ...send, organizationId: conversation.organization_id, extra })
 }
@@ -476,17 +474,6 @@ export async function markConversationUnread(db: DbClient, input: { organization
 export function archiveQuery(input: { organizationId: string; conversationId: string; userId: string; archived: boolean; guard?: ConversationGuard; now: string }): BatchQuery {
   return updateParticipant({ ...input,
     set: 'archived_at', value: input.archived ? input.now : null })
-}
-
-/** Archiving a guest conversation also dismisses its open reply task, as Dismiss does: what the guest said next is work again. */
-export function archiveReplyTaskQuery(input: { conversationId: string; organizationId: string; userId: string; guard?: ConversationGuard; now: string }): BatchQuery {
-  const guard = input.guard ?? participantGuard('c', input.userId)
-  return {
-    query: `UPDATE tasks SET status = 'skipped', closed_at = ?, closed_by_user_id = ?, version = version + 1, updated_at = ?
-      WHERE kind = 'guest_reply' AND subject_type = 'conversation' AND subject_id = ? AND status = 'open'
-        AND EXISTS (SELECT 1 FROM conversations c WHERE c.id = tasks.subject_id AND c.organization_id = ? AND ${guard.sql})`,
-    params: [input.now, input.userId, input.now, input.conversationId, input.organizationId, ...guard.params],
-  }
 }
 
 export const guestConversationSql = (alias: string) => `${alias}.kind IN ('contact', 'booking')`
