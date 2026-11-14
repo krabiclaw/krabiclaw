@@ -18,16 +18,11 @@
         :description="getErrorMessage(threadsError || nextPageError, 'Guest thread request failed')"
       />
 
-      <!-- A conversation that gains a message slides to its new place; one
-           that leaves this list fades and the rest close up behind it. -->
+      <!-- Reordering animates. New previews and access removals take effect immediately. -->
       <TransitionGroup
         tag="div"
         class="relative -mx-3"
         move-class="transition-transform duration-300 ease-out motion-reduce:transition-none"
-        enter-from-class="opacity-0 -translate-y-1"
-        enter-active-class="transition duration-300 ease-out motion-reduce:transition-none"
-        leave-to-class="opacity-0"
-        leave-active-class="absolute inset-x-0 transition-opacity duration-200 motion-reduce:transition-none"
       >
         <MessageRowActions
           v-for="thread in threads"
@@ -115,6 +110,7 @@ import { useInboxUnread } from './inbox-unread'
 */
 const props = withDefaults(defineProps<{ personalScope?: boolean }>(), { personalScope: false })
 const session = authClient.useSession()
+const reader = computed(() => session.value.data?.user.id)
 const emit = defineEmits<{ first: [target: { path: string; query: LocationQueryRaw } | null] }>()
 
 const dashboard = useDashboardOrganization()
@@ -161,15 +157,17 @@ const listQuery = computed(() => ({
   unread: unreadOnly.value ? '1' as const : undefined,
 }))
 
-const listKey = computed(() => [
-  props.personalScope ? `account-conversations:${session.value.data?.user.id}` : 'dashboard-conversations',
-  String(route.params.org_slug ?? ''),
+const listKey = computed(() => JSON.stringify([
+  'messages-list',
+  reader.value,
+  props.personalScope,
+  route.params.org_slug,
   organizationId.value,
   kind.value ?? 'all',
   search.value ?? '',
   blockedOnly.value ? 'blocked' : pastOnly.value ? 'past' : 'current',
   unreadOnly.value ? 'unread' : 'any',
-].join(':'))
+]))
 
 // One loader for the list: the first render, a filter change and a live
 // update all go through it, and a refresh keeps the rows already on screen.
@@ -178,6 +176,8 @@ const loadingMore = ref(false)
 let pageController: AbortController | null = null
 let loadedScope = listKey.value
 let loadedPages = 1
+let readConnectionEpoch: number | null = null
+let reuseExpiresAt: number | undefined
 async function loadPage(offset: number, signal?: AbortSignal): Promise<ThreadListPage> {
   const query = { ...listQuery.value, limit: 100, offset }
   if (!props.personalScope && !dashboardScope.value) {
@@ -194,7 +194,7 @@ class ShiftedPages extends Error {}
 function appendLoadedPage(before: ThreadListPage, page: ThreadListPage): ThreadListPage {
   const ids = new Set(before.threads.map(thread => thread.id))
   if (page.threads.some(thread => ids.has(thread.id))) throw new ShiftedPages('Conversations moved between pages while loading')
-  return { threads: [...before.threads, ...page.threads], pagination: page.pagination }
+  return { ...page, threads: [...before.threads, ...page.threads] }
 }
 // New activity reorders the inbox while its pages are read, which shifts a row
 // across a page boundary. That ordinary case re-reads the window from the top;
@@ -221,33 +221,36 @@ async function loadWindow(pages: number, scope: string, signal: AbortSignal): Pr
 // its rows; a different list (another mailbox, filter or search) shows the
 // loading state until its own rows arrive, never the previous list's.
 const rowsKey = ref(listKey.value)
-const { data, pending, error: threadsError, refresh } = await useAsyncData<ThreadListPage>(listKey, async (_app, { signal }) => {
+const { data, pending, status, error: threadsError, refresh, clear } = await useAsyncData<ThreadListPage>(listKey, async (_app, { signal }) => {
   pageController?.abort()
   nextPageError.value = null
   const scope = listKey.value
+  if (!props.personalScope && readConnectionEpoch === null) {
+    const held = realtime.recentInbox.snapshot
+    realtime.recentInbox.snapshot = undefined
+    if (held?.key === scope && held.expiresAt > Date.now() && realtime.status.value === 'open') {
+      readConnectionEpoch = realtime.connectionEpoch.value
+      reuseExpiresAt = held.expiresAt
+      loadedPages = 1 + held.page.pagination.offset / held.page.pagination.limit
+      rowsKey.value = scope
+      return held.page
+    }
+    await realtime.waitForFirstOpen(signal)
+  }
+  if (signal.aborted || scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
+  readConnectionEpoch = realtime.connectionEpoch.value
   if (loadedScope !== scope) { loadedScope = scope; loadedPages = 1 }
   const { page, fetched } = await loadWindow(loadedPages, scope, signal)
   if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
   loadedPages = fetched
   rowsKey.value = scope
+  reuseExpiresAt = undefined
   return page
 }, {
   server: !props.personalScope,
-  getCachedData(cacheKey, nuxtApp, ctx) {
-    if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-    const cached = nuxtApp.payload.data[cacheKey] as ThreadListPage | undefined
-    if (cached) rowsKey.value = cacheKey
-    return cached
-  },
+  lazy: true,
 })
 
-if (import.meta.client) {
-  onMounted(() => {
-    if (useNuxtApp().payload.data[listKey.value]) {
-      void refresh()
-    }
-  })
-}
 const page = computed(() => rowsKey.value === listKey.value ? data.value ?? null : null)
 const threads = computed(() => page.value?.threads ?? [])
 
@@ -278,7 +281,6 @@ async function loadMore() {
   }
 }
 watch(listKey, () => pageController?.abort())
-onScopeDispose(() => pageController?.abort())
 
 const documentVisibility=useDocumentVisibility()
 useIntervalFn(()=>{if(props.personalScope&&documentVisibility.value==='visible')void refresh()},15_000)
@@ -288,8 +290,7 @@ useIntervalFn(()=>{if(props.personalScope&&documentVisibility.value==='visible')
 // While a list loads there is none: the rows on screen may be another
 // mailbox's, and the shell must not keep one of them to open.
 watch([threads, openThreadId, pending], ([rows, open, loading]) => {
-  if (open) return
-  if (loading) { emit('first', null); return }
+  if (open || loading) { emit('first', null); return }
   const first = rows[0]
   emit('first', first ? { path: threadRoute(first), query: route.query } : null)
 }, { immediate: true })
@@ -307,7 +308,12 @@ const toggling = new Set<string>()
 async function toggleRead(thread: ThreadListItem) {
   if (toggling.has(thread.id)) return
   toggling.add(thread.id)
-  try { await saveRead(thread) } finally { toggling.delete(thread.id) }
+  try {
+    await saveRead(thread)
+  } finally {
+    toggling.delete(thread.id)
+    refreshWorkspaceInbox()
+  }
 }
 async function saveRead(thread: ThreadListItem) {
   const read = thread.unread
@@ -321,13 +327,11 @@ async function saveRead(thread: ThreadListItem) {
       ...(read ? { body: {} } : {}),
       validate: (value: unknown): value is { read: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'read') === read,
     })
-    refreshConversationUnreadCount()
+    if (!disposed) refreshConversationUnreadCount()
   } catch (error) {
-    mark(read)
+    if (!disposed) mark(read)
     toast.add({ color: 'error', title: read ? 'Could not mark as read' : 'Could not mark as unread', description: getErrorMessage(error, 'Try again') })
   }
-  // Saved or not, the server says what the row is now: a save can land while telling other devices fails.
-  await refresh()
 }
 
 function conversationPath(thread: ThreadListItem) {
@@ -344,28 +348,63 @@ async function archive(thread: ThreadListItem) {
       body: { archived: true },
       validate: (value: unknown): value is { archived: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'archived') === true,
     })
-    refreshConversationUnreadCount()
+    if (!disposed) refreshConversationUnreadCount()
   } catch (error) {
     toast.add({ color: 'error', title: 'Could not archive the conversation', description: getErrorMessage(error, 'Try again') })
   } finally {
     toggling.delete(thread.id)
+    refreshWorkspaceInbox()
   }
-  await refresh()
 }
 
 // The menu's counts are the list's, read with it.
-watch(data, page => { if (page?.unread) unreadCounts.value = page.unread }, { immediate: true })
+watch(page, value => { if (value?.unread) unreadCounts.value = value.unread }, { immediate: true })
 
-watch(realtime.event, (event) => {
-  // MESSAGE_ACK: this member read, marked or archived a conversation on another device or tab.
-  if (props.personalScope || !event || !['access.changed', 'MESSAGE_CREATE', 'MESSAGE_UPDATE', 'MESSAGE_ACK', 'CONVERSATION_LEAVE'].includes(event.type)) return
-  if (organizationId.value && event.organization_id !== organizationId.value) return
+let refreshRequested = false
+let disposed = false
+function refreshWorkspaceInbox() {
+  refreshRequested = true
+  drainRefresh()
+}
+
+function drainRefresh() {
+  if (disposed || !refreshRequested || pending.value || loadingMore.value || toggling.size) return
+  refreshRequested = false
   void refresh()
+}
+
+watch([pending, loadingMore], drainRefresh)
+onScopeDispose(() => {
+  disposed = true
+  pageController?.abort()
+  const current = page.value
+  if (!props.personalScope && current && status.value === 'success' && !loadingMore.value && !toggling.size
+    && !nextPageError.value && !refreshRequested && realtime.status.value === 'open' && readConnectionEpoch === realtime.connectionEpoch.value) {
+    const expiresAt = reuseExpiresAt ?? Date.now() + 30_000
+    if (expiresAt > Date.now()) realtime.recentInbox.snapshot = { key: listKey.value, page: current, expiresAt }
+  }
 })
 
+function clearWorkspaceInbox() {
+  pageController?.abort()
+  unreadCounts.value = null
+  loadedPages = 1
+  clear()
+}
+
+watch(realtime.event, event => {
+  if (props.personalScope || !event || event.organization_id !== organizationId.value) return
+  if ((event.type === 'MESSAGE_ACK' || event.type === 'CONVERSATION_LEAVE') && event.user_id !== reader.value) return
+  if (event.type === 'access.changed' || event.type === 'CONVERSATION_LEAVE') clearWorkspaceInbox()
+  else if (event.type !== 'MESSAGE_CREATE' && event.type !== 'MESSAGE_UPDATE' && event.type !== 'MESSAGE_ACK') return
+  refreshWorkspaceInbox()
+}, { flush: 'sync' })
+watch(realtime.accessEnded, () => {
+  if (props.personalScope) return
+  refreshRequested = false
+  clearWorkspaceInbox()
+}, { flush: 'sync' })
 watch(realtime.connectionEpoch, (epoch) => {
-  if (epoch <= 0) return
-  if (!props.personalScope) realtime.connect()
-  void refresh()
+  if (!props.personalScope && readConnectionEpoch !== null && epoch > readConnectionEpoch) refreshWorkspaceInbox()
 })
 </script>

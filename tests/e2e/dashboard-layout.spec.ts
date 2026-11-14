@@ -55,6 +55,25 @@ test.describe('dashboard pane hierarchy', () => {
     await loginAs(page.request, baseURL!)
   })
 
+  test('inbox auto-selection keeps the desktop Menu open', async ({ page }) => {
+    await page.setViewportSize(WIDE)
+    const inbox = (url: URL) => url.pathname.endsWith('/conversations') && url.searchParams.get('offset') === '0'
+    const release = Promise.withResolvers<undefined>()
+    await page.route(inbox, async route => {
+      await release.promise
+      await route.continue()
+    }, { times: 1 })
+    try {
+      await open(page, `${ORG}/messages`)
+      await page.getByTestId('dashboard-top-nav-menu-button').click()
+    } finally {
+      release.resolve(undefined)
+    }
+    await expect(page.locator('[data-thread-row][aria-current="page"]')).toHaveCount(1)
+    const menu = page.getByRole('dialog', { name: 'Menu', exact: true })
+    await expect(menu.getByTestId('dashboard-search')).toBeVisible()
+  })
+
   test('each Menu destination is a root at its own URL, and Website content nests under Website', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/menu`)

@@ -1,5 +1,6 @@
 import { inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type InjectionKey, type Ref } from 'vue'
 import { isDashboardInvalidation, type DashboardInvalidation } from '~/shared/dashboard-invalidations'
+import type { ThreadListPage } from '~/lib/components/workspace/messages/guest-thread-client'
 
 export type DashboardInvalidationStatus = 'closed' | 'connecting' | 'open' | 'failed'
 
@@ -11,21 +12,30 @@ export interface DashboardInvalidationConnection {
    * first gap between their initial read and the completed socket upgrade.
    */
   connectionEpoch: Ref<number>
+  accessEnded: Ref<number>
+  recentInbox: { snapshot?: { key: string; page: ThreadListPage; expiresAt: number } }
   connect: () => void
+  waitForFirstOpen: (signal: AbortSignal) => Promise<void>
 }
 
 const dashboardInvalidationKey: InjectionKey<DashboardInvalidationConnection> = Symbol('dashboard-invalidations')
 const CONNECT_TIMEOUT_MS = 8_000
+const INITIAL_READ_WAIT_MS = 350
 const HEARTBEAT_INTERVAL_MS = 20_000
 const HEARTBEAT_TIMEOUT_MS = 8_000
 
-export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>): DashboardInvalidationConnection {
+export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>, reader: Readonly<Ref<string | undefined>>): DashboardInvalidationConnection {
+  const accessEnded = ref(0)
+  const recentInbox: DashboardInvalidationConnection['recentInbox'] = {}
   // `nuxt dev` cannot carry this socket: its dev server answers the upgrade
   // with a plain 200 (docs/local-development.md). Realtime runs under
   // `yarn dev:worker`, staging and production; here the dashboard stays on its
   // reads instead of retrying a connection that cannot open and reporting it.
   if (import.meta.dev) {
-    const connection: DashboardInvalidationConnection = { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), connect: () => {} }
+    const connection: DashboardInvalidationConnection = {
+      status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), accessEnded, recentInbox,
+      connect: () => {}, waitForFirstOpen: async () => {},
+    }
     provide(dashboardInvalidationKey, connection)
     return connection
   }
@@ -125,22 +135,43 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
         const first = seenEventIds.values().next().value
         if (first) seenEventIds.delete(first)
       }
+      if (parsed.type === 'access.changed' || parsed.type === 'MESSAGE_CREATE' || parsed.type === 'MESSAGE_UPDATE'
+        || ((parsed.type === 'MESSAGE_ACK' || parsed.type === 'CONVERSATION_LEAVE') && parsed.user_id === reader.value)) {
+        recentInbox.snapshot = undefined
+      }
       event.value = parsed
     })
 
-    nextSocket.addEventListener('close', () => {
+    nextSocket.addEventListener('close', close => {
       if (socket !== nextSocket) return
       clearHealthTimer()
       socket = null
-      if (stopped || !organizationSlug.value) {
-        status.value = 'closed'
-        return
-      }
+      status.value = organizationSlug.value ? 'failed' : 'closed'
+      if (close.code === 1008) accessEnded.value++
       scheduleReconnect()
     })
 
     nextSocket.addEventListener('error', () => {
       nextSocket.close()
+    })
+  }
+
+  /** Subscribe before the first inbox read when the socket can open promptly. */
+  async function waitForFirstOpen(signal: AbortSignal) {
+    if (!import.meta.client || signal.aborted || status.value === 'open' || status.value === 'failed' || !window.navigator.onLine) return
+    connect()
+    await new Promise<void>(resolve => {
+      const stop = watch(status, value => {
+        if (value === 'open' || value === 'failed' || value === 'closed') finish()
+      }, { flush: 'sync' })
+      const timer = setTimeout(finish, INITIAL_READ_WAIT_MS)
+      signal.addEventListener('abort', finish, { once: true })
+      function finish() {
+        clearTimeout(timer)
+        stop()
+        signal.removeEventListener('abort', finish)
+        resolve()
+      }
     })
   }
 
@@ -172,6 +203,13 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
   }
 
   watch(organizationSlug, resetConnection, { flush: 'sync' })
+  watch(status, value => {
+    if (value !== 'open') recentInbox.snapshot = undefined
+  }, { flush: 'sync' })
+  watch(reader, (_next, previous) => {
+    recentInbox.snapshot = undefined
+    if (previous !== undefined) resetConnection()
+  }, { flush: 'sync' })
 
   onMounted(() => {
     mounted = true
@@ -191,7 +229,7 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
     status.value = 'closed'
   })
 
-  const connection = { status, event, connectionEpoch, connect }
+  const connection = { status, event, connectionEpoch, accessEnded, recentInbox, connect, waitForFirstOpen }
   provide(dashboardInvalidationKey, connection)
   return connection
 }

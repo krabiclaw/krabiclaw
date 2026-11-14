@@ -1,13 +1,99 @@
-import { expect, test, type APIRequestContext } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Request } from '@playwright/test'
+import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import type { InboxRow, InboxThread } from '../../server/domain/guest-threads/types'
 import { openTenantPage } from './helpers'
-import { loginAs } from './helpers/auth'
+import { authRequestHeaders, loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
 import { seededSiteHeaders, testBaseUrl } from './test-env'
 import { bookTable, openSeating } from './helpers/tables'
 
 type ConversationPage = { threads: InboxRow[]; unread: { all: number; guests: number; support: number; team: number } }
+
+test('a saved workspace inbox is discarded when the reader loses access', async ({ browser, playwright, baseURL }) => {
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Uses an isolated local workspace')
+  const origin = baseURL!
+  const headers = authRequestHeaders(origin)
+  const fixture = findE2eAuthFixture('user-e2e-demo-role-owner')
+  const owner = await playwright.request.newContext({ baseURL: origin })
+  const reader = await playwright.request.newContext({ baseURL: origin })
+  const slug = `e2e-inbox-access-${crypto.randomUUID().slice(0, 8)}`
+  let organizationId: string | undefined
+  try {
+    await loginAs(owner, origin)
+    await loginAs(reader, origin, fixture.id)
+    const workspace = await owner.post('/api/auth/organization/create', {
+      headers, data: { name: slug, slug, default_currency: 'THB', timezone: 'Asia/Bangkok', keepCurrentActiveOrganization: true },
+    })
+    expect(workspace.status(), await workspace.text()).toBe(200)
+    organizationId = (await workspace.json() as { id: string }).id
+    const invitation = await owner.post('/api/auth/organization/invite-member', {
+      headers, data: { organizationId, email: fixture.email, role: 'member' },
+    })
+    expect(invitation.status(), await invitation.text()).toBe(200)
+    const { id: invitationId } = await invitation.json() as { id: string }
+    const joined = await reader.post('/api/auth/organization/accept-invitation', { headers, data: { invitationId } })
+    expect(joined.status(), await joined.text()).toBe(200)
+    const { member } = await joined.json() as { member: { id: string } }
+
+    const team = '/api/dashboard/team/threads'
+    const created = await owner.post(team, { params: { org: slug }, headers, data: { member_user_ids: [fixture.id] } })
+    expect(created.status(), await created.text()).toBe(201)
+    const { conversation_id: id } = await created.json() as { conversation_id: string }
+    const preview = 'Preview visible only to the workspace member.'
+    const sent = await owner.post(`${team}/${id}/messages`, { params: { org: slug }, headers, data: { body: preview, idempotency_key: crypto.randomUUID() } })
+    expect(sent.status(), await sent.text()).toBe(201)
+    const conversations = `/api/dashboard/organizations/${organizationId}/conversations`
+    const page = await browser.newPage({ baseURL: origin, storageState: await reader.storageState(), viewport: { width: 1280, height: 900 } })
+    try {
+      const connected = page.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket' })
+      await openTenantPage(page, `${origin}/dashboard/${slug}/messages/team/${id}`, {})
+      const socket = await connected
+      const row = page.locator(`[data-thread-row="${id}"]`)
+      await expect(row).toContainText(preview)
+      const nav = page.getByTestId('dashboard-top-nav')
+      await nav.getByRole('link', { name: 'Calendar', exact: true }).click()
+      await expect(row).toHaveCount(0)
+      const closed = socket.waitForEvent('close')
+      const revoked = await owner.post('/api/auth/organization/remove-member', { headers, data: { organizationId, memberIdOrEmail: member.id } })
+      expect(revoked.status(), await revoked.text()).toBe(200)
+      await closed
+
+      const isInbox = (url: URL) => url.pathname === conversations && url.searchParams.get('offset') === '0'
+      const releaseDenied = Promise.withResolvers<undefined>()
+      await page.route(isInbox, async route => {
+        await releaseDenied.promise
+        await route.continue()
+      }, { times: 1 })
+      try {
+        const request = page.waitForRequest(item => item.method() === 'GET' && isInbox(new URL(item.url())))
+        await nav.getByRole('link', { name: 'Messages', exact: true }).click()
+        await request
+        await expect(row).toHaveCount(0)
+        const denied = page.waitForResponse(response => response.request().method() === 'GET' && isInbox(new URL(response.url())))
+        releaseDenied.resolve(undefined)
+        expect((await denied).status()).toBe(404)
+        await expect(row).toHaveCount(0)
+      } finally {
+        releaseDenied.resolve(undefined)
+      }
+    } finally {
+      await page.close()
+    }
+    const retained = await owner.get(conversations)
+    expect(retained.status(), await retained.text()).toBe(200)
+    expect(await retained.json()).toMatchObject({ threads: [{ id, preview }] })
+  } finally {
+    try {
+      if (organizationId) {
+        const deleted = await owner.post('/api/auth/organization/delete', { headers, data: { organizationId } })
+        expect(deleted.status(), await deleted.text()).toBe(200)
+      }
+    } finally {
+      await Promise.all([owner.dispose(), reader.dispose()])
+    }
+  }
+})
 
 test('a new booking, its cancellation and a guest message are unread until read, and one count says so everywhere', async ({ browser, playwright }, testInfo) => {
   test.setTimeout(60_000)
@@ -74,9 +160,10 @@ test('a new booking, its cancellation and a guest message are unread until read,
     await expect.poll(async () => (await row(reservationId)).unread).toBe(false)
     expect(await unread()).toBe(before)
 
+    const preview = 'Is the patio open on Sunday evenings?'
     const submitted = await guest.post('/api/public/contact', {
       headers: tenantHeaders,
-      data: { name: 'Unread badge proof', email: `unread-badge-${Date.now()}@playwright.example`, message: 'Is the patio open on Sunday evenings?' },
+      data: { name: 'Unread badge proof', email: `unread-badge-${Date.now()}@playwright.example`, message: preview },
     })
     expect(submitted.status(), await submitted.text()).toBe(201)
     const threadId = (await submitted.json() as { conversation_id: string }).conversation_id
@@ -84,18 +171,43 @@ test('a new booking, its cancellation and a guest message are unread until read,
     // Counted once, and Messages on the dashboard shows the same number.
     const arrived = await unread()
     expect(arrived).toBe(before + 1)
-    await openTenantPage(page, `${baseURL}/dashboard/${restaurant.slug}/calendar`, {})
+    const listRow = page.locator(`[data-thread-row="${threadId}"]`)
+    await expect(listRow).toContainText(preview)
+    const nav = page.getByTestId('dashboard-top-nav')
+    const calendar = nav.getByRole('link', { name: 'Calendar', exact: true })
+    const messages = nav.getByRole('link', { name: 'Messages', exact: true })
+    await calendar.click()
+    await expect(listRow).toHaveCount(0)
     await expect(page.getByTestId('dashboard-nav-unread')).toHaveText(arrived > 99 ? '99+' : String(arrived))
 
-    // Opening the conversation reads it: the count drops by it.
+    // Measure only the inbox navigation. A real acknowledgement subsequently refreshes the row.
+    const isInbox = (request: Request) => {
+      const url = new URL(request.url())
+      return request.method() === 'GET' && url.pathname === conversations && url.searchParams.get('offset') === '0'
+    }
+    const reads: Request[] = []
+    const trackInbox = (request: Request) => { if (isInbox(request)) reads.push(request) }
     const readContact = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `${conversations}/${threadId}/read`)
-    await openTenantPage(page, `${baseURL}/dashboard/${restaurant.slug}/messages/${encodeURIComponent(threadId)}`, {})
+    page.on('request', trackInbox)
+    const releaseRead = Promise.withResolvers<undefined>()
+    await page.route(url => url.pathname === `${conversations}/${threadId}/read`, async route => {
+      await releaseRead.promise
+      await route.continue()
+    }, { times: 1 })
+    try {
+      await messages.click()
+      await expect(listRow).toContainText(preview)
+      await expect(listRow).toHaveAttribute('aria-current', 'page')
+      expect(reads).toHaveLength(0)
+    } finally {
+      page.off('request', trackInbox)
+      releaseRead.resolve(undefined)
+    }
     expect((await readContact).status()).toBe(200)
     await expect.poll(async () => await unread()).toBe(before)
 
     // From the Messages list: the row's envelope marks it unread, and its menu marks it read
     // again. Each is read back through the count Messages uses.
-    const listRow = page.locator(`[data-thread-row="${threadId}"]`)
     await expect(listRow).toBeVisible()
     await expect(listRow.getByLabel('Unread badge proof: unread')).toHaveCount(0)
     await listRow.hover()
@@ -108,6 +220,12 @@ test('a new booking, its cancellation and a guest message are unread until read,
     await expect(listRow.getByLabel('Unread badge proof: unread')).toHaveCount(0)
     await expect.poll(async () => await unread()).toBe(before)
     expect(await row(threadId)).toMatchObject({ unread: false })
+
+    const refreshed = page.waitForResponse(response => isInbox(response.request()))
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')))
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
+    expect((await refreshed).status()).toBe(200)
+    await expect(listRow).toContainText(preview)
   } finally {
     await dashboard.close()
     await owner.dispose()
