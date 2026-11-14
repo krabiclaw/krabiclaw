@@ -321,7 +321,7 @@ test('booking assignment and workspace admin promotion do not grant a conversati
     expect(ownerThread.status(), await ownerThread.text()).toBe(200)
     const { conversation: ownerConversation, viewer_role: role } = await ownerThread.json() as ConversationPage
     expect(role).toBe('member')
-    expect(ownerConversation).toMatchObject({ id: reservationId, kind: 'guest', title: guestName, channel: 'direct', booking_id: booking.booking_id })
+    expect(ownerConversation).toMatchObject({ id: reservationId, kind: 'guest', title: guestName, booking_id: booking.booking_id, composer: { channel: 'email' } })
     await loginAs(memberRequest, baseURL!, actor.userId)
     const verifyAccess = async (assigned: boolean) => {
       const agendaResponse = await memberRequest.get('/api/dashboard/agenda', { params: { org, from: day.date, to: day.date } })
@@ -501,11 +501,13 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
     expect(await draftOpportunity()).toBeUndefined()
     const taskRead = await page.request.get(`${tasksApi}/tasks/${acceptedTask.id}`)
     expect(taskRead.status(), await taskRead.text()).toBe(200)
-    expect((await taskRead.json() as { task: TaskView }).task).toMatchObject({
+    const { task } = await taskRead.json() as { task: TaskView }
+    expect(task).toMatchObject({
       id: acceptedTask.id, kind: 'opportunity', status: 'open', status_line: 'Accepted opportunity', title: `Publish “${title}”`,
       assignee: { type: 'member', name: 'You', you: true }, due_at: expect.any(String), action: { type: 'complete', label: 'Done' },
-      can: { complete: true, skip: true, reopen: false, assign: true, edit: true }, dismiss: { label: 'Skip', card: false },
+      can: { complete: true, skip: true, reopen: false, assign: true, edit: true },
     })
+    expect(task.dismiss).toEqual({ label: 'Skip' })
     expect((await readToday()).tasks.find(section => section.id === 'open')?.tasks.map(task => task.id)).toContain(acceptedTask.id)
 
     // Publishing from another surface is the work the task asked for: it is done, and the next growth opportunity is offered.
