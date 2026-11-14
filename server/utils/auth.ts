@@ -31,7 +31,7 @@ import { ingestStripeFeeReportEvent } from '~/server/domain/payments/costs'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { deleteBuyerCustomers } from '~/server/utils/billing-customer'
 import { anonymousLinkQueries, linkGuestIdentitiesByVerifiedEmail } from '~/server/utils/guest-accounts'
-import { recordRequestExternalCall, unwrapInstrumentedD1 } from '~/server/utils/request-metrics'
+import { isTracingTranscript, recordRequestExternalCall, timeTranscriptPhase, unwrapInstrumentedD1 } from '~/server/utils/request-metrics'
 import { timingSafeEqualText } from '~/server/utils/dev-route-auth'
 import { notifyOrganizationInvited } from '~/server/utils/notifications'
 import { cleanupOrganizationBeforeDelete } from '~/server/utils/tenant-deletion'
@@ -1071,9 +1071,15 @@ export async function requireIntegrationAccount(
 }
 
 export async function getAuthSession(event: H3Event, env: CloudflareEnv): Promise<Awaited<ReturnType<ReturnType<typeof createAuth>['api']['getSession']>>> {
-  return createAuth(env).api.getSession({
-    headers: event.req.headers,
+  const headers = event.req.headers
+  if (!isTracingTranscript(event)) return createAuth(env).api.getSession({ headers })
+
+  const auth = await timeTranscriptPhase(event, 'auth_init', async () => {
+    const instance = createAuth(env)
+    await instance.$context
+    return instance
   })
+  return timeTranscriptPhase(event, 'auth_session', () => auth.api.getSession({ headers }))
 }
 
 /**

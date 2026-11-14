@@ -3,6 +3,7 @@ import { defineHandler, HTTPError, type H3Event } from 'nitro';
 import {    redirect, setResponseHeader } from 'nitro/h3';
 import { queryFirst } from '~/server/db'
 import { cloudflareEnv } from '~/server/utils/api-response'
+import { markTranscriptMiddlewareComplete } from '~/server/utils/request-metrics'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
 import { presentationForProduct } from '~/utils/product-presentation'
 
@@ -244,4 +245,6 @@ export default defineHandler(async (event) => {
     }
   }
 
+  // Nuxt's remaining middleware and lazy API handler import run after this point.
+  markTranscriptMiddlewareComplete(event)
 })

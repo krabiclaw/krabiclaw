@@ -16,6 +16,7 @@ export interface RequestDataMetrics {
   d1Colos: Set<string>
   startedAt: number
   phases: Record<string, number>
+  transcript?: { finishDispatch?: () => void; firstAppD1Ms?: number }
   resources: Map<string, number>
   externalCalls: Partial<Record<'google_calendar_free_busy' | 'better_auth_google_refresh', number>>
   finalized: boolean
@@ -79,6 +80,52 @@ export function safeRoute(event: H3Event): string {
 export function recordRequestPhase(event: H3Event, phase: string, startedAt: number) {
   const metrics = getRequestDataMetrics(event)
   metrics.phases[phase] = (metrics.phases[phase] ?? 0) + performance.now() - startedAt
+}
+
+export function beginTranscriptMetrics(event: H3Event) {
+  if (event.req.method !== 'GET' || !/^\/api\/messages\/[^/]+\/?$/.test(event.url.pathname)) return
+  if (event.url.pathname === '/api/messages/unread-count' || event.url.pathname === '/api/messages/unread-count/') return
+  const metrics = getRequestDataMetrics(event)
+  metrics.transcript = { finishDispatch: startTranscriptPhase(event, 'middleware') }
+}
+
+export function isTracingTranscript(event: H3Event) {
+  return metricsByEvent.get(event)?.transcript !== undefined
+}
+
+export function markTranscriptMiddlewareComplete(event: H3Event) {
+  const transcript = metricsByEvent.get(event)?.transcript
+  if (!transcript?.finishDispatch) return
+  transcript.finishDispatch()
+  transcript.finishDispatch = startTranscriptPhase(event, 'route_dispatch')
+}
+
+export function markTranscriptHandlerEntry(event: H3Event) {
+  const transcript = metricsByEvent.get(event)?.transcript
+  transcript?.finishDispatch?.()
+  if (transcript) delete transcript.finishDispatch
+}
+
+function startTranscriptPhase(event: H3Event, name: string) {
+  const startedAt = performance.now()
+  const span = event.req.runtime?.cloudflare?.context?.tracing?.startSpan(`messages.${name}`)
+  return () => {
+    span?.end()
+    recordRequestPhase(event, name, startedAt)
+  }
+}
+
+export function timeTranscriptPhase<T>(event: H3Event, name: string, run: () => Promise<T>): Promise<T> {
+  const tracing = event.req.runtime?.cloudflare?.context?.tracing
+  const measure = async () => {
+    const startedAt = performance.now()
+    try {
+      return await run()
+    } finally {
+      recordRequestPhase(event, name, startedAt)
+    }
+  }
+  return tracing ? tracing.enterSpan(`messages.${name}`, measure) : measure()
 }
 
 function recordResult(metrics: RequestDataMetrics, value: unknown): D1MetaSummary[] {
@@ -171,6 +218,7 @@ function wrapStatement(statement: object, metrics: RequestDataMetrics, event: H3
         return async (...args: unknown[]) => {
           metrics.statementCount += 1
           const startedAt = performance.now()
+          if (metrics.transcript) metrics.transcript.firstAppD1Ms ??= startedAt - metrics.startedAt
           let queryDurationMs = 0
           try {
             const result = await value.apply(target, args)
@@ -219,6 +267,7 @@ export function instrumentD1(event: H3Event, database: D1Database | D1DatabaseSe
           metrics.statementCount += statements.length
           metrics.batchRoundTrips += 1
           const startedAt = performance.now()
+          if (metrics.transcript) metrics.transcript.firstAppD1Ms ??= startedAt - metrics.startedAt
           let batchDurationMs = 0
           try {
             const originals = statements.map(statement => statementTargets.get(statement)?.target ?? statement)
@@ -336,6 +385,7 @@ function applyMetricHeaders(
   )
   setHeader(event, 'server-timing', [
     ...phaseTimings,
+    ...(metrics.transcript?.firstAppD1Ms === undefined ? [] : [`first_app_d1;dur=${metrics.transcript.firstAppD1Ms.toFixed(2)}`]),
     `d1;dur=${metrics.d1DurationMs.toFixed(2)}`,
     `total;dur=${totalDuration.toFixed(2)}`,
   ].join(', '))
@@ -344,6 +394,7 @@ function applyMetricHeaders(
 export async function flushRequestMetrics(event: HTTPEvent, response: Response) {
   const metrics = metricsByEvent.get(event)
   if (!metrics) return
+  markTranscriptHandlerEntry(event)
 
   // h3 holds the response until this hook settles, and an event stream such as
   // MCP's subscriptions/listen never ends: reading it held the stream from the
@@ -384,6 +435,7 @@ export async function flushRequestMetrics(event: HTTPEvent, response: Response) 
     ...(metrics.auditContext ? { auditContext: metrics.auditContext } : {}),
     rayId: event.req.headers.get('cf-ray'),
     phases: Object.fromEntries(Object.entries(metrics.phases).map(([name, duration]) => [name, Number(duration.toFixed(2))])),
+    ...(metrics.transcript ? { firstAppD1Ms: metrics.transcript.firstAppD1Ms === undefined ? null : Number(metrics.transcript.firstAppD1Ms.toFixed(2)) } : {}),
     d1SqlDurationMs: Number(metrics.d1SqlDurationMs.toFixed(2)),
     d1MetaCount: metrics.d1MetaCount,
     d1Colos: [...metrics.d1Colos],
