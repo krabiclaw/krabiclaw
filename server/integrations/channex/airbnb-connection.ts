@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { STAY_CALENDAR_DAYS, resolveStayNightPolicy } from '~/shared/bookings'
+import { STAY_CALENDAR_DAYS, resolveStayNightPolicy, stayChannelCalendarRules } from '~/shared/bookings'
 import { executeWithinCapacity, hasOrganizationEntitlement, requireHomeCapacity } from '~/server/utils/billing'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -586,7 +586,7 @@ export class AirbnbConnection {
       await executeBatch(this.db, [{
         query: `INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, import_stage, import_property, import_written)
           VALUES (?, ?, 'channex', ?, ?, 'property', ?, ?) ON CONFLICT (product_id, provider) DO NOTHING`,
-        params: [this.organizationId, home.product_id, listingId, channelId, JSON.stringify(property), JSON.stringify(created ? {} : { min_nights: await fingerprint(home.min_nights), calendar_rules: await fingerprint(home.calendar_rules) })],
+        params: [this.organizationId, home.product_id, listingId, channelId, JSON.stringify(property), JSON.stringify(created ? {} : { min_nights: await fingerprint(home.min_nights), calendar_rules: await fingerprint(stayChannelCalendarRules(home.calendar_rules)) })],
       }, ...(contact ? [contact] : [])], { operation: 'Map an imported Airbnb listing' })
       return { product_id: home.product_id, stage: 'property', waiting: false }
     })
@@ -948,7 +948,7 @@ export class AirbnbConnection {
     const body: Record<string, unknown> = {}
     if (written.min_nights !== undefined) body.min_nights = content.minimum_nights
     else report.kept_host_edits.push('min_nights')
-    if (written.calendar_rules !== undefined || home.calendar_rules === null) body.calendar_rules = content.calendar_rules
+    if (written.calendar_rules !== undefined || stayChannelCalendarRules(home.calendar_rules) === null) body.calendar_rules = content.calendar_rules
     else report.kept_host_edits.push('calendar_rules')
     const texts = content.descriptions
     // Airbnb's Listing description is the home's description; Airbnb's other texts are the home's sections of the same names.
@@ -994,7 +994,7 @@ export class AirbnbConnection {
     }
     // A field the host changed since Airbnb's value was last written here keeps the host's value: only a
     // field still holding what the last run wrote, or one never written, takes Airbnb's.
-    const current: Record<string, unknown> = { ...home, ...(await getProduct(this.db, this.organizationId, mapping.product_id)).details }
+    const current: Record<string, unknown> = { ...home, calendar_rules: stayChannelCalendarRules(home.calendar_rules), ...(await getProduct(this.db, this.organizationId, mapping.product_id)).details }
     const unedited = async <T extends Record<string, unknown>>(values: T): Promise<Partial<T>> => {
       const kept: Partial<T> = {}
       for (const [field, value] of Object.entries(values) as Array<[keyof T & string, T[keyof T & string]]>) {
@@ -1004,7 +1004,9 @@ export class AirbnbConnection {
           continue
         }
         written[field] = await fingerprint(value)
-        if (written[field] !== currentHash) kept[field] = value
+        if (written[field] !== currentHash) kept[field] = field === 'calendar_rules' && home.calendar_rules?.direct_discounts
+          ? { ...content.calendar_rules, direct_discounts: home.calendar_rules.direct_discounts } as T[keyof T & string]
+          : value
       }
       return kept
     }

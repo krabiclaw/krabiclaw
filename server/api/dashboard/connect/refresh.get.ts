@@ -21,7 +21,7 @@ export default defineHandler(async (event) => {
   if (!account?.stripe_account_id) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe onboarding has not started', data: { code: 'CONNECT_NOT_STARTED' } })
   const onboardingUrl = await createStripeConnectOnboardingLink(
     paymentsStripe(env, account.livemode),
-    { stripeAccountId: account.stripe_account_id, ...buildStripeConnectOnboardingUrls(env.NUXT_PUBLIC_PLATFORM_DOMAIN, organization.slug) },
+    { stripeAccountId: account.stripe_account_id, ...buildStripeConnectOnboardingUrls(env.NUXT_PUBLIC_PLATFORM_DOMAIN, organization.slug, account.livemode) },
   )
   return sendRedirect(event, onboardingUrl, 303)
 })

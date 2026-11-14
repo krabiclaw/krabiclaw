@@ -9,7 +9,7 @@
 // recoverable until native deletion is verified; a failed cleanup never reports
 // a completed discard.
 
-import { defineHandler } from 'nitro'
+import { defineHandler, HTTPError } from 'nitro'
 
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
@@ -30,7 +30,11 @@ export default defineHandler(async (event) => {
   const draft = await readActiveOnboardingDraft(db, session.user.id, true)
   if (!draft) return jsonResponse({ success: true, deleted: false })
 
-  const organizationId = draft.organization_id ?? (await findOnboardingOrganization(env, session.user.id, { draftId: draft.id, slug: draft.subdomain_candidate }))?.organizationId ?? null
+  const subdomain = draft.subdomain_candidate
+  const organizationId = draft.organization_id
+    ?? (subdomain ? (await findOnboardingOrganization(env, session.user.id, { draftId: draft.id, slug: subdomain }))?.organizationId : null)
+    ?? null
+  if (organizationId && !subdomain) throw new HTTPError({ statusCode: 409, message: 'The draft organization has no website address to discard', data: { code: 'ONBOARDING_DRAFT_DISCARD_INCOMPLETE', draft_id: draft.id } })
   if (organizationId && (await resolveOrganizationMembership(env, { organizationId, userId: session.user.id }))?.role !== 'owner') return jsonResponse({ error: 'Only an owner of this organization can discard its draft.' }, { status: 403 })
   const revision = new Date(Math.max(Date.now(), Date.parse(draft.updated_at) + 1)).toISOString()
   const claimed = await execute(db, `
@@ -41,12 +45,12 @@ export default defineHandler(async (event) => {
   if (!claimed.meta.changes) return jsonResponse({ error: 'Website draft changed or is already live. Reload before discarding.', code: 'ONBOARDING_DRAFT_CHANGED', draft_id: draft.id }, { status: 409 })
 
   let deleted = false
-  if (organizationId) {
+  if (organizationId && subdomain) {
     const outcome = await deleteAbandonedDraftTenant(env, {
       draftId: draft.id,
       updated_at: revision,
       organizationId,
-      subdomain: draft.subdomain_candidate,
+      subdomain,
       userId: session.user.id,
     })
     if ('refused' in outcome) {

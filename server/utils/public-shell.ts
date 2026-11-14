@@ -90,7 +90,7 @@ export async function loadPublicShellSource(
     getSourceLocale(db, organizationId),
   ])
   const shellQueries: BatchQuery[] = []
-  const shellIndexes = appendPublicShellQueries(shellQueries, organization.id)
+  const shellIndexes = appendPublicShellQueries(shellQueries, organization.id, previewAuthorized && organization.vertical === 'restaurant')
   // The language, the shell rows and the bookable experiences depend on the
   // site alone; they were three sequential round trips on every cold shell.
   const [

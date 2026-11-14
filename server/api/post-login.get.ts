@@ -1,8 +1,8 @@
 import { HTTPError, defineHandler  } from 'nitro';
 
-// GET /api/post-login — server-side redirect after OAuth / sign-in.
+// GET /api/post-login — resolve where an authenticated account should start.
 import { getQuery, redirect } from 'nitro/h3';
-import { cloudflareEnv } from '~/server/utils/api-response'
+import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { resolvePostLoginRoute } from '~/server/utils/post-login-routing'
 import { activateSessionOrganization } from '~/server/utils/session-organization'
@@ -13,18 +13,23 @@ export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
   const db = env.DB
 
-  const plan = getQuery(event).plan
+  const { plan, redirect: requestedRedirect, format } = getQuery(event)
+  const asJSON = format === 'json'
   if (plan !== undefined && !isNewSalePlan(plan)) {
     throw new HTTPError({ statusCode: 400, message: 'Unknown checkout plan' })
   }
   const session = await getAuthSession(event, env)
-  const redirectTarget = validatedInternalPath(getQuery(event).redirect)
+  const redirectTarget = validatedInternalPath(requestedRedirect)
 
   if (!session?.user?.id) {
+    if (asJSON) throw new HTTPError({ statusCode: 401, message: 'Authentication required' })
     const returnTarget = redirectTarget ?? (plan ? buildPostLoginUrl({ plan }) : undefined)
     return redirect(buildLoginUrl(returnTarget ? { redirect: returnTarget } : {}), 302)
   }
 
+  if (asJSON && (plan !== undefined || requestedRedirect !== undefined)) {
+    throw new HTTPError({ statusCode: 400, message: 'The account destination does not take a plan or redirect' })
+  }
   if (redirectTarget && !isDashboardAppPath(redirectTarget)) return redirect(redirectTarget, 302)
 
   if (!db) {
@@ -37,6 +42,8 @@ export default defineHandler(async (event) => {
       userId: session.user.id,
       activeOrganizationId: typeof sessionRecord.activeOrganizationId === 'string' ? sessionRecord.activeOrganizationId : null,
     })
+
+    if (asJSON) return jsonResponse({ destination: route.destination }, { headers: { 'Cache-Control': 'private, no-store' } })
 
     // One organization is activated here rather than on arrival: this handler
     // holds the authenticated request headers, and routing first would leave
@@ -56,7 +63,7 @@ export default defineHandler(async (event) => {
         chooseParams.set('plan', plan)
         return redirect(`${route.destination}?${chooseParams}`, 302)
       }
-      return redirect(`${route.destination}/billing?plan=${encodeURIComponent(plan)}`, 302)
+      return redirect(`${route.destination}/billing?checkout=${encodeURIComponent(plan)}`, 302)
     }
 
     if (route.kind === 'onboard') {

@@ -37,20 +37,6 @@ export function verifyEmailMessage(input: { verificationUrl: string }): Notifica
   }
 }
 
-export function signInCodeMessage(input: { code: string }): NotificationMessage {
-  return {
-    title: 'Your KrabiClaw sign-in code',
-    preheader: `${input.code} is your code. It expires in 5 minutes.`,
-    hero: null,
-    intro: 'Enter this code where you asked for it to sign in to KrabiClaw.',
-    facts: [{ key: 'code', label: 'Code', value: input.code }],
-    finePrint: 'The code expires in 5 minutes. If you did not ask for it, you can ignore this email.',
-    emailPurpose: 'transactional',
-    emailReason: 'You received this email because a sign-in code was requested for this address on KrabiClaw.',
-    category: 'account_security',
-  }
-}
-
 export function resetPasswordMessage(input: { resetUrl: string }): NotificationMessage {
   return {
     title: 'Reset your password',
@@ -160,7 +146,7 @@ export function guestBookingReceivedMessage(input: GuestBookingInput & { product
     locale: locale.locale,
     title: input.status === 'pending' ? locale.messages['booking.request_received']!
       : reservation ? locale.messages['email.subject.reservation_confirmed']!.replace('{place}', input.organizationName) : locale.messages['booking.confirmed']!,
-    preheader: `${input.productTitle} · ${input.date} · ${input.time}`,
+    preheader: [input.productTitle, input.date, input.time].filter(Boolean).join(' · '),
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     intro: input.status === 'pending' ? locale.messages['booking.pending_message']! : undefined,
     facts: guestVisitFacts(input),
@@ -299,7 +285,7 @@ export function guestThreadReplyMessage(input: {
     preheader: input.body ? input.body.slice(0, 120) : `${input.organizationName} sent ${photos.length === 1 ? 'a photo' : `${photos.length} photos`}`,
     hero: null,
     facts: [],
-    quote: { author: input.organizationName, body: input.body, translation: null, photos },
+    quote: { author: input.organizationName, body: input.body, photos },
     primaryAction: manageAction(input),
     finePrint: 'Reply to this email and your message goes straight back to the same conversation.',
     emailPurpose: 'transactional',

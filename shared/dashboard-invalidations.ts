@@ -10,11 +10,20 @@ interface DashboardInvalidationBase {
  * delivery receipt or a block (MESSAGE_UPDATE). A team conversation's reach
  * only its participants.
  */
+export interface MessageIdentity { id: string; sequence: number }
+
+export function isMessageIdentity(value: unknown): value is MessageIdentity {
+  return isRecord(value) && typeof value.id === 'string' && Boolean(value.id) && Number.isSafeInteger(value.sequence) && Number(value.sequence) > 0
+}
+
 export interface ConversationEvent extends DashboardInvalidationBase {
   type: 'MESSAGE_CREATE' | 'MESSAGE_UPDATE'
   conversation_id: string
   location_id: string | null
   team: boolean
+  message?: MessageIdentity
+  /** Only the scheduled outbox changed. There is no new or updated chat entry. */
+  scheduled?: true
 }
 
 /** One person's read position or archive moved (MESSAGE_ACK); it reaches only them. */
@@ -75,4 +84,6 @@ export function isDashboardInvalidation(value: unknown): value is DashboardInval
 
   return (value.type === 'MESSAGE_CREATE' || value.type === 'MESSAGE_UPDATE')
     && typeof value.conversation_id === 'string' && Boolean(value.conversation_id) && typeof value.team === 'boolean'
+    && (value.message === undefined || isMessageIdentity(value.message))
+    && (value.scheduled === undefined || (value.scheduled === true && value.type === 'MESSAGE_UPDATE' && !value.team && value.message === undefined))
 }

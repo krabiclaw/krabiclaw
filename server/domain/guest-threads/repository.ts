@@ -1,14 +1,14 @@
 import { HTTPError } from 'nitro'
 import { sessionPrepTaskQueries } from '~/server/domain/tasks'
-import { BOOKING_ENDS_SQL, BOOKING_RECORDS_SQL, bookingDay, parseGuestRequest, participantLabel } from '~/server/domain/requests'
+import { BOOKING_ENDS_SQL, BOOKING_RECORDS_SQL, bookingDay, parseGuestRequest, stayRequestPayBySql, stayRequestRespondBySql } from '~/server/domain/requests'
 import {
-  CURRENT_GUEST_SQL, MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SUPPORT_CONVERSATION_SQL,
-  archiveQuery, archiveReplyTaskQuery, conversationAccessSql, guestVisibleSql, listUnreadIds, messageHasContentSql, unreadSql, type UnreadCounts,
+  MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SUPPORT_CONVERSATION_SQL,
+  archiveQuery, conversationAccessDenied, participantGuard, guestVisibleSql, listUnreadIds, messageHasContentSql, unreadSql, type ConversationGuard, type UnreadCounts,
 } from '~/server/domain/conversations'
 import { messagePreview } from './attachments'
+import { conversationGuestName } from './inbox'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
-import type { CloudflareEnv } from '~/server/utils/auth'
 import type { GuestThreadSubmissionType, InboxRow, ListGuestThreadsOptions } from './types'
 import { calendarDate, clockTime, firstName, initial, listTime, localDateKey, providerInstant, stayWhen } from './presentation'
 import { formatCalendarRange } from '~/utils/timezone'
@@ -22,7 +22,7 @@ const REPLY_CHANNEL_SQL = "CASE WHEN EXISTS (SELECT 1 FROM channel_threads ct WH
  * through Airbnb are not mirrored back (channel-messages.ts), so a mirrored
  * host message is one typed on Airbnb.
  */
-export function successfulBusinessReplySql(reply: string): string {
+function successfulBusinessReplySql(reply: string): string {
   return `(${reply}.author_kind = 'member' AND ${messageHasContentSql(reply)} AND (
     (${reply}.event_name = '${MEMBER_REPLY_EVENT}' AND (${reply}.channel = 'web' OR EXISTS (
       SELECT 1 FROM guest_thread_deliveries delivery
@@ -33,51 +33,6 @@ export function successfulBusinessReplySql(reply: string): string {
       AND NULLIF(TRIM(json_extract(${reply}.payload_json, '$.provider_message_id')), '') IS NOT NULL)
   ))`
 }
-
-function providerTimeSql(entry: string): string { return `json_extract(${entry}.payload_json, '$.provider_inserted_at')` }
-/** An explicit offset is honored; a zoneless Channex time is UTC (read 2026-11-08: every live mirror lands 2-6 s after its provider time). */
-function providerZoneSql(time: string): string {
-  return `CASE WHEN substr(${time}, -1) = 'Z' THEN 'Z' WHEN substr(${time}, -6, 1) IN ('+', '-') THEN substr(${time}, -6) ELSE 'Z' END`
-}
-
-/** One UTC clock for provider and local times, keeping the provider's microseconds for ordering. */
-function providerClockSql(time: string): string {
-  const zoneLength = `(CASE WHEN substr(${time}, -1) = 'Z' THEN 1 WHEN substr(${time}, -6, 1) IN ('+', '-') THEN 6 ELSE 0 END)`
-  const fraction = `substr((CASE WHEN substr(${time}, 20, 1) = '.' THEN substr(${time}, 21, length(${time}) - 20 - ${zoneLength}) ELSE '' END) || '000000000', 1, 9)`
-  return `(strftime('%Y-%m-%dT%H:%M:%S', substr(${time}, 1, 19) || ${providerZoneSql(time)}) || '.' || ${fraction})`
-}
-
-/** The resource's original time decides whether a late-imported reply follows the guest, not its local append sequence. */
-function mirroredAfterSql(reply: string, guestEntry: string): string {
-  const guestTime = `(CASE WHEN ${guestEntry}.event_name = '${MIRRORED_EVENT}' AND ${guestEntry}.channel = 'airbnb' THEN ${providerTimeSql(guestEntry)} ELSE ${guestEntry}.occurred_at END)`
-  return `${providerClockSql(providerTimeSql(reply))} > ${providerClockSql(guestTime)}`
-}
-
-/** A specific business response follows this message by causal local order or original provider chronology. */
-export function businessReplyFollowsSql(reply: string, guestEntry: string): string {
-  return `((${reply}.event_name = '${MEMBER_REPLY_EVENT}' AND ${reply}.sequence > ${guestEntry}.sequence)
-    OR (${reply}.event_name = '${MIRRORED_EVENT}' AND ${mirroredAfterSql(reply, guestEntry)}))`
-}
-
-/** When the guest asked: the provider's own instant for a mirrored message, otherwise when it was recorded. */
-export function guestEntryAskedAtSql(entry: string): string {
-  const time = providerTimeSql(entry)
-  return `CASE WHEN ${entry}.event_name = '${MIRRORED_EVENT}' AND ${time} IS NOT NULL
-    THEN strftime('%Y-%m-%dT%H:%M:%fZ', substr(${time}, 1, 19) || ${providerZoneSql(time)}) ELSE ${entry}.occurred_at END`
-}
-
-/** Whether a later successful business response to this guest message has been recorded. */
-export function businessReplyAfterSql(guestEntry: string): string {
-  return `EXISTS (
-        SELECT 1 FROM messages reply
-        WHERE reply.conversation_id = ${guestEntry}.conversation_id
-          AND ${successfulBusinessReplySql('reply')}
-          AND ${businessReplyFollowsSql('reply', guestEntry)}
-      )`
-}
-
-/** The conversation has an open reply task (server/domain/tasks.ts). */
-export const OPEN_REPLY_TASK_SQL = `EXISTS (SELECT 1 FROM tasks reply_task WHERE reply_task.kind = 'guest_reply' AND reply_task.subject_type = 'conversation' AND reply_task.subject_id = gt.id AND reply_task.status = 'open')`
 
 /**
  * The booking a conversation is about.
@@ -151,42 +106,36 @@ function kindWhere(kind: NonNullable<ListGuestThreadsOptions['kind']>): string {
  * which mailbox, which kind, what was searched, joined to the viewer's own
  * participant row `me`. Params run in SQL order: the `me` join, then the WHERE.
  */
-async function inboxScope(organizationId: string | null, opts: ListGuestThreadsOptions, now: string): Promise<{ from: string; where: string; params: Array<string | number> }> {
+function inboxScope(organizationId: string | null, opts: ListGuestThreadsOptions, now: string) {
   if (!organizationId && !opts.buyerAudience) throw new Error('Conversation list requires organization scope')
   if (!opts.userId) throw new Error('Conversation list requires the viewer')
   const params: Array<string | number> = [opts.userId]
   const from = `conversations gt${operationalRecordSql()}
     LEFT JOIN conversation_participants me ON me.conversation_id = gt.id AND me.user_id = ?`
-  let where: string
-  if (opts.buyerAudience) {
-    where = `gt.user_id = ? AND ${CURRENT_GUEST_SQL('gt')}`
-    params.push(opts.userId)
-    if (organizationId) { where += ' AND gt.organization_id = ?'; params.push(organizationId) }
-  } else {
-    where = 'gt.organization_id = ?'
-    params.push(organizationId!)
-    // Without a resolved principal (a server read on the viewer's behalf), every guest conversation and the viewer's team ones.
-    const access = opts.principal ? await conversationAccessSql('gt', opts.principal)
-      : { sql: "(gt.kind IN ('contact', 'booking') OR me.user_id IS NOT NULL AND gt.kind = 'team')", params: [] }
-    where += ` AND ${access.sql}`
-    params.push(...access.params)
+  const access = participantGuard('gt', opts.userId, opts.buyerAudience ? 'guest' : 'member')
+  let where = access.sql
+  params.push(...access.params)
+  if (organizationId) { where += ' AND gt.organization_id = ?'; params.push(organizationId) }
+  if (opts.conversationIds) {
+    where += " AND gt.id IN (SELECT value FROM json_each(?))"
+    params.push(d1JsonStringSet(opts.conversationIds))
   }
   if (opts.locationId) { where += ' AND gt.location_id = ?'; params.push(opts.locationId) }
   if (opts.assignedMemberId) { where += ' AND op.assigned_member_id = ?'; params.push(opts.assignedMemberId) }
   if (opts.type) where += threadTypeWhere(opts.type)
-  if (opts.needsReply) where += ` AND ${OPEN_REPLY_TASK_SQL}`
   if (opts.kind) where += kindWhere(opts.kind)
   if (opts.q) {
+    const visible = opts.buyerAudience ? ` AND ${guestVisibleSql('e', 'gt.user_id = me.user_id')}` : ''
     const like = `%${opts.q.toLowerCase().replace(/[\\%_]/g, char => `\\${char}`)}%`
     where += ` AND (LOWER(COALESCE(json_extract(gt.payload_json, '$.guest.name'), '')) LIKE ? ESCAPE '\\'
       OR LOWER(COALESCE(gt.name, '')) LIKE ? ESCAPE '\\'
       OR LOWER(COALESCE(json_extract(gt.payload_json, '$.participant.title'), '')) LIKE ? ESCAPE '\\'
       OR LOWER(COALESCE(${threadLocationTitleSql(opts.buyerAudience)}, '')) LIKE ? ESCAPE '\\'
-      OR EXISTS (SELECT 1 FROM messages e WHERE e.conversation_id = gt.id
+      OR EXISTS (SELECT 1 FROM messages e WHERE e.conversation_id = gt.id${visible}
         AND (LOWER(COALESCE(e.body, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(json_extract(e.payload_json, '$.meta.name'), '')) LIKE ? ESCAPE '\\')))`
     params.push(like, like, like, like, like, like)
   }
-  where += ` AND ${HAS_CONVERSATION_SQL}`
+  where += ` AND (${HAS_CONVERSATION_SQL}${opts.buyerAudience ? ' OR gt.user_id IS NOT me.user_id' : ''})`
   const mailbox = mailboxWhere(opts.mailbox ?? null, now, opts.buyerAudience)
   where += mailbox.sql
   params.push(...mailbox.params)
@@ -196,14 +145,15 @@ async function inboxScope(organizationId: string | null, opts: ListGuestThreadsO
 type ListRow = {
   id: string
   kind: 'contact' | 'booking' | 'team'
+  user_id: string | null
   name: string | null
   created_at: string
+  last_message_at: string
   reply_channel: 'email' | 'airbnb'
   support: number
   organization_name: string
   location_title: string | null
   time_zone: string
-  airbnb_name: string | null
   record_unit: 'slot' | 'nights' | null
   record_starts_at: string | null
   record_stored_ends_at: string | null
@@ -226,16 +176,18 @@ export async function listConversations(
   opts: ListGuestThreadsOptions,
   now = new Date(),
 ): Promise<InboxRow[]> {
-  const scope = await inboxScope(organizationId, opts, now.toISOString())
-  const visible = opts.buyerAudience ? ` AND ${guestVisibleSql('e')}` : ''
+  const { query, params } = conversationListQuery(organizationId, opts, now)
+  return presentConversationList(db, await queryAll<ListRow>(db, query, params), opts, now)
+}
+
+function conversationListQuery(organizationId: string | null, opts: ListGuestThreadsOptions, now: Date): BatchQuery {
+  const scope = inboxScope(organizationId, opts, now.toISOString())
+  const visible = opts.buyerAudience ? ` AND ${guestVisibleSql('e', 'gt.user_id = me.user_id')}` : ''
   const unread = unreadSql('gt', opts.userId)
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 200))
-  const rows = await queryAll<ListRow & Record<string, unknown>>(db, `
+  return { query: `
     SELECT gt.*, ${REPLY_CHANNEL_SQL} AS reply_channel, ${SUPPORT_CONVERSATION_SQL('gt')} AS support,
       o.name AS organization_name, ${threadLocationTitleSql(opts.buyerAudience)} AS location_title, COALESCE(bl.timezone, o.timezone) AS time_zone,
-      (SELECT json_extract(e.payload_json, '$.meta.name') FROM messages e
-        WHERE e.conversation_id = gt.id AND e.author_kind = 'guest' AND e.event_name = '${MIRRORED_EVENT}'
-          AND json_extract(e.payload_json, '$.meta.name') IS NOT NULL ORDER BY e.sequence DESC LIMIT 1) AS airbnb_name,
       op.unit AS record_unit, op.starts_at AS record_starts_at, op.stored_ends_at AS record_stored_ends_at, op.timezone AS record_timezone,
       (SELECT COALESCE(sc.internal_name, p.name) FROM products p LEFT JOIN product_stay_configs sc ON sc.organization_id = p.organization_id AND sc.product_id = p.id
         WHERE p.organization_id = gt.organization_id AND p.id = op.product_id) AS record_title,
@@ -247,13 +199,16 @@ export async function listConversations(
     WHERE ${scope.where}${opts.unreadOnly ? ` AND ${unread.sql}` : ''}
     ORDER BY gt.last_message_at DESC, gt.id
     LIMIT ? OFFSET ?
-  `, [...unread.params, ...scope.params, ...(opts.unreadOnly ? unread.params : []), limit, opts.offset ?? 0])
+  `, params: [...unread.params, ...scope.params, ...(opts.unreadOnly ? unread.params : []), limit, opts.offset ?? 0] }
+}
 
+async function presentConversationList(db: DbClient, rows: ListRow[], opts: ListGuestThreadsOptions, now: Date): Promise<InboxRow[]> {
   const teamIds = rows.filter(row => row.kind === 'team').map(row => row.id)
   const [latest, people] = await Promise.all([
     latestMessages(db, rows.flatMap(row => row.latest_message_id ? [row.latest_message_id] : [])),
     teamIds.length ? queryAll<{ conversation_id: string; user_id: string; name: string }>(db, `SELECT p.conversation_id, p.user_id, u.name FROM conversation_participants p
-      JOIN user u ON u.id = p.user_id WHERE p.conversation_id IN (SELECT value FROM json_each(?)) ORDER BY p.created_at, p.user_id`, [d1JsonStringSet(teamIds)]) : [],
+      JOIN member m ON m.organizationId = p.organization_id AND m.userId = p.user_id
+      JOIN user u ON u.id = p.user_id WHERE p.role = 'member' AND p.conversation_id IN (SELECT value FROM json_each(?)) ORDER BY p.created_at, p.user_id`, [d1JsonStringSet(teamIds)]) : [],
   ])
   return rows.map(row => {
     const message = row.latest_message_id ? latest.get(row.latest_message_id) : undefined
@@ -266,7 +221,7 @@ export async function listConversations(
       const others = people.filter(person => person.conversation_id === row.id && person.user_id !== opts.userId).map(person => person.name)
       const title = row.name ?? row.record_title ?? (others.length ? others.join(', ') : 'You')
       return {
-        id: row.id, kind: 'team', title, avatar_initial: initial(title), channel: 'direct',
+        id: row.id, ...opts.includeSortKey && { last_message_at: row.last_message_at }, kind: 'team', title, avatar_initial: initial(title), channel: 'direct',
         home: row.record_unit === 'nights' ? row.record_title : row.location_title, when,
         preview: message ? messagePreview(message.text, message.photos) : '',
         preview_from: message ? message.actorUserId === opts.userId ? 'You' : message.actorName ? firstName(message.actorName) : 'KrabiClaw' : null,
@@ -275,21 +230,21 @@ export async function listConversations(
     }
     const request = parseGuestRequest(row)
     const support = row.support === 1
-    const recordedName = request.payload.guest.name ?? participantLabel(request)
-    // Airbnb's first name from the guest's messages, else the booked guest's first name, else what the conversation was recorded as.
-    const guestName = support ? 'Airbnb Support' : row.airbnb_name ?? (row.reply_channel === 'airbnb' && request.payload.guest.name ? firstName(request.payload.guest.name) : recordedName)
+    const guestName = conversationGuestName(request, support, row.reply_channel === 'airbnb')
     const shownName = opts.buyerAudience ? row.organization_name : guestName
+    const traveler = opts.buyerAudience && row.user_id !== opts.userId
     const inquiry = request.kind === 'booking' ? request.payload.inquiry : undefined
     return {
       id: row.id,
+      ...opts.includeSortKey && { last_message_at: row.last_message_at },
       kind: support ? 'support' : 'guest',
       title: shownName,
       avatar_initial: initial(shownName),
       channel: row.reply_channel === 'airbnb' ? 'airbnb' : 'direct',
       home: row.location_title,
-      when: support ? null : when ?? (inquiry ? formatCalendarRange(inquiry.check_in_date, inquiry.check_out_date, 'en-US') : null),
+      when: support || traveler ? null : when ?? (inquiry ? formatCalendarRange(inquiry.check_in_date, inquiry.check_out_date, 'en-US') : null),
       preview: message ? messagePreview(message.text, message.photos) : '',
-      preview_from: message ? previewFrom(message, { guestName: row.reply_channel === 'airbnb' ? guestName : firstName(guestName), viewerId: opts.userId, buyer: Boolean(opts.buyerAudience), business: row.organization_name }) : null,
+      preview_from: message ? previewFrom(message, { guestName: row.reply_channel === 'airbnb' ? guestName : firstName(guestName), viewerId: opts.userId, primaryGuestId: row.user_id, buyer: Boolean(opts.buyerAudience), business: row.organization_name }) : null,
       time,
       unread: row.unread === 1,
     } satisfies InboxRow
@@ -298,28 +253,31 @@ export async function listConversations(
 
 type LatestMessage = { authorKind: string; actorUserId: string | null; actorName: string | null; eventName: string | null; text: string | null; photos: number; sentAt: string }
 
-/** The last message of each listed conversation: who sent it, its words (Airbnb's translation where there is one) and when. */
+/** The last message of each listed conversation: who sent it, its words and when. */
 async function latestMessages(db: DbClient, ids: string[]): Promise<Map<string, LatestMessage>> {
   if (!ids.length) return new Map()
-  const rows = await queryAll<{ id: string; author_kind: string; author_user_id: string | null; actor_name: string | null; event_name: string | null; body: string | null; translated: string | null; provider_inserted_at: string | null; occurred_at: string; photos: number }>(db, `
+  const rows = await queryAll<{ id: string; author_kind: string; author_user_id: string | null; actor_name: string | null; event_name: string | null; body: string | null; provider_inserted_at: string | null; occurred_at: string; photos: number }>(db, `
     SELECT e.id, e.author_kind, e.author_user_id, u.name AS actor_name, e.event_name, e.body,
-      json_extract(e.payload_json, '$.meta.translated_message') AS translated,
       json_extract(e.payload_json, '$.provider_inserted_at') AS provider_inserted_at, e.occurred_at,
       (SELECT COUNT(*) FROM media_placements mp WHERE mp.owner_type = 'message' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active') AS photos
     FROM messages e LEFT JOIN user u ON u.id = e.author_user_id
     WHERE e.id IN (SELECT value FROM json_each(?))`, [d1JsonStringSet(ids)])
   return new Map(rows.map(row => [row.id, {
     authorKind: row.author_kind, actorUserId: row.author_user_id, actorName: row.actor_name, eventName: row.event_name,
-    text: row.author_kind === 'guest' && row.translated?.trim() ? row.translated : row.body,
+    text: row.body,
     photos: row.photos,
     sentAt: row.provider_inserted_at ? providerInstant(row.provider_inserted_at) : row.occurred_at,
   }]))
 }
 
 /** "You", or the sender's first name, before the preview. */
-function previewFrom(message: LatestMessage, context: { guestName: string; viewerId: string; buyer: boolean; business: string }): string {
+function previewFrom(message: LatestMessage, context: { guestName: string; viewerId: string; primaryGuestId: string | null; buyer: boolean; business: string }): string {
   // The booking's own opening message is the guest's, as the conversation draws it.
-  if (message.authorKind === 'guest' || message.eventName === OPENING_EVENT) return context.buyer ? 'You' : context.guestName
+  if (message.authorKind === 'guest' || message.eventName === OPENING_EVENT) {
+    if (message.actorUserId === context.viewerId || (context.buyer && context.primaryGuestId === context.viewerId && message.actorUserId === null)) return 'You'
+    if (message.actorUserId && message.actorUserId !== context.primaryGuestId && message.actorName) return firstName(message.actorName)
+    return context.guestName
+  }
   if (message.authorKind === 'krabiclaw' && message.eventName === MIRRORED_EVENT) return 'Airbnb Support'
   if (context.buyer) return context.business
   if (message.authorKind === 'member' && message.actorUserId && message.actorUserId !== context.viewerId) {
@@ -329,26 +287,62 @@ function previewFrom(message: LatestMessage, context: { guestName: string; viewe
   return message.authorKind === 'krabiclaw' ? 'KrabiClaw' : 'You'
 }
 
+type UnreadCountRow = { list_kind: 'guests' | 'support' | 'team'; count: number }
+
 /**
  * Unread conversations in the Current mailbox per list kind, for the filter
  * menu (All, Guests, Airbnb Support, Team) and the nav count: the list's own
  * scope and the one unread statement, so a count never disagrees with a row.
  */
-export async function countUnreadConversations(db: DbClient, organizationId: string, opts: ListGuestThreadsOptions): Promise<UnreadCounts> {
-  const scope = await inboxScope(organizationId, { ...opts, kind: null, q: null, mailbox: 'current', unreadOnly: false }, new Date().toISOString())
+function unreadConversationsQuery(organizationId: string, opts: ListGuestThreadsOptions, now: Date): BatchQuery {
+  const scope = inboxScope(organizationId, { ...opts, conversationIds: undefined, kind: null, q: null, mailbox: 'current', unreadOnly: false }, now.toISOString())
   const unread = unreadSql('gt', opts.userId)
-  const rows = await queryAll<{ list_kind: 'guests' | 'support' | 'team'; count: number }>(db, `
+  return { query: `
     SELECT CASE WHEN gt.kind = 'team' THEN 'team' WHEN ${SUPPORT_CONVERSATION_SQL('gt')} THEN 'support' ELSE 'guests' END AS list_kind, COUNT(*) AS count
-      FROM ${scope.from} LEFT JOIN business_locations bl ON bl.id = gt.location_id
+      FROM ${scope.from}
      WHERE ${scope.where} AND ${unread.sql}
-     GROUP BY 1`, [...scope.params, ...unread.params])
-  const count = (kind: 'guests' | 'support' | 'team') => Number(rows.find(row => row.list_kind === kind)?.count ?? 0)
+     GROUP BY 1`, params: [...scope.params, ...unread.params] }
+}
+
+function presentUnreadCounts(rows: UnreadCountRow[]): UnreadCounts {
+  const count = (kind: UnreadCountRow['list_kind']) => Number(rows.find(row => row.list_kind === kind)?.count ?? 0)
   return { all: count('guests') + count('support') + count('team'), guests: count('guests'), support: count('support'), team: count('team') }
+}
+
+/** The Better Auth member row distinguishes an empty inbox from a workspace the user cannot read. */
+function workspaceMembershipQuery(organizationId: string, userId: string): BatchQuery {
+  return { query: 'SELECT id FROM member WHERE userId = ? AND organizationId = ?', params: [userId, organizationId] }
+}
+
+function requireInboxMembership(result: D1Result | undefined) {
+  if (!result?.results[0]) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
+}
+
+export async function readWorkspaceInbox(db: DbClient, organizationId: string, opts: ListGuestThreadsOptions, now = new Date()) {
+  const [membership, list, counts] = await executeBatch(db, [
+    workspaceMembershipQuery(organizationId, opts.userId),
+    conversationListQuery(organizationId, opts, now),
+    unreadConversationsQuery(organizationId, opts, now),
+  ], { operation: 'Read workspace inbox' })
+  requireInboxMembership(membership)
+  return {
+    threads: await presentConversationList(db, list!.results as ListRow[], opts, now),
+    unread: presentUnreadCounts(counts!.results as UnreadCountRow[]),
+  }
+}
+
+export async function countUnreadConversations(db: DbClient, organizationId: string, opts: ListGuestThreadsOptions): Promise<UnreadCounts> {
+  const [membership, counts] = await executeBatch(db, [
+    workspaceMembershipQuery(organizationId, opts.userId),
+    unreadConversationsQuery(organizationId, opts, new Date()),
+  ], { operation: 'Count workspace unread conversations' })
+  requireInboxMembership(membership)
+  return presentUnreadCounts(counts!.results as UnreadCountRow[])
 }
 
 /** Unread conversations a guest has with every business, in their own inbox's Current mailbox. */
 export async function countUnreadAsGuest(db: DbClient, userId: string): Promise<number> {
-  const scope = await inboxScope(null, { userId, buyerAudience: true, mailbox: 'current' }, new Date().toISOString())
+  const scope = inboxScope(null, { userId, buyerAudience: true, mailbox: 'current' }, new Date().toISOString())
   const unread = unreadSql('gt', userId)
   const row = await queryFirst<{ count: number }>(db, `SELECT COUNT(*) AS count FROM ${scope.from} WHERE ${scope.where} AND ${unread.sql}`, [...scope.params, ...unread.params])
   if (!row) throw new Error('Unread conversations as a guest could not be counted')
@@ -360,50 +354,22 @@ export async function countUnreadAsGuest(db: DbClient, userId: string): Promise<
  * organization they belong to, and their own as a guest. Each is the same
  * count the inbox's filter menu shows.
  */
-export async function unreadBadge(env: CloudflareEnv, db: DbClient, userId: string): Promise<number> {
-  const memberships = await queryAll<{ organizationId: string; role: string }>(db, 'SELECT organizationId, role FROM member WHERE userId = ?', [userId])
-  const counts = await Promise.all([
-    ...memberships.map(membership => countUnreadConversations(db, membership.organizationId, {
-      userId, principal: { organizationId: membership.organizationId, role: membership.role, userId },
-    }).then(count => count.all)),
-    countUnreadAsGuest(db, userId),
-  ])
-  return counts.reduce((sum, count) => sum + count, 0)
+export async function unreadBadge(db: DbClient, userId: string): Promise<number> {
+  const guest = inboxScope(null, { userId, buyerAudience: true, mailbox: 'current' }, new Date().toISOString())
+  const current = mailboxWhere('current', new Date().toISOString())
+  const memberAccess = participantGuard('gt', userId, 'member')
+  const unread = unreadSql('gt', userId)
+  const row = await queryFirst<{ count: number }>(db, `
+    SELECT (SELECT COUNT(*) FROM ${guest.from} WHERE ${guest.where} AND ${unread.sql})
+      + (SELECT COUNT(*) FROM ${guest.from}
+        WHERE ${memberAccess.sql} AND ${HAS_CONVERSATION_SQL}${current.sql} AND ${unread.sql}) AS count`,
+    [...guest.params, ...unread.params, userId, ...memberAccess.params, ...current.params, ...unread.params])
+  if (!row) throw new Error('Unread conversations for the app badge could not be counted')
+  return Number(row.count)
 }
 
 /** Which of these conversations the viewer has unread, by the one statement. */
 export { listUnreadIds }
-
-/** The guest message a reply task is about: a message the guest wrote. */
-export const GUEST_QUESTION_SQL = `guest_entry.author_kind = 'guest'`
-/** A cancelled booking answers what the guest asked before it, by when the guest asked it. */
-export const CANCELLED_AFTER_SQL = `EXISTS (SELECT 1 FROM conversations asked_in JOIN bookings record ON record.id = asked_in.booking_id AND record.organization_id = asked_in.organization_id
-  WHERE asked_in.id = guest_entry.conversation_id AND record.status = 'cancelled' AND record.cancelled_at >= ${guestEntryAskedAtSql('guest_entry')})`
-
-/** Time passing changes no conversation, so a daily run closes what has aged out and opens any newer question behind it. */
-export async function expireReplyTasks(db: DbClient, now: string): Promise<{ conversations: number }> {
-  const rows = await queryAll<{ subject_id: string }>(db, `SELECT DISTINCT t.subject_id FROM tasks t
-    JOIN messages guest_entry ON guest_entry.id = substr(t.dedupe_key, length('guest_reply:' || t.subject_id || ':') + 1)
-    WHERE t.kind = 'guest_reply' AND t.subject_type = 'conversation' AND t.status = 'open' AND ${guestEntryAskedAtSql('guest_entry')} < ?`, [replyTaskCutoff(now)])
-  // One conversation at a time; one that fails does not stop the rest, and every failure is reported.
-  const failures: unknown[] = []
-  for (const row of rows) {
-    try {
-      await executeBatch(db, conversationTaskQueries(row.subject_id, now), { operation: 'Expire reply tasks' })
-    } catch (cause) {
-      failures.push(cause)
-    }
-  }
-  if (failures.length) {
-    const reasons = failures.map(cause => cause instanceof Error ? cause.message : String(cause)).join('; ')
-    throw new AggregateError(failures, `${failures.length} of ${rows.length} conversations' reply tasks could not be expired: ${reasons}`)
-  }
-  return { conversations: rows.length }
-}
-
-/** A question nobody answered for this long is no longer anyone's work. */
-const REPLY_TASK_EXPIRY_DAYS = 30
-const replyTaskCutoff = (now: string) => new Date(Date.parse(now) - REPLY_TASK_EXPIRY_DAYS * 86_400_000).toISOString()
 
 // The follow-up belongs to the guest's booking and moves with it.
 function bookingFollowUpQueries(conversationId: string, now: string): BatchQuery[] {
@@ -428,72 +394,38 @@ function bookingFollowUpQueries(conversationId: string, now: string): BatchQuery
   }]
 }
 
-/**
- * The tasks (server/domain/tasks.ts) one guest conversation's messages make,
- * for the batch that changes it: the task for an answered question closes
- * (done, by whoever replied), a blocked conversation's closes (cancelled), a
- * question left unanswered for REPLY_TASK_EXPIRY_DAYS closes (cancelled), and
- * the first question still unanswered opens one — or reopens its task when a
- * reply turned out not to be delivered. A person's Dismiss (and an archive,
- * which dismisses) covers everything the guest had said by then; the guest's
- * next message opens a new task. A failed scheduled message the business has
- * since answered in person is done too. Bookings awaiting approval, changes
- * that need the business and follow-ups follow the booking. Prep follows the session while it has confirmed bookings.
- */
-export function conversationTaskQueries(conversationId: string, now: string, previousSessionId: string | null = null): BatchQuery[] {
-  const entryOf = `substr(tasks.dedupe_key, length('guest_reply:' || tasks.subject_id || ':') + 1)`
-  const unanswered = `guest_entry.id = ${entryOf} AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}`
-  return [{
-    query: `UPDATE tasks SET status = CASE WHEN r.blocked_at IS NOT NULL
-          OR EXISTS (SELECT 1 FROM messages guest_entry WHERE ${unanswered}) THEN 'cancelled' ELSE 'done' END,
-        closed_at = ?, version = tasks.version + 1, updated_at = ?,
-        closed_by_user_id = CASE WHEN r.blocked_at IS NOT NULL THEN NULL ELSE (
-          SELECT reply.author_user_id FROM messages reply JOIN messages guest_entry ON guest_entry.id = ${entryOf}
-          WHERE reply.conversation_id = r.id AND ${successfulBusinessReplySql('reply')} AND reply.sequence > guest_entry.sequence ORDER BY reply.sequence LIMIT 1) END
-      FROM conversations r
-      WHERE tasks.kind = 'guest_reply' AND tasks.subject_type = 'conversation' AND tasks.subject_id = ? AND tasks.status = 'open' AND r.id = tasks.subject_id
-        AND (r.blocked_at IS NOT NULL OR NOT EXISTS (
-          SELECT 1 FROM messages guest_entry WHERE ${unanswered} AND ${guestEntryAskedAtSql('guest_entry')} >= ?))`,
-    params: [now, now, conversationId, replyTaskCutoff(now)],
-  }, {
-    query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT ?, r.organization_id, 'guest_reply', 'conversation', r.id, (SELECT s.product_id FROM bookings s WHERE s.id = r.booking_id AND s.organization_id = r.organization_id AND s.product_session_id IS NULL),
-        r.location_id, COALESCE(l.timezone, o.timezone), 'open', 'guest_reply:' || r.id || ':' || guest_entry.id, 1, ?, ?
-        FROM conversations r JOIN organization o ON o.id = r.organization_id
-        LEFT JOIN business_locations l ON l.organization_id = r.organization_id AND l.id = r.location_id
-        JOIN messages guest_entry ON guest_entry.conversation_id = r.id
-       WHERE r.id = ? AND r.kind IN ('contact', 'booking') AND r.blocked_at IS NULL AND ${GUEST_QUESTION_SQL}
-         AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}
-         AND ${guestEntryAskedAtSql('guest_entry')} >= ?
-         -- A person's Dismiss covers everything said by then; what the guest says next is work.
-         AND NOT EXISTS (SELECT 1 FROM tasks skipped WHERE skipped.kind = 'guest_reply' AND skipped.subject_type = 'conversation' AND skipped.subject_id = r.id AND skipped.status = 'skipped'
-           AND (skipped.closed_at > guest_entry.occurred_at OR skipped.dedupe_key = 'guest_reply:' || r.id || ':' || guest_entry.id))
-         AND NOT EXISTS (SELECT 1 FROM tasks open_reply WHERE open_reply.kind = 'guest_reply' AND open_reply.subject_type = 'conversation' AND open_reply.subject_id = r.id AND open_reply.status = 'open')
-       ORDER BY guest_entry.sequence LIMIT 1
-      ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = excluded.updated_at
-        WHERE tasks.status IN ('done', 'cancelled')`,
-    params: [crypto.randomUUID(), now, now, conversationId, replyTaskCutoff(now)],
-  }, {
+/** A successful manual reply can resolve a failed scheduled delivery for the same booking. */
+export function resolveScheduledDeliveryFailure(message: BatchQuery, now: string): BatchQuery {
+  return {
     query: `UPDATE tasks SET status = 'done', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ?
       WHERE kind = 'message_delivery' AND status = 'open' AND subject_type = 'scheduled_guest_message' AND subject_id IN (
-        SELECT m.id FROM scheduled_guest_messages m JOIN conversations c ON c.booking_id = m.booking_id AND c.kind = 'booking'
-         WHERE c.id = ? AND EXISTS (
-          SELECT 1 FROM messages reply WHERE reply.conversation_id = c.id AND ${successfulBusinessReplySql('reply')} AND reply.occurred_at > m.updated_at))`,
-    params: [now, now, conversationId],
-  }, {
+        SELECT m.id FROM messages reply JOIN conversations c ON c.id = reply.conversation_id AND c.kind = 'booking'
+        JOIN scheduled_guest_messages m ON m.booking_id = c.booking_id AND m.organization_id = c.organization_id
+        WHERE reply.id = (${message.query}) AND ${successfulBusinessReplySql('reply')} AND reply.occurred_at > m.updated_at)`,
+    params: [now, now, ...(message.params ?? [])],
+  }
+}
+
+/** Booking mutations also reconcile approval, follow-ups, session prep and change requests. */
+export function conversationTaskQueries(conversationId: string, now: string, previousSessionId: string | null = null): BatchQuery[] {
+  return [{
     // A booking waiting for the business's approval is work until it is approved, declined or cancelled.
-    query: `UPDATE tasks SET status = CASE WHEN b.status = 'confirmed' THEN 'done' ELSE 'cancelled' END, closed_at = ?, version = tasks.version + 1, updated_at = ?,
+    query: `UPDATE tasks SET status = CASE WHEN b.status = 'cancelled' THEN 'cancelled' ELSE 'done' END, closed_at = ?, version = tasks.version + 1, updated_at = ?,
         closed_by_user_id = (SELECT e.author_user_id FROM messages e WHERE e.conversation_id = c.id AND e.event_name IN ('booking.confirm', 'booking.reject', 'booking.cancel') ORDER BY e.sequence DESC LIMIT 1)
       FROM conversations c JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id
-      WHERE c.id = ? AND tasks.dedupe_key = 'booking_review:' || b.id AND tasks.status = 'open' AND b.status <> 'pending'`,
+      WHERE c.id = ? AND tasks.dedupe_key = 'booking_review:' || b.id AND tasks.status = 'open'
+        AND (b.status <> 'pending' OR ${stayRequestPayBySql('c.id')} IS NOT NULL)`,
     params: [now, now, conversationId],
   }, {
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT ?, b.organization_id, 'booking_review', 'booking', b.id, b.product_id, b.location_id, bc.assigned_member_id, b.starts_at, b.timezone, 'open', 'booking_review:' || b.id, 1, ?, ?
+      SELECT ?, b.organization_id, 'booking_review', 'booking', b.id, b.product_id, b.location_id,
+        CASE WHEN b.product_session_id IS NULL THEN NULL ELSE bc.assigned_member_id END,
+        CASE WHEN ${stayRequestRespondBySql('b')} IS NOT NULL THEN b.created_at ELSE b.starts_at END,
+        b.timezone, 'open', 'booking_review:' || b.id, 1, ?, ?
         FROM conversations c
         JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id
         JOIN product_booking_configs bc ON bc.organization_id = b.organization_id AND bc.product_id = b.product_id
-       WHERE c.id = ? AND c.kind = 'booking' AND b.status = 'pending'
+       WHERE c.id = ? AND c.kind = 'booking' AND b.status = 'pending' AND ${stayRequestPayBySql('c.id')} IS NULL
       ON CONFLICT (dedupe_key) DO NOTHING`,
     params: [crypto.randomUUID(), now, now, conversationId],
   }, ...bookingFollowUpQueries(conversationId, now), ...sessionPrepTaskQueries({
@@ -545,22 +477,19 @@ export async function reconcileConversationTasks(db: DbClient, conversationId: s
 /**
  * Archive or unarchive a conversation for one person (D2): it leaves their
  * Current list for Past, and a new message from someone else brings it back.
- * Archiving a guest conversation also dismisses its open reply task. A
- * conversation the quiet rule keeps in Past cannot be brought back by
+ * A conversation the quiet rule keeps in Past cannot be brought back by
  * unarchiving, and a blocked one is in Blocked, not in either.
  */
-export async function archiveConversation(db: DbClient, input: { organizationId: string; conversationId: string; userId: string; archived: boolean }): Promise<{ archived: boolean }> {
+export async function archiveConversation(db: DbClient, input: { organizationId: string; conversationId: string; userId: string; archived: boolean; guard?: ConversationGuard }): Promise<{ archived: boolean }> {
   const now = new Date().toISOString()
   const rule = pastByRuleSql(now)
-  const row = await queryFirst<{ kind: string; blocked_at: string | null; past_by_rule: number }>(db, `
-    SELECT gt.kind, gt.blocked_at, ${rule.sql} AS past_by_rule FROM conversations gt${operationalRecordSql()}
+  const row = await queryFirst<{ blocked_at: string | null; past_by_rule: number }>(db, `
+    SELECT gt.blocked_at, ${rule.sql} AS past_by_rule FROM conversations gt${operationalRecordSql()}
      WHERE gt.organization_id = ? AND gt.id = ?`, [...rule.params, input.organizationId, input.conversationId])
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Conversation not found', data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
   if (row.blocked_at !== null) throw new HTTPError({ statusCode: 409, message: 'A blocked guest’s conversation is in Blocked; unblock it first', data: { code: 'INVALID_TRANSITION', field: 'archived' } })
   if (!input.archived && row.past_by_rule === 1) throw new HTTPError({ statusCode: 409, message: 'This conversation is past because it has been quiet for 30 days', data: { code: 'INVALID_TRANSITION', field: 'archived' } })
-  await executeBatch(db, [
-    archiveQuery({ ...input, now }),
-    ...(input.archived && row.kind !== 'team' ? [archiveReplyTaskQuery({ conversationId: input.conversationId, userId: input.userId, now })] : []),
-  ], { operation: input.archived ? 'Archive conversation' : 'Unarchive conversation' })
+  const [written] = await executeBatch(db, [archiveQuery({ ...input, now })], { operation: input.archived ? 'Archive conversation' : 'Unarchive conversation' })
+  if (!written?.meta?.changes) conversationAccessDenied()
   return { archived: input.archived }
 }

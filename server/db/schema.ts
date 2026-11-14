@@ -95,10 +95,8 @@ export const business_locations = sqliteTable("business_locations", {
 // blocked_at: a member blocked this guest (content_reports holds who and why).
 // last_message_at: the newest message's time (a channel's own time where it
 //   gave one), or the creation time before the first message. Lists order by it.
-// Who reads a conversation and how far is conversation_participants; its
-// messages are messages. Visibility: a guest conversation by role or by
-//   handling its booking's product (server/utils/member-access.ts); a team
-//   conversation by its participants.
+// conversation_participants is the roster and holds individual read positions.
+// user_id on a guest conversation identifies the booking contact.
 // Deletion: cascades from the organization. A booking is not deleted while a
 //   conversation names it.
 export const conversations = sqliteTable("conversations", {
@@ -152,18 +150,17 @@ export const conversations = sqliteTable("conversations", {
 	index("conversations_guest_email_idx").on(sql`lower(payload_json ->> '$.guest.email')`),
 ]);
 
-// One person's place in one conversation: how far they have read, and whether
-// they archived it for themselves (D2). On a team conversation the row is the
-// seat; a member who leaves the organization loses it
-// (reconcileResponsibilities). On a guest conversation the guest and any
-// member who read or archived it have one; visibility is not read from it. No
-// row reads as nothing read. A message from someone else after
-// last_read_message_id is unread (conversations.ts unreadSql, the one
-// statement of it).
+// One participant's seat, read position and personal archive. Member seats
+// require current Better Auth organization membership. A guest uses the guest
+// projection even if they work at the same organization.
 export const conversation_participants = sqliteTable("conversation_participants", {
 	conversation_id: text().notNull(),
 	organization_id: text().notNull(),
 	user_id: text().notNull().references((): AnySQLiteColumn => user.id, { onDelete: "cascade" }),
+	// Read and archive rows written by a rolling old Worker carry no grant.
+	role: text({ enum: ["guest", "member"] }),
+	// A listing grant supplies these member seats. Initial hosts and explicit guest invites have no listing source.
+	host_listing_id: text().references((): AnySQLiteColumn => products.id, { onDelete: "cascade" }),
 	last_read_message_id: text().references((): AnySQLiteColumn => messages.id, { onDelete: "set null" }),
 	archived_at: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
@@ -172,6 +169,37 @@ export const conversation_participants = sqliteTable("conversation_participants"
 	foreignKey({ columns: [table.organization_id, table.conversation_id], foreignColumns: [conversations.organization_id, conversations.id], name: "conversation_participants_conversation_scope_fk" }).onDelete("cascade"),
 	index("conversation_participants_user_idx").on(table.user_id, table.organization_id),
 	check("conversation_participants_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND (archived_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', archived_at, '+0 days') IS archived_at)`),
+]);
+
+// Only a listing's messaging co-hosts join its guest conversations. The grant
+// references a Better Auth membership and can be revoked without changing operational assignments.
+export const listing_message_members = sqliteTable("listing_message_members", {
+	organization_id: text().notNull(),
+	listing_id: text().notNull(),
+	member_id: text().notNull(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, table => [
+	primaryKey({ columns: [table.organization_id, table.listing_id, table.member_id] }),
+	foreignKey({ columns: [table.organization_id, table.listing_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "listing_message_members_listing_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.member_id, table.organization_id], foreignColumns: [member.id, member.organizationId], name: "listing_message_members_membership_fk" }).onDelete("cascade"),
+	index("listing_message_members_member_idx").on(table.member_id, table.organization_id),
+]);
+
+// A traveler's one-time proof of invitation. Only accepting with their verified
+// Better Auth account creates a guest seat in the named conversation.
+export const conversation_guest_invites = sqliteTable("conversation_guest_invites", {
+	id: text().primaryKey(),
+	organization_id: text().notNull(),
+	conversation_id: text().notNull(),
+	email: text().notNull(),
+	token_hash: text().notNull().unique(),
+	inviter_id: text().notNull().references((): AnySQLiteColumn => user.id, { onDelete: "cascade" }),
+	expires_at: text().notNull(),
+	accepted_at: text(),
+	accepted_user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
+}, table => [
+	foreignKey({ columns: [table.organization_id, table.conversation_id], foreignColumns: [conversations.organization_id, conversations.id], name: "conversation_guest_invites_conversation_fk" }).onDelete("cascade"),
+	index("conversation_guest_invites_conversation_idx").on(table.conversation_id),
 ]);
 
 // One message in one conversation, in `sequence` order. Its author is a person
@@ -202,7 +230,8 @@ export const messages = sqliteTable("messages", {
 }, table => [
 	foreignKey({ columns: [table.organization_id, table.conversation_id], foreignColumns: [conversations.organization_id, conversations.id], name: "messages_conversation_scope_fk" }).onDelete("cascade"),
 	uniqueIndex("messages_conversation_sequence_unique").on(table.conversation_id, table.sequence),
-	index("messages_conversation_event_idx").on(table.conversation_id, table.event_name),
+	index("messages_conversation_event_idx").on(table.conversation_id, table.event_name, table.author_kind),
+	index("messages_conversation_author_idx").on(table.conversation_id, table.author_kind),
 	check("messages_sequence_check", sql`sequence > 0`),
 	check("messages_payload_check", sql`json_valid(payload_json) AND json_type(payload_json) = 'object'`),
 	check("messages_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', occurred_at, '+0 days') IS occurred_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
@@ -270,8 +299,6 @@ export const invitation = sqliteTable("invitation", {
 	createdAt: integer({ mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
 }, (table) => [
 	index("invitation_organizationId_idx").on(table.organizationId),
-	uniqueIndex("idx_invitation_org_pending_owner").on(table.organizationId).where(sql`role = 'owner' AND status = 'pending'`),
-	uniqueIndex("idx_invitation_org_email_pending_unique").on(table.organizationId, sql`lower(${table.email})`).where(sql`status = 'pending'`),
 ]);
 
 export const jwks = sqliteTable("jwks", {
@@ -341,7 +368,7 @@ export const opportunities = sqliteTable('opportunities', {
 
 // Work someone has to do (server/domain/tasks.ts). Every task but a custom
 // one is opened and closed by the batch that changes its subject: a stay's
-// turnover, a guest's unanswered message, a failed scheduled message, a
+// turnover, a failed scheduled message, a
 // booking awaiting approval, a change that needs the business, an accepted
 // opportunity. Kinds other than custom
 // and opportunity take their words from the subject, so title is NULL there.
@@ -470,6 +497,18 @@ export const member = sqliteTable("member", {
 	uniqueIndex("member_userId_organizationId_unique").on(table.userId, table.organizationId),
 	index("member_organizationId_idx").on(table.organizationId),
 	uniqueIndex("member_id_organizationId_unique").on(table.id, table.organizationId),
+]);
+
+// An unfinished home has no product until Finish. Its manager can resume the same answers on any device.
+export const stay_home_setup_drafts = sqliteTable("stay_home_setup_drafts", {
+	organization_id: text().notNull(),
+	member_id: text().notNull(),
+	payload_json: text().notNull(),
+	revision: text().notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.organization_id, table.member_id] }),
+	foreignKey({ columns: [table.member_id, table.organization_id], foreignColumns: [member.id, member.organizationId] }).onDelete("cascade"),
+	check("stay_home_setup_drafts_payload_check", sql`json_valid(payload_json) AND json_type(payload_json) IS 'object'`),
 ]);
 
 // ---------------------------------------------------------------------------
@@ -2064,28 +2103,6 @@ export const onboarding_drafts = sqliteTable("onboarding_drafts", {
 	check("onboarding_drafts_payload_json_check", sql`payload_json IS NULL OR (json_valid(payload_json) AND json_type(payload_json) IS 'object')`),
 	uniqueIndex("idx_onboarding_drafts_active_user_unique").on(table.user_id).where(sql`status = 'active'`),
 	index("onboarding_drafts_user_id_idx").on(table.user_id),
-]);
-
-// A single-use link that adds whoever opens it to an organization. Better Auth
-// invitations are bound to an email address, which an inviter cannot know for
-// a person who signs in with Apple's private relay; the link carries the role
-// instead, and accepting it adds the member through Better Auth's addMember.
-// Only the token's SHA-256 is stored.
-export const organization_invite_links = sqliteTable("organization_invite_links", {
-	id: text().primaryKey(),
-	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" } ),
-	role: text().notNull(),
-	token_hash: text().notNull(),
-	inviter_id: text().notNull().references(() => user.id, { onDelete: "cascade" } ),
-	expires_at: text().notNull(),
-	used_at: text(),
-	used_by_user_id: text().references(() => user.id, { onDelete: "set null" } ),
-	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-}, (table) => [
-	check("organization_invite_links_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', expires_at, '+0 days') IS expires_at AND (used_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', used_at, '+0 days') IS used_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
-	check("organization_invite_links_role_check", sql`role IN ('admin', 'member')`),
-	uniqueIndex("organization_invite_links_token_hash_unique").on(table.token_hash),
-	index("organization_invite_links_organization_id_idx").on(table.organization_id),
 ]);
 
 export const rate_limits = sqliteTable("rate_limits", {

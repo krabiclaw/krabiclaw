@@ -2,6 +2,8 @@ import type { EditorNavigationGroup } from '~/components/dashboard/EditorNavigat
 import type { DashboardScopeHeaderModel } from '~/lib/components/workspace/dashboard/DashboardScopeHeader.vue'
 import { authClient } from '~/lib/auth-client'
 import { canOpenPlatformAccounts, canOpenPlatformReports } from '~/utils/platform-admin-access'
+import { onboardingLink } from '~/composables/useOnboardingFlow'
+import type { WebsiteOnboardingResumeAction } from '~/shared/onboarding-flow'
 
 // The rows on Menu. Menu is a launcher: every row is a destination of its own
 // — Website, Posts, Locations, Team, Plan and billing — or an action, with no headings. The Menu
@@ -14,6 +16,7 @@ import { canOpenPlatformAccounts, canOpenPlatformReports } from '~/utils/platfor
 export function useOrganizationSettingsNavigation(
   organization: Ref<{ id: string; slug: string } | null>,
   scopeModel: Readonly<Ref<DashboardScopeHeaderModel | null>>,
+  resumeAction?: Readonly<Ref<WebsiteOnboardingResumeAction | null | undefined>>,
 ) {
   const route = useRoute()
   const router = useRouter()
@@ -73,13 +76,14 @@ export function useOrganizationSettingsNavigation(
     const organizations = (scopeModel.value?.peers ?? []).filter(peer => peer.id)
     if (organizations.length === 1) return organizations[0]!.to ? { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: `Switch to ${organizations[0]!.label}`, to: organizations[0]!.to } : { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: `Switch to ${organizations[0]!.label}`, action: {} }
     if (organizations.length > 1) return { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: 'Switch to an organization', to: '/dashboard/account/profile/organizations' }
-    return { id: 'switch-organization', icon: 'i-lucide-plus', label: 'New organization', to: '/dashboard/onboarding' }
+    const action = resumeAction?.value ?? scopeModel.value?.createAction
+    return action ? { id: 'switch-organization', icon: resumeAction?.value ? 'i-lucide-arrow-right' : 'i-lucide-plus', label: action.label, to: onboardingLink(action.to, route.fullPath) } : null
   })
 
   const items = computed(() => {
     if (!base.value) return [
       { id: 'account', icon: 'i-lucide-user-round-cog', label: 'Account settings', to: '/dashboard/account/profile' },
-      switchRow.value,
+      ...(switchRow.value ? [switchRow.value] : []),
       { id: 'log-out', icon: 'i-lucide-log-out', label: 'Log out', action: {} },
     ]
     return [

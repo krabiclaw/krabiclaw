@@ -16,7 +16,7 @@ export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organization_id')
   if (!organizationId) return jsonResponse({ error: 'Organization ID is required' }, { status: 400 })
 
-  const body = await readBody<{ account_id?: string }>(event)
+  const body = await readBody<{ revision?: string; account_id?: string }>(event)
   const accountId = body?.account_id?.trim()
   if (!accountId) return jsonResponse({ error: 'Choose an Instagram account.' }, { status: 400 })
 
@@ -26,7 +26,7 @@ export default defineHandler(async (event) => {
   }
 
   const current = await readIntegration(env.DB, organization.id, 'instagram')
-  if (current) return jsonResponse({ error: 'Disconnect Instagram before connecting again.' }, { status: 409 })
+  if ((current?.revision ?? null) !== (body?.revision ?? null)) return jsonResponse({ error: 'Instagram changed. Reload the connection before saving.' }, { status: 409 })
   await requireIntegrationAccount(env, accountId, {
     userId: session.user.id, currentAccountId: null, providerId: 'instagram', scopes: [],
   })
@@ -34,7 +34,7 @@ export default defineHandler(async (event) => {
   const account = await getInstagramAccount((await linkedAccountAccessToken(env, accountId)).accessToken)
   await storeIntegration(env.DB, organization.id, 'instagram', {
     account_id: accountId, target_id: account.id, target_name: account.username,
-  }, { revision: null })
+  }, { revision: current?.revision ?? null })
 
   return jsonResponse({ success: true, username: account.username })
 })

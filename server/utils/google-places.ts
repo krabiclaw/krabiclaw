@@ -137,12 +137,13 @@ export async function syncPlaceToLocation(
   locationId: string,
   placeId: string,
   scope: 'import' | 'provider',
+  sessionToken?: string,
 ): Promise<{ place: PlaceDetails; reviewsUpserted: number }> {
   const current = await queryFirst<{ updated_at: string; google_place_id: string | null }>(db,
     'SELECT updated_at, google_place_id FROM business_locations WHERE id = ? AND organization_id = ?', [locationId, organizationId])
   if (!current) throw new HTTPError({ statusCode: 404, statusMessage: 'Location not found' })
   if (scope === 'provider' && current.google_place_id !== placeId) throw new HTTPError({ statusCode: 409, statusMessage: 'The location is no longer connected to this Google place' })
-  const place = await getPlaceDetails(apiKey, placeId)
+  const place = await getPlaceDetails(apiKey, placeId, { sessionToken })
   if (!place.placeId) throw new Error(`Google Maps returned no place id for ${placeId}`)
   const now = new Date().toISOString()
   const version: BatchQuery = {
@@ -247,6 +248,7 @@ export async function autocompletePlaces(
   apiKey: string,
   input: string,
   sessionToken: string,
+  purpose?: 'address',
 ): Promise<GooglePlaceSuggestion[]> {
   const response = await fetch(`${PLACES_BASE}:autocomplete`, {
     method: 'POST',
@@ -255,7 +257,10 @@ export async function autocompletePlaces(
       'X-Goog-Api-Key': apiKey,
       'X-Goog-FieldMask': AUTOCOMPLETE_FIELD_MASK,
     },
-    body: JSON.stringify({ input, sessionToken }),
+    body: JSON.stringify({
+      input, sessionToken,
+      ...(purpose === 'address' ? { includedPrimaryTypes: ['street_address', 'premise', 'subpremise', 'route'] } : {}),
+    }),
   })
 
   if (!response.ok) {
@@ -279,14 +284,14 @@ export async function autocompletePlaces(
 export async function getPlaceDetails(
   apiKey: string,
   placeId: string,
-  options: { sessionToken?: string } = {},
+  options: { sessionToken?: string; purpose?: 'address' } = {},
 ): Promise<PlaceDetails> {
   const query = new URLSearchParams({ languageCode: 'en' })
   if (options.sessionToken) query.set('sessionToken', options.sessionToken)
   const response = await fetch(`${PLACES_BASE}/${encodeURIComponent(placeId)}?${query}`, {
     headers: {
       'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': DETAIL_FIELD_MASK,
+      'X-Goog-FieldMask': options.purpose === 'address' ? 'id,postalAddress,timeZone' : DETAIL_FIELD_MASK,
     },
   })
 

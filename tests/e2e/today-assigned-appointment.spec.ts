@@ -1,5 +1,6 @@
+import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import { expect, test, type APIResponse } from '@playwright/test'
-import { authRequestHeaders, loginAs } from './helpers/auth'
+import { acceptOrganizationInvitation, authRequestHeaders, loginAs, sendOrganizationInvitation } from './helpers/auth'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededSiteHeaders } from './test-env'
@@ -90,13 +91,12 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     expect(assignedRead.booking).toMatchObject({ conversation_id: requestId, assigned_member_id: actor.id })
 
     // A member's Today is their own work: no opportunities, nobody to assign to,
-    // and only tasks given to them or replies in conversations they handle.
+    // and only tasks given to them.
     const today = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
     expect(today).toMatchObject({ opportunities: [], opportunity_issues: [], assignees: [] })
     for (const task of today.tasks.flatMap(section => section.tasks)) {
       expect(task.can, `${task.kind} ${task.id} is not a manager's`).toMatchObject({ assign: false, edit: false })
-      if (task.kind === 'guest_reply') await body(await memberContext.request.get(`/api/dashboard/organizations/${ORGANIZATION}/guest-threads/${task.conversation_id}`), 200)
-      else expect(task.assignee, `${task.kind} ${task.id} is given to the member`).toMatchObject({ type: 'member', id: actor.id, you: true })
+      expect(task.assignee, `${task.kind} ${task.id} is given to the member`).toMatchObject({ type: 'member', id: actor.id, you: true })
     }
     // The consultation is the Calendar's: it is on its day there.
     const agenda = await body<{ items: Array<{ id: string; conversation_id: string; booking_id: string; starts_at: string; to: string }> }>(await memberContext.request.get('/api/dashboard/agenda', { params: { org: SLUG, from: day, to: new Date(Date.parse(day) + 86_400_000).toISOString().slice(0, 10) } }), 200)
@@ -167,8 +167,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await expect(detail.getByRole('link').filter({ hasText: /^\s*Attorney\b/ })).toHaveCount(0)
     await dismissPreviewToolbar(page)
     await page.setViewportSize({ width: 390, height: 844 })
-    const issuedLink = new URL(`${DASHBOARD}/bookings/booking/${requestId}`, baseURL!).toString()
-    expect((await page.goto(issuedLink))?.status()).toBe(200)
+    expect((await page.goto(new URL(bookingPath, baseURL!).toString()))?.status()).toBe(200)
     await expect(page).toHaveURL(new URL(bookingPath, baseURL!).toString())
     // The attorney is the practice area's: the owner reads who handles it and changes it on the practice area.
     const ownerDetail = page.locator('#dashboard-panel-booking-details')
@@ -242,12 +241,12 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
       } else if (scheduleWritten) {
         // An absent schedule is restored through Better Auth's existing removal
         // and invitation lifecycle, rather than direct authentication-row writes.
-        const invitation = await body<{ token: string }>(await page.request.post(`/api/organizations/${ORGANIZATION}/invite-links`, { data: { role: 'member' } }), 201)
         await body(await page.request.post('/api/auth/organization/remove-member', { headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberIdOrEmail: actor.id } }), 200)
-        const joined = await body<{ member_id: string }>(await memberContext.request.post(`/api/invite-links/${encodeURIComponent(invitation.token)}/accept`, { data: {} }), 200)
-        await body(await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: joined.member_id, role: actor.role } }), 200)
+        const invitationId = await sendOrganizationInvitation(page.request, baseURL!, ORGANIZATION, findE2eAuthFixture(ACTOR).email, 'member')
+        const joined = await acceptOrganizationInvitation(memberContext.request, baseURL!, invitationId)
+        await body(await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: joined.id, role: actor.role } }), 200)
         roleChanged = false
-        const restored = await body<{ scheduling: Schedule | null }>(await page.request.get(`/api/organizations/${ORGANIZATION}/members/${joined.member_id}/scheduling`), 200)
+        const restored = await body<{ scheduling: Schedule | null }>(await page.request.get(`/api/organizations/${ORGANIZATION}/members/${joined.id}/scheduling`), 200)
         expect(restored.scheduling).toBeNull()
       }
       if (roleChanged) await body(await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: actor.id, role: actor.role } }), 200)

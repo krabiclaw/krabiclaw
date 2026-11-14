@@ -217,6 +217,6 @@ test('member working windows retain IANA timezone across DST and merge adjacent 
  const intervals=workingWindows('America/New_York',[{weekday:1,start:'09:00',end:'12:00'},{weekday:1,start:'12:00',end:'17:00'}],span)
  assert(intervals.some(i=>i.start==='2026-10-26T13:00:00.000Z'&&i.end==='2026-10-26T21:00:00.000Z'))
  assert(intervals.some(i=>i.start==='2026-11-02T14:00:00.000Z'&&i.end==='2026-11-02T22:00:00.000Z'))
- assert.throws(()=>workingWindows('America/New_York',[{weekday:0,start:'01:30',end:'03:30'}],span),/multiple|ambiguous/i)
- assert.throws(()=>workingWindows('America/New_York',[{weekday:0,start:'02:30',end:'03:30'}],{from:new Date('2027-03-01T00:00:00.000Z'),until:new Date('2027-04-01T00:00:00.000Z')}),/exist|invalid/i)
+ assert.throws(()=>workingWindows('America/New_York',[{weekday:0,start:'01:30',end:'03:30'}],span),{ message: 'On 2026-11-01, the clocks change during these hours. Choose a different start or end time.' })
+ assert.throws(()=>workingWindows('America/New_York',[{weekday:0,start:'02:30',end:'03:30'}],{from:new Date('2027-03-01T00:00:00.000Z'),until:new Date('2027-04-01T00:00:00.000Z')}),{ message: 'On 2027-03-14, the clocks change during these hours. Choose a different start or end time.' })
 })

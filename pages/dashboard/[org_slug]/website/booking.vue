@@ -3,78 +3,40 @@
     id="organization-website-booking"
     :title="panelTitle"
     :saving="editor.saving.value"
+    :footer="vertical === 'lodging' || isService"
     :disabled="editor.saveDisabled.value"
     :error="editor.editorError.value ?? ''"
     @cancel="editor.revert"
     @save="editor.save"
   >
-    <!-- Booking Mode Selection Cards (Airbnb Parity) -->
-    <div class="space-y-4" role="radiogroup" :aria-label="panelTitle">
-      <!-- Option 1: Instant / Online requests -->
-      <button
-        type="button"
-        role="radio"
-        :aria-checked="isInstantActive"
-        data-testid="booking-mode-instant"
-        class="w-full text-left rounded-2xl p-5 border-2 transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-highlighted"
-        :class="isInstantActive
-          ? 'border-highlighted bg-elevated shadow-sm ring-1 ring-highlighted/10'
-          : 'border-default bg-default hover:border-accented'"
-        @click="setBookingMode(true)"
-      >
-        <div class="flex items-start justify-between gap-4">
-          <div class="space-y-1">
-            <h3 class="font-semibold text-highlighted text-base">
-              {{ instantTitle }}
-            </h3>
-            <p class="text-sm text-muted">
-              {{ instantDescription }}
-            </p>
-          </div>
-          <div
-            class="size-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5"
-            :class="isInstantActive ? 'border-highlighted' : 'border-default'"
-          >
-            <div v-if="isInstantActive" class="size-2.5 rounded-full bg-highlighted" />
-          </div>
-        </div>
+    <template v-if="vertical === 'lodging'">
+      <LodgingBookingChoices
+        v-if="editor.lodgingBookingChoices.value.length"
+        v-model="editor.form.stay_confirmation_mode"
+        :choices="editor.lodgingBookingChoices.value"
+        :label="panelTitle"
+      />
 
-        <div v-if="instantHighlight" class="mt-4 flex items-center gap-2 rounded-xl bg-accented px-3.5 py-2.5 text-xs text-muted">
-          <UIcon name="i-lucide-trending-up" class="size-4 shrink-0 text-highlighted" />
-          <span>{{ instantHighlight }}</span>
-        </div>
-      </button>
-
-      <!-- Option 2: Manual review / inquiries only -->
-      <button
-        type="button"
-        role="radio"
-        :aria-checked="!isInstantActive"
-        data-testid="booking-mode-manual"
-        class="w-full text-left rounded-2xl p-5 border-2 transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-highlighted"
-        :class="!isInstantActive
-          ? 'border-highlighted bg-elevated shadow-sm ring-1 ring-highlighted/10'
-          : 'border-default bg-default hover:border-accented'"
-        @click="setBookingMode(false)"
+      <NuxtLink
+        :to="payoutPath"
+        class="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-default p-4 hover:bg-elevated"
       >
-        <div class="flex items-start justify-between gap-4">
-          <div class="space-y-1">
-            <h3 class="font-semibold text-highlighted text-base">
-              {{ manualTitle }}
-            </h3>
-            <p class="text-sm text-muted">
-              {{ manualDescription }}
-            </p>
-          </div>
-          <div
-            class="size-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5"
-            :class="!isInstantActive ? 'border-highlighted' : 'border-default'"
-          >
-            <div v-if="!isInstantActive" class="size-2.5 rounded-full bg-highlighted" />
-          </div>
+        <div>
+          <p class="font-semibold text-highlighted">How you get paid</p>
+          <p class="text-sm text-muted">Manage your Stripe account and payouts.</p>
         </div>
-      </button>
-    </div>
+        <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
+      </NuxtLink>
+    </template>
+
+    <URadioGroup
+      v-else-if="isService"
+      :model-value="editor.form.native_consultations ? 'online' : 'offline'"
+      :items="consultationChoices"
+      :aria-label="panelTitle"
+      variant="card"
+      @update:model-value="editor.form.native_consultations = $event === 'online'"
+    />
 
     <!-- Chevron Row: Intake Questions -->
     <div class="mt-8 border-t border-default pt-6">
@@ -98,6 +60,7 @@
 </template>
 
 <script setup lang="ts">
+import LodgingBookingChoices from '~/lib/components/workspace/settings/LodgingBookingChoices.vue'
 import { organizationSettingsEditorKey } from '~/lib/components/workspace/settings/OrganizationSettingsPage.vue'
 import { formQuestionsSummary } from '~/utils/form-question-editing'
 
@@ -115,48 +78,12 @@ const panelTitle = computed(() => {
   return 'Booking settings'
 })
 
-const isInstantActive = computed(() => {
-  if (isService.value) return editor.form.native_consultations
-  return true
-})
+const consultationChoices = [
+  { value: 'online', label: 'Accept consultation requests online', description: 'Clients can select a practice area and submit consultation requests with intake details online.' },
+  { value: 'offline', label: 'Inquiries only (offline scheduling)', description: 'Clients contact your office directly via phone or email to schedule consultations.' },
+]
 
-function setBookingMode(instant: boolean) {
-  if (isService.value) {
-    editor.form.native_consultations = instant
-  }
-}
-
-const instantTitle = computed(() => {
-  if (isService.value) return 'Accept consultation requests online'
-  return 'Instant Book'
-})
-
-const instantDescription = computed(() => {
-  if (isService.value) {
-    return 'Clients can select a practice area and submit consultation requests with intake details online.'
-  }
-  return 'All bookings are automatically approved upon submission.'
-})
-
-const instantHighlight = computed(() => {
-  if (isService.value) {
-    return 'Practices accepting online requests receive significantly more retained client inquiries.'
-  }
-  return 'On average, listings using Instant Book appear higher in search results and get more bookings.'
-})
-
-const manualTitle = computed(() => {
-  if (isService.value) return 'Inquiries only (offline scheduling)'
-  return 'Review requests manually'
-})
-
-const manualDescription = computed(() => {
-  if (isService.value) {
-    return 'Clients contact your office directly via phone or email to schedule consultations.'
-  }
-  return 'Requests require staff review and manual confirmation before scheduling.'
-})
-
+const payoutPath = computed(() => `/dashboard/${route.params.org_slug}/payments/payout-method`)
 const questionsPath = computed(() => `/dashboard/${route.params.org_slug}/website/inquiry-form`)
 
 const questionsSummary = computed(() => {

@@ -23,7 +23,7 @@ export interface DashboardTopNavAction {
   onSelect: () => void
 }
 
-const registered = ref<DashboardTopNavAction[]>([])
+const registered = shallowRef<DashboardTopNavAction[]>([])
 
 /** Read side, for the header. */
 export function useDashboardTopNavActions() {

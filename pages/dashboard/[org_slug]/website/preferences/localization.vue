@@ -43,17 +43,19 @@
           >
             <span class="text-base font-normal text-highlighted">
               {{ language.label }}
+              <span class="ml-2 text-xs text-muted">{{ language.status === 'published' ? 'Published' : 'Draft' }}</span>
             </span>
 
-            <!-- Delete language -->
+            <UButton v-if="language.status === 'disabled'" label="Publish" variant="ghost" :disabled="busyLocale !== null" @click="publishLanguage(language)" />
             <button
+              v-else
               type="button"
               class="inline-flex items-center gap-1.5 text-base font-medium text-highlighted hover:opacity-70 transition cursor-pointer"
               :disabled="busyLocale !== null"
               @click="deleteLanguage(language)"
             >
               <UIcon name="i-lucide-trash-2" class="size-4" />
-              <span>Delete</span>
+              <span>Hide</span>
             </button>
           </div>
         </div>
@@ -201,8 +203,8 @@ const isLocalizationProgress = (value: unknown): value is LocalizationProgress =
     && typeof item.completed === 'number' && typeof item.total === 'number')
 }
 
-const isMutationResponse = (value: unknown): value is { success: boolean } => {
-  return isRecord(value) && typeof value.success === 'boolean'
+const isLanguageMutation = (value: unknown): value is { language: Language } => {
+  return isRecord(value) && isRecord(value.language) && typeof value.language.locale === 'string'
 }
 
 const dashboardApi = useDashboardApi()
@@ -285,10 +287,9 @@ async function saveSelectedLanguages() {
   actionError.value = null
   try {
     for (const locale of selectedCatalogs.value) {
-      await dashboardApi(`${localesPath}/${encodeURIComponent(locale)}`, {
-        method: 'PUT',
-        body: { status: 'published' },
-        validate: isMutationResponse,
+      await dashboardApi(`${localesPath}/${encodeURIComponent(locale)}/add`, {
+        method: 'POST',
+        validate: isLanguageMutation,
       })
     }
     addModalOpen.value = false
@@ -303,9 +304,9 @@ async function saveSelectedLanguages() {
 
 async function deleteLanguage(language: Language) {
   const confirmed = await confirmDialog.open({
-    title: `Remove ${language.label}?`,
-    description: `Are you sure you want to remove ${language.label}? Any translations specific to this language will no longer be shown to visitors.`,
-    confirmLabel: 'Remove language',
+    title: `Hide ${language.label}?`,
+    description: 'Its translations will remain saved and visitors will no longer see them.',
+    confirmLabel: 'Hide language',
     cancelLabel: 'Cancel',
   })
   if (!confirmed) return
@@ -313,14 +314,31 @@ async function deleteLanguage(language: Language) {
   busyLocale.value = language.locale
   actionError.value = null
   try {
-    await dashboardApi(`${localesPath}/${encodeURIComponent(language.locale)}`, {
-      method: 'DELETE',
-      validate: isMutationResponse,
+    await dashboardApi(`${localesPath}/${encodeURIComponent(language.locale)}/disable`, {
+      method: 'POST',
+      validate: isLanguageMutation,
     })
     await refreshSettings()
     await refreshProgress()
   } catch (error) {
-    actionError.value = error instanceof Error ? error.message : 'Removing language failed.'
+    actionError.value = error instanceof Error ? error.message : 'Hiding language failed.'
+  } finally {
+    busyLocale.value = null
+  }
+}
+
+async function publishLanguage(language: Language) {
+  busyLocale.value = language.locale
+  actionError.value = null
+  try {
+    await dashboardApi(`${localesPath}/${encodeURIComponent(language.locale)}/publish`, {
+      method: 'POST',
+      validate: isLanguageMutation,
+    })
+    await refreshSettings()
+    await refreshProgress()
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : 'Publishing language failed.'
   } finally {
     busyLocale.value = null
   }

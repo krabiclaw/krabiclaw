@@ -18,6 +18,7 @@ import {
 } from '~/server/utils/instagram'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { readIntegration } from '~/server/utils/organization-integrations'
+import { isRecord } from '~/server/utils/type-guards'
 import {
   createMessage, discordMessageLink, DiscordError, getMessage, readMessageChannel,
   type DiscordFile, type DiscordMessage,
@@ -197,6 +198,9 @@ async function currentAccessProblem(env: CloudflareEnv, connection: ConnectionRe
     return null
   } catch (error) {
     if (error instanceof MetaGraphError || error instanceof DiscordError) return failureOf(error)
+    if (HTTPError.isError(error) && isRecord(error.data) && error.data.code === 'FAILED_TO_GET_ACCESS_TOKEN') {
+      return { code: 'access_token_unavailable', message: `Better Auth could not get an access token for ${CHANNEL_NAMES[connection.channel]}. Reconnect the account and try again.` }
+    }
     throw error
   }
 }

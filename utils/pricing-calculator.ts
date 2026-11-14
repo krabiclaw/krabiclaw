@@ -19,6 +19,29 @@ export const PRICING_CALCULATOR_SCHEMA = {
   },
 } as const
 
+export const PRICING_CALCULATOR_COLUMNS = ['Household size', '250% limit', '350% limit', '400% limit'] as const
+
+export function pricingCalculatorConfig(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+export function pricingCalculatorTable(config: Record<string, unknown>): Record<string, unknown> {
+  return config.table && typeof config.table === 'object' && !Array.isArray(config.table)
+    ? config.table as Record<string, unknown>
+    : { rows: config.rows, notice: '' }
+}
+
+export function pricingCalculatorRows(config: Record<string, unknown>): unknown[][] {
+  const rows = pricingCalculatorTable(config).rows
+  return Array.isArray(rows) ? rows.filter(Array.isArray).map(row => [...row]) : []
+}
+
+export function updatePricingCalculator(config: Record<string, unknown>, rows: unknown[][], note: string) {
+  return config.table
+    ? { ...config, note, table: { ...pricingCalculatorTable(config), rows } }
+    : { ...config, note, rows }
+}
+
 export function parsePricingAmount(value: unknown) {
   const amount = Number(String(value ?? '').replace(/[^0-9.]/g, ''))
   return Number.isFinite(amount) ? amount : 0

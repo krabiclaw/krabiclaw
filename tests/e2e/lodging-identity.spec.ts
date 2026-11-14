@@ -1,17 +1,16 @@
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import { expect, request as playwrightRequest, test, type WebSocket } from '@playwright/test'
+import { expect, request as playwrightRequest, test } from '@playwright/test'
 import sharp from 'sharp'
 import { E2E_PASSWORD, findE2eAuthFixture } from '../../config/development-auth-fixtures'
-import { seededTenant } from './seed/manifest'
 import { devLoginHeaders } from './test-env'
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
-import type { TeamMember, TeamMessage, TeamThread } from '../../server/domain/team-messages'
+import type { TeamMember } from '../../server/domain/team-messages'
 import type { InboxRow } from '../../server/domain/guest-threads/types'
 import { ALL_VERTICALS } from '../../utils/vertical-copy'
-import { isDashboardInvalidation } from '../../shared/dashboard-invalidations'
+import type { ConversationEntriesPage, ConversationMessage, ConversationPage } from '../../shared/messages-contract'
 import type { Product } from '../../server/types/products'
 
 // The native app authenticates with a Better Auth bearer session and nothing
@@ -98,33 +97,20 @@ test.describe('lodging identity boundary', () => {
     try {
       expect(await members()).toEqual([expect.objectContaining({ userId: fixture.id, role: 'owner' })])
 
-      // A single-use link adds whoever accepts it, with the link's role.
-      const link = await api.post(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer, data: { role: 'admin' } })
-      expect(link.status, await link.text()).toBe(201)
-      const { id: inviteLinkId, token: inviteToken, expires_at } = await link.json() as { id: string; token: string; expires_at: string }
-      expect(Date.parse(expires_at) - Date.now()).toBeGreaterThan(6.9 * 24 * 60 * 60 * 1000)
-      const pending = await api.get(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer })
-      expect(pending.status, await pending.text()).toBe(200)
-      expect((await pending.json() as { invite_links: Array<{ id: string; role: string }> }).invite_links).toEqual([expect.objectContaining({ id: inviteLinkId, role: 'admin' })])
-      // Anyone holding the link reads what it offers, and the public page shows it.
-      const offered = await api.get(`/api/invite-links/${encodeURIComponent(inviteToken)}`)
-      expect(offered.status, await offered.text()).toBe(200)
-      expect(await offered.json()).toEqual({ organization: { name: organization.name }, role: 'admin', expires_at })
-      const invitePage = await api.get(`/invite/${encodeURIComponent(inviteToken)}`)
-      expect(invitePage.status).toBe(200)
-      expect(await invitePage.text()).toContain(`Join ${organization.name}`)
-      // In a browser with no session the page offers sign-in and the app.
-      await page.goto(`/invite/${encodeURIComponent(inviteToken)}`)
-      await expect(page.getByRole('heading', { name: `Join ${organization.name}`, level: 1 })).toBeVisible()
-      await expect(page.getByRole('link', { name: 'Sign in with email' })).toHaveAttribute('href', `/login?redirect=${encodeURIComponent(`/invite/${encodeURIComponent(inviteToken)}`)}`)
-      await expect(page.getByRole('link', { name: 'Open this invite in the KrabiClaw app' })).toHaveAttribute('href', `krabiclaw://invite?token=${encodeURIComponent(inviteToken)}`)
-      expect((await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`)).status).toBe(401)
+      const invitation = await api.post('/api/auth/organization/invite-member', {
+        headers: bearer, data: { organizationId: organization.id, email: invitee.email, role: 'admin' },
+      })
+      expect(invitation.status, await invitation.text()).toBe(200)
+      const { id: invitationId } = await invitation.json() as { id: string }
       const inviteeBearer = await signInBearer(invitee.email)
-      const accepted = await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`, { headers: inviteeBearer })
+      const offered = await api.get('/api/auth/organization/get-invitation?id=' + encodeURIComponent(invitationId), { headers: inviteeBearer })
+      expect(offered.status, await offered.text()).toBe(200)
+      expect(await offered.json()).toMatchObject({ organizationName: organization.name, email: invitee.email, role: 'admin' })
+      const accepted = await api.post('/api/auth/organization/accept-invitation', { headers: inviteeBearer, data: { invitationId } })
       expect(accepted.status, await accepted.text()).toBe(200)
-      const joined = await accepted.json() as { organization: { id: string; name: string }; role: string; member_id: string }
-      expect(joined).toMatchObject({ organization: { id: organization.id, name: organization.name }, role: 'admin' })
-      expect(await members()).toEqual(expect.arrayContaining([expect.objectContaining({ id: joined.member_id, userId: invitee.id, role: 'admin' })]))
+      const { member: joined } = await accepted.json() as { member: { id: string; organizationId: string; role: string } }
+      expect(joined).toMatchObject({ organizationId: organization.id, role: 'admin' })
+      expect(await members()).toEqual(expect.arrayContaining([expect.objectContaining({ id: joined.id, userId: invitee.id, role: 'admin' })]))
 
       // MCP and the native app address the same participants, messages and read
       // positions. This organization already exists for the invitation journey.
@@ -135,11 +121,8 @@ test.describe('lodging identity boundary', () => {
         expect(response.status(), await response.text()).toBe(200)
         return mcpData<T>(await response.json())
       }
-      /** A team conversation's messages as get_conversation returns them, newest first. */
-      const teamRead = async (args: Record<string, unknown>, client = request) => {
-        const { messages, has_more } = (await teamCall<{ team: { messages: TeamMessage[]; has_more: boolean } }>('get_conversation', { conversation_id: threadId, ...args }, client)).team
-        return { messages, has_more }
-      }
+      const messages = (page: Pick<ConversationEntriesPage, 'entries'>) => page.entries.filter((entry): entry is ConversationMessage => entry.type === 'message')
+      const teamRead = (args: { before?: number } = {}, client = request) => teamCall<ConversationPage>('get_conversation', { conversation_id: threadId, ...args }, client)
       const recipients = await teamCall<{ current_user_id: string; members: TeamMember[] }>('list_conversation_recipients')
       expect(recipients.current_user_id).toBe(fixture.id)
       const nativeMembers = await api.get(`/api/dashboard/team/members?org=${slug}`, { headers: bearer })
@@ -149,34 +132,39 @@ test.describe('lodging identity boundary', () => {
       const started = await teamCall<{ conversation_id: string; created: boolean }>('start_conversation', { member_user_ids: [invitee.id] })
       expect(started.created).toBe(true)
       const threadId = started.conversation_id
-      const teamPath = `/api/dashboard/team/threads/${threadId}`
+      const teamPath = `/api/messages/${threadId}`
       const reusedTeam = await api.post(`/api/dashboard/team/threads?org=${slug}`, { headers: inviteeBearer, data: { member_user_ids: [fixture.id] } })
       expect(reusedTeam.status, await reusedTeam.text()).toBe(200)
       expect(await reusedTeam.json()).toEqual({ conversation_id: threadId })
       const conversations = await teamCall<{ conversations: Array<{ conversation_id: string; kind: string; unread: boolean }>; page_info: { has_more: boolean; next_cursor: string | null } }>('list_conversations', { kind: 'team' })
       expect(conversations.conversations).toEqual([expect.objectContaining({ conversation_id: threadId, kind: 'team', unread: false })])
       expect(conversations.page_info).toEqual({ has_more: false, next_cursor: null })
-      const opened = (await teamCall<{ team: { thread: TeamThread } }>('get_conversation', { conversation_id: threadId })).team.thread
-      expect(opened).toMatchObject({ id: threadId, unread: false, stay: null, location_id: null })
+      const opened = (await teamRead()).conversation
+      expect(opened).toMatchObject({ id: threadId, booking_id: null })
+      expect(opened).not.toHaveProperty('location_id')
+      expect(opened).not.toHaveProperty('stay')
       expect(opened.participants.map(member => member.id).sort()).toEqual([fixture.id, invitee.id].sort())
       const message = `The guest room is ready ${crypto.randomUUID()}`
       const idempotencyKey = crypto.randomUUID()
-      const sentReceipt = await teamCall<{ conversation_id: string; outcome: { ok: boolean }; message_id: string; created: boolean }>('send_message', { conversation_id: threadId, message, idempotency_key: idempotencyKey })
-      expect(sentReceipt).toMatchObject({ conversation_id: threadId, outcome: { ok: true }, created: true })
-      const sent = { message: (await teamRead({ limit: 1 })).messages[0]! }
-      expect(sent.message).toMatchObject({ id: sentReceipt.message_id, conversation_id: threadId, author_user_id: fixture.id, body: message, attachments: [] })
-      const replay = await teamCall<{ message_id: string; created: boolean }>('send_message', { conversation_id: threadId, message, idempotency_key: idempotencyKey })
-      expect(replay).toMatchObject({ message_id: sentReceipt.message_id, created: false })
+      const sentReceipt = await teamCall<{ conversation_id: string; message: { id: string; sequence: number } }>('send_message', { conversation_id: threadId, message, idempotency_key: idempotencyKey })
+      expect(sentReceipt).toMatchObject({ conversation_id: threadId, message: { id: expect.any(String), sequence: 1 } })
+      const sent = { message: messages(await teamRead())[0]! }
+      expect(sent.message).toMatchObject({ id: sentReceipt.message.id, sequence: sentReceipt.message.sequence, author_user_id: fixture.id, body: message, photos: [] })
+      const replay = await teamCall<{ conversation_id: string; message: { id: string; sequence: number } }>('send_message', { conversation_id: threadId, message, idempotency_key: idempotencyKey })
+      expect(replay).toEqual(sentReceipt)
       const changedRetry = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'send_message', args: { organization_id: organization.id, conversation_id: threadId, message: 'Different content', idempotency_key: idempotencyKey } })
       expect(changedRetry.status()).toBe(200)
       const changedRetryResult = (await changedRetry.json()).result
       expect(changedRetryResult.isError).toBe(true)
       expect(JSON.parse(changedRetryResult.content[0].text)).toMatchObject({ status: 409, code: 'IDEMPOTENCY_KEY_REUSED' })
-      const nativeRead = await api.get(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer })
+      const nativeRead = await api.get(teamPath, { headers: inviteeBearer })
       expect(nativeRead.status, await nativeRead.text()).toBe(200)
-      expect(await nativeRead.json()).toEqual({ messages: [sent.message], has_more: false, thread: { ...opened, unread: true, last_message_at: sent.message.created_at, last_message: { id: sent.message.id, body: message, author_user_id: fixture.id, attachment_count: 0, created_at: sent.message.created_at } } })
+      const nativePage = await nativeRead.json() as ConversationPage
+      expect(nativePage).toMatchObject({ page: { before: null }, conversation: { id: threadId } })
+      expect(nativePage.entries.map(entry => entry.type)).toEqual(['day', 'message'])
+      expect(messages(nativePage)).toMatchObject([{ id: sent.message.id, body: message, author_user_id: fixture.id }])
       const teamRows = async (headers: Record<string, string>) => {
-        const response = await api.get(`/api/dashboard/organizations/${organization.id}/conversations?kind=team&org=${slug}`, { headers })
+        const response = await api.get(`/api/messages?organization_id=${organization.id}&kind=team`, { headers })
         expect(response.status, await response.text()).toBe(200)
         return (await response.json() as { threads: InboxRow[] }).threads
       }
@@ -184,31 +172,28 @@ test.describe('lodging identity boundary', () => {
       const marked = await teamCall<{ conversation_id: string; unread: boolean; last_read_message_id: string | null }>('mark_conversation_read', { conversation_id: threadId }, memberMcp)
       expect(marked).toEqual({ conversation_id: threadId, unread: false, last_read_message_id: sent.message.id })
       expect(await teamRows(inviteeBearer)).toEqual([expect.objectContaining({ id: threadId, unread: false })])
-      const reply = await api.post(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer, data: { body: 'Thank you, I will check the room.', idempotency_key: crypto.randomUUID() } })
-      expect(reply.status, await reply.text()).toBe(201)
-      const replyMessage = (await reply.json() as { message: TeamMessage }).message
-      const latest = await teamRead({ limit: 1 })
-      expect(latest).toEqual({ messages: [replyMessage], has_more: true })
-      const beforeInvalidCursor = await api.get(`${teamPath}/messages?org=${slug}`, { headers: bearer })
+      const reply = await api.post(teamPath, { headers: inviteeBearer, data: { body: 'Thank you, I will check the room.', idempotency_key: crypto.randomUUID() } })
+      expect(reply.status, await reply.text()).toBe(200)
+      const replyMessage = (await reply.json() as { message: ConversationMessage }).message
+      const latest = await teamRead()
+      expect(messages(latest).at(-1)).toMatchObject({ id: replyMessage.id, sequence: replyMessage.sequence })
+      const beforeInvalidCursor = await api.get(teamPath, { headers: bearer })
       expect(beforeInvalidCursor.status, await beforeInvalidCursor.text()).toBe(200)
       const messagesBeforeInvalidCursor = await beforeInvalidCursor.json()
-      for (const { cursor, field } of [
-        { cursor: { before: replyMessage.created_at }, field: 'before_id' },
-        { cursor: { before_id: replyMessage.id }, field: 'before' },
-      ]) {
+      for (const cursor of [{ before: 'invalid' }, { before: 0 }]) {
         const invalidCursor = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: organization.id, conversation_id: threadId, ...cursor } })
         expect(invalidCursor.status(), await invalidCursor.text()).toBe(200)
         const invalidCursorResult = (await invalidCursor.json()).result
         expect(invalidCursorResult.isError).toBe(true)
         expect(invalidCursorResult.structuredContent).toBeUndefined()
-        // Half a cursor passes the schema, which has no combinator Claude clients mis-render; the team-message domain refuses it.
-        expect(JSON.parse(invalidCursorResult.content[0].text)).toEqual({ status: 422, message: 'before and before_id are sent together', code: 'INVALID_CURSOR', field })
+        expect(invalidCursorResult.content[0].text).toContain('Invalid arguments for tool get_conversation')
       }
-      const afterInvalidCursor = await api.get(`${teamPath}/messages?org=${slug}`, { headers: bearer })
+      const afterInvalidCursor = await api.get(teamPath, { headers: bearer })
       expect(afterInvalidCursor.status, await afterInvalidCursor.text()).toBe(200)
       expect(await afterInvalidCursor.json()).toEqual(messagesBeforeInvalidCursor)
-      const earlier = await teamRead({ limit: 1, before: replyMessage.created_at, before_id: replyMessage.id })
-      expect(earlier).toEqual({ messages: [sent.message], has_more: false })
+      const earlier = await teamRead({ before: replyMessage.sequence })
+      expect(messages(earlier).map(entry => entry.id)).toEqual([sent.message.id])
+      expect(earlier.page.before).toBeNull()
       expect(await teamRows(bearer)).toEqual([expect.objectContaining({ id: threadId, unread: true })])
 
       await loginAs(page.request, baseURL!, fixture.id)
@@ -216,28 +201,28 @@ test.describe('lodging identity boundary', () => {
       await page.goto(`/dashboard/${slug}/messages?kind=team`)
       await dismissPreviewToolbar(page)
       await expect(page.locator('[data-conversation-list-hydrated="true"]')).toBeVisible()
-      await page.getByRole('link', { name: 'New team conversation', exact: true }).click()
+      await page.getByRole('link', { name: 'New conversation', exact: true }).click()
       await page.getByRole('checkbox', { name: invitee.name, exact: true }).check()
       const reopened = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/dashboard/team/threads')
       await page.getByRole('button', { name: 'Start', exact: true }).click()
       const reopenedResponse = await reopened
       expect(reopenedResponse.status()).toBe(200)
       expect(await reopenedResponse.json()).toEqual({ conversation_id: threadId })
-      await expect(page).toHaveURL(new RegExp(`/messages/team/${threadId}\\?kind=team$`))
+      await expect(page).toHaveURL(new RegExp(`/messages/${threadId}\\?kind=team$`))
       const cmsBody = `Team CMS proof ${crypto.randomUUID()}`
       const composer = page.getByRole('textbox', { name: 'Message your team', exact: true })
       await composer.fill(cmsBody)
       // A lost request keeps the actual draft and retry identity in the CMS.
       let attemptedKey = ''
-      await page.route('**/api/dashboard/team/threads/*/messages?*', async route => {
+      await page.route(`**${teamPath}`, async route => {
         if (route.request().method() !== 'POST') return route.continue()
         attemptedKey = (route.request().postDataJSON() as { idempotency_key: string }).idempotency_key
         await route.abort('failed')
       })
       await page.getByRole('button', { name: 'Send message', exact: true }).click()
-      await expect(page.getByText('Conversation needs attention', { exact: true })).toBeVisible()
+      await expect(page.getByText('Failed to fetch', { exact: false })).toBeVisible()
       await expect(composer).toHaveValue(cmsBody)
-      await page.unroute('**/api/dashboard/team/threads/*/messages?*')
+      await page.unroute(`**${teamPath}`)
       // The local Worker has no APNs signing key. Register through the native
       // boundary so its actual failed push receipt must be visible in the CMS.
       const deviceToken = crypto.randomUUID().replaceAll('-', '')
@@ -245,15 +230,15 @@ test.describe('lodging identity boundary', () => {
       expect(registered.status, await registered.text()).toBe(200)
       expect(await registered.json()).toEqual({ status: 'registered' })
       try {
-        const cmsSent = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `${teamPath}/messages`)
+        const cmsSent = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === teamPath)
         await page.getByRole('button', { name: 'Send message', exact: true }).click()
         const cmsSentResponse = await cmsSent
-        expect(cmsSentResponse.status()).toBe(201)
+        expect(cmsSentResponse.status()).toBe(200)
         expect((cmsSentResponse.request().postDataJSON() as { idempotency_key: string }).idempotency_key).toBe(attemptedKey)
         await expect(composer).toHaveValue('')
-        const cmsNativeRead = await api.get(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer })
+        const cmsNativeRead = await api.get(teamPath, { headers: inviteeBearer })
         expect(cmsNativeRead.status, await cmsNativeRead.text()).toBe(200)
-        const cmsMatches = (await cmsNativeRead.json() as { messages: TeamMessage[] }).messages.filter(message => message.body === cmsBody)
+        const cmsMatches = messages(await cmsNativeRead.json() as ConversationPage).filter(message => message.body === cmsBody)
         expect(cmsMatches).toHaveLength(1)
         const saved = cmsMatches[0]!
         expect(saved).toMatchObject({ author_user_id: fixture.id, deliveries: expect.arrayContaining([expect.objectContaining({ channel: 'push', status: 'failed', error: expect.stringMatching(/^APNS_CONFIG_REQUIRED: /) })]) })
@@ -262,8 +247,8 @@ test.describe('lodging identity boundary', () => {
         await expect(savedRow).toContainText('Message saved. A notification failed.')
         await savedRow.getByRole('button', { name: 'Delivery error details', exact: true }).click()
         await expect(savedRow).toContainText(saved.deliveries.find(delivery => delivery.channel === 'push')!.error!)
-        const cmsMcpRead = await teamRead({ limit: 1 }, memberMcp)
-        expect(cmsMcpRead).toEqual({ messages: [saved], has_more: true })
+        const cmsMcpRead = await teamRead({}, memberMcp)
+        expect(messages(cmsMcpRead).at(-1)).toEqual(saved)
       } finally {
         const unregistered = await api.delete('/api/dashboard/devices', { headers: inviteeBearer, data: { token: deviceToken } })
         expect(unregistered.status, await unregistered.text()).toBe(200)
@@ -274,33 +259,35 @@ test.describe('lodging identity boundary', () => {
       await expect(composer).toBeVisible()
       await expect(page.locator('[data-team-delivery-failure]')).toContainText('Message saved. A notification failed.')
       await page.locator('input[type="file"]').setInputFiles({ name: 'team-message-proof.avif', mimeType: 'image/avif', buffer: await sharp('public/platform/apple-touch-icon.png').avif().toBuffer() })
-      const photoSent = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `${teamPath}/messages`)
+      const photoSent = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === teamPath)
       await page.getByRole('button', { name: 'Send message', exact: true }).click()
-      expect((await photoSent).status()).toBe(201)
-      const photoRead = await api.get(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer })
+      const photoResponse = await photoSent
+      expect(photoResponse.status()).toBe(200)
+      const sentPhoto = (await photoResponse.json() as { message: ConversationMessage }).message
+      expect(sentPhoto.deliveries).toEqual([expect.objectContaining({ channel: 'email', status: 'sent' })])
+      const photoRead = await api.get(teamPath, { headers: inviteeBearer })
       expect(photoRead.status, await photoRead.text()).toBe(200)
-      const photo = (await photoRead.json() as { messages: TeamMessage[] }).messages[0]!
-      expect(photo).toMatchObject({ body: '', author_user_id: fixture.id })
-      expect(photo.deliveries).toEqual([expect.objectContaining({ channel: 'email', status: 'sent' })])
-      expect(photo.attachments).toHaveLength(1)
-      const loadedPhoto = await api.get(photo.attachments[0]!.url)
+      const photo = messages(await photoRead.json() as ConversationPage).at(-1)!
+      expect(photo).toMatchObject({ id: sentPhoto.id, body: '', author_user_id: fixture.id, deliveries: [] })
+      expect(photo.photos).toHaveLength(1)
+      const loadedPhoto = await api.get(photo.photos[0]!.url)
       expect(loadedPhoto.status).toBe(200)
       expect(loadedPhoto.headers.get('content-type')).toBe('image/avif')
       await expect(page.locator(`[data-team-message="${photo.id}"] img`)).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-      const photoMcpRead = await teamRead({ limit: 1 }, memberMcp)
-      expect(photoMcpRead).toEqual({ messages: [photo], has_more: true })
+      const photoMcpRead = await teamRead({}, memberMcp)
+      expect(messages(photoMcpRead).at(-1)).toEqual(photo)
       expect(await teamRows(inviteeBearer)).toEqual([expect.objectContaining({ id: threadId, unread: true })])
 
       // Native arrivals cross the first page. Loading earlier history must keep
       // its oldest row when the next live arrival refreshes the source window.
-      let lastHistoryMessage: TeamMessage | null = null
-      for (let index = 0; index < 17; index++) {
-        const historySent = await api.post(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer, data: { body: `Native team history ${index + 1} ${threadId}`, idempotency_key: crypto.randomUUID() } })
-        expect(historySent.status, await historySent.text()).toBe(201)
-        lastHistoryMessage = (await historySent.json() as { message: TeamMessage }).message
+      let lastHistoryMessage: ConversationMessage | null = null
+      for (let index = 0; index < 42; index++) {
+        const historySent = await api.post(teamPath, { headers: inviteeBearer, data: { body: `Native team history ${index + 1} ${threadId}`, idempotency_key: crypto.randomUUID() } })
+        expect(historySent.status, await historySent.text()).toBe(200)
+        lastHistoryMessage = (await historySent.json() as { message: ConversationMessage }).message
       }
-      await expect(page.locator(`[data-team-message="${lastHistoryMessage!.id}"]`)).toContainText(lastHistoryMessage!.body)
+      await expect(page.locator(`[data-team-message="${lastHistoryMessage!.id}"]`)).toContainText(lastHistoryMessage!.body!)
       const oldestRow = page.locator(`[data-team-message="${sent.message.id}"]`)
       await expect(oldestRow).toHaveCount(0)
       const earlierMessages = page.getByRole('button', { name: 'Earlier messages', exact: true })
@@ -309,37 +296,56 @@ test.describe('lodging identity boundary', () => {
       await expect(oldestRow).toContainText(message)
       await expect(earlierMessages).toHaveCount(0)
       const liveBody = `Native arrival after loading earlier messages ${threadId}`
-      const liveSent = await api.post(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer, data: { body: liveBody, idempotency_key: crypto.randomUUID() } })
-      expect(liveSent.status, await liveSent.text()).toBe(201)
-      const liveMessage = (await liveSent.json() as { message: TeamMessage }).message
+      const liveSent = await api.post(teamPath, { headers: inviteeBearer, data: { body: liveBody, idempotency_key: crypto.randomUUID() } })
+      expect(liveSent.status, await liveSent.text()).toBe(200)
+      const liveMessage = (await liveSent.json() as { message: ConversationMessage }).message
       const liveRow = page.locator(`[data-team-message="${liveMessage.id}"]`)
       await expect(liveRow).toBeVisible()
       await expect(liveRow).toContainText(liveBody)
       await expect(oldestRow).toBeVisible()
       await expect(oldestRow).toContainText(message)
-      await expect(page.locator('[data-team-message]')).toHaveCount(22)
-      const retainedHistory = await api.get(`${teamPath}/messages?org=${slug}&limit=100`, { headers: bearer })
+      await expect(page.locator('[data-team-message]')).toHaveCount(47)
+      const retainedHistory = await api.get(teamPath, { headers: bearer })
       expect(retainedHistory.status, await retainedHistory.text()).toBe(200)
-      const retained = await retainedHistory.json() as { messages: TeamMessage[]; has_more: boolean }
-      expect(retained.has_more).toBe(false)
-      expect(await page.locator('[data-team-message]').evaluateAll(rows => rows.map(row => row.getAttribute('data-team-message')))).toEqual(retained.messages.map(message => message.id).reverse())
-      const reused = await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`, { headers: inviteeBearer })
-      expect(reused.status).toBe(410)
-      expect(await reused.json()).toMatchObject({ data: { code: 'INVITE_LINK_USED', field: 'token' } })
-      const usedRead = await api.get(`/api/invite-links/${encodeURIComponent(inviteToken)}`)
-      expect(usedRead.status).toBe(410)
-      expect(await usedRead.json()).toMatchObject({ data: { code: 'INVITE_LINK_USED', field: 'token' } })
-      // Used links are no longer pending, and a withdrawn link cannot be read or accepted.
-      expect((await (await api.get(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer })).json() as { invite_links: unknown[] }).invite_links).toEqual([])
-      const withdrawn = await api.post(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer, data: { role: 'member' } })
-      expect(withdrawn.status, await withdrawn.text()).toBe(201)
-      const withdrawnLink = await withdrawn.json() as { id: string; token: string }
-      expect((await api.delete(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links/${withdrawnLink.id}`, { headers: bearer })).status).toBe(204)
-      const gone = await api.get(`/api/invite-links/${encodeURIComponent(withdrawnLink.token)}`)
-      expect(gone.status).toBe(404)
-      expect(await gone.json()).toMatchObject({ data: { code: 'INVITE_LINK_NOT_FOUND', field: 'token' } })
-      expect((await api.post(`/api/invite-links/${encodeURIComponent(withdrawnLink.token)}/accept`, { headers: inviteeBearer })).status).toBe(404)
-      expect((await api.post(`/api/organizations/${seededTenant('restaurant').organizationId}/invite-links`, { headers: inviteeBearer, data: { role: 'member' } })).status).toBe(404)
+      const retained = await retainedHistory.json() as ConversationPage
+      expect(retained.page.before).not.toBeNull()
+      const older = await api.get(`${teamPath}?before=${retained.page.before}`, { headers: bearer })
+      expect(older.status, await older.text()).toBe(200)
+      const prior = await older.json() as ConversationEntriesPage
+      expect(Object.keys(prior).sort()).toEqual(['conversation_id', 'entries', 'page'])
+      expect(prior.conversation_id).toBe(threadId)
+      expect(prior.page.before).toBeNull()
+      expect(prior.page.newest).toBeLessThan(retained.page.before!)
+      expect(await page.locator('[data-team-message]').evaluateAll(rows => rows.map(row => row.getAttribute('data-team-message')))).toEqual([...messages(prior), ...messages(retained)].map(message => message.id))
+
+      // An earlier-page denial clears the held head even if the socket has no access event yet.
+      const isOlderPage = (url: URL) => url.pathname === teamPath && url.searchParams.has('before')
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.reload()
+      await expect(liveRow).toBeVisible()
+      await page.route(isOlderPage, route => route.fulfill({ status: 404, json: { message: 'Conversation not found' } }), { times: 1 })
+      await earlierMessages.click()
+      await expect(liveRow).toHaveCount(0)
+      const nav = page.getByTestId('dashboard-top-nav')
+      await nav.getByRole('link', { name: 'Calendar', exact: true }).click()
+      await expect(liveRow).toHaveCount(0)
+      const releaseHead = Promise.withResolvers<undefined>()
+      const isHead = (url: URL) => url.pathname === teamPath && !url.searchParams.has('before')
+      await page.route(isHead, async route => {
+        await releaseHead.promise
+        await route.continue()
+      }, { times: 1 })
+      try {
+        await Promise.all([page.waitForRequest(request => request.method() === 'GET' && isHead(new URL(request.url()))), nav.getByRole('link', { name: 'Messages', exact: true }).click()])
+        await expect(page).toHaveURL(new RegExp(`/messages/${threadId}(?:\\?|$)`))
+        await expect(liveRow).toHaveCount(0)
+      } finally {
+        releaseHead.resolve(undefined)
+      }
+      await expect(liveRow).toBeVisible()
+      const reused = await api.post('/api/auth/organization/accept-invitation', { headers: inviteeBearer, data: { invitationId } })
+      expect(reused.status).toBe(400)
+      expect(await reused.json()).toMatchObject({ code: 'INVITATION_NOT_FOUND' })
       const inviteeLeft = await api.post('/api/auth/organization/leave', { headers: inviteeBearer, data: { organizationId: organization.id } })
       expect(inviteeLeft.status, await inviteeLeft.text()).toBe(200)
       expect(await members()).toEqual([expect.objectContaining({ userId: fixture.id, role: 'owner' })])
@@ -348,10 +354,9 @@ test.describe('lodging identity boundary', () => {
       const lostResult = (await lostMcpSeat.json()).result
       expect(lostResult.isError).toBe(true)
       expect(JSON.parse(lostResult.content[0].text)).toMatchObject({ status: 404 })
-      const lostNativeSeat = await api.get(`/api/dashboard/team/threads/${threadId}/messages?org=${slug}`, { headers: inviteeBearer })
+      const lostNativeSeat = await api.get(teamPath, { headers: inviteeBearer })
       expect(lostNativeSeat.status).toBe(404)
-      // Membership resolution refuses the organization before the thread's seat check.
-      expect(await lostNativeSeat.json()).toMatchObject({ data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
+      expect(await lostNativeSeat.json()).toMatchObject({ data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
 
       // Deleting the only owner would orphan the organization.
       const refused = await api.post('/api/auth/delete-user', { headers: bearer, data: {} })
@@ -409,15 +414,16 @@ test.describe('lodging identity boundary', () => {
         const context = await api.get(`/api/dashboard/context?org=${slug}`, { headers: ownerBearer })
         expect(context.status, await context.text()).toBe(200)
         expect(await context.json()).toMatchObject({ success: true, organization: { id: organization.id, name, slug, subdomain: slug, vertical } })
-        // Invitations use the same single-use link as a new teammate joining from the app.
         const join = async (actor: typeof invitee, role: 'admin' | 'member') => {
-          const link = await api.post(`/api/organizations/${organization.id}/invite-links`, { headers: ownerBearer, data: { role } })
-          expect(link.status, await link.text()).toBe(201)
-          const { token } = await link.json() as { token: string }
+          const invitation = await api.post('/api/auth/organization/invite-member', {
+            headers: ownerBearer, data: { organizationId: organization.id, email: actor.email, role },
+          })
+          expect(invitation.status, await invitation.text()).toBe(200)
+          const { id: invitationId } = await invitation.json() as { id: string }
           const bearer = await signInBearer(actor.email)
-          const accepted = await api.post(`/api/invite-links/${encodeURIComponent(token)}/accept`, { headers: bearer })
+          const accepted = await api.post('/api/auth/organization/accept-invitation', { headers: bearer, data: { invitationId } })
           expect(accepted.status, await accepted.text()).toBe(200)
-          expect(await accepted.json()).toMatchObject({ organization: { id: organization.id }, role })
+          expect(await accepted.json()).toMatchObject({ member: { organizationId: organization.id, role } })
           return bearer
         }
         const adminBearer = await join(invitee, 'admin')
@@ -430,7 +436,7 @@ test.describe('lodging identity boundary', () => {
         await page.goto(`${listPath}?kind=team`)
         await waitForNuxtHydration(page)
         await dismissPreviewToolbar(page)
-        await page.getByRole('link', { name: 'New team conversation', exact: true }).click()
+        await page.getByRole('link', { name: 'New conversation', exact: true }).click()
         await page.getByRole('checkbox', { name: invitee.name, exact: true }).check()
         await page.getByRole('checkbox', { name: teammate.name, exact: true }).check()
         const initialName = `Handover ${slug}`
@@ -440,8 +446,9 @@ test.describe('lodging identity boundary', () => {
         const groupResponse = await groupCreated
         expect(groupResponse.status(), await groupResponse.text()).toBe(201)
         const { conversation_id: threadId } = await groupResponse.json() as { conversation_id: string }
-        const groupPath = `${listPath}/team/${threadId}`
-        const teamPath = `/api/dashboard/team/threads/${threadId}`
+        const groupPath = `${listPath}/${threadId}`
+        const teamPath = `/api/messages/${threadId}`
+        const operations = `/api/dashboard/team/threads/${threadId}/operations`
         const createBody = groupResponse.request().postDataJSON() as { member_user_ids: string[]; name: string; idempotency_key: string }
         expect(createBody).toMatchObject({ member_user_ids: [invitee.id, teammate.id].sort(), name: initialName, idempotency_key: expect.any(String) })
         expect(createBody.idempotency_key).not.toBe('')
@@ -450,33 +457,35 @@ test.describe('lodging identity boundary', () => {
         expect(await retriedStart.json()).toEqual({ conversation_id: threadId })
         const changedStart = await api.post(teamListPath, { headers: ownerBearer, data: { ...createBody, name: 'Different group' } })
         expect(changedStart.status, await changedStart.text()).toBe(409)
-        await expect(page).toHaveURL(new RegExp(`/messages/team/${threadId}\\?kind=team$`))
+        await expect(page).toHaveURL(new RegExp(`/messages/${threadId}\\?kind=team$`))
 
         // One team conversation as its screen reads it; a member who is not in it reads 404.
         const threads = async (headers: Record<string, string>, id = threadId) => {
-          const response = await api.get(`/api/dashboard/team/threads/${id}/messages?org=${slug}&limit=1`, { headers })
+          const response = await api.get(`/api/messages/${id}`, { headers })
           if (response.status === 404) return []
           expect(response.status, await response.text()).toBe(200)
-          return [(await response.json() as { thread: TeamThread }).thread]
+          const { conversation, capabilities } = await response.json() as ConversationPage
+          if (conversation.kind !== 'team') throw new Error(`Expected a team conversation for ${id}`)
+          return [{ ...conversation, capabilities }]
         }
         const history = async (headers: Record<string, string>) => {
-          const response = await api.get(`${teamPath}/messages?org=${slug}&limit=100`, { headers })
+          const response = await api.get(teamPath, { headers })
           expect(response.status, await response.text()).toBe(200)
-          return (await response.json() as { messages: TeamMessage[] }).messages
+          return (await response.json() as ConversationPage).entries.filter(entry => entry.type === 'message')
         }
         for (const [bearer, can_manage] of [[ownerBearer, true], [adminBearer, true], [memberBearer, false]] as const) {
           const group = (await threads(bearer)).find(thread => thread.id === threadId)!
-          expect(group).toMatchObject({ name: initialName, is_group: true, created_by_user_id: fixture.id, can_manage, can_leave: true, booking_id: null, location_id: null })
+          expect(group).toMatchObject({ name: initialName, is_group: true, created_by_user_id: fixture.id, capabilities: { can_manage_participants: can_manage, can_leave: true }, booking_id: null })
           expect(group.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id, teammate.id].sort())
         }
         const messageIds: string[] = []
         const bodies: string[] = []
         for (const [actor, bearer] of [[fixture, ownerBearer], [invitee, adminBearer], [teammate, memberBearer]] as const) {
           const body = `${actor.name} group proof ${crypto.randomUUID()}`
-          const sent = await api.post(`${teamPath}/messages?org=${slug}`, { headers: bearer, data: { body, idempotency_key: crypto.randomUUID() } })
-          expect(sent.status, await sent.text()).toBe(201)
-          const { message } = await sent.json() as { message: TeamMessage }
-          expect(message).toMatchObject({ conversation_id: threadId, body, author_user_id: actor.id })
+          const sent = await api.post(teamPath, { headers: bearer, data: { body, idempotency_key: crypto.randomUUID() } })
+          expect(sent.status, await sent.text()).toBe(200)
+          const { message } = await sent.json() as { message: ConversationMessage }
+          expect(message).toMatchObject({ sequence: expect.any(Number), body, author_user_id: actor.id })
           messageIds.push(message.id)
           bodies.push(body)
           await expect(page.locator(`[data-team-message="${message.id}"]`)).toContainText(body)
@@ -484,34 +493,32 @@ test.describe('lodging identity boundary', () => {
         await page.screenshot({ path: testInfo.outputPath('team-group-conversation.png'), fullPage: true })
         const mcpRead = await mcpRequest(memberMcp, baseURL!, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: organization.id, conversation_id: threadId } })
         expect(mcpRead.status(), await mcpRead.text()).toBe(200)
-        expect(mcpData<{ team: { messages: TeamMessage[] } }>(await mcpRead.json()).team.messages.map(message => message.id).sort()).toEqual([...messageIds].sort())
+        expect(mcpData<ConversationPage>(await mcpRead.json()).entries.filter(entry => entry.type === 'message').map(message => message.id).sort()).toEqual([...messageIds].sort())
         await memberPage.goto(`${groupPath}?kind=team`)
         await waitForNuxtHydration(memberPage)
         await dismissPreviewToolbar(memberPage)
         await expect(memberPage.locator(`[data-team-message="${messageIds[2]}"]`)).toContainText(bodies[2]!)
 
-        const deniedRename = await api.post(`${teamPath}/operations?org=${slug}`, { headers: memberBearer, data: { action: 'rename', name: 'Unpermitted', idempotency_key: crypto.randomUUID() } })
+        const deniedRename = await api.post(`${operations}?org=${slug}`, { headers: memberBearer, data: { action: 'rename', name: 'Unpermitted', idempotency_key: crypto.randomUUID() } })
         expect(deniedRename.status, await deniedRename.text()).toBe(403)
         expect((await threads(adminBearer)).find(thread => thread.id === threadId)?.name).toBe(initialName)
         for (const headers of [outsiderBearer, buyerBearer]) {
-          expect((await api.get(`${teamPath}/messages?org=${slug}`, { headers })).status).toBe(404)
-          expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers, data: { body: 'Outside', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
-          expect((await api.post(`${teamPath}/operations?org=${slug}`, { headers, data: { action: 'rename', name: 'Outside', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
+          expect((await api.get(teamPath, { headers })).status).toBe(404)
+          expect((await api.post(teamPath, { headers, data: { body: 'Outside', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
+          expect((await api.post(`${operations}?org=${slug}`, { headers, data: { action: 'rename', name: 'Outside', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
         }
 
-        await page.getByLabel('Conversation details', { exact: true }).click()
-        await page.getByRole('link', { name: /^Name/ }).click()
+        await page.getByLabel('In this conversation', { exact: true }).click()
+        const panel = page.getByRole('dialog', { name: 'In this conversation', exact: true })
         const renamed = `Named group ${slug}`
         await page.getByRole('textbox', { name: 'Conversation name', exact: true }).fill(renamed)
         await page.getByRole('button', { name: 'Save name', exact: true }).click()
         await expect.poll(async () => (await threads(memberBearer)).find(thread => thread.id === threadId)?.name).toBe(renamed)
-        const memberManagement = await api.post(`${teamPath}/operations?org=${slug}`, { headers: memberBearer, data: { action: 'remove', user_id: invitee.id, idempotency_key: crypto.randomUUID() } })
+        const memberManagement = await api.post(`${operations}?org=${slug}`, { headers: memberBearer, data: { action: 'remove', user_id: invitee.id, idempotency_key: crypto.randomUUID() } })
         expect(memberManagement.status, await memberManagement.text()).toBe(403)
 
-        await page.goto(`${groupPath}/details/members?kind=team`)
-        await waitForNuxtHydration(page)
         await page.getByRole('button', { name: `Remove ${teammate.name}`, exact: true }).click()
-        const removed = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `${teamPath}/operations`)
+        const removed = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === operations)
         await page.getByRole('dialog').getByRole('button', { name: 'Remove', exact: true }).click()
         const removedResponse = await removed
         expect(removedResponse.status(), await removedResponse.text()).toBe(200)
@@ -521,61 +528,62 @@ test.describe('lodging identity boundary', () => {
         // Revocation reaches an already-open browser; a stale transcript is not retained.
         await expect(memberPage.locator('[data-team-message]')).toHaveCount(0)
         await expect(memberPage.locator(`[data-thread-row="${threadId}"]`)).toHaveCount(0)
-        expect((await api.get(`${teamPath}/messages?org=${slug}`, { headers: memberBearer })).status).toBe(404)
-        expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers: memberBearer, data: { body: 'No seat', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
+        expect((await api.get(teamPath, { headers: memberBearer })).status).toBe(404)
+        expect((await api.post(teamPath, { headers: memberBearer, data: { body: 'No seat', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
 
-        await page.getByRole('checkbox', { name: teammate.name, exact: true }).check()
-        await page.getByRole('button', { name: 'Add', exact: true }).click()
+        await panel.getByRole('button', { name: 'Add people', exact: true }).click()
+        await panel.getByRole('checkbox', { name: teammate.name, exact: true }).check()
+        await panel.getByRole('button', { name: 'Add', exact: true }).click()
         await expect.poll(async () => (await threads(adminBearer)).find(thread => thread.id === threadId)?.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id, teammate.id].sort())
         expect((await history(memberBearer)).map(message => message.id).sort()).toEqual([...messageIds].sort())
         await memberPage.goto(`${groupPath}?kind=team`)
         await waitForNuxtHydration(memberPage)
         await expect(memberPage.locator(`[data-team-message="${messageIds[0]}"]`)).toContainText(bodies[0]!)
-        await memberPage.getByLabel('Conversation details', { exact: true }).click()
-        await expect(memberPage.getByRole('link', { name: /^Name/ })).toHaveCount(0)
+        await memberPage.getByLabel('In this conversation', { exact: true }).click()
+        await expect(memberPage.getByRole('textbox', { name: 'Conversation name', exact: true })).toHaveCount(0)
         await memberPage.getByRole('button', { name: 'Leave conversation', exact: true }).click()
-        const left = memberPage.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `${teamPath}/operations`)
-        await memberPage.getByRole('dialog').getByRole('button', { name: 'Leave conversation', exact: true }).click()
+        const left = memberPage.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === operations)
+        await memberPage.getByRole('dialog', { name: 'In this conversation' }).getByRole('button', { name: 'Leave conversation', exact: true }).click()
         const leftResponse = await left
         expect(leftResponse.status(), await leftResponse.text()).toBe(200)
         expect(await leftResponse.json()).toEqual({ status: 'left', conversation_id: threadId })
         expect((await threads(ownerBearer)).find(thread => thread.id === threadId)?.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id].sort())
-        expect((await api.get(`${teamPath}/messages?org=${slug}`, { headers: memberBearer })).status).toBe(404)
-        expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers: memberBearer, data: { body: 'After leaving', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
+        expect((await api.get(teamPath, { headers: memberBearer })).status).toBe(404)
+        expect((await api.post(teamPath, { headers: memberBearer, data: { body: 'After leaving', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
 
         // The participating admin can manage; an owner's role cannot replace a lost seat.
         const adminRename = await mcpRequest(memberMcp, baseURL!, { method: 'tools/call', toolName: 'update_conversation_group', args: { organization_id: organization.id, conversation_id: threadId, action: 'rename', name: 'Admin handover', idempotency_key: crypto.randomUUID() } })
         expect(adminRename.status(), await adminRename.text()).toBe(200)
         expect(mcpData<{ status: 'updated'; conversation_id: string }>(await adminRename.json())).toEqual({ status: 'updated', conversation_id: threadId })
         expect((await threads(ownerBearer)).find(thread => thread.id === threadId)?.name).toBe('Admin handover')
-        await page.goto(`${groupPath}/details/members?kind=team`)
-        await waitForNuxtHydration(page)
         await expect(page.getByRole('button', { name: `Remove ${invitee.name}`, exact: true })).toBeVisible()
         await page.screenshot({ path: testInfo.outputPath('team-group-details-after-membership-changes.png'), fullPage: true })
-        const ownerLeft = await api.post(`${teamPath}/operations?org=${slug}`, { headers: ownerBearer, data: { action: 'leave', idempotency_key: crypto.randomUUID() } })
+        const ownerLeft = await api.post(`${operations}?org=${slug}`, { headers: ownerBearer, data: { action: 'leave', idempotency_key: crypto.randomUUID() } })
         expect(ownerLeft.status, await ownerLeft.text()).toBe(200)
         expect(await ownerLeft.json()).toEqual({ status: 'left', conversation_id: threadId })
-        expect((await api.get(`${teamPath}/messages?org=${slug}`, { headers: ownerBearer })).status).toBe(404)
-        expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers: ownerBearer, data: { body: 'Owner bypass', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
-        expect((await api.post(`${teamPath}/operations?org=${slug}`, { headers: ownerBearer, data: { action: 'rename', name: 'Owner bypass', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
+        expect((await api.get(teamPath, { headers: ownerBearer })).status).toBe(404)
+        expect((await api.post(teamPath, { headers: ownerBearer, data: { body: 'Owner bypass', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
+        expect((await api.post(`${operations}?org=${slug}`, { headers: ownerBearer, data: { action: 'rename', name: 'Owner bypass', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
         expect((await history(adminBearer)).map(message => message.id).sort()).toEqual([...messageIds].sort())
 
         // A direct conversation keeps its existing protected addressing and has no group controls.
         const direct = await api.post(teamListPath, { headers: adminBearer, data: { member_user_ids: [fixture.id] } })
         expect(direct.status, await direct.text()).toBe(201)
         const { conversation_id: directId } = await direct.json() as { conversation_id: string }
-        expect((await threads(ownerBearer, directId)).find(thread => thread.id === directId)).toMatchObject({ name: null, is_group: false, can_manage: false, can_leave: false })
+        expect((await threads(ownerBearer, directId)).find(thread => thread.id === directId)).toMatchObject({ name: null, is_group: false, capabilities: { can_manage_participants: false, can_leave: false } })
         const protectedDirect = await api.post(`/api/dashboard/team/threads/${directId}/operations?org=${slug}`, { headers: ownerBearer, data: { action: 'leave', idempotency_key: crypto.randomUUID() } })
         expect(protectedDirect.status, await protectedDirect.text()).toBe(409)
         expect(await protectedDirect.json()).toMatchObject({ data: { code: 'TEAM_GROUP_PROTECTED', field: 'conversation_id' } })
-        await page.goto(`${listPath}/team/${directId}?kind=team`)
+        await page.goto(`${listPath}/${directId}?kind=team`)
         await waitForNuxtHydration(page)
-        await expect(page.getByLabel('Conversation details', { exact: true })).toHaveCount(0)
+        await page.getByLabel('In this conversation', { exact: true }).click()
+        await expect(panel).toBeVisible()
+        await expect(panel.getByRole('button', { name: 'Leave conversation', exact: true })).toHaveCount(0)
+        await expect(panel.getByRole('textbox', { name: 'Conversation name', exact: true })).toHaveCount(0)
         await loginAs(memberContext.request, baseURL!, buyer.id)
         await memberPage.goto('/dashboard/account/messages')
         await waitForNuxtHydration(memberPage)
-        await expect(memberPage.getByRole('link', { name: 'New team conversation', exact: true })).toHaveCount(0)
-        await expect(memberPage.getByLabel('Conversation details', { exact: true })).toHaveCount(0)
+        await expect(memberPage.getByRole('link', { name: 'New conversation', exact: true })).toHaveCount(0)
       } finally {
         try {
           const deleted = await api.post('/api/auth/organization/delete', { headers: ownerBearer, data: { organizationId: organization.id } })
@@ -599,12 +607,14 @@ test.describe('lodging identity boundary', () => {
     try {
       const provisioned = await api.post('/api/organizations', { headers: ownerBearer, data: { organization_id: organization.id, name, subdomain: slug, vertical: 'experience', source_locale: 'en' } })
       expect(provisioned.status, await provisioned.text()).toBe(200)
-      const offered = await api.post(`/api/organizations/${organization.id}/invite-links`, { headers: ownerBearer, data: { role: 'member' } })
-      expect(offered.status, await offered.text()).toBe(201)
-      const { token } = await offered.json() as { token: string }
-      const accepted = await api.post(`/api/invite-links/${token}/accept`, { headers: memberBearer })
+      const offered = await api.post('/api/auth/organization/invite-member', {
+        headers: ownerBearer, data: { organizationId: organization.id, email: invitee.email, role: 'member' },
+      })
+      expect(offered.status, await offered.text()).toBe(200)
+      const { id: invitationId } = await offered.json() as { id: string }
+      const accepted = await api.post('/api/auth/organization/accept-invitation', { headers: memberBearer, data: { invitationId } })
       expect(accepted.status, await accepted.text()).toBe(200)
-      const { member_id: memberId } = await accepted.json() as { member_id: string }
+      const { member: { id: memberId } } = await accepted.json() as { member: { id: string } }
       const profile = await api.put(`/api/organizations/${organization.id}/members/${memberId}/scheduling`, { headers: ownerBearer, data: { updated_at: null, public_name: 'Experience guide', public_bio: 'Leads the local experience.', public_approved: true } })
       expect(profile.status, await profile.text()).toBe(200)
       const context = await api.get(`/api/dashboard/context?org=${slug}`, { headers: ownerBearer })
@@ -653,30 +663,13 @@ test.describe('lodging identity boundary', () => {
       expect(booked.status(), await booked.text()).toBe(201)
       const { conversation_id: requestId, booking_id: bookingId } = await booked.json() as { conversation_id: string; booking_id: string }
       const bookingPath = `/api/dashboard/bookings/${bookingId}?org=${slug}`
-      const inboxPath = `/api/dashboard/organizations/${organization.id}/guest-threads/${requestId}`
+      const inboxPath = `/api/messages/${requestId}`
       const memberBooking = await api.get(bookingPath, { headers: memberBearer })
       expect(memberBooking.status, await memberBooking.text()).toBe(200)
       expect(await memberBooking.json()).toMatchObject({ booking: { conversation_id: requestId, assigned_member_id: memberId, product_id: product.id, guest_name: guestName } })
-      await loginAs(memberContext.request, baseURL!, invitee.id)
-      const memberPage = await memberContext.newPage()
-      let socket: WebSocket | undefined
-      memberPage.on('websocket', next => { if (new URL(next.url()).pathname === '/api/dashboard/guest-inbox/socket') socket = next })
-      const reconciled = memberPage.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === inboxPath)
-      await memberPage.goto(`/dashboard/${slug}/messages/${requestId}`)
-      expect((await reconciled).status()).toBe(200)
-      await expect(memberPage.getByRole('heading', { name: guestName, exact: true })).toBeVisible()
-      await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toBeVisible()
-      if (!socket || socket.isClosed()) throw new Error('The responsible experience member has no live inbox socket')
-      const revoked = socket.waitForEvent('framereceived', { predicate: frame => {
-        if (frame.payload === 'pong') return false
-        const event: unknown = JSON.parse(String(frame.payload))
-        return isDashboardInvalidation(event) && event.type === 'access.changed' && event.organization_id === organization.id
-      } })
+      expect((await api.get(inboxPath, { headers: memberBearer })).status).toBe(404)
       const removed = await api.put(`${editor}/products/${product.id}/booking`, { headers: ownerBearer, data: { assigned_member_id: ownerMemberId } })
       expect(removed.status, await removed.text()).toBe(200)
-      await revoked
-      await expect(memberPage.getByText(guestName, { exact: true })).toHaveCount(0)
-      await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toHaveCount(0)
       expect((await api.get(bookingPath, { headers: memberBearer })).status).toBe(404)
       expect((await api.get(inboxPath, { headers: memberBearer })).status).toBe(404)
       const retained = await api.get(bookingPath, { headers: ownerBearer })

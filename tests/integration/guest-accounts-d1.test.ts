@@ -20,8 +20,12 @@ test('a verified account gathers the guest identities that used only its email, 
       ['guest-shared', 'anon-3@customers.krabiclaw.local', 0, 1], ['guest-sam', 'anon-4@customers.krabiclaw.local', 0, 1],
     ]
     for (const [id, email, verified, anonymous] of users) await db.prepare('INSERT INTO user(id,name,email,"emailVerified","isAnonymous") VALUES(?,?,?,?,?)').bind(id, id, email, verified, anonymous).run()
-    const request = (id: string, organization: string, user: string, email: string, kind = 'booking') => db.prepare(`INSERT INTO conversations(id,kind,organization_id,user_id,payload_json,last_message_at,created_at) VALUES(?,?,?,?,?,?,?)`)
-      .bind(id, kind, organization, user, JSON.stringify({ guest: { name: 'Jane', email, phone: null } }), NOW, NOW).run()
+    const request = (id: string, organization: string, user: string, email: string, kind = 'booking') => db.batch([
+      db.prepare('INSERT INTO conversations (id,kind,organization_id,user_id,payload_json,last_message_at,created_at) VALUES (?,?,?,?,?,?,?)')
+        .bind(id, kind, organization, user, JSON.stringify({ guest: { name: 'Jane', email, phone: null } }), NOW, NOW),
+      db.prepare("INSERT INTO conversation_participants (conversation_id,organization_id,user_id,role,created_at) VALUES (?,?,?,'guest',?)")
+        .bind(id, organization, user, NOW),
+    ])
     await request('pottery-booking', 'pottery', 'guest-pottery', 'jane@example.com')
     await request('pottery-question', 'pottery', 'guest-pottery', 'JANE@example.com', 'contact')
     await request('kikuzuki-booking', 'kikuzuki', 'guest-kikuzuki', 'jane@example.com')
@@ -43,7 +47,7 @@ test('a verified account gathers the guest identities that used only its email, 
       'sam-booking': 'guest-sam', 'shared-alex': 'guest-shared', 'shared-jane': 'guest-shared',
     })
     assert.equal(await db.prepare('SELECT author_user_id FROM messages WHERE id = ?').bind(written.id).first('author_user_id'), 'jane')
-    assert.deepEqual(await db.prepare("SELECT user_id, last_read_message_id FROM conversation_participants WHERE conversation_id = 'pottery-question'").all().then(result => result.results), [{ user_id: 'jane', last_read_message_id: written.id }])
+    assert.deepEqual(await db.prepare("SELECT user_id, role, last_read_message_id FROM conversation_participants WHERE conversation_id = 'pottery-question'").all().then(result => result.results), [{ user_id: 'jane', role: 'guest', last_read_message_id: written.id }])
     // The guest identity's opt-out is Jane's now too.
     assert.deepEqual(await db.prepare("SELECT user_id, email_enabled FROM user_notification_preferences WHERE category='product_news'").all().then(result => result.results), [{ user_id: 'jane', email_enabled: 0 }])
 

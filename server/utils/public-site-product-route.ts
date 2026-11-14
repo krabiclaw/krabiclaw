@@ -22,6 +22,6 @@ export function defineSiteProductDetailHandler(surface: SiteProductSurface) {
     const scope = getQuery(event).location_id
     const result = await loadPublicSiteProductDetail(env, db, organizationId, surface, previewAuthorized, slug, locale, typeof scope === 'string' ? scope : null)
     if (!result) return jsonResponse({ error: `${noun} not found` }, { status: 404 })
-    return jsonResponse(await publicProductDetailPayload(db, env, result))
+    return jsonResponse(await publicProductDetailPayload(db, env, result, surface === 'experiences' && previewAuthorized))
   })
 }

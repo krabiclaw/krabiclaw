@@ -139,7 +139,9 @@ function itemStatus(product: Product): string {
   const context = catalogProductItem(product, { collections: collections.value, locations: locations.value, priceLabel, to: '' }).summary
   return [!product.active && (product.kind !== 'service' || product.booking) ? 'Unavailable' : null, listed ? 'Listed' : 'Not listed', context].filter(Boolean).join(' · ')
 }
-const listItems = computed(() => loadError.value ? [] : products.value.map(row => ({ id: row.id, title: row.name, to: scoped(catalogPath.value + '/' + row.id), row, status: itemStatus(row) })))
+const listItems = computed(() => loadError.value ? [] : products.value.map(row => ({ id: row.id, title: row.name, to: scoped(catalogPath.value + '/' + row.id, {
+  location_id: locationId.value && row.locations.some(location => location.location_id === locationId.value) ? locationId.value : undefined,
+}), row, status: itemStatus(row) })))
 
 
 useSeoMeta({ title: () => (collection.value?.name ?? 'Section') + ' | KrabiClaw Dashboard', robots: 'noindex, nofollow' })

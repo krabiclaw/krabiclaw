@@ -1671,7 +1671,7 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Persists the caller’s own archived or restored state for the selected conversation, and for a guest conversation dismisses its open reply task.",
+        "read_only_justification": "Persists the caller’s own archived or restored state for the selected conversation.",
         "destructive_justification": "Overwrites the caller’s own archive state; it does not cancel a booking, send a message or change anyone else’s Messages.",
         "open_world_justification": "Operates only in the selected private business inbox."
       }

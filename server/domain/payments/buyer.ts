@@ -1,8 +1,9 @@
+import {transferBookingGuestSeat} from '~/server/domain/conversation-participants'
 import {HTTPError} from 'nitro'
 import {executeBatch,queryAll,queryFirst,type DbClient} from '~/server/db'
 import {CURRENT_GUEST_SQL} from '~/server/domain/conversations'
 import {loadOwnerPictures} from '~/server/notifications/hero'
-import {accountActivityPath,isAccountActivityItem,isBuyerPaymentEntry,type AccountActivityItem,type AccountActivityResponse,type BuyerPaymentEntry} from '~/shared/account-activity'
+import {accountActivityPath,isAccountActivityItem,isBuyerPaymentEntry,type AccountActivityItem,type AccountActivityKind,type AccountActivityResponse,type BuyerPaymentEntry} from '~/shared/account-activity'
 
 export async function ownedBuyerRequest(db:DbClient,userId:string,id:string,lookup:'conversation'|'booking'='conversation') {
  // The conversation's booking is the buyer's: CURRENT_GUEST_SQL holds it to the conversation's own guest.
@@ -42,7 +43,7 @@ function paymentActivity(row:BuyerPaymentRow):AccountActivityItem {
  return {kind,id:row.id,conversation_id:kind==='payment'?row.hold_conversation_id:null,booking_id:null,payment_id:row.id,organization_id:row.organization_id,organization_name:row.organization_name,organization_slug:row.organization_slug,title:snapshot.title,status:row.captured_amount===0?'pending':row.refunded_amount===row.captured_amount?'refunded':'captured',starts_at:scheduled?row.hold_starts_at:null,ends_at:scheduled?row.hold_ends_at:null,timezone:scheduled?row.hold_timezone:null,created_at:row.created_at,image_url:null,location_title:null,party_size:null}
 }
 function resolvePaymentActivity(rows:Awaited<ReturnType<typeof buyerActivityRows>>,payment:BuyerPaymentRow):AccountActivityItem {
- const visits=rows.visits.filter(row=>payment.subject_type==='booking'&&row.booking_id===payment.subject_id&&row.organization_id===payment.organization_id)
+ const visits=rows.visits.filter(row=>payment.subject_type==='booking'&&row.organization_id===payment.organization_id&&(row.booking_id===payment.subject_id||(row.kind==='stay'&&row.conversation_id!==null&&row.conversation_id===payment.hold_conversation_id)))
  if(visits.length>1)throw new Error('Owned payment has ambiguous visit associations')
  return visits[0]?visitActivity(visits[0]):paymentActivity(payment)
 }
@@ -91,17 +92,41 @@ export async function buyerPaymentActivityPath(db:DbClient,userId:string,payment
  const item=resolvePaymentActivity(rows,payment)
  return accountActivityPath(item.kind,item.id)
 }
-/** Conversation links share the same actual visit/payment association resolver. */
-export async function buyerRequestActivityPath(db:DbClient,userId:string,conversation_id:string):Promise<string|null> {
- const rows=await buyerActivityRows(db,userId)
- const visits=rows.visits.filter(row=>row.conversation_id===conversation_id)
- if(visits.length>1)throw new Error('Owned conversation has ambiguous visit associations')
- if(visits[0])return accountActivityPath(visits[0].kind,visits[0].id)
- const payments=rows.payments.filter(row=>row.hold_conversation_id===conversation_id)
- if(payments.length>1)return '/dashboard/account/activity'
- if(!payments[0])return null
- const item=resolvePaymentActivity(rows,payments[0])
- return accountActivityPath(item.kind,item.id)
+/** The linked app booking takes precedence over a checkout for the same conversation. */
+export async function buyerRequestActivityPath(db: DbClient, input: { organizationId: string; conversationId: string; userId?: string }): Promise<string | null> {
+  const params = [input.conversationId, input.organizationId]
+  if (input.userId !== undefined) params.push(input.userId)
+  const rows = await queryAll<{ kind: AccountActivityKind; id: string; subject_type: string | null }>(db, `
+    WITH owned AS (
+      SELECT c.id, c.organization_id, c.user_id, c.booking_id FROM conversations c
+      WHERE c.id = ? AND c.organization_id = ? AND c.kind = 'booking' AND ${CURRENT_GUEST_SQL('c')}
+        ${input.userId === undefined ? '' : 'AND c.user_id = ?'}
+    ), visit AS (
+      SELECT CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END AS kind, c.id
+      FROM owned c JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id AND b.user_id = c.user_id AND b.owner = 'app'
+    ), checkout AS (
+      SELECT p.id, p.organization_id, p.buyer_user_id, p.subject_type, p.subject_id, po.id AS order_id
+      FROM owned c JOIN payments p ON p.buyer_user_id = c.user_id AND p.organization_id = c.organization_id
+      JOIN payment_checkout_holds h ON h.payment_id = p.id AND h.organization_id = p.organization_id AND h.buyer_user_id = p.buyer_user_id AND h.conversation_id = c.id
+      LEFT JOIN payment_orders po ON po.payment_id = p.id AND po.organization_id = p.organization_id AND po.buyer_user_id = p.buyer_user_id
+      WHERE NOT EXISTS (SELECT 1 FROM visit)
+      LIMIT 2
+    )
+    SELECT kind, id, NULL AS subject_type FROM visit
+    UNION ALL
+    SELECT CASE WHEN b.id IS NOT NULL THEN CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END
+      WHEN p.order_id IS NOT NULL THEN 'order' ELSE 'payment' END AS kind, COALESCE(r.id, b.id, p.id) AS id, p.subject_type
+    FROM checkout p
+    LEFT JOIN bookings b ON p.subject_type = 'booking' AND b.id = p.subject_id AND b.organization_id = p.organization_id AND b.user_id = p.buyer_user_id AND b.owner = 'app'
+      AND NOT EXISTS (SELECT 1 FROM conversations other WHERE other.booking_id = b.id AND other.kind = 'booking'
+        AND (other.organization_id <> b.organization_id OR other.user_id IS NOT b.user_id))
+    LEFT JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking'
+  `, params)
+  if (rows.length > 1) return '/dashboard/account/activity'
+  const activity = rows[0]
+  if (!activity) return null
+  if (activity.kind === 'order' && activity.subject_type !== 'order') throw new Error('Owned order does not match its payment subject')
+  return accountActivityPath(activity.kind, activity.id)
 }
 export async function tokenHash(token:string):Promise<string>{return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token)))).map(v=>v.toString(16).padStart(2,'0')).join('')}
 /** Hidden Checkout-return proof, accepted only after native Stripe verification. */
@@ -113,13 +138,16 @@ export async function claimCheckoutReturn(db:DbClient,userId:string,token:string
  const claim=await queryFirst<{payment_id:string;claimed_at:string|null}>(db,available,params)
  if(!claim) throw new HTTPError({statusCode:404,statusMessage:'Purchase return proof expired or already used'})
  if(claim.claimed_at)return {payment_id:claim.payment_id,claimed:true}
+ const conversationId="COALESCE((SELECT conversation_id FROM payment_checkout_holds WHERE payment_id=?),(SELECT c.id FROM conversations c JOIN payments p ON p.subject_id=c.booking_id AND p.subject_type='booking' AND p.organization_id=c.organization_id WHERE p.id=? AND c.kind='booking'))"
+ const claimedConversation={query:`c.id=${conversationId} AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)`,params:[claim.payment_id,claim.payment_id,hash,userId,now]}
  const result=await executeBatch(db,[
   {query:'UPDATE payments SET claimed_at=?,claimed_user_id=?,buyer_user_id=? WHERE return_token_hash=? AND return_expires_at>? AND claimed_at IS NULL AND captured_amount>0 AND (buyer_user_id IS NULL OR buyer_user_id=? OR EXISTS(SELECT 1 FROM user u WHERE u.id=payments.buyer_user_id AND u.isAnonymous=1))',params:[now,userId,userId,hash,now,userId]},
   {query:'UPDATE payment_orders SET buyer_user_id=? WHERE payment_id=? AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)',params:[userId,claim.payment_id,hash,userId,now]},
   {query:'UPDATE payment_checkout_holds SET buyer_user_id=? WHERE payment_id=? AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)',params:[userId,claim.payment_id,hash,userId,now]},
   {query:"UPDATE bookings SET user_id=? WHERE id=(SELECT subject_id FROM payments WHERE id=? AND subject_type='booking') AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)",params:[userId,claim.payment_id,hash,userId,now]},
   // The booking's conversation: a session booking's checkout waited in it, a stay's opened with the booking.
-  {query:"UPDATE conversations SET user_id=? WHERE id=COALESCE((SELECT conversation_id FROM payment_checkout_holds WHERE payment_id=?),(SELECT c.id FROM conversations c JOIN payments p ON p.subject_id=c.booking_id AND p.subject_type='booking' AND p.organization_id=c.organization_id WHERE p.id=? AND c.kind='booking')) AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)",params:[userId,claim.payment_id,claim.payment_id,hash,userId,now]},
+  ...transferBookingGuestSeat(claimedConversation,userId,now),
+  {query:`UPDATE conversations AS c SET user_id=? WHERE ${claimedConversation.query}`,params:[userId,...claimedConversation.params]},
  ],{operation:'Attach verified Checkout purchase'})
  if(result[0]?.meta.changes!==1){
   const replay=await queryFirst<{payment_id:string;claimed_at:string|null}>(db,available,params)

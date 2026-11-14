@@ -6,7 +6,7 @@ import { getIcons } from '@iconify/utils'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { ROBOTS_DISABLED_DIRECTIVE, ROBOTS_ENABLED_DIRECTIVE } from './shared/robots-directive'
 import { localizedPublicRouteAliases } from './build/localized-public-routes'
-import { mountBookingRoutes } from './build/booking-routes'
+import { mountBookingRoutes, nodeAt } from './build/booking-routes'
 import { mountFormQuestionRoutes } from './build/form-question-routes'
 // One source for the entry -> public path map; patch.cjs rewrites the built
 // manifest from the same file, so a surface cannot be registered in one place
@@ -241,6 +241,15 @@ export default defineNuxtConfig({
     },
     'pages:extend'(pages) {
       pages.push(...localizedPublicRouteAliases(pages))
+      const workspaceMessages = nodeAt(pages, '/dashboard/:org_slug()/messages')
+      const conversation = workspaceMessages?.children?.find(page => page.path === ':conversation_id()')
+      if (!workspaceMessages || !conversation) throw new Error('The Messages pages could not be mounted')
+      pages.push({
+        name: 'dashboard-account-messages',
+        path: '/dashboard/account/messages',
+        file: workspaceMessages.file,
+        children: [{ name: 'dashboard-account-messages-conversation_id', path: conversation.path, file: conversation.file }],
+      })
       mountBookingRoutes(pages)
       mountFormQuestionRoutes(pages)
       // Captured here because this is where the resolved route tree exists. The

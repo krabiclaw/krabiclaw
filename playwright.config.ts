@@ -26,6 +26,9 @@ const localDevRouteSecret = previewUrl ? '' : 'local-playwright-dev-route-secret
 
 if (!previewUrl) {
   process.env.E2E_DEV_ROUTE_SECRET = localDevRouteSecret
+  // The Connections check inspects the OAuth redirect without contacting Google.
+  process.env.GOOGLE_CLIENT_ID = 'local-playwright-google-client'
+  process.env.GOOGLE_CLIENT_SECRET = 'local-playwright-google-secret'
   // The provider-ingress spec signs Resend webhooks with this and the local
   // Worker, which inherits this process's environment, verifies them with it.
   // The deployed secrets never leave Cloudflare.

@@ -1,3 +1,5 @@
+import { parseDate } from '@internationalized/date'
+import { isValidCalendarDate, localNow } from '~/utils/timezone'
 import type { BookableSession } from '~/server/utils/availability'
 import { PRODUCT_SESSION_STATUSES } from '~/shared/bookings'
 import { isRecord } from '~/utils/api-clients'
@@ -18,4 +20,21 @@ export function isSessionResponse(value: unknown): value is { success: true; ses
 
 export function isSessionsResponse(value: unknown): value is { success: true; sessions: BookableSession[] } {
   return isRecord(value) && value.success === true && Array.isArray(value.sessions) && value.sessions.every(isSessionAvailability)
+}
+
+export function sessionCalendarMonth(month: string) {
+  if (!isValidCalendarDate(`${month}-01`)) throw new Error('Choose a valid calendar month')
+  const first = parseDate(`${month}-01`)
+  const next = first.add({ months: 1 })
+  return {
+    previous: first.subtract({ months: 1 }).toString().slice(0, 7),
+    next: next.toString().slice(0, 7),
+    from: first.subtract({ days: 1 }).toDate('UTC').toISOString(),
+    to: next.add({ days: 1 }).toDate('UTC').toISOString(),
+    labelStart: first.toString(),
+    dayOf(session: Pick<BookableSession, 'starts_at' | 'timezone'>) {
+      const day = localNow(session.timezone, new Date(session.starts_at)).date
+      return day.startsWith(`${month}-`) ? day : null
+    },
+  }
 }

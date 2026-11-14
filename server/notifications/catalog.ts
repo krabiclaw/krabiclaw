@@ -35,7 +35,6 @@ import {
   organizationInviteMessage,
   resetPasswordMessage,
   reviewRequestMessage,
-  signInCodeMessage,
   verifyEmailMessage,
 } from './guest-events'
 
@@ -174,7 +173,7 @@ const guestPayments: GuestPaymentNotificationEvent[] = [
 ]
 
 export const NOTIFICATION_CATALOG: CatalogEntry[] = [
-  { id: 'team-message', audience: 'owner', title: 'Team — new message', whatsappTemplate: 'guest_thread_reply_whatsapp', message: ownerAlert(messageReceived({ sender: { kind: 'person', name: 'Alex Carter', email: null }, conversationLabel: 'Team', about: null, messagePreview: 'The home is ready for check-in.', body: 'The home is ready for check-in.', photos: [], history: [], translation: null, record: null, organizationName: studio, replyUrl: inbox })) },
+  { id: 'team-message', audience: 'owner', title: 'Team — new message', whatsappTemplate: 'guest_thread_reply_whatsapp', message: ownerAlert(messageReceived({ sender: { kind: 'person', name: 'Alex Carter', email: null }, conversationLabel: 'Team', about: null, messagePreview: 'The home is ready for check-in.', body: 'The home is ready for check-in.', photos: [], history: [], record: null, organizationName: studio, replyUrl: inbox })) },
   { id: 'task-assigned', audience: 'owner', title: 'Tasks — assigned to you', whatsappTemplate: 'guest_thread_reply_whatsapp', message: ownerAlert(taskAlertMessage({ kind: 'assigned', actorName: 'Alex Carter', task: { eyebrow: 'Turnover · 11:00 AM – 3:00 PM', title: '70 2B', detail: 'Next guests arrive 3:00 PM · 2 guests' }, organizationName: studio, taskUrl: inbox })) },
   { id: 'task-starting', audience: 'owner', title: 'Tasks — turnover starts today', whatsappTemplate: 'guest_thread_reply_whatsapp', message: ownerAlert(taskAlertMessage({ kind: 'starting', actorName: null, task: { eyebrow: '11:00 AM – 3:00 PM', title: '70 2B', detail: 'Next guests arrive 3:00 PM · 2 guests' }, organizationName: studio, taskUrl: inbox })) },
   // Owner alerts — both channels.
@@ -258,7 +257,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
       sender: { kind: 'person', name: 'Jordan Lee', email: 'jordan@example.com' }, conversationLabel: 'Email reply', about: 'Main Dining Room',
       messagePreview: 'Thanks! One more thing — is the terrace covered if it rains?', body: 'Thanks! One more thing — is the terrace covered if it rains?', photos: [],
       history: [{ author: 'Jordan', text: 'Do you have a table for four on Friday at 7?' }, { author: restaurant, text: 'Yes, we have you down for 7pm on the terrace.' }],
-      translation: null, record: null,
+      record: null,
       organizationName: restaurant, replyUrl: inbox,
     })),
   },
@@ -269,7 +268,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     whatsappTemplate: 'guest_thread_reply_whatsapp',
     message: ownerAlert(messageReceived({
       sender: { kind: 'person', name: 'Jordan Lee', email: 'jordan@example.com' }, conversationLabel: 'Website reply', about: 'Main Dining Room',
-      messagePreview: 'Thanks! See you tomorrow.', body: 'Thanks! See you tomorrow.', photos: [], history: [], translation: null, record: null,
+      messagePreview: 'Thanks! See you tomorrow.', body: 'Thanks! See you tomorrow.', photos: [], history: [], record: null,
       organizationName: restaurant, replyUrl: inbox,
     })),
   },
@@ -279,7 +278,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     title: 'Owner — Airbnb guest asked about dates',
     whatsappTemplate: 'guest_thread_reply_whatsapp',
     message: ownerAlert(inquiryReceivedMessage({
-      guestName: 'Derek', translation: null, photos: [],
+      guestName: 'Derek', photos: [],
       message: 'Hi! I’m interested in your property for a long-term stay beginning November 7. I’ll also be traveling with Sirius, my well-trained black Labrador Retriever.',
       record: { image: { imageUrl: sampleCover, alt: 'Cedar Loft' }, homeName: 'Cedar Loft', checkIn: '2026-11-07', checkOut: '2026-12-05', guests: '1 adult, 1 pet', replyBy: 'Nov 6, 8:13 AM MST' },
       organizationName: 'Pinecone Stays', replyUrl: stay.replyUrl,
@@ -292,7 +291,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     whatsappTemplate: 'guest_thread_reply_whatsapp',
     message: ownerAlert(messageReceived({
       sender: { kind: 'person', name: 'Mililani', email: null }, conversationLabel: 'Airbnb message', about: 'Cedar Loft',
-      messagePreview: 'La lavadora y secadora están compartidas ?', body: 'La lavadora y secadora están compartidas ?', translation: { by: 'Airbnb', text: 'Are the washing machine and dryer shared?' },
+      messagePreview: 'La lavadora y secadora están compartidas ?', body: 'La lavadora y secadora están compartidas ?',
       photos: [{ imageUrl: sampleCover, alt: 'Photo from Mililani' }],
       history: [{ author: 'Mililani', text: 'Hola, llegamos el jueves.' }, { author: 'Pinecone Stays', text: 'Welcome! Check-in is from 4pm.' }],
       record: { image: { imageUrl: sampleCover, alt: 'Cedar Loft' }, homeName: 'Cedar Loft', checkIn: '2026-10-30', checkOut: '2026-11-20', guests: '2 adults', replyBy: null },
@@ -306,7 +305,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     whatsappTemplate: 'guest_thread_reply_whatsapp',
     message: ownerAlert(messageReceived({
       sender: { kind: 'support' }, conversationLabel: 'Airbnb message', about: 'Cedar Loft',
-      messagePreview: 'This is a final decision. We’ve issued the refund, and I’m closing this thread for now if there’s nothing else.', body: 'This is a final decision. We’ve issued the refund, and I’m closing this thread for now if there’s nothing else.', photos: [], history: [], translation: null, record: null,
+      messagePreview: 'This is a final decision. We’ve issued the refund, and I’m closing this thread for now if there’s nothing else.', body: 'This is a final decision. We’ve issued the refund, and I’m closing this thread for now if there’s nothing else.', photos: [], history: [], record: null,
       organizationName: 'Pinecone Stays', replyUrl: stay.replyUrl,
     })),
   },
@@ -463,7 +462,6 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
 
   // Guest and account mail — email only.
   { id: 'auth-verify', audience: 'guest', title: 'Sign-up — verify your email', message: verifyEmailMessage({ verificationUrl: 'https://krabiclaw.com/api/auth/verify-email?token=preview' }) },
-  { id: 'auth-sign-in-code', audience: 'guest', title: 'Sign-in — email code', message: signInCodeMessage({ code: '482913' }) },
   { id: 'auth-reset', audience: 'guest', title: 'Sign-in — reset your password', message: resetPasswordMessage({ resetUrl: 'https://krabiclaw.com/reset-password?token=preview' }) },
   { id: 'organization-invite', audience: 'guest', title: 'Invitee — organization invitation', message: organizationInviteMessage({ organizationName: studio, inviterName: 'Priya Shah', role: 'Admin', inviteUrl: 'https://demo.krabiclaw.com/accept-invitation/preview', expires: 'Nov 8, 2026, 2:00 PM UTC' }) },
   { id: 'guest-reservation-received', audience: 'guest', title: 'Guest — table reservation confirmed', message: guestBookingReceivedMessage({ ...guestVisit, productTitle: 'Main Dining Room table', status: 'confirmed', wording: 'reservation' }) },

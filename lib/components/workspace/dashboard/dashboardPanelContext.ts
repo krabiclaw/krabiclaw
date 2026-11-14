@@ -49,3 +49,5 @@ export const dashboardLeafParentKey: InjectionKey<{ focus?: () => void; exit: ()
 
 /** An owning ancestor's fullscreen overlay keeps focus while its leaf retains its draft. */
 export const dashboardOverlayOpenKey: InjectionKey<ComputedRef<boolean>> = Symbol('dashboard-overlay-open')
+
+export const dashboardSearchOpenKey: InjectionKey<() => void> = Symbol('dashboard-search-open')

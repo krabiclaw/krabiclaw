@@ -1,4 +1,5 @@
 {
+  "dashboard": "surfaces/dashboard.css",
   "platform-app-entry": "surfaces/platform-app.css",
   "platform": "surfaces/platform.css",
   "tenant": "surfaces/tenant.css",

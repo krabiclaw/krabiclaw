@@ -301,7 +301,10 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
   divider: blockDefinitionWithMetadata('divider', 'Divider', 'i-lucide-minus', 'A break between sections.', ALL_RECIPES, {},
     { accessibility: 'inherited', seo: 'none' }),
 
-  cta: blockDefinitionWithMetadata('cta', 'Call to action', 'i-lucide-mouse-pointer-click', 'A prompt with one button.', ALL_RECIPES, CTA_FIELDS),
+  cta: blockDefinitionWithMetadata('cta', 'Call to action', 'i-lucide-mouse-pointer-click', 'A prompt with one button.', ALL_RECIPES, {
+    ...CTA_FIELDS,
+    status: { kind: 'enum', label: 'Visibility', translatable: false, options: [{ value: 'active', label: 'Visible' }, { value: 'hidden', label: 'Hidden' }] },
+  }),
   contact_cta: blockDefinitionWithMetadata('contact_cta', 'Contact prompt', 'i-lucide-phone', 'A prompt to get in touch.', ALL_RECIPES, CTA_FIELDS),
   // A booking prompt says what it costs and what the visitor is agreeing to.
   // Both were stored and read as `priceLine` and `notice`, which no list

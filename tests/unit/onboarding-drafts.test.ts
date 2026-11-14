@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseOnboardingDraftPayload } from '../../server/utils/onboarding-drafts.ts'
+import { normalizeOnboardingDraftInput, parseOnboardingDraftPayload } from '../../server/utils/onboarding-drafts.ts'
 
 const details = {
   name: 'Kikuzuki', street_address: '88 Moo 2', address_line_2: null, city: 'Ao Nang', region: null, postal_code: null,
@@ -35,4 +35,44 @@ test('a version 3 draft whose source contradicts its type is refused', () => {
   assert.throws(() => parseOnboardingDraftPayload(JSON.stringify({ version: 3, source: { type: 'google_places', placeId: null, place: null, details }, preview })))
   assert.throws(() => parseOnboardingDraftPayload(JSON.stringify({ version: 3, source: { type: 'manual', placeId: 'ChIJ-kikuzuki', place: null, details }, preview })))
   assert.throws(() => parseOnboardingDraftPayload(JSON.stringify({ version: 1, source: { type: 'manual', place: null, details }, preview })))
+})
+
+test('a different Google place seeds its own time zone while a saved place preserves edits', () => {
+  const existing = parseOnboardingDraftPayload(JSON.stringify({
+    version: 3,
+    source: { type: 'google_places', placeId: place.placeId, place, details: { ...details, timezone: 'Asia/Tokyo' } },
+    preview,
+  }))
+  const row = { vertical: 'restaurant', subdomain_candidate: 'kikuzuki', organization_id: null } as const
+  assert.equal(normalizeOnboardingDraftInput({}, row, existing, 'google_places', place.placeId, place).payload.source.details.timezone, 'Asia/Tokyo')
+  const replacement = { ...place, placeId: 'ChIJ-replacement', timezone: 'Europe/London' }
+  assert.equal(normalizeOnboardingDraftInput({}, row, existing, 'google_places', replacement.placeId, replacement).payload.source.details.timezone, 'Europe/London')
+  const edited = normalizeOnboardingDraftInput({ details: { timezone: 'Europe/Paris' } }, row, existing, 'google_places', replacement.placeId, replacement)
+  assert.equal(edited.payload.source.details.timezone, 'Europe/Paris')
+})
+
+test('a partial update retains an omitted website address and distinguishes clearing it', () => {
+  const start = normalizeOnboardingDraftInput({ partial: true, vertical: 'restaurant', name: 'Kikuzuki', subdomain: 'our-custom-address' }, null, null, 'manual', null, null)
+  const row = { vertical: start.vertical, subdomain_candidate: start.subdomain, organization_id: null }
+  const paused = normalizeOnboardingDraftInput({ partial: true, paused_step: 'location' }, row, start.payload, 'manual', null, null)
+  assert.equal(paused.subdomain, 'our-custom-address')
+  const cleared = normalizeOnboardingDraftInput({ partial: true, subdomain: '' }, row, start.payload, 'manual', null, null)
+  assert.equal(cleared.subdomain, '')
+  const complete = normalizeOnboardingDraftInput({ details: { source_locale: 'en' } }, row, paused.payload, 'manual', null, null)
+  assert.equal(complete.subdomain, 'our-custom-address')
+})
+
+test('completing a partial Google draft retains saved answers for the same place', () => {
+  const imported = { ...place, phone: '+66952932112', websiteUrl: 'https://example.com' }
+  const start = normalizeOnboardingDraftInput({ partial: true, vertical: 'restaurant', name: 'Our Local Name', details: { phone: null } }, null, null, 'google_places', place.placeId, imported)
+  const row = { vertical: start.vertical, subdomain_candidate: start.subdomain, organization_id: null }
+  const finish = { details: { source_locale: 'en' } }
+  assert.equal(start.payload.source.place?.phone, imported.phone)
+  const complete = normalizeOnboardingDraftInput(finish, row, start.payload, 'google_places', place.placeId, { ...imported, websiteUrl: 'https://changed.example.com' })
+  assert.equal(complete.name, 'Our Local Name')
+  assert.equal(complete.subdomain, 'our-local-name')
+  assert.equal(complete.payload.source.details.phone, null)
+  assert.equal(complete.payload.source.details.website_url, imported.websiteUrl)
+  const replacement = { ...place, placeId: 'ChIJ-replacement', name: 'New Place' }
+  assert.equal(normalizeOnboardingDraftInput(finish, row, start.payload, 'google_places', replacement.placeId, replacement).name, 'New Place')
 })

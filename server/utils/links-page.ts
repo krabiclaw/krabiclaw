@@ -285,8 +285,7 @@ export async function upsertLinksPage(db: DbClient, input: {
   if (foreignIds.length) throw new OrganizationLinksValidationError('Link item IDs must belong to this organization.')
 
   const blocks = normalizedItems.sort((a, b) => a.sortOrder - b.sortOrder).map(item => ({
-    id: item.id, type: 'cta' as const, data: { label: item.label, url: item.destination,
-      status: item.status, updated_by: input.updatedBy ?? null },
+    id: item.id, type: 'cta' as const, data: { label: item.label, url: item.destination, status: item.status },
   }))
   const copy = { title, updated_by: input.updatedBy ?? null }
   if (current.page) {

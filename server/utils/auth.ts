@@ -3,7 +3,7 @@ import { createAuthMiddleware, getOAuthState, isAPIError } from 'better-auth/api
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
-import { admin, anonymous, bearer, emailOTP, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
+import { admin, anonymous, bearer, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, oneTimeToken, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
 import { stripe as betterAuthStripe } from '@better-auth/stripe'
 import { oauthProvider } from '@better-auth/oauth-provider'
 import { cimd } from '@better-auth/cimd'
@@ -20,7 +20,7 @@ import { isValidTimezone } from '~/utils/timezone'
 import { departedParticipantsQuery } from '~/server/domain/conversations'
 import { measurementOutcome, readPageEventId, recordAndDeliverConversion } from '~/server/utils/organization-conversions'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
-import { sendPasswordResetEmail, sendSignInCodeEmail, sendVerificationEmail } from '~/server/utils/auth-email'
+import { sendPasswordResetEmail, sendVerificationEmail } from '~/server/utils/auth-email'
 import { validatePassword } from '~/utils/password-validation'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { organizationAccessControl, organizationRoles } from '~/utils/organization-access'
@@ -31,10 +31,9 @@ import { ingestStripeFeeReportEvent } from '~/server/domain/payments/costs'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { deleteBuyerCustomers } from '~/server/utils/billing-customer'
 import { anonymousLinkQueries, linkGuestIdentitiesByVerifiedEmail } from '~/server/utils/guest-accounts'
-import { recordRequestExternalCall, unwrapInstrumentedD1 } from '~/server/utils/request-metrics'
+import { isTracingTranscript, recordRequestExternalCall, timeTranscriptPhase, unwrapInstrumentedD1 } from '~/server/utils/request-metrics'
 import { timingSafeEqualText } from '~/server/utils/dev-route-auth'
 import { notifyOrganizationInvited } from '~/server/utils/notifications'
-import { assertNoPendingInvitation } from '~/server/utils/email-invitations'
 import { cleanupOrganizationBeforeDelete } from '~/server/utils/tenant-deletion'
 import { APPLE_AUTHORIZATION_CODE_HEADER, APPLE_CLIENT_SECRET_MAX_LIFETIME_SECONDS, appleClientSecret, exchangeAppleAuthorizationCode, revokeAppleGrant } from '~/server/utils/apple-revocation'
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
@@ -74,6 +73,7 @@ export function oauthSigningConfig(authBaseUrl: string) {
 }
 
 export const organizationOptions = {
+  creatorRole: 'owner',
   ac: organizationAccessControl,
   roles: organizationRoles,
   // A business cannot exist without the currency it sells in and the clock it
@@ -120,6 +120,7 @@ function organizationDeletionCleanupPlugin(env: CloudflareEnv): BetterAuthPlugin
         },
         afterDeleteOrganization: async (data, hookCtx) => {
           await afterDeleteOrganization?.(data, hookCtx)
+          await publishAccessInvalidation(env, { organizationId: data.organization.id })
           await reconcileZarazAnalytics(env, env.DB)
         },
       }
@@ -240,6 +241,7 @@ export function localDevelopmentOrigin(value: string | undefined): string | null
 }
 
 /** Where Stripe Checkout hands a host back to the iPhone app. */
+export const NATIVE_CONNECTION_RETURN_ORIGIN = 'krabiclaw://connections'
 export const NATIVE_BILLING_RETURN_ORIGIN = 'krabiclaw://billing'
 
 function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Request) => string[]) {
@@ -255,6 +257,7 @@ function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Requ
   // Better Auth matches a custom scheme by scheme and authority, so only the
   // billing returns are trusted, not any krabiclaw:// address.
   origins.add(NATIVE_BILLING_RETURN_ORIGIN)
+  origins.add(NATIVE_CONNECTION_RETURN_ORIGIN)
   // Sign in with Apple returns to the website by posting a form from Apple.
   origins.add('https://appleid.apple.com')
   if (import.meta.dev || env.E2E_ALLOW_DEV_ROUTES === 'true') {
@@ -377,7 +380,15 @@ function buildAuth(env: CloudflareEnv) {
     organizationHooks: {
       beforeCreateOrganization: async ({ organization, user }: { organization: Record<string, unknown>; user: { email: string } }) => {
         assertOrganizationFacts(organization)
-        await assertNoPendingInvitation(db, user.email)
+        const adapter = getOrgAdapter(getCurrentAuthEndpointContext().context, organizationOptions)
+        const hasPendingInvitation = (await adapter.listUserInvitations(user.email))
+          .some(invitation => invitation.status === 'pending' && invitation.expiresAt.getTime() > Date.now())
+        if (hasPendingInvitation) {
+          throw new APIError('FORBIDDEN', {
+            code: 'PENDING_INVITATION',
+            message: 'Accept or decline your pending invitation before creating a business.',
+          })
+        }
       },
       beforeUpdateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
       afterAddMember: async ({ member }: { member: { organizationId: string } }) => recordMemberChange(member.organizationId),
@@ -445,13 +456,9 @@ function buildAuth(env: CloudflareEnv) {
     // An administrator does not delete accounts: /admin/remove-user would skip
     // the ownership guard and Apple revocation that /delete-user runs in
     // deleteUser.beforeDelete.
-    //
-    // An email code only signs in; verifying, resetting a password and changing
-    // an address keep their existing link flows.
     disabledPaths: [
       '/sign-in/phone-number', '/phone-number/request-password-reset', '/phone-number/reset-password', '/admin/remove-user',
-      '/email-otp/verify-email', '/email-otp/request-password-reset', '/forget-password/email-otp', '/email-otp/reset-password',
-      '/email-otp/request-email-change', '/email-otp/change-email',
+      '/one-time-token/generate', '/one-time-token/verify',
     ],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
@@ -504,10 +511,13 @@ function buildAuth(env: CloudflareEnv) {
         const callback = new URL(state.callbackURL, authBaseUrl)
         // Only a successful integration link continues to resource selection.
         if (new URL(location, authBaseUrl).href !== callback.href) return
-        const integration = callback.pathname.match(/^\/dashboard\/[^/]+\/integrations\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar|google-ads|meta-ads)$/)?.[1]
+        const nativeIntegration = callback.protocol === 'krabiclaw:' && callback.host === 'connections'
+          ? callback.pathname.match(/^\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar|google-ads|meta-ads|personal-calendar)$/)?.[1]
+          : undefined
+        const integration = nativeIntegration ?? callback.pathname.match(/^\/dashboard\/[^/]+\/integrations\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar|google-ads|meta-ads)$/)?.[1]
           ?? (/^\/dashboard\/[^/]+\/calendar\/settings\/availability\/google-calendar$/.test(callback.pathname) || /^\/dashboard\/account\/profile\/calendar\/[^/]+\/google-calendar$/.test(callback.pathname) ? 'google-calendar' : undefined)
         if (!integration) return
-        const provider = integration.startsWith('google-') ? 'google' : integration === 'meta-ads' ? 'facebook' : integration
+        const provider = (integration.startsWith('google-') || integration === 'personal-calendar') ? 'google' : integration === 'meta-ads' ? 'facebook' : integration
         if (ctx.params?.id !== provider) return
         const accountId = (ctx.context as IntegrationCallbackContext).integrationAccountId
         if (accountId) callback.searchParams.set('account_id', accountId)
@@ -661,6 +671,7 @@ function buildAuth(env: CloudflareEnv) {
     },
     plugins: [
       bearer(),
+      oneTimeToken({ disableClientRequest: true, disableSetSessionCookie: true, storeToken: 'hashed', expiresIn: 1 }),
       lastLoginMethod({ customResolveMethod: ctx => loginMethodForPath(ctx.path, ctx.body) }),
       jwt({
         // The plugin's default after-hook mints a fresh JWT on every
@@ -770,15 +781,6 @@ function buildAuth(env: CloudflareEnv) {
         defaultRole: 'user',
         roles: platformAdminRoles,
         impersonationSessionDuration: 15 * 60,
-      }),
-      // Someone invited by email signs in with a code sent to that address, so
-      // the account that accepts is the one the invitation names. Only sign-in
-      // codes are sent; verification and password reset stay on their links.
-      emailOTP({
-        sendVerificationOTP: async ({ email, otp, type }) => {
-          if (type !== 'sign-in') throw new APIError('BAD_REQUEST', { code: 'UNSUPPORTED_OTP_TYPE', message: 'Email codes are used only to sign in.' })
-          await sendSignInCodeEmail(env, { email, code: otp })
-        },
       }),
       phoneNumber({
         sendOTP: async ({ phoneNumber: phone, code }) => {
@@ -1070,9 +1072,15 @@ export async function requireIntegrationAccount(
 }
 
 export async function getAuthSession(event: H3Event, env: CloudflareEnv): Promise<Awaited<ReturnType<ReturnType<typeof createAuth>['api']['getSession']>>> {
-  return createAuth(env).api.getSession({
-    headers: event.req.headers,
+  const headers = event.req.headers
+  if (!isTracingTranscript(event)) return createAuth(env).api.getSession({ headers })
+
+  const auth = await timeTranscriptPhase(event, 'auth_init', async () => {
+    const instance = createAuth(env)
+    await instance.$context
+    return instance
   })
+  return timeTranscriptPhase(event, 'auth_session', () => auth.api.getSession({ headers }))
 }
 
 /**

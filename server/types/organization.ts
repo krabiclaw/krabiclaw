@@ -1,6 +1,7 @@
 // Site management types
 
 import type { DomainStatus } from '~/server/utils/domains'
+import type { LodgingBookingPolicy } from '~/shared/lodging-booking'
 import type { CurrencyCode } from '~/shared/currencies'
 import type { OrganizationFontPreset } from '~/shared/organization-fonts'
 import type { SitePalette, SitePalettePatch } from '~/shared/site-palette'
@@ -55,6 +56,7 @@ export interface OrganizationSettings {
 }
 
 export interface UpdateOrganizationSettingsRequest {
+  lodging_booking?: Pick<LodgingBookingPolicy, 'confirmation_mode'> & Partial<Pick<LodgingBookingPolicy, 'online_payment_required'>>
   name?: string
   /**
    * The website's publication state, and the only one there is. A tenant moves

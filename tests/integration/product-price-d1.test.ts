@@ -20,6 +20,7 @@ import {
   setCollectionProducts,
   setProductLocation,
   setProductPublication,
+  updateCollection,
   updateProduct,
   updateMenu,
 } from '../../server/utils/product-management.ts'
@@ -692,6 +693,28 @@ test('a menu update commits all sections, prices and public offerings once', { t
     const before = (await listCollectionProducts(db, { organizationId: ORG, collectionId: collection.id })).map(product => product.id)
     await assert.rejects(setCollectionProducts(db, { organizationId: ORG, collectionId: collection.id, productIds: ['missing-id'], actor: ACTOR }), /missing products/)
     assert.deepEqual((await listCollectionProducts(db, { organizationId: ORG, collectionId: collection.id })).map(product => product.id), before)
+  } finally { await runtime.dispose() }
+})
+
+test('only one menu section edit can save against the same revision', async () => {
+  const { runtime, db } = await boot()
+  try {
+    const section = await createCollection(db, {
+      organizationId: ORG, actor: ACTOR, collection: { name: 'Menu', location_id: 'loc-a' },
+    })
+    const edits = await Promise.allSettled(['Small plates', 'Starters'].map(name => updateCollection(db, {
+      organizationId: ORG, collectionId: section.id, actor: ACTOR,
+      patch: { name }, expectedUpdatedAt: section.updated_at,
+    })))
+    const saved = edits.filter(edit => edit.status === 'fulfilled')
+    const stale = edits.filter(edit => edit.status === 'rejected')
+    assert.equal(saved.length, 1)
+    assert.equal(stale.length, 1)
+    assert.equal(stale[0]!.reason.statusCode, 409)
+    const [persisted] = await listCollections(db, { organizationId: ORG, locationId: 'loc-a' })
+    assert.equal(persisted?.name, saved[0]!.value.name)
+    assert.notEqual(persisted?.updated_at, section.updated_at)
+    assert.equal(await db.prepare("SELECT count(*) n FROM public_resource_cache_invalidations WHERE reason = 'collection_updated'").first<number>('n'), 1)
   } finally { await runtime.dispose() }
 })
 

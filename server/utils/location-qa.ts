@@ -108,6 +108,15 @@ function normalizeQaInput(input: UpdateQaInput, creating = false) {
   return normalized
 }
 
+export function listQaPageScopes(db: DbClient, organizationId: string) {
+  return queryAll<{ page_path: string }>(db, `
+    SELECT DISTINCT scope_path AS page_path
+    FROM content_documents
+    WHERE kind = 'qa' AND row_role = 'root' AND organization_id = ? AND location_id IS NULL AND scope_path IS NOT NULL
+    ORDER BY page_path ASC
+  `, [organizationId])
+}
+
 /**
  * `qaId` addresses one record whatever its scope. A dashboard record has a URL
  * of its own — `/qa/<id>` — and cannot know the page it was filed under before

@@ -11,20 +11,18 @@
     <template #actions>
       <UTabs
         :model-value="viewport ?? undefined"
-        :items="[{ label: 'Desktop view', value: 'desktop' }, { label: 'Mobile view', value: 'mobile' }]"
+        :items="[{ label: 'Desktop view', value: 'desktop', icon: 'i-lucide-monitor' }, { label: 'Mobile view', value: 'mobile', icon: 'i-lucide-smartphone' }]"
         :content="false"
         size="sm"
         color="neutral"
-        variant="pill"
+        variant="link"
+        :ui="{ label: 'sr-only', list: 'border-0 gap-1 p-0', trigger: 'size-10 rounded-lg data-[state=active]:bg-elevated', indicator: 'hidden', leadingIcon: 'size-5' }"
         aria-label="Preview device"
         class="hidden col-start-2 row-start-1 lg:block"
         @update:model-value="emit('update:viewport', $event)"
       />
-      <div class="col-start-3 row-start-1 justify-self-end">
-        <ShareButton v-if="publicUrl" :title="contentTitle" :url="publicUrl" data-testid="preview-share" />
-        <UTooltip v-else-if="src" text="This preview has no shareable public address.">
-          <UButton color="neutral" variant="ghost" icon="i-lucide-lock-keyhole" label="Private preview" disabled data-testid="preview-private" />
-        </UTooltip>
+      <div v-if="publicUrl" class="col-start-3 row-start-1 justify-self-end">
+        <ShareButton :title="contentTitle" :url="publicUrl" data-testid="preview-share" />
       </div>
     </template>
     <template #body>

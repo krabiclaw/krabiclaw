@@ -5,19 +5,13 @@ import { hashPassword } from 'better-auth/crypto'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
-import { describeEmailInvitation } from '../../server/utils/email-invitations.ts'
-
-// Someone invited by email signs in with a code sent to that address, so the
-// account that answers is the one the invitation names, and an address Apple
-// relays for them cannot. Until they answer, they cannot start a business of
-// their own. Each step runs through Better Auth's own HTTP handler.
 
 const BASE = 'https://invitation-proof.example'
 const PASSWORD = 'InvitationProof123!'
 const ORG = 'org'
 const INVITEE = 'cleaner@invitation-proof.example'
 
-test('an invitee signs in with an emailed code, cannot create a business until they answer, and joins', { timeout: 120_000 }, async () => {
+test('an email invitation is private, uses normal sign-in, and creates a membership only when accepted', { timeout: 120_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'invitation-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
@@ -33,7 +27,7 @@ test('an invitee signs in with an emailed code, cannot create a business until t
       VALUES (?, 'Strut Stays', 'strut', 'strut', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
     // The owner, and the same invitee already signed in with Apple under a relay address.
-    for (const [id, email] of [['owner', 'owner@invitation-proof.example'], ['relay', 'np9gfypzgf@privaterelay.appleid.com']]) {
+    for (const [id, email] of [['owner', 'owner@invitation-proof.example'], ['relay', 'np9gfypzgf@privaterelay.appleid.com'], ['invitee', INVITEE]]) {
       await db.prepare('INSERT INTO user (id, name, email, "emailVerified", createdAt, updatedAt) VALUES (?, ?, ?, 1, 0, 0)').bind(id, id, email).run()
       await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES (?, ?, 'credential', ?, ?, 0, 0)")
         .bind(`account-${id}`, id, id, await hashPassword(PASSWORD)).run()
@@ -54,49 +48,66 @@ test('an invitee signs in with an emailed code, cannot create a business until t
     }
     const createBusiness = (token: string, slug: string) => post('/organization/create', token, { name: 'Cleaner Co', slug, default_currency: 'USD', timezone: 'America/Denver' })
 
-    // The owner invites the cleaner's address.
-    const invited = await post('/organization/invite-member', await signIn('owner@invitation-proof.example'), { organizationId: ORG, email: INVITEE, role: 'member' })
+    // Better Auth leaves expired invitations in the table. The owner can invite the same address again.
+    const ownerToken = await signIn('owner@invitation-proof.example')
+    const invite = (email: string) => post('/organization/invite-member', ownerToken, { organizationId: ORG, email, role: 'member' })
+    const original = await invite(INVITEE)
+    assert.equal(original.status, 200)
+    await db.prepare('UPDATE invitation SET expiresAt = 0 WHERE id = ?').bind(original.body.id).run()
+    const invited = await invite(INVITEE)
     assert.equal(invited.status, 200)
     const invitationId = String(invited.body.id)
-    const invitation = await describeEmailInvitation(db, invitationId)
-    assert.deepEqual({ ...invitation, expiresAt: undefined }, { email: INVITEE, organization: { name: 'Strut Stays' }, role: 'member', expiresAt: undefined })
-    assert.ok(Date.parse(invitation.expiresAt) > Date.now())
-
-    // The relay address is not the invited one, so Better Auth refuses it.
-    const relay = await post('/organization/accept-invitation', await signIn('np9gfypzgf@privaterelay.appleid.com'), { invitationId })
-    assert.deepEqual([relay.status, relay.body.code], [403, 'YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION'])
-
-    // A code goes to the invited address; it signs in a new account for it.
-    assert.equal((await post('/email-otp/send-verification-otp', null, { email: INVITEE, type: 'sign-in' })).status, 200)
-    const stored = await db.prepare('SELECT value FROM verification WHERE identifier = ?').bind(`sign-in-otp-${INVITEE}`).first<string>('value')
-    const code = stored?.split(':')[0]
-    assert.match(code ?? '', /^\d{6}$/u)
-    assert.equal((await post('/sign-in/email-otp', null, { email: INVITEE, otp: String((Number(code) + 1) % 1_000_000).padStart(6, '0') })).status, 400)
-    const signedIn = await post('/sign-in/email-otp', null, { email: INVITEE, otp: code })
-    assert.equal(signedIn.status, 200)
-    const invitee = await db.prepare('SELECT id, "emailVerified" AS verified FROM user WHERE email = ?').bind(INVITEE).first<{ id: string; verified: number }>()
-    assert.equal(invitee?.verified, 1)
-    const token = signedIn.token!
-    // The code is the only way in by email here: no reset or verification codes are offered.
-    const reset = await auth.handler(new Request(`${BASE}/api/auth/email-otp/request-password-reset`, { method: 'POST', headers: { 'content-type': 'application/json', origin: BASE }, body: JSON.stringify({ email: INVITEE }) }))
-    assert.equal(reset.status, 404)
+    assert.notEqual(invitationId, original.body.id)
+    const deliveryReceipts = () => db.prepare(`
+      SELECT d.provider_message_id FROM guest_thread_deliveries d JOIN activity_entries a ON a.id = d.activity_entry_id
+      WHERE a.dedupe_key = ? AND a.organization_id = ? AND d.provider = 'log_only' AND d.status = 'sent'
+    `).bind(`organization-invitation:${invitationId}`, ORG).all<{ provider_message_id: string }>()
+    const beforeResend = await deliveryReceipts()
+    assert.equal(beforeResend.results.length, 1)
+    const resent = await post('/organization/invite-member', ownerToken, { organizationId: ORG, email: INVITEE, role: 'member', resend: true })
+    assert.deepEqual([resent.status, resent.body.id], [200, invitationId])
+    const afterResend = await deliveryReceipts()
+    assert.equal(afterResend.results.length, 2)
+    assert.equal(new Set(afterResend.results.map(receipt => receipt.provider_message_id)).size, 2)
+    const getInvitation = async (token?: string) => {
+      const url = new URL('/api/auth/organization/get-invitation', BASE)
+      url.searchParams.set('id', invitationId)
+      const response = await auth.handler(new Request(url, { headers: token ? { authorization: `Bearer ${token}` } : {} }))
+      return { status: response.status, body: await response.json() as Record<string, unknown> }
+    }
+    assert.equal((await getInvitation()).status, 401)
+    const wrongAccount = await signIn('np9gfypzgf@privaterelay.appleid.com')
+    const wrongSession = await auth.handler(new Request(new URL('/api/auth/get-session', BASE), { headers: { authorization: 'Bearer ' + wrongAccount } }))
+    assert.equal((await wrongSession.json() as { user?: { id: string } } | null)?.user?.id, 'relay')
+    const wrongAnswer = await post('/organization/accept-invitation', wrongAccount, { invitationId })
+    assert.deepEqual([wrongAnswer.status, wrongAnswer.body.code], [403, 'YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION'])
+    const wrongRead = await getInvitation(wrongAccount)
+    assert.deepEqual([wrongRead.status, wrongRead.body.code], [403, 'YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION'], JSON.stringify(wrongRead.body))
+    const token = await signIn(INVITEE)
+    const invitation = await getInvitation(token)
+    assert.equal(invitation.status, 200)
+    assert.equal(invitation.body.email, INVITEE)
+    assert.equal(invitation.body.organizationName, 'Strut Stays')
+    assert.equal(invitation.body.role, 'member')
+    assert.equal(await db.prepare('SELECT role FROM member WHERE "organizationId" = ? AND "userId" = ?').bind(ORG, 'invitee').first(), null)
 
     // While the invitation is open, the invitee cannot start a business of their own.
     const refused = await createBusiness(token, 'cleaner-co')
     assert.deepEqual([refused.status, refused.body.code], [403, 'PENDING_INVITATION'])
-    assert.match(String(refused.body.message), /Strut Stays/u)
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM organization WHERE slug = 'cleaner-co'").first('n'), 0)
 
     // Accepting makes them a member of the inviting business, read back from the member table.
     const accepted = await post('/organization/accept-invitation', token, { invitationId })
     assert.equal(accepted.status, 200)
-    assert.deepEqual(await db.prepare('SELECT role FROM member WHERE "organizationId" = ? AND "userId" = ?').bind(ORG, invitee!.id).first(), { role: 'member' })
-    await assert.rejects(describeEmailInvitation(db, invitationId), { status: 410, data: { code: 'INVITATION_ACCEPTED', field: 'invitationId' } })
+    assert.deepEqual(await db.prepare('SELECT role FROM member WHERE "organizationId" = ? AND "userId" = ?').bind(ORG, 'invitee').first(), { role: 'member' })
+    assert.equal((await getInvitation(token)).status, 400)
+    const replay = await post('/organization/accept-invitation', token, { invitationId })
+    assert.deepEqual([replay.status, replay.body.code], [400, 'INVITATION_NOT_FOUND'])
 
     // Once answered, a business of their own is theirs to start.
     const created = await createBusiness(token, 'cleaner-co')
     assert.equal(created.status, 200)
-    assert.deepEqual(await db.prepare('SELECT m.role FROM member m JOIN organization o ON o.id = m."organizationId" WHERE o.slug = \'cleaner-co\' AND m."userId" = ?').bind(invitee!.id).first(), { role: 'owner' })
+    assert.deepEqual(await db.prepare('SELECT m.role FROM member m JOIN organization o ON o.id = m."organizationId" WHERE o.slug = \'cleaner-co\' AND m."userId" = ?').bind('invitee').first(), { role: 'owner' })
   } finally {
     await runtime.dispose()
   }

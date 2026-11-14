@@ -10,7 +10,7 @@ export async function taskRouteContext(event: H3Event) {
   if (!organizationId) throw new HTTPError({ statusCode: 400, message: 'organization_id is required', data: { code: 'ORGANIZATION_REQUIRED', field: 'organization_id' } })
   const { db, env, organization } = await requireOrganizationMembership(event, organizationId)
   const principal = memberAccessPrincipal(organization.membership, { env, event })
-  return { db, env, principal, viewer: () => taskViewer(db, principal) }
+  return { db, env, principal, viewer: () => taskViewer(principal) }
 }
 
 export function routeId(event: H3Event, name: 'task_id' | 'opportunity_id'): string {

@@ -4,10 +4,17 @@
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { queryFirst } from '~/server/db'
-import { getDraftMedia, parseOnboardingDraftPayload, readActiveOnboardingDraft } from '~/server/utils/onboarding-drafts'
+import { getDraftMedia, parseStoredOnboardingDraftPayload, readActiveOnboardingDraft } from '~/server/utils/onboarding-drafts'
 import { createPreviewToken, PREVIEW_TOKEN_TTL_MS, previewSecretOf } from '~/server/utils/preview-token'
 import { defineHandler, HTTPError } from 'nitro'
 import { deleteAbandonedDraftTenant } from '~/server/utils/tenant-deletion'
+import { WEBSITE_ONBOARDING_PATH, type WebsiteOnboardingResumeAction } from '~/shared/onboarding-flow'
+
+const noDraft = { success: true, draft: null, resume_action: null }
+const resumeAction: WebsiteOnboardingResumeAction = {
+  label: 'Continue website setup',
+  to: WEBSITE_ONBOARDING_PATH,
+}
 
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
@@ -19,9 +26,9 @@ export default defineHandler(async (event) => {
 
   const row = await readActiveOnboardingDraft(db, session.user.id, true)
 
-  if (!row) return jsonResponse({ success: true, draft: null })
+  if (!row) return jsonResponse(noDraft)
   if (row.status === 'abandoned') {
-    if (!row.organization_id) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft cleanup has no recorded organization. Its native ownership must be verified.', data: { code: 'ONBOARDING_DRAFT_DISCARD_INCOMPLETE', draft_id: row.id } })
+    if (!row.organization_id || !row.subdomain_candidate) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft cleanup has no recorded organization or address. Its native ownership must be verified.', data: { code: 'ONBOARDING_DRAFT_DISCARD_INCOMPLETE', draft_id: row.id } })
     const outcome = await deleteAbandonedDraftTenant(env, {
       draftId: row.id,
       updated_at: row.updated_at, organizationId: row.organization_id,
@@ -32,10 +39,10 @@ export default defineHandler(async (event) => {
       statusMessage: outcome.refused === 'organization_is_live' ? 'This site is already live. Delete it from its dashboard instead.' : 'Website draft cleanup is incomplete. Retry discarding this draft.',
       data: { code: 'ONBOARDING_DRAFT_DISCARD_INCOMPLETE', draft_id: row.id, organization_id: row.organization_id },
     })
-    return jsonResponse({ success: true, draft: null })
+    return jsonResponse(noDraft)
   }
 
-  const payload = parseOnboardingDraftPayload(row.payload_json)
+  const payload = parseStoredOnboardingDraftPayload(row.payload_json)
 
   const organization = row.organization_id && row.subdomain_candidate
     ? await queryFirst<{ id: string; subdomain: string | null }>(db, `
@@ -54,24 +61,27 @@ export default defineHandler(async (event) => {
 
   return jsonResponse({
     success: true,
+    resume_action: resumeAction,
     draft: {
       draft_id: row.id,
       updated_at: row.updated_at,
-      name: payload.preview.brandName,
+      name: row.name,
       source_type: row.source_type,
       google_place_id: payload.source.placeId,
-      vertical: payload.preview.vertical,
+      vertical: row.vertical,
       details: payload.source.details,
-      config: payload.preview.config,
+      timezone_step_visited: payload.timezone_step_visited ?? false,
+      paused_step: payload.partial ? payload.paused_step ?? null : null,
+      config: payload.preview?.config ?? null,
       logo_image: getDraftMedia(payload, 'logo'),
       hero_image: getDraftMedia(payload, 'hero'),
-      products: payload.preview.products.map(product => ({
+      products: (payload.preview?.vertical === row.vertical ? payload.preview.products : []).map(product => ({
         name: product.name,
         category: product.collection,
         unit_amount: product.price === null ? null : product.price.unit_amount,
       })),
       organization_id: organization?.id ?? null,
-      subdomain_candidate: organization?.subdomain ?? row.subdomain_candidate,
+      subdomain_candidate: organization?.subdomain ?? (payload.partial && payload.preview ? payload.subdomain_answer ?? null : row.subdomain_candidate),
       preview_token: previewToken,
     },
   })

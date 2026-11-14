@@ -15,14 +15,14 @@ import { createProductBooking, quoteTimedBooking } from '../../server/domain/pro
 import { projectStripeConnectedAccount, reserveStripeConnectedAccount } from '../../server/utils/stripe-connect.ts'
 import { H3Event } from 'h3'
 import { ingestStripeFeeReport, stripeFeeMinor, stripeFeeScaled } from '../../server/domain/payments/costs.ts'
-import { buyerActivities, buyerPaymentActivityPath, claimCheckoutReturn, tokenHash } from '../../server/domain/payments/buyer.ts'
+import { buyerActivities, buyerPaymentActivityPath, buyerRequestActivityPath, claimCheckoutReturn, tokenHash } from '../../server/domain/payments/buyer.ts'
 import { loadBuyerBookingDetails } from '../../server/utils/dashboard-booking-details.ts'
 import { cancelBookingRequest, requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
-import { appendMessage, markConversationRead } from '../../server/domain/conversations.ts'
-import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
-import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
+import { appendMessage, markConversationRead, readGuestConversation, resolveConversationAccess } from '../../server/domain/conversations.ts'
+import { transferBookingGuestSeat } from '../../server/domain/conversation-participants.ts'
+import { conversationPageFor } from './support/conversation-page.ts'
 import { archiveConversation, listConversations } from '../../server/domain/guest-threads/repository.ts'
-import { receiveGuestWebReply } from '../../server/domain/guest-threads/inbound-email.ts'
+import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
 import { retainPaymentsForTenantDeletion } from '../../server/domain/payments/retention.ts'
 import { deliverPaymentsUsage, paymentsUsage } from '../../server/domain/payments/usage.ts'
 import { agreeToService, endService, listServices, SERVICE_TERMS_VERSION } from '../../server/utils/organization-services.ts'
@@ -32,6 +32,9 @@ import { hashPassword, symmetricEncrypt } from 'better-auth/crypto'
 import { H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
 import servicesPostRoute from '../../server/api/dashboard/services.post.ts'
+import googleAdsAccountsRoute from '../../server/api/organizations/[organization_id]/integrations/google-ads/accounts.get.ts'
+import googleAdsSelectRoute from '../../server/api/organizations/[organization_id]/integrations/google-ads/select.post.ts'
+import { INTEGRATION_SCOPES } from '../../shared/organization-settings.ts'
 import servicesGetRoute from '../../server/api/dashboard/services.get.ts'
 import mcpRoute from '../../server/api/mcp.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[payment_id]/return.post.ts'
@@ -248,6 +251,10 @@ test('a checkout thread stays out of Messages until payment creates its booking'
  const { db, runtime, env } = await boot()
  try {
   const provenance = { source: 'website', external_reference: null, actor_user_id: null, idempotency_key: 'checkout-key', fingerprint: 'checkout-fingerprint', guest_acknowledgement: true, creation_kind: 'checkout' as const, creation_status: 'confirmed' as const, followups_completed: false }
+  await db.batch([
+    db.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('owner-reader','Owner','owner-reader@example.com',1)"),
+    db.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('owner-reader-member',?,'owner-reader','owner')").bind(ORG),
+  ])
   const opening = { id: 'checkout-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'verified', booking_id: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com' }), provenance }, created_at: NOW }
   await db.batch(requestInsertQueries(opening, undefined, { opening: 'Class for 1 guest', note: 'A note before paying' }).map(write => db.prepare(write.query).bind(...write.params)))
   const owner = async () => (await listConversations(db, ORG, { userId: 'owner-reader' })).map(row => row.id)
@@ -720,6 +727,8 @@ test('a payment back on the business’s site claims for that site’s buyer and
   await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,location_id,currency,amount,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,?,'acct_seller',0,'booking','dining','USD',10000,?,?,?)")
    .bind(ORG, 'guest', JSON.stringify({ title: 'Dining tables', tax_code: null, price: { unit_amount: 10000, currency: 'USD', tax_behavior: 'exclusive' }, quantity: 1, automatic_tax: false, method_configuration_id: 'pmc_seller', product_id: 'tables', variant_id: 'table-variant', session_id: 'seating', policy: TABLE_TERMS, answers: [] }), NOW, NOW).run()
   await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,location_id,timezone,buyer_user_id,conversation_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at) VALUES('deposit-hold',?,'tables','table-variant','table-price','seating','dining','UTC',?,'deposit-request','deposit',1,10000,'USD','2099-10-01T13:00:00.000Z','2099-10-01T15:00:00.000Z','active','2099-09-30T00:00:00.000Z',?)").bind(ORG, 'guest', NOW).run()
+  assert.equal(await buyerRequestActivityPath(db, { organizationId: ORG, conversationId: 'deposit-request', userId: 'guest' }), '/dashboard/account/activity/payment/deposit')
+  assert.equal(await buyerRequestActivityPath(db, { organizationId: ORG, conversationId: 'deposit-request', userId: 'verified' }), null)
   const claims: Record<string, string> = {}
   for (const id of ['deposit', 'clearing', 'declined']) {
    claims[id] = crypto.randomUUID() + crypto.randomUUID()
@@ -795,6 +804,7 @@ test('a payment back on the business’s site claims for that site’s buyer and
   const read = await call('/api/public/booking-requests/deposit-request', { headers: { authorization: `Bearer ${receipt.token}` } })
   assert.equal(read.status, 200)
   const booking = (await read.json() as { booking: Record<string, unknown> }).booking
+  assert.equal(booking.manage_url, 'https://proof.example/dashboard/account/activity/booking/deposit-request')
   assert.deepEqual({ kind: booking.kind, status: booking.status, name: booking.name, email: booking.email, starts_at: booking.starts_at, timezone: booking.timezone, guests: booking.guests, location_id: booking.location_id },
    { kind: 'booking', status: 'confirmed', name: 'Verified', email: 'verified@example.com', starts_at: '2099-10-01T13:00:00.000Z', timezone: 'UTC', guests: '1', location_id: 'dining' })
 
@@ -844,14 +854,20 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   assert.deepEqual(order.payments![0]!.order,{lines:[{id:'immutable-line',title:'Original item title',unit_amount:1250,quantity:2,currency:'USD'}]})
   assert.deepEqual((await db.prepare('SELECT * FROM conversations ORDER BY id').all()).results,requestsBefore)
   await assert.rejects(()=>loadBuyerBookingDetails(db, env,'other','order','order-payment'),error=>error instanceof HTTPError&&error.statusCode===404)
-  await db.prepare("UPDATE bookings SET user_id='other' WHERE id=?").bind(booking.bookingId).run()
+  await db.batch([
+    db.prepare("UPDATE bookings SET user_id='other' WHERE id=?").bind(booking.bookingId),
+    ...transferBookingGuestSeat({ query: 'c.id = ?', params: [opening.id] }, 'other', NOW).map(write => db.prepare(write.query).bind(...(write.params ?? []))),
+    db.prepare("UPDATE conversations SET user_id='other' WHERE id=?").bind(opening.id),
+  ])
+  assert.equal(await readGuestConversation(db, 'verified', opening.id), null)
+  assert.equal((await readGuestConversation(db, 'other', opening.id))?.id, opening.id)
   assert.equal((await buyerActivities(db,'verified')).activities.some(item=>item.kind==='booking'),false)
   await assert.rejects(()=>loadBuyerBookingDetails(db, env,'verified','booking',opening.id),error=>error instanceof HTTPError&&error.statusCode===404)
   const retainedPayment=await loadBuyerBookingDetails(db, env,'verified','payment','visit-payment')
   assert.equal(retainedPayment.conversation_id,null)
   assert.equal(retainedPayment.payments![0]!.payment.id,'visit-payment')
   assert.equal(await db.prepare("SELECT buyer_user_id FROM payments WHERE id='visit-payment'").first('buyer_user_id'),'verified')
-  assert.equal(await getGuestThreadDetail(db,opening.id,ORG,{buyerUserId:'verified'}),null)
+  await assert.rejects(conversationPageFor(db,'verified',opening.id), {statusCode:404})
   assert.deepEqual(await listConversations(db,null,{userId:'verified',buyerAudience:true}),[])
  }finally{await runtime.dispose()}
 })
@@ -871,23 +887,15 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   await appendMessage(db,{conversationId:'buyer-conversation',authorKind:'krabiclaw',authorUserId:null,eventName:'payment.dispute_created',body:'Merchant dispute diagnostic',payload:{stripe_dispute_id:'private-dispute'},dedupeKey:'merchant-dispute'})
   // A member archived it for themselves; the guest's own view does not change.
   await archiveConversation(db,{organizationId:ORG,conversationId:'buyer-conversation',userId:'other',archived:true})
-  const view=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'verified'})
-  assert(view)
-  assert.deepEqual(view.entries.map(entry=>entry.id),[question,publicReply.id,capture.id])
-  assert(view.entries.every(entry=>(entry.actorUserId===null||(entry.actorKind==='guest'&&entry.actorUserId==='verified'))&&entry.deliveries.length===0))
-  assert.deepEqual(view.deliveryFailures,[])
-  assert.deepEqual(view.availableActions,[])
-  assert.equal(view.needsReply,false,'whether the business owes a reply is merchant state')
-  assert.equal(view.manuallyArchived,false)
-  assert.equal(view.archivedAt,null)
   const secrets=['private-ip-hash','private-diagnostic','private-charge','private-dispute','Internal staff note','Merchant dispute diagnostic']
-  for(const secret of secrets)assert.equal(JSON.stringify(view).includes(secret),false)
-  // The buyer's own conversation, as their inbox draws it, says only what the buyer may read.
-  const thread=await getInboxThread(db,'buyer-conversation',ORG,{audience:'buyer',userId:'verified'})
-  assert(thread)
-  assert.deepEqual(thread.stream.filter(item=>item.type!=='day').map(item=>item.type==='message'?[item.side,item.author,item.body]:item.type==='event'?['event',item.text]:[item.type]),
+  const thread=await conversationPageFor(db,'verified','buyer-conversation')
+  assert.deepEqual(thread.entries.filter(entry=>entry.type!=='day').map(entry=>entry.id),[question,publicReply.id,capture.id])
+  assert(thread.entries.every(entry=>entry.type!=='message'||((entry.author_user_id===null||(entry.side==='guest'&&entry.author_user_id==='verified'))&&entry.deliveries.length===0)))
+  assert.equal(thread.capabilities.can_manage_participants,false)
+  assert.deepEqual(thread.entries.filter(item=>item.type!=='day').map(item=>item.type==='message'?[item.side,item.author,item.body]:item.type==='event'?['event',item.text]:[item.type]),
    [['guest','You','My question'],['business','Payments','Public host reply'],['event','Payment received']])
-  assert.deepEqual([thread.pending,thread.composer],[[],{channel:'email',available:true,reason:null}])
+  if(thread.conversation.kind==='team')throw new Error('Expected the buyer’s conversation')
+  assert.deepEqual(thread.conversation.composer,{channel:'email'})
   for(const secret of secrets)assert.equal(JSON.stringify(thread).includes(secret),false,secret)
   const inbox=await listConversations(db,null,{userId:'verified',buyerAudience:true})
   // The newest messages are the internal note and the dispute; the buyer's row previews the newest message they can read
@@ -899,17 +907,22 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   const readInbox=await listConversations(db,null,{userId:'verified',buyerAudience:true})
   assert.deepEqual(readInbox.map(row=>[row.id,row.unread]),[['buyer-conversation',false]])
   assert.deepEqual(await listConversations(db,null,{userId:'verified',buyerAudience:true,unreadOnly:true}),[])
-  assert.deepEqual((await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'verified'}))?.entries,view.entries)
+  assert.deepEqual((await conversationPageFor(db,'verified','buyer-conversation')).entries,thread.entries)
   const input={threadId:'buyer-conversation',userId:'verified',body:'My web reply',photos:[],idempotencyKey:'buyer-reply-key'}
-  await receiveGuestWebReply(env,input)
+  const send = async ({threadId,userId,...reply}: typeof input) => {
+    const {conversation,role} = await resolveConversationAccess(db,userId,threadId)
+    if (role !== 'guest') throw new HTTPError({statusCode:404,statusMessage:'Conversation not found'})
+    return await sendConversationMessage(env,{...reply,conversation,role,userId,senderName:userId})
+  }
+  await send(input)
   const ledger=(await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results
   const message=ledger.find(entry=>entry.body===input.body)
   assert(message)
   assert.equal(message.author_user_id,'verified')
   assert.equal(message.channel,'web')
-  const ownReplyView=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'verified'})
-  assert.equal(ownReplyView?.entries.find(entry=>entry.id===message.id)?.actorUserId,'verified')
-  assert(ownReplyView?.entries.every(entry=>entry.actorUserId===null||(entry.actorKind==='guest'&&entry.actorUserId==='verified')))
+  const ownReplyView=await conversationPageFor(db,'verified','buyer-conversation')
+  assert.equal(ownReplyView.entries.find(entry=>entry.type==='message'&&entry.id===message.id)?.author_user_id,'verified')
+  assert(ownReplyView.entries.every(entry=>entry.type!=='message'||entry.author_user_id===null||(entry.side==='guest'&&entry.author_user_id==='verified')))
   // The conversation's projection: its inbox order and its reply tasks.
   const projectionOf=async()=>({last_message_at:await db.prepare("SELECT last_message_at FROM conversations WHERE id='buyer-conversation'").first<string>('last_message_at'),
    tasks:(await db.prepare("SELECT dedupe_key,status,version FROM tasks WHERE subject_type='conversation' AND subject_id='buyer-conversation' ORDER BY dedupe_key").all()).results})
@@ -918,25 +931,28 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   // The owner's alert about it is sent once and recorded on the message.
   const notices=(await db.prepare("SELECT * FROM guest_thread_deliveries WHERE message_id=? ORDER BY id").bind(message.id).all()).results
   assert.deepEqual(notices.map(notice=>[notice.channel,notice.purpose,notice.status]),[['email','owner_alert','sent']])
-  await receiveGuestWebReply(env,input)
+  await send(input)
   assert.deepEqual((await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results,ledger)
   assert.deepEqual(await projectionOf(),projection)
   assert.deepEqual((await db.prepare("SELECT * FROM guest_thread_deliveries WHERE message_id=? ORDER BY id").bind(message.id).all()).results,notices)
-  await assert.rejects(()=>receiveGuestWebReply(env,{...input,body:'Changed message'}),error=>error instanceof HTTPError&&error.statusCode===409)
-  await assert.rejects(()=>receiveGuestWebReply(env,{...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===404)
+  await assert.rejects(()=>send({...input,body:'Changed message'}),error=>error instanceof HTTPError&&error.statusCode===409)
+  await assert.rejects(()=>send({...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===404)
   // The conversation now belongs to another account: the key names the earlier owner's message, so their retry is refused and writes nothing.
-  await db.prepare("UPDATE conversations SET user_id='other' WHERE id='buyer-conversation'").run()
-  await assert.rejects(()=>receiveGuestWebReply(env,{...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===409)
+  await db.batch([
+    ...transferBookingGuestSeat({query:"c.id='buyer-conversation'"},'other',NOW).map(write=>db.prepare(write.query).bind(...(write.params??[]))),
+    db.prepare("UPDATE conversations SET user_id='other' WHERE id='buyer-conversation'"),
+  ])
+  await assert.rejects(()=>send({...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===409)
   assert.deepEqual((await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results,ledger)
-  const previousActorView=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'other'})
-  assert(previousActorView?.entries.every(entry=>entry.actorUserId===null))
-  await assert.rejects(()=>receiveGuestWebReply(env,input),error=>error instanceof HTTPError&&error.statusCode===404)
+  const previousActorView=await conversationPageFor(db,'other','buyer-conversation')
+  assert(previousActorView.entries.every(entry=>entry.type!=='message'||entry.author_user_id===null))
+  await assert.rejects(()=>send(input),error=>error instanceof HTTPError&&error.statusCode===404)
   await db.prepare('UPDATE messages SET author_user_id=NULL WHERE id=?').bind(message.id).run()
   const retained=(await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results
-  await assert.rejects(()=>receiveGuestWebReply(env,{...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===409)
-  const historicalNullView=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'other'})
-  assert(historicalNullView?.entries.every(entry=>entry.actorUserId===null))
-  await assert.rejects(()=>receiveGuestWebReply(env,input),error=>error instanceof HTTPError&&error.statusCode===404)
+  await assert.rejects(()=>send({...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===409)
+  const historicalNullView=await conversationPageFor(db,'other','buyer-conversation')
+  assert(historicalNullView.entries.every(entry=>entry.type!=='message'||entry.author_user_id===null))
+  await assert.rejects(()=>send(input),error=>error instanceof HTTPError&&error.statusCode===404)
   assert.deepEqual((await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results,retained)
   assert.deepEqual(await projectionOf(),projection)
   assert.deepEqual((await db.prepare("SELECT * FROM guest_thread_deliveries WHERE message_id=? ORDER BY id").bind(message.id).all()).results,notices)
@@ -1120,6 +1136,7 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     assert.deepEqual(open, {
       payment_id: 'changing', state: 'open', title: 'Cabin', quantity: 1, unit_amount: 20000,
       stay: { product_id: 'cabin', check_in_date: '2099-10-01', check_out_date: '2099-10-03', nights: 2, nightly: [10000, 10000], adults: 1, children: 0, infants: 0, cancellation_policy: 'flexible' },
+      approved_stay_path: null,
       billing_details: { name: 'Guest', email: 'guest@example.com' },
       kind: 'stay', image_url: null, starts_at: null, ends_at: null, timezone: null, party_size: null, product_slug: 'cabin', location_slug: 'cabin-site', free_cancellation_until: null,
       subtotal: 20000, currency: 'USD', expires_at: '2099-09-30T00:00:00.000Z', stripe_account_id: 'acct_seller', publishable_key: 'pk_test_local_boundary',
@@ -1747,6 +1764,8 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   const app = new H3()
   app.post('/api/dashboard/services', servicesPostRoute)
   app.get('/api/dashboard/services', servicesGetRoute)
+  app.get('/api/organizations/:organization_id/integrations/google-ads/accounts', googleAdsAccountsRoute)
+  app.post('/api/organizations/:organization_id/integrations/google-ads/select', googleAdsSelectRoute)
   app.post('/api/mcp', mcpRoute)
   const background: Promise<unknown>[] = []
   // Nitro initializes the Request context before H3; the bare in-process app shares it here too.
@@ -1813,6 +1832,9 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
      return Response.json({ mutateOperationResponses: [{ campaignResult: { resourceName: 'customers/1234567890/campaigns/222' } }] })
     }
     googleReads++
+    if (url.pathname === '/v25/customers:listAccessibleCustomers') {
+     return Response.json({ resourceNames: ['1234567890', '2222222222', '3333333333'].map(id => `customers/${id}`) })
+    }
     // The managed account, and the accounts a later free connection chooses from: 3333333333 is a manager account.
     assert.ok(['1234567890', '2222222222', '3333333333'].some(id => url.pathname === `/v25/customers/${id}/googleAds:search`), url.pathname)
     if (providerUnavailable) return Response.json({ error: 'Reporting unavailable at external boundary' }, { status: 503 })
@@ -1842,7 +1864,8 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   defaultCard = 'pm_default'
   await assert.rejects(agree, /Connect a Google Ads account billed in USD/u)
   const token = await symmetricEncrypt({ key: env.BETTER_AUTH_SECRET, data: 'managed-ads-token' })
-  await db.prepare("INSERT INTO account(id,accountId,providerId,userId,accessToken) VALUES('ads-linked','google-fixture','google','verified',?)").bind(token).run()
+  await db.prepare("INSERT INTO account(id,accountId,providerId,userId,accessToken,scope) VALUES('ads-linked','google-fixture','google','verified',?,?)")
+   .bind(token, INTEGRATION_SCOPES['google-ads'].join(',')).run()
   await storeIntegration(db, ORG, 'google_ads', { account_id: 'ads-linked', target_id: '1234567890', target_name: 'Managed ads fixture' }, { revision: null })
   const client = new Client({ name: 'payments-managed-ads-proof', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } })
   const transport = new StreamableHTTPClientTransport(new URL('https://proof.example/api/mcp'), {
@@ -1946,6 +1969,30 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   await assert.rejects(selectGoogleAdsCustomer(env, ORG, 'ads-linked', '3333333333', 'Manager account'), { status: 422, message: 'That is a Google Ads manager account. Choose one of the accounts it manages.' })
   // A new free connection cannot make the previous agreement bill its account.
   await selectGoogleAdsCustomer(env, ORG, 'ads-linked', '2222222222', 'New free connection')
+  const freeConnection = await readIntegration(db, ORG, 'google_ads')
+  currency = 'THB'
+  await assert.rejects(selectGoogleAdsCustomer(env, ORG, 'ads-linked', '1234567890', 'Replacement', true),
+   /requires a Google Ads account billed in USD/)
+  assert.deepEqual(await readIntegration(db, ORG, 'google_ads'), freeConnection)
+  currency = 'USD'
+  await assert.rejects(selectGoogleAdsCustomer(env, ORG, 'ads-linked', '1234567890', 'Stale replacement', true, { revision: null }),
+   /Google Ads changed/)
+  assert.deepEqual(await readIntegration(db, ORG, 'google_ads'), freeConnection)
+  assert.ok(freeConnection)
+  const adsPath = `/api/organizations/${ORG}/integrations/google-ads`
+  const accounts = await call(`${adsPath}/accounts?service=managed-ads&account_id=ads-linked`)
+  assert.equal(accounts.status, 200, await accounts.clone().text())
+  const inventory = await accounts.json() as { revision: string; accounts: Array<{ customerId: string }> }
+  assert.equal(inventory.revision, freeConnection.revision)
+  assert.deepEqual(inventory.accounts.map(account => account.customerId), ['1234567890', '2222222222'])
+  const savedAccount = await call(`${adsPath}/select`, 'POST', {
+   service: 'managed-ads', account_id: 'ads-linked', customer_id: '2222222222', customer_name: 'Managed replacement', revision: inventory.revision,
+  })
+  assert.equal(savedAccount.status, 200, await savedAccount.text())
+  const replacement = await readIntegration(db, ORG, 'google_ads')
+  assert.equal(replacement?.target_name, 'Managed replacement')
+  assert.equal(replacement?.target_id, '2222222222')
+  assert.notEqual(replacement?.revision, freeConnection?.revision)
   const readsBeforeDelivery = googleReads
   providerUnavailable = true
   deliveryUnavailable = false

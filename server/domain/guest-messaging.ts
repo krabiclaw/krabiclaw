@@ -153,7 +153,7 @@ export async function saveMessageTemplate(db: DbClient, env: GuestInboxPublicati
   await planTemplateMessages(db, saved, now)
   const messages = await queryAllPages<ScheduledGuestMessageRow>(db, `${SCHEDULED_MESSAGE_VIEW_SQL} WHERE m.organization_id = ? AND m.template_id = ? ORDER BY m.id`, [access.organizationId, saved.id])
   try {
-    for (const message of messages) await publishScheduledGuestMessageChange(db, env, message.conversation_id)
+    for (const message of messages) await publishScheduledGuestMessageChange(db, env, message)
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The automatic message was saved, but open apps could not be updated. Reload before editing it again.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, template_id: saved.id, version: saved.version }, cause })
@@ -181,7 +181,7 @@ export async function deleteMessageTemplate(db: DbClient, env: GuestInboxPublica
     for (const { id } of messages) {
       const message = await queryFirst<ScheduledGuestMessageRow>(db, `${SCHEDULED_MESSAGE_VIEW_SQL} WHERE m.organization_id = ? AND m.id = ?`, [access.organizationId, id])
       if (!message) messagingError(500, 'SCHEDULED_MESSAGE_NOT_FOUND', 'The saved scheduled message could not be read', 'scheduled_message_id')
-      await publishScheduledGuestMessageChange(db, env, message.conversation_id)
+      await publishScheduledGuestMessageChange(db, env, message)
     }
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The automatic message was deleted, but open apps could not be updated. Reload to see its saved status.',
@@ -278,15 +278,15 @@ export function visibleScheduledMessagesSql(alias: string, access: StayAccess): 
 }
 
 /** The outbox, newest first: every automatic message for managers, and each member's own send-later replies. */
-export async function listScheduledGuestMessages(db: DbClient, access: StayAccess, query: MessageListQuery, conversationId: string | null) {
-  if (conversationId !== null && !await getGuestRequest(db, conversationId, access.organizationId)) {
-    messagingError(404, 'THREAD_NOT_FOUND', 'This conversation is not in the workspace', 'conversation_id')
-  }
+export async function listScheduledGuestMessages(db: DbClient, principal: MemberAccessPrincipal, query: MessageListQuery, conversationId: string | null, productId: string | null = null) {
+  const access = await stayAccessFor(principal)
+  if (conversationId !== null) await assertConversationAccess(db, principal, conversationId, true)
   const visible = visibleScheduledMessagesSql('m', access)
   const rows = await queryAll<ScheduledGuestMessageRow>(db, `${SCHEDULED_MESSAGE_VIEW_SQL}
     WHERE m.organization_id = ? AND ${visible.query} ${conversationId === null ? '' : `AND ${SCHEDULED_MESSAGE_CONVERSATION_SQL} = ?`}
+      ${productId === null ? '' : 'AND m.product_id = ?'}
     ORDER BY m.created_at DESC, m.id DESC LIMIT ? OFFSET ?`,
-  [access.organizationId, ...visible.params, ...(conversationId === null ? [] : [conversationId]), query.limit + 1, query.offset])
+  [access.organizationId, ...visible.params, ...(conversationId === null ? [] : [conversationId]), ...(productId === null ? [] : [productId]), query.limit + 1, query.offset])
   const page = messageListPage(rows.map(scheduledGuestMessage), query)
   return { messages: page.items, pagination: page.pagination }
 }
@@ -304,7 +304,7 @@ export async function cancelScheduledGuestMessage(db: DbClient, env: GuestInboxP
   if (!current) messagingError(404, 'SCHEDULED_MESSAGE_NOT_FOUND', 'This scheduled message is not in the workspace', 'scheduled_message_id')
   if (results[0]?.meta.changes !== 1) messagingError(409, 'SCHEDULED_MESSAGE_NOT_PENDING', `The message is ${current.status}; only a pending message can be cancelled`, 'status')
   try {
-    await publishScheduledGuestMessageChange(db, env, current.conversation_id)
+    await publishScheduledGuestMessageChange(db, env, current)
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The scheduled message was cancelled, but open apps could not be updated. Reload to see its saved status.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, scheduled_message_id: current.id }, cause })

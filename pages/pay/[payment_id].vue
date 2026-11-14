@@ -48,7 +48,7 @@
               <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.dates') }}</h3>
               <p class="mt-1 text-sm text-default">{{ stayRange }}</p>
             </div>
-            <UButton v-if="offeringPath && handoff.state !== 'paid' && !paid && !outcome" color="neutral" variant="soft" size="sm" :label="t('payment.change')" :loading="working" :disabled="working || completing" @click="changeStay('dates')" />
+            <UButton v-if="offeringPath && !handoff.approved_stay_path && handoff.state !== 'paid' && !paid && !outcome" color="neutral" variant="soft" size="sm" :label="t('payment.change')" :loading="working" :disabled="working || completing" @click="changeStay('dates')" />
           </div>
           <div v-else-if="handoff.starts_at && handoff.ends_at && handoff.timezone" class="flex items-start justify-between gap-4 border-t border-default pt-5" data-payment-time>
             <div>
@@ -63,7 +63,7 @@
               <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.guests') }}</h3>
               <p class="mt-1 text-sm text-default">{{ guests }}</p>
             </div>
-            <UButton v-if="offeringPath && handoff.stay && handoff.state !== 'paid' && !paid && !outcome" color="neutral" variant="soft" size="sm" :label="t('payment.change')" :loading="working" :disabled="working || completing" @click="changeStay('guests')" />
+            <UButton v-if="offeringPath && handoff.stay && !handoff.approved_stay_path && handoff.state !== 'paid' && !paid && !outcome" color="neutral" variant="soft" size="sm" :label="t('payment.change')" :loading="working" :disabled="working || completing" @click="changeStay('guests')" />
             <UButton v-else-if="offeringPath && !handoff.stay" :to="offeringPath" color="neutral" variant="soft" size="sm" :label="t('payment.change')" />
           </div>
 
@@ -426,7 +426,12 @@ async function complete() {
 }
 
 async function leave() {
-  await navigateTo(offeringPath.value || localePath('/'))
+  const path = handoff.value?.approved_stay_path
+  if (path) {
+    await navigateTo(new URL(path, useRuntimeConfig().public.platformDomain).href, { external: true })
+  } else {
+    await navigateTo(offeringPath.value || localePath('/'))
+  }
 }
 
 async function changeStay(edit: 'dates' | 'guests') {

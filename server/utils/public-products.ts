@@ -6,6 +6,8 @@ import { projectPublicLocation, type PublicLocationPrivacySource } from '~/share
 import { projectPublicLocationReview, publicLocationPrivacySql } from '~/server/utils/public-location-privacy'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { readPublicBookingSessions } from '~/server/utils/public-session-booking'
+import { listSessions } from '~/server/utils/availability'
+import { BOOKING_HORIZON_DAYS } from '~/shared/bookings'
 import { getProductBySlug, hydrateProductMedia, listCollections, listLocationProducts, listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
 import { assertProductKind } from '~/shared/product-details'
 import type { Collection, ProductBookingConfig, ProductPresentation, ProductSurface, PublicProduct, SiteProductSurface, StaffAssignment } from '~/server/types/products'
@@ -26,6 +28,8 @@ import { publicTenantVisibilitySql } from '~/server/utils/public-base'
 import { selectProductCollectionSiblings, type ProductCollectionSibling } from '~/utils/product-seo'
 import { getPublicTenantPageForPath } from '~/server/utils/public-tenant-pages'
 import { resolvePublishedTenantPageIdentity } from '~/server/utils/content/pages'
+import type { LodgingConfirmationMode } from '~/shared/lodging-booking'
+import { readLodgingBookingPolicy } from '~/server/utils/lodging-booking-policy'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
@@ -134,6 +138,7 @@ export interface PublicProductDetailPayload {
   locale_representations: PublicLocaleRepresentation[]
   /** A place to stay is paid for on the site only once the business's Payments setup is complete; until then it takes enquiries. */
   stay_checkout_available: boolean
+  stay_confirmation_mode: LodgingConfirmationMode | null
 }
 
 export interface PublicProductReview {
@@ -411,13 +416,14 @@ async function projectPublicOffering(
 }
 
 /** One public response for server rendering and API navigation. */
-export async function publicProductDetailPayload(db: DbClient, env: CloudflareEnv, detail: PublicProductDetail): Promise<PublicProductDetailPayload> {
+export async function publicProductDetailPayload(db: DbClient, env: CloudflareEnv, detail: PublicProductDetail, previewAuthorized = false): Promise<PublicProductDetailPayload> {
   const memberships = new Set(detail.product.collections.map(entry => entry.collection_id))
   const collection = detail.collections.find(collection => memberships.has(collection.id))
-  const [reviews, sessions, staySetup] = await Promise.all([
+  const [reviews, sessions, staySetup, stayPolicy] = await Promise.all([
     loadPublicProductReviews(db, detail),
-    loadPublicProductSessions(db, detail, env),
+    loadPublicProductSessions(db, detail, env, previewAuthorized),
     detail.product.kind === 'stay' ? readStripeCheckoutSetup(db, detail.organization.id, env) : null,
+    detail.product.kind === 'stay' ? readLodgingBookingPolicy(db, detail.organization.id) : null,
   ])
   return {
     product: detail.product, location: detail.location, locations: detail.locations,
@@ -429,6 +435,7 @@ export async function publicProductDetailPayload(db: DbClient, env: CloudflareEn
     collection_siblings: collection ? selectProductCollectionSiblings(detail.products, detail.product, collection.id, { currency: detail.currency, location_id: detail.location?.id ?? null, at: new Date().toISOString() }) : [],
     locale_representations: detail.locale_representations,
     stay_checkout_available: staySetup !== null && staySetup.missing.length === 0,
+    stay_confirmation_mode: stayPolicy?.confirmation_mode ?? null,
   }
 }
 
@@ -480,11 +487,22 @@ export async function loadPublicProductSessions(
   db: DbClient,
   detail: PublicProductDetail,
   env: CloudflareEnv,
+  previewAuthorized = false,
 ): Promise<PublicProductSession[]> {
-  if (!detail.product.active || !detail.booking || detail.scope_required
-    || !detail.product.publications.some(publication => publication.organization_id === detail.organization.id && publication.published)) return []
+  if (!detail.product.active || !detail.booking || detail.scope_required) return []
   const locationId = detail.location?.id
-  if (locationId && !detail.product.locations.some(location => location.location_id === locationId && location.active && location.published)) return []
+  const publication = detail.product.publications.some(row => row.organization_id === detail.organization.id && row.published)
+  const placement = detail.product.locations.find(row => row.location_id === locationId && row.active)
+  if (previewAuthorized && detail.product.kind === 'experience' && locationId && placement && (!publication || !placement.published)) {
+    const now = new Date()
+    const sessions = await listSessions(db, {
+      env, organizationId: detail.organization.id, productId: detail.product.id, locationId,
+      fromInstant: now.toISOString(), toInstant: new Date(now.getTime() + BOOKING_HORIZON_DAYS * 86_400_000).toISOString(),
+    })
+    return sessions.map(({ id, starts_at, ends_at, location_id, timezone, remaining, is_full, created_at }) =>
+      ({ id, starts_at, ends_at, location_id, timezone, remaining, is_full, created_at }))
+  }
+  if (!publication || locationId && !placement?.published) return []
   if (!locationId && !detail.booking.held_online) return []
   return (await readPublicBookingSessions(db, detail.organization.id, detail.product, env, { location_id: locationId ?? 'online' })).sessions.filter(session => !session.is_full)
 }

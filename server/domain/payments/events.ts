@@ -7,7 +7,7 @@ import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/for
 import { assertBookingBatchWrite, sessionClaimQuery } from '~/server/utils/availability'
 import { processStripeWebhookEvent } from '~/server/utils/stripe-webhook-events'
 import { platformLivemode } from '~/server/utils/stripe-connect'
-import { executeRefund, reconcileRefundState, requirePayment, assertMinorAmount, type Payment } from './index'
+import { approvedStayBooking, executeRefund, reconcileRefundState, requirePayment, assertMinorAmount, type Payment } from './index'
 import { notifyPaymentFinancialEvent, reconcilePayoutEvent } from './notifications'
 import { recordPaymentPaid } from '~/server/domain/booking-analytics'
 import { notifyStayBooked, raiseSettledFailures } from '~/server/utils/notifications'
@@ -15,8 +15,10 @@ import { paymentsBillingBasis } from './fx'
 import { deliverPaymentsUsage, paymentUsageEventQuery } from './usage'
 import { isStayPurchase } from './checkout'
 import { turnoverTaskQueries } from '~/server/domain/tasks'
+import { organizationEventQuery } from '~/server/utils/organization-events'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
-import { completeStayFromCheckout, isStayNightConflict, readStayHome, releaseLapsedStayHolds, stayFromCheckoutQueries } from '~/server/domain/stays'
+import { stayRequestConfirmationKey } from '~/server/domain/requests'
+import { approvedStayPaymentPredicate, completeStayFromCheckout, isStayNightConflict, readStayHome, releaseLapsedStayHolds, stayFromCheckoutQueries } from '~/server/domain/stays'
 
 interface Hold {
   id:string; organization_id:string; product_id:string|null; variant_id:string|null; session_id:string|null; location_id:string|null; timezone:string|null
@@ -36,13 +38,15 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
 async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,reported:Stripe.PaymentIntent, env:CloudflareEnv, captured:{savedCard?:boolean}):Promise<Stripe.PaymentIntent> {
   if (reported.livemode !== Boolean(payment.livemode) || reported.currency.toUpperCase() !== payment.currency || reported.metadata.krabiclaw_payment_id !== payment.id || payment.stripe_payment_intent_id !== reported.id) throw new Error('Stripe PaymentIntent financial identity mismatch')
   // The intent is the one this purchase opened, on this account and mode; what it charged is Stripe's.
-  const snapshot=JSON.parse(payment.price_snapshot_json) as {billing_fx?:unknown}
+  const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
+  if (!isRecord(snapshot)) throw new Error('Payment has no frozen purchase')
+  const approval = approvedStayBooking(snapshot)
   const now = new Date().toISOString()
   const intent = reported.status === 'requires_capture' ? await captureOnceBooked(db,stripe,env,payment,reported) : reported
   if (intent.status !== 'succeeded') {
     // A debit waiting on its bank verification or clearing keeps its capacity until Stripe says how it ended.
     if (intent.status === 'processing' || intent.next_action?.type === 'verify_with_microdeposits') {
-      await execute(db,"UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active'",[new Date(Date.now()+14*86400*1000).toISOString(),payment.id])
+      await execute(db, "UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active'", [new Date(Date.now() + 14 * 86_400_000).toISOString(), payment.id])
     }
     // A declined confirmation can accept another method; only cancellation is terminal.
     if (intent.status === 'canceled') {
@@ -54,8 +58,11 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,rep
     }
     if (intent.status === 'requires_payment_method' && intent.last_payment_error) {
       // A bank debit that failed days later gives back the 14 days it was holding.
-      const until=confirmationHoldUntil(payment)
-      await execute(db,"UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active' AND expires_at>?",[until,payment.id,until])
+      if (approval) await releaseApprovedStayConfirmation(db, payment)
+      else {
+        const until=confirmationHoldUntil(payment)
+        await execute(db,"UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active' AND expires_at>?",[until,payment.id,until])
+      }
       await notifyPaymentFinancialEvent(db,stripe,env,payment,{kind:'payment_failed',nativeId:intent.id,status:intent.status,amount:intent.amount})
     }
     return intent
@@ -120,7 +127,29 @@ async function captureOnceBooked(db:DbClient,stripe:Stripe,env:CloudflareEnv,pay
  const chargeId=typeof intent.latest_charge==='string'?intent.latest_charge:intent.latest_charge?.id
  const charge=chargeId?await stripe.charges.retrieve(chargeId,{},account):null
  if(!charge||charge.livemode!==Boolean(payment.livemode)||charge.payment_intent!==intent.id)throw new Error('Authorized charge financial scope mismatch')
- const booked=payment.subject_type!=='booking'||await commitBooking(db,env,payment,new Date(charge.created*1000).toISOString())!==null
+ const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
+ if (!isRecord(snapshot)) throw new Error('Booking payment has no frozen purchase')
+ const approval = approvedStayBooking(snapshot)
+ let booked = payment.subject_type !== 'booking'
+ if (approval) {
+  // The approved booking already owns its nights. Capture first, then confirm that same booking.
+  const hold = await queryFirst<Hold>(db, 'SELECT * FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id])
+  const purchase = snapshot.stay
+  if (!hold?.conversation_id || !hold.buyer_user_id || !isStayPurchase(purchase) || purchase.product_id !== hold.product_id) {
+   throw new Error('Approved stay payment has no stay or guest conversation')
+  }
+  const now = new Date().toISOString()
+  const bookable = await approvedStayPaymentPredicate(db, { ...approval, organizationId: payment.organization_id,
+   productId: purchase.product_id, checkIn: purchase.check_in_date, checkOut: purchase.check_out_date,
+   conversationId: hold.conversation_id, buyerUserId: hold.buyer_user_id, through: now, allowInFlight: payment.id })
+  const renewed = await execute(db, `UPDATE payment_checkout_holds SET expires_at=MAX(expires_at, ?)
+    WHERE payment_id=? AND organization_id=? AND status='active' AND ${bookable.query}
+      AND EXISTS (SELECT 1 FROM payments p WHERE p.id=payment_checkout_holds.payment_id AND json_type(p.review_json,'$.confirmation_started_at')='text')`,
+  [confirmationHoldUntil(payment, now), payment.id, payment.organization_id, ...bookable.params])
+  booked = renewed.meta.changes === 1
+ } else if (!booked) {
+  booked = await commitBooking(db, env, payment, new Date(charge.created * 1000).toISOString()) !== null
+ }
  try{
   return booked?await stripe.paymentIntents.capture(intent.id,{},account):await stripe.paymentIntents.cancel(intent.id,{},account)
  }catch(error){
@@ -153,10 +182,14 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
   return hold.converted_booking_id
  }
  const now=new Date().toISOString()
- const bookingId=crypto.randomUUID()
  const snapshot:unknown=JSON.parse(payment.price_snapshot_json)
  if(!isRecord(snapshot)||!isRecord(snapshot.policy))throw new Error('Booking payment has no frozen booking policy')
+ const approval = approvedStayBooking(snapshot)
+ const bookingId = approval?.bookingId ?? crypto.randomUUID()
  const policy=JSON.stringify(snapshot.policy)
+ const bookingExists = approval
+  ? { query: `EXISTS (SELECT 1 FROM bookings WHERE id=? AND organization_id=? AND status='confirmed' AND version=?)`, params: [bookingId, payment.organization_id, approval.version + 1] }
+  : { query: 'EXISTS (SELECT 1 FROM bookings WHERE id=?)', params: [bookingId] }
  let claim:BatchQuery[]
  if(hold.session_id){
   if(!hold.conversation_id)throw new Error('Visit hold has no guest conversation')
@@ -172,23 +205,41 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
   if(!isStayPurchase(purchase)||purchase.product_id!==hold.product_id||purchase.total_minor!==payment.amount)throw new Error('Stay payment has no valid stay purchase')
   const buyerUserId=payment.buyer_user_id??hold.buyer_user_id
   if(!buyerUserId)throw new Error('Stay payment has no guest account')
-  const home=await readStayHome(db,{organizationId:payment.organization_id,actorId:'system',manage:true},purchase.product_id)
-  claim=[
-   ...stayFromCheckoutQueries({organizationId:payment.organization_id,stayId:bookingId,holdId:hold.id,paymentId:payment.id,buyerUserId,now,stay:{quote:purchase,guest:purchase.guest},home,policy}),
-   ...await turnoverTaskQueries(db,{organizationId:payment.organization_id,now,before:null,after:{id:bookingId,product_id:purchase.product_id,status:'confirmed',check_in_date:purchase.check_in_date,check_out_date:purchase.check_out_date}}),
-  ]
+  const turnover = await turnoverTaskQueries(db, { organizationId: payment.organization_id, now, before: null,
+   after: { id: bookingId, product_id: purchase.product_id, status: 'confirmed', check_in_date: purchase.check_in_date, check_out_date: purchase.check_out_date } })
+  if (approval) {
+   if (!hold.conversation_id || hold.buyer_user_id !== buyerUserId || !hold.location_id) throw new Error('Approved stay payment has no guest conversation')
+   const bookable = await approvedStayPaymentPredicate(db, { ...approval, organizationId: payment.organization_id,
+    productId: purchase.product_id, checkIn: purchase.check_in_date, checkOut: purchase.check_out_date,
+    conversationId: hold.conversation_id, buyerUserId, through: now, allowInFlight: payment.id })
+   claim = [
+    { query: `UPDATE bookings SET status='confirmed', version=version+1, updated_at=? WHERE id=? AND organization_id=? AND ${bookable.query}`,
+      params: [now, bookingId, payment.organization_id, ...bookable.params] },
+    organizationEventQuery({ organizationId: payment.organization_id, locationId: hold.location_id, actorId: null, eventType: 'stay.updated',
+     entityType: 'stay', entityId: bookingId, metadata: { status: 'confirmed', payment_id: payment.id },
+     dedupeKey: stayRequestConfirmationKey(bookingId), onlyIfPreviousChangedOneRow: true }),
+    ...turnover,
+    ...conversationTaskQueries(hold.conversation_id, now),
+   ]
+  } else {
+   const home = await readStayHome(db, { organizationId: payment.organization_id, actorId: 'system', manage: true }, purchase.product_id)
+   claim = [
+    ...stayFromCheckoutQueries({ organizationId: payment.organization_id, stayId: bookingId, holdId: hold.id, paymentId: payment.id, buyerUserId, now, stay: { quote: purchase, guest: purchase.guest }, home, policy }),
+    ...turnover,
+   ]
+  }
  }
  try{
   await executeBatch(db,[...claim,
-   {query:`UPDATE payment_checkout_holds SET status='converted',converted_booking_id=? WHERE id=? AND organization_id=? AND status IN ('active','released') AND EXISTS(SELECT 1 FROM bookings WHERE id=?)`,params:[bookingId,hold.id,payment.organization_id,bookingId]},
-   {query:`UPDATE payments SET subject_id=?,updated_at=? WHERE id=? AND organization_id=? AND EXISTS(SELECT 1 FROM bookings WHERE id=?)`,params:[bookingId,now,payment.id,payment.organization_id,bookingId]},
+   {query:`UPDATE payment_checkout_holds SET status='converted',converted_booking_id=? WHERE id=? AND organization_id=? AND status IN ('active','released') AND ${bookingExists.query}`,params:[bookingId,hold.id,payment.organization_id,...bookingExists.params]},
+   {query:`UPDATE payments SET subject_id=?,updated_at=? WHERE id=? AND organization_id=? AND ${bookingExists.query}`,params:[bookingId,now,payment.id,payment.organization_id,...bookingExists.params]},
    // A refused inventory claim changes nothing. A committed booking requires
    // its conversation and its checkout association in the same transaction.
-   assertBookingBatchWrite({ query: `NOT EXISTS (SELECT 1 FROM bookings WHERE id=?) OR EXISTS (
+   assertBookingBatchWrite({ query: `NOT ${bookingExists.query} OR EXISTS (
      SELECT 1 FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id AND p.organization_id=h.organization_id
        JOIN conversations c ON c.organization_id=p.organization_id AND c.booking_id=p.subject_id AND c.kind='booking'
      WHERE h.id=? AND h.organization_id=? AND h.status='converted' AND h.converted_booking_id=? AND p.subject_id=h.converted_booking_id
-       AND (h.session_id IS NULL OR c.id=h.conversation_id))`, params:[bookingId,hold.id,payment.organization_id,bookingId] }),
+       AND (h.conversation_id IS NULL OR c.id=h.conversation_id))`, params:[...bookingExists.params,hold.id,payment.organization_id,bookingId] }),
   ],{operation:'Convert paid booking hold'})
  }catch(error){
   // A night someone else holds by now refuses the batch: the guest is refunded in full. Any other failure is raised unless a concurrent conversion landed.
@@ -206,8 +257,20 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
 
 const CONFIRMATION_HOLD_MS=60*60*1000
 
+export async function releaseApprovedStayConfirmation(db: DbClient, payment: Payment) {
+ if (!payment.checkout_expires_at) throw new Error('Approved stay payment has no checkout window')
+ await executeBatch(db, [
+  { query: `UPDATE payments SET review_json=json_remove(review_json,'$.confirmation_started_at')
+    WHERE id=? AND organization_id=? AND captured_amount=0 AND review_json=? AND json_type(review_json,'$.confirmation_started_at')='text'`,
+  params: [payment.id, payment.organization_id, payment.review_json] },
+  { query: "UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND organization_id=? AND status='active' AND changes()=1",
+  params: [payment.checkout_expires_at, payment.id, payment.organization_id] },
+ ], { operation: 'Release failed approved-stay payment' })
+}
+
 /** When a hold on a payment that has begun confirming ends: an hour on, and never before the buyer's time to pay. */
-export function confirmationHoldUntil(payment:Pick<Payment,'checkout_expires_at'>):string{
+export function confirmationHoldUntil(payment:Pick<Payment,'checkout_expires_at'>, approvedStartedAt?: string):string{
+ if (approvedStartedAt) return new Date(Date.parse(approvedStartedAt) + CONFIRMATION_HOLD_MS).toISOString()
  const buyerWindow=Date.parse(payment.checkout_expires_at??'')
  if(!Number.isFinite(buyerWindow))throw new Error('Payment has no checkout window')
  return new Date(Math.max(Date.now()+CONFIRMATION_HOLD_MS,buyerWindow)).toISOString()

@@ -11,7 +11,7 @@ import { createSession, listBookableSessions, setProductBookingConfig } from '..
 import { createProductBooking } from '../../server/domain/product-bookings.ts'
 import { createTables } from './support/table-product.ts'
 import { createStay, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
-import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
+import { sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
 import { listOpportunities } from '../../server/domain/opportunities.ts'
 import { memberAccessPrincipal, resolveOrganizationMembership } from '../../server/utils/member-access.ts'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
@@ -42,7 +42,7 @@ async function boot() {
   const db = await runtime.getD1Database('DB')
   const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'today-reservations-proof-secret-long-enough', BETTER_AUTH_URL: 'https://proof.example',
     STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'today-reservations-reply-secret',
-    EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    PREVIEW_SECRET: 'today-reservations-preview-proof-secret', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
   await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
   await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner', 'owner@proof.example', 1, 0, 0)").bind(OWNER).run()
   await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('owner-account', ?, 'credential', ?, ?, 0, 0)").bind(OWNER, OWNER, await hashPassword(PASSWORD)).run()
@@ -184,8 +184,8 @@ test('Today shows every booking type as a reservation card for its own business,
     assert.deepEqual(listed.map(opportunity => [opportunity.id, opportunity.conversation_id, opportunity.message]), [[law.reservations.cards[0]!.suggestion!.id, evaConsultation, consultationMessage]])
 
     // The host's message takes the suggestion off the card; the card stays.
-    const replied = await executeGuestThreadOperation(db, { threadId: evaConsultation, organizationId: 'law', action: 'reply', body: consultationMessage,
-      actorUserId: OWNER, idempotencyKey: 'eva-welcome', env, financialWritesAllowed: false })
+    const replied = await sendGuestThreadReply(db, { threadId: evaConsultation, organizationId: 'law', body: consultationMessage,
+      actorUserId: OWNER, idempotencyKey: 'eva-welcome', env })
     assert.equal(replied.ok, true, JSON.stringify(replied))
     const after = await today('law', 'upcoming')
     assert.deepEqual(after.reservations.cards.map(shape), [

@@ -5,7 +5,7 @@ import { PUBLIC_CACHE_REVISION_SQL, publicCacheRevision } from '~/server/utils/e
 
 import { HTTPError, defineHandler  } from 'nitro';
 import type { H3Event } from 'nitro';
-import { redirect } from 'nitro/h3';
+import { redirect, setResponseHeader } from 'nitro/h3';
 import { queryFirst, type DbClient } from "~/server/db";
 import { TENANT_TYPES } from "~/utils/tenant-routing";
 import { cloudflareEnv, isInternalSelfFetch } from "../utils/api-response";
@@ -15,7 +15,7 @@ import {
   isPlatformHost,
   usesTenantHeader,
 } from "../utils/tenant-hosts";
-import { previewSecretOf, resolvePreviewAuthorization } from "../utils/preview-token";
+import { clearPreviewAuthorization, previewSecretOf, PUBLIC_WEBSITE_QUERY, resolvePreviewAuthorization } from "../utils/preview-token";
 import { PLATFORM_SITE, resolvePublicSite } from "~/utils/site-routing";
 import { organizationSocialMediaFromJson } from '~/server/utils/public-social-image'
 import { resolveOrganizationFontPreset } from '~/shared/organization-fonts'
@@ -247,7 +247,7 @@ function setResolvedTenantContext(
   }
 }
 
-const SESSION_SCOPED_API_PREFIXES = ["/api/dashboard", "/api/organizations", "/api/mcp", "/api/invite-links", "/api/invitations", "/api/integrations/channex"] as const;
+const SESSION_SCOPED_API_PREFIXES = ["/api/dashboard", "/api/organizations", "/api/messages", "/api/mcp", "/api/integrations/channex"] as const;
 
 export default defineHandler(async (event) => {
   // Nested self-fetches (i18n/icon/internal API calls during SSR) never carry
@@ -269,7 +269,7 @@ export default defineHandler(async (event) => {
   // own access and never read one either. A fresh database has no platform
   // organization until the E2E seed's bootstrap creates it.
   if (tenantPath === "/api/health" || tenantPath.startsWith("/api/dev/")) return;
-  // The dashboard, organization, MCP, invite-link and invitation APIs are scoped by the session and the
+  // The dashboard, organization, Messages and MCP APIs are scoped by the session and the
   // organization the request names, never by the host. Resolving the platform
   // site for them cost every call its tenant row, its redirect lookups and the
   // preview check before authentication ran: six D1 statements and 100-190 ms
@@ -304,6 +304,12 @@ export default defineHandler(async (event) => {
       return redirect(`https://${tenant.successorDomain}${url.pathname}${url.search}`, 301)
     }
     throw new HTTPError({ statusCode: 410, statusMessage: 'Gone' })
+  }
+
+  if (tenant && !isPlatformRequest && event.method === 'GET' && tenantPath === '/' && url.search === PUBLIC_WEBSITE_QUERY) {
+    clearPreviewAuthorization(event)
+    setResponseHeader(event, 'cache-control', 'private, no-store')
+    return redirect('/', 303)
   }
 
   if (tenant && await authorizeTenant(event, tenant)) {

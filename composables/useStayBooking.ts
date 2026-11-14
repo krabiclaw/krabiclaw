@@ -1,4 +1,5 @@
 import type { MaybeRefOrGetter } from 'vue'
+import type { LodgingConfirmationMode } from '~/shared/lodging-booking'
 import type { PublicProduct } from '~/server/types/products'
 import type { PublicProductLocation } from '~/server/utils/public-products'
 import type { PublicStayCalendar, PublicStayNight, StayQuote } from '~/server/domain/stays'
@@ -15,13 +16,20 @@ export interface StayBookingContext {
   location: PublicProductLocation | null
   /** Whether the stay is paid for on the site; without it the chosen dates go to the host as an enquiry. */
   checkout: boolean
+  confirmationMode: LodgingConfirmationMode | null
+}
+
+interface StayRequestReceipt {
+  activity_path: string
+  status: 'pending' | 'confirmed' | 'cancelled'
+  request_status: 'awaiting_approval' | 'awaiting_payment' | null
 }
 
 /**
  * Booking a place to stay on the site: the guest picks check-in and checkout
  * on the home's public nights, sets the party, sees the server's quote, gives
- * their contact details and pays the full amount on the site's pay page. The
- * nights come from the home's own calendar and the price from the server's
+ * their contact details and either pays or asks the host to approve their
+ * request first. The nights come from the home's calendar and the price from the server's
  * quote; nothing here prices or validates a stay on its own.
  */
 export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
@@ -31,6 +39,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   const route = useRoute()
   const bookingOpen = ref(false)
   const bookingStep = ref(1)
+  const submittedRequest = ref<StayRequestReceipt | null>(null)
   const contactForm = ref<ContactFormState>({ name: '', email: '', phone: '', notes: '', answers: {} })
   // The home's own questions, asked beside the guest's contact details.
   const formQuestions = useFormQuestionState(() => context.value.product.stay, computed({ get: () => contactForm.value.answers, set: (answers) => { contactForm.value.answers = answers } }))
@@ -356,6 +365,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   })
 
   function openBooking(step: 1 | 2 = quote.value && checkout.value ? 2 : 1) {
+    submittedRequest.value = null
     bookingStep.value = step
     if (step === 1) dateField.value = checkIn.value && !checkOut.value ? 'checkOut' : 'checkIn'
     bookingOpen.value = true
@@ -363,7 +373,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
 
 
   async function submitBooking(contact: ContactFormState) {
-    if (submitting.value) return
+    if (submitting.value || submittedRequest.value) return
     if (!quote.value || !checkIn.value || !checkOut.value) {
       bookingStep.value = 1
       return
@@ -373,23 +383,36 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     formQuestions.clear()
     try {
       const guest = { name: contact.name.trim(), email: contact.email.trim(), phone: contact.phone?.trim() || null, notes: contact.notes?.trim() || null }
-      const fingerprint = JSON.stringify([context.value.product.id, checkIn.value, checkOut.value, adults.value, children.value, infants.value, guest.name, guest.email, guest.phone, guest.notes, formQuestions.submission()])
+      const confirmationMode = context.value.confirmationMode
+      if (!confirmationMode) throw new Error('The home has no booking policy')
+      const fingerprint = JSON.stringify([context.value.product.id, confirmationMode, checkIn.value, checkOut.value, adults.value, children.value, infants.value, guest.name, guest.email, guest.phone, guest.notes, formQuestions.submission()])
       if (fingerprint !== requestFingerprint) {
         requestKey = crypto.randomUUID()
         requestFingerprint = fingerprint
       }
       type CheckoutResponse = { success: true; status: 'checkout'; payment_id: string; pay_path: string; purchase_claim: string; expires_at: string }
+        | (StayRequestReceipt & { success: true })
       const response = await publicApiMutation<CheckoutResponse>(`/api/public/products/${encodeURIComponent(context.value.product.slug)}/book`, {
         method: 'POST',
         body: {
           idempotency_key: requestKey, check_in_date: checkIn.value, check_out_date: checkOut.value,
           adults: adults.value, children: children.value, infants: infants.value,
           guest_name: guest.name, guest_email: guest.email, guest_phone: guest.phone, notes: guest.notes, ...formQuestions.submission(), locale: locale.value,
+          confirmation_mode: confirmationMode,
           page_event_id: await pageEventId(),
         },
-        validate: (value): value is CheckoutResponse => isRecord(value) && value.success === true && value.status === 'checkout' && typeof value.pay_path === 'string' && value.pay_path.startsWith('/pay/')
-          && typeof value.purchase_claim === 'string' && typeof value.payment_id === 'string' && isValidInstant(value.expires_at),
+        validate: (value): value is CheckoutResponse => isRecord(value) && value.success === true
+          && (value.status === 'checkout'
+            ? typeof value.pay_path === 'string' && value.pay_path.startsWith('/pay/') && typeof value.purchase_claim === 'string'
+              && typeof value.payment_id === 'string' && isValidInstant(value.expires_at)
+            : typeof value.activity_path === 'string' && value.activity_path.startsWith('/dashboard/account/activity/stay/')
+              && (value.status === 'pending' ? value.request_status === 'awaiting_approval' || value.request_status === 'awaiting_payment'
+                : (value.status === 'confirmed' || value.status === 'cancelled') && value.request_status === null)),
       })
+      if (response.status !== 'checkout') {
+        submittedRequest.value = response
+        return
+      }
       // The site's own pay page; the claim rides in the fragment, which never leaves the browser.
       await navigateTo({ path: response.pay_path, hash: `#${response.purchase_claim}` })
     } catch (error) {
@@ -408,6 +431,8 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   }
 
   const checkout = computed(() => context.value.checkout)
+  const needsApproval = computed(() => checkout.value && context.value.confirmationMode === 'review')
+  const actionLabel = computed(() => t(!checkout.value ? 'stay.send_enquiry' : needsApproval.value ? 'stay.request_to_book' : 'stay.reserve'))
   /** The contact form, told which home, which nights and how many guests the enquiry is about. */
   const enquiryPath = computed(() => {
     const about = [context.value.product.name, rangeLabel.value, quote.value ? guestsLabel.value : ''].filter(Boolean).join(' · ')
@@ -415,7 +440,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   })
 
   return {
-    checkout, enquiryPath,
+    checkout, enquiryPath, needsApproval, actionLabel, submittedRequest,
     bookingOpen, bookingStep, contactForm, formQuestions, defaultPhoneCountry, calendar, calendarPending, calendarError, checkIn, checkOut, dateField, adults, children, infants, maxGuests,
     quote, quotePending, bookingError, submitting, breakdown, priceSummary, rangeLabel, guestsLabel, nightCount,
     openCalendar, loadCalendar, horizon, night, canCheckIn, canCheckOut, checkInHint, checkOutHint, firstCheckIn, earliestCheckOut, selectDay, setCheckIn, setCheckOut, clearDates, clearCheckOut, openBooking, submitBooking, money, nightsLabel, dateLabel,

@@ -65,22 +65,10 @@
     <UDashboardGroup
       :ui="{ base: ['z-40', showNavChrome ? 'top-(--kc-dashboard-banner) md:top-(--kc-dashboard-chrome-top)' : 'top-(--kc-dashboard-chrome-top)', showBottomNav ? 'max-md:bottom-(--kc-dashboard-bottom-nav)' : ''].join(' ') }"
     >
-      <UDashboardSearch
+      <LazyDashboardSearchPalette
+        v-if="dashboardSearchMounted"
         v-model:open="dashboardSearchOpen"
-        v-model:search-term="dashboardSearchTerm"
-        title="Search"
-        description="Search this organization"
-        placeholder="Search…"
-        size="lg"
-        :fullscreen="!navigationWidth"
-        :groups="dashboardSearchGroups"
-        :loading="dashboardSearchLoading"
-        :color-mode="false"
-      >
-        <template v-if="dashboardSearchError" #footer>
-          <p class="text-sm text-error" role="alert" data-testid="dashboard-search-error">{{ dashboardSearchError }}</p>
-        </template>
-      </UDashboardSearch>
+      />
 
       <slot />
     </UDashboardGroup>
@@ -143,10 +131,10 @@ import DashboardTopNav from '~/lib/components/workspace/dashboard/DashboardTopNa
 import DashboardMenuSlideover from '~/lib/components/workspace/dashboard/DashboardMenuSlideover.vue'
 import type { DashboardScopeHeaderModel } from '~/lib/components/workspace/dashboard/DashboardScopeHeader.vue'
 import { dashboardScopeHeaderModelKey } from '~/lib/components/workspace/dashboard/dashboardScopeHeaderContext'
+import { dashboardSearchOpenKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import { authClient } from '~/lib/auth-client'
 import { reconcileAnalyticsConsent } from '~/composables/useAnalyticsConsentReconciliation'
 import { useAnalytics } from '~/composables/useAnalytics'
-import '~/assets/css/dashboard.css'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -185,11 +173,13 @@ const refreshSession = () => session.value.refetch()
 const { trackDashboardVisited, setUserId } = useAnalytics()
 const impersonationError = ref<string | null>(null)
 const stoppingImpersonation = ref(false)
-const { searchTerm: dashboardSearchTerm, loading: dashboardSearchLoading, error: dashboardSearchError, groups: dashboardSearchGroups } = useDashboardSearch()
-// The Menu's Search row and a list's search icon open the same palette ⌘K does.
 const dashboardSearchOpen = ref(false)
-// Below the top nav the palette is the screen, like every other sheet here; with it, a card.
-const navigationWidth = useDashboardBreakpoint('md')
+const dashboardSearchMounted = ref(false)
+function openDashboardSearch() {
+  dashboardSearchMounted.value = true
+  dashboardSearchOpen.value = true
+}
+provide(dashboardSearchOpenKey, openDashboardSearch)
 const nuxtApp = useNuxtApp()
 const pushSubscription = usePushSubscription()
 onMounted(() => {
@@ -214,6 +204,16 @@ const shellError = computed(() =>
   ?? (session.value.data ? null : session.value.error)
   ?? (unref(organizationsState).data ? null : unref(organizationsState).error)
   ?? null)
+defineShortcuts({
+  meta_k: {
+    usingInput: true,
+    handler: () => {
+      if (shellError.value) return
+      if (dashboardSearchOpen.value) dashboardSearchOpen.value = false
+      else openDashboardSearch()
+    },
+  },
+})
 const shellRefetchError = computed(() => {
   if (shellError.value) return null
   const error = session.value.error ?? unref(organizationsState).error
@@ -276,7 +276,9 @@ const realtimeOrganizationSlug = computed(() => {
   const slug = router.currentRoute.value.params.org_slug
   return !stoppingImpersonation.value && typeof slug === 'string' ? slug : null
 })
-const realtime = provideDashboardInvalidations(realtimeOrganizationSlug)
+const realtimePersonal = computed(() => !stoppingImpersonation.value && !realtimeOrganizationSlug.value
+  && /^\/dashboard\/account\/(messages|activity)(\/|$)/.test(router.currentRoute.value.path))
+const realtime = provideDashboardInvalidations(realtimeOrganizationSlug, realtimePersonal, computed(() => sessionData.value?.user.id), computed(() => session.value.isPending))
 
 // A failed background refetch leaves the shell on what it had and says so;
 // a dropped live connection leaves every screen on its last read. Either is

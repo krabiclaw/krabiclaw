@@ -87,9 +87,26 @@
               </span>
             </div>
           </div>
-          <div v-else class="flex flex-col items-center justify-center h-40 my-3 rounded-2xl bg-[#F7F7F7] dark:bg-neutral-800 text-muted">
-            <UIcon name="i-lucide-file-text" class="size-8 mb-1.5 opacity-60" />
-            <span class="text-xs font-medium">{{ pagesCount }} {{ pagesCount === 1 ? 'page' : 'pages' }}</span>
+          <!-- Image Fan Stack (Placeholder when no images) -->
+          <div v-else class="relative flex items-center justify-center h-44 sm:h-52 my-3 select-none">
+            <!-- Left placeholder card -->
+            <div
+              class="absolute left-1/2 -translate-x-[115%] w-36 sm:w-44 h-28 sm:h-36 rounded-2xl bg-[#F7F7F7] dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-700/60 shadow-md -rotate-6 opacity-90 transition-transform group-hover:-rotate-8 group-hover:-translate-x-[120%]"
+            />
+            <!-- Right placeholder card -->
+            <div
+              class="absolute left-1/2 translate-x-[15%] w-36 sm:w-44 h-28 sm:h-36 rounded-2xl bg-[#F7F7F7] dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-700/60 shadow-md rotate-6 opacity-90 transition-transform group-hover:rotate-8 group-hover:translate-x-[20%]"
+            />
+            <!-- Center placeholder card with icon and badge -->
+            <div class="relative w-40 sm:w-48 h-32 sm:h-40 rounded-2xl overflow-hidden bg-[#F7F7F7] dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-700/60 shadow-xl z-10 flex items-center justify-center transition-transform group-hover:scale-105">
+              <UIcon
+                name="i-lucide-image"
+                class="size-10 sm:size-12 text-neutral-300 dark:text-neutral-600 transition-transform duration-300 group-hover:scale-110"
+              />
+              <span class="absolute top-2.5 left-2.5 bg-white/95 dark:bg-neutral-900/95 text-neutral-900 dark:text-neutral-100 shadow-sm text-xs font-semibold px-2.5 py-1 rounded-full">
+                {{ pagesCount }} {{ pagesCount === 1 ? 'page' : 'pages' }}
+              </span>
+            </div>
           </div>
 
           <!-- Task note under images -->
@@ -274,6 +291,7 @@
         </div>
       </div>
 
+      <UAlert v-if="preferencesError" color="error" variant="soft" :description="getErrorMessage(preferencesError, 'Preferences could not be loaded')" />
       <EditorNavigationList :groups="navigationGroups" :active-item="detailKey" />
 
       <!-- Airbnb Parity: Featured Brand ("About the business") card -->
@@ -392,12 +410,14 @@
         <p class="mt-2 text-sm text-muted max-w-sm mx-auto leading-relaxed">
           {{ isPublished
             ? 'Only members with dashboard access or a preview link will be able to view the site. Visitors will see an offline notice.'
-            : 'Your website will become public immediately and search engines will be able to index it.' }}
+            : 'Anyone can visit your website once it’s public.' }}
         </p>
+        <p v-if="!isPublished && loadedSettings?.public_url" class="mt-3 break-all text-sm">{{ loadedSettings.public_url }}</p>
+        <UAlert v-if="editorError" class="mt-4" color="error" :description="editorError" />
 
         <div class="mt-8 space-y-3">
           <UButton
-            :label="isPublished ? 'Switch to draft' : 'Publish website'"
+            :label="isPublished ? 'Switch to draft' : 'Make public'"
             color="neutral"
             variant="solid"
             size="xl"
@@ -407,6 +427,7 @@
             data-testid="confirm-status-toggle"
             @click="toggleStatusFromModal"
           />
+          <UButton v-if="publishingFromToday" label="Preview" color="neutral" variant="ghost" block :to="todayPath" />
           <UButton
             label="Cancel"
             color="neutral"
@@ -474,6 +495,7 @@ export interface OrganizationSettingsForm {
   seo_description: string
   canonical_url: string
   native_consultations: boolean
+  stay_confirmation_mode: LodgingConfirmationMode | null
 }
 
 /** Live and Draft are the tenant's; Suspended is KrabiClaw's hold. */
@@ -481,6 +503,7 @@ export type OrganizationStatus = 'active' | 'inactive' | 'suspended'
 
 export interface OrganizationSettingsResponse {
   theme?: string
+  public_url?: string | null
   status: OrganizationStatus
   name?: string | null
   brand_description?: string | null
@@ -496,6 +519,8 @@ export interface OrganizationSettingsResponse {
   canonical_url: string | null
   /** Null when the organization has no consultation settings, so no website booking to switch. */
   consultation_mode: 'native' | 'external_url' | 'native_disabled' | null
+  lodging_booking?: LodgingBookingPolicy
+  lodging_booking_choices?: LodgingBookingChoice[]
   inquiry_questions: FormQuestion[]
   inquiry_questions_revision: string
   vertical?: string
@@ -527,6 +552,7 @@ export interface OrganizationSettingsEditor {
   resetPalette: () => Promise<void>
   /** The saved website booking mode, or null where the organization has no consultation settings. */
   consultationMode: ComputedRef<OrganizationSettingsResponse['consultation_mode']>
+  lodgingBookingChoices: ComputedRef<LodgingBookingChoice[]>
   /** The saved logo assets' URLs, for previews before a new pick is saved. */
   logoUrl: (assetId: string | null) => string | null
   revert: () => void
@@ -543,6 +569,7 @@ export const organizationSettingsEditorKey = Symbol('organization-settings-edito
 <script setup lang="ts">
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
 import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
+import { isLodgingConfirmationMode, type LodgingBookingChoice, type LodgingBookingPolicy, type LodgingConfirmationMode } from '~/shared/lodging-booking'
 import { isCurrencyCode } from '~/shared/currencies'
 import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset, resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { parseSitePalette } from '~/shared/site-palette'
@@ -552,6 +579,7 @@ import PageTasksModal from '~/components/dashboard/PageTasksModal.vue'
 import { isTenantPageListResponse, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
 import { getVerticalLabel } from '~/utils/vertical-copy'
 import type { BlogPost } from '~/lib/components/workspace/blog/types'
+import type { CatalogScreen } from '~/shared/catalog-screen'
 
 const props = withDefaults(defineProps<{ surface?: 'brand' | 'settings' | 'preferences' }>(), { surface: 'settings' })
 const surface = computed(() => props.surface)
@@ -589,6 +617,14 @@ const isSettingsResponse = (value: unknown): value is { success: boolean; settin
   && (value.settings.font_preset === undefined || isOrganizationFontPreset(value.settings.font_preset))
   && (value.settings.palette === null || isRecord(value.settings.palette))
   && (value.settings.default_currency === undefined || value.settings.default_currency === null || typeof value.settings.default_currency === 'string')
+  && (value.settings.vertical !== 'lodging' || (
+    isRecord(value.settings.lodging_booking)
+    && isLodgingConfirmationMode(value.settings.lodging_booking.confirmation_mode)
+    && value.settings.lodging_booking.online_payment_required === true
+    && Array.isArray(value.settings.lodging_booking_choices)
+    && value.settings.lodging_booking_choices.every(choice => isRecord(choice) && isLodgingConfirmationMode(choice.value)
+      && typeof choice.label === 'string' && typeof choice.description === 'string' && typeof choice.icon === 'string')
+  ))
   && [value.settings.seo_title, value.settings.seo_description, value.settings.canonical_url].every(field => field === null || typeof field === 'string')
   && (value.settings.consultation_mode === null || value.settings.consultation_mode === 'native' || value.settings.consultation_mode === 'external_url' || value.settings.consultation_mode === 'native_disabled')
   && isOrganizationStatus(value.settings.status)
@@ -610,11 +646,13 @@ const form = reactive<OrganizationSettingsForm>({
   logoAssetId: null, logoPresentation: ORIGINAL_LOGO_PRESENTATION, logoDarkAssetId: null, logoDarkPresentation: ORIGINAL_LOGO_PRESENTATION,
   faviconAssetId: null, socialShareAssetId: null, contact_email: '', palette: null, font_preset: 'default',
   default_currency: null, status: 'inactive',
-  seo_title: '', seo_description: '', canonical_url: '', native_consultations: false,
+  seo_title: '', seo_description: '', canonical_url: '', native_consultations: false, stay_confirmation_mode: null,
 })
 
 const statusModalOpen = ref(false)
 const togglingStatus = ref(false)
+const publishingFromToday = computed(() => route.query.publish === '1')
+const todayPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.org_slug))}`)
 const isPublished = computed(() => form.status === 'active')
 const statusLabel = computed(() => {
   if (form.status === 'active') return 'Published'
@@ -635,11 +673,13 @@ const statusDescription = computed(() => {
 async function toggleStatusFromModal() {
   if (form.status === 'suspended') return
   togglingStatus.value = true
+  editorError.value = null
   try {
     const nextStatus: OrganizationStatus = form.status === 'active' ? 'inactive' : 'active'
     await patchSettings({ status: nextStatus })
     form.status = nextStatus
     statusModalOpen.value = false
+    if (nextStatus === 'active' && publishingFromToday.value) await navigateTo(todayPath.value)
   } catch (error) {
     editorError.value = getErrorMessage(error, 'Failed to update website status')
   } finally {
@@ -654,8 +694,6 @@ const nameCharactersRemaining = computed(() => 50 - form.name.length)
 const descriptionCharactersRemaining = computed(() => 500 - form.brand_description.length)
 
 function explicitSummary(value: string | null | undefined, empty = 'Not set') { return value?.trim() || empty }
-const STATUS_LABELS: Record<OrganizationStatus, string> = { active: 'Published', inactive: 'Draft', suspended: 'Suspended' }
-const domainSummary = computed(() => dashboard.organization.value?.custom_domain || dashboard.organization.value?.public_url || 'Not connected')
 const brandItems = computed<EditorNavigationItem[]>(() => [
   { id: 'name', label: 'Brand name', summary: explicitSummary(loadedSettings.value?.name), icon: 'i-lucide-building-2', to: `${brandPath.value}/name` },
   { id: 'description', label: 'Description', summary: explicitSummary(loadedSettings.value?.brand_description), icon: 'i-lucide-file-text', to: `${brandPath.value}/description` },
@@ -803,11 +841,15 @@ const bookingCardSubtitle = computed(() => {
       ? 'Accepting consultation requests online'
       : 'Inquiries only (offline scheduling)'
   }
+  if (v === 'lodging') {
+    const settings = loadedSettings.value
+    return settings?.lodging_booking_choices?.find(choice => choice.value === settings.lodging_booking?.confirmation_mode)?.label
+  }
   const questionsCount = loadedSettings.value?.inquiry_questions?.length ?? 0
   if (questionsCount > 0) {
     return `${questionsCount} intake ${questionsCount === 1 ? 'question' : 'questions'} configured`
   }
-  return 'All bookings are automatically approved'
+  return 'Contact fields only'
 })
 
 const brandLogoUrl = computed(() => {
@@ -846,40 +888,17 @@ const brandYearsActive = computed(() => {
   return Math.max(1, diff)
 })
 
-const currencyIcon = computed(() => {
-  const code = loadedSettings.value?.default_currency?.toUpperCase()
-  if (code === 'EUR') return 'i-lucide-euro'
-  if (code === 'GBP') return 'i-lucide-pound-sterling'
-  if (code === 'JPY' || code === 'CNY') return 'i-lucide-japanese-yen'
-  return 'i-lucide-dollar-sign'
-})
-
-const preferencesItems = computed<EditorNavigationItem[]>(() => [
-  {
-    id: 'status',
-    label: 'Status',
-    summary: loadedSettings.value ? STATUS_LABELS[loadedSettings.value.status] : 'Not set',
-    status: form.status === 'active' ? 'success' : form.status === 'suspended' ? 'error' : 'neutral',
-    to: `${preferencesPath.value}/status`,
-  },
-  { id: 'localization', label: 'Languages', summary: 'Languages the site is published in', icon: 'i-lucide-languages', to: `${preferencesPath.value}/localization` },
-  { id: 'domains', label: 'Domains', summary: domainSummary.value, icon: 'i-lucide-globe-2', to: `${preferencesPath.value}/domains` },
-  { id: 'currency', label: 'Currency', summary: explicitSummary(loadedSettings.value?.default_currency), icon: currencyIcon.value, to: `${preferencesPath.value}/currency` },
-  {
-    id: 'booking',
-    label: bookingCardTitle.value,
-    summary: bookingCardSubtitle.value,
-    icon: 'i-lucide-calendar-check',
-    to: `${preferencesPath.value}/booking`,
-  },
-  {
-    id: 'reviews',
-    label: 'Review settings',
-    summary: 'Manual approval',
-    icon: 'i-lucide-star',
-    to: `${preferencesPath.value}/reviews`,
-  },
-])
+const { data: preferences, error: preferencesError, refresh: refreshPreferences } = await useAsyncData(
+  `website-preferences:${organizationId}:${surface.value}`,
+  () => surface.value === 'preferences'
+    ? dashboardApi('/api/dashboard/offering', {
+        query: { view: 'website-preferences' },
+        validate: (value): value is CatalogScreen => isRecord(value) && Array.isArray(value.rows)
+          && value.rows.every(row => isRecord(row) && typeof row.id === 'string' && typeof row.label === 'string'),
+      })
+    : Promise.resolve(null),
+)
+const preferencesItems = computed(() => (preferences.value?.rows ?? []).filter(row => row.to))
 
 const navigationGroups = computed(() => {
   if (surface.value === 'brand') return [{ id: 'brand', items: brandItems.value }]
@@ -888,7 +907,9 @@ const navigationGroups = computed(() => {
 })
 
 const autoOpenDestination = computed(() => {
-  if (surface.value === 'settings') return pagesPath.value
+  if (surface.value === 'settings') {
+    return publishingFromToday.value ? { path: pagesPath.value, query: { publish: '1' } } : pagesPath.value
+  }
   return navigationGroups.value[0]?.items.find(item => item.to)?.to ?? null
 })
 
@@ -912,7 +933,7 @@ function editorSignature(key: string | null) {
     case 'currency': return JSON.stringify(form.default_currency)
     case 'status': return JSON.stringify(form.status)
     case 'search': return JSON.stringify([form.seo_title, form.seo_description, form.canonical_url])
-    case 'booking': return JSON.stringify(form.native_consultations)
+    case 'booking': return JSON.stringify([form.native_consultations, form.stay_confirmation_mode])
     default: return ''
   }
 }
@@ -983,6 +1004,7 @@ function fillForm(settings: OrganizationSettingsResponse) {
   form.seo_description = settings.seo_description ?? ''
   form.canonical_url = settings.canonical_url ?? ''
   form.native_consultations = settings.consultation_mode === 'native'
+  form.stay_confirmation_mode = settings.lodging_booking?.confirmation_mode ?? null
 }
 function resetDraft() {
   editorError.value = null
@@ -1005,6 +1027,9 @@ watch(settingsResource, (resource) => {
   fillForm(resource.settings.settings)
   originalSignature.value = editorSignature(detailKey.value)
 }, { immediate: true })
+watch([() => loadedSettings.value?.status, publishingFromToday], ([status, requested]) => {
+  if (props.surface === 'settings' && status === 'inactive' && requested) statusModalOpen.value = true
+}, { immediate: true })
 watch(detailKey, () => resetDraft())
 
 async function patchSettings(body: Record<string, unknown>) {
@@ -1013,6 +1038,10 @@ async function patchSettings(body: Record<string, unknown>) {
   // through it keeps the other list's rows on the saved values.
   settingsResource.value = { settings: response }
   await dashboard.refresh()
+  if (surface.value === 'preferences') {
+    await refreshPreferences()
+    if (preferencesError.value) throw preferencesError.value
+  }
 }
 async function refreshSettings() {
   await refreshSettingsResource()
@@ -1066,6 +1095,10 @@ async function saveCurrentEditor() {
       case 'status': await patchSettings({ status: form.status }); break
       case 'search': await patchSettings({ seo_title: form.seo_title.trim() || null, seo_description: form.seo_description.trim() || null, canonical_url: form.canonical_url.trim() || null }); break
       case 'booking': {
+        if (form.stay_confirmation_mode) {
+          await patchSettings({ lodging_booking: { confirmation_mode: form.stay_confirmation_mode } })
+          break
+        }
         const current = loadedSettings.value?.consultation_mode
         if (!current) throw new Error('This website has no booking to switch.')
         // The one writer of the consultation mode, shared with MCP's set_consultation_mode.
@@ -1097,6 +1130,7 @@ provide(organizationSettingsEditorKey, {
   paletteSource,
   resetPalette,
   consultationMode: computed(() => loadedSettings.value?.consultation_mode ?? null),
+  lodgingBookingChoices: computed(() => loadedSettings.value?.lodging_booking_choices ?? []),
   logoUrl,
   // A cancelled leaf puts the loaded settings back before it closes.
   revert: resetDraft,

@@ -23,6 +23,7 @@ export interface Offer {
   headline: string
   line: string
   illustration: string
+  banner?: string
   steps: readonly OfferStep[]
   /** The leaf the offer leads to once it is on. */
   path: string
@@ -90,7 +91,7 @@ export const OFFERS: readonly Offer[] = [
     id: 'managed_ads', unlock: { service: 'managed_ads' },
     name: SERVICES.managed_ads.name, headline: 'Get more from this budget',
     line: 'Chris hand-manages your campaigns — budgets, creative direction and conversion rate — and meets with you weekly.',
-    illustration: `${ILLUSTRATIONS}/chart.webp`, path: 'billing/managed-ads',
+    illustration: `${ILLUSTRATIONS}/chart.webp`, banner: `${ILLUSTRATIONS}/managed-ads-service.webp`, path: 'billing/managed-ads',
     steps: [
       { icon: 'i-lucide-link', title: 'Connect Google Ads', text: 'Chris works in the account you already advertise from.' },
       { icon: 'i-lucide-sliders-horizontal', title: 'Budgets, creative and conversion rate', text: 'Hand-managed against your real results, with a weekly meeting.' },
@@ -101,7 +102,7 @@ export const OFFERS: readonly Offer[] = [
     id: 'strategy', unlock: { service: 'strategy' },
     name: SERVICES.strategy.name, headline: 'Rank for what your clients search',
     line: 'Julia leads your SEO strategy, hand-writes posts built to rank and meets with you weekly.',
-    illustration: `${ILLUSTRATIONS}/briefcase.webp`, path: 'billing/strategy',
+    illustration: `${ILLUSTRATIONS}/briefcase.webp`, banner: `${ILLUSTRATIONS}/seo-strategy-service.webp`, path: 'billing/strategy',
     steps: [
       { icon: 'i-lucide-search', title: 'A strategy for your market', text: 'Julia maps what your clients search for and where you can win.' },
       { icon: 'i-lucide-pen-line', title: 'Articles written to rank', text: 'Hand-written blog posts, published on your site.' },

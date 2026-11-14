@@ -1,11 +1,13 @@
+import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import { expect, request as playwrightRequest, test, type APIResponse } from '@playwright/test'
 import sharp from 'sharp'
 import type { BusinessOutcomePage, BusinessProgressReference } from '../../shared/business-outcomes'
 import type { BusinessGoal } from '../../shared/business-progress'
 import type { TaskSection, TaskView } from '../../server/domain/tasks'
 import type { OpportunityView } from '../../server/domain/opportunities'
-import type { InboxRow, InboxThread } from '../../server/domain/guest-threads/types'
-import { authRequestHeaders, loginAs } from './helpers/auth'
+import type { InboxRow } from '../../server/domain/guest-threads/types'
+import type { ConversationPage } from '../../shared/messages-contract'
+import { acceptOrganizationInvitation, authRequestHeaders, loginAs, sendOrganizationInvitation } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { seededTenant } from './seed/manifest'
 
@@ -145,11 +147,11 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     await responseBody(await member.post('/api/public/contact', { headers: { 'x-preview-tenant': slug }, data: {
       name: guestName, email: 'buyer@playwright.example', subject: 'general', consent: true, message: 'Which documents should I bring to my legal consultation?',
     } }), 201)
-    const inbox = await responseBody<{ threads: InboxRow[] }>(await request.get(`/api/dashboard/organizations/${organization.id}/conversations`, { params: { type: 'contact' } }))
+    const inbox = await responseBody<{ threads: InboxRow[] }>(await request.get('/api/messages', { params: { organization_id: organization.id, type: 'contact' } }))
     const contacts = inbox.threads.filter(thread => thread.title === guestName)
     expect(contacts).toHaveLength(1)
     const threadId = contacts[0]!.id
-    const threadUrl = `/api/dashboard/organizations/${organization.id}/guest-threads/${threadId}`
+    const threadUrl = `/api/messages/${threadId}`
 
     const stillDraft = await responseBody<{ post: { status: string; updated_at: string } }>(await request.get(postUrl))
     expect(stillDraft.post).toMatchObject({ status: 'draft', updated_at: edited.updated_at })
@@ -236,20 +238,10 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     expect(afterMedia.reference.evidence).toMatchObject({ kind: 'article', updated_at: publishedRead.post.updated_at, media: [expect.objectContaining({ asset_id: asset.asset_id })] })
     expect(afterMedia.reference.evidence_revision).not.toBe(beforeMedia.reference.evidence_revision)
 
-    // The client's enquiry is the owner's open reply task on Today, read through the dashboard and through MCP alike.
-    const replyTasks = async () => {
-      const { tasks } = await responseBody<{ tasks: TaskSection[] }>(await request.get('/api/dashboard/today', { params: { org: slug, kind: 'guest_reply' } }))
-      const listed = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'list_tasks', args: { organization_id: organization.id, range: 'today', kind: 'guest_reply' } })
-      expect(listed.status(), await listed.text()).toBe(200)
-      expect(mcpData<{ sections: TaskSection[] }>(await listed.json()).sections).toEqual(tasks)
-      return tasks.map(section => ({ section: section.id, tasks: section.tasks.filter(task => task.conversation_id === threadId).map(task => ({ id: task.id, status: task.status, detail: task.detail })) })).filter(section => section.tasks.length)
-    }
-    const unanswered = await replyTasks()
-    expect(unanswered).toEqual([{ section: 'open', tasks: [{ id: expect.any(String), status: 'open', detail: 'Which documents should I bring to my legal consultation?' }] }])
     const replyBody = 'Please bring the relevant documents and any prior correspondence.'
     const replyKey = crypto.randomUUID()
-    await responseBody(await request.post(`${threadUrl}/operations/reply`, { data: { body: replyBody, idempotency_key: replyKey } }))
-    await responseBody(await request.post(`${threadUrl}/operations/reply`, { data: { body: replyBody, idempotency_key: replyKey } }))
+    await responseBody(await request.post(threadUrl, { headers: authRequestHeaders(baseURL!), data: { body: replyBody, idempotency_key: replyKey } }))
+    await responseBody(await request.post(threadUrl, { headers: authRequestHeaders(baseURL!), data: { body: replyBody, idempotency_key: replyKey } }))
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
     const replies = progress.outcomes.filter(outcome => outcome.event === 'thread.member_reply' && outcome.subject.id === threadId)
     expect(replies).toEqual([expect.objectContaining({
@@ -258,24 +250,18 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     })])
     const { reference: repliedReference } = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'guest_thread.reply', subject_id: threadId } }))
     expect(repliedReference.evidence).toMatchObject({ kind: 'guest_thread', latest_guest_entry_id: expect.any(String), latest_reply_entry_id: replies[0]!.id })
-    // A reply is an answer once a provider accepted it. Here its only receipt is log-only (unconfirmed, above),
-    // so the record shows no delivered answer and the question is still owed.
-    expect(await replyTasks()).toEqual(unanswered)
     const guestReply = 'I found another letter with a deadline tomorrow; should I send it now?'
-    await responseBody(await member.post(`/api/account/messages/${threadId}/reply`, { headers: authRequestHeaders(baseURL!), data: { body: guestReply, idempotency_key: crypto.randomUUID() } }))
+    await responseBody(await member.post(threadUrl, { headers: authRequestHeaders(baseURL!), data: { body: guestReply, idempotency_key: crypto.randomUUID() } }))
     const { reference: inboundReference } = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'guest_thread.reply', subject_id: threadId } }))
     expect(inboundReference.evidence_revision).not.toBe(repliedReference.evidence_revision)
     if (inboundReference.evidence.kind !== 'guest_thread' || repliedReference.evidence.kind !== 'guest_thread') throw new Error('The explicit thread reference must describe thread evidence')
     expect(inboundReference.evidence.latest_guest_entry_id).not.toBe(repliedReference.evidence.latest_guest_entry_id)
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
-    // The client writing again does not add a second task: the one task stays on the first question still owed.
-    const reasked = await replyTasks()
-    expect(reasked).toEqual(unanswered)
     expect(progress.outcomes.filter(outcome => outcome.event === 'thread.member_reply' && outcome.subject.id === threadId)).toEqual(replies)
     // The conversation keeps one copy of each side's message: the owner's retried reply and the client's answer.
-    const preserved = await responseBody<{ thread: InboxThread }>(await request.get(threadUrl))
-    expect(preserved.thread.stream.filter(item => item.type === 'message' && item.body === replyBody)).toMatchObject([{ side: 'business' }])
-    expect(preserved.thread.stream.filter(item => item.type === 'message' && item.body === guestReply)).toMatchObject([{ side: 'guest' }])
+    const preserved = await responseBody<ConversationPage>(await request.get(threadUrl))
+    expect(preserved.entries.filter(item => item.type === 'message' && item.body === replyBody)).toMatchObject([{ side: 'business' }])
+    expect(preserved.entries.filter(item => item.type === 'message' && item.body === guestReply)).toMatchObject([{ side: 'guest' }])
 
     const archived = await responseBody<{ goal: BusinessGoal }>(await request.patch(`${api}/goals/${goal.id}`, { data: { updated_at: currentGoal.updated_at, status: 'archived' } }))
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
@@ -283,10 +269,11 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
 
     await responseBody(await request.get(`/api/organizations/${seededTenant('restaurant').organizationId}/progress`), 404)
     await responseBody(await request.get(`${api}/progress/reference`, { params: { operation: 'article.update', subject_id: crypto.randomUUID() } }), 404)
-    const { token } = await responseBody<{ token: string }>(await request.post(`${api}/invite-links`, { data: { role: 'member' } }), 201)
-    await loginAs(member, baseURL!, 'user-e2e-demo-role-owner')
-    const joined = await responseBody<{ role: string; organization: { id: string } }>(await member.post(`/api/invite-links/${token}/accept`))
-    expect(joined).toMatchObject({ role: 'member', organization: { id: organization.id } })
+    const actor = findE2eAuthFixture('user-e2e-demo-role-owner')
+    const invitationId = await sendOrganizationInvitation(request, baseURL!, organization.id, actor.email, 'member')
+    await loginAs(member, baseURL!, actor.id)
+    const joined = await acceptOrganizationInvitation(member, baseURL!, invitationId)
+    expect(joined).toMatchObject({ role: 'member', organizationId: organization.id })
     await responseBody(await member.get(`${api}/progress`), 404)
     await responseBody(await member.get(`${api}/progress/reference`, { params: { operation: 'article.update', subject_id: postId } }), 404)
     await responseBody(await member.post(`${api}/goals`, { data: { ...intent, idempotency_key: crypto.randomUUID() } }), 404)

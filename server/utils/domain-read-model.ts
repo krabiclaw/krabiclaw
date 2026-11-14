@@ -107,6 +107,13 @@ function groupedStatus(records: DomainRecord[]): DomainStatus {
   return statuses.every((status) => status === 'active') ? 'active' : 'pending'
 }
 
+export function domainStatusLabel(status: DomainStatus) {
+  return {
+    active: 'Active', pending: 'DNS required', verifying: 'Checking', failed: 'Failed',
+    blocked: 'Blocked', disabled: 'Disabled', deleted: 'Deleted',
+  }[status]
+}
+
 function newestDate(values: Array<string | null | undefined>): string | null {
   const timestamps = values
     .map((value) => value ? Date.parse(value) : NaN)
@@ -121,6 +128,7 @@ export interface DomainGroup {
   root_domain: string
   role: DomainRole
   status: DomainStatus
+  status_label: string
   primary_domain_id: string | null
   apex_domain_id: string | null
   www_domain_id: string | null
@@ -148,17 +156,8 @@ export function groupCustomDomains(domains: DomainRecord[]): DomainGroup[] {
       ?? apex
       ?? records[0]
       ?? null
-    const instructionRecord = apex ?? primary
-    const trafficRecord = www
-      ? domainInstructions(www).dns
-      : instructionRecord ? domainInstructions(instructionRecord).dns : null
-    const baseInstructions = instructionRecord ? domainInstructions(instructionRecord) : null
-    const dnsRecords = [
-      baseInstructions?.ownership ?? null,
-      baseInstructions?.dcv_delegation ?? null,
-      trafficRecord,
-      ...(baseInstructions?.ssl_records ?? []),
-    ].filter((record): record is DomainDnsRecord => Boolean(record))
+    const dnsRecords = [...new Map(records.flatMap(domain => domainInstructions(domain).records)
+      .map(record => [JSON.stringify([record.type, record.name, record.value]), record])).values()]
     const status = groupedStatus(records)
     return {
       id: root,
@@ -166,15 +165,14 @@ export function groupCustomDomains(domains: DomainRecord[]): DomainGroup[] {
       root_domain: root,
       role: records.some((record) => record.role === 'canonical') ? 'canonical' : 'secondary',
       status,
+      status_label: domainStatusLabel(status),
       primary_domain_id: primary?.id ?? null,
       apex_domain_id: apex?.id ?? null,
       www_domain_id: www?.id ?? null,
       domains: records,
       records: dnsRecords,
       warning: null,
-      error: status === 'failed' || status === 'blocked'
-        ? records.find((record) => record.error_message)?.error_message ?? null
-        : null,
+      error: records.find(record => record.error_message)?.error_message ?? null,
       last_synced_at: newestDate(records.map((record) => record.last_synced_at)),
     } satisfies DomainGroup
   }).sort((a, b) => a.domain.localeCompare(b.domain))

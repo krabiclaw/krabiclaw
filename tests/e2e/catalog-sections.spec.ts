@@ -87,7 +87,7 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
 
     expect((await page.goto(`${catalog}/menu?location_id=${brooklyn}`))?.status()).toBe(200)
     await waitForNuxtHydration(page)
-    await expect(page.locator('#dashboard-panel-catalog-menu').getByRole('link', { name: source.name })).toHaveAttribute('href', `${catalog}/menu/${source.id}?kind=dish`)
+    await expect(page.locator('#dashboard-panel-catalog-menu').getByRole('link', { name: source.name })).toHaveAttribute('href', `${catalog}/menu/${source.id}?location_id=${brooklyn}&kind=dish`)
 
     // Section order belongs to its explicit scope. Moving a shared section
     // stays a draft until Done and leaves the location's own section alone.

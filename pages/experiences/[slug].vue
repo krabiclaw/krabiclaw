@@ -1,6 +1,6 @@
 <template>
   <NuxtLayout :name="site.layout">
-  <ProductDetailPage :key="`${detail.product.id}:${detail.location?.id ?? 'online'}:${Boolean(detail.scope_required)}`" :organization-id="organizationId" :vertical="detail.vertical" :product="detail.product" :location="detail.location" :organization-name="detail.organization_name" :reviews="detail.reviews" :booking="detail.booking" :sessions="detail.sessions" :collection-name="detail.collection_name" :collection-siblings="detail.collection_siblings" :currency="detail.currency"  :presentation="presentation" :scope-required="detail.scope_required" :locations="detail.locations" :online-available="detail.online_available" :stay-checkout-available="detail.stay_checkout_available">
+  <ProductDetailPage :key="`${detail.product.id}:${detail.location?.id ?? 'online'}:${Boolean(detail.scope_required)}`" :organization-id="organizationId" :vertical="detail.vertical" :product="detail.product" :location="detail.location" :organization-name="detail.organization_name" :reviews="detail.reviews" :booking="detail.booking" :sessions="detail.sessions" :collection-name="detail.collection_name" :collection-siblings="detail.collection_siblings" :currency="detail.currency"  :presentation="presentation" :scope-required="detail.scope_required" :locations="detail.locations" :online-available="detail.online_available" :stay-checkout-available="detail.stay_checkout_available" :stay-confirmation-mode="detail.stay_confirmation_mode">
   </ProductDetailPage>
   </NuxtLayout>
 </template>

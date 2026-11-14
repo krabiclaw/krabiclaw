@@ -157,10 +157,9 @@ Business Today and Upcoming show two stored things
 (`project/tasks-and-opportunities.md` in the design system):
 
 - **Tasks** (`tasks`, `server/domain/tasks.ts`): work someone has to do, with
-  an assignee, a window, and who closed it and when. A turnover, a guest's
-  unanswered question and a scheduled message that did not send are opened and
-  closed by the batch that changes their subject; an accepted opportunity and a
-  task a person adds are closed by a person.
+  an assignee, a window, and who closed it and when. A turnover and a failed
+  scheduled delivery follow their source records. A person closes an accepted
+  opportunity or a task they add.
 - **Opportunities** (`opportunities`, `server/domain/opportunities.ts`): what
   `readBusinessRecommendations` finds the business could do, recorded against
   its evidence revision. Owners and admins see suggestions in the same card
@@ -168,32 +167,29 @@ Business Today and Upcoming show two stored things
   top-right dismiss control records a decision about the current evidence.
 
 `GET /api/dashboard/today` returns task sections, opportunities, assignees
-and the resolved time. The server supplies each card's content and destination.
+and the resolved time. The server supplies each card's content and destination. On unfiltered Today,
+workspace managers see the signed preview of a private site and a link into
+the Website status dialog. When Today has no open work, a published site
+links to its public address. Before publishing, a workspace created through
+onboarding can see up to three suggestions. Stripe setup, a custom domain,
+and the first catalog item for its business type take priority when they apply.
 The task sheet holds assignment and completion controls for work that a person
-tracks there. A reply card opens the conversation. A payment card opens that
-offering's Payment settings. Saving the payment requirement completes its
-accepted task in the booking configuration batch.
+tracks there. Guest messages enter Messages and update its unread count. A
+payment card opens that offering's Payment settings. Saving the payment
+requirement completes its accepted task in the booking configuration batch.
 
 Each active experience can show one catalog suggestion for its current
 publication blocker. The server uses the catalog’s published-host and booking
 readiness checks. The card opens the editor for the current blocker and
 advances or clears as the catalog state changes.
 
-An open reply with an authorized linked stay includes reservation context in
-the same TaskView. TaskCard shows its dates, guest portrait, group, internal
-home name, status and message preview. The card opens the conversation.
-Unknown clocks read "Time not set". The task ID, schedule and actions remain
-owned by the stored task. An inquiry without a stay remains a compact reply.
-
-Owner Today orders failed deliveries, then turnovers, then replies, in one
-column. Opportunities follow, then Done. A member sees only
-their own tasks and Done. The shared header holds Today/Upcoming, a round +
+Owner Today shows failed deliveries, turnovers and booking decisions before
+opportunities and Done. A member sees the work in their scope and Done.
+The shared header holds Today/Upcoming, a round +
 for the permitted Add task and Add stay actions, and a task kind filter.
 `TodayTaskSheet` uses Airbnb's Checkout | Check-in split, followed by Assigned
-with Change. A task someone completes adds "What you found", Skip and Done; a
-reply adds Dismiss and Reply. Either close needs no note. A reply closes itself
-30 days after the question, and a dismissed one stays closed until the guest
-writes again. Upcoming groups by day
+with Change. A task someone completes adds "What you found", Skip and Done.
+Closing a task needs no note. Upcoming groups by day
 ("Tomorrow · Sat, Nov 7"). Arrivals and bookings
 stay in Calendar.
 
@@ -423,7 +419,7 @@ check-in and checkout times, how many it sleeps, the minimum nights and the
 team who look after it; it has no Scheduling or Locations rows. Its price row
 is the base nightly price. Calendar shows stays on the day guests arrive and
 the day they leave. A stay opens at the booking route as
-`bookings/stay/:stayId`. A stay taken by the host records offline payments and
+`bookings/:bookingId`. A stay taken by the host records offline payments and
 is cancelled there, and is not refused by closed nights or minimum stays —
 those are what guests and channels are offered; a stay from Airbnb or another channel is read-only and
 changes on that channel. A published place to stay is booked on the website:
@@ -568,6 +564,19 @@ actions, connection instructions and unavailable/read-only settings have no
 commit footer. New Team invitations start with Member; elevated access is an
 explicit choice through Better Auth's existing roles and permissions.
 
+**Team.** The dashboard is the reference for native Team. Its Team header
+carries the Invite control with a person-plus icon. Members and Pending
+invitations use compact rows and hairline dividers. A member's avatar, name,
+“(you)” marker and muted email go on the left. The role appears once on the
+right as text or a plain role picker with a chevron. The email uses the full
+width beneath the name so the role and menu do not squeeze it. Only rows with
+contextual actions reserve room for the menu. The menu holds Remove member,
+which asks for confirmation. Pending invitations show the email, Pending status,
+delivery feedback and a role on the right. Resend and Revoke invitation sit in
+that row's overflow menu. Show “No pending invitations.” when the viewer can
+manage invitations and none are pending. Both surfaces read the shared Team
+response for role labels, current-user identity and available controls.
+
 **Icons identify destinations and meaningful choices.** Follow the captured
 Airbnb host editor's restraint: amenities have recognizable pictograms;
 ordinary listing fields, house rules and safety switches stay text and their
@@ -628,7 +637,8 @@ leaf's sheet has ✕ and its title small and centred, and the leaf's pane its
 title large. Host booking and stay records use the compact status header
 specified below. Back, ✕ and every action are the same round button. Pages
 supply `title`, `lead` and `#right`; they never place a title or an action
-themselves.
+themselves. Use the title on its own wherever it names the task. Keep secondary text beneath a title to one line. Put longer instructions
+and terms beside the control they explain.
 
 **Reuse the card that owns the job.** Saved editor summaries use
 `EditorNavigationList`'s cards; selectable choices use the native radio or
@@ -979,7 +989,15 @@ offers photo, name, description and amount in one screen. The kind, menu
 section and location explicitly supplied by the entrance remain its context;
 the form does not ask for them again or infer another one. Legal practice
 areas do not require photographs. Lodging retains its actual location,
-capacity, arrival/departure and minimum-night requirements.
+capacity, arrival/departure and minimum-night requirements. An empty lodging
+Catalog offers manual creation and Airbnb import side by side, because existing
+hosts can bring over their listings and fill in only the missing details.
+Manual setup confirms the address, then asks for property type, rooms and
+capacity before saving an unpublished Catalog entry. The stay-homes API owns
+the steps and validation for web and iOS. Import opens the Airbnb controls.
+Website → Booking settings owns how direct stays are confirmed and paid across
+all homes. The lodging website setup asks for that choice once. The home
+editor retains the individual property's stay rules, prices and availability.
 
 Optional facts do not block saving a draft. Publishing checks the real domain
 requirements and names actual missing facts. A multi-step task that genuinely
@@ -1327,8 +1345,8 @@ live there too, because appending `s` produces "dishs".
 ### Moving lodging occupancy from Hostaway
 
 The organization owns the one-time migration task at
-`O/integrations/hostaway-migration`, reached from Connections and offered at
-lodging onboarding's final review. Owners and admins with operations-update
+`O/integrations/hostaway-migration`, reached from Connections. Owners and
+admins with operations-update
 permission upload the host's reservation export, confirm column/date/amount
 formats and explicit home matches, review manual blocked dates, and approve
 stays before importing. The task index uses `DashboardIndexPanel`; its focused

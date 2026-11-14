@@ -403,6 +403,21 @@ outbox identity is namespaced by account/mode/event. Only minimal object identit
 is retained. Stripe remains record authority; a webhook handler that fails
 returns non-2xx and Stripe redelivers the event until the write lands.
 
+### Direct stay requests
+
+Lodging businesses choose **Instant Book** or **Approve requests** under
+**Website → Booking settings**. The choice applies to every home on their
+website. With Instant Book, the guest starts checkout immediately. With
+Approve requests, submitting the request holds the dates, alerts the host
+through the existing booking review, and sends the guest an acknowledgment.
+Approval sends the guest a link to pay from Activity. Stripe payment confirms
+that same stay.
+
+The host has up to 24 hours to respond and the guest has up to 24 hours after
+approval to start payment. Both deadlines end by check-in. A declined,
+withdrawn, or expired request releases the dates. A bank payment in progress
+uses the same clearing window as other stay payments.
+
 ### Paying on the site
 
 The buyer pays on the business's own site at `/pay/<payment id>`, not on a hosted

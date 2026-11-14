@@ -12,16 +12,16 @@ import { paymentsStripe, requireStripeCheckoutAcceptance, type StripeConnectedAc
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { tokenHash } from './buyer'
 import { connectedBuyerCustomer } from '~/server/utils/billing-customer'
-import { assertMinorAmount, requirePayment } from './index'
+import { approvedStayBooking, assertMinorAmount, requirePayment, type ApprovedStayBooking } from './index'
 import { recordCheckoutStarted } from '~/server/domain/booking-analytics'
 import { isCurrencyCode } from '~/shared/currencies'
 import { quotePaymentsBillingFx, requireBillingFxQuote } from './fx'
-import { isStayNightConflict, stayCheckoutPolicy, stayHoldClaimQueries, stayHoldPredicate, type CheckoutStay, type StayQuote } from '~/server/domain/stays'
+import { approvedStayPaymentPredicate, isStayNightConflict, stayCheckoutPolicy, stayHoldClaimQueries, stayHoldPredicate, type CheckoutStay, type StayQuote } from '~/server/domain/stays'
 
 interface CheckoutInputBase {
   organizationId: string
   buyerUserId: string | null
-  /** The guest conversation the hold waits in; a stay's conversation opens when its payment is captured. */
+  /** The existing guest conversation for a session or approved stay. Instant stays open theirs on payment. */
   requestId: string | null
   requestFingerprint: string
   quantity: number
@@ -39,11 +39,18 @@ export type CheckoutInput = CheckoutInputBase & (
   /** `answers` are the guest's answers accepted for a new checkout, frozen with its purchase; null on a retry, which is held to the ones it froze. */
   | { unit: 'slot'; productId: string; variantId: string; sessionId: string; answers: FormAnswerSnapshot[] | null; resolved?: ResolvedBookingSession }
   /** `quote` is read only for a new checkout; a retry is held to the stay it froze, whose nights it already holds. */
-  | { unit: 'nights'; stay: StayRequest; guest: CheckoutStay['guest']; quote: () => Promise<StayQuote> }
+  | { unit: 'nights'; stay: StayRequest; guest: CheckoutStay['guest']; quote: () => Promise<StayQuote>; approval?: StayCheckoutApproval }
 )
 
 /** Which stay a guest asked for: the home, the nights and the party. */
 export type StayRequest = Pick<StayQuote, 'product_id' | 'check_in_date' | 'check_out_date' | 'adults' | 'children' | 'infants'>
+
+interface StayCheckoutApproval extends ApprovedStayBooking {
+  conversationId: string
+  buyerUserId: string
+  expiresAt: string
+  policy: string
+}
 
 /** The stay a checkout froze: the quote's nights and money, and the guest who is paying. */
 export type StayPurchase = CheckoutStay['quote'] & Pick<StayQuote, 'location_id' | 'timezone' | 'nightly'> & { guest: CheckoutStay['guest'] }
@@ -72,10 +79,12 @@ export interface PaymentHandoff { payment_id: string; pay_path: string; purchase
 export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, input: CheckoutInput, retry = false) {
   if (!Number.isSafeInteger(input.quantity) || input.quantity < 1 || input.quantity > 99 || !input.idempotencyKey.trim() || input.idempotencyKey.trim().length > 200) throw new HTTPError({ statusCode: 400, statusMessage: 'A quantity of 1–99 and an idempotency key of 1–200 characters are required' })
   const key = `checkout:${input.organizationId}:${input.idempotencyKey.trim()}`
-  const previous = await queryFirst<{id:string;stripe_payment_intent_id:string|null;checkout_expires_at:string;return_token:string;hold_status:string|null;hold_quantity:number|null}>(db,`
-    SELECT p.id,p.stripe_payment_intent_id,p.checkout_expires_at,p.return_token,h.status AS hold_status,h.quantity AS hold_quantity
+  const approval = input.unit === 'nights' ? input.approval : undefined
+  const previous = await queryFirst<{id:string;stripe_payment_intent_id:string|null;checkout_expires_at:string;return_token:string;hold_status:string|null;hold_quantity:number|null;confirmation_in_flight:number}>(db,`
+    SELECT p.id,p.stripe_payment_intent_id,p.checkout_expires_at,p.return_token,h.status AS hold_status,h.quantity AS hold_quantity,
+      h.status='active' AND h.expires_at>? AND json_type(p.review_json,'$.confirmation_started_at')='text' AS confirmation_in_flight
     FROM payments p LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id
-    WHERE p.idempotency_key=? AND p.organization_id=?`,[key,input.organizationId])
+    WHERE p.idempotency_key=? AND p.organization_id=?`,[new Date().toISOString(),key,input.organizationId])
   // Stripe refused this request outright: it has no intent and gave its capacity back.
   if(previous&&!previous.stripe_payment_intent_id&&previous.hold_status==='released')throw new HTTPError({statusCode:409,statusMessage:'Checkout was rejected; start a new request',data:{code:'checkout_failed'}})
   const now = new Date().toISOString()
@@ -105,6 +114,10 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       || !isCurrencyCode(snapshot.price.currency) || !Number.isSafeInteger(snapshot.price.unit_amount)
       || !PRICE_TAX_BEHAVIORS.includes(snapshot.price.tax_behavior as Price['tax_behavior'])) {
       throw new HTTPError({ statusCode: 409, statusMessage: 'Checkout retry does not match its immutable purchase' })
+    }
+    const booked = approvedStayBooking(snapshot)
+    if (booked?.bookingId !== approval?.bookingId || booked?.version !== approval?.version) {
+      throw new HTTPError({ statusCode: 409, statusMessage: 'Checkout no longer matches the approved stay' })
     }
     purchaseQuantity = snapshot.quantity
     const frozenPrice = snapshot.price as Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'>
@@ -166,7 +179,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       adults: quote.adults, children: quote.children, infants: quote.infants, nightly: quote.nightly, total_minor: quote.total_minor, currency: quote.currency, cancellation_policy: quote.cancellation_policy, guest,
     }
     // The terms the guest booked under are frozen with the purchase, as a session booking's are.
-    policy = JSON.parse(await stayCheckoutPolicy(db, input.organizationId, { ...stay, tax_behavior: quote.tax_behavior })) as BookingPolicy
+    policy = JSON.parse(approval ? approval.policy : await stayCheckoutPolicy(db, input.organizationId, { ...stay, tax_behavior: quote.tax_behavior })) as BookingPolicy
   }
   if (!previous) {
     const acceptance = await requireStripeCheckoutAcceptance(db, env, input.organizationId)
@@ -181,9 +194,13 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   const id = previous?.id ?? crypto.randomUUID(), holdId = crypto.randomUUID()
   const returnToken=previous?.return_token ?? crypto.randomUUID()+crypto.randomUUID()
   const returnHash=await tokenHash(returnToken)
-  const expiresAt = previous?.checkout_expires_at ?? new Date(Date.now()+60*60*1000).toISOString()
-  if (expiresAt<=now) throw new HTTPError({statusCode:409,statusMessage:'Checkout hold expired; start a new request',data:{code:'checkout_expired'}})
+  const expiresAt = previous?.checkout_expires_at ?? approval?.expiresAt ?? new Date(Date.now()+60*60*1000).toISOString()
+  const resuming = approval && previous?.stripe_payment_intent_id && previous.confirmation_in_flight === 1
+  if (expiresAt <= now && !resuming) throw new HTTPError({statusCode:409,statusMessage:'Checkout hold expired; start a new request',data:{code:'checkout_expired'}})
   const handoff = (paymentId: string): PaymentHandoff => ({ payment_id: paymentId, pay_path: `/pay/${encodeURIComponent(paymentId)}`, purchase_claim: returnToken, expires_at: expiresAt })
+  if (approval && previous?.hold_status !== undefined && previous.hold_status !== 'active') {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'Checkout is no longer available for this stay', data: { code: 'checkout_expired' } })
+  }
   if (previous?.stripe_payment_intent_id) {
     await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,previous.id), null, input.origin)
     return handoff(previous.id)
@@ -202,18 +219,22 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
         params: [holdId,input.organizationId,input.productId,input.variantId,catalogPriceId,session.id,input.buyerUserId,input.requestId,id,input.quantity,amount,price.currency,expiresAt,now,session.id,input.organizationId,input.productId,...allocation.params!] }
     } else {
       if (!stay) throw new Error('The selected stay is missing')
-      const scope = { organizationId: input.organizationId, productId: stay.product_id, checkIn: stay.check_in_date, checkOut: stay.check_out_date }
-      const bookable = stayHoldPredicate(scope)
-      // A lapsed hold on these nights is cleared before this one claims them; the hold's nights are claimed after it.
-      const [clearLapsed, claim] = stayHoldClaimQueries({ ...scope, holdId })
-      preceding.push(clearLapsed!)
+      const scope = { organizationId: input.organizationId, productId: stay.product_id, checkIn: stay.check_in_date, checkOut: stay.check_out_date, timezone: stay.timezone }
+      const bookable = approval
+        ? await approvedStayPaymentPredicate(db, { ...approval, ...scope, through: now })
+        : await stayHoldPredicate(db, scope)
+      if (!approval) {
+        // A lapsed hold on these nights is cleared before the new hold claims them.
+        const [clearLapsed, claim] = stayHoldClaimQueries({ ...scope, holdId })
+        preceding.push(clearLapsed!)
+        following.push(claim!)
+      }
       hold = { query: `INSERT INTO payment_checkout_holds(id,organization_id,product_id,location_id,timezone,buyer_user_id,conversation_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at)
-        SELECT ?,?,?,?,?,?,NULL,?,?,?,?,?,?,'active',?,? WHERE ${bookable.query}`,
-        params: [holdId,input.organizationId,stay.product_id,stay.location_id,stay.timezone,input.buyerUserId,id,stay.adults+stay.children,amount,price.currency,stay.check_in_date,stay.check_out_date,expiresAt,now,...bookable.params] }
-      following.push(claim!)
+        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,'active',?,? WHERE ${bookable.query}`,
+        params: [holdId,input.organizationId,stay.product_id,stay.location_id,stay.timezone,input.buyerUserId,approval?.conversationId ?? null,id,stay.adults+stay.children,amount,price.currency,stay.check_in_date,stay.check_out_date,expiresAt,now,...bookable.params!] }
     }
     const purchase = { title: projectionTitle, tax_code: projectionTaxCode, price, quantity: purchaseQuantity, automatic_tax: automaticTax, method_configuration_id: methodConfigurationId, request_fingerprint: input.requestFingerprint, billing_fx: billingFx,
-      policy, ...(input.unit === 'slot' ? { product_id: input.productId, variant_id: input.variantId, session_id: input.sessionId, answers } : { stay }) }
+      policy, ...(input.unit === 'slot' ? { product_id: input.productId, variant_id: input.variantId, session_id: input.sessionId, answers } : { stay, ...(approval ? { approved_stay: { bookingId: approval.bookingId, version: approval.version } } : {}) }) }
     try { await executeBatch(db,[
       { query: `INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,price_snapshot_json,idempotency_key,checkout_expires_at,return_token,return_token_hash,return_expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, params:[id,input.organizationId,input.buyerUserId,connected.stripe_account_id,Number(connected.livemode),'booking',null,input.unit === 'slot' ? session!.location_id : stay!.location_id,price.currency,amount,JSON.stringify(purchase),key,expiresAt,returnToken,returnHash,new Date(Date.now()+86400000).toISOString(),now,now] },
       ...preceding, hold, ...following,

@@ -136,7 +136,7 @@ for (const directory of ['pages', 'server/api']) {
 for (const path of sources(join(root, 'server/api'))) {
   const route = path.slice(root.length + 1)
   const file = ts.createSourceFile(route, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest)
-  const appRoute = /^server\/api\/(account|analytics|billing|dashboard|editor|invite-links|organizations|public)\b/.test(route)
+  const appRoute = /^server\/api\/(account|analytics|billing|dashboard|editor|organizations|public)\b/.test(route)
   const checkKey = key => {
     if (!snakeCase.test(key) || retiredWireKeys.has(key)) {
       failures.push(`${route}: ${key} must use its canonical column or snake_case name`)

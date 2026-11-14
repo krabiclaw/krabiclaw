@@ -25,7 +25,8 @@ export interface PhoneCountry {
   dialCode: string
 }
 
-function flagEmoji(code: CountryCode): string {
+export function flagEmoji(code: string): string {
+  if (!/^[A-Z]{2}$/u.test(code)) return ''
   return Array.from(code, ch => String.fromCodePoint(0x1F1E6 + ch.charCodeAt(0) - 65)).join('')
 }
 

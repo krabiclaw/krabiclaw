@@ -370,7 +370,9 @@ async function loadPublicPageSource(
     return i;
   };
 
-  const shellIndexes = appendPublicShellQueries(batchStmts, orgId);
+  const previewRestaurant = isPreviewAuthorized && organization.vertical === 'restaurant'
+  const previewMenu = previewRestaurant && page === 'menu'
+  const shellIndexes = appendPublicShellQueries(batchStmts, orgId, previewRestaurant);
   if (needsLocations) idxLoc = shellIndexes.locations;
 
   if (includeProducts) {
@@ -563,7 +565,7 @@ async function loadPublicPageSource(
     tenantPagePromise,
     buildPublicShellPayload(db, organization, batchResults, shellIndexes, env, undefined, { localizations: localizedLocale ? publicLocalizations : undefined }),
     includeProducts
-      ? listOrganizationProducts(db, { organizationId: orgId, kind: page === 'experiences' ? 'experience' : page === 'menu' ? 'dish' : page === 'stays' ? 'stay' : page === 'reservations' ? 'table' : undefined, publishedOnly: true, env }).then(products => products.map(publicProduct))
+      ? listOrganizationProducts(db, { organizationId: orgId, kind: page === 'experiences' ? 'experience' : page === 'menu' ? 'dish' : page === 'stays' ? 'stay' : page === 'reservations' ? 'table' : undefined, publishedOnly: !previewMenu, env }).then(products => products.map(publicProduct))
       : [],
     includeProducts
       ? locationId
@@ -641,7 +643,7 @@ async function loadPublicPageSource(
     // reassemble variants, prices and collections from its own SQL — the
     // catalog has one reader and a projection that disagreed with it is
     // exactly the drift this replaces.
-    products = canonical.filter(product => product.locations.some(location => location.published
+    products = canonical.filter(product => product.locations.some(location => (location.published || previewMenu)
       && activeLocationIds.has(location.location_id) && (!locationSlug || location.location_id === locationId))
       || (!locationSlug && (product.kind === 'stay' || Boolean(product.order_url || product.booking?.held_online)))).map((product) => {
       const media = mediaByProduct.get(product.id) ?? []

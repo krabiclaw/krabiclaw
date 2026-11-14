@@ -45,6 +45,11 @@ platform proxy that `server/plugins/00.cloudflare-dev-bindings.ts` starts in
 each thread is disposed with it. Without that, each rebuild left another
 Miniflare holding the local D1 file until queries failed with `SQLITE_BUSY`.
 
+If D1 reports `Failed to get session commit token` while testing workspace
+creation or Today under `yarn dev`, stop that server and run `yarn dev:worker`.
+The built Worker runs the app and inbox Durable Object in the same runtime
+against the existing local database.
+
 The auxiliary Worker loads the same root `.env`, derives its database binding
 from the root Wrangler `dev` environment, and shares the root local persistence
 directory. Its broadcasts authorize connected members through Better Auth
@@ -193,7 +198,7 @@ rm /tmp/staging-admin.jar
 
 Repeat the second call for each role the app needs to exercise (an owner who
 creates a lodging organization, and a co-host and cleaner who join it through an
-invite link). Each answers `{"user":{…}}`; then sign in once from the app to
+Better Auth email invitation). Each answers `{"user":{…}}`; then sign in once from the app to
 confirm.
 
 `schema:local` applies new forward migrations when the schema changes. After a

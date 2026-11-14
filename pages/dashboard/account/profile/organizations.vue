@@ -8,6 +8,9 @@
   <DashboardIndexPanel id="account-organizations" title="Organizations">
     <UAlert v-if="marksError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(marksError, 'Organization details could not be loaded.')" />
     <UAlert v-if="permissionError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="permissionError" />
+    <UAlert v-if="setupError" class="mb-6" color="error" variant="soft" :description="getErrorMessage(setupError, 'Website setup could not be loaded.')">
+      <template #actions><UButton color="error" variant="soft" size="xs" @click="() => refreshSetup()">Retry</UButton></template>
+    </UAlert>
     <DashboardListEditor
       v-model:editing="editing"
       title="Organizations"
@@ -15,8 +18,9 @@
       empty-title="No organizations yet"
       empty-icon="i-lucide-building-2"
       add-label="New organization"
+      :addable="Boolean(createAction && !resumeAction)"
+      :add-to="createAction?.to"
       :read-only="!deletable.size"
-      @add="startOrganization"
       @remove="openDelete"
     >
       <template #item="{ item }">
@@ -37,7 +41,8 @@
         </component>
       </template>
     </DashboardListEditor>
-    <UButton v-if="!deletable.size" class="mt-6" color="neutral" variant="soft" icon="i-lucide-plus" :label="createAction.label" :to="createAction.to" />
+    <UButton v-if="createAction && (resumeAction || !deletable.size)" class="mt-6" color="neutral" variant="soft"
+      :icon="resumeAction ? 'i-lucide-arrow-right' : 'i-lucide-plus'" :trailing="Boolean(resumeAction)" :label="createAction.label" :to="createAction.to" />
   </DashboardIndexPanel>
 </template>
 
@@ -47,10 +52,13 @@ import { dashboardScopeHeaderModelKey } from '~/lib/components/workspace/dashboa
 import { useOrganizationDeletePermission } from '~/composables/useOrganizationDeletePermission'
 import { organizationRoleLabel } from '~/utils/organization-access'
 import { getVerticalLabel } from '~/utils/vertical-copy'
+import { readActiveWebsiteDraft } from '~/composables/useOnboardingDraft'
+import { onboardingLink } from '~/composables/useOnboardingFlow'
 
 definePageMeta({ layout: 'dashboard' })
 
 const level = useRouteLevel()
+const route = useRoute()
 const model = inject(dashboardScopeHeaderModelKey)!
 const editing = ref(false)
 const organizations = computed(() => model.value.peers.filter((peer): peer is typeof peer & { id: string } => Boolean(peer.id)))
@@ -58,7 +66,10 @@ const { deletable, permissionError } = await useOrganizationDeletePermission(com
 // Each organization's mark, as Airbnb's listing rows carry their picture, and what it is to this account: `Vacation rental · Owner`.
 type OrganizationMark = { id: string; image_url: string | null; vertical: string; role: string }
 const isOrganizationList = (value: unknown): value is { organizations: OrganizationMark[] } => isRecord(value) && Array.isArray(value.organizations) && value.organizations.every(row => isRecord(row) && typeof row.id === 'string' && (row.image_url === null || typeof row.image_url === 'string') && typeof row.vertical === 'string' && typeof row.role === 'string')
-const { data: marksData, error: marksError } = await useAsyncData('account-organizations', () => applicationFetch<{ organizations: OrganizationMark[] }>('/api/account/organizations', { validate: isOrganizationList }))
+const [{ data: marksData, error: marksError }, { data: setup, error: setupError, refresh: refreshSetup }] = await Promise.all([
+  useAsyncData('account-organizations', () => applicationFetch<{ organizations: OrganizationMark[] }>('/api/account/organizations', { validate: isOrganizationList })),
+  useAsyncData('account-organization-setup', readActiveWebsiteDraft),
+])
 const marks = computed(() => new Map((marksData.value?.organizations ?? []).map(row => [row.id, row])))
 const items = computed(() => organizations.value.map(organization => ({
   id: organization.id,
@@ -69,10 +80,11 @@ const items = computed(() => organizations.value.map(organization => ({
   select: () => organization.onSelect?.(),
   removable: deletable.value.has(organization.id),
 })))
+const resumeAction = computed(() => setup.value?.resume_action)
 const createAction = computed(() => {
-  const action = model.value.createAction
-  if (!action) throw createError({ statusCode: 500, statusMessage: 'The dashboard scope offers no way to start an organization.' })
-  return action
+  if (!setup.value) return null
+  const action = resumeAction.value ?? model.value.createAction
+  return action ? { ...action, to: onboardingLink(action.to, route.fullPath) } : null
 })
 
 function describe(mark: OrganizationMark | undefined) {
@@ -82,9 +94,6 @@ function describe(mark: OrganizationMark | undefined) {
 type Row = (typeof items.value)[number]
 function enter(row: Row) {
   if (!row.to && !editing.value) row.select()
-}
-async function startOrganization() {
-  await navigateTo(createAction.value.to)
 }
 async function openDelete(row: Row) {
   await navigateTo(`${level.path.value}/${encodeURIComponent(row.id)}/delete`)

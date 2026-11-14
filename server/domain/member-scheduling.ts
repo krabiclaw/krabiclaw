@@ -25,9 +25,9 @@ export async function requireSchedulingAccess(actor: SchedulingActor, memberId: 
  return target
 }
 function weeklyHours(value: unknown): WorkingHours[] {
- if (!Array.isArray(value) || value.length > 28) throw new HTTPError({ statusCode: 400, message: 'At most 28 weekly working windows are allowed' })
+ if (!Array.isArray(value) || value.length > 28) throw new HTTPError({ statusCode: 400, message: 'At most 28 weekly working windows are allowed', data: { code: 'INVALID_MEMBER_HOURS' } })
  return value.map(slot => {
-  if (!slot || typeof slot!=='object' || !Number.isInteger(slot.weekday) || slot.weekday < 0 || slot.weekday > 6 || typeof slot.start!=='string' || typeof slot.end!=='string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(slot.start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(slot.end) || slot.end <= slot.start) throw new HTTPError({ statusCode: 400, message: 'Hours require weekday 0–6 and start before end on the same day' })
+  if (!slot || typeof slot!=='object' || !Number.isInteger(slot.weekday) || slot.weekday < 0 || slot.weekday > 6 || typeof slot.start!=='string' || typeof slot.end!=='string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(slot.start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(slot.end) || slot.end <= slot.start) throw new HTTPError({ statusCode: 400, message: 'Choose an end time after the start time on the same day.', data: { code: 'INVALID_MEMBER_HOURS' } })
   return { weekday: slot.weekday, start: slot.start, end: slot.end }
  })
 }
@@ -46,7 +46,7 @@ export function workingWindows(timezone: string, weekly: WorkingHours[], span: {
     const end = localDateTimeToInstant(date, slot.end, timezone, 'reject').toISOString()
     if (end > start) intervals.push({ start, end })
    } catch {
-    throw new HTTPError({statusCode:400,message:`Working hours on ${date} have a nonexistent or ambiguous DST boundary; choose an unambiguous start and end`})
+    throw new HTTPError({ statusCode: 400, message: `On ${date}, the clocks change during these hours. Choose a different start or end time.`, data: { code: 'INVALID_MEMBER_HOURS' } })
    }
   }
  }
@@ -166,7 +166,7 @@ async function memberBusy(env: CloudflareEnv, row: MemberScheduling, span: { fro
  const ids = JSON.parse(row.calendar_ids_json) as string[]
  if (!row.calendar_account_id || !ids.length) return []
  // Google Calendar sync is Business; a selection kept past the plan is not read.
- if (!await hasOrganizationEntitlement(env, row.organization_id, 'calendar_sync')) throw new HTTPError({ statusCode: 409, message: 'Google Calendar sync requires the Business plan; disconnect this busy calendar to stop checking it' })
+ if (!await hasOrganizationEntitlement(env, row.organization_id, 'calendar_sync')) throw new HTTPError({ statusCode: 409, message: 'Google Calendar sync requires the Business plan; disconnect this busy calendar to stop checking it', data: { code: 'CALENDAR_SYNC_PLAN_REQUIRED' } })
  const token = await linkedAccountAccessToken(env, row.calendar_account_id)
  // Google rejects the full scheduling horizon in one freeBusy request.
  const starts: number[] = []
@@ -175,7 +175,7 @@ async function memberBusy(env: CloudflareEnv, row: MemberScheduling, span: { fro
   const timeMax = new Date(Math.min(from + 30 * 86400000, Date.parse(span.until))).toISOString()
   recordRequestExternalCall(env.DB, 'google_calendar_free_busy')
   const response = await fetch('https://www.googleapis.com/calendar/v3/freeBusy', { method: 'POST', headers: { Authorization: `Bearer ${token.accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ timeMin: new Date(from).toISOString(), timeMax, items: ids.map(id => ({ id })) }) })
-  if (!response.ok) throw new HTTPError({ statusCode: 502, message: `Google busy-calendar check failed (${response.status})` })
+  if (!response.ok) throw new HTTPError({ statusCode: 502, message: `Google busy-calendar check failed (${response.status})`, data: { code: 'CALENDAR_AVAILABILITY_UNAVAILABLE' } })
   const data = await response.json() as { calendars: Record<string, { errors?: { reason: string }[]; busy: SchedulingInterval[] }> }
   return ids.flatMap((id) => {
    const calendar = data.calendars[id]!

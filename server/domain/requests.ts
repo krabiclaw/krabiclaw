@@ -1,6 +1,7 @@
+import { initialConversationParticipants, initialListingParticipants } from '~/server/domain/conversation-participants'
 import { openingMessageQueries } from '~/server/domain/guest-threads/opening'
 import { bookingStatusQuery } from '~/server/domain/bookings'
-import { CURRENT_GUEST_SQL, SUBMISSION_EVENT, messageQueries } from '~/server/domain/conversations'
+import { SUBMISSION_EVENT, messageQueries, type ConversationRow } from '~/server/domain/conversations'
 import { z } from 'zod'
 import { HTTPError } from 'nitro'
 import { guestVisitRefundQueries, guestVisitRefundKey } from '~/server/domain/payments/visit-refund'
@@ -120,6 +121,30 @@ export interface ThreadOperationalRecord {
   review_id: string | null
   /** The advance notice the booking was made under (its frozen policy), which closes the guest's own cancellation; null for no notice. */
   advance_notice_minutes: number | null
+  respond_by: string | null
+  pay_by: string | null
+  payment_processing: boolean
+}
+
+/** The guest may pay after the host's decision. The decision message owns its deadline. */
+export const stayRequestRespondBySql = (booking: string) => `json_extract(${booking}.policy_json, '$.stay_request.respond_by')`
+export const stayRequestPayBySql = (conversation: string) => `(SELECT json_extract(approval.payload_json, '$.pay_by') FROM messages approval
+  WHERE approval.conversation_id = ${conversation} AND approval.event_name = 'booking.confirm'
+    AND json_type(approval.payload_json, '$.pay_by') = 'text' ORDER BY approval.sequence DESC LIMIT 1)`
+export const stayRequestConfirmationKey = (bookingId: string) => `stay:${bookingId}:request-paid`
+/** Only a payment confirmation already sent to Stripe protects an expired request. */
+export const noStayRequestPaymentInFlightSql = (conversation: string) => `NOT EXISTS (
+  SELECT 1 FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id AND p.organization_id=h.organization_id
+  WHERE h.conversation_id=${conversation} AND h.status='active' AND json_type(p.review_json, '$.confirmation_started_at') = 'text' AND h.expires_at > ?
+)`
+
+export function stayRequestProgress(record: Pick<ThreadOperationalRecord, 'status' | 'respond_by' | 'pay_by'>) {
+  return {
+    request_status: record.status === 'pending' && record.respond_by
+      ? record.pay_by ? 'awaiting_payment' as const : 'awaiting_approval' as const : null,
+    respond_by: record.respond_by,
+    pay_by: record.pay_by,
+  }
 }
 
 /** Whether a stored booking end is a local day alone (its home had no time for it). */
@@ -150,7 +175,7 @@ export const BOOKING_ENDS_SQL = (alias: string) => `CASE WHEN length(${alias}.en
 /** A booking's start as an instant SQL can compare, a start stored as a day reads as that day's first possible moment anywhere. */
 export const BOOKING_STARTS_SQL = (alias: string) => `CASE WHEN length(${alias}.starts_at) = 10 THEN date(${alias}.starts_at, '-1 day') || 'T10:00:00.000Z' ELSE ${alias}.starts_at END`
 
-export function parseGuestRequest(row: Record<string, unknown>): GuestRequest {
+export function parseGuestRequest(row: Record<string, unknown> | ConversationRow): GuestRequest {
   if (typeof row.payload_json !== 'string') throw new Error('Request payload is missing')
   return guestRequestSchema.parse({ ...row, payload: JSON.parse(row.payload_json) })
 }
@@ -162,9 +187,13 @@ export function participantLabel(request: GuestRequest): string {
   return request.payload.guest.name
 }
 
-export async function getGuestRequest(db: DbClient, id: string, organizationId?: string, kind?: GuestRequestKind, buyerUserId?:string): Promise<GuestRequest | null> {
-  const row = await queryFirst<Record<string, unknown>>(db, `SELECT r.* FROM conversations r WHERE r.id = ? AND r.kind IN ('contact', 'booking')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}${buyerUserId?` AND r.user_id=? AND ${CURRENT_GUEST_SQL('r')}`:''}`, [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : []),...(buyerUserId?[buyerUserId]:[])])
-  if (!row) return null
+export async function getGuestRequest(db: DbClient, id: string, organizationId?: string, kind?: GuestRequestKind): Promise<GuestRequest | null> {
+  const row = await queryFirst<Record<string, unknown>>(db, `SELECT r.* FROM conversations r WHERE r.id = ? AND r.kind IN ('contact', 'booking')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}`, [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : [])])
+  return row ? validateGuestRequest(db, row) : null
+}
+
+/** Parse the conversation row already returned by a scoped read and validate its channel association. */
+export async function validateGuestRequest(db: DbClient, row: Record<string, unknown> | ConversationRow): Promise<GuestRequest> {
   const request = parseGuestRequest(row)
   if (request.kind === 'booking' && request.payload.participant) {
     const mapped = await queryFirst(db, `SELECT 1 FROM conversations r
@@ -191,7 +220,7 @@ export const BOOKING_RECORDS_SQL = `(
     SELECT b.id, (SELECT conv.id FROM conversations conv WHERE conv.booking_id = b.id AND conv.kind = 'booking') AS conversation_id, b.organization_id, b.status, b.party_size, b.party_size_is_minimum, b.starts_at, b.ends_at, b.timezone,
            b.location_id, b.product_id, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit,
            p.kind AS product_kind, b.product_id AS offering_id, p.name AS product_name, sc.internal_name AS product_internal_name, c.assigned_member_id, b.user_id,
-           b.no_show_at, b.created_at, b.received_at, b.updated_at, b.version,
+           b.no_show_at, b.created_at, b.received_at, b.updated_at, b.version, ${stayRequestRespondBySql('b')} AS respond_by,
            json_extract(b.policy_json, '$.advance_notice_minutes') AS advance_notice_minutes,
            json_array(b.version, b.status, b.product_id, b.product_session_id, b.starts_at, b.ends_at, b.timezone, b.updated_at) AS fingerprint
       FROM bookings b
@@ -201,7 +230,7 @@ export const BOOKING_RECORDS_SQL = `(
   )`
 
 /** One row of BOOKING_RECORDS_SQL. received_at is null for a booking imported or known before KrabiClaw received it. */
-export interface BookedRecord extends Omit<ThreadOperationalRecord, 'review_id'> {
+export interface BookedRecord extends Omit<ThreadOperationalRecord, 'review_id' | 'pay_by' | 'payment_processing'> {
   conversation_id: string | null
   offering_id: string
   created_at: string
@@ -236,17 +265,20 @@ export function bookedRecordGuard(record: Pick<BookedRecord, 'organization_id' |
   return { query: `EXISTS (SELECT 1 FROM ${BOOKING_RECORDS_SQL} br WHERE br.organization_id = ? AND br.id = ? AND br.fingerprint = ?)`, params: [record.organization_id, record.id, record.fingerprint] }
 }
 
-export async function getThreadOperationalRecord(db: DbClient, requestId: string): Promise<ThreadOperationalRecord | null> {
-  const record = await queryFirst<Omit<ThreadOperationalRecord, 'party_size_is_minimum'> & { party_size_is_minimum: number }>(db, `
+export async function getThreadOperationalRecord(db: DbClient, requestId: string, authorized?: Pick<ConversationRow, 'kind' | 'booking_id' | 'organization_id'>): Promise<ThreadOperationalRecord | null> {
+  if (authorized?.kind === 'contact') return null
+  const conversationRef = authorized ? '?' : 'owner.id'
+  const now = new Date().toISOString()
+  const record = authorized?.booking_id === null ? null : await queryFirst<Omit<ThreadOperationalRecord, 'party_size_is_minimum' | 'payment_processing'> & { party_size_is_minimum: number; payment_processing: number }>(db, `
     SELECT br.unit, br.id, br.status, br.party_size, br.party_size_is_minimum, br.starts_at, br.ends_at, br.timezone, br.location_id, br.product_id, br.product_kind, br.product_name, br.product_internal_name,
-           br.assigned_member_id, br.organization_id, br.user_id, br.no_show_at, br.version,
+           br.assigned_member_id, br.organization_id, br.user_id, br.no_show_at, br.version, br.respond_by, ${stayRequestPayBySql(conversationRef)} AS pay_by,
+           CASE WHEN br.status='pending' AND br.respond_by IS NOT NULL THEN NOT (${noStayRequestPaymentInFlightSql(conversationRef)}) ELSE 0 END AS payment_processing,
            (SELECT rv.id FROM reviews rv WHERE rv.organization_id = br.organization_id AND rv.booking_id = br.id ORDER BY rv.created_at LIMIT 1) AS review_id, br.advance_notice_minutes
-      FROM conversations owner
-      JOIN ${BOOKING_RECORDS_SQL} br ON br.id = owner.booking_id AND br.organization_id = owner.organization_id
-     WHERE owner.id = ? AND owner.kind = 'booking'
+      FROM ${authorized ? `${BOOKING_RECORDS_SQL} br` : `conversations owner JOIN ${BOOKING_RECORDS_SQL} br ON br.id = owner.booking_id AND br.organization_id = owner.organization_id`}
+     WHERE ${authorized ? 'br.id = ? AND br.organization_id = ?' : "owner.id = ? AND owner.kind = 'booking'"}
      LIMIT 1
-  `, [requestId])
-  if (record) return { ...record, party_size_is_minimum: Number(record.party_size_is_minimum) === 1 }
+  `, authorized ? [requestId, requestId, now, authorized.booking_id, authorized.organization_id] : [now, requestId])
+  if (record) return { ...record, party_size_is_minimum: Number(record.party_size_is_minimum) === 1, payment_processing: record.payment_processing === 1 }
   const request = await queryFirst<{ kind: GuestRequestKind; uncaptured_checkout: number | null }>(db, `
     SELECT r.kind,
       (json_extract(r.payload_json, '$.provenance.creation_kind') = 'checkout'
@@ -295,7 +327,9 @@ export function requestInsertQueries(request: Omit<GuestRequest, 'blocked_at' | 
   return [{
     query: claimedBy ? `${insert} SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (${claimedBy.query})` : `${insert} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     params: claimedBy ? [...values, ...(claimedBy.params ?? [])] : values,
-  }, ...messages, publicResourceCacheInvalidationQuery(request.organization_id, 'guest-thread-create')]
+  }, initialConversationParticipants(request.id, request.organization_id),
+  initialListingParticipants(request.organization_id, request.id), ...messages,
+  publicResourceCacheInvalidationQuery(request.organization_id, 'guest-thread-create')]
 }
 
 /**
@@ -316,7 +350,8 @@ export function bookingConversationQueries(input: {
       SELECT ?, 'booking', ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ?)
         AND NOT EXISTS (SELECT 1 FROM conversations WHERE kind = 'booking' AND booking_id = ?)`,
     params: [input.requestId, input.organizationId, input.locationId, input.bookingId, input.userId, JSON.stringify(payload), input.now, input.now, input.organizationId, input.bookingId, input.bookingId],
-  }, publicResourceCacheInvalidationQuery(input.organizationId, 'guest-thread-create')]
+  }, initialConversationParticipants(input.requestId, input.organizationId),
+  initialListingParticipants(input.organizationId, input.requestId), publicResourceCacheInvalidationQuery(input.organizationId, 'guest-thread-create')]
 }
 
 /**
@@ -353,8 +388,12 @@ export function threadPayloadForGuest(input: GuestThreadInput): GuestThreadPaylo
  */
 export function requestActions(record: ThreadOperationalRecord | null, now: string): string[] {
   const noShow = canMarkNoShow(record, now) ? ['no_show'] : []
-  // A stay is changed and cancelled from its own screen; its thread is the conversation.
-  if (record?.unit === 'nights' || !canCancelBookingRequest(record, now)) return noShow
+  if (!canCancelBookingRequest(record, now)) return noShow
+  if (record.unit === 'nights') {
+    if (record.status !== 'pending' || !record.respond_by) return noShow
+    if (record.pay_by) return !record.payment_processing && record.pay_by > now ? ['cancel'] : noShow
+    return record.respond_by > now ? ['confirm', 'reject'] : noShow
+  }
   return [...(record.status === 'pending' ? ['confirm', 'reject', 'change', 'cancel'] : ['change', 'cancel']), ...noShow]
 }
 
@@ -378,16 +417,22 @@ export function stayPreview(record: { starts_at: string; ends_at: string; timezo
   return `${day(record.starts_at)} – ${day(record.ends_at)} · ${record.party_size} ${record.party_size === 1 ? 'guest' : 'guests'}`
 }
 
-export async function requestSummary(db: DbClient, request: GuestRequest, knownRecord?: ThreadOperationalRecord | null) {
+export type RequestLocation = { title: string; timezone: string }
+
+export function requestLocationQuery(request: Pick<ConversationRow, 'location_id' | 'organization_id'>) {
+  return { query: 'SELECT title, timezone FROM business_locations WHERE id = ? AND organization_id = ?', params: [request.location_id, request.organization_id] }
+}
+
+export async function requestSummary(db: DbClient, request: GuestRequest, knownRecord?: ThreadOperationalRecord | null, knownLocation?: RequestLocation | null) {
   const record = knownRecord === undefined ? await getThreadOperationalRecord(db, request.id) : knownRecord
-  // A thread without a location belongs to the business itself; one with a location must find it.
-  const location = request.location_id === null ? null
-    : await queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE id = ? AND organization_id = ?', [request.location_id, request.organization_id])
+  const { query, params } = requestLocationQuery(request)
+  const location = knownLocation !== undefined ? knownLocation
+    : request.location_id === null ? null : await queryFirst<RequestLocation>(db, query, params)
   if (request.location_id !== null && !location) throw new HTTPError({ statusCode: 500, message: 'The conversation location does not exist', data: { code: 'INVALID_GUEST_THREAD', field: 'location_id', request_id: request.id } })
   return {
     guestName: request.payload.guest.name, participantLabel: participantLabel(request), guestEmail: request.payload.guest.email, guestPhone: request.payload.guest.phone,
     organizationId: request.organization_id, locationId: request.location_id,
-    locationTitle: location?.title ?? null, productTitle: record?.product_name ?? null,
+    locationTitle: location?.title ?? null, locationTimezone: location?.timezone ?? null, productTitle: record?.product_name ?? null,
     createdAt: request.created_at,
     operationalStatus: record?.status ?? null,
   }

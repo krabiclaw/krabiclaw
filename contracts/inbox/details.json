@@ -3,29 +3,16 @@
     "archive": true,
     "block": true,
     "report": true,
-    "show_reservation": true,
     "unarchive": false,
     "unblock": false
   },
-  "participants": [
-    {
-      "initial": "M",
-      "name": "Mililani Garcia",
-      "role": "Guest"
-    },
-    {
-      "initial": "S",
-      "name": "Skyler Baird",
-      "role": "Host"
-    }
-  ],
   "photos": [
     {
       "height": 3,
-      "id": "00000000-0000-4000-8000-000000000007",
+      "id": "00000000-0000-4000-8000-000000000006",
       "sent_at": "2026-11-04T18:17:00.000Z",
-      "thumbnail_url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
-      "url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
+      "thumbnail_url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000006.avif",
+      "url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000006.avif",
       "width": 4
     }
   ]

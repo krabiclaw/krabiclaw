@@ -10,6 +10,7 @@ import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import createHomeRoute from '../../server/api/dashboard/stay-homes/index.post.ts'
 import listHomesRoute from '../../server/api/dashboard/stay-homes/index.get.ts'
 import editHomeRoute from '../../server/api/dashboard/stay-homes/[product_id].patch.ts'
+import guidedHomeRoute from '../../server/api/dashboard/stay-homes/setup.post.ts'
 import { getLocation, updateLocation } from '../../server/utils/location-management.ts'
 import { getProduct } from '../../server/utils/product-management.ts'
 import { createStayHome, quoteStay, readPublicStayCalendar, readStayHome, stayHomeInput } from '../../server/domain/stays.ts'
@@ -60,6 +61,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     const app = new H3()
     app.post('/api/dashboard/stay-homes', createHomeRoute)
     app.get('/api/dashboard/stay-homes', listHomesRoute)
+    app.post('/api/dashboard/stay-homes/setup', guidedHomeRoute)
     app.patch('/api/dashboard/stay-homes/:product_id', editHomeRoute)
     const call = async (cookie: string, method: 'GET' | 'POST' | 'PATCH', body?: Record<string, unknown>, productId?: string) => {
       const response = await app.request(Object.assign(new Request(`${BASE}/api/dashboard/stay-homes${productId ? `/${productId}` : ''}?org=org`, {
@@ -103,7 +105,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
       name: 'Cliff Cabin', internal_name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, base_price_tax_behavior: 'unspecified', check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4, min_nights: 2, calendar_rules: null, check_in_instructions: null, assigned_member_id: 'm-owner', channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
       accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })),
       address: { address: '1 Cliff Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532' }, latitude: null, longitude: null,
-      questions: [], questions_revision: formQuestionsRevision([]),
+      questions: [], questions_revision: formQuestionsRevision([]), host_profile_published: false,
       description: '', published: false, live: false, airbnb_listing_id: null, airbnb_editor_url: null, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
     const keyedCabin = { ...cabin, idempotency_key: 'a'.repeat(200) }
@@ -169,7 +171,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     const changed = {
       product_id: made.product_id, variant_id: catalogHome.variants[0]!.id, updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, location_id: made.location_id, name: 'Cliff Cabin North', internal_name: 'Cliff Cabin', timezone: 'America/Los_Angeles', currency: 'USD', base_price_minor: 210_00, base_price_tax_behavior: 'unspecified',
       check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, calendar_rules: null, check_in_instructions: null, assigned_member_id: 'm-helper', channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
-      accessibility: home.accessibility, questions: home.questions, questions_revision: home.questions_revision,
+      accessibility: home.accessibility, questions: home.questions, questions_revision: home.questions_revision, host_profile_published: false,
       address: home.address, latitude: null, longitude: null, description: '', published: false, live: false, airbnb_listing_id: null, airbnb_editor_url: null, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
     assert.deepEqual(edited.body, { home: changed, channel_push: null, airbnb_unsynced: [] })
@@ -378,6 +380,31 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.partialDeepStrictEqual((await getProduct(db, ORG, unknownId)).stay, {
       check_in_time: null, check_out_time: null, cancellation_policy: null, long_term_cancellation_policy: null,
     })
+
+    // Exhaust the existing location allocator for this title. The refusal
+    // leaves the guide editable and does not create a home or a location.
+    await db.batch(['full-slug', ...Array.from({ length: 9 }, (_, index) => `full-slug-${index + 2}`)].map(slug =>
+      db.prepare('INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES (?, ?, ?, ?, ?)')
+        .bind(slug, ORG, slug, slug, cabin.timezone)))
+    const guided = (body: Record<string, unknown>) => call(owner, 'POST', body, 'setup')
+    const { address, city, state, country, zip_code, timezone, max_guests, min_nights } = cabin
+    const answers = { address, city, state, country, zip_code, timezone, max_guests, min_nights, name: 'Full slug',
+      property_type: 'house', listing_type: 'entire_place', stay_map_sharing: 'general', bedrooms: 1, beds: 1, bathrooms: 1, base_price: '120' }
+    const key = 'guided-slug-retry'
+    assert.equal((await guided({ action: 'exit', step: 'disclosures', answers, idempotency_key: key })).status, 200)
+    const initial = (await guided({})).body.draft as { revision: string }
+    const beforeRefusal = [await count('business_locations'), await count('products')]
+    const rejected = await guided({ step: 'disclosures', answers, idempotency_key: key, revision: initial.revision })
+    assert.deepEqual(refusal(rejected), { status: 409, error: 'Unable to allocate a unique location slug after 10 attempts.', code: 'LOCATION_SLUG_CONFLICT', field: 'slug' })
+    assert.deepEqual([await count('business_locations'), await count('products')], beforeRefusal)
+    const reopened = await guided({})
+    assert.partialDeepStrictEqual(reopened.body.draft, { revision: initial.revision, answers })
+    assert.equal(Object.hasOwn(reopened.body.draft as object, 'finishing'), false)
+    const saved = await guided({ step: 'disclosures', answers: { ...answers, name: 'New cabin' }, idempotency_key: key, revision: initial.revision })
+    assert.equal(saved.status, 201, JSON.stringify(saved.body))
+    const newHome = await getProduct(db, ORG, (saved.body.home as { product_id: string }).product_id)
+    assert.equal(newHome.name, 'New cabin')
+    assert.equal((await guided({})).body.draft, null)
   } finally {
     await runtime.dispose()
   }

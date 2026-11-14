@@ -13,7 +13,7 @@ interface BookingScope {
 export function bookingStatusQuery(input: BookingScope & {
   now: string
   guard: BatchQuery
-} & ({ status: 'confirmed' } | { status: 'cancelled'; reason: string | null })): BatchQuery {
+} & ({ status: 'confirmed' | 'pending' } | { status: 'cancelled'; reason: string | null })): BatchQuery {
   const stamps = input.status === 'cancelled' ? ', cancelled_at = ?, cancellation_reason = ?' : ''
   const stampParams = input.status === 'cancelled' ? [input.now, input.reason] : []
   return {

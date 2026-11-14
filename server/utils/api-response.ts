@@ -134,7 +134,7 @@ export const cloudflareEnv = (event: H3Event): CloudflareEnv => {
       const isRealInboundRequest = !isInternalSelfFetch(event)
       const logMessage =
         `[cloudflareEnv] Missing bindings: ${missing.join(', ')} ` +
-        `for ${host}${path} (cf-ray: ${cfRay ?? 'no-cf-ray'}). In local dev, run via wrangler dev/yarn dev. ` +
+        `for ${host}${path.split('?')[0]} (cf-ray: ${cfRay ?? 'no-cf-ray'}). In local dev, run via wrangler dev/yarn dev. ` +
         (isRealInboundRequest
           ? 'In production this means the Workers runtime did not attach bindings to this request — escalate to Cloudflare support with the cf-ray above if it recurs on real traffic.'
           : 'No cf-ray present — this looks like a nested internal self-fetch (event.$fetch/useRequestFetch), which does not inherit Cloudflare bindings. Fetch the data directly instead of self-fetching if this is unexpected.')

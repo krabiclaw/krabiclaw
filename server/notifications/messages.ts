@@ -40,8 +40,6 @@ export interface NotificationQuote {
   author: string
   /** The words as written; empty when the message is only photos. */
   body: string
-  /** The channel's translation into the reader's language, when it made one, and the channel that made it. */
-  translation: { by: string; text: string } | null
   /** Photos the message carries, shown whole, uncropped. */
   photos: Array<{ imageUrl: string; alt: string }>
 }

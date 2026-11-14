@@ -38,7 +38,7 @@
           square
           class="size-10 justify-center justify-self-start rounded-full lg:hidden"
           data-testid="dashboard-navbar-close"
-          :to="level.to.value ?? undefined"
+          :to="backTo ?? level.to.value ?? undefined"
           :disabled="saving"
           @click.prevent="cancel"
         />
@@ -109,6 +109,7 @@ const props = withDefaults(defineProps<{
   footer?: boolean
   /** Keep the explicit Cancel action beside a focused lodging editor. */
   desktopCancel?: boolean
+  backTo?: string
 }>(), { saving: false, disabled: false, error: '', saveLabel: 'Save', footer: true })
 
 const emit = defineEmits<{ save: []; cancel: [] }>()
@@ -128,7 +129,7 @@ function cancel() {
   cancelled = true
   emit('cancel')
   drawerOpen.value = false
-  const exitTo = parent?.exit() ?? level.to.value
+  const exitTo = props.backTo ?? parent?.exit() ?? level.to.value
   if (exitTo) {
     const historyBack = import.meta.client ? window.history.state?.back : null
     const target = router.resolve(exitTo).fullPath

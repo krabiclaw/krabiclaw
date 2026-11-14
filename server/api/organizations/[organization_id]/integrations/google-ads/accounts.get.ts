@@ -16,9 +16,11 @@ export default defineHandler(async (event) => {
   if (!organizationId) return jsonResponse({ error: 'Organization ID is required' }, { status: 400 })
 
   const { env, session, organization } = await requireOrganizationAccess(event, organizationId)
-  const ads = integrationSummary(await readIntegration(env.DB, organization.id, 'google_ads'))
+  const connection = await readIntegration(env.DB, organization.id, 'google_ads')
+  const ads = integrationSummary(connection)
+  const revision = connection?.revision ?? null
   const accountId = event.url.searchParams.get('account_id') || ads?.account_id || null
-  if (!accountId) return jsonResponse({ success: true, account_id: null, ads, accounts: [], error: null })
+  if (!accountId) return jsonResponse({ success: true, account_id: null, ads, revision, accounts: [], error: null })
 
   try {
     await requireIntegrationAccount(env, accountId, {
@@ -31,12 +33,15 @@ export default defineHandler(async (event) => {
     const accounts = await listGoogleAdsAccounts(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN)
     const not_enabled = accounts.filter(account => account.not_enabled).map(account => account.customerId)
     if (not_enabled.length) console.info('google_ads_accounts_not_enabled', { organizationId: organization.id, accountId, customerIds: not_enabled })
-    return jsonResponse({ success: true, account_id: accountId, ads, accounts, error: null })
+    return jsonResponse({ success: true, account_id: accountId, ads, revision,
+      accounts: event.url.searchParams.get('service') === 'managed-ads'
+        ? accounts.filter(account => account.currencyCode === 'USD' && !account.is_manager && !account.error && !account.not_enabled) : accounts,
+      error: null })
   } catch (error) {
     rethrowHttpError(error)
     console.error('google_ads_accounts_failed', { organizationId: organization.id, error })
     return jsonResponse({
-      account_id: accountId, ads, accounts: [],
+      account_id: accountId, ads, revision, accounts: [],
       error: error instanceof Error ? error.message : String(error),
     }, { status: 502 })
   }

@@ -32,8 +32,7 @@ export function tenantOrganizationOrigin(input: {
   const alias = environmentTenantAliasHostname(normalizeHost(input.platformDomain), subdomain)
   if (alias) return `${protocol}//${alias}`
 
-  if (canonicalHost) return `https://${canonicalHost}`
-  if (!freeOrganizationHost) return ''
-  if (!subdomain) return ''
-  return `${protocol}//${subdomain}.${freeOrganizationHost}`
+  const includedHost = freeOrganizationHost && subdomain ? `${subdomain}.${freeOrganizationHost}` : ''
+  if (canonicalHost && canonicalHost !== normalizeHost(includedHost)) return `https://${canonicalHost}`
+  return includedHost ? `${protocol}//${includedHost}` : ''
 }

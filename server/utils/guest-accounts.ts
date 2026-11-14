@@ -1,3 +1,4 @@
+import { linkGuestConversationSeats } from '~/server/domain/conversation-participants'
 import { executeBatch, queryAll, type BatchQuery, type DbClient } from '~/server/db'
 
 /**
@@ -33,8 +34,7 @@ export function anonymousLinkQueries(from: string, to: string, now: string): Bat
     // What the guest wrote is the account's, and so is how far they read: where
     // both identities read one conversation, the account keeps its own position.
     { query: 'UPDATE messages SET author_user_id = ? WHERE author_user_id = ?', params: [to, from] },
-    { query: 'UPDATE OR IGNORE conversation_participants SET user_id = ? WHERE user_id = ?', params: [to, from] },
-    { query: 'DELETE FROM conversation_participants WHERE user_id = ?', params: [from] },
+    ...linkGuestConversationSeats(from, to),
     { query: 'UPDATE media_assets SET created_by_user_id = ? WHERE created_by_user_id = ?', params: [to, from] },
   ]
 }

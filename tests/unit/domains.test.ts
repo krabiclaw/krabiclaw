@@ -123,6 +123,9 @@ test('groupCustomDomains renders apex and www as one customer domain row', () =>
       domain: 'www.example.com',
       role: 'canonical',
       status: 'verifying',
+      ssl_validation_name: '_acme-challenge.www.example.com',
+      ssl_validation_type: 'TXT',
+      ssl_validation_value: 'www-certificate-token',
     }),
     domain({
       id: 'domain-platform',
@@ -140,5 +143,6 @@ test('groupCustomDomains renders apex and www as one customer domain row', () =>
     ['TXT', '_cf-custom-hostname.example.com', 'ownership-token'],
     ['CNAME', '_acme-challenge.example.com', 'krabiclaw.com.dcv.cloudflare.com'],
     ['CNAME', 'www', 'customers.krabiclaw.com'],
+    ['TXT', '_acme-challenge.www.example.com', 'www-certificate-token'],
   ])
 })

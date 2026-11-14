@@ -5,7 +5,8 @@ import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
 import { seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
-import type { FormAnswerSnapshot, FormQuestion } from '../../shared/form-questions'
+import type { FormQuestion } from '../../shared/form-questions'
+import type { ConversationPage } from '../../shared/messages-contract'
 
 type Settings = { inquiry_questions: FormQuestion[]; inquiry_questions_revision: string }
 
@@ -70,14 +71,13 @@ test('an owner adds an inquiry question in Website, a visitor answers it, and th
     const requestId = (await submitted.json() as { conversation_id: string }).conversation_id
     await expect(guest).toHaveURL(/\/contact\/confirmed/)
 
-    // The answers are the submission's, kept with the conversation; MCP reads them out (the inbox view does not carry them).
     const savedAnswers = async () => {
       const response = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: restaurant.organizationId, conversation_id: requestId } })
       expect(response.status(), await response.text()).toBe(200)
-      return mcpData<{ guest: { answers: FormAnswerSnapshot[] } }>(await response.json()).guest.answers
+      return mcpData<ConversationPage>(await response.json()).entries.find(entry => entry.type === 'message')?.body
     }
     const answers = await savedAnswers()
-    expect(answers).toEqual([{ question_id: question.id, label: 'How did you hear about us?', type: 'single_choice', help_text: null, value: 'instagram', selected_choices: [{ id: 'instagram', label: 'Instagram' }] }])
+    expect(answers).toContain('How did you hear about us? Instagram')
     await openTenantPage(cms, `${baseURL}/dashboard/${restaurant.slug}/messages/${requestId}`, {})
     // The answers are part of the visitor's opening message, as they wrote them.
     const answered = cms.locator('[data-message]').first()

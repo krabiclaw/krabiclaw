@@ -34,20 +34,25 @@
 
 <script setup lang="ts">
 import DashboardMenuContent from './DashboardMenuContent.vue'
+import { dashboardSearchOpenKey } from './dashboardPanelContext'
 
 const open = defineModel<boolean>('open', { default: false })
 
 const route = useRoute()
-const nuxtApp = useNuxtApp()
+const openDashboardSearch = inject(dashboardSearchOpenKey)!
 const { personal } = useDashboardMenu()
 
 function openSearch() {
   open.value = false
-  nuxtApp.hooks.callHook('dashboard:search:toggle')
+  openDashboardSearch()
 }
 
 // DashboardMenuContent renders plain NuxtLinks, so a selection navigates the
 // page underneath the slideover rather than closing it. Close on the resulting
 // path change instead of wrapping every item in a click handler.
-watch(() => route.path, () => { open.value = false })
+watch(() => route.path, (path, previous) => {
+  // The desktop inbox selects its first thread in the background.
+  if (previous.endsWith('/messages') && route.params.conversation_id && path.startsWith(`${previous}/`)) return
+  open.value = false
+})
 </script>

@@ -73,6 +73,7 @@ import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 import { earningsFigure, isEarningsSummary, type EarningsSummary } from '~/shared/earnings-display'
 import { formatCalendarDate } from '~/utils/timezone'
 import { isAccountActivityResponse, type AccountActivityResponse } from '~/shared/account-activity'
+import { readActiveWebsiteDraft } from '~/composables/useOnboardingDraft'
 
 // Rendered by both the desktop slideover and the mobile menu page, off one
 // model, so the two surfaces cannot show different menus.
@@ -85,9 +86,11 @@ const offer = computed(() => dashboard.organization.value && dashboard.canUpdate
 const orgBase = computed(() => organization.value ? `/dashboard/${encodeURIComponent(organization.value.slug)}` : null)
 const inOrganization = computed(() => Boolean(orgBase.value))
 const monthLabel = formatCalendarDate(new Date().toISOString().slice(0, 10), 'en', { month: 'long', year: 'numeric' })
-const organizationSettings = useOrganizationSettingsNavigation(organization, scopeModel)
+const setup = useAsyncData('personal-menu-website-setup', readActiveWebsiteDraft, { enabled: personal })
+const resumeAction = computed(() => setup.data.value?.resume_action)
+const organizationSettings = useOrganizationSettingsNavigation(organization, scopeModel, resumeAction)
 const { groups, activeItem } = organizationSettings
-await organizationSettings.ready
+await Promise.all([organizationSettings.ready, setup])
 // Only the actual Menu loads Earnings. Search reuses its navigation and
 // permission checks without reading the payments summary.
 const { data: earnings, error: earningsError } = await useAsyncData(
@@ -130,7 +133,7 @@ const { data: activity, error: activityError } = await useAsyncData(
 )
 // A card whose figure or photos could not be read says so, never an empty card standing in for one.
 const cardsError = computed(() => {
-  const error = organizationSettings.error.value ?? earningsError.value ?? placesError.value ?? activityError.value
+  const error = organizationSettings.error.value ?? setup.error.value ?? earningsError.value ?? placesError.value ?? activityError.value
   return error ? getErrorMessage(error, 'The Menu could not be loaded.') : null
 })
 const placePhotos = computed(() => places.value?.organizationId === organization.value?.id ? places.value?.locations.map(row => row.picture_url).filter((url): url is string => !!url) ?? [] : [])

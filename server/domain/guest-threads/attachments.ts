@@ -40,6 +40,15 @@ export interface MessagePhoto {
 /** Host file identities keep a replay independent of an expiring download URL. */
 export type MessagePhotoInput = MessagePhoto[] | { sourceIds: string[]; resolve: () => Promise<MessagePhoto[]> }
 
+export function messagePhotoCount(photos: MessagePhotoInput): number {
+  return Array.isArray(photos) ? photos.length : photos.sourceIds.length
+}
+
+export async function messagePhotoHashes(photos: MessagePhoto[]): Promise<string[]> {
+  return await Promise.all(photos.map(async ({ bytes }) =>
+    Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('')))
+}
+
 type Uploader = { source: 'uploaded'; userId: string } | { source: 'external'; userId: null }
 
 /** What a message says in a preview line: its words, or what it sent when it has none. */
@@ -172,23 +181,45 @@ export async function discardMessagePhotos(
   if (failures.length) throw new AggregateError([cause, ...failures], 'Message photos could not be cleaned up after the message failed')
 }
 
-/** Each message's photos, in the order they were sent. */
-export async function listMessagePhotos(db: DbClient, ownerType: MessageOwnerType, messageIds: string[]): Promise<Map<string, GuestThreadEntryAttachmentViewModel[]>> {
-  const photos = new Map<string, GuestThreadEntryAttachmentViewModel[]>()
-  if (!messageIds.length) return photos
-  const rows = await queryAll<{ owner_id: string; id: string; public_url: string; thumbnail_url: string | null; alt_text: string | null; width: number | null; height: number | null }>(db, `
-    SELECT mp.owner_id, ma.id, ma.public_url, ma.thumbnail_url, ma.alt_text, ma.width, ma.height
+export interface MessagePhotoRow {
+  owner_id: string
+  id: string
+  public_url: string
+  thumbnail_url: string | null
+  alt_text: string | null
+  width: number | null
+  height: number | null
+}
+
+export function messagePhotoRowsSql(scope: string, from = '', columns = '', order = 'mp.owner_id, mp.sort_order') {
+  return `
+    SELECT mp.owner_id, ma.id, ma.public_url, ma.thumbnail_url, ma.alt_text, ma.width, ma.height${columns}
       FROM media_placements mp
       JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id
-     WHERE mp.owner_type = ? AND mp.slot = 'attachments' AND mp.status = 'active'
+      ${from}
+     WHERE ${scope} AND mp.slot = 'attachments' AND mp.status = 'active'
        AND ma.status = 'active' AND ma.public_url IS NOT NULL
-       AND mp.owner_id IN (SELECT value FROM json_each(?))
-     ORDER BY mp.owner_id, mp.sort_order
-  `, [ownerType, d1JsonStringSet(messageIds)])
+     ORDER BY ${order}
+  `
+}
+
+export function messagePhotosQuery(ownerType: MessageOwnerType, messageIds: string[]): BatchQuery {
+  return { query: messagePhotoRowsSql('mp.owner_type = ? AND mp.owner_id IN (SELECT value FROM json_each(?))'), params: [ownerType, d1JsonStringSet(messageIds)] }
+}
+
+export function groupMessagePhotos(rows: MessagePhotoRow[]): Map<string, GuestThreadEntryAttachmentViewModel[]> {
+  const photos = new Map<string, GuestThreadEntryAttachmentViewModel[]>()
   for (const row of rows) {
     const list = photos.get(row.owner_id) ?? []
     list.push({ id: row.id, url: row.public_url, thumbnailUrl: row.thumbnail_url ?? row.public_url, alt: row.alt_text, width: row.width, height: row.height })
     photos.set(row.owner_id, list)
   }
   return photos
+}
+
+/** Each message's photos, in the order they were sent. */
+export async function listMessagePhotos(db: DbClient, ownerType: MessageOwnerType, messageIds: string[]) {
+  if (!messageIds.length) return groupMessagePhotos([])
+  const { query, params } = messagePhotosQuery(ownerType, messageIds)
+  return groupMessagePhotos(await queryAll<MessagePhotoRow>(db, query, params))
 }

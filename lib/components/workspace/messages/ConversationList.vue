@@ -18,16 +18,11 @@
         :description="getErrorMessage(threadsError || nextPageError, 'Guest thread request failed')"
       />
 
-      <!-- A conversation that gains a message slides to its new place; one
-           that leaves this list fades and the rest close up behind it. -->
+      <!-- Reordering animates. New previews and access removals take effect immediately. -->
       <TransitionGroup
         tag="div"
         class="relative -mx-3"
         move-class="transition-transform duration-300 ease-out motion-reduce:transition-none"
-        enter-from-class="opacity-0 -translate-y-1"
-        enter-active-class="transition duration-300 ease-out motion-reduce:transition-none"
-        leave-to-class="opacity-0"
-        leave-active-class="absolute inset-x-0 transition-opacity duration-200 motion-reduce:transition-none"
       >
         <MessageRowActions
           v-for="thread in threads"
@@ -94,7 +89,6 @@
 </template>
 
 <script setup lang="ts">
-import { useIntervalFn, useDocumentVisibility } from '@vueuse/core'
 import { authClient } from '~/lib/auth-client'
 import type { LocationQueryRaw } from 'vue-router'
 import { getErrorMessage } from '~/utils/errors'
@@ -103,7 +97,7 @@ import { useDashboardInvalidations } from '~/composables/useDashboardInvalidatio
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import InboxAvatar from './InboxAvatar.vue'
 import MessageRowActions from './MessageRowActions.vue'
-import { useInboxUnread } from './inbox-unread'
+import { useInboxUnread, usePersonalInboxUnread } from './inbox-unread'
 
 /*
   The one list of conversations: guests', Airbnb Support's and the team's, in
@@ -115,7 +109,9 @@ import { useInboxUnread } from './inbox-unread'
 */
 const props = withDefaults(defineProps<{ personalScope?: boolean }>(), { personalScope: false })
 const session = authClient.useSession()
+const reader = computed(() => session.value.data?.user.id)
 const emit = defineEmits<{ first: [target: { path: string; query: LocationQueryRaw } | null] }>()
+defineExpose({ removeConversation })
 
 const dashboard = useDashboardOrganization()
 const route = useRoute()
@@ -127,7 +123,7 @@ const listRoute = computed(() => props.personalScope ? '/dashboard/account/messa
 const openThreadId = computed(() => {
   if (!route.path.startsWith(`${listRoute.value}/`)) return null
   const segments = route.path.slice(listRoute.value.length + 1).split('/')
-  return decodeURIComponent((segments[0] === 'team' ? segments[1] : segments[0]) ?? '') || null
+  return decodeURIComponent(segments[0] ?? '') || null
 })
 
 // Filter and corpus live in the URL, so a filtered list is a link.
@@ -142,9 +138,8 @@ const listHydrated = ref(false)
 const realtime = useDashboardInvalidations()
 onMounted(() => { listHydrated.value = true })
 
-const dashboardScope = useDashboardRouteScope()
-const dashboardApi = useDashboardApi(dashboardScope)
 const unreadCounts = useInboxUnread(organizationId)
+const personalUnread = usePersonalInboxUnread()
 
 const emptyTitle = computed(() => search.value || kind.value || unreadOnly.value ? 'No conversations match' : 'No conversations yet.')
 const emptyDescription = computed(() => {
@@ -161,15 +156,17 @@ const listQuery = computed(() => ({
   unread: unreadOnly.value ? '1' as const : undefined,
 }))
 
-const listKey = computed(() => [
-  props.personalScope ? `account-conversations:${session.value.data?.user.id}` : 'dashboard-conversations',
+const listKey = computed(() => JSON.stringify([
+  'messages-list',
+  reader.value,
+  props.personalScope,
   String(route.params.org_slug ?? ''),
   organizationId.value,
   kind.value ?? 'all',
   search.value ?? '',
   blockedOnly.value ? 'blocked' : pastOnly.value ? 'past' : 'current',
   unreadOnly.value ? 'unread' : 'any',
-].join(':'))
+]))
 
 // One loader for the list: the first render, a filter change and a live
 // update all go through it, and a refresh keeps the rows already on screen.
@@ -178,14 +175,13 @@ const loadingMore = ref(false)
 let pageController: AbortController | null = null
 let loadedScope = listKey.value
 let loadedPages = 1
+let readConnectionEpoch: number | null = null
+let reuseExpiresAt: number | undefined
+const listScope = computed(() => props.personalScope ? {} : { organization_id: organizationId.value })
 async function loadPage(offset: number, signal?: AbortSignal): Promise<ThreadListPage> {
-  const query = { ...listQuery.value, limit: 100, offset }
-  if (!props.personalScope && !dashboardScope.value) {
-    throw createError({ statusCode: 400, statusMessage: 'Dashboard route scope is incomplete' })
-  }
-  const page = props.personalScope
-    ? await applicationFetch<ThreadListPage>('/api/account/messages', { query, signal, validate: isThreadListResponse })
-    : await dashboardApi<ThreadListPage>(`/api/dashboard/organizations/${organizationId.value}/conversations`, { query, signal, validate: isThreadListResponse })
+  if (!props.personalScope && !organizationId.value) throw createError({ statusCode: 400, statusMessage: 'Messages require a workspace' })
+  const query = { ...listQuery.value, ...listScope.value, limit: 100, offset, sort_key: '1' }
+  const page = await applicationFetch<ThreadListPage>('/api/messages', { query, signal, validate: isThreadListResponse })
   if (page.pagination.limit !== query.limit || page.pagination.offset !== offset) throw createError({ statusCode: 502, statusMessage: 'Messages returned a different page than requested' })
   return page
 }
@@ -194,7 +190,7 @@ class ShiftedPages extends Error {}
 function appendLoadedPage(before: ThreadListPage, page: ThreadListPage): ThreadListPage {
   const ids = new Set(before.threads.map(thread => thread.id))
   if (page.threads.some(thread => ids.has(thread.id))) throw new ShiftedPages('Conversations moved between pages while loading')
-  return { threads: [...before.threads, ...page.threads], pagination: page.pagination }
+  return { ...page, threads: [...before.threads, ...page.threads] }
 }
 // New activity reorders the inbox while its pages are read, which shifts a row
 // across a page boundary. That ordinary case re-reads the window from the top;
@@ -221,33 +217,36 @@ async function loadWindow(pages: number, scope: string, signal: AbortSignal): Pr
 // its rows; a different list (another mailbox, filter or search) shows the
 // loading state until its own rows arrive, never the previous list's.
 const rowsKey = ref(listKey.value)
-const { data, pending, error: threadsError, refresh } = await useAsyncData<ThreadListPage>(listKey, async (_app, { signal }) => {
+const { data, pending, status, error: threadsError, refresh, clear } = await useAsyncData<ThreadListPage>(listKey, async (_app, { signal }) => {
   pageController?.abort()
   nextPageError.value = null
   const scope = listKey.value
+  if (readConnectionEpoch === null) {
+    const held = realtime.recentInbox.snapshot
+    realtime.recentInbox.snapshot = undefined
+    if (held?.key === scope && held.expiresAt > Date.now() && realtime.status.value === 'open') {
+      readConnectionEpoch = realtime.connectionEpoch.value
+      reuseExpiresAt = held.expiresAt
+      loadedPages = 1 + held.page.pagination.offset / held.page.pagination.limit
+      rowsKey.value = scope
+      return held.page
+    }
+    await realtime.waitForFirstOpen(signal)
+  }
+  if (signal.aborted || scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
+  readConnectionEpoch = realtime.connectionEpoch.value
   if (loadedScope !== scope) { loadedScope = scope; loadedPages = 1 }
   const { page, fetched } = await loadWindow(loadedPages, scope, signal)
   if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
   loadedPages = fetched
   rowsKey.value = scope
+  reuseExpiresAt = undefined
   return page
 }, {
   server: !props.personalScope,
-  getCachedData(cacheKey, nuxtApp, ctx) {
-    if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-    const cached = nuxtApp.payload.data[cacheKey] as ThreadListPage | undefined
-    if (cached) rowsKey.value = cacheKey
-    return cached
-  },
+  lazy: true,
 })
 
-if (import.meta.client) {
-  onMounted(() => {
-    if (useNuxtApp().payload.data[listKey.value]) {
-      void refresh()
-    }
-  })
-}
 const page = computed(() => rowsKey.value === listKey.value ? data.value ?? null : null)
 const threads = computed(() => page.value?.threads ?? [])
 
@@ -261,7 +260,12 @@ async function loadMore() {
   nextPageError.value = null
   try {
     const page = await loadPage(before.pagination.next_offset, controller.signal)
-    if (controller.signal.aborted || key !== listKey.value || data.value !== before) return
+    if (controller.signal.aborted || key !== listKey.value) return
+    if (data.value !== before) {
+      loadedPages = Math.ceil((data.value?.threads.length ?? 100) / 100) + 1
+      await refresh()
+      return
+    }
     try {
       data.value = appendLoadedPage(before, page)
       loadedPages = Math.ceil(data.value.threads.length / 100)
@@ -280,23 +284,19 @@ async function loadMore() {
 watch(listKey, () => pageController?.abort())
 onScopeDispose(() => pageController?.abort())
 
-const documentVisibility=useDocumentVisibility()
-useIntervalFn(()=>{if(props.personalScope&&documentVisibility.value==='visible')void refresh()},15_000)
-
 // The newest thread, for the index above to open into its second column on
 // arrival. The list only says which; whether there is a column is the shell's.
 // While a list loads there is none: the rows on screen may be another
 // mailbox's, and the shell must not keep one of them to open.
 watch([threads, openThreadId, pending], ([rows, open, loading]) => {
-  if (open) return
-  if (loading) { emit('first', null); return }
+  if (open || loading) { emit('first', null); return }
   const first = rows[0]
   emit('first', first ? { path: threadRoute(first), query: route.query } : null)
 }, { immediate: true })
 
 // A conversation opens beside this list: a guest's at its id, the team's on the team screen.
 function threadRoute(thread: ThreadListItem) {
-  return thread.kind === 'team' ? `${listRoute.value}/team/${encodeURIComponent(thread.id)}` : `${listRoute.value}/${encodeURIComponent(thread.id)}`
+  return `${listRoute.value}/${encodeURIComponent(thread.id)}`
 }
 
 // Read or unread without opening it: the row changes at once, and the list and
@@ -316,22 +316,22 @@ async function saveRead(thread: ThreadListItem) {
   }
   mark(!read)
   try {
-    await dashboardApi(`${conversationPath(thread)}/${read ? 'read' : 'unread'}`, {
+    await applicationFetch(`${conversationPath(thread)}/${read ? 'read' : 'unread'}`, {
       method: 'POST',
       ...(read ? { body: {} } : {}),
       validate: (value: unknown): value is { read: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'read') === read,
     })
-    refreshConversationUnreadCount()
   } catch (error) {
     mark(read)
+    reconcile(thread.id)
     toast.add({ color: 'error', title: read ? 'Could not mark as read' : 'Could not mark as unread', description: getErrorMessage(error, 'Try again') })
   }
-  // Saved or not, the server says what the row is now: a save can land while telling other devices fails.
-  await refresh()
+  // A successful save publishes its reader-scoped acknowledgement.
+  if (realtime.status.value !== 'open') reconcile(thread.id)
 }
 
 function conversationPath(thread: ThreadListItem) {
-  return `/api/dashboard/organizations/${organizationId.value}/conversations/${encodeURIComponent(thread.id)}`
+  return `/api/messages/${encodeURIComponent(thread.id)}`
 }
 
 // Archive files the conversation away for this member alone; a new message from someone else brings it back.
@@ -339,33 +339,164 @@ async function archive(thread: ThreadListItem) {
   if (toggling.has(thread.id)) return
   toggling.add(thread.id)
   try {
-    await dashboardApi(`${conversationPath(thread)}/archive`, {
+    await applicationFetch(`${conversationPath(thread)}/archive`, {
       method: 'POST',
       body: { archived: true },
       validate: (value: unknown): value is { archived: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'archived') === true,
     })
-    refreshConversationUnreadCount()
+    removeConversation(thread.id)
   } catch (error) {
+    reconcile(thread.id)
     toast.add({ color: 'error', title: 'Could not archive the conversation', description: getErrorMessage(error, 'Try again') })
   } finally {
     toggling.delete(thread.id)
   }
-  await refresh()
 }
 
-// The menu's counts are the list's, read with it.
-watch(data, page => { if (page?.unread) unreadCounts.value = page.unread }, { immediate: true })
+// Changes received during a read stay queued until that read has settled.
+const changedIds = new Set<string>()
+let fullRefresh = false
+let reconciling = false
+let generation = 0
+let disposed = false
+let reconcileAbort: AbortController | undefined
 
-watch(realtime.event, (event) => {
-  // MESSAGE_ACK: this member read, marked or archived a conversation on another device or tab.
-  if (props.personalScope || !event || !['access.changed', 'MESSAGE_CREATE', 'MESSAGE_UPDATE', 'MESSAGE_ACK', 'CONVERSATION_LEAVE'].includes(event.type)) return
-  if (organizationId.value && event.organization_id !== organizationId.value) return
-  void refresh()
+function publishUnread(value: ThreadListPage | undefined) {
+  if (props.personalScope) {
+    if (value?.count !== undefined) personalUnread.value = value.count
+  } else if (value?.unread) unreadCounts.value = value.unread
+}
+watch(page, value => publishUnread(value ?? undefined), { immediate: true })
+watch(listKey, () => {
+  generation++
+  changedIds.clear()
+  fullRefresh = false
+  reconcileAbort?.abort()
+}, { flush: 'sync' })
+onScopeDispose(() => {
+  disposed = true
+  reconcileAbort?.abort()
+  const current = page.value
+  if (!props.personalScope && current && reader.value && status.value === 'success' && !loadingMore.value && !reconciling
+    && !nextPageError.value && !toggling.size && !fullRefresh && !changedIds.size && realtime.status.value === 'open'
+    && readConnectionEpoch === realtime.connectionEpoch.value) {
+    // Mailboxes and labels change with time. Reusing a snapshot does not extend its life.
+    const expiresAt = reuseExpiresAt ?? Date.now() + 30_000
+    if (expiresAt > Date.now()) realtime.recentInbox.snapshot = { key: listKey.value, page: current, expiresAt }
+  }
 })
 
-watch(realtime.connectionEpoch, (epoch) => {
-  if (epoch <= 0) return
-  if (!props.personalScope) realtime.connect()
-  void refresh()
-})
+function reconcile(id?: string) {
+  if (id) changedIds.add(id)
+  else fullRefresh = true
+  void drainChanges()
+}
+
+/** Apply a confirmed archive or block before the route can select the first visible row. */
+function removeConversation(id: string) {
+  const current = page.value
+  if (!current?.threads.some(row => row.id === id)) return
+  data.value = { ...current, threads: current.threads.filter(row => row.id !== id) }
+  if (pending.value) void refresh({ dedupe: 'cancel' })
+  else reconcile(current.pagination.has_more ? undefined : id)
+}
+
+async function drainChanges() {
+  if (disposed || reconciling || pending.value || loadingMore.value || (!fullRefresh && !changedIds.size)) return
+  reconciling = true
+  nextPageError.value = null
+  const generationAtStart = generation
+  const scope = listKey.value
+  try {
+    const ids = [...changedIds].slice(0, 100)
+    for (const id of ids) changedIds.delete(id)
+    const all = fullRefresh || !data.value
+    fullRefresh = false
+    if (all) {
+      changedIds.clear()
+      await refresh()
+      return
+    }
+    const before = data.value!
+    const controller = new AbortController()
+    reconcileAbort = controller
+    const changed = await applicationFetch<ThreadListPage>('/api/messages', {
+      query: { ...listQuery.value, ...listScope.value, sort_key: '1', ids: ids.join(',') },
+      signal: controller.signal, validate: isThreadListResponse,
+    })
+    if (disposed || generationAtStart !== generation || scope !== listKey.value) return
+    if (data.value !== before) {
+      for (const id of ids) changedIds.add(id)
+      return
+    }
+    // A later event may already have moved this row. Apply it from the next read.
+    if (fullRefresh || ids.some(id => changedIds.has(id))) {
+      for (const id of ids) changedIds.add(id)
+      return
+    }
+    const replacements = new Map(changed.threads.map(row => [row.id, row]))
+    const affected = new Set(ids)
+    const rows = before.threads.filter(row => !affected.has(row.id)).concat(changed.threads)
+    rows.sort((a, b) => (b.last_message_at ?? '').localeCompare(a.last_message_at ?? '') || (a.id < b.id ? -1 : a.id === b.id ? 0 : 1))
+    if (before.pagination.has_more && (rows.length < before.threads.length
+      || before.threads.some(row => affected.has(row.id) && replacements.has(row.id)
+        && replacements.get(row.id)!.last_message_at! < row.last_message_at!))) {
+      // A hole or a row moving past the known boundary requires an authoritative window.
+      fullRefresh = true
+      return
+    }
+    const threads = before.pagination.has_more ? rows.slice(0, before.threads.length) : rows
+    data.value = { ...before, threads, unread: changed.unread, count: changed.count }
+  } catch (error) {
+    if (!disposed && generationAtStart === generation && scope === listKey.value) nextPageError.value = error
+  } finally {
+    reconcileAbort = undefined
+    reconciling = false
+    void drainChanges()
+  }
+}
+watch([pending, loadingMore], () => { void drainChanges() })
+
+function clearInbox() {
+  generation++
+  changedIds.clear()
+  fullRefresh = false
+  reconcileAbort?.abort()
+  pageController?.abort()
+  if (props.personalScope) personalUnread.value = null
+  else unreadCounts.value = null
+  clear()
+  loadedPages = 1
+}
+
+watch(realtime.event, event => {
+  if (!event || (!props.personalScope && event.organization_id !== organizationId.value)) return
+  if (event.type === 'MESSAGE_UPDATE' && event.scheduled) return
+  if ((event.type === 'MESSAGE_ACK' || event.type === 'CONVERSATION_LEAVE') && event.user_id !== reader.value) return
+  if (event.type === 'access.changed') {
+    clearInbox()
+    reconcile()
+  } else if ('conversation_id' in event) {
+    if (event.type === 'CONVERSATION_LEAVE') {
+      generation++
+      reconcileAbort?.abort()
+      if (pending.value) {
+        clearInbox()
+        reconcile()
+        return
+      }
+      else {
+        if (data.value) data.value = { ...data.value, threads: data.value.threads.filter(row => row.id !== event.conversation_id), unread: undefined, count: undefined }
+        if (props.personalScope) personalUnread.value = null
+        else unreadCounts.value = null
+      }
+    }
+    reconcile(event.conversation_id)
+  }
+}, { flush: 'sync' })
+
+watch(realtime.accessEnded, clearInbox, { flush: 'sync' })
+watch(realtime.connectionEpoch, epoch => {
+  if (readConnectionEpoch !== null && epoch > readConnectionEpoch) reconcile()
+}, { immediate: true })
 </script>

@@ -9,7 +9,7 @@ import { executeBatch } from "~/server/db";
 import { publicResourceCacheInvalidationQuery } from "~/server/utils/public-resource-cache";
 import { assertNotPinnedByPublication, createMediaAsset, getMediaAsset, getMediaStorageReferenceState, publicationPinGuardQuery, type MediaAsset } from "~/server/utils/media-asset-manager";
 import { fastStartMp4, readMp4Metadata } from "~/server/utils/video-metadata";
-import { imagePixelSize, R2_IMAGE_MIME_TYPES } from "~/server/utils/media-mime";
+import { imagePixelSize, POSTER_IMAGE_MIME_TYPES, R2_IMAGE_MIME_TYPES } from "~/server/utils/media-mime";
 
 interface UploadResolvedMediaInputBase {
   db: DbClient;
@@ -102,6 +102,9 @@ function uploadFailure(error: unknown): Error {
 export async function uploadResolvedMediaToAssetStore(
   input: UploadResolvedMediaInput,
 ): Promise<UploadResolvedMediaResult> {
+  if (input.kind === 'video' && !POSTER_IMAGE_MIME_TYPES.has(input.poster.contentType)) {
+    throw new HTTPError({ statusCode: 415, message: 'Video posters must be JPEG, PNG, WebP or GIF', data: { code: 'UNSUPPORTED_MEDIA_TYPE', field: 'poster' } })
+  }
   const identity = input.idempotencyKey ? { organizationId: input.organizationId, idempotencyKey: input.idempotencyKey, sourceFileId: input.sourceFileId ?? '', posterSourceFileId: input.posterSourceFileId, category: input.category, altText: input.altText } : null
   const creation = identity ? await uploadCreation(identity) : undefined
   const earlier = identity ? await getMediaUploadReplay(input.db, identity) : null

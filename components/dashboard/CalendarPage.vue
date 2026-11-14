@@ -293,7 +293,7 @@ import CalendarOfferingFilter from './CalendarOfferingFilter.vue'
 import { closureOnDate, getDateIntervals, parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 import { addLocalDays, formatCalendarDate, formatTimestamp, isValidCalendarDate, localNow } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
-import { isSessionsResponse } from '~/utils/session-contract'
+import { isSessionsResponse, sessionCalendarMonth } from '~/utils/session-contract'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 
 useSeoMeta({ title: 'Calendar | KrabiClaw', robots: 'noindex, nofollow' })
@@ -498,15 +498,16 @@ async function loadMonth(key: string, signal?: AbortSignal): Promise<void> {
       if (scopeError.value) throw createError({ statusCode: 404, statusMessage: scopeError.value })
       // UTC bounds include the full local month even when a saved session's
       // timezone differs from the location's current configuration.
+      const range = sessionCalendarMonth(key)
       const payload = await dashboardApi(`/api/editor/organizations/${organizationId}/products/${product.id}/sessions`, {
-        query: { from: first.subtract({ days: 1 }).toDate('UTC').toISOString(), to: first.add({ months: 1, days: 1 }).toDate('UTC').toISOString() },
+        query: { from: range.from, to: range.to },
         validate: isSessionsResponse,
         signal,
       })
       if (requested !== generation.value) return
       const items: CalendarSessionItem[] = payload.sessions.flatMap(session => {
-        const dayKey = localNow(session.timezone, new Date(session.starts_at)).date
-        if (dayKey < first.toString() || dayKey > last.toString() || (scope.value === 'online' ? session.location_id !== null : scope.value && session.location_id !== scope.value)) return []
+        const dayKey = range.dayOf(session)
+        if (!dayKey || (scope.value === 'online' ? session.location_id !== null : scope.value && session.location_id !== scope.value)) return []
         const location = session.location_id ? props.sessionLocations?.find(entry => entry.id === session.location_id) : null
         if (session.location_id && !location) throw new Error('A scheduled time’s saved location could not be loaded')
         return [{

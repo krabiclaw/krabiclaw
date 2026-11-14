@@ -47,5 +47,5 @@ export function isGuestStay(value: unknown): value is GuestStay {
   return typeof home.name === 'string' && (home.location === null || isRecord(home.location))
     && (home.arrival_guide === null || isStayArrivalGuide(home.arrival_guide))
     && [home.house_rules, home.safety].every(lines => Array.isArray(lines) && lines.every(line => typeof line === 'string'))
-    && 'cancellation' in value
+    && 'cancellation' in value && typeof value.payment_processing === 'boolean'
 }

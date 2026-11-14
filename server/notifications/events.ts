@@ -200,7 +200,7 @@ export function bookingCreatedMessage(input: BookingEventInput & { status: 'pend
     title: input.status === 'confirmed'
       ? `${input.presentation.label} confirmed - ${input.guestName}, ${input.day}`
       : `${input.presentation.label} request from ${input.guestName} for ${input.day}`,
-    preheader: `${input.productTitle} · ${input.date} at ${input.time}`,
+    preheader: `${input.productTitle} · ${input.date}${input.time ? ` at ${input.time}` : ''}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     facts: facts(
       fact('context', input.presentation.label, bookedWhat(input), true),
@@ -280,7 +280,7 @@ export function contactReceivedMessage(input: ContactEventInput): MemberAlertMes
       fact('message', 'Message', input.message, true),
       input.consentAcknowledged ? fact('consent', 'Contact/privacy notice', 'Acknowledged') : null,
     ),
-    quote: { author: input.guestName, body: input.message, translation: null, photos: [] },
+    quote: { author: input.guestName, body: input.message, photos: [] },
     primaryAction: { url: input.replyUrl, label: 'Reply' },
     finePrint: REPLY_NOTE,
     category: 'messages',
@@ -333,7 +333,6 @@ export interface MessageEventInput {
   /** The words as written; empty when the message is only photos or files. */
   body: string
   photos: NotificationQuote['photos']
-  translation: NotificationQuote['translation']
   /** The conversation's last messages before this one, oldest first. */
   history: NotificationHistory
   record: ConversationRecord | null
@@ -358,7 +357,7 @@ export function messageReceived(input: MessageEventInput): MemberAlertMessage {
       fact('guestEmail', 'Email', input.sender.kind === 'person' ? input.sender.email : null),
       fact('message', 'Message', input.messagePreview, true),
     ),
-    quote: { author: first, body: input.body, translation: input.translation, photos: input.photos },
+    quote: { author: first, body: input.body, photos: input.photos },
     history: input.history,
     primaryAction: { url: input.replyUrl, label: 'Reply' },
     finePrint: REPLY_NOTE,
@@ -377,7 +376,6 @@ export interface InquiryEventInput {
   /** The guest's words that asked, as the conversation recorded them. */
   message: string
   photos: NotificationQuote['photos']
-  translation: NotificationQuote['translation']
   record: ConversationRecord & { replyBy: string }
   organizationName: string
   replyUrl: string
@@ -398,7 +396,7 @@ export function inquiryReceivedMessage(input: InquiryEventInput): MemberAlertMes
       fact('subject', 'Inquiry', `Airbnb inquiry · ${record.homeName}`, true),
       fact('message', 'Asking for', `Reply by ${record.replyBy} · ${dates} · ${nights} night${nights === 1 ? '' : 's'} · ${record.guests}`, true),
     ),
-    quote: { author: first, body: input.message, translation: input.translation, photos: input.photos },
+    quote: { author: first, body: input.message, photos: input.photos },
     primaryAction: { url: input.replyUrl, label: 'Reply' },
     finePrint: REPLY_NOTE,
     sections: [recordSection(record)],
@@ -660,6 +658,7 @@ export function domainUpdateMessage(input: DomainEventInput): MemberAlertMessage
 }
 
 export interface OnboardingCompletedInput {
+  privateSite?: boolean
   organizationName: string
   ownerName: string
   ownerEmail: string
@@ -700,7 +699,7 @@ export function contentReportedMessage(input: ContentReportedInput): MemberAlert
 
 export function onboardingCompletedMessage(input: OnboardingCompletedInput): MemberAlertMessage {
   return {
-    title: `${input.organizationName} is live on KrabiClaw`,
+    title: input.privateSite ? `${input.organizationName} finished setup on KrabiClaw` : `${input.organizationName} is live on KrabiClaw`,
     preheader: `${input.ownerName} finished onboarding`,
     hero: null,
     facts: facts(
@@ -709,7 +708,7 @@ export function onboardingCompletedMessage(input: OnboardingCompletedInput): Mem
       fact('site', 'Site', input.siteUrl),
     ),
     primaryAction: { url: input.viewCustomerUrl, label: 'View customer' },
-    secondaryAction: { url: input.siteUrl, label: 'Open site' },
+    secondaryAction: input.privateSite ? undefined : { url: input.siteUrl, label: 'Open site' },
     category: 'organization_and_billing',
     emailPurpose: 'transactional',
     emailReason: `You received this email because ${input.organizationName} completed setup and you receive KrabiClaw business onboarding alerts.`,
@@ -717,6 +716,7 @@ export function onboardingCompletedMessage(input: OnboardingCompletedInput): Mem
 }
 
 export interface OwnerWelcomeInput {
+  privateSite?: boolean
   organizationName: string
   ownerName: string
   siteUrl: string
@@ -746,15 +746,17 @@ export function ownerWelcomeMessage(input: OwnerWelcomeInput): MemberAlertMessag
   const greeting = firstName(input.ownerName)
   const verticalPrompt = welcomeVerticalPrompt(input.vertical, input.organizationName)
   const body = [
-    `I saw that you just launched ${input.organizationName} on KrabiClaw (${input.siteUrl}) — congratulations!`,
+    input.privateSite
+      ? `I saw that you set up ${input.organizationName} on KrabiClaw. You can preview and publish your website from Today.`
+      : `I saw that you just launched ${input.organizationName} on KrabiClaw (${input.siteUrl}) — congratulations!`,
     `I’m Paul, the founder of KrabiClaw. I wanted to reach out personally to welcome you and see how setup went.`,
     verticalPrompt,
     `Excited to have you on board,\n\n**Paul**  \nFounder, KrabiClaw`,
   ].join('\n\n')
 
   return {
-    title: `Welcome to KrabiClaw — congrats on launching ${input.organizationName}!`,
-    preheader: `Welcome to KrabiClaw — your site is live at ${input.siteUrl}`,
+    title: input.privateSite ? 'Welcome to KrabiClaw' : `Welcome to KrabiClaw — congrats on launching ${input.organizationName}!`,
+    preheader: input.privateSite ? 'Your website is ready to preview' : `Welcome to KrabiClaw — your site is live at ${input.siteUrl}`,
     hero: null,
     intro: `Hi ${greeting},`,
     body,
@@ -763,11 +765,11 @@ export function ownerWelcomeMessage(input: OwnerWelcomeInput): MemberAlertMessag
       fact('site', 'Site', input.siteUrl, true),
     ),
     primaryAction: { url: input.dashboardUrl, label: 'Open your dashboard' },
-    secondaryAction: { url: input.siteUrl, label: 'View your site' },
+    secondaryAction: input.privateSite ? undefined : { url: input.siteUrl, label: 'View your site' },
     finePrint: 'You can reply directly to this email to reach me.',
     category: 'organization_and_billing',
     emailPurpose: 'transactional',
-    emailReason: `You received this email because you launched ${input.organizationName} on KrabiClaw.`,
+    emailReason: `You received this email because you set up ${input.organizationName} on KrabiClaw.`,
   }
 }
 

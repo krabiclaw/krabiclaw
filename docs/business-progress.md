@@ -114,8 +114,7 @@ receipts. A decision applies to that revision only: when the evidence changes,
 the selector records a new opportunity and stops listing the old one. A partial
 read reports the unavailable evidence alongside any current opportunities.
 Accepting re-reads the selector and is refused with 409 when the evidence has
-moved on. Whether the business owes a guest a reply is an open `guest_reply`
-task, opened and closed by the conversation's own writes.
+moved on. Guest replies and their delivery evidence stay in the conversation.
 
 ## What progress proves
 

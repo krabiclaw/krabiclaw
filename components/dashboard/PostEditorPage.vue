@@ -72,7 +72,7 @@ import DashboardContentPreview from '~/components/dashboard/DashboardContentPrev
 import PostMediaFields from '~/components/dashboard/PostMediaFields.vue'
 import MediaGallery from '~/components/MediaGallery.vue'
 import { normalizePostMediaForForm, usePostEditor, type PostMediaFormItem, type PublishOutcome, type PublishTarget, type SocialChannel } from '~/composables/usePostEditor'
-import { parsePostInput, POST_BODY_MAX, POST_TITLE_MAX, POST_CALL_TO_ACTION_LABEL_MAX, type PostCallToAction } from '~/shared/posts'
+import { articlePostFields, parsePostInput, POST_BODY_MAX, POST_TITLE_MAX, POST_CALL_TO_ACTION_LABEL_MAX } from '~/shared/posts'
 import { isBlogPostResponse } from '~/lib/components/workspace/blog/blog-response-contracts'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 
@@ -111,8 +111,7 @@ function initialDraft() {
   const source = sourceArticle.value
   return {
     location_id: scopeLocationId.value, title: source?.article.title ?? '',
-    body: source ? [source.article.title, source.article.excerpt].filter(Boolean).join('\n\n') : '',
-    callToAction: source ? { label: 'Read article', url: source.url } as PostCallToAction : null,
+    ...(source ? articlePostFields(source.article, source.url) : { body: '', callToAction: null }),
     media: source?.article.cover ? [{ ...source.article.cover, slot: 'cover' as const, alt_text: source.article.cover.alt_text ?? '' }] as PostMediaFormItem[] : [],
     idempotency_key: crypto.randomUUID(),
     submitted: false,

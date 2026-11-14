@@ -5,29 +5,16 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { threadPayloadForGuest, requestInsertQueries, cancelBookingRequest, getGuestRequest, getThreadOperationalRecord } from '../../server/domain/requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
-import { archiveConversation, countUnreadConversations, listConversations, reconcileConversationTasks } from '../../server/domain/guest-threads/repository.ts'
-import { getInboxThreadDetails } from '../../server/domain/guest-threads/inbox.ts'
-import { appendMessage, markConversationRead, markConversationUnread } from '../../server/domain/conversations.ts'
-import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
+import { archiveConversation, countUnreadConversations, listConversations } from '../../server/domain/guest-threads/repository.ts'
+import { getConversationDetails } from '../../server/domain/guest-threads/inbox.ts'
+import { appendMessage, markConversationRead, markConversationUnread, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { CapacityUnavailableError, claimSessionCapacity } from '../../server/utils/availability.ts'
-import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 const ORG = 'org-proof'
 const LOCATION = 'location-proof'
 const ACTOR = 'user-proof'
 const NOW = '2026-09-11T00:00:00.000Z'
-/** The owner, as every dashboard and MCP read is scoped: through their membership. */
-const OWNER = memberAccessPrincipal({ userId: ACTOR, organizationId: ORG, role: 'owner' }, { env: {} as CloudflareEnv })
-/** The read the inbox and MCP share: conversations with an open reply task, the business's reply owed. */
-const needsReply = (db: D1Database) => listConversations(db, ORG, { principal: OWNER, userId: ACTOR, needsReply: true })
-/** A guest's message, and the reply work it makes, as the inbound writers record it. */
-const guestWrites = async (db: D1Database, conversationId: string, body: string, occurredAt: string) => {
-  const message = await appendMessage(db, { conversationId, authorKind: 'guest', authorUserId: null, channel: 'email', body, occurredAt })
-  await reconcileConversationTasks(db, conversationId)
-  return message
-}
-
 /**
  * A thread carries the conversation; a booking holds the seats.
  *
@@ -53,6 +40,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
       `INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('${ORG}','Proof','proof', 'USD', 'UTC')`,
       `INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES ('proof-en','${ORG}','en',1,'published')`,
       `INSERT INTO user (id,name,email) VALUES ('${ACTOR}','Proof','owner@proof.example')`,
+      `INSERT INTO member (id,organizationId,userId,role,createdAt) VALUES ('member-proof','${ORG}','${ACTOR}','owner',1)`,
       `INSERT INTO business_locations (id,organization_id,slug,title,timezone) VALUES ('${LOCATION}','${ORG}','proof','Proof','Asia/Bangkok')`,
       `INSERT INTO products (kind, id,organization_id,name,slug,created_by,updated_by) VALUES ('experience', 'product-proof','${ORG}','Pottery Class','pottery-class','${ACTOR}','${ACTOR}')`,
       `INSERT INTO product_variants (id,organization_id,product_id,name,created_by,updated_by) VALUES ('variant-proof','${ORG}','product-proof','Standard','${ACTOR}','${ACTOR}')`,
@@ -93,15 +81,17 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
 
     const winner = await db.prepare('SELECT c.id FROM conversations c JOIN bookings b ON b.id = c.booking_id').first<string>('id')
     assert.ok(winner)
+    assert.deepEqual((await db.prepare('SELECT conversation_id, user_id, role FROM conversation_participants').all()).results,
+      [{ conversation_id: winner, user_id: ACTOR, role: 'member' }])
     // The thread holds no copy of when or for how many; the booking does.
     const record = await getThreadOperationalRecord(db, winner)
     assert.equal(record?.unit, 'slot')
     assert.equal(record?.party_size, 1)
     assert.equal(record?.starts_at, at(8, 7))
 
-    const inbox = await listConversations(db, ORG, { userId: ACTOR, principal: OWNER, locationId: LOCATION, type: 'booking', q: 'guest' })
+    const inbox = await listConversations(db, ORG, { userId: ACTOR, locationId: LOCATION, type: 'booking', q: 'guest' })
     assert.deepEqual(inbox.map(item => item.id), [winner])
-    assert.deepEqual(await listConversations(db, ORG, { userId: ACTOR, principal: OWNER, locationId: LOCATION, type: 'booking', q: 'nobody' }), [])
+    assert.deepEqual(await listConversations(db, ORG, { userId: ACTOR, locationId: LOCATION, type: 'booking', q: 'nobody' }), [])
 
     // Cancelling is idempotent: the same operation key twice writes one message.
     // A booking arrives confirmed and is complete once its end passes, so
@@ -120,7 +110,6 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     assert.equal(await bookSession(tokenThread, 'session-token', { token_hash: 'hash', expires_at: at(7), used_at: null }), true)
     assert.equal(await bookSession('token-second', 'session-token'), false)
     assert.equal(await db.prepare("SELECT count(*) FROM bookings WHERE product_session_id='session-token'").first('count(*)'), 1)
-    await guestWrites(db, tokenThread, 'Could we sit outside?', at(1))
 
     // The token is spendable exactly once, however many times it is presented.
     const cancellations = await Promise.all([1, 2].map(() => cancelBookingRequest(db, {
@@ -135,31 +124,15 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     assert.equal(await db.prepare("SELECT count(*) FROM messages WHERE conversation_id=? AND event_name='booking.cancel'").bind(tokenThread).first('count(*)'), 1)
     const cancelledThread = await getGuestRequest(db, tokenThread)
     assert.equal(cancelledThread?.payload.cancellation.used_at, at(2))
-    // The cancellation answers the question asked before it: no reply is owed.
-    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [])
-
-    await guestWrites(db, tokenThread, 'When will my refund arrive?', at(3))
-    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [tokenThread])
+    // The canceled booking remains a conversation. A cancellation retry cannot
+    // write another message or discard a later question.
+    const question = await appendMessage(db, { conversationId: tokenThread, authorKind: 'guest', authorUserId: null, channel: 'email', body: 'When will my refund arrive?', occurredAt: at(3) })
     const retry = await cancelBookingRequest(db, { id: tokenThread, organizationId: ORG, kind: 'booking', tokenHash: 'hash', now: at(4), env })
     assert.equal(retry?.changed, false)
-    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [tokenThread], 'a replayed cancellation does not answer a question asked after it')
+    const newest = await db.prepare('SELECT id, body FROM messages WHERE conversation_id = ? ORDER BY sequence DESC LIMIT 1').bind(tokenThread).first()
+    assert.deepEqual(newest, { id: question.id, body: question.body })
     assert.equal(await db.prepare("SELECT count(*) FROM messages WHERE conversation_id=? AND event_name='booking.cancel'").bind(tokenThread).first('count(*)'), 1)
-
-    // A saved reply that failed to send does not answer the guest, even
-    // though it is now the last message in the ledger.
-    const failedReply = await appendMessage(db, { conversationId: tokenThread, authorKind: 'member', authorUserId: ACTOR, channel: 'email', eventName: 'thread.member_reply', body: 'Your refund is on its way.', occurredAt: at(5) })
-    const receipt = await createDeliveryReceipt(db, { subject: { messageId: failedReply.id }, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'cancelled-reply-delivery' })
-    await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'failed', error: 'Delivery refused' })
-    await reconcileConversationTasks(db, tokenThread)
-    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [tokenThread])
-    await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'sent', providerMessageId: 'delivered-cancelled-reply' })
-    await reconcileConversationTasks(db, tokenThread)
-    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [])
-    await guestWrites(db, tokenThread, 'Thank you. Can you send the receipt?', at(6))
-    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [tokenThread])
-    await appendMessage(db, { conversationId: tokenThread, authorKind: 'member', authorUserId: ACTOR, channel: 'web', eventName: 'thread.member_reply', body: 'Here is your receipt.', occurredAt: at(7) })
-    await reconcileConversationTasks(db, tokenThread)
-    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [], 'a committed web reply needs no external delivery receipt')
+    assert.equal((await listConversations(db, ORG, { userId: ACTOR, unreadOnly: true, conversationIds: [tokenThread] }))[0]?.id, tokenThread)
 
     // An audit entry belongs to the organization it describes and goes with it.
     await db.batch([
@@ -214,7 +187,7 @@ test('archive and unarchive file a conversation for one person without touching 
     await db.batch([
       `INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('${ORG}','Proof','proof', 'USD', 'UTC'), ('org-foreign','Foreign','foreign', 'USD', 'UTC')`,
       `INSERT INTO user (id,name,email) VALUES ('${ACTOR}','Proof','owner@proof.example')`,
-      `INSERT INTO member (id,organizationId,userId,role,createdAt) VALUES ('member-proof','${ORG}','${ACTOR}','owner',0)`,
+      `INSERT INTO member (id,organizationId,userId,role,createdAt) VALUES ('member-proof','${ORG}','${ACTOR}','owner',1)`,
       `INSERT INTO business_locations (id,organization_id,slug,title,timezone) VALUES ('${LOCATION}','${ORG}','proof','Proof','Asia/Bangkok')`,
       `INSERT INTO products (kind, id,organization_id,name,slug,created_by,updated_by) VALUES ('experience', 'product-proof','${ORG}','Pottery Class','pottery-class','${ACTOR}','${ACTOR}')`,
       `INSERT INTO product_variants (id,organization_id,product_id,name,created_by,updated_by) VALUES ('variant-proof','${ORG}','product-proof','Standard','${ACTOR}','${ACTOR}')`,
@@ -239,21 +212,22 @@ test('archive and unarchive file a conversation for one person without touching 
       thread('booking-ended', 'booking', '2026-09-07T00:00:00.000Z'),
       // The newest real activity in the inbox, which filing others must not overtake.
       thread('newest', 'contact', '2026-09-10T00:00:00.000Z'),
-      // Archived by the owner while it was still to come; it has since ended.
-      `INSERT INTO conversation_participants (conversation_id,organization_id,user_id,archived_at) VALUES ('ended-archived','${ORG}','${ACTOR}','1999-12-31T00:00:00.000Z')`,
+      // The owner holds a seat in each fixture conversation and archived one while it was still to come.
+      `INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role, archived_at)
+        SELECT id, organization_id, '${ACTOR}', 'member', CASE WHEN id = 'ended-archived' THEN '1999-12-31T00:00:00.000Z' END FROM conversations`,
     ].map(statement => db.prepare(statement)))
 
-    const ids = async (mailbox: 'current' | 'past', unreadOnly = false) => (await listConversations(db, ORG, { userId: ACTOR, principal: OWNER, mailbox, unreadOnly })).map(row => row.id)
+    const ids = async (mailbox: 'current' | 'past', unreadOnly = false) => (await listConversations(db, ORG, { userId: ACTOR, mailbox, unreadOnly })).map(row => row.id)
     // What the conversation's sheet offers: Archive, or Move to messages.
     const filing = async (id: string) => {
-      const details = await getInboxThreadDetails(db, id, ORG, { audience: 'member', userId: ACTOR, principal: OWNER })
+      const details = await getConversationDetails(db, (await resolveConversationAccess(db, ACTOR, id)).conversation, ACTOR, 'member')
       assert.ok(details, id)
       return { archive: details.actions.archive, unarchive: details.actions.unarchive }
     }
     const archivedAt = async (id: string) => (await db.prepare('SELECT archived_at FROM conversation_participants WHERE conversation_id = ? AND user_id = ?').bind(id, ACTOR).first<{ archived_at: string | null }>())?.archived_at ?? null
     const activity = (id: string) => db.prepare('SELECT last_message_at FROM conversations WHERE id = ?').bind(id).first('last_message_at')
     const recordRow = (id: string) => db.prepare('SELECT * FROM bookings WHERE id = ?').bind(`row-${id}`).first()
-    const counts = () => countUnreadConversations(db, ORG, { userId: ACTOR, principal: OWNER })
+    const counts = () => countUnreadConversations(db, ORG, { userId: ACTOR })
     const file = (conversationId: string, archived: boolean, organizationId = ORG) => archiveConversation(db, { organizationId, conversationId, userId: ACTOR, archived })
 
     // Ordered by conversation activity. An ended visit with recent activity stays Current, as Airbnb keeps an ended, read trip;

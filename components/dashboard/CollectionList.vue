@@ -113,7 +113,7 @@ const isMenuSection = (row: CollectionRow) => !row.products.length || row.produc
 const sections = computed(() => collections.value.filter(isMenuSection))
 
 // A section opens in its own scope. Shared membership has no location filter.
-const listItems = computed(() => sections.value.map(row => ({ id: row.id, title: row.name, to: router.resolve({ path: `${menuPath.value}/${row.id}`, query: { location_id: row.location_id ?? undefined, kind: 'dish' } }).fullPath, row })))
+const listItems = computed(() => sections.value.map(row => ({ id: row.id, title: row.name, to: router.resolve({ path: `${menuPath.value}/${row.id}`, query: { location_id: locationId.value ?? row.location_id ?? undefined, kind: 'dish' } }).fullPath, row })))
 const loadError = computed(() => (catalog.error.value ? getErrorMessage(catalog.error.value, 'Failed to load sections') : null))
 
 const load = catalog.refresh

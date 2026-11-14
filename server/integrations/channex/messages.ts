@@ -128,6 +128,7 @@ function attachmentUrl(value: unknown, env: ChannexEnv, label: string, field: st
 
 export function parseChannexMessage(value: unknown, env: ChannexEnv, uncertain = false): ChannexMessage {
   const row = read('message', 'data', () => resource(value, 'message'), uncertain)
+  if (!row.id.trim()) fail('message', 'id', 'Expected a nonblank message ID', uncertain)
   const label = `message:${row.id}`
   const attributes = row.attributes
   if (!Array.isArray(attributes.attachments)) fail(label, 'attachments', 'Expected an attachment-link array', uncertain)

@@ -25,6 +25,7 @@
             </UDropdownMenu>
           </template>
         </UFileUpload>
+        <UButton v-if="suggestReply" type="button" icon="i-lucide-sparkles" color="neutral" variant="ghost" square aria-label="Suggest a reply" title="Suggest a reply" :loading="generatingSuggestions" :disabled="disabled || sending || generatingSuggestions" @click="emit('suggestReply')" />
         <!-- Nuxt UI owns keyboard/IME submission; this explicit button also sends a photo with no text. -->
         <UButton type="button" icon="i-lucide-arrow-up" color="neutral" variant="solid" square class="size-8 justify-center rounded-full p-0 transition duration-200 active:scale-90 disabled:bg-elevated disabled:text-dimmed disabled:opacity-100" :ui="{ leadingIcon: 'size-4' }" :aria-label="sendLabel" :title="sendLabel" :loading="sending" :disabled="disabled || sending || incompatibleContent || (sendAt !== null && photos.length > 0) || (!body.trim() && !photos.length)" @click="submit" />
       </template>
@@ -66,8 +67,8 @@ export function sameMessagePhotos(left: MessagePhotoDraft[], right: MessagePhoto
 </script>
 <script setup lang="ts">
 import type { DropdownMenuItem } from '@nuxt/ui'
-const props = withDefaults(defineProps<{ disabled?: boolean; sending?: boolean; channel?: 'airbnb' | 'email' | 'team'; placeholder?: string; sendLabel?: string; sendLater?: boolean; suggestionsHidden?: boolean }>(), { disabled: false, sending: false, channel: 'email', placeholder: 'Write a message…', sendLabel: 'Send message', sendLater: false, suggestionsHidden: false })
-const emit = defineEmits<{ send: []; showSuggestions: [] }>()
+const props = withDefaults(defineProps<{ disabled?: boolean; sending?: boolean; channel?: 'airbnb' | 'email' | 'team'; placeholder?: string; sendLabel?: string; sendLater?: boolean; suggestReply?: boolean; generatingSuggestions?: boolean }>(), { disabled: false, sending: false, channel: 'email', placeholder: 'Write a message…', sendLabel: 'Send message', sendLater: false, suggestReply: false, generatingSuggestions: false })
+const emit = defineEmits<{ send: []; suggestReply: [] }>()
 const body = defineModel<string>({ required: true })
 const photos = defineModel<MessagePhotoDraft[]>('photos', { required: true })
 /** When the message is sent later: an ISO instant, or null to send now. */
@@ -84,8 +85,6 @@ function addItems(open: () => void): DropdownMenuItem[] {
   return [
     { label: 'Photos', icon: 'i-lucide-image', disabled: photos.value.length >= maxPhotos.value || Boolean(sendAt.value), onSelect: open },
     ...(props.sendLater ? [{ label: 'Send later', icon: 'i-lucide-clock', onSelect: () => { when.value = sendAt.value ? localInput(new Date(sendAt.value)) : localInput(new Date(Date.now() + 3_600_000)); scheduleError.value = ''; scheduling.value = true } }] : []),
-    // Suggested replies that exist but are hidden (dismissed, or put away by typing) come back from here.
-    ...(props.suggestionsHidden ? [{ label: 'Suggested replies', icon: 'i-lucide-sparkles', onSelect: () => emit('showSuggestions') }] : []),
   ]
 }
 function schedule() {

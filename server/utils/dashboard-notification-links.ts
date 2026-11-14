@@ -1,7 +1,6 @@
 import { HTTPError } from 'nitro'
 import { accountActivityPath, isAccountActivityPath, type AccountActivityKind } from '~/shared/account-activity'
 import { buyerRequestActivityPath } from '~/server/domain/payments/buyer'
-import { CURRENT_GUEST_SQL } from '~/server/domain/conversations'
 import { queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { findOrganizationById } from '~/server/utils/member-access'
@@ -63,9 +62,7 @@ export function composeBuyerActivityUrl(env: DashboardNotificationLinkEnv, kind:
 
 /** Omit account management for unowned/imported records; never guess a buyer or visit. */
 export async function buildBuyerRequestActivityUrl(env: DashboardNotificationLinkEnv, db: DbClient, opts: { organizationId: string; threadId: string }): Promise<string | null> {
-  const owner = await queryFirst<{ user_id: string }>(db, `SELECT r.user_id FROM conversations r WHERE r.id=? AND r.organization_id=? AND r.kind = 'booking' AND ${CURRENT_GUEST_SQL('r')}`, [opts.threadId, opts.organizationId])
-  if (!owner) return null
-  const path = await buyerRequestActivityPath(db, owner.user_id, opts.threadId)
+  const path = await buyerRequestActivityPath(db, { organizationId: opts.organizationId, conversationId: opts.threadId })
   return isAccountActivityPath(path) ? new URL(path, platformOrigin(env)).href : null
 }
 

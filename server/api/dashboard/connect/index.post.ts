@@ -4,7 +4,7 @@ import { requireFinancialBrowserOrAppRequest } from '~/server/utils/financial-br
 import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { assertRoleAllows } from '~/server/utils/member-access'
 import { jsonResponse } from '~/server/utils/api-response'
-import { buildAppPayoutsOnboardingUrls, buildStripeConnectOnboardingUrls, startStripeConnectOnboarding } from '~/server/utils/stripe-connect'
+import { buildAppPayoutsOnboardingUrls, buildStripeConnectOnboardingUrls, organizationPaymentsLivemode, startStripeConnectOnboarding } from '~/server/utils/stripe-connect'
 
 // Stripe-hosted onboarding: { country?, return_to?: "app" }. The dashboard returns to Payments; the iPhone app
 // (return_to "app") to /app/return/payouts, which hands back to krabiclaw://payouts/<outcome>.
@@ -32,7 +32,7 @@ export default defineHandler(async (event) => {
     country: typeof body?.country === 'string' ? body.country : null,
     urls: body?.return_to === 'app'
       ? buildAppPayoutsOnboardingUrls(env.NUXT_PUBLIC_PLATFORM_DOMAIN)
-      : buildStripeConnectOnboardingUrls(env.NUXT_PUBLIC_PLATFORM_DOMAIN, organization.slug),
+      : buildStripeConnectOnboardingUrls(env.NUXT_PUBLIC_PLATFORM_DOMAIN, organization.slug, organizationPaymentsLivemode(env, organization)),
   })
   return jsonResponse({ success: true, account, onboarding_url: url })
 })
