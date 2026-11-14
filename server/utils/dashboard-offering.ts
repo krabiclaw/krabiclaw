@@ -1,3 +1,4 @@
+import { PUBLICATION_CONTENT_BLOCK_TYPES } from '~/shared/content-registries'
 import { HTTPError, type H3Event } from 'nitro'
 import { getQuery } from 'nitro/h3'
 import { getDashboardMemberContext, listDashboardLocations } from '~/server/utils/dashboard-context'
@@ -12,7 +13,7 @@ import { editableProductKinds, PRODUCT_KIND_LABELS, productDetailFields, STAY_DE
 import { STAY_SAFETY_FIELDS, STAY_SAFETY_SECTIONS, staySafetySectionKeys, type StaySafetySection } from '~/shared/stay-safety'
 import { formatMinorAmount, majorAmountToMinor, minorAmountToMajor, scopedPriceAmountPatch, selectPrice } from '~/shared/prices'
 import { CURRENCY_OPTIONS, isCurrencyCode } from '~/shared/currencies'
-import { mediaStillUrl } from '~/shared/media-placement-contract'
+import { mediaPlaybackUrl, mediaStillUrl } from '~/shared/media-placement-contract'
 import type { CatalogAnswer, CatalogField, CatalogRow, CatalogScreen } from '~/shared/catalog-screen'
 import type { UpdateProductInput } from '~/server/types/products'
 import { getVerticalCopy } from '~/utils/vertical-copy'
@@ -43,7 +44,7 @@ import { listArticleCategories } from '~/server/utils/content/article-categories
 import { articleCollectionOf, createBlogPost, deleteBlogPost, getBlogPost, updateBlogLifecycle, updateBlogPost } from '~/server/utils/content/publishing'
 import { loadDashboardBlogPosts } from '~/server/utils/dashboard-editor-resources'
 import { createPost, deletePost, getPost, listPosts, updatePost } from '~/server/utils/post-management'
-import { publishPost } from '~/server/utils/social-publication'
+import { getSocialConnections, publishPost, type PublishTarget } from '~/server/utils/social-publication'
 import { PostValidationError } from '~/shared/posts'
 import { createQa, deleteQa, listQa, updateQa } from '~/server/utils/location-qa'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
@@ -55,7 +56,11 @@ import { blankBlogLocalizedText, blogLocalizedTextFields, initialBlogEditorBlock
 import { PRICING_CALCULATOR_COLUMNS, pricingCalculatorConfig, pricingCalculatorRows, updatePricingCalculator } from '~/utils/pricing-calculator'
 import { SITE_PALETTE_MODES, SITE_PALETTE_ROLES, type SitePalettePatch } from '~/shared/site-palette'
 import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset } from '~/shared/organization-fonts'
-import { getOrganizationDomains } from '~/server/utils/domain-read-model'
+import { getOrganizationDomainsDashboardPayload } from '~/server/utils/domain-read-model'
+import { setCanonicalDomain } from '~/server/utils/domains'
+import { changeDashboardDomain, connectDashboardDomain } from '~/server/utils/domain-dashboard-actions'
+import { hasOrganizationEntitlement } from '~/server/utils/billing'
+import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
 import { listOrganizationReviews, setReviewStatus } from '~/server/utils/organization-reviews'
 import { isPlatformSite } from '~/utils/site-routing'
 import { isRecord } from '~/server/utils/type-guards'
@@ -521,16 +526,16 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       if (result.status >= 400) throw new HTTPError({ statusCode: result.status, message: String(result.data.error), data: result.data })
     })
   }
-  if (['website-blog', 'website-posts', 'website-qa', 'website-content'].includes(view)) {
+  if (['website-blog', 'website-posts', 'website-qa', 'website-content', 'post-destinations', 'post-publish', 'post-media', 'post-media-item', 'post-media-order'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Website content not found')
     const scope = { organizationId: organization.id, locationId: null }
-    const kind = view === 'website-blog' ? 'article' : view === 'website-posts' ? 'post' : view === 'website-qa' ? 'qa' : query.kind
+    const kind = view === 'website-blog' ? 'article' : ['website-posts', 'post-destinations', 'post-publish', 'post-media', 'post-media-item', 'post-media-order'].includes(view) ? 'post' : view === 'website-qa' ? 'qa' : query.kind
     if (kind !== 'article' && kind !== 'post' && kind !== 'qa') return missing('Content not found')
     const title = kind === 'article' ? 'Blog' : kind === 'post' ? 'Social posts' : 'Q&A'
     const row = (id: string, label: string, summary?: string): CatalogRow => ({
       id, label, summary, native: 'website-content', query: { kind, ...(id === 'new' ? {} : { content_id: id }) },
     })
-    if (view !== 'website-content') {
+    if (['website-blog', 'website-posts', 'website-qa'].includes(view)) {
       if (answer) return missing('Choose content to edit')
       const cursor = typeof query.cursor === 'string' ? query.cursor : undefined
       const resource = { resource: `native-posts:${organization.id}` }
@@ -548,6 +553,101 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     const id = query.content_id === undefined ? null : typeof query.content_id === 'string' ? query.content_id : missing('Content not found')
     const article = kind === 'article' && id ? await getBlogPost(db, id, organization.id, env) : null
     const post = kind === 'post' && id ? await getPost(db, env, organization.id, id) ?? missing('Post not found') : null
+    if (['post-media', 'post-media-item', 'post-media-order'].includes(view)) {
+      if (!post) return missing('Post not found')
+      const row = (id: string, label: string, slot: 'cover' | 'gallery', asset?: typeof post.media[number]): CatalogRow => ({
+        id, label, native: 'post-media-item', image: mediaStillUrl(asset),
+        query: { content_id: post.id, slot, ...(asset ? { asset_id: asset.asset_id } : {}) },
+      })
+      const gallery = post.media.filter(item => item.slot === 'gallery')
+      const cover = post.media.find(item => item.slot === 'cover')
+      if (view === 'post-media') {
+        if (answer) return missing('Choose a media placement')
+        return { title: 'Post media', fields: [], rows: [
+          row('cover', 'Cover', 'cover', cover),
+          ...gallery.map((asset, index) => row(asset.asset_id, `Gallery item ${index + 1}`, 'gallery', asset)),
+          row('add', 'Add to gallery', 'gallery'),
+          ...(gallery.length > 1 ? [{ id: 'order', label: 'Reorder gallery', native: 'post-media-order', query: { content_id: post.id, slot: 'gallery' } }] : []),
+        ] }
+      }
+      const slot = query.slot
+      if (slot !== 'cover' && slot !== 'gallery') return missing('Media placement not found')
+      const order = view === 'post-media-order'
+      if (order && slot !== 'gallery') return missing('Gallery not found')
+      const asset = slot === 'cover' ? cover : query.asset_id === undefined ? null
+        : gallery.find(item => item.asset_id === query.asset_id) ?? missing('Media not found')
+      const ids = gallery.map(item => item.asset_id)
+      const title = order ? 'Reorder gallery' : slot === 'cover' ? 'Cover' : asset ? 'Gallery item' : 'Add to gallery'
+      const revision = post.updated_at
+      const screen = { title, revision, rows: [], fields: [
+        order ? field('value', title, 'order', ids.join('\n'), {
+          choices: gallery.map((item, index) => ({ value: item.asset_id, label: `Gallery item ${index + 1}`, image: mediaStillUrl(item) })),
+        }) : field('value', title, 'photo', asset?.asset_id, { media_kind: 'any', playback_url: mediaPlaybackUrl(asset), display_url: mediaStillUrl(asset), optional: true }),
+      ], save_label: 'Save' }
+      if (!answer) return screen
+      if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The post changed. Reopen it before saving.' })
+      const value = answer.values.value ?? invalid('Missing media value')
+      const input = { env, principal, organizationId: organization.id, placement: { owner_type: 'content_document' as const, owner_id: post.id, slot } }
+      if (order) {
+        const next = value.split('\n')
+        if (next.length !== ids.length || new Set(next).size !== ids.length || !next.every(id => ids.includes(id))) invalid('Include each gallery item once')
+        await reorderMediaPlacements(db, { ...input, expectedAssetIds: ids, moves: next.slice(1).map((asset_id, index) => ({ asset_id, after_asset_id: next[index]! })) })
+      } else if (slot === 'cover') {
+        await setSingleMediaPlacement(db, { ...input, assetId: value || null })
+      } else if (asset && !value) {
+        await removeMediaPlacement(db, { ...input, assetId: asset.asset_id })
+      } else if (!asset && value) {
+        await attachMediaPlacement(db, { ...input, assetId: value })
+      } else if (asset && value !== asset.asset_id) return invalid('Add the new media before removing the old item')
+      await purgePublicResourceCacheNow(env, organization.id)
+      return screen
+    }
+    if (view === 'post-destinations' || view === 'post-publish') {
+      if (!post) return missing('Post not found')
+      const connections = await getSocialConnections(env, organization.id, { dashboardBase: dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null }) })
+      const channels = [
+        { channel: 'organization' as const, label: 'Website', status: post.status === 'published' ? 'Published' : undefined,
+          target: { channel: 'organization' } as PublishTarget, destination: connections.website.label },
+        ...connections.channels.map(connection => {
+          const publication = post.publications.find(item => item.channel === connection.channel)
+          const status = publication?.state === 'published' ? 'Published'
+            : publication?.state === 'removed' ? 'Removed'
+            : [connection.target_name, publication?.message, ...connection.problems.map(item => item.message)].filter(Boolean).join(' · ')
+          const target: PublishTarget | null = !connection.problems.length && connection.target_id && connection.connection_revision
+            && (!publication || publication.state === 'failed')
+            ? { channel: connection.channel, target_id: connection.target_id, connection_revision: connection.connection_revision } : null
+          const label = connection.channel === 'facebook' ? 'Facebook' : connection.channel === 'instagram' ? 'Instagram' : 'Discord'
+          return { channel: connection.channel, label, status, target, destination: connection.target_name }
+        }),
+      ]
+      const available = channels.filter(item => item.target && !(item.channel === 'organization' && post.status === 'published'))
+      if (view === 'post-destinations') {
+        if (answer) return missing('Choose a destination')
+        return { title: 'Publishing', fields: [], rows: [
+          ...channels.map(({ channel, label, status }) => ({ id: channel, label, summary: status || 'Ready to publish' })),
+          ...(available.length ? [{ id: 'publish', label: 'Choose destinations', native: 'post-publish', query: { content_id: post.id } }] : []),
+        ] }
+      }
+      const revision = JSON.stringify([post.updated_at, available.map(item => item.target)])
+      const fields = available.map(item => field(item.channel, item.label, 'toggle', false, { hint: item.destination ?? undefined }))
+      if (!fields.length) return missing('No publication destinations are available')
+      const screen = { title: 'Publish to', fields, rows: [], revision, save_label: 'Publish' }
+      if (!answer) return screen
+      if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The post or destinations changed. Reopen them before publishing.' })
+      if (fields.length !== Object.keys(answer.values).length || fields.some(item => !['true', 'false'].includes(answer.values[item.key]!))) invalid('Choose available destinations')
+      const targets = available.flatMap(item => item.target && answer.values[item.channel] === 'true' ? [item.target] : [])
+      if (!targets.length) return invalid('Choose where to publish')
+      const result = await publishPost(env, organization.id, post.id, { expectedUpdatedAt: post.updated_at, targets }, userId)
+      await purgePublicResourceCacheNow(env, organization.id)
+      if (!result.ok) {
+        const details = result.outcomes.map(outcome => {
+          const label = channels.find(item => item.channel === outcome.channel)?.label ?? outcome.channel
+          return `${label}: ${outcome.message ?? (outcome.status === 'published' || outcome.status === 'already_published' ? 'Published' : 'Publication failed')}`
+        })
+        throw new HTTPError({ statusCode: 422, message: details.join(' · '), data: { code: 'POST_PUBLICATION_INCOMPLETE', outcomes: result.outcomes } })
+      }
+      return screen
+    }
     const qa = kind === 'qa' && id ? (await listQa(db, organization.id, null, false, null, undefined, id))
       .find(item => item.source === 'manual' && item.location_id === null) ?? missing('Question not found') : null
     const stored = article ?? post ?? qa
@@ -565,7 +665,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       ...(kind === 'article' ? [
         field('excerpt', 'Excerpt', 'textarea', article?.excerpt, { optional: true }),
         field('category', 'Category', 'select', article?.category?.id, { optional: true, choices: [{ value: '', label: 'Choose later' }, ...categories.map(item => ({ value: item.id, label: item.name }))] }),
-        ...articleEdits.map(item => field(item.key, item.label, 'textarea', item.value)),
+        ...(!id ? articleEdits.map(item => field(item.key, item.label, 'textarea', item.value)) : []),
       ] : kind === 'post' ? [
         field('body', 'Caption', 'textarea', post?.body),
         field('button_label', 'Button label', 'text', post?.call_to_action?.label, { optional: true }),
@@ -578,12 +678,17 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     if (id && action === undefined) {
       if (answer) return missing('Choose a content setting')
       return { title: contentTitle || title, fields: [], rows: [
-        { id: 'edit', label: 'Edit content', native: view, query: { kind, content_id: id, action: 'edit' } },
-        ...(stored?.status === 'draft' ? [{ id: 'publish', label: 'Publish on website', native: view, query: { kind, content_id: id, action: 'publish' } }] : []),
+        { id: 'edit', label: article ? 'Article details' : 'Edit content', native: view, query: { kind, content_id: id, action: 'edit' } },
+        ...(article ? [{ id: 'sections', label: 'Article blocks', native: 'page-sections', query: { article_id: id } }] : []),
+        ...(post ? [
+          { id: 'media', label: 'Media', native: 'post-media', query: { content_id: id } },
+          { id: 'destinations', label: 'Publish to', native: 'post-destinations', query: { content_id: id } },
+        ] : []),
+        ...(article?.status === 'draft' ? [{ id: 'publish', label: 'Publish on website', native: view, query: { kind, content_id: id, action: 'publish' } }] : []),
         { id: 'delete', label: 'Delete', native: view, query: { kind, content_id: id, action: 'delete' } },
       ] }
     }
-    if ((action === 'delete' || action === 'publish') && (!stored || !id || (action === 'publish' && qa))) return missing('Content not found')
+    if ((action === 'delete' || action === 'publish') && (!stored || !id || (action === 'publish' && !article))) return missing('Content not found')
     const screen = { title: contentTitle || title, fields, rows: [], revision, save_label: action === 'publish' ? 'Publish' : action === 'delete' ? 'Delete' : 'Save' }
     if (!answer) return screen
     if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The content changed. Reopen it before saving.' })
@@ -598,19 +703,16 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       } else if (action === 'publish') {
         if (values.confirm !== 'true') return invalid('Confirm publication')
         if (article) await updateBlogLifecycle(db, id!, { updated_at: revision }, organization.id, userId)
-        else if (post) {
-          const result = await publishPost(env, organization.id, id!, { expectedUpdatedAt: revision, targets: [{ channel: 'organization' }] }, userId)
-          if (!result.ok) return invalid(result.outcomes.find(item => item.message)?.message ?? 'The post could not be published')
-        }
+
       } else if (kind === 'article') {
-        for (const edit of articleEdits) writeBlogLocalizedText(edit.block.data, edit.path, values[edit.key]!)
+        for (const edit of id ? [] : articleEdits) writeBlogLocalizedText(edit.block.data, edit.path, values[edit.key]!)
         const content = {
           title: values.title!, excerpt: values.excerpt || null,
           ...(values.category ? { category_id: values.category } : {}),
-          content_blocks: blocks as ContentBlockInput[],
+          ...(id ? {} : { content_blocks: blocks as ContentBlockInput[] }),
         }
         if (article) await updateBlogPost(db, id!, { ...content, updated_at: revision }, organization.id, userId, env)
-        else await createBlogPost(db, userId, { ...content, idempotency_key: answer.idempotency_key }, { organization_id: organization.id }, env)
+        else await createBlogPost(db, userId, { ...content, content_blocks: blocks as ContentBlockInput[], idempotency_key: answer.idempotency_key }, { organization_id: organization.id }, env)
       } else if (kind === 'post') {
         const changes = {
           title: values.title || null, body: values.body || null,
@@ -630,12 +732,72 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
-  if (view === 'website-domains') {
-    if (!isOrganizationWideRole(organization.role) || answer) return missing('Domains not found')
-    const domains = await getOrganizationDomains(db, organization.id)
-    return { title: 'Domains', fields: [], empty_title: 'No connected domains', rows: domains.map(domain => ({
-      id: domain.id, label: domain.domain, summary: domain.status === 'active' ? domain.role === 'canonical' ? 'Primary' : 'Connected' : domain.status,
-    })) }
+  if (['website-domains', 'website-domain', 'website-domain-action'].includes(view)) {
+    const actorType = organization.role
+    if (actorType !== 'owner' && actorType !== 'admin') return missing('Domains not found')
+    const actor = { organizationId: organization.id, organizationSlug: organization.slug, actorId: userId, actorType } as const
+    const payload = await getOrganizationDomainsDashboardPayload(db, organization.id)
+    const included = payload.domains.find(domain => domain.type === 'subdomain')
+    const canConnect = await hasOrganizationEntitlement(env, organization.id, 'custom_domains')
+    if (view === 'website-domains') {
+      if (answer) return missing('Choose a domain')
+      return { title: 'Domains', fields: [], rows: [
+        ...(included ? [{ id: included.id, label: included.domain, summary: 'Included address' }] : []),
+        ...payload.domain_groups.map(group => ({
+          id: group.id, label: group.domain, summary: group.role === 'canonical' && group.status === 'active' ? 'Primary' : group.status,
+          native: 'website-domain', query: { domain_id: group.id },
+        })),
+        ...(canConnect ? [{ id: 'connect', label: 'Connect domain', native: 'website-domain-action', query: { action: 'connect' } }]
+          : [{ id: 'plan', label: 'Custom domains require a paid plan' }]),
+      ] }
+    }
+    const action = query.action
+    const group = payload.domain_groups.find(item => item.id === query.domain_id)
+    if (view === 'website-domain') {
+      if (!group || answer) return missing('Domain not found')
+      const row = (action: string, label: string): CatalogRow => ({
+        id: action, label, native: 'website-domain-action', query: { action, domain_id: group.id },
+      })
+      return { title: group.domain, fields: [], rows: [
+        ...group.records.map((record, index) => ({ id: `dns-${index}`, label: `${record.type} · ${record.name}`, summary: record.value })),
+        ...[group.warning, group.error].flatMap((message, index) => message ? [{ id: `notice-${index}`, label: message }] : []),
+        ...(group.primary_domain_id && group.status !== 'deleted' ? [row('synced', 'Check connection')] : []),
+        ...(group.status === 'active' && group.role !== 'canonical' ? [row('primary', 'Make primary')] : []),
+        row('deleted', 'Remove domain'),
+      ] }
+    }
+    if (action !== 'connect' && action !== 'synced' && action !== 'primary' && action !== 'deleted') return missing('Domain action not found')
+    const connecting = action === 'connect'
+    if (connecting && !canConnect) throw new HTTPError({ statusCode: 403, message: 'Custom domains require a paid plan.' })
+    if (!connecting && !group) return missing('Domain not found')
+    const title = connecting ? 'Connect domain' : action === 'synced' ? 'Check connection' : action === 'primary' ? 'Make primary' : 'Remove domain'
+    const revision = connecting ? 'new' : JSON.stringify(group!.domains.map(domain => [domain.id, domain.role, domain.status, domain.updated_at]))
+    const fields = connecting ? [
+      field('domain', 'Domain', 'text', ''),
+      field('www', 'Include www', 'toggle', true),
+      field('cutover', 'Allow moving a domain that already points elsewhere', 'toggle', false),
+    ] : [field('confirm', `${title} · ${group!.domain}`, 'toggle', false)]
+    const screen = { title, fields, rows: [], revision, save_label: title }
+    if (!answer) return screen
+    if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This domain changed. Reopen it before saving.' })
+    if (fields.length !== Object.keys(answer.values).length || fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this editor')
+    if (connecting) {
+      const domain = answer.values.domain!.trim() || invalid('Enter a domain')
+      await connectDashboardDomain(env, db, actor, domain, answer.values.www === 'true', answer.values.cutover === 'true')
+    } else {
+      if (answer.values.confirm !== 'true') return invalid('Confirm the domain change')
+      const domain = group!.domains.find(item => item.id === group!.primary_domain_id)
+      if (action === 'deleted') {
+        for (const member of group!.domains.filter(item => item.status !== 'deleted')) {
+          await changeDashboardDomain(env, db, actor, member, action)
+        }
+      } else if (domain && action === 'primary' && domain.status === 'active') {
+        await setCanonicalDomain(db, organization.id, domain.id, actorType, userId)
+      } else if (domain && action === 'synced' && domain.status !== 'deleted') {
+        await changeDashboardDomain(env, db, actor, domain, action)
+      } else return invalid('This action is unavailable for the domain')
+    }
+    return screen
   }
   if (view === 'website-reviews' || view === 'website-review') {
     if (!isOrganizationWideRole(organization.role)) return missing('Reviews not found')
@@ -821,8 +983,14 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       } })
       return screen
     }
-    const sourceId = typeof query.page_id === 'string' ? query.page_id : missing('Choose a page')
-    const source = await getTenantPageById(db, sourceId, scope)
+    const articleId = typeof query.article_id === 'string' ? query.article_id : null
+    if (articleId && (query.page_id !== undefined || locale || ['page', 'page-content', 'page-delete'].includes(view))) return missing('Article blocks not found')
+    const article = articleId ? await getBlogPost(db, articleId, organization.id, env) : null
+    const page = article ? null : await getTenantPageById(db, typeof query.page_id === 'string' ? query.page_id : missing('Choose a page'), scope)
+    const source = article ? {
+      id: String(article.id), blocks: article.content_document.blocks as TenantPageBlock[], document: article.content_document.document,
+    } : page!
+    const documentQuery: Record<string, string> = article ? { article_id: source.id } : { page_id: source.id }
     const platform = isPlatformSite({ themeId: organization.theme_id })
     const editFields = (
       data: Record<string, unknown>, definitions: Readonly<Record<string, TenantPageField>>, prefix = '',
@@ -918,17 +1086,17 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         }
       } }
     }
-    const savePage = (blocks = source.blocks) => updateTenantPage(db, source.id, {
-      userId, scope, env, data: {
-        path: source.path, title: source.title, summary: source.summary, page_type: source.page_type,
-        recipe: source.recipe, sort_order: source.sort_order, updated_at: source.document.updated_at, blocks,
-      },
-    })
+    const saveBlocks = (blocks = source.blocks) => article
+      ? updateBlogPost(db, source.id, { updated_at: source.document.updated_at, content_blocks: blocks }, organization.id, userId, env)
+      : updateTenantPage(db, source.id, { userId, scope, env, data: {
+        path: page!.path, title: page!.title, summary: page!.summary, page_type: page!.page_type,
+        recipe: page!.recipe, sort_order: page!.sort_order, updated_at: source.document.updated_at, blocks,
+      } })
     const removable = async () => (await listTenantPages(db, organization.id)).find(page => page.id === source.id)?.removable === true
     if (view === 'page-delete') {
       if (locale || !await removable()) return missing('This page cannot be removed')
       const revision = source.document.updated_at
-      const screen = { title: 'Delete page', fields: [field('confirm', `Delete ${source.title}`, 'toggle', false)], rows: [], revision, save_label: 'Delete' }
+      const screen = { title: 'Delete page', fields: [field('confirm', `Delete ${page!.title}`, 'toggle', false)], rows: [], revision, save_label: 'Delete' }
       if (!answer) return screen
       if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This page changed. Reopen it before deleting.' })
       if (answer.values.confirm !== 'true') return invalid('Confirm deletion')
@@ -941,7 +1109,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       if (!tenantPageBlockFieldsForSection(block, 'calculator').some(({ field }) => field.kind === 'calculator')) return missing('Calculator not found')
       const config = pricingCalculatorConfig(block.data.calculator)
       const rows = pricingCalculatorRows(config)
-      const base = { page_id: source.id, block_id: block.id }
+      const base = { ...documentQuery, block_id: block.id }
       if (!answer && query.row === undefined) {
         return { title: 'Calculator', fields: [], rows: [
           { id: 'note', label: 'Note', summary: String(config.note ?? ''), native: view, query: { ...base, row: 'note' } },
@@ -975,7 +1143,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         }
       }
       block.data.calculator = updatePricingCalculator(config, rows, note ? answer.values.note! : String(config.note ?? ''))
-      await savePage()
+      await saveBlocks()
       return screen
     }
     if (view === 'page-settings') {
@@ -996,7 +1164,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       reference.write(answer.values)
       const problem = validateTenantPageBlock(block)[0]
       if (problem) return invalid(problem)
-      await savePage()
+      await saveBlocks()
       return screen
     }
     if (view === 'page-records' || view === 'page-record' || view === 'page-record-order') {
@@ -1012,7 +1180,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       const records = (value ?? []) as Record<string, unknown>[]
       const copy = TENANT_PAGE_RECORD_NOUNS[collection]
       const row = (id: string, label: string, native: string, extra: Record<string, string> = {}): CatalogRow => ({
-        id, label, native, query: { page_id: source.id, block_id: block.id, collection, ...extra },
+        id, label, native, query: { ...documentQuery, block_id: block.id, collection, ...extra },
       })
       if (view === 'page-records') {
         if (answer) return missing('Choose a record')
@@ -1051,7 +1219,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       }
       const problem = validateTenantPageBlock(block)[0]
       if (problem) return invalid(problem)
-      await savePage()
+      await saveBlocks()
       return screen
     }
     if (view === 'page-media' || view === 'page-media-item' || view === 'page-media-order') {
@@ -1072,7 +1240,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       })
       const row = (id: string, label: string, native: string, slot: string, asset?: typeof block.media[number]): CatalogRow => ({
         id, label, native, image: mediaStillUrl(asset),
-        query: { page_id: source.id, block_id: block.id, slot, ...(asset ? { asset_id: asset.asset_id } : {}) },
+        query: { ...documentQuery, block_id: block.id, slot, ...(asset ? { asset_id: asset.asset_id } : {}) },
       })
       if (view === 'page-media') {
         if (answer) return missing('Choose a media placement')
@@ -1100,7 +1268,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       const screen = { title, rows: [], revision, save_label: 'Save', fields: [
         order ? field('value', title, 'order', ids.join('\n'), { choices: media.map((item, index) => ({
           value: item.asset_id, label: `Gallery item ${index + 1}`, image: mediaStillUrl(item),
-        })) }) : field('value', title, 'photo', asset?.asset_id, { optional: true, display_url: mediaStillUrl(asset), media_kind: slot.accept }),
+        })) }) : field('value', title, 'photo', asset?.asset_id, { optional: true, display_url: mediaStillUrl(asset), playback_url: mediaPlaybackUrl(asset), media_kind: slot.accept }),
       ] }
       if (!answer) return screen
       if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This media changed. Reopen it before saving.' })
@@ -1121,7 +1289,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         const blocks = source.blocks.map(item => item.id === block.id ? {
           ...item, media: [...item.media.filter(asset => asset.slot !== slot.slot), ...(value ? [{ asset_id: value, slot: slot.slot }] : [])],
         } : item)
-        await savePage(blocks)
+        await saveBlocks(blocks)
       } else if (asset && !value) {
         await removeMediaPlacement(db, { ...input, assetId: asset.asset_id })
       } else if (!asset && value) {
@@ -1134,19 +1302,19 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     }
     if (view === 'page') {
       if (answer) return missing('Choose a page setting')
-      return { title: source.title, fields: [], rows: [
-        { id: 'copy', label: 'Page text', summary: source.summary ?? undefined, native: 'page-content', query: { page_id: source.id } },
-        { id: 'sections', label: 'Sections', summary: String(source.blocks.length), native: 'page-sections', query: { page_id: source.id } },
-        ...(await removable() ? [{ id: 'delete', label: 'Delete page', native: 'page-delete', query: { page_id: source.id } }] : []),
+      return { title: page!.title, fields: [], rows: [
+        { id: 'copy', label: 'Page text', summary: page!.summary ?? undefined, native: 'page-content', query: documentQuery },
+        { id: 'sections', label: 'Sections', summary: String(source.blocks.length), native: 'page-sections', query: documentQuery },
+        ...(await removable() ? [{ id: 'delete', label: 'Delete page', native: 'page-delete', query: documentQuery }] : []),
       ] }
     }
     if (['page-sections', 'page-order', 'page-section-add', 'page-section-remove'].includes(view)) {
       if (locale) return missing('Edit the layout in the source language')
       const row = (id: string, label: string, native: string, query: Record<string, string> = {}): CatalogRow => ({
-        id, label, native, query: { page_id: source.id, ...query },
+        id, label, native, query: { ...documentQuery, ...query },
       })
       const allowed = Object.values(TENANT_PAGE_BLOCK_REGISTRY)
-        .filter(block => isTenantPageBlockAllowed(block, source.recipe, source.page_type, organization.vertical))
+        .filter(block => article ? PUBLICATION_CONTENT_BLOCK_TYPES.some(type => type === block.type) : isTenantPageBlockAllowed(block, page!.recipe, page!.page_type, organization.vertical))
       if (view === 'page-sections') {
         if (answer) return missing('Choose a page section')
         return { title: 'Sections', fields: [], rows: [
@@ -1182,15 +1350,25 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       const draft = type ? createTenantPageBlock(type, createTenantPageEditorData(type), source.blocks.length) : null
       const reference = draft ? await references(draft) : null
       const controls = draft ? blockFields(draft, TENANT_PAGE_BLOCK_REGISTRY[draft.type].fields) : null
+      const initialMedia = draft && article && draft.type === 'image'
+        ? [field('initial-media', 'Image', 'photo', '', { media_kind: 'image' })] : []
+      const requiredRecords = draft ? Object.entries(TENANT_PAGE_BLOCK_REGISTRY[draft.type].fields).flatMap(([key, item]) => {
+        if (item.kind !== 'list' || !item.required || !item.of) return []
+        const fields = item.of
+        return Array.from({ length: item.min ?? 1 }, (_, index) => {
+          const record = {}
+          return { key, record, controls: editFields(record, fields, `initial:${key}:${index}:`) }
+        })
+      }) : []
       const choices = add
         ? allowed.map(block => ({ value: block.type, label: block.label }))
         : source.blocks.map((block, index) => ({ value: block.id, label: `${tenantPageBlockLabel(block.type)} ${index + 1}` }))
       const title = order ? 'Reorder sections' : add ? 'Add a section' : 'Remove a section'
       const revision = source.document.updated_at
       const screen = { title, rows: [], fields: draft
-        ? [...controls!.fields, ...reference!.fields]
+        ? [...controls!.fields, ...reference!.fields, ...initialMedia, ...requiredRecords.flatMap(item => item.controls.fields)]
         : [field('value', title, order ? 'order' : 'select', order ? choices.map(item => item.value).join('\n') : '', { choices })],
-      revision, save_label: 'Save', allow_unchanged: Boolean(draft && !validateTenantPageBlock(draft).length) }
+      revision, save_label: 'Save', allow_unchanged: Boolean(draft && !initialMedia.length && !validateTenantPageBlock(draft).length) }
       if (!answer) return screen
       if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This page changed. Reopen it before saving.' })
       let blocks = source.blocks
@@ -1198,6 +1376,16 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         if (screen.fields.length !== Object.keys(answer.values).length || screen.fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this section')
         reference!.write(answer.values)
         controls!.write(answer.values)
+        for (const { key, controls, record } of requiredRecords) {
+          controls.write(answer.values)
+          const records = draft.data[key] as Record<string, unknown>[]
+          records.push(record)
+        }
+        if (initialMedia.length) {
+          const asset_id = answer.values['initial-media'] || invalid('Choose an image')
+          await hydrateMediaAssetRefs(db, { organizationId: organization.id, refs: [{ asset_id }], allowedKinds: ['image'] })
+          draft.media = [{ asset_id, slot: 'media' }]
+        }
         const problem = validateTenantPageBlock(draft)[0]
         if (problem) return invalid(problem)
         blocks = [...blocks, draft]
@@ -1211,26 +1399,24 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         if (!blocks.some(block => block.id === value)) return invalid('Choose a saved section')
         blocks = blocks.filter(block => block.id !== value)
       }
-      await updateTenantPage(db, source.id, { userId, scope, env, data: {
-        path: source.path, title: source.title, summary: source.summary, page_type: source.page_type, recipe: source.recipe,
-        sort_order: source.sort_order, updated_at: revision, blocks: blocks.map((block, position) => ({ ...block, position })),
-      } })
+      await saveBlocks(blocks.map((block, position) => ({ ...block, position })))
       return screen
     }
-    const translated = locale && locale !== source.locale
+    if (!page) return missing('Page not found')
+    const translated = locale && locale !== page.locale
     const translationId = translated
-      ? (await listTenantPages(db, organization.id, { locale })).find(page => page.page_id === source.page_id)?.id
+      ? (await listTenantPages(db, organization.id, { locale })).find(item => item.page_id === page.page_id)?.id
       : undefined
-    const saved = translated ? translationId ? await getTenantPageById(db, translationId, scope) : null : source
+    const saved = translated ? translationId ? await getTenantPageById(db, translationId, scope) : null : page
     const blocks = translated
-      ? saved ? alignTenantPageTranslationBlocks(source.blocks, saved.blocks) : createTenantPageTranslationBlocks(source.blocks)
-      : source.blocks
-    const selected = query.block_id === undefined ? null : source.blocks.find(block => block.id === query.block_id) ?? missing('Section not found')
+      ? saved ? alignTenantPageTranslationBlocks(page.blocks, saved.blocks) : createTenantPageTranslationBlocks(page.blocks)
+      : page.blocks
+    const selected = query.block_id === undefined ? null : page.blocks.find(block => block.id === query.block_id) ?? missing('Section not found')
     const fields = selected ? [] : [
-      field('title', 'Title', 'text', saved?.title, { hint: translated ? source.title : undefined }),
-      field('summary', 'Summary', 'textarea', saved?.summary, { optional: true, hint: translated ? source.summary ?? undefined : undefined }),
+      field('title', 'Title', 'text', saved?.title, { hint: translated ? page.title : undefined }),
+      field('summary', 'Summary', 'textarea', saved?.summary, { optional: true, hint: translated ? page.summary ?? undefined : undefined }),
     ]
-    const edits = (translated ? source.blocks : []).flatMap((block, index) => {
+    const edits = (translated ? page.blocks : []).flatMap((block, index) => {
       if (selected && selected.id !== block.id) return []
       const target = translated ? blocks.find(item => tenantPageTranslationSourceBlockId(item) === block.id) : block
       if (!target) throw new Error('Page section is missing from the translation')
@@ -1241,19 +1427,19 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         return { key, path, target }
       })
     })
-    const revision = JSON.stringify([source.document.updated_at, saved?.document.updated_at])
-    const screen = { title: selected ? tenantPageBlockLabel(selected.type) : saved?.title ?? source.title, rows: [], fields, revision, save_label: 'Save' }
+    const revision = JSON.stringify([page.document.updated_at, saved?.document.updated_at])
+    const screen = { title: selected ? tenantPageBlockLabel(selected.type) : saved?.title ?? page.title, rows: [], fields, revision, save_label: 'Save' }
     if (!answer) return screen
     if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This page changed. Reopen it before saving.' })
     if (fields.length !== Object.keys(answer.values).length || fields.some(row => typeof answer.values[row.key] !== 'string')) invalid('The saved fields do not match this page')
     for (const edit of edits) writeTenantPageLocalizedText(edit.target, edit.path, answer.values[edit.key]!)
     const data = {
-      page_id: source.page_id, locale: locale ?? source.locale, path: saved?.path ?? source.path,
-      title: selected ? saved?.title ?? source.title : answer.values.title!,
-      summary: selected ? saved?.summary ?? null : answer.values.summary!, page_type: source.page_type,
-      recipe: source.recipe, blocks,
+      page_id: page.page_id, locale: locale ?? page.locale, path: saved?.path ?? page.path,
+      title: selected ? saved?.title ?? page.title : answer.values.title!,
+      summary: selected ? saved?.summary ?? null : answer.values.summary!, page_type: page.page_type,
+      recipe: page.recipe, blocks,
     }
-    if (saved) await updateTenantPage(db, saved.id, { userId, scope, data: { ...data, sort_order: source.sort_order, updated_at: saved.document.updated_at }, env })
+    if (saved) await updateTenantPage(db, saved.id, { userId, scope, data: { ...data, sort_order: page.sort_order, updated_at: saved.document.updated_at }, env })
     else await createTenantPage(db, { organizationId: organization.id, userId, data, env })
     return screen
   }

@@ -20,6 +20,7 @@ export interface CatalogField {
   choices?: Array<{ value: string; label: string; image?: string | null }>
   optional?: boolean
   display_url?: string | null
+  playback_url?: string | null
   hint?: string
   media_kind?: 'image' | 'video' | 'any'
 }
