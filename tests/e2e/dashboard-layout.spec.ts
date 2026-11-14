@@ -2053,6 +2053,18 @@ test.describe('dashboard pane hierarchy', () => {
     expect((await afterRead.json() as { product: Product }).product.image?.asset_id).toBe(product!.image!.asset_id)
   })
 
+  test('Website review preferences use the CMS moderation rules', async ({ page }) => {
+    const tenant = seededTenant('restaurant')
+    const response = await page.request.get('/api/dashboard/offering', { params: { org: tenant.slug, view: 'website-review-settings' } })
+    expect(response.status(), await response.text()).toBe(200)
+    const screen = await response.json() as CatalogScreen
+    expect(screen.fields).toEqual([])
+    expect(screen.rows.find(row => row.id === 'website-reviews')).toMatchObject({ native: 'website-reviews', to: `${ORG}/website/reviews` })
+    await open(page, `${ORG}/website/preferences/reviews`)
+    await expect(page.locator('#dashboard-panel-organization-website-reviews').getByText(screen.rows[0]!.summary!)).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Manage reviews', exact: true })).toHaveAttribute('href', `${ORG}/website/reviews`)
+  })
+
   test('native Connections opens shared screens and starts a single-use provider authorization', async ({ page, baseURL }) => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Uses local Better Auth and stops at the provider boundary.')
     const tenant = seededTenant('restaurant')

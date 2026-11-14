@@ -549,7 +549,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     if (result.status !== 200) throw new HTTPError({ statusCode: result.status, message: 'error' in result.data ? result.data.error : 'Could not save the location' })
     return formScreen
   }
-  if (['website', 'website-preferences', 'website-status', 'website-booking', 'website-booking-mode'].includes(view)) {
+  if (['website', 'website-preferences', 'website-status', 'website-booking', 'website-booking-mode', 'website-review-settings'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Website not found')
     const settings = await loadSettingsPayload(db, env, organization.id)
     const lodging = settings.vertical === 'lodging'
@@ -560,6 +560,13 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       ? settings.lodging_booking_choices?.find(choice => choice.value === settings.lodging_booking?.confirmation_mode)?.label
       : settings.consultation_mode === 'native' ? 'Accepting consultation requests online' : undefined)
     const statusRow = settings.status === 'suspended' ? { id: 'status', label: 'Status', summary: status } : row('website-status', 'Status', status)
+    if (view === 'website-review-settings') {
+      if (answer) return invalid('Review approval is managed per review')
+      return { title: 'Review settings', fields: [], rows: [
+        { id: 'mode', label: 'Guest reviews', summary: 'Guest reviews submitted for publication require approval. Reviews imported from Google Maps are published when you import them.' },
+        { ...row('website-reviews', 'Manage reviews'), to: `/dashboard/${encodeURIComponent(organization.slug)}/website/reviews` },
+      ] }
+    }
     if (view === 'website' || view === 'website-preferences' || view === 'website-booking') {
       if (answer) return invalid('Choose a website setting')
       if (view === 'website') return { title: 'Website', fields: [], preview_url: settings.public_url, rows: [
@@ -578,7 +585,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
           link('domains', row('website-domains', 'Domains', settings.public_url ?? 'Not connected'), 'i-lucide-globe-2'),
           link('currency', row('website-currency', 'Currency', currency), `i-lucide-${currencyIcon}`),
           link('booking', booking, 'i-lucide-calendar-check', `${site}/booking`),
-          link('reviews', row('website-reviews', 'Review settings', 'Manual approval'), 'i-lucide-star'),
+          link('reviews', row('website-review-settings', 'Review settings', 'Approval and visibility'), 'i-lucide-star'),
           row('website-seo', 'Search engine optimization'),
         ] }
       }
