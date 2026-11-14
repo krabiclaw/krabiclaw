@@ -63,92 +63,35 @@ export const integrationsKey = Symbol('integrations') as InjectionKey<{
 }>
 </script>
 <script setup lang="ts">
-import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
-import { INTEGRATIONS, type IntegrationKey } from '~/shared/integrations'
+import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vue'
 import { BUSINESS_PLAN_ID, GROWTH_PLAN_ID, STARTER_PLAN_ID } from '~/shared/billing-model'
-import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
-import { organizationRoles } from '~/utils/organization-access'
+import type { CatalogRow } from '~/shared/catalog-screen'
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
 useSeoMeta({ title: 'Connections | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 const route = useRoute()
 const level = useRouteLevel()
-const dashboard = useDashboardOrganization()
 const dashboardApi = useDashboardApi()
 const organizationId = useDashboardOrganizationId()
-const base = computed(() => `/dashboard/${String(route.params.org_slug)}/integrations`)
-const isSummaryResponse = (value: unknown): value is { settings: { integrations: IntegrationsSummary } } =>
+type ConnectionRow = CatalogRow & { group: 'sync' | 'connection'; plan: string | null; to: string }
+const isSummaryResponse = (value: unknown): value is { settings: { integrations: IntegrationsSummary }; connections: ConnectionRow[] } =>
   isRecord(value) && isRecord(value.settings) && isRecord(value.settings.integrations)
-  && Array.isArray(value.settings.integrations.google_maps)
-const { data: summary, error, refresh } = await useAsyncData(
+  && Array.isArray(value.settings.integrations.google_maps) && Array.isArray(value.connections)
+const { data, error, refresh } = await useAsyncData(
   () => `dashboard-integrations:${String(route.params.org_slug)}`,
-  async () => (await dashboardApi('/api/dashboard/settings', { validate: isSummaryResponse })).settings.integrations,
+  () => dashboardApi('/api/dashboard/settings', { query: { connections: '1' }, validate: isSummaryResponse }),
 )
-// A row says what the connection is and how it is: the target it names, a dot
-// for working or failing, and the plan it waits on when the plan lacks it.
-const connection = (value: ConnectedIntegration | null, name = value?.target_name): Pick<EditorNavigationItem, 'summary' | 'status'> => {
-  if (!value) return { summary: 'Not connected', status: 'neutral' }
-  if (value.status === 'error') return { summary: `${name} · Needs attention`, status: 'error' }
-  return { summary: name, status: 'success' }
-}
-const rows = computed<Record<IntegrationKey, Pick<EditorNavigationItem, 'summary' | 'status'>>>(() => {
-  const s = summary.value
-  const maps = s?.google_maps ?? []
-  const connected = maps.filter(location => location.google_place_id).length
-  const calendar = s?.google_calendar
-  return {
-    'google-maps': maps.length
-      ? { summary: `${connected} of ${maps.length} ${maps.length === 1 ? 'location' : 'locations'} connected`, status: connected ? 'success' : 'neutral' }
-      : { summary: 'No locations yet' },
-    'google-analytics': connection(s?.google_analytics ?? null),
-    'google-ads': connection(s?.google_ads ?? null),
-    'meta-ads': connection(s?.meta_ads ?? null),
-    'google-search-console': connection(s?.google_search_console ?? null),
-    'google-calendar': calendar
-      ? { summary: calendar.status === 'error' ? `${calendar.calendar_name} · Needs attention` : calendar.calendar_name, status: calendar.status === 'active' ? 'success' : 'error' }
-      : { summary: 'Not connected', status: 'neutral' },
-    'facebook': connection(s?.facebook ?? null),
-    'instagram': connection(s?.instagram ?? null, s?.instagram ? `@${s.instagram.target_name}` : undefined),
-    'discord': connection(s?.discord ?? null, s?.discord ? `#${s.discord.target_name}` : undefined),
-    'airbnb': (() => {
-      const a = s?.airbnb
-      if (!a || a.status === 'not_connected') return { summary: 'Not connected', status: 'neutral' as const }
-      if (a.status === 'connected') return { summary: 'Connected', status: 'success' as const }
-      if (a.status === 'needs_review') return { summary: 'Needs review', status: 'error' as const }
-      return { summary: a.status, status: 'neutral' as const }
-    })(),
-  }
-})
-
-// The plan each connection first appears on, from the one entitlement policy.
-const PLANS = [STARTER_PLAN_ID, GROWTH_PLAN_ID, BUSINESS_PLAN_ID] as const
-const planName = (plan: string) => plan === STARTER_PLAN_ID ? 'Free' : plan.charAt(0).toUpperCase() + plan.slice(1)
-const includedFrom = (entitlement?: string) => PLANS.find(plan => !entitlement || getPlanEntitlements(plan)[entitlement] === true) ?? BUSINESS_PLAN_ID
-const plan = ref<'all' | typeof PLANS[number]>('all')
-const planTabs = [{ label: 'All', value: 'all' }, ...PLANS.map(value => ({ label: planName(value), value }))]
-
-const items = computed<EditorNavigationItem[]>(() => INTEGRATIONS
-  .filter(definition => !definition.feature || dashboard.hasFeature(definition.feature))
-  .filter(definition => plan.value === 'all' || includedFrom(definition.entitlement) === plan.value)
-  .map((definition) => {
-    const lacking = definition.entitlement && dashboard.entitlements.value[definition.entitlement] !== true
-    const row = rows.value[definition.key]
-    return {
-      id: definition.key, label: definition.name, lead: { icon: definition.logo }, to: `${base.value}/${definition.key}`,
-      ...row,
-      ...(lacking ? { summary: `Included with ${planName(includedFrom(definition.entitlement))}`, status: undefined } : {}),
-    }
-  }))
-
-const migrationItem = computed<EditorNavigationItem[]>(() => {
-  const organization = dashboard.organization.value
-  const role = organization?.role
-  if (!dashboard.hasFeature('stays') || !role || !(role in organizationRoles) || !organizationRoles[role as keyof typeof organizationRoles].authorize({ operations: ['update'] }).success) return []
-  return [{ id: 'hostaway-migration', label: 'Migrate from Hostaway', summary: 'Move existing stays and check blocked dates', lead: { icon: 'i-lucide-arrow-right-left' }, to: `${base.value}/hostaway-migration` }]
-})
-
+const summary = computed(() => data.value?.settings.integrations)
+const plan = ref('all')
+const planTabs = [
+  { label: 'All', value: 'all' }, { label: 'Free', value: STARTER_PLAN_ID },
+  { label: 'Growth', value: GROWTH_PLAN_ID }, { label: 'Business', value: BUSINESS_PLAN_ID },
+]
+const items = computed(() => (data.value?.connections ?? [])
+  .filter(item => item.plan === null || plan.value === 'all' || item.plan === plan.value)
+  .map(({ icon, ...item }) => ({ ...item, lead: { icon } })))
 const groups = computed(() => [
-  { id: 'sync', label: 'Sync', items: items.value.filter(item => INTEGRATIONS.find(definition => definition.key === item.id)?.group === 'sync') },
-  { id: 'connections', label: 'Connections', items: [...items.value.filter(item => INTEGRATIONS.find(definition => definition.key === item.id)?.group === 'connection'), ...migrationItem.value] },
+  { id: 'sync', label: 'Sync', items: items.value.filter(item => item.group === 'sync') },
+  { id: 'connections', label: 'Connections', items: items.value.filter(item => item.group === 'connection') },
 ].filter(group => group.items.length))
 
 provide(integrationsKey, {

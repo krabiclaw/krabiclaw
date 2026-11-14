@@ -13,7 +13,7 @@ import { handleTaskTools } from '../../server/utils/mcp-tools/tasks.ts'
 import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
 import { asMcpError, MCP_ERROR } from '../../server/utils/mcp-protocol.ts'
 import { isMcpRenderResponse } from '../../server/utils/mcp-render.ts'
-import { linkedAccountAccessToken, type CloudflareEnv } from '../../server/utils/auth.ts'
+import { createAuth, linkedAccountAccessToken, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { createPost, deletePost, getPost, listPublicSocialPosts, postPayloadFingerprint, updatePost } from '../../server/utils/post-management.ts'
 import { getSocialConnections, publishPost, reconcilePostPublication, type PublishTarget } from '../../server/utils/social-publication.ts'
 import { listChannelPosts, getChannelPost, deleteChannelPost } from '../../server/utils/social-channel-posts.ts'
@@ -23,6 +23,8 @@ import { MetaGraphError, verifyMetaSignedRequest, configuredMetaApps } from '../
 import { instagramAccessToken, listMedia, readAccountInsights, readMediaInsights } from '../../server/utils/instagram.ts'
 import { attachMediaPlacement } from '../../server/utils/media-placement.ts'
 import { listLinkedFacebookPages, facebookPageToken } from '../../server/utils/facebook-pages.ts'
+import connectionAuthorization from '../../server/api/dashboard/connection-authorization.ts'
+import selectFacebook from '../../server/api/organizations/[organization_id]/integrations/facebook/select.post.ts'
 import deauthorizeCallback from '../../server/api/integrations/meta/deauthorize.post.ts'
 import { loadInstagramInsights } from '../../server/utils/instagram-insights.ts'
 import deleteCallback from '../../server/api/integrations/meta/data-deletion.post.ts'
@@ -722,6 +724,89 @@ test('publication: one result and one external post per target; a failure is the
     // Deleted keys answer gone.
     await assert.rejects(create('key-race', { media: [{ asset_id: 'a1', slot: 'cover' }] }), /deleted/)
     assert.equal(await db.prepare('PRAGMA foreign_key_check').all().then(result => result.results.length), 0)
+  } finally {
+    restore()
+    await runtime.dispose()
+  }
+})
+
+test('Better Auth returns the Instagram account it linked to the native Connections screen', async (t) => {
+  const { runtime, db, env, restore } = await setUp()
+  const providerFetch = globalThis.fetch
+  try {
+    await db.prepare("INSERT INTO member(id, organizationId, userId, role, createdAt) VALUES ('member-owner', 'org-a', 'owner', 'owner', ?)").bind(Date.now()).run()
+    const session = 'instagram-native-session'
+    await db.prepare('INSERT INTO session(id, token, userId, expiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind('instagram-native', session, 'owner', Date.now() + 60_000, Date.now(), Date.now()).run()
+    t.mock.method(globalThis, 'fetch', async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+      if (url.hostname === 'api.instagram.com' && url.pathname === '/oauth/access_token') return Response.json({ access_token: 'fixture-short' })
+      if (url.hostname === 'graph.instagram.com' && url.pathname === '/access_token') return Response.json({ access_token: 'fixture-long', expires_in: 3600 })
+      if (url.hostname === 'graph.instagram.com' && url.pathname === '/v23.0/me') return Response.json({ id: 'new-instagram-subject', user_id: 'new-professional-account', username: 'native_fixture' })
+      return providerFetch(input, init)
+    })
+    const app = new H3()
+    app.all('/api/dashboard/connection-authorization', connectionAuthorization)
+    const local = (input: string | URL, init?: RequestInit) => app.request(Object.assign(new Request(
+      new URL(input, 'https://proof.example'), init,
+    ), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    const attempt = crypto.randomUUID()
+    const start = await local('/api/dashboard/connection-authorization?org=org-a', {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}` },
+      body: JSON.stringify({ integration: 'instagram', attempt }),
+    })
+    assert.equal(start.status, 200, await start.clone().text())
+    const { authorization_url } = await start.json() as { authorization_url: string }
+    const authorization = await local(authorization_url)
+    assert.equal(authorization.status, 302)
+    const provider = new URL(authorization.headers.get('location')!)
+    assert.equal(provider.hostname, 'www.instagram.com')
+    const callback = new URL(provider.searchParams.get('redirect_uri')!)
+    callback.search = new URLSearchParams({ state: provider.searchParams.get('state')!, code: 'fixture-instagram-code' }).toString()
+    const cookies = authorization.headers.getSetCookie().map(entry => entry.split(';')[0]).join('; ')
+    const completed = await createAuth(env).handler(new Request(callback, { headers: { cookie: cookies } }))
+    assert.equal(completed.status, 302)
+    const result = new URL(completed.headers.get('location')!)
+    assert.equal(result.host, 'connections')
+    assert.equal(result.pathname, '/instagram')
+    assert.equal(result.searchParams.get('attempt'), attempt)
+    assert.equal(result.searchParams.get('error'), null)
+    const id = result.searchParams.get('account_id')
+    assert.ok(id)
+    const account = await db.prepare('SELECT providerId, accountId, userId FROM account WHERE id = ?').bind(id).first()
+    assert.deepEqual(account, { providerId: 'instagram', accountId: 'new-instagram-subject', userId: 'owner' })
+  } finally {
+    t.mock.restoreAll()
+    restore()
+    await runtime.dispose()
+  }
+})
+
+test('the shared Facebook selection route preserves the current connection until a replacement succeeds', async () => {
+  const { runtime, db, env, restore } = await setUp()
+  try {
+    await db.prepare("INSERT INTO member(id, organizationId, userId, role, createdAt) VALUES ('member-owner', 'org-a', 'owner', 'owner', ?)").bind(Date.now()).run()
+    const session = 'facebook-reconnect-session'
+    await db.prepare('INSERT INTO session(id, token, userId, expiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind('facebook-reconnect', session, 'owner', Date.now() + 60_000, Date.now(), Date.now()).run()
+    const app = new H3()
+    app.post('/api/organizations/:organization_id/integrations/facebook/select', selectFacebook)
+    const select = (body: Record<string, string>) => app.request(Object.assign(new Request('https://proof.example/api/organizations/org-a/integrations/facebook/select', {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}` }, body: JSON.stringify(body),
+    }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    const before = await readIntegration(db, 'org-a', 'facebook')
+    assert.ok(before)
+    const stale = await select({ account_id: 'fb-account', page_id: PAGE, revision: 'stale' })
+    assert.equal(stale.status, 409)
+    const unavailable = await select({ account_id: 'fb-account', page_id: 'missing-page', revision: before.revision })
+    assert.equal(unavailable.status, 400)
+    assert.deepEqual(await readIntegration(db, 'org-a', 'facebook'), before)
+    const selected = await select({ account_id: 'fb-account', page_id: PAGE, revision: before.revision })
+    assert.equal(selected.status, 200, await selected.clone().text())
+    const saved = await readIntegration(db, 'org-a', 'facebook')
+    assert.equal(saved?.target_id, PAGE)
+    assert.equal(saved?.account_id, 'fb-account')
+    assert.notEqual(saved?.revision, before.revision)
   } finally {
     restore()
     await runtime.dispose()

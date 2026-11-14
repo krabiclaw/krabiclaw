@@ -2022,6 +2022,66 @@ test.describe('dashboard pane hierarchy', () => {
     expect((await afterRead.json() as { product: Product }).product.image?.asset_id).toBe(product!.image!.asset_id)
   })
 
+  test('native Connections opens shared screens and starts a single-use provider authorization', async ({ page, baseURL }) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Uses local Better Auth and stops at the provider boundary.')
+    const tenant = seededTenant('restaurant')
+    const read = async (params: Record<string, string>) => {
+      const response = await page.request.get('/api/dashboard/offering', { params: { org: tenant.slug, ...params } })
+      expect(response.status(), await response.text()).toBe(200)
+      return await response.json() as CatalogScreen
+    }
+    const connections = await read({ view: 'connections' })
+    expect(connections.rows.map(row => row.id)).toEqual(expect.arrayContaining(['google-maps', 'google-calendar', 'facebook', 'instagram', 'discord']))
+    const web = await page.request.get('/api/dashboard/settings', { params: { org: tenant.slug, connections: '1' } })
+    expect(web.status(), await web.text()).toBe(200)
+    expect((await web.json()).connections).toEqual(connections.rows)
+    const maps = await read({ view: 'connection', integration: 'google-maps' })
+    expect(maps.rows.find(row => row.id === tenant.locations.brooklyn.id)).toMatchObject({
+      native: 'connection-map', query: { integration: 'google-maps', location_id: tenant.locations.brooklyn.id },
+    })
+    const search = await read({ view: 'connection-map-search', integration: 'google-maps', location_id: tenant.locations.brooklyn.id })
+    const query = { org: tenant.slug, view: 'connection-map-search', integration: 'google-maps', location_id: tenant.locations.brooklyn.id }
+    const requestSearch = await page.request.post('/api/dashboard/offering', {
+      params: query, data: { revision: search.revision, values: { input: 'Brooklyn' }, idempotency_key: randomUUID() },
+    })
+    expect(requestSearch.status(), await requestSearch.text()).toBe(200)
+    const next = (await requestSearch.json()).destination
+    expect(next).toMatchObject({ view: 'connection-map-results', query: { location_id: tenant.locations.brooklyn.id, input: 'Brooklyn' } })
+    const withoutMaps = await page.request.get('/api/dashboard/offering', { params: { org: tenant.slug, view: next.view, ...next.query } })
+    expect(withoutMaps.status(), await withoutMaps.text()).toBe(503)
+    expect((await withoutMaps.json()).message).toContain('Google Maps search is unavailable')
+    const calendar = await read({ view: 'connection', integration: 'google-calendar' })
+    expect(calendar.rows).toContainEqual(expect.objectContaining({ authorization: 'google-calendar' }))
+    const link = await page.request.post('/api/dashboard/connection-authorization', {
+      params: { org: tenant.slug }, data: { integration: 'google-calendar', attempt: randomUUID() },
+    })
+    expect(link.status(), await link.text()).toBe(200)
+    const url = new URL((await link.json()).authorization_url)
+    expect(url.origin).toBe(new URL(baseURL!).origin)
+    const tampered = new URL(url)
+    tampered.searchParams.set('integration', 'facebook')
+    const rejected = await page.request.get(tampered.href, { maxRedirects: 0 })
+    expect(rejected.status()).toBe(302)
+    expect(new URL(rejected.headers().location!).searchParams.get('error')).toBe('This authorization link is invalid.')
+    const started = await page.request.get(url.href, { maxRedirects: 0 })
+    expect(started.status()).toBe(302)
+    const provider = new URL(started.headers().location!)
+    expect(provider.hostname).toBe('accounts.google.com')
+    expect(provider.searchParams.get('scope')).toContain('https://www.googleapis.com/auth/calendar.app.created')
+    expect(started.headers()['set-cookie']).toContain('state')
+    const callback = new URL(provider.searchParams.get('redirect_uri')!)
+    callback.search = new URLSearchParams({ state: provider.searchParams.get('state')!, error: 'access_denied' }).toString()
+    const cancelled = await page.request.get(callback.href, { maxRedirects: 0 })
+    expect(cancelled.status()).toBe(302)
+    const appReturn = new URL(cancelled.headers().location!)
+    expect(appReturn.protocol + '//' + appReturn.host + appReturn.pathname).toBe('krabiclaw://connections/google-calendar')
+    expect(appReturn.searchParams.get('attempt')).toBe(url.searchParams.get('attempt'))
+    expect(appReturn.searchParams.get('error')).toBe('access_denied')
+    const replay = await page.request.get(url.href, { maxRedirects: 0 })
+    expect(replay.status()).toBe(302)
+    expect(new URL(replay.headers().location!).searchParams.get('error')).toBe('Invalid token')
+  })
+
   test('the native location editor saves to the shared dashboard record and keeps content scoped', async ({ page, baseURL }, testInfo) => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Location edits require isolated local D1.')
     const tenant = seededTenant('restaurant')

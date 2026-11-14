@@ -16,7 +16,7 @@ export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organization_id')
   if (!organizationId) return jsonResponse({ error: 'Organization ID is required' }, { status: 400 })
 
-  const body = await readBody<{ account_id?: string; page_id?: string }>(event)
+  const body = await readBody<{ revision?: string; account_id?: string; page_id?: string }>(event)
   const accountId = body?.account_id?.trim()
   const pageId = body?.page_id?.trim()
   if (!accountId || !pageId) return jsonResponse({ error: 'Choose a Facebook account and Page.' }, { status: 400 })
@@ -27,7 +27,7 @@ export default defineHandler(async (event) => {
   }
 
   const current = await readIntegration(env.DB, organization.id, 'facebook')
-  if (current) return jsonResponse({ error: 'Disconnect Facebook before connecting again.' }, { status: 409 })
+  if ((current?.revision ?? null) !== (body?.revision ?? null)) return jsonResponse({ error: 'Facebook changed. Reload the connection before saving.' }, { status: 409 })
   await requireIntegrationAccount(env, accountId, {
     userId: session.user.id, currentAccountId: null, providerId: 'facebook', scopes: [],
   })
@@ -37,7 +37,7 @@ export default defineHandler(async (event) => {
 
   await storeIntegration(env.DB, organization.id, 'facebook', {
     account_id: accountId, target_id: page.id, target_name: page.name,
-  }, { revision: null })
+  }, { revision: current?.revision ?? null })
 
   return jsonResponse({ success: true, page_id: page.id, page_name: page.name })
 })

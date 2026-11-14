@@ -1,3 +1,4 @@
+import { dashboardConnections } from '~/server/utils/dashboard-connections'
 import { PUBLICATION_CONTENT_BLOCK_TYPES } from '~/shared/content-registries'
 import { HTTPError, type H3Event } from 'nitro'
 import { getQuery } from 'nitro/h3'
@@ -226,10 +227,14 @@ async function questionEditor(
 }
 
 export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer): Promise<CatalogScreen> {
-  const { db, env, organization, userId, session } = await getDashboardMemberContext(event)
+  const context = await getDashboardMemberContext(event)
+  const { db, env, organization, userId, session } = context
   const principal = memberAccessPrincipal(organization, { env, event })
   const query = getQuery(event)
   const view = typeof query.view === 'string' ? query.view : ''
+  if (view === 'connections' || view === 'connection' || view.startsWith('connection-')) {
+    return dashboardConnections(event, context, view, query, answer)
+  }
   if (view === 'member-profile' || view === 'member-profile-field' || view === 'member-hours' || view === 'member-time-off') {
     const memberId = typeof query.member_id === 'string' && query.member_id ? query.member_id : missing('Member not found')
     const actor = { env, organizationId: organization.id, userId }
@@ -247,6 +252,9 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         row('public_name', 'Public name', schedule?.public_name ?? undefined),
         { ...row('public_photo_url', 'Public photo'), image: schedule?.public_photo_url },
         row('public_bio', 'About you', schedule?.public_bio ?? undefined),
+        ...(member.userId === userId ? [
+          row('google-calendar', 'Google Calendar sync', schedule?.calendar_status === 'ready' ? 'Connected' : 'Not connected', 'connection-personal-calendar'),
+        ] : []),
         ...(admin ? [row('public_approved', 'Publish profile', schedule?.public_approved ? 'Published' : 'Not published')] : []),
       ] }
     }
@@ -1217,6 +1225,10 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         if (answer) return missing('Choose a destination')
         return { title: 'Publishing', fields: [], rows: [
           ...channels.map(({ channel, label, status, receipt }) => ({ id: channel, label, summary: status || 'Ready to publish', external_url: receipt })),
+          ...(isOrganizationWideRole(organization.role) ? connections.channels.filter(item => item.problems.length).map(item => ({
+            id: `connection:${item.channel}`, label: `Manage ${item.channel === 'facebook' ? 'Facebook' : item.channel === 'instagram' ? 'Instagram' : 'Discord'} connection`,
+            native: 'connection', query: { integration: item.channel },
+          })) : []),
           ...(available.length ? [{ id: 'publish', label: 'Choose destinations', native: 'post-publish', query: { ...contentQuery, content_id: post.id, ...(typeof query.channel === 'string' ? { channel: query.channel } : {}) } }] : []),
         ] }
       }

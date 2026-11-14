@@ -246,18 +246,20 @@ test('a table is seated through its location\'s current hours and closing preser
       name: `places/place-id/reviews/${name}`, authorAttribution: { displayName: name }, rating: 5,
       publishTime: '2026-01-01T00:00:00Z',
     })
+    const mapsSession = 'bdab991c-96d6-40b0-af53-3077b4073850'
     const originalFetch = globalThis.fetch
     const closure = { kind: 'closure', starts_on: tuesday, ends_on: tuesday, note: 'Private event' } as const
     let racing = false
     t.mock.method(globalThis, 'fetch', async (...args: Parameters<typeof fetch>) => {
       if (!String(args[0]).startsWith('https://places.googleapis.com/')) return originalFetch(...args)
+      if (!racing) assert.equal(new URL(String(args[0])).searchParams.get('sessionToken'), mapsSession)
       if (racing) assert.equal((await updateLocation(db, ORG, LOCATION, { special_hours: [closure] }, ACTOR, env)).status, 200)
       return Response.json({
         id: 'place-id', rating: racing ? 1 : 5, timeZone: { id: ZONE }, regularOpeningHours: hours(22),
         reviews: [review(racing ? 'stale-review' : 'current-review')],
       })
     })
-    assert.equal((await syncPlaceToLocation(db, 'test-key', ORG, LOCATION, 'place-id', 'import')).reviewsUpserted, 1)
+    assert.equal((await syncPlaceToLocation(db, 'test-key', ORG, LOCATION, 'place-id', 'import', mapsSession)).reviewsUpserted, 1)
     assert.deepEqual(await offered(wednesday), evening('20:30'))
     racing = true
     await assert.rejects(syncPlaceToLocation(db, 'test-key', ORG, LOCATION, 'place-id', 'import'), { statusCode: 409 })

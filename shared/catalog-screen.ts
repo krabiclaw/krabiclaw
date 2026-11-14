@@ -11,9 +11,10 @@ export interface CatalogRow {
   external_url?: string | null
   copy_value?: string
   to?: string
+  authorization?: string
   native?: string
   query?: Record<string, string>
-  status?: 'success' | 'neutral'
+  status?: 'success' | 'neutral' | 'error'
   placeholder?: boolean
 }
 
