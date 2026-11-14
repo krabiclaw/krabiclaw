@@ -334,6 +334,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@better-auth/oauth-provider@patch:@better-auth/oauth-provider@npm%3A1.7.15#~/patches/better-auth-oauth-provider-npm-1.7.15.patch":
+  version: 1.7.15
+  resolution: "@better-auth/oauth-provider@patch:@better-auth/oauth-provider@npm%3A1.7.15#~/patches/better-auth-oauth-provider-npm-1.7.15.patch::version=1.7.15&hash=102445"
+  dependencies:
+    jose: "npm:^6.2.3"
+    zod: "npm:^4.5.4"
+  peerDependencies:
+    "@better-auth/core": ^1.7.15
+    "@better-auth/utils": ^0.4.2 || ^0.5.0
+    "@better-fetch/fetch": 1.3.3
+    better-auth: ^1.7.15
+    better-call: 1.4.4
+  checksum: 10c0/3f383f95b43cf27a5a36f45601fa4fa96e20c6d037cb81ac82a6125528cbe293b777cf91e11ff53ca4846a24f1c6a2978a9b1864e3a5c93d66966d3359d8ce6a
+  languageName: node
+  linkType: hard
+
 "@better-auth/prisma-adapter@npm:1.7.15":
   version: 1.7.15
   resolution: "@better-auth/prisma-adapter@npm:1.7.15"
@@ -11313,7 +11329,7 @@ __metadata:
   dependencies:
     "@better-auth/cimd": "npm:1.7.15"
     "@better-auth/core": "npm:1.7.15"
-    "@better-auth/oauth-provider": "npm:1.7.15"
+    "@better-auth/oauth-provider": "patch:@better-auth/oauth-provider@npm%3A1.7.15#~/patches/better-auth-oauth-provider-npm-1.7.15.patch"
     "@better-auth/stripe": "npm:1.7.15"
     "@better-auth/utils": "npm:0.5.1"
     "@better-fetch/fetch": "npm:1.3.3"

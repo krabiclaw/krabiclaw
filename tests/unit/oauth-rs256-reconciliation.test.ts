@@ -56,13 +56,13 @@ async function request(auth: ReturnType<typeof betterAuth>, path: string, init?:
   return await auth.handler(new Request(`${BASE_URL}/api/auth${path}`, init))
 }
 
-async function issueOpenIdTokens(auth: ReturnType<typeof betterAuth>) {
+async function signIn(auth: ReturnType<typeof betterAuth>, email: string) {
   const signup = await request(auth, '/sign-up/email', {
     method: 'POST',
     headers: { 'content-type': 'application/json', origin: BASE_URL },
     body: JSON.stringify({
       name: 'RS256 test user',
-      email: 'rs256@example.com',
+      email,
       password: 'password123',
     }),
   })
@@ -71,11 +71,13 @@ async function issueOpenIdTokens(auth: ReturnType<typeof betterAuth>) {
   const signIn = await request(auth, '/sign-in/email', {
     method: 'POST',
     headers: { 'content-type': 'application/json', origin: BASE_URL },
-    body: JSON.stringify({ email: 'rs256@example.com', password: 'password123' }),
+    body: JSON.stringify({ email, password: 'password123' }),
   })
   assert.equal(signIn.status, 200)
-  const cookie = signIn.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+  return signIn.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+}
 
+async function issueOpenIdTokens(auth: ReturnType<typeof betterAuth>, cookie: string) {
   const registration = await request(auth, '/oauth2/register', {
     method: 'POST',
     headers: { 'content-type': 'application/json', origin: BASE_URL },
@@ -140,14 +142,18 @@ async function issueOpenIdTokens(auth: ReturnType<typeof betterAuth>) {
   return await token.json() as { access_token: string, id_token: string }
 }
 
-test('OAuth restart reconciles an existing EdDSA deployment to RS256', async () => {
+test('OAuth resource use reconciles signing policy without writing it during session requests', async () => {
   const database = new DatabaseSync(':memory:')
   try {
     const beforeMigrations = betterAuth(authOptions(database))
     await (await beforeMigrations.$context).runMigrations()
 
     const legacy = betterAuth(authOptions(database))
-    await legacy.$context
+    const legacyCookie = await signIn(legacy, 'legacy@example.com')
+    assert.equal(database.prepare(
+      'SELECT id FROM oauthResource WHERE identifier = ?',
+    ).get(RESOURCE), undefined)
+    await issueOpenIdTokens(legacy, legacyCookie)
     const legacyJwks = await request(legacy, '/jwks')
     assert.equal(legacyJwks.status, 200)
     const legacyKeys = await legacyJwks.json() as { keys: Array<{ alg: string }> }
@@ -158,12 +164,19 @@ test('OAuth restart reconciles an existing EdDSA deployment to RS256', async () 
     assert.equal(legacyResource?.signingAlgorithm, null)
 
     const reconciled = betterAuth(authOptions(database, OAUTH_SIGNING_POLICY))
-    await reconciled.$context
+    const cookie = await signIn(reconciled, 'rs256@example.com')
+    const session = await request(reconciled, '/get-session', { headers: { cookie } })
+    assert.equal(session.status, 200)
+    assert.equal((await session.json() as { user: { email: string } }).user.email, 'rs256@example.com')
+    assert.deepEqual(database.prepare(
+      'SELECT signingAlgorithm FROM oauthResource WHERE identifier = ?',
+    ).get(RESOURCE), legacyResource)
+
+    const tokens = await issueOpenIdTokens(reconciled, cookie)
     const reconciledResource = database.prepare(
       'SELECT signingAlgorithm FROM oauthResource WHERE identifier = ?',
     ).get(RESOURCE) as { signingAlgorithm: string | null } | undefined
     assert.equal(reconciledResource?.signingAlgorithm, 'RS256')
-    const tokens = await issueOpenIdTokens(reconciled)
 
     assert.equal(decodeProtectedHeader(tokens.access_token).alg, 'RS256')
     assert.equal(decodeProtectedHeader(tokens.id_token).alg, 'RS256')

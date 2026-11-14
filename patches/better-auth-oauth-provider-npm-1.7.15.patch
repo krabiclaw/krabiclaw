@@ -1,0 +1,87 @@
+diff --git a/dist/authorize-Cmcf5O5Y.mjs b/dist/authorize-Cmcf5O5Y.mjs
+index 893d6f599208c34e4e614723d89290d9a4f3b57c..59a949661d914606a560379a3fd26e88da717837 100644
+--- a/dist/authorize-Cmcf5O5Y.mjs
++++ b/dist/authorize-Cmcf5O5Y.mjs
+@@ -994,10 +994,8 @@ function invalidateResourceCache(identifier) {
+ * Looks up an {@link OAuthResource} by `identifier`, consulting the in-process
+ * cache when the identifier is in {@link OAuthOptions.cachedResources}.
+ *
+-* Triggers the lazy seed via {@link seedResourcesOnce} on first call — the
+-* retry path when the startup seed failed (database unreachable, or
+-* migrations run after plugin init). The seed is idempotent and coalesced,
+-* so the cost is paid only once per process.
++* Seeds configured resources on first use. Session-only requests never
++* need to read or write OAuth resource policy.
+ *
+ * Returns a defensive copy so callers can't mutate cached state.
+ *
+@@ -1087,35 +1085,6 @@ function buildSeedUpdate(input, mode, now) {
+ 	return update;
+ }
+ /**
+-* Pattern matched against adapter errors to detect the "table not yet
+-* created" case — i.e. migrations or `auth generate` haven't run. Only
+-* used to keep the expected startup seed failure quiet.
+-*
+-* Covers SQLite ("no such table"), Postgres ("relation X does not exist"),
+-* MySQL ("Table X does not exist" / contracted form), and the Drizzle and
+-* Prisma adapters' missing-model errors.
+-*/
+-const MISSING_TABLE_PATTERN = /no such table|relation.*does not exist|table.*does(?: not|n'?t) exist|model.*(?:does not exist|was not found in the schema)/i;
+-/**
+-* Logs a failed startup seed. Missing tables are expected before migrations
+-* and stay quiet; anything else is an error worth seeing.
+-*
+-* @internal
+-*/
+-function logStartupSeedFailure(ctx, error) {
+-	let missingTable = false;
+-	let current = error;
+-	for (let depth = 0; current && !missingTable && depth < 5; depth++) {
+-		missingTable = MISSING_TABLE_PATTERN.test(current instanceof Error ? current.message : String(current));
+-		current = current instanceof Error ? current.cause : void 0;
+-	}
+-	if (missingTable) {
+-		ctx.logger.debug("oauth-provider: oauthResource table not yet created; deferring resource seed to first access.");
+-		return;
+-	}
+-	ctx.logger.error("oauth-provider: could not seed `resources` at startup; retrying on first resource access.", error);
+-}
+-/**
+ * Lazy-seed state per adapter and plugin options. A module-level boolean would
+ * let one Better Auth instance suppress seeding for every later instance in the
+ * same process. Endpoint `AuthContext` objects are not guaranteed to be stable
+@@ -1215,7 +1184,7 @@ async function seedResources(ctx, opts) {
+ }
+ /**
+ * Idempotent, coalesced wrapper around {@link seedResources}, called from
+-* plugin `init` and from every resource lookup. The first call runs the
++* resource lookup and administration. The first call runs the
+ * seed, concurrent calls await the same promise, and calls after a success
+ * are no-ops. A failure resets the state so the next call retries.
+ *
+@@ -3782,14 +3751,14 @@ async function assertClientPrivileges(ctx, session, opts, action, clientId) {
+ async function assertResourcePrivileges(ctx, session, opts, action, resourceId) {
+ 	if (!session) throw new APIError("UNAUTHORIZED");
+ 	if (!ctx.headers) throw new APIError("BAD_REQUEST");
+-	if (!opts.resourcePrivileges) return;
+-	if (!await opts.resourcePrivileges({
++	if (opts.resourcePrivileges && !await opts.resourcePrivileges({
+ 		headers: ctx.headers,
+ 		action,
+ 		session: session.session,
+ 		user: session.user,
+ 		resourceId
+ 	})) throw new APIError("UNAUTHORIZED");
++	await seedResourcesOnce(ctx.context, opts);
+ }
+ //#endregion
+ //#region src/utils/client-assertion.ts
+@@ -7129,7 +7098,6 @@ const oauthProvider = (options) => {
+ 				const gap = ctx.adapter.id === "memory" ? "the memory adapter" : ctx.options.advanced?.database?.generateId === "serial" ? "`advanced.database.generateId: \"serial\"`" : void 0;
+ 				if (gap) throw new BetterAuthError(`\`allowClientKeyRotation\` requires single-use client assertions, which ${gap} does not enforce`);
+ 			}
+-			await seedResourcesOnce(ctx, opts).catch((error) => logStartupSeedFailure(ctx, error));
+ 			logEnforcePerClientResourcesResolution(opts);
+ 			if (!opts.disableJwtPlugin) {
+ 				const jwtPluginOptions = getJwtPlugin(ctx)?.options;
