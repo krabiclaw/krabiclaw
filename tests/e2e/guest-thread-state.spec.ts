@@ -4,9 +4,6 @@ import { createHmac } from 'node:crypto'
 import { expect, test, type APIRequestContext, type APIResponse } from '@playwright/test'
 import type {
   InboxRow,
-  InboxStreamItem,
-  InboxThread,
-  InboxThreadDetails,
 } from '../../server/domain/guest-threads/types'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
@@ -15,7 +12,7 @@ import { seededTenant } from './seed/manifest'
 import { devLoginHeaders, seededSiteHeaders, testBaseUrl } from './test-env'
 import type { TaskPerson, TaskSection } from '../../server/domain/tasks'
 import type { OpportunityView } from '../../server/domain/opportunities'
-import type { ConversationPage } from '../../shared/messages-contract'
+import type { ConversationDetails, ConversationEntry, ConversationHeader, ConversationPage } from '../../shared/messages-contract'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
 interface DeliveryView {
@@ -161,16 +158,16 @@ async function loadThreadDetail(
 }
 
 /** What "In this conversation" offers for the thread, read as the member it was asked by. */
-async function loadThreadActions(request: APIRequestContext, threadId: string, targetOrganizationId = organizationId()) {
-  const response = await request.get(`/api/dashboard/organizations/${targetOrganizationId}/guest-threads/${threadId}/details`)
+async function loadThreadActions(request: APIRequestContext, threadId: string) {
+  const response = await request.get(`/api/messages/${threadId}/details`)
   await expectStatus(response, 200)
-  return (await response.json() as InboxThreadDetails).actions
+  return (await response.json() as ConversationDetails).actions
 }
 
-type StreamMessage = Extract<InboxStreamItem, { type: 'message' }>
-type StreamEvent = Extract<InboxStreamItem, { type: 'event' }>
-const streamMessages = (thread: InboxThread) => thread.stream.filter((item): item is StreamMessage => item.type === 'message')
-const streamEvents = (thread: InboxThread, text: string) => thread.stream.filter((item): item is StreamEvent => item.type === 'event' && item.text === text)
+type StreamMessage = Extract<ConversationEntry, { type: 'message' }>
+type StreamEvent = Extract<ConversationEntry, { type: 'event' }>
+const streamMessages = (thread: ConversationHeader & { stream: ConversationEntry[] }) => thread.stream.filter((item): item is StreamMessage => item.type === 'message')
+const streamEvents = (thread: ConversationHeader & { stream: ConversationEntry[] }, text: string) => thread.stream.filter((item): item is StreamEvent => item.type === 'event' && item.text === text)
 
 /** The owner's reply tasks on Today, open and done today, for one conversation. */
 async function loadReplyTasks(request: APIRequestContext, slug: string, threadId: string) {
@@ -180,7 +177,7 @@ async function loadReplyTasks(request: APIRequestContext, slug: string, threadId
 }
 
 /** Opening a conversation reads it through to the newest message shown; the GET that showed it wrote nothing. */
-async function readThrough(request: APIRequestContext, thread: InboxThread) {
+async function readThrough(request: APIRequestContext, thread: ConversationHeader & { stream: ConversationEntry[] }) {
   const newest = thread.stream.filter(item => item.type !== 'day').at(-1)!.id
   const response = await request.post(`/api/messages/${thread.id}/read`, { headers: authRequestHeaders(baseURL), data: { message_id: newest } })
   await expectStatus(response, 200)
@@ -237,10 +234,8 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
       kind: 'guest',
       title: guestName,
       channel: 'direct',
-      when: null,
       booking_id: null,
-      record_kind: null,
-      composer: { channel: 'email', available: true },
+      composer: { channel: 'email', reason: null },
     })
     // The guest's own words open the conversation, once, as their message.
     expect(streamMessages(detail)).toMatchObject([{ side: 'guest', author: guestName, body: message, photos: [] }])
@@ -828,7 +823,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   await expectStatus(pendingRecord, 200)
   expect(await pendingRecord.json()).toMatchObject({ booking: { pending_change: { message_id: requests[0]!.id, before: { party_size: before.booking.party_size }, after: { party_size: targetPartySize } } } })
   await page.goto(`${baseURL}/dashboard/${demoSlug()}/messages/${before.booking.conversation_id}`)
-  const reservationLink = page.getByRole('link', { name: 'Show reservation', exact: true })
+  const reservationLink = page.getByRole('link', { name: 'Show booking', exact: true })
   await expect(reservationLink).toHaveAttribute('href', `/dashboard/${demoSlug()}/bookings/${upcomingBookingId}`)
   await expect(page.getByTestId('booking-change-request')).toHaveCount(0)
   await reservationLink.click()
@@ -908,7 +903,7 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     try {
       await loginAs(ownerPage.request, baseURL, 'user-e2e-demo-owner')
       await ownerPage.goto(`${baseURL}/dashboard/${demoSlug()}/messages/${threadId}`)
-      const reservation = ownerPage.getByRole('link', { name: 'Show reservation', exact: true })
+      const reservation = ownerPage.getByRole('link', { name: 'Show booking', exact: true })
       await expect(reservation).toHaveAttribute('href', `/dashboard/${demoSlug()}/bookings/${booked.bookingId}`)
       await expect(ownerPage.getByTestId('booking-change-request')).toHaveCount(0)
       await reservation.click()
@@ -924,7 +919,7 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     expect(await guestUnread(), 'Opening the conversation reads it').toBe(unreadBefore)
     await expect(page.getByText(/^Requested .+ for 2 guests/)).toBeVisible()
     await expect(page.getByRole('button', { name: /^(Accept|Decline)( changes)?$/ })).toHaveCount(0)
-    await page.getByRole('link', { name: 'Show reservation', exact: true }).click()
+    await page.getByRole('link', { name: 'Show booking', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}/dashboard/account/activity/booking/${threadId}`)
     const card = page.getByTestId('booking-change-request')
     await expect(card).toContainText('1 guest')

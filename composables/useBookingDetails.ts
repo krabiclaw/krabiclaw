@@ -2,7 +2,7 @@ import { localDateAt } from '~/utils/timezone'
 import { resolveBookingPresentation, type BookingPresentation } from '~/utils/booking-presentation'
 import { paymentStateLabel } from '~/shared/payment-display'
 import type { DashboardBookingDetails, DashboardRecordType } from '~/server/utils/dashboard-booking-details'
-import type { DashboardBookingResource } from '~/composables/useDashboardBooking'
+import type { AccountNightBooking, DashboardBooking } from '~/composables/useDashboardBooking'
 
 // A purchase is not a booking of anything; its one word is the same for every vertical.
 const PURCHASE: BookingPresentation = {
@@ -16,7 +16,7 @@ const PURCHASE: BookingPresentation = {
   formatCount: count => String(count),
 }
 
-export async function useBookingDetails(bookingType: DashboardRecordType, bookingId: string, personalScope = false, canonical?: DashboardBookingResource) {
+export async function useBookingDetails(bookingType: DashboardRecordType, bookingId: string, personalScope = false) {
   const route = useRoute()
   // The heading follows the clock while the page stays open.
   const now = ref(new Date())
@@ -25,34 +25,22 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
   onBeforeUnmount(() => clearInterval(clock))
   // The account reads its own booking from the account API; the business reads the organization's.
   const dashboardApi = personalScope ? applicationFetch : useDashboardApi()
-  const endpoint = personalScope && bookingType === 'booking'
-    ? `/api/account/bookings/${encodeURIComponent(bookingId)}?lookup=conversation`
-    : `/api/${personalScope ? 'account' : 'dashboard'}/bookings/${bookingType}/${encodeURIComponent(bookingId)}`
   const orgSlug = computed(() => personalScope ? 'account' : String(route.params.org_slug || ''))
-
-  const key = computed(() => `dashboard-booking:${orgSlug.value}:${bookingType}:${bookingId}`)
-  if (!canonical && !personalScope && bookingType === 'booking') throw new Error('Dashboard bookings require their parent booking resource')
-  const accountOrPurchase = canonical ? null : await useAsyncData<{ booking: DashboardBookingDetails }>(
-    key, () => dashboardApi(endpoint, { validate: isBookingDetailsResponse }),
-  )
-  const details = canonical ?? accountOrPurchase!
-  const { error, refresh: reread } = details
-  const resource = computed<{ booking: DashboardBookingDetails } | null>({
-    get: () => isBookingDetailsResponse(details.data.value) ? details.data.value : null,
-    set: (value) => {
-      if (!value) return
-      if (accountOrPurchase) accountOrPurchase.data.value = value
-      else if (canonical?.data.value?.booking.unit === 'slot') {
-        canonical.data.value = { ...canonical.data.value, booking: { ...value.booking, unit: 'slot' } }
-      }
-    },
+  const purchase = bookingType === 'order' || bookingType === 'payment'
+  const dashboardRecord = !personalScope && !purchase
+  const key = dashboardRecord ? dashboardBookingKey(orgSlug.value, bookingId) : `dashboard-booking:${orgSlug.value}:${bookingType}:${bookingId}`
+  const { data, error, refresh: reread, clear } = await useAsyncData<DashboardBooking | AccountNightBooking | { booking: DashboardBookingDetails }>(key, (_app, { signal }) => {
+    if (dashboardRecord) return dashboardApi(dashboardBookingPath(bookingId), { signal, validate: isDashboardBooking })
+    if (!purchase) return applicationFetch(`/api/account/bookings/${encodeURIComponent(bookingId)}?lookup=conversation`, {
+      signal,
+      validate: (value): value is AccountNightBooking | { booking: DashboardBookingDetails } => isAccountNightBooking(value) || isBookingDetailsResponse(value),
+    })
+    return dashboardApi(`/api/${personalScope ? 'account' : 'dashboard'}/bookings/${bookingType}/${encodeURIComponent(bookingId)}`, { signal, validate: isBookingDetailsResponse })
   })
-
-  const booking = computed(() => resource.value?.booking ?? null)
+  const booking = computed(() => isBookingDetailsResponse(data.value) ? data.value.booking : null)
 
   // The one vocabulary. `resolveBookingPresentation` refuses a missing vertical
   // rather than guessing, so it is only asked once the booking has loaded.
-  const purchase = bookingType === 'order' || bookingType === 'payment'
   const presentation = computed(() => booking.value
     ? booking.value.product_kind === null ? PURCHASE : resolveBookingPresentation(booking.value.product_kind, booking.value.vertical)
     : null)
@@ -80,5 +68,5 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
     if (error.value) throw error.value
   }
 
-  return { resource, booking, error, presentation, noun, pageTitle, orgSlug, purchase, refresh }
+  return { data, booking, error, presentation, noun, pageTitle, orgSlug, purchase, refresh, clear }
 }

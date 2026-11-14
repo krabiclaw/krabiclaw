@@ -94,8 +94,8 @@
 
         <UAlert v-if="requestingChange" class="mb-3" color="info" variant="soft" :description="t(changeRequestSent ? 'booking.change_request_sent' : 'booking.change_request_help')" />
         <!-- Where the reply operation cannot send (no email, account or connected Airbnb home), there is no composer: its reason shows instead. -->
-        <p v-if="!canSend" class="rounded-2xl bg-elevated px-4 py-3 text-sm text-muted">{{ guestThread?.composer.reason ?? 'Sending is unavailable in this conversation.' }}</p>
-        <MessageComposer v-else v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :sending="sending" :channel="guestThread?.composer.channel ?? 'team'" :send-later="!personalScope && guestThread !== null" :suggest-reply="suggestionsOn && !!latestGuestMessage && !personalScope" :generating-suggestions="generatingSuggestions" :placeholder="thread.kind === 'team' ? 'Message your team' : undefined" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : guestThread ? 'Send reply' : 'Send message'" @send="sendReply" @suggest-reply="generateSuggestions" />
+        <p v-if="!canSend" class="rounded-2xl bg-elevated px-4 py-3 text-sm text-muted">{{ thread.composer.reason ?? 'Sending is unavailable in this conversation.' }}</p>
+        <MessageComposer v-else v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :sending="sending" :channel="thread.composer.channel" :send-later="!personalScope && thread.kind !== 'team'" :suggest-reply="suggestionsOn && !!latestGuestMessage && !personalScope" :generating-suggestions="generatingSuggestions" :placeholder="thread.kind === 'team' ? 'Message your team' : undefined" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : guestThread ? 'Send reply' : 'Send message'" @send="sendReply" @suggest-reply="generateSuggestions" />
         <MessagePhotoViewer v-model="viewer" />
         <ReportDialog :open="reporting !== null" title="Report this message" :description="reporting ? `Tell KrabiClaw what is wrong with ${reporting.author}'s message.` : ''" confirm-label="Report" :saving="reportSaving" :error="reportError" @submit="report" @close="reporting = null" />
       </div>
@@ -350,7 +350,7 @@ const usedSuggestion = ref<{ generation_id: string; index: number } | null>(null
 const suggestionError = ref<string | null>(null)
 const generatingSuggestions = ref(false)
 const latestGuestMessage = computed(() => {
-  if (!guestThread.value?.composer.available) return null
+  if (!canSend.value || !guestThread.value) return null
   const last = entries.value.findLast(item => item.type === 'message')
   return last?.type === 'message' && last.side === 'guest' && guestThread.value.kind === 'guest' ? last.id : null
 })

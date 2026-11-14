@@ -5,9 +5,9 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { acceptConversationGuestInvite, createConversationGuestInvite, removeConversationGuest, setListingMessagingAccess } from '../../server/domain/conversation-participants.ts'
-import { readGuestConversation } from '../../server/domain/conversations.ts'
+import { readGuestConversation, resolveConversationAccess  } from '../../server/domain/conversations.ts'
 import { createStay, updateStay, type StayAccess } from '../../server/domain/stays.ts'
-import { getInboxThreadDetails } from '../../server/domain/guest-threads/inbox.ts'
+import { getConversationDetails } from '../../server/domain/guest-threads/inbox.ts'
 import { conversationPageFor } from './support/conversation-page.ts'
 import { executeGuestThreadOperation, sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
 import { listConversations } from '../../server/domain/guest-threads/repository.ts'
@@ -125,8 +125,8 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     const hostConversation = await conversationPageFor(db, principal(OWNER, 'owner'), ana.conversation_id)
     const detail = hostConversation.conversation
     assert(detail.kind === 'guest')
-    assert.deepEqual([detail.record_kind, detail.booking_id], ['stay', ana.id])
-    const sheet = () => getInboxThreadDetails(db, ana.conversation_id, ORG, { audience: 'member', userId: OWNER, principal: principal(OWNER, 'owner') })
+    assert.equal(detail.booking_id, ana.id)
+    const sheet = async () => getConversationDetails(db, (await resolveConversationAccess(db, OWNER, ana.conversation_id)).conversation, OWNER, 'member')
     const reply = await sendGuestThreadReply(db, { threadId: ana.conversation_id, organizationId: ORG, body: 'The gate code is in your confirmation.', actorUserId: OWNER, idempotencyKey: 'reply-1', env })
     assert.deepEqual([reply.ok, reply.status], [true, 200])
     assert.deepEqual(await db.prepare(`SELECT d.channel, d.status FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id

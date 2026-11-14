@@ -1,10 +1,8 @@
 <template>
-  <BookingRecord v-if="!rawType && bookingId" :booking-id="bookingId" :editor-path="level.path.value" />
-  <BookingDetails v-else-if="purchase && bookingId" :booking-type="purchase" :booking-id="bookingId" :editor-path="level.path.value" />
+  <BookingDetails v-if="bookingId" :booking-type="purchase ?? 'booking'" :booking-id="bookingId" :editor-path="level.path.value" />
 </template>
 
 <script setup lang="ts">
-import BookingRecord from '~/components/dashboard/BookingRecord.vue'
 import BookingDetails from '~/components/dashboard/BookingDetails.vue'
 import { showNotFound } from '~/utils/errors'
 

@@ -889,11 +889,10 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   assert.deepEqual(thread.entries.filter(entry=>entry.type!=='day').map(entry=>entry.id),[question,publicReply.id,capture.id])
   assert(thread.entries.every(entry=>entry.type!=='message'||((entry.author_user_id===null||(entry.side==='guest'&&entry.author_user_id==='verified'))&&entry.deliveries.length===0)))
   assert.equal(thread.capabilities.can_manage_participants,false)
-  assert.equal(thread.capabilities.can_view_read_receipts,false)
   assert.deepEqual(thread.entries.filter(item=>item.type!=='day').map(item=>item.type==='message'?[item.side,item.author,item.body]:item.type==='event'?['event',item.text]:[item.type]),
    [['guest','You','My question'],['business','Payments','Public host reply'],['event','Payment received']])
   if(thread.conversation.kind==='team')throw new Error('Expected the buyer’s conversation')
-  assert.deepEqual(thread.conversation.composer,{channel:'email',available:true,reason:null})
+  assert.deepEqual(thread.conversation.composer,{channel:'email',reason:null})
   for(const secret of secrets)assert.equal(JSON.stringify(thread).includes(secret),false,secret)
   const inbox=await listConversations(db,null,{userId:'verified',buyerAudience:true})
   // The newest messages are the internal note and the dispute; the buyer's row previews the newest message they can read

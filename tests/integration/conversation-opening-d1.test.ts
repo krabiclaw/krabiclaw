@@ -97,7 +97,7 @@ test('a table booking opens with its own message and the guest note, written onc
     const privatePage = await page(traveler.id)
     assert.deepEqual(privatePage.entries, [])
     if (privatePage.conversation.kind === 'team') throw new Error('Expected the traveler’s booking conversation')
-    assert.deepEqual([privatePage.conversation.booking_id, privatePage.conversation.when, privatePage.conversation.activity_path], [null, null, null])
+    assert.deepEqual([privatePage.conversation.booking_id, privatePage.conversation.activity_path], [null, null])
     const [travelerRow] = await list()
     assert.deepEqual([travelerRow?.id, travelerRow?.preview, travelerRow?.when, travelerRow?.unread], ['shared', '', null, false])
     assert.deepEqual(await list('Private booking note'), [])

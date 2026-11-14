@@ -12,10 +12,10 @@ import { conversationPageFor } from './support/conversation-page.ts'
 import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
 import { createTeamThread } from '../../server/domain/team-messages.ts'
 import { closeTask, jobKey, taskViewForUser, taskViewer, updateTask, type TaskRow } from '../../server/domain/tasks.ts'
+import { listConversations, conversationTaskQueries  } from '../../server/domain/guest-threads/repository.ts'
 import { markConversationRead, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { runOrganizationJobs } from '../../server/domain/cleaner-jobs.ts'
 import { claimSessionCapacity } from '../../server/utils/availability.ts'
-import { conversationTaskQueries } from '../../server/domain/guest-threads/repository.ts'
 import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { executeBatch } from '../../server/db/index.ts'
 import { localDateTimeToInstant } from '../../utils/timezone.ts'
@@ -36,6 +36,9 @@ const readTeamThread = async (db: DbClient, viewer: MemberAccessPrincipal, id: s
   assert.equal(conversation.kind, 'team')
   return conversation
 }
+
+const isUnread = async (db: DbClient, viewer: MemberAccessPrincipal, id: string) =>
+  (await listConversations(db, viewer.organizationId, { userId: viewer.userId, principal: viewer, kind: 'team' })).find(row => row.id === id)?.unread
 
 test('a cleaning job lives in the stay’s team conversation from assignment to Done', { timeout: 180_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -98,7 +101,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.deepEqual(threads.map(item => item.booking_id).sort(), [dee.id, lee.id].sort())
     const thread = threads.find(item => item.booking_id === dee.id)!
     // KrabiClaw's post is a message from someone else: unread until read, for everyone in the conversation.
-    assert.deepEqual([thread.name, thread.booking_id, thread.participants.map(person => person.id).sort(), thread.unread], [null, dee.id, ['admin', 'cleaner', 'owner'], true])
+    assert.deepEqual([thread.name, thread.booking_id, thread.participants.map(person => person.id).sort(), await isUnread(db, cleaner, thread.id)], [null, dee.id, ['admin', 'cleaner', 'owner'], true])
     const [job] = await automatic(thread.id)
     assert.equal(job!.key, jobKey(turnover))
     assert.match(job!.body, /^Turnover: Cabin\n/)
@@ -106,7 +109,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     const messages = (await conversationPageFor(db, cleaner, thread.id)).entries.filter(entry => entry.type === 'message').reverse()
     assert.deepEqual([messages[0]!.automatic, messages[0]!.author_user_id], [true, null])
     // The hosts read along, and it is unread for them too until they do.
-    assert.equal((await readTeamThread(db, owner, thread.id)).unread, true)
+    assert.equal(await isUnread(db, owner, thread.id), true)
     // The cleaner's alert is the message itself, sent to the cleaner alone.
     const alerted = (messageId: string) => db.prepare("SELECT COUNT(*) AS n FROM guest_thread_deliveries WHERE message_id = ? AND purpose = 'owner_alert' AND channel = 'email'").bind(messageId).first<number>('n')
     assert.equal(await alerted(messages[0]!.id), 1)
@@ -149,8 +152,8 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.deepEqual([cookMessages[0]!.author_user_id, cookMessages[0]!.automatic, cookMessages[0]!.body, cookMessages[0]!.deliveries], ['cook', false, 'All clean, towels restocked', []])
     assert.equal((await taskRow(`turnover:${dee.id}`))!.status, 'done')
     // The cook's own message reads the conversation through for them and is unread for the hosts; the cleaner, no longer seated with it, never sees it.
-    assert.equal((await readTeamThread(db, owner, cookThreads[0]!.id)).unread, true)
-    assert.equal((await readTeamThread(db, cook, cookThreads[0]!.id)).unread, false)
+    assert.equal(await isUnread(db, owner, cookThreads[0]!.id), true)
+    assert.equal(await isUnread(db, cook, cookThreads[0]!.id), false)
     await assert.rejects(readTeamThread(db, cleaner, cookThreads[0]!.id), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
     // The cook, given the job at 13:10, was told today's turnover and the warning then; a closed job is told about no more.
     assert.deepEqual((await automatic(cookThreads[0]!.id)).map(message => message.key), [jobKey(turnover), `reminder:${turnover.id}:morning:${day(3)}`, `warning:${turnover.id}:${turnover.due_at}`])
@@ -182,10 +185,10 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
 
     // A person's own message in a job conversation counts as unread for the others, from where they read.
     await markConversationRead(db, { organizationId: ORG, conversationId: thread.id, userId: 'cleaner' })
-    assert.equal((await readTeamThread(db, cleaner, thread.id)).unread, false)
+    assert.equal(await isUnread(db, cleaner, thread.id), false)
     await sendConversationMessage(env, { ...await resolveConversationAccess(db, owner.userId, thread.id), userId: owner.userId, body: 'Thanks Cleo', photos: [], idempotencyKey: 'thanks-cleo', senderName: 'Olive Owner' })
-    assert.equal((await readTeamThread(db, cleaner, thread.id)).unread, true)
-    assert.equal((await readTeamThread(db, owner, thread.id)).unread, false)
+    assert.equal(await isUnread(db, cleaner, thread.id), true)
+    assert.equal(await isUnread(db, owner, thread.id), false)
   } finally {
     await runtime.dispose()
   }

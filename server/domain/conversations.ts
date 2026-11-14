@@ -81,7 +81,7 @@ export const SUBMISSION_EVENT = 'thread.submission'
 /** A booking guest's note, written with the booking as their own message. */
 export const GUEST_NOTE_EVENT = 'thread.guest_note'
 /** KrabiClaw's messages that are words to read, not events about the booking. */
-const KRABICLAW_WORDS = new Set<string | null>([OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, MIRRORED_EVENT])
+const KRABICLAW_WORDS = new Set<string | null>([null, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, MIRRORED_EVENT])
 
 /** An event KrabiClaw recorded (a cancellation, a change, a payment), as opposed to words someone wrote. */
 export function isEventMessage(message: Pick<MessageRow, 'author_kind' | 'event_name'>): boolean {
@@ -319,6 +319,26 @@ export async function assertMessageWriteAccess(db: DbClient, conversationId: str
   }
 }
 
+/** Sends share the scoped ledger write, including the sender's read position, photos and pending receipt. */
+export async function appendChatMessage(db: DbClient, input: Omit<MessageInput, 'conversationId' | 'guard'> & {
+  conversation: Pick<ConversationRow, 'id' | 'organization_id' | 'kind'>
+  role: ParticipantRole
+}, send: Omit<MessageSendWrite, 'organizationId' | 'extra'>): Promise<MessageRow> {
+  const { conversation, role, ...message } = input
+  if (conversation.kind === 'team' && role !== 'member') conversationAccessDenied()
+  const occurredAt = message.occurredAt ?? new Date().toISOString()
+  const id = message.id ?? crypto.randomUUID()
+  const extra = conversation.kind !== 'team' && (role === 'guest' || message.channel === 'web')
+    ? (await import('./guest-threads/repository')).conversationReplyTaskQueries({
+      query: '(SELECT conversation_id FROM messages WHERE id = ?)', params: [id],
+    }, occurredAt)
+    : []
+  return appendMessage(db, {
+    ...message, id, occurredAt, conversationId: conversation.id,
+    guard: conversationMessageGuard(conversation, send.uploaderUserId, role),
+  }, { ...send, organizationId: conversation.organization_id, extra })
+}
+
 /**
  * One durable append for the ledger and for sends. A send's pending receipt
  * and photo placements commit with the message. A concurrent replay keeps
@@ -329,7 +349,11 @@ export async function appendMessage(db: DbClient, input: MessageInput, additions
   const extra = Array.isArray(additions) ? additions : additions.extra ?? []
   const writer = messageQueries(input)
   const { id, dedupeKey } = writer
-  const existing = send && 'recorded' in send ? send.recorded : input.dedupeKey ? await findMessageByDedupeKey(db, dedupeKey) : null
+  // Text sends can let the guarded batch choose the winner without a read
+  // before it. For photos, check the key first to avoid uploading on replay.
+  const hasPhotos = send && (Array.isArray(send.photos) ? send.photos.length : send.photos.sourceIds.length)
+  const existing = send && 'recorded' in send ? send.recorded
+    : input.dedupeKey && (!send || hasPhotos) ? await findMessageByDedupeKey(db, dedupeKey) : null
   // Read again on a deliberate retry so an already removed message cannot be dispatched.
   if (send?.retryMessageId) {
     const saved = await findMessageByDedupeKey(db, dedupeKey)

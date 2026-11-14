@@ -1,5 +1,5 @@
 import { executeBatch, queryAll, type BatchQuery, type DbClient } from '~/server/db'
-import { SCHEDULED_MESSAGE_EVENT, conversationMessagesQuery, type ConversationGuard, type ConversationRow, type ConversationWindow, type MessageRow } from './conversations'
+import { SCHEDULED_MESSAGE_EVENT, conversationMessagesQuery, type ConversationGuard, type ConversationWindow, type MessageRow } from './conversations'
 import { groupMessagePhotos, messagePhotoRowsSql, type MessagePhotoRow } from './guest-threads/attachments'
 import { HISTORY_DELIVERY_COLUMNS, HISTORY_DELIVERY_FIELDS, groupMessageDeliveries, type HistoryDelivery } from './guest-threads/deliveries'
 import type { ConversationEntry, ConversationMessage } from '~/shared/messages-contract'
@@ -58,21 +58,20 @@ const receiptFields = HISTORY_DELIVERY_FIELDS.map(field => `'${field}', d.${fiel
 export async function readConversationHistory(
   db: DbClient,
   conversationId: string,
-  audience: { guestUserId: string | null; kind: ConversationRow['kind']; guard?: ConversationGuard; filter?: string },
+  audience: { guestUserId: string | null; guard?: ConversationGuard; filter?: string },
   window?: ConversationWindow,
   contextQueries: BatchQuery[] = [],
 ) {
   const { query, params } = conversationMessagesQuery(conversationId, audience.guestUserId, window, audience.guard, audience.filter)
-  const team = audience.kind === 'team'
   const staff = !audience.guestUserId
   const photos = messagePhotoRowsSql("mp.owner_type = 'message' AND mp.owner_id = m.id AND mp.organization_id = m.organization_id")
   const receipts = staff && !audience.filter ? `(
     SELECT json_group_array(json_object(${receiptFields}))
     FROM (SELECT ${HISTORY_DELIVERY_COLUMNS} FROM guest_thread_deliveries d
-      WHERE d.message_id = m.id AND d.purpose ${team ? "= 'owner_alert'" : "IN ('member_reply', 'scheduled_message')"}
-      ORDER BY ${team ? 'd.created_at, d.id' : 'd.created_at DESC, d.id'}) d
+      WHERE d.message_id = m.id AND d.purpose IN ('owner_alert', 'member_reply', 'scheduled_message')
+      ORDER BY d.created_at, d.id) d
   )` : "'[]'"
-  const showAutomatic = !team && !audience.filter
+  const showAutomatic = !audience.filter
   const automatic = showAutomatic ? `,
     scheduled AS MATERIALIZED (SELECT id, organization_id, conversation_id FROM display WHERE enrich AND event_name = '${SCHEDULED_MESSAGE_EVENT}'),
     template_titles AS MATERIALIZED (

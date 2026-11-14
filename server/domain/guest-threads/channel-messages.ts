@@ -7,7 +7,7 @@ import { landBookingRevision, pendingBookingRevisions } from '~/server/integrati
 import { getChannexThread, listChannexMessages, listChannexThreads, sendChannexMessage, type ChannexMessage, type ChannexMessageThread } from '~/server/integrations/channex/messages'
 import { MIRRORED_EVENT, MessageDedupeConflictError, SCHEDULED_MESSAGE_EVENT, appendMessage, assertMessageWriteAccess, findMessageByDedupeKey, getMessage, parseMessagePayload, type ConversationGuard, type MessageRow } from '~/server/domain/conversations'
 import { getDeliveryById, getDeliveryByProviderMessageId, isDeliverySent, recordDeliveryOutcome } from './deliveries'
-import { conversationTaskQueries } from './repository'
+import { conversationReplyTaskQueries } from './repository'
 import { assertMessagePhotos, attachGuestPhotos, isMessagePhoto, listMessagePhotos, sortGuestFiles, type MessagePhoto } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { getMediaAsset, readMediaPlacements } from '~/server/utils/media-asset-manager'
@@ -237,7 +237,7 @@ async function mirrorMessage(db: DbClient, env: ChannelEnv, mapping: ChannelThre
     // retained exactly as Channex sent them: zoneless UTC.
     payload: { provider_message_id: message.id, provider_inserted_at: message.insertedAt, provider_updated_at: message.updatedAt,
       attachments: message.attachments, ...(message.meta === undefined ? {} : { meta: message.meta }) },
-  }, conversationTaskQueries(mapping.conversation_id, new Date().toISOString())).catch(async (error: unknown) => {
+  }, conversationReplyTaskQueries(mapping.conversation_id, new Date().toISOString())).catch(async (error: unknown) => {
     if (error instanceof MessageDedupeConflictError) fail(409, 'CHANNEL_MESSAGE_ID_CONFLICT', 'The provider message ID differs from its immutable recorded fact; review the conversation', 'message.id')
     if (await alreadySent()) return null
     throw error
@@ -400,7 +400,7 @@ export async function mirrorChannexMessageEvent(db: DbClient, env: ChannelEnv, v
   if (!entry.body?.trim() && !attachments) return mirrored
   await notifyGuestThreadReply(env, db, {
     organizationId: request.organization_id, locationId: request.location_id,
-    threadId: request.id, messageId: entry.id, submissionType: 'stay', submissionId: request.id,
+    threadId: request.id, messageId: entry.id, entry, submissionType: 'stay', submissionId: request.id,
     participantLabel: summary.participantLabel, guestEmail: summary.guestEmail, guestPhone: summary.guestPhone,
     inboundChannel: 'airbnb',
   })

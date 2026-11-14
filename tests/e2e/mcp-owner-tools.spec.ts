@@ -10,8 +10,7 @@ import { bookTable, openSeating, seededTables, tableSeatings } from './helpers/t
 import { getDateIntervals, toTimeString, type OpeningHours, type SpecialHours } from '../../shared/reservation-hours'
 import { addLocalDays, localDateAt, localDateTimeToInstant, localNow } from '../../utils/timezone'
 import type { Product } from '../../server/types/products'
-import type { InboxThreadDetails } from '../../server/domain/guest-threads/types'
-import type { ConversationPage } from '../../shared/messages-contract'
+import type { ConversationDetails, ConversationPage } from '../../shared/messages-contract'
 import { formQuestionsRevision } from '../../shared/form-questions'
 import type { SessionAvailability } from '../../server/utils/availability'
 import type { readMemberScheduling } from '../../server/domain/member-scheduling'
@@ -410,9 +409,9 @@ test.describe('stateless MCP server', () => {
         const archive = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'set_conversation_archived',args:{organization_id:organizationId,conversation_id:conversationId,archived}})
         expect(archive.status()).toBe(200)
         expect(mcpData<{ conversation_id: string; archived: boolean }>(await archive.json())).toEqual({ conversation_id: conversationId, archived })
-          const nativeActions = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${conversationId}/details`)
+          const nativeActions = await request.get(`${baseURL}/api/messages/${conversationId}/details`)
         expect(nativeActions.status()).toBe(200)
-        expect((await nativeActions.json() as InboxThreadDetails).actions).toMatchObject({ archive: !archived, unarchive: archived })
+        expect((await nativeActions.json() as ConversationDetails).actions).toMatchObject({ archive: !archived, unarchive: archived })
         const native = await request.get(`${baseURL}/api/messages/${conversationId}`)
         expect(((await native.json() as ConversationPage).entries.filter(item => item.type !== 'day'))).toEqual(unchangedContactState.entries.filter(item => item.type !== 'day'))
       }

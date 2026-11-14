@@ -303,7 +303,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const threadURL = `${baseURL}/api/messages/${body.conversation_id}`
     const pendingThread = await request.get(threadURL)
     expect(pendingThread.status(), await pendingThread.text()).toBe(200)
-    expect((await pendingThread.json() as ConversationPage).conversation).toMatchObject({ id: body.conversation_id, title: 'Cancel Once', record_kind: 'booking' })
+    expect((await pendingThread.json() as ConversationPage).conversation).toMatchObject({ id: body.conversation_id, title: 'Cancel Once' })
     // The booking carries no question from the guest, so Today holds no reply task for it.
     const todayBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(todayBefore.status(), await todayBefore.text()).toBe(200)

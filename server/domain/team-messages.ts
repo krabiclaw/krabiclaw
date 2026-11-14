@@ -9,7 +9,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import type { MessageIdentity } from '~/shared/dashboard-invalidations'
 import { getStay, stayAccessFor } from '~/server/domain/stays'
 import type { JobSubject } from '~/server/domain/tasks'
-import { appendMessage, conversationAccessDenied, participantGuard, type ConversationParticipantRow, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
+import { appendMessage, participantGuard, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
 import { messagePreview } from '~/server/domain/guest-threads/attachments'
 
 /**
@@ -42,22 +42,6 @@ export interface TeamParticipant {
   member_id: string
   name: string
   image: string | null
-}
-
-export interface TeamThread {
-  id: string
-  name: string | null
-  is_group: boolean
-  created_by_user_id: string | null
-  can_manage: boolean
-  can_leave: boolean
-  created_at: string
-  last_message_at: string
-  booking_id: string | null
-  location_id: string | null
-  participants: TeamParticipant[]
-  /** A message from someone else after the caller's read position (conversations.ts unreadSql). */
-  unread: boolean
 }
 
 const MAX_BODY = 5000
@@ -118,30 +102,11 @@ async function publishThreadChanged(env: GuestInboxPublicationEnv, db: DbClient,
   }
 }
 
-/**
- * The team context shown above the shared transcript.
- * The list of conversations is the one list (guest-threads/repository.ts
- * listConversations).
- */
-export async function presentGroupConversation(access: MemberAccessPrincipal, thread: ConversationRow, roster: ConversationParticipantRow[], unread: boolean): Promise<TeamThread> {
-  const mutableGroup = thread.is_group === 1 && !thread.booking_id && !thread.location_id
-  const participants = roster.flatMap(({ id, member_id, name, image, role }) =>
-    role === 'member' && id && member_id ? [{ id, member_id, name, image }] : [])
-  if (!participants.some(person => person.id === access.userId && person.member_id === access.memberId)) conversationAccessDenied()
-  const managesGroup = mutableGroup && (thread.created_by_user_id === access.userId || await canManageGroups(access))
+export async function conversationGroupCapabilities(access: MemberAccessPrincipal | null, thread: ConversationRow) {
+  const mutableGroup = access !== null && thread.kind === 'team' && thread.is_group === 1 && !thread.booking_id && !thread.location_id
   return {
-    id: thread.id,
-    name: thread.name,
-    is_group: thread.is_group === 1,
-    created_by_user_id: thread.created_by_user_id,
-    can_manage: managesGroup,
+    can_manage_participants: mutableGroup && (thread.created_by_user_id === access.userId || await canManageGroups(access)),
     can_leave: mutableGroup,
-    created_at: thread.created_at,
-    last_message_at: thread.last_message_at,
-    booking_id: thread.booking_id,
-    location_id: thread.location_id,
-    participants,
-    unread,
   }
 }
 
@@ -394,7 +359,7 @@ export async function operateTeamGroup(env: TeamEnv, db: DbClient, access: Membe
 }
 
 /** Team delivery fans out to current participants after the shared message commit. */
-export async function deliverTeamMessage(env: TeamEnv, db: DbClient, row: MessageRow, senderName: string, photoCount: number, created: boolean): Promise<void> {
+export async function notifyTeamParticipants(env: TeamEnv, db: DbClient, row: MessageRow, senderName: string, photoCount: number): Promise<void> {
   const recipients = await queryAll<{ user_id: string }>(db, `SELECT seat.user_id FROM conversation_participants seat
     JOIN member m ON m.organizationId = seat.organization_id AND m.userId = seat.user_id
     WHERE seat.conversation_id = ? AND seat.role = 'member' AND seat.user_id <> ?`, [row.conversation_id, row.author_user_id])
@@ -406,7 +371,6 @@ export async function deliverTeamMessage(env: TeamEnv, db: DbClient, row: Messag
     messagePreview: messagePreview(row.body, photoCount),
     recipientUserIds: recipients.map(recipient => recipient.user_id),
   })
-  await publishThreadChanged(env, db, row.conversation_id, created ? 'MESSAGE_CREATE' : 'MESSAGE_UPDATE', { message_id: row.id }, { id: row.id, sequence: row.sequence })
 }
 
 /**

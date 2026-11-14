@@ -10,7 +10,7 @@ import { applyBookingRevision } from '../../server/integrations/channex/booking-
 import { mirrorChannexMessageEvent } from '../../server/domain/guest-threads/channel-messages.ts'
 import { runAlterationRequestFeed } from '../../server/domain/guest-threads/stay-change-requests.ts'
 import { sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
-import { getInboxThreadDetails } from '../../server/domain/guest-threads/inbox.ts'
+import { getConversationDetails } from '../../server/domain/guest-threads/inbox.ts'
 import { conversationPageFor } from '../integration/support/conversation-page.ts'
 import { scheduleGuestReply } from '../../server/domain/scheduled-guest-messages.ts'
 import { suggestGuestReplies } from '../../server/domain/suggested-reply.ts'
@@ -18,7 +18,7 @@ import { memberInbox } from '../../server/utils/dashboard-guest-threads.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { executeBatch } from '../../server/db/index.ts'
 import { requestInsertQueries } from '../../server/domain/requests.ts'
-import { appendMessage } from '../../server/domain/conversations.ts'
+import { appendMessage, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { archiveConversation } from '../../server/domain/guest-threads/repository.ts'
 import { stayCheckoutPolicy, stayFromCheckoutQueries } from '../../server/domain/stays.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -138,7 +138,6 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
       VALUES (?, ?, 'channex', 'listing', 'channel', ?, 'room', 'rate', 'complete', 1)`).bind(ORG, home.id, PROPERTY).run()
     const principal = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
-    const viewer = { audience: 'member' as const, userId: OWNER, principal }
 
     // The booked stay and its conversation: a message, a photo, the host's Airbnb reply, then the guest's question, which alerts (unread).
     await applyBookingRevision(db, env, 'rev-contract')
@@ -211,7 +210,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     assert.deepEqual(thread.conversation.participants.filter(person => person.role === 'guest').map(person => person.id), [stay.user_id])
     await check('thread', thread, stay.user_id)
     await check('opening', opened)
-    await check('details', await getInboxThreadDetails(db, threadId, ORG, viewer, new Date(NOW)))
+    await check('details', await getConversationDetails(db, (await resolveConversationAccess(db, OWNER, threadId)).conversation, OWNER, 'member', new Date(NOW)))
     await check('suggestions', suggestions)
   } finally {
     globalThis.fetch = realFetch

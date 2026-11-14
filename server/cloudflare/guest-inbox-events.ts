@@ -16,11 +16,11 @@ export function guestInboxTarget(organizationId: string | null, userId: string) 
 export async function publishConversationEvent(
   env: GuestInboxPublicationEnv,
   db: DbClient,
-  input: { conversationId: string; scheduledAuthorId?: string | null } & Pick<ConversationEvent, 'type' | 'message' | 'scheduled'>,
+  input: { conversationId: string; scheduledAuthorId?: string | null; conversation?: { id: string; organization_id: string; location_id: string | null; kind: string } } & Pick<ConversationEvent, 'type' | 'message' | 'scheduled'>,
 ): Promise<void> {
-  const conversation = await queryFirst<{ id: string; organization_id: string; location_id: string | null; kind: string }>(db,
+  const conversation = input.conversation ?? await queryFirst<{ id: string; organization_id: string; location_id: string | null; kind: string }>(db,
     'SELECT id, organization_id, location_id, kind FROM conversations WHERE id = ?', [input.conversationId])
-  if (!conversation) throw new Error(`Conversation ${input.conversationId} not found for publication`)
+  if (!conversation || conversation.id !== input.conversationId) throw new Error(`Conversation ${input.conversationId} not found for publication`)
   await publishDashboardInvalidation(env, {
     event_id: crypto.randomUUID(),
     type: input.type,

@@ -106,7 +106,7 @@ test('a new booking, its cancellation and a guest message are unread until read,
     await expect(listRow).toBeVisible()
     await expect(listRow.getByLabel('Unread badge proof: unread')).toHaveCount(0)
     await listRow.hover()
-    await page.getByRole('button', { name: 'Mark as unread: Unread badge proof' }).click()
+    await listRow.locator('xpath=../..').getByRole('button', { name: 'Mark as unread: Unread badge proof', exact: true }).click()
     await expect(listRow.getByLabel('Unread badge proof: unread')).toBeVisible()
     await expect.poll(async () => await unread()).toBe(before + 1)
     expect(await row(threadId)).toMatchObject({ unread: true })

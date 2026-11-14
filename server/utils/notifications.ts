@@ -208,6 +208,7 @@ interface GuestThreadReplyNotificationInput extends Omit<OrganizationContext, 'o
   threadId: string
   /** The guest's (or Airbnb Support's) message the alert is about. */
   messageId: string
+  entry?: MessageRow
   submissionType: 'contact' | 'booking' | 'stay'
   submissionId: string
   /** Who the conversation is with: the contact's recorded name, or the channel's title for a channel thread. */
@@ -1679,8 +1680,10 @@ export async function notifyGuestThreadReply(
 
   // Who wrote decides the alert: a guest's message carries the conversation's
   // record under it; Airbnb Support writing about a case carries none.
-  const entry = await getMessage(db, opts.messageId)
-  if (!entry || entry.conversation_id !== opts.threadId) throw new Error(`Message ${opts.messageId} is not in conversation ${opts.threadId}`)
+  const entry = opts.entry ?? await getMessage(db, opts.messageId)
+  if (!entry || entry.id !== opts.messageId || entry.conversation_id !== opts.threadId || entry.organization_id !== opts.organizationId) {
+    throw new Error(`Message ${opts.messageId} is not in conversation ${opts.threadId}`)
+  }
   const support = isAirbnbSupportMessage(entry)
   if (entry.author_kind !== 'guest' && !support) throw new Error(`Message ${entry.id} is neither a guest's nor Airbnb Support's; nobody is alerted to it`)
   const { guestName, body, photos, preview, history } = await alertedMessage(db, thread, entry, business)

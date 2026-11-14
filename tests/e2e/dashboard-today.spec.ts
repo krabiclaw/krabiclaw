@@ -335,7 +335,7 @@ test('booking assignment and workspace admin promotion do not grant a conversati
     expect(ownerThread.status(), await ownerThread.text()).toBe(200)
     const { conversation: ownerConversation, viewer_role: role } = await ownerThread.json() as ConversationPage
     expect(role).toBe('member')
-    expect(ownerConversation).toMatchObject({ id: reservationId, kind: 'guest', title: guestName, channel: 'direct', home: booking.location_title, booking_id: booking.booking_id, record_kind: 'booking' })
+    expect(ownerConversation).toMatchObject({ id: reservationId, kind: 'guest', title: guestName, channel: 'direct', booking_id: booking.booking_id })
     await loginAs(memberRequest, baseURL!, actor.userId)
     const verifyAccess = async (assigned: boolean) => {
       const agendaResponse = await memberRequest.get('/api/dashboard/agenda', { params: { org, from: day.date, to: day.date } })

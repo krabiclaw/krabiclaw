@@ -563,7 +563,7 @@ test('a guest who wrote before booking keeps one conversation: the reservation\'
     const detail = (await hostConversation(db, env, inquiry)).conversation
     assert(request.kind === 'booking')
     assert(detail.kind === 'guest')
-    assert.deepEqual([request.payload.guest.name, request.payload.participant?.title, detail.booking_id, detail.record_kind], ['Actual Guest', 'Conversation supplied by Airbnb', stay.id, 'stay'])
+    assert.deepEqual([request.payload.guest.name, request.payload.participant?.title, detail.booking_id], ['Actual Guest', 'Conversation supplied by Airbnb', stay.id])
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
@@ -965,10 +965,11 @@ test('an in-flight or interrupted reply never blocks actual provider messages an
       { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: 'This home is disconnected from Airbnb, so its guest cannot be replied to here.' })
     // The inbox reads the same rule: a disconnected home's Airbnb conversation shows no composer, and says why.
     const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
-    const disconnected = (await conversationPageFor(db, owner, mirrored.conversation_id)).conversation
+    const { conversation: disconnected, capabilities } = await conversationPageFor(db, owner, mirrored.conversation_id)
     if (disconnected.kind === 'team') throw new Error('Expected the disconnected Airbnb conversation')
     assert.deepEqual(disconnected.composer,
-      { channel: 'airbnb', available: false, reason: 'This home is disconnected from Airbnb, so its guest cannot be replied to here.' })
+      { channel: 'airbnb', reason: 'This home is disconnected from Airbnb, so its guest cannot be replied to here.' })
+    assert.equal(capabilities.can_send, false)
     assert.equal(await db.prepare('SELECT count(*) FROM messages').first('count(*)'), 5, 'failed preflight records no outbound message')
   } finally { release(); globalThis.fetch = realFetch; await runtime.dispose() }
 })

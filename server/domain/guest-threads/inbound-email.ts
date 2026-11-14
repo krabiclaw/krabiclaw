@@ -1,12 +1,10 @@
 import EmailReplyParser from 'email-reply-parser'
 import { compile } from 'html-to-text'
-import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
-import { getGuestRequest, participantLabel, validateGuestRequest, type GuestRequest } from '~/server/domain/requests'
-import { MessageDedupeConflictError, appendMessage, conversationMessageGuard, findMessageByDedupeKey, getMessage, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
-import { messagePhotoHashes, sortGuestFiles, type MessagePhoto, type MessagePhotoInput } from '~/server/domain/guest-threads/attachments'
-import { conversationReplyTaskQueries } from '~/server/domain/guest-threads/repository'
+import { getGuestRequest } from '~/server/domain/requests'
+import { MessageDedupeConflictError, findMessageByDedupeKey, getMessage } from '~/server/domain/conversations'
+import { sortGuestFiles, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
+import { sendGuestProviderMessage } from '~/server/domain/send-conversation-message'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { notifyGuestThreadReply } from '~/server/utils/notifications'
 import { findSubmissionByPhone } from '~/server/utils/submission-messages'
 import { queryFirst } from '~/server/db'
 import { REPLY_FAILED_ALERTED, replyToAlertEntry } from './member-reply'
@@ -74,10 +72,13 @@ export async function receiveGuestEmail(env: CloudflareEnv, email: InboundGuestE
   const { photos, unshown } = sortGuestFiles(email.files)
   if (!email.body && !photos.length && !unshown.length) return
 
-  await receiveGuestReply(env, {
-    thread, body:email.body, photos, unshown,
-    channel:'email', userId:null, dedupeKey:`email:${email.messageId}`, headers:email.headers,
-  })
+  try {
+    await sendGuestProviderMessage(env, { conversation: thread, body: email.body, photos, unshown,
+      channel: 'email', dedupeKey: `email:${email.messageId}`, headers: email.headers })
+  } catch (error) {
+    if (error instanceof MessageDedupeConflictError) throw new InboundEmailRejection('A different message with this Message-ID was already received.')
+    throw error
+  }
 }
 
 /**
@@ -95,8 +96,8 @@ export async function receiveGuestWhatsApp(env: CloudflareEnv, input: { phone: s
   if (!match) return null
   const { photos, unshown } = sortGuestFiles(input.files)
   if (!input.body && !photos.length && !unshown.length) return { conversationId: match.id }
-  await receiveGuestReply(env, {
-    thread: match, body: input.body, photos, unshown, channel: 'whatsapp', userId: null, dedupeKey,
+  await sendGuestProviderMessage(env, {
+    conversation: match, body: input.body, photos, unshown, channel: 'whatsapp', dedupeKey,
   })
   return { conversationId: match.id }
 }
@@ -133,51 +134,4 @@ export async function receiveMemberEmail(env: CloudflareEnv, email: InboundMembe
   }
   if (outcome.report !== null) await report(outcome.report)
   if (!outcome.sent) throw new InboundEmailRejection(outcome.notice)
-}
-
-/** The web session and verified provider events supply the guest identity. */
-export async function receiveGuestWebReply(env: CloudflareEnv, input: { conversation: ConversationRow; userId: string; body: string; photos: MessagePhotoInput; idempotencyKey: string }): Promise<MessageRow> {
-  const thread = await validateGuestRequest(env.DB, input.conversation)
-  return receiveGuestReply(env, { thread, body: input.body, photos: input.photos, unshown: [], channel: 'web',
-    userId: input.userId, dedupeKey: `guest-web-reply:${thread.id}:${input.idempotencyKey}` })
-}
-
-async function receiveGuestReply(env: CloudflareEnv, input: {
-  thread: GuestRequest; body: string; photos: MessagePhotoInput; unshown: string[]; userId: string | null; dedupeKey: string
-} & ({ channel: 'email'; headers: InboundGuestEmail['headers'] } | { channel: 'web' | 'whatsapp'; headers?: never })): Promise<MessageRow> {
-  const { DB: db } = env
-  const { thread, photos, unshown } = input
-  const now = new Date().toISOString()
-  const hashes = Array.isArray(photos) ? await messagePhotoHashes(photos) : []
-  const photoManifest = Array.isArray(photos)
-    ? photos.map((photo, index) => ({ filename: photo.filename, sha256: hashes[index] }))
-    : { sourceIds: photos.sourceIds }
-  let entry: MessageRow
-  try {
-    entry = await appendMessage(db, {
-      conversationId: thread.id, authorKind: 'guest', authorUserId: input.userId ?? thread.user_id,
-      channel: input.channel, body: input.body || null, occurredAt: now,
-      payload: {
-        ...(unshown.length ? { unshownFiles: unshown } : {}),
-        ...(input.channel === 'web' || hashes.length ? { photos: photoManifest } : {}),
-        ...(input.channel === 'email' ? { email: input.headers } : {}),
-      },
-      dedupeKey: input.dedupeKey,
-      guard: conversationMessageGuard(thread, input.userId, 'guest'),
-    }, { organizationId: thread.organization_id, env, photos, uploaderUserId: input.userId, extra: conversationReplyTaskQueries(thread.id, now) })
-  } catch (error) {
-    if (input.channel === 'email' && error instanceof MessageDedupeConflictError) {
-      throw new InboundEmailRejection('A different message with this Message-ID was already received.')
-    }
-    throw error
-  }
-  // The guest's message is in the conversation before the owner is alerted, so an alert that fails cannot hide it.
-  await publishConversationEvent(env, db, { conversationId: thread.id, type: 'MESSAGE_CREATE', message: { id: entry.id, sequence: entry.sequence } })
-  await notifyGuestThreadReply(env,db,{
-    organizationId:thread.organization_id,locationId:thread.location_id,threadId:thread.id,messageId:entry.id,
-    submissionType:thread.kind,submissionId:thread.id,
-    participantLabel:participantLabel(thread),guestEmail:thread.payload.guest.email,guestPhone:thread.payload.guest.phone,
-    inboundChannel:input.channel,
-  })
-  return entry
 }

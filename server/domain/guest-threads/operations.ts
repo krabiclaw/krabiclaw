@@ -9,7 +9,7 @@ import { bookingDay, canMarkNoShow, getGuestRequest, getThreadOperationalRecord,
 import type { StayAccess } from '~/server/domain/stays'
 import { revokeReviewRequestQuery } from '~/server/utils/review-requests'
 import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deliveries'
-import { MEMBER_REPLY_EVENT, SCHEDULED_MESSAGE_EVENT, MessageDedupeConflictError, MessageStateConflictError, appendMessage, assertMessageWriteAccess, conversationMessageGuard, findMessageByDedupeKey, messageQueries, parseMessagePayload, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
+import { MEMBER_REPLY_EVENT, SCHEDULED_MESSAGE_EVENT, MessageDedupeConflictError, MessageStateConflictError, appendChatMessage, conversationMessageGuard, findMessageByDedupeKey, messageQueries, parseMessagePayload, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
 import { listMessagePhotos, MessagePhotoRejection, messagePhotoCount, messagePhotoHashes, type MessagePhotoInput } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { conversationReplyTaskQueries, conversationTaskQueries, reconcileConversationTasks } from './repository'
@@ -499,7 +499,8 @@ type ReplyInput = Pick<ExecuteOperationInput, 'conversation' | 'threadId' | 'org
   retryMessageId?: string
 }
 
-export async function sendGuestThreadReply(db: DbClient, input: ReplyInput): Promise<ReplyOutcome> {
+/** The outbound provider prepares one canonical write and decides when dispatch may commit it. */
+export async function deliverGuestReply(db: DbClient, input: ReplyInput, append: typeof appendChatMessage): Promise<ReplyOutcome> {
   const { threadId, organizationId, conversation, actorUserId, idempotencyKey } = input
   if (!idempotencyKey) return { ok: false, status: 400, reason: 'missing_idempotency_key' }
   const body = input.body.trim()
@@ -555,15 +556,14 @@ export async function sendGuestThreadReply(db: DbClient, input: ReplyInput): Pro
   }
   const guestEmail = destination.channel === 'email' || destination.channel === 'account' ? destination.email : null
   const messageChannel = recorded?.channel ?? (channel ? 'airbnb' : guestEmail ? 'email' : 'web')
-  const commit = () => appendMessage(db, {
-    conversationId: threadId, authorKind: actorUserId === null ? 'krabiclaw' : 'member', authorUserId: recordedAuthor,
-    channel: messageChannel, body: messageChannel === 'airbnb' ? body : body || null, eventName, payload: { request_hash: requestHash }, dedupeKey, guard,
+  const commit = () => append(db, {
+    conversation: thread, role: 'member', authorKind: actorUserId === null ? 'krabiclaw' : 'member', authorUserId: recordedAuthor,
+    channel: messageChannel, body: messageChannel === 'airbnb' ? body : body || null, eventName, payload: { request_hash: requestHash }, dedupeKey,
   }, {
-    organizationId, env: input.env, photos: photoInput, uploaderUserId: actorUserId, recorded, retryMessageId,
+    env: input.env, photos: photoInput, uploaderUserId: actorUserId, recorded, retryMessageId,
     receipt: messageChannel === 'web' ? undefined : {
       id: deliveryId, channel: messageChannel === 'airbnb' ? 'airbnb' : 'email', provider: messageChannel === 'airbnb' ? 'channex' : emailProvider(input.env), purpose,
     },
-    extra: messageChannel === 'web' ? conversationReplyTaskQueries(threadId, new Date().toISOString()) : undefined,
   })
   const sentReply = async (message: MessageRow): Promise<ReplyOutcome> => {
     if (scheduled) {
@@ -617,12 +617,6 @@ export async function sendGuestThreadReply(db: DbClient, input: ReplyInput): Pro
 
   const fromName = await getOrganizationBrandName(db, organizationId)
   const email = await renderMemberReply(input.env, db, organizationId, fromName, entry, thread.payload.guest.locale, photoCount)
-  try {
-    await assertMessageWriteAccess(db, threadId, guard)
-  } catch (error) {
-    if (error instanceof MessageStateConflictError) return { ok: false, status: 404, reason: 'thread_not_found' }
-    throw error
-  }
   const outcome = await deliverGuestThreadEmail(db, {
     delivery,
     env: input.env,
@@ -631,8 +625,13 @@ export async function sendGuestThreadReply(db: DbClient, input: ReplyInput): Pro
     subject: replySubject(thread.kind, fromName),
     email,
     conversationId: threadId,
+    guard,
+  }).catch((error: unknown) => {
+    if (error instanceof MessageStateConflictError) return null
+    throw error
   })
 
+  if (outcome === null) return { ok: false, status: 404, reason: 'thread_not_found' }
   if (isDeliverySent(outcome)) {
     return sentReply(entry)
   }
@@ -640,6 +639,11 @@ export async function sendGuestThreadReply(db: DbClient, input: ReplyInput): Pro
     throw new HTTPError({ statusCode: 502, statusMessage: 'Failed email delivery did not provide its error', data: { code: 'INVALID_DELIVERY_RESPONSE', field: 'error' } })
   }
   return { ok: false, status: 502, reason: 'delivery_failed', code: 'DELIVERY_FAILED', field: 'delivery', message: outcome.error }
+}
+
+/** Retry and scheduler use the same writer as the interactive command. */
+export function sendGuestThreadReply(db: DbClient, input: ReplyInput): Promise<ReplyOutcome> {
+  return deliverGuestReply(db, input, appendChatMessage)
 }
 
 /** Why a reply to a guest with no email, no Airbnb thread and no KrabiClaw account is refused. */
@@ -653,6 +657,13 @@ export type GuestReplyDestination =
   | { channel: 'email'; email: string }
   | { channel: 'account'; email: string | null }
   | { channel: null; reason: string }
+
+export type GuestReplyAccount = { email: string | null; readable: number }
+export const guestReplyAccountQuery = (userId: string): BatchQuery => ({
+  query: `SELECT CASE WHEN "emailVerified" = 1 AND COALESCE("isAnonymous", 0) = 0 THEN email END AS email,
+      COALESCE("isAnonymous", 0) = 0 OR EXISTS (SELECT 1 FROM session WHERE session."userId" = user.id) AS readable FROM user WHERE id = ?`,
+  params: [userId],
+})
 
 /**
  * The one rule for whether, and where, a member can reply to a guest. The reply
@@ -668,6 +679,7 @@ export async function guestReplyDestination(
   db: DbClient,
   thread: Pick<GuestRequest, 'id' | 'organization_id' | 'user_id' | 'payload'>,
   channelFacts?: Awaited<ReturnType<typeof guestThreadChannel>>,
+  accountFacts?: GuestReplyAccount | null,
 ): Promise<GuestReplyDestination> {
   const facts = channelFacts === undefined ? await guestThreadChannel(db, thread.id, thread.organization_id) : channelFacts
   if (!facts) throw new Error(`Conversation ${thread.id} has no channel facts`)
@@ -679,8 +691,8 @@ export async function guestReplyDestination(
   if (thread.user_id === null) return { channel: null, reason: GUEST_UNREACHABLE_MESSAGE }
   // An account inbox is read by whoever signs in to it: a named account, or an anonymous guest's browser while it is signed in.
   // The anonymous user a host or a channel gave a guest has never been signed in to, so nobody reads it.
-  const account = await queryFirst<{ email: string | null; readable: number }>(db, `SELECT CASE WHEN "emailVerified" = 1 AND COALESCE("isAnonymous", 0) = 0 THEN email END AS email,
-      COALESCE("isAnonymous", 0) = 0 OR EXISTS (SELECT 1 FROM session WHERE session."userId" = user.id) AS readable FROM user WHERE id = ?`, [thread.user_id])
+  const { query, params } = guestReplyAccountQuery(thread.user_id)
+  const account = accountFacts === undefined ? await queryFirst<GuestReplyAccount>(db, query, params) : accountFacts
   if (!account?.readable) return { channel: null, reason: GUEST_UNREACHABLE_MESSAGE }
   return { channel: 'account', email: account.email }
 }

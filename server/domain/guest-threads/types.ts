@@ -1,5 +1,4 @@
 import type { GuestRequest } from '~/server/domain/requests'
-import type { MessageAuthorKind, MessageChannel } from '~/server/domain/conversations'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { GuestThreadMailbox } from './mailbox'
 
@@ -35,22 +34,6 @@ export interface GuestThreadPagination {
   next_offset: number | null
 }
 
-/**
- * What became of one outbound send. `channel` here is where the message went,
- * which is not the entry's own channel: a reservation submitted on the web can
- * alert its owner over WhatsApp, and only this says so.
- */
-export interface GuestThreadEntryDeliveryViewModel {
-  id: string
-  channel: GuestThreadDeliveryChannel
-  provider: GuestThreadDeliveryProvider
-  purpose: GuestThreadDeliveryPurpose
-  status: GuestThreadDeliveryStatus
-  error: string | null
-  updated_at: string
-}
-
-/** A photo a message carries. */
 export interface GuestThreadEntryAttachmentViewModel {
   id: string
   url: string
@@ -61,35 +44,6 @@ export interface GuestThreadEntryAttachmentViewModel {
   height: number | null
 }
 
-export interface GuestThreadEntryViewModel {
-  id: string
-  /** Words someone wrote (or KrabiClaw's opening, automatic and relayed messages), or an event KrabiClaw recorded. */
-  kind: 'message' | 'event'
-  /** The part its person plays: the guest, the team, or KrabiClaw alone (conversations.ts messageRole). */
-  actorKind: MessageAuthorKind
-  actorUserId: string | null
-  actorLabel: string | null
-  channel: MessageChannel | null
-  body: string | null
-  eventName: string | null
-  payload: Record<string, unknown> | null
-  sequence: number
-  occurredAt: string
-  /** Channex's original timestamp; a timezone-free value is not an instant. */
-  providerTimestamp: string | null
-  deliveries: GuestThreadEntryDeliveryViewModel[]
-  attachments: GuestThreadEntryAttachmentViewModel[]
-}
-
-/*
-  The inbox: one conversation model behind the web Messages pane, the iOS
-  Messages tab and the message emails (design: inbox-parity.md). The server
-  hands every surface these shapes already reduced; a client draws them and
-  decides nothing. Deliveries, event names, payloads, provider ids and
-  submission fields stay on the server.
-*/
-
-/** Airbnb Support is a case, not a guest: its own filter, never under Guests. A team conversation is the team's own. */
 export type InboxThreadKind = 'guest' | 'support' | 'team'
 /** The mark at the corner of the person's circle: Airbnb, or the business's own site and email. */
 export type InboxChannel = 'airbnb' | 'direct'
@@ -129,59 +83,6 @@ export interface InboxPhoto {
   thumbnail_url: string
   width: number | null
   height: number | null
-}
-
-export type InboxStreamItem =
-  | { type: 'day'; id: string; label: string }
-  | {
-    type: 'message'
-    id: string
-    side: 'guest' | 'business'
-    /** "Mililani", "You", the team member's first name, "Skyler · Automatic". */
-    author: string
-    /** An automatic message's template, "Check-in instructions"; null otherwise. */
-    label: string | null
-    /** One instant: the provider's time when it has one, else when KrabiClaw sent it. */
-    sent_at: string
-    /** "2:33 PM" on the first message of a run from one side; null on the rest of the run. */
-    time: string | null
-    body: string | null
-    photos: InboxPhoto[]
-    /** Files the message carried that are not photos the conversation can show, such as a PDF. */
-    unshown_files: number
-    /** On the newest business message only: Sending, Sent, Delivered, Read by <name>, Not delivered, Recorded locally. */
-    receipt: string | null
-    /** The reply was not delivered and can be sent again as it was (a team member's text reply). */
-    retryable: boolean
-  }
-  | { type: 'event'; id: string; text: string; sent_at: string }
-
-export interface InboxThread {
-  id: string
-  kind: InboxThreadKind
-  title: string
-  avatar_initial: string
-  channel: InboxChannel
-  home: string | null
-  when: string | null
-  /** The stored booking attached to this conversation, whether it uses nights or a session. */
-  booking_id: string | null
-  record_kind: 'stay' | 'booking' | null
-  /** The record in the business's own word: "Reservation", "Consultation", "Experience". */
-  record_title: string | null
-  /** In a guest's own inbox, where their booking is shown; null for the business. */
-  activity_path: string | null
-  stream: InboxStreamItem[]
-  /** Where a reply goes, and whether one can be sent. */
-  /** `reason` says why there is no composer: the reply operation's own refusal. */
-  composer: { channel: 'airbnb' | 'email'; available: boolean; reason: string | null }
-}
-
-/** "In this conversation": who is in it, its photos and what can be done to it. */
-export interface InboxThreadDetails {
-  participants: Array<{ name: string; initial: string; role: 'Guest' | 'Host' | 'Co-host' | 'Airbnb Support' }>
-  photos: Array<InboxPhoto & { sent_at: string }>
-  actions: { archive: boolean; unarchive: boolean; report: boolean; block: boolean; unblock: boolean }
 }
 
 export interface ListGuestThreadsOptions {

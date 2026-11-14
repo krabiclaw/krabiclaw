@@ -3,22 +3,22 @@
     "can_invite_guest": true,
     "can_leave": false,
     "can_manage_participants": false,
-    "can_send": true,
-    "can_view_read_receipts": true
+    "can_send": true
   },
   "conversation": {
     "activity_path": null,
-    "avatar_initial": "M",
     "booking_id": "00000000-0000-4000-8000-000000000003",
     "channel": "airbnb",
     "composer": {
-      "available": true,
       "channel": "airbnb",
       "reason": null
     },
-    "home": "74 D · Sky",
+    "created_by_user_id": null,
     "id": "00000000-0000-4000-8000-000000000001",
+    "is_group": false,
     "kind": "guest",
+    "location_id": "location",
+    "name": null,
     "organization_id": "org-contract",
     "participants": [
       {
@@ -38,10 +38,7 @@
         "role": "member"
       }
     ],
-    "record_kind": "stay",
-    "record_title": "Reservation",
-    "title": "Mililani",
-    "when": "In 3 days"
+    "title": "Mililani"
   },
   "entries": [
     {

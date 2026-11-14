@@ -6,8 +6,8 @@ import * as schema from '../../server/db/schema.ts'
 import { threadPayloadForGuest, requestInsertQueries, cancelBookingRequest, getGuestRequest, getThreadOperationalRecord } from '../../server/domain/requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { archiveConversation, countUnreadConversations, listConversations, reconcileConversationTasks } from '../../server/domain/guest-threads/repository.ts'
-import { getInboxThreadDetails } from '../../server/domain/guest-threads/inbox.ts'
-import { appendMessage, markConversationRead, markConversationUnread } from '../../server/domain/conversations.ts'
+import { getConversationDetails } from '../../server/domain/guest-threads/inbox.ts'
+import { appendMessage, markConversationRead, markConversationUnread, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { CapacityUnavailableError, claimSessionCapacity } from '../../server/utils/availability.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
@@ -250,7 +250,7 @@ test('archive and unarchive file a conversation for one person without touching 
     const ids = async (mailbox: 'current' | 'past', unreadOnly = false) => (await listConversations(db, ORG, { userId: ACTOR, principal: OWNER, mailbox, unreadOnly })).map(row => row.id)
     // What the conversation's sheet offers: Archive, or Move to messages.
     const filing = async (id: string) => {
-      const details = await getInboxThreadDetails(db, id, ORG, { audience: 'member', userId: ACTOR, principal: OWNER })
+      const details = await getConversationDetails(db, (await resolveConversationAccess(db, ACTOR, id)).conversation, ACTOR, 'member')
       assert.ok(details, id)
       return { archive: details.actions.archive, unarchive: details.actions.unarchive }
     }

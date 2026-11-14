@@ -394,7 +394,7 @@ export async function expireReplyTasks(db: DbClient, now: string): Promise<{ con
   const failures: unknown[] = []
   for (const row of rows) {
     try {
-      await executeBatch(db, conversationTaskQueries(row.subject_id, now), { operation: 'Expire reply tasks' })
+      await executeBatch(db, conversationReplyTaskQueries(row.subject_id, now), { operation: 'Expire reply tasks' })
     } catch (cause) {
       failures.push(cause)
     }
@@ -444,7 +444,8 @@ function bookingFollowUpQueries(conversationId: string, now: string): BatchQuery
  * next message opens a new task. A failed scheduled message the business has
  * since answered in person is done too.
  */
-export function conversationReplyTaskQueries(conversationId: string, now: string): BatchQuery[] {
+export function conversationReplyTaskQueries(conversationId: string | BatchQuery, now: string): BatchQuery[] {
+  const scope = typeof conversationId === 'string' ? { query: '?', params: [conversationId] } : conversationId
   const entryOf = `substr(tasks.dedupe_key, length('guest_reply:' || tasks.subject_id || ':') + 1)`
   const unanswered = `guest_entry.id = ${entryOf} AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}`
   return [{
@@ -455,10 +456,10 @@ export function conversationReplyTaskQueries(conversationId: string, now: string
           SELECT reply.author_user_id FROM messages reply JOIN messages guest_entry ON guest_entry.id = ${entryOf}
           WHERE reply.conversation_id = r.id AND ${successfulBusinessReplySql('reply')} AND reply.sequence > guest_entry.sequence ORDER BY reply.sequence LIMIT 1) END
       FROM conversations r
-      WHERE tasks.kind = 'guest_reply' AND tasks.subject_type = 'conversation' AND tasks.subject_id = ? AND tasks.status = 'open' AND r.id = tasks.subject_id
+      WHERE tasks.kind = 'guest_reply' AND tasks.subject_type = 'conversation' AND tasks.subject_id = ${scope.query} AND tasks.status = 'open' AND r.id = tasks.subject_id
         AND (r.blocked_at IS NOT NULL OR NOT EXISTS (
           SELECT 1 FROM messages guest_entry WHERE ${unanswered} AND ${guestEntryAskedAtSql('guest_entry')} >= ?))`,
-    params: [now, now, conversationId, replyTaskCutoff(now)],
+    params: [now, now, ...(scope.params ?? []), replyTaskCutoff(now)],
   }, {
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, timezone, status, dedupe_key, version, created_at, updated_at)
       SELECT ?, r.organization_id, 'guest_reply', 'conversation', r.id, (SELECT s.product_id FROM bookings s WHERE s.id = r.booking_id AND s.organization_id = r.organization_id AND s.product_session_id IS NULL),
@@ -466,7 +467,7 @@ export function conversationReplyTaskQueries(conversationId: string, now: string
         FROM conversations r JOIN organization o ON o.id = r.organization_id
         LEFT JOIN business_locations l ON l.organization_id = r.organization_id AND l.id = r.location_id
         JOIN messages guest_entry ON guest_entry.conversation_id = r.id
-       WHERE r.id = ? AND r.kind IN ('contact', 'booking') AND r.blocked_at IS NULL AND ${GUEST_QUESTION_SQL}
+       WHERE r.id = ${scope.query} AND r.kind IN ('contact', 'booking') AND r.blocked_at IS NULL AND ${GUEST_QUESTION_SQL}
          AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}
          AND ${guestEntryAskedAtSql('guest_entry')} >= ?
          -- A person's Dismiss covers everything said by then; what the guest says next is work.
@@ -476,14 +477,14 @@ export function conversationReplyTaskQueries(conversationId: string, now: string
        ORDER BY guest_entry.sequence LIMIT 1
       ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = excluded.updated_at
         WHERE tasks.status IN ('done', 'cancelled')`,
-    params: [crypto.randomUUID(), now, now, conversationId, replyTaskCutoff(now)],
+    params: [crypto.randomUUID(), now, now, ...(scope.params ?? []), replyTaskCutoff(now)],
   }, {
     query: `UPDATE tasks SET status = 'done', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ?
       WHERE kind = 'message_delivery' AND status = 'open' AND subject_type = 'scheduled_guest_message' AND subject_id IN (
         SELECT m.id FROM scheduled_guest_messages m JOIN conversations c ON c.booking_id = m.booking_id AND c.kind = 'booking'
-         WHERE c.id = ? AND EXISTS (
+         WHERE c.id = ${scope.query} AND EXISTS (
           SELECT 1 FROM messages reply WHERE reply.conversation_id = c.id AND ${successfulBusinessReplySql('reply')} AND reply.occurred_at > m.updated_at))`,
-    params: [now, now, conversationId],
+    params: [now, now, ...(scope.params ?? [])],
   }]
 }
 

@@ -268,7 +268,7 @@ test('listing messaging grants and verified trip invites use the live conversati
     const sheet = page.getByRole('dialog', { name: 'In this conversation', exact: true })
     await sheet.getByRole('button', { name: `Remove ${findE2eAuthFixture(travelerId).name}`, exact: true }).click()
     const removal = page.waitForResponse(response => response.request().method() === 'DELETE' && new URL(response.url()).pathname === participant)
-    await sheet.getByRole('button', { name: 'Remove guest', exact: true }).click()
+    await sheet.getByRole('button', { name: 'Remove', exact: true }).click()
     const removed = await removal
     await expectStatus(removed, 200)
     expect(await removed.json()).toEqual({ removed: true })
@@ -580,7 +580,10 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const stayPath = api(`bookings/${stay.booking_id}`)
     const memberStay = await memberContext.request.get(stayPath)
     await expectStatus(memberStay, 200)
-    expect(await memberStay.json()).toEqual({ booking: { ...turnoverFields, booking_id: stay.booking_id, unit: 'nights' }, manage: false })
+    expect(await memberStay.json()).toEqual({
+      booking: { ...turnoverFields, booking_id: stay.booking_id, unit: 'nights' }, manage: false,
+      home: { name: 'Cliff Cabin', internal_name: 'Cliff Cabin', check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', check_in_method: null, check_in_instructions: null, image_url: null },
+    })
     const memberList = await memberContext.request.get(api(`bookings?unit=nights&from=${localDay(0)}&to=${localDay(3)}`))
     await expectStatus(memberList, 200)
     expect(await memberList.json()).toEqual({ bookings: [{ ...turnoverFields, booking_id: stay.booking_id, unit: 'nights', name: 'Cliff Cabin' }], manage: false })
@@ -684,7 +687,8 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const hosted = await memberContext.request.post(api('team/threads'), { data: { member_user_ids: ['user-e2e-lodging-host'], booking_id: stay.booking_id } })
     await expectStatus(hosted, 200)
     expect((await hosted.json() as { conversation_id: string }).conversation_id).toBe(jobThreadId)
-    expect(await teamThread(jobThreadId)).toMatchObject({ name: 'Cliff Cabin', booking_id: stay.booking_id })
+    expect(await teamThread(jobThreadId)).toMatchObject({ name: null, booking_id: stay.booking_id })
+    expect((await teamRows()).find(row => row.id === jobThreadId)).toMatchObject({ title: 'Cliff Cabin' })
     await expect.poll(async () => {
       const read = await memberContext.request.get(`/api/messages/${jobThreadId}`)
       await expectStatus(read, 200)
