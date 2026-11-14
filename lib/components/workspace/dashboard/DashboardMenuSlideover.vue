@@ -34,16 +34,17 @@
 
 <script setup lang="ts">
 import DashboardMenuContent from './DashboardMenuContent.vue'
+import { dashboardSearchOpenKey } from './dashboardPanelContext'
 
 const open = defineModel<boolean>('open', { default: false })
 
 const route = useRoute()
-const nuxtApp = useNuxtApp()
+const openDashboardSearch = inject(dashboardSearchOpenKey)!
 const { personal } = useDashboardMenu()
 
 function openSearch() {
   open.value = false
-  nuxtApp.hooks.callHook('dashboard:search:toggle')
+  openDashboardSearch()
 }
 
 // DashboardMenuContent renders plain NuxtLinks, so a selection navigates the

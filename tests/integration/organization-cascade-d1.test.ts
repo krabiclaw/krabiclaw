@@ -42,7 +42,7 @@ function tenantGraph(org: string): string[] {
     `INSERT INTO conversations (id,kind,organization_id,location_id,booking_id,user_id,payload_json,last_message_at,created_at) VALUES ('${bookingThread}','booking','${org}','${location}','${org}-booking','${guest}',${payload},'${NOW}','${NOW}')`,
     `INSERT INTO conversations (id,kind,organization_id,location_id,booking_id,user_id,payload_json,last_message_at,created_at) VALUES ('${reservationThread}','booking','${org}','${location}','${org}-reservation','${guest}',${payload},'${NOW}','${NOW}')`,
     `INSERT INTO messages (id,organization_id,conversation_id,sequence,author_kind,author_user_id,channel,body,dedupe_key,occurred_at,created_at) VALUES ('${org}-guest-message','${org}','${bookingThread}',1,'guest','${guest}','web','Hello','${org}-guest-message','${NOW}','${NOW}')`,
-    `INSERT INTO conversation_participants (conversation_id,organization_id,user_id,last_read_message_id,created_at) VALUES ('${bookingThread}','${org}','${guest}','${org}-guest-message','${NOW}')`,
+    `INSERT INTO conversation_participants (conversation_id,organization_id,user_id,role,last_read_message_id,created_at) VALUES ('${bookingThread}','${org}','${guest}','guest','${org}-guest-message','${NOW}')`,
     `INSERT INTO content_documents (id,organization_id,kind,row_role,locale,product_id,title,path,metadata_json) VALUES ('${org}-product-page','${org}','page','root','en','${product}','Class','/class','{"page_type":"custom"}')`,
   ]
 }
@@ -70,7 +70,7 @@ function lodgingGraph(org: string): string[] {
     `INSERT INTO scheduled_guest_messages (id,organization_id,product_id,booking_id,template_id,template_title,template_version,body,due_at,timezone,status,created_at,updated_at)
       VALUES ('${org}-scheduled','${org}','${home}','${stay}','${org}-template','Welcome',1,'Hello','2099-01-05T08:00:00.000Z','Asia/Bangkok','pending','${NOW}','${NOW}')`,
     `INSERT INTO conversations (id,kind,organization_id,booking_id,participants_key,last_message_at,created_at) VALUES ('${thread}','team','${org}','${stay}','${member}','${NOW}','${NOW}')`,
-    `INSERT INTO conversation_participants (conversation_id,organization_id,user_id,created_at) VALUES ('${thread}','${org}','${org}-guest','${NOW}')`,
+    `INSERT INTO conversation_participants (conversation_id,organization_id,user_id,role,created_at) VALUES ('${thread}','${org}','${org}-guest','member','${NOW}')`,
     `INSERT INTO messages (id,organization_id,conversation_id,sequence,author_kind,author_user_id,body,dedupe_key,occurred_at,created_at) VALUES ('${org}-team-message','${org}','${thread}',1,'member','${org}-guest','Cleaned','team:${thread}:k','${NOW}','${NOW}')`,
   ]
 }

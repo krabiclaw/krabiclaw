@@ -2,7 +2,7 @@
   <DashboardLeafPanel id="team-conversation-members" title="Members" lead="People added to this conversation can read its history. Removing someone ends their access and keeps their messages." :footer="false" :error="actionError || (error || membersError ? getErrorMessage(error || membersError, 'Conversation members could not be loaded') : !thread ? 'This conversation is not available to your membership' : '')">
     <template v-if="thread">
       <div class="divide-y divide-default">
-        <div v-for="person in thread.participants" :key="person.id" class="flex items-center gap-3 py-4">
+        <div v-for="person in thread.participants" :key="person.id ?? person.name" class="flex items-center gap-3 py-4">
           <UAvatar :src="person.image ?? undefined" :alt="person.name" />
           <span class="min-w-0 flex-1 text-highlighted">{{ person.name }}{{ person.id === userId ? ' (you)' : '' }}</span>
           <UButton v-if="thread.can_manage && person.id !== userId" icon="i-lucide-user-minus" :aria-label="`Remove ${person.name}`" color="error" variant="ghost" :disabled="saving" @click="removing = person" />
@@ -30,7 +30,7 @@
 import { authClient } from '~/lib/auth-client'
 import { isTeamMembersResponse, useTeamGroup } from '~/lib/components/workspace/messages/team-thread-client'
 import { getErrorMessage } from '~/utils/errors'
-import type { TeamParticipant } from '~/server/domain/team-messages'
+import type { ConversationParticipant } from '~/shared/messages-contract'
 definePageMeta({ layout: 'dashboard', tab: 'messages' })
 const { thread, error, operate } = await useTeamGroup()
 const api = useDashboardApi()
@@ -40,7 +40,7 @@ const userId = computed(() => session.value.data?.user.id)
 const { data: members, error: membersError } = await useAsyncData(`team-members:${dashboard.organizationId.value}`, () => api('/api/dashboard/team/members', { validate: isTeamMembersResponse }))
 const available = computed(() => members.value?.members.filter(person => !thread.value?.participants.some(participant => participant.id === person.id)) ?? [])
 const selected = ref<string[]>([])
-const removing = ref<TeamParticipant | null>(null)
+const removing = ref<ConversationParticipant | null>(null)
 const saving = ref(false)
 const actionError = ref('')
 function toggle(id: string, checked: boolean) { selected.value = checked ? [...new Set([...selected.value, id])] : selected.value.filter(userId => userId !== id) }
@@ -53,7 +53,7 @@ async function add() {
   finally { saving.value = false }
 }
 async function remove() {
-  if (saving.value || !removing.value || !thread.value?.can_manage) return
+  if (saving.value || !removing.value?.id || !thread.value?.can_manage) return
   saving.value = true
   actionError.value = ''
   try { await operate({ action: 'remove', user_id: removing.value.id }); removing.value = null }

@@ -1,6 +1,6 @@
 import type { DbClient } from '~/server/db'
 import { HTTPError, type H3Event } from 'nitro'
-import { getInboxThread, getInboxThreadDetails } from '~/server/domain/guest-threads/inbox'
+import { getInboxThreadDetails } from '~/server/domain/guest-threads/inbox'
 import { countUnreadConversations, listConversations } from '~/server/domain/guest-threads/repository'
 import type {
   GuestThreadSubmissionType,
@@ -10,13 +10,15 @@ import type {
   InboxUnreadCounts,
 } from '~/server/domain/guest-threads/types'
 import type { GuestThreadMailbox } from '~/server/domain/guest-threads/mailbox'
-import { requireOrganizationMembership } from '~/server/utils/location-access'
-import { memberAccessPrincipal, type MemberAccessPrincipal } from '~/server/utils/member-access'
-import { assertConversationAccess, assertGuestOperations, type ConversationRow } from '~/server/domain/conversations'
+import { requireOrganizationPrincipal } from '~/server/utils/location-access'
+import type { MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assertConversationAccess, type ConversationRow } from '~/server/domain/conversations'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { messageListPage } from '~/server/domain/guest-message-schedule'
 
 export interface DashboardGuestThreadListQuery {
+  conversationIds?: string[]
+  includeSortKey?: boolean
   limit?: number
   offset?: number
   locationId?: string | null
@@ -57,12 +59,19 @@ export function parseGuestThreadListQuery(query: Record<string, unknown>): Dashb
     if (typeof value === 'string' && value.trim()) return value.trim()
     throw invalid(key, `${key} must be a non-empty string`)
   }
+  const ids = id('ids')?.split(',')
+  if (ids && (ids.length > 100 || ids.some(value => !value || value.length > 200) || query.offset !== undefined)) {
+    throw invalid('ids', 'ids must name up to 100 conversations without an offset')
+  }
+  const includeSortKey = filter('sort_key', ['1'])
   const unread = filter('unread', ['1', 'true', '0', 'false'])
   const q = id('q')
   if (q !== null && q.length > 200) throw invalid('q', 'q must be at most 200 characters')
   // The menu's kinds: All is no filter.
   const kind = filter('kind', ['all', 'guests', 'support', 'team'])
   return {
+    ...ids && { conversationIds: ids },
+    ...includeSortKey && { includeSortKey: true },
     limit: query.limit === undefined ? 100 : Number(query.limit),
     offset: query.offset === undefined ? 0 : Number(query.offset),
     locationId: id('location_id'),
@@ -76,7 +85,7 @@ export function parseGuestThreadListQuery(query: Record<string, unknown>): Dashb
 
 // `org` is the dashboard's route scope, not a filter, and is read elsewhere.
 const GUEST_THREAD_LIST_PARAMS = new Set([
-  'location_id', 'type', 'kind', 'q', 'unread', 'mailbox', 'org', 'limit', 'offset',
+  'location_id', 'type', 'kind', 'q', 'unread', 'mailbox', 'org', 'limit', 'offset', 'ids', 'sort_key',
 ])
 
 /** The extra row proves whether another page exists; no total is inferred. */
@@ -88,6 +97,8 @@ export function guestThreadListPage(rows: InboxRow[], query: Pick<DashboardGuest
 /** The list response the dashboard and the app read, with its unread counts; the contract fixtures in contracts/inbox are generated from it. */
 export async function memberInbox(db: DbClient, organizationId: string, principal: MemberAccessPrincipal, query: DashboardGuestThreadListQuery): Promise<InboxListPage & { unread: InboxUnreadCounts }> {
   const options = {
+    conversationIds: query.conversationIds,
+    includeSortKey: query.includeSortKey,
     limit: (query.limit ?? 100) + 1,
     offset: query.offset ?? 0,
     locationId: query.locationId ?? null,
@@ -108,36 +119,24 @@ export async function memberInbox(db: DbClient, organizationId: string, principa
 
 /** Every conversation the member sees, of every kind: what their role and their seats let them read. */
 export async function loadOrganizationConversations(event: H3Event, organizationId: string, query: DashboardGuestThreadListQuery) {
-  const { db, env, organization } = await requireOrganizationMembership(event, organizationId)
-  return memberInbox(db, organizationId, memberAccessPrincipal(organization.membership, { env, event }), query)
+  const { db, principal } = await requireOrganizationPrincipal(event, organizationId)
+  return memberInbox(db, organizationId, principal, query)
+}
+
+/** The workspace Messages badge counts exactly the same Current conversations as the list. */
+export async function loadOrganizationConversationUnread(event: H3Event, organizationId: string) {
+  const { db, principal } = await requireOrganizationPrincipal(event, organizationId)
+  return countUnreadConversations(db, organizationId, { principal, userId: principal.userId })
 }
 
 /** One conversation the member may read, by the one access statement. */
-export async function memberConversation(event: H3Event, organizationId: string, conversationId: string): Promise<{ db: DbClient; env: CloudflareEnv; principal: MemberAccessPrincipal; conversation: ConversationRow }> {
-  const { db, env, organization } = await requireOrganizationMembership(event, organizationId)
-  const principal = memberAccessPrincipal(organization.membership, { env, event })
-  return { db, env, principal, conversation: await assertConversationAccess(db, principal, conversationId) }
+export async function memberConversation(event: H3Event, organizationId: string, conversationId: string, guestOnly = false): Promise<{ db: DbClient; env: CloudflareEnv; principal: MemberAccessPrincipal; conversation: ConversationRow }> {
+  const { db, env, principal } = await requireOrganizationPrincipal(event, organizationId)
+  return { db, env, principal, conversation: await assertConversationAccess(db, principal, conversationId, guestOnly) }
 }
 
-/** One guest conversation for a member, read as the viewer. */
-async function memberThread(event: H3Event, organizationId: string, threadId: string) {
-  const { db, principal, conversation } = await memberConversation(event, organizationId, threadId)
-  await assertGuestOperations(principal)
-  if (conversation.kind === 'team') throw new HTTPError({ statusCode: 404, statusMessage: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
-  return { db, conversation, principal }
-}
-
-/** The conversation as the member reads it. Reading it never writes: the client reads it through with POST …/read. */
-export async function loadDashboardGuestThread(event: H3Event, organizationId: string, threadId: string) {
-  const { db, conversation, principal } = await memberThread(event, organizationId, threadId)
-  const view = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal, conversation })
-  if (!view) throw new HTTPError({ statusCode: 404, statusMessage: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
-  return { thread: view }
-}
-
-/** "In this conversation": its people, gallery and actions. */
 export async function loadDashboardGuestThreadDetails(event: H3Event, organizationId: string, threadId: string) {
-  const { db, conversation, principal } = await memberThread(event, organizationId, threadId)
+  const { db, conversation, principal } = await memberConversation(event, organizationId, threadId, true)
   const details = await getInboxThreadDetails(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal, conversation })
   if (!details) throw new HTTPError({ statusCode: 404, statusMessage: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
   return details

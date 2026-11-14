@@ -7,7 +7,7 @@ import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTables } from './helpers/tables'
 import type { Product, PublicProduct } from '../../server/types/products'
-import type { InboxThread } from '../../server/domain/guest-threads/types'
+import type { ConversationPage } from '../../shared/messages-contract'
 import type { TaskSection } from '../../server/domain/tasks'
 
 type DeliveryRow = { conversation_id: string; channel: 'email' | 'whatsapp'; purpose: string; status: string }
@@ -300,18 +300,11 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect(persisted.status(), await persisted.text()).toBe(200)
     const persistedBooking = (await persisted.json()).booking as { guest_name: string; guest_phone: string | null; booking_date: string }
     expect(persistedBooking).toMatchObject({ guest_name: 'Cancel Once', guest_phone: null })
-    const threadURL = `${baseURL}/api/dashboard/organizations/${wheel.organizationId}/guest-threads/${body.conversation_id}`
+    const threadURL = `${baseURL}/api/messages/${body.conversation_id}`
     const pendingThread = await request.get(threadURL)
     expect(pendingThread.status(), await pendingThread.text()).toBe(200)
-    expect((await pendingThread.json() as { thread: InboxThread }).thread).toMatchObject({ id: body.conversation_id, title: 'Cancel Once', record_kind: 'booking' })
-    // Whether a reply is owed is the ledger's, which MCP reads out; the inbox view keeps it on the server.
-    const conversationLedger = async () => {
-      const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: wheel.organizationId, conversation_id: body.conversation_id } })
-      expect(response.status()).toBe(200)
-      return mcpData<{ guest: { needs_reply: boolean; operational_record: { status: string } | null; messages: Array<{ id: string; event: string | null }> } }>(await response.json()).guest
-    }
-    // The booking carries no question from the guest: no reply is owed, and Today holds no reply task for it.
-    expect((await conversationLedger()).needs_reply).toBe(false)
+    expect((await pendingThread.json() as ConversationPage).conversation).toMatchObject({ id: body.conversation_id, title: 'Cancel Once', record_kind: 'booking' })
+    // The booking carries no question from the guest, so Today holds no reply task for it.
     const todayBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(todayBefore.status(), await todayBefore.text()).toBe(200)
     const todayBeforePayload = await todayBefore.json() as { tasks: TaskSection[] }
@@ -339,13 +332,9 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect(await replay.json()).toEqual({ success: true, kind: 'booking' })
     const cancelledThread = await request.get(threadURL)
     expect(cancelledThread.status(), await cancelledThread.text()).toBe(200)
-    const thread = (await cancelledThread.json() as { thread: InboxThread }).thread
-    // A cancel and its replay are one cancellation: one ledger entry, said once in the conversation.
-    const cancelledLedger = await conversationLedger()
-    expect(cancelledLedger).toMatchObject({ needs_reply: false, operational_record: { status: 'cancelled' } })
-    const cancelEntries = cancelledLedger.messages.filter(entry => entry.event === 'booking.cancel')
-    expect(cancelEntries).toHaveLength(1)
-    expect(thread.stream.filter(item => item.type === 'event' && item.id === cancelEntries[0]!.id)).toMatchObject([{ text: expect.stringMatching(/ canceled the booking$/) }])
+    // A cancellation and its replay are one visible event.
+    const { entries } = await cancelledThread.json() as ConversationPage
+    expect(entries.filter(entry => entry.type === 'event' && / canceled the booking$/.test(entry.text))).toHaveLength(1)
     const todayAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(todayAfter.status(), await todayAfter.text()).toBe(200)
     const todayAfterPayload = await todayAfter.json() as { tasks: TaskSection[] }

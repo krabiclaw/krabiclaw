@@ -2,10 +2,11 @@ import { DurableObject } from 'cloudflare:workers'
 import { HTTPError } from 'nitro'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../../shared/dashboard-invalidations'
 import { queryFirst } from '~/server/db'
-import { assignedMemberSql, memberAccessPrincipal, resolveOrganizationMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
-import { assertConversationAccess } from '~/server/domain/conversations'
+import { assignedMemberSql, memberAccessPrincipal, resolveMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
+import { assertConversationAccess, guestVisibleSql, participantGuard, resolveConversationAccess, type ParticipantRole } from '~/server/domain/conversations'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { runOrganizationJobs } from '~/server/domain/cleaner-jobs'
+import { SCHEDULED_AUTHOR_HEADER } from '~/server/cloudflare/guest-inbox-events'
 
 type GuestInboxHubEnv = CloudflareEnv
 
@@ -17,6 +18,7 @@ interface InboxSocketAttachment {
   sessionId: string
   /** Better Auth's opaque session credential, private across hibernation. */
   sessionToken: string
+  scope?: { conversationId: string; role: ParticipantRole }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -29,22 +31,21 @@ function isSocketAttachment(value: unknown): value is InboxSocketAttachment {
     && typeof value.userId === 'string'
     && typeof value.sessionId === 'string'
     && typeof value.sessionToken === 'string' && Boolean(value.sessionToken)
+    && (value.scope === undefined || (isRecord(value.scope) && typeof value.scope.conversationId === 'string'
+      && (value.scope.role === 'guest' || value.scope.role === 'member')))
 }
 
 function failure(status: number, code: string, message: string, field: string): Response {
   return Response.json({ error: message, code, field }, { status })
 }
 
-async function socketMembership(env: GuestInboxHubEnv, attachment: InboxSocketAttachment) {
+async function socketSession(env: GuestInboxHubEnv, attachment: InboxSocketAttachment) {
   const headers = new Headers({ authorization: `Bearer ${attachment.sessionToken}` })
   // The open socket must not extend a revoked or expired session through the
   // browser's cookie cache. Better Auth remains the session authority.
   const session = await createAuth(env).api.getSession({ headers, query: { disableCookieCache: true, disableRefresh: true } })
   if (!session || session.user.id !== attachment.userId || session.session.id !== attachment.sessionId) return null
-  const membership = await resolveOrganizationMembership(env, { organizationId: attachment.organizationId, userId: session.user.id })
-  if (!membership || (!await roleAllows({ ...membership, permissions: { operations: ['read'] } })
-    && !await roleAllows({ ...membership, permissions: { operations: ['assigned'] } }))) return null
-  return membership
+  return session
 }
 
 async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachment, membership: ResolvedMembership, event: DashboardInvalidation): Promise<boolean> {
@@ -53,15 +54,14 @@ async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachme
   // learn to re-read too, even though resource events no longer reach them.
   if (event.type === 'access.changed' || event.type === 'business.changed') return true
   // A read position or archive moved: the reader's own apps alone.
-  if (event.type === 'MESSAGE_ACK') return event.user_id === attachment.userId
+  if (event.type === 'MESSAGE_ACK') return true
   if (event.type === 'CONVERSATION_LEAVE') {
-    if (event.user_id !== attachment.userId) return false
     // An old keyed retry must not evict someone who has since been added again.
     return !await queryFirst(env.DB, 'SELECT 1 FROM conversation_participants WHERE organization_id = ? AND conversation_id = ? AND user_id = ?',
       [attachment.organizationId, event.conversation_id, attachment.userId])
   }
   if (event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') {
-    // The one statement of who sees a conversation: a team conversation its participants, a guest one by role or responsibility.
+    // Only current conversation participants can receive its message events.
     try {
       await assertConversationAccess(env.DB, memberAccessPrincipal(membership, { env }), event.conversation_id)
       return true
@@ -109,9 +109,18 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     const auth = createAuth(this.env)
     const session = await auth.api.getSession({ headers: request.headers, query: { disableCookieCache: true, disableRefresh: true } })
     if (!session) return failure(401, 'UNAUTHORIZED', 'Authentication required', 'session')
-    const membership = await resolveOrganizationMembership(this.env, { organizationId, userId: session.user.id })
-    if (!membership || (!await roleAllows({ ...membership, permissions: { operations: ['read'] } })
-      && !await roleAllows({ ...membership, permissions: { operations: ['assigned'] } }))) {
+    const conversationId = request.headers.get('x-krabiclaw-conversation-id')
+    let scope: InboxSocketAttachment['scope']
+    if (conversationId) {
+      try {
+        const { conversation, role } = await resolveConversationAccess(this.env.DB, session.user.id, conversationId)
+        if (conversation.organization_id !== organizationId) return failure(404, 'THREAD_NOT_FOUND', 'Conversation not found', 'conversation_id')
+        scope = { conversationId, role }
+      } catch (error) {
+        if (error instanceof HTTPError && error.status === 404) return failure(404, 'THREAD_NOT_FOUND', 'Conversation not found', 'conversation_id')
+        throw error
+      }
+    } else if (!await resolveMembership(this.env, { organizationId, userId: session.user.id })) {
       return failure(403, 'FORBIDDEN', 'Access denied', 'permissions')
     }
     const pair = new WebSocketPair()
@@ -124,6 +133,7 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
       userId: session.user.id,
       sessionId: session.session.id,
       sessionToken: session.session.token,
+      ...(scope && { scope }),
     } satisfies InboxSocketAttachment)
     return new Response(null, { status: 101, webSocket: client })
   }
@@ -174,6 +184,12 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     if (!organizationId || !isDashboardInvalidation(event) || event.organization_id !== organizationId) {
       return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid dashboard invalidation', 'body')
     }
+    const scheduledAuthor = request.headers.get(SCHEDULED_AUTHOR_HEADER)
+    const scheduleOnly = event.type === 'MESSAGE_UPDATE' && event.scheduled === true
+    const scheduledSend = event.type === 'MESSAGE_CREATE' && !event.team && scheduledAuthor !== null
+    if (scheduleOnly ? scheduledAuthor === null : scheduledAuthor !== null && !scheduledSend) {
+      return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid scheduled message audience', SCHEDULED_AUTHOR_HEADER)
+    }
     // A stay, booking or task write is announced this way (a booking's in its guest conversation); the organization's jobs follow it.
     if (event.type === 'stay.changed' || event.type === 'business.changed' || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.team)) await this.wakeJobs(organizationId)
 
@@ -182,23 +198,58 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     // publication fails with its code so the committed write's caller sees it
     // and the idempotent retry repairs it.
     const encoded = JSON.stringify(event)
+    const scheduledChange = scheduleOnly || scheduledSend
+      ? JSON.stringify({ ...event, type: 'MESSAGE_UPDATE', scheduled: true, message: undefined, location_id: null })
+      : encoded
+    const scheduleTaskChange = scheduleOnly && scheduledAuthor === '' ? JSON.stringify({
+      type: 'business.changed', event_id: event.event_id, organization_id: organizationId, occurred_at: event.occurred_at,
+    } satisfies DashboardInvalidation) : null
     let eligible = 0
     const failures: string[] = []
     for (const socket of this.ctx.getWebSockets()) {
+      if (socket.readyState !== WebSocket.OPEN) continue
       const attachment: unknown = socket.deserializeAttachment()
       if (!isSocketAttachment(attachment)) {
         socket.close(1008, 'Authentication required')
         continue
       }
-      const membership = await socketMembership(this.env, attachment)
-      if (!membership) {
-        socket.close(1008, 'Session or organization access ended')
-        continue
+      if (attachment.organizationId !== organizationId) continue
+      const scope = attachment.scope
+      if (scope && scheduleOnly) continue
+      if (scope && event.type !== 'access.changed' && (!('conversation_id' in event) || event.conversation_id !== scope.conversationId)) continue
+      if ((event.type === 'CONVERSATION_LEAVE' || event.type === 'MESSAGE_ACK') && event.user_id !== attachment.userId) continue
+      const session = await socketSession(this.env, attachment)
+      const membership = session && !scope ? await resolveMembership(this.env, { organizationId, userId: attachment.userId }) : null
+      let eventToSend = encoded
+      let revoke = !session || (!scope && !membership)
+      if (scope && session) {
+        const access = participantGuard('c', attachment.userId, scope.role)
+        const visibleMessage = scope.role === 'guest' && (event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') ? event.message : undefined
+        const visible = visibleMessage ? `EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.id = ? AND ${guestVisibleSql('m', 'c.user_id = ?')})` : '1'
+        const permission = await queryFirst<{ can_see_message: number }>(this.env.DB, `SELECT ${visible} AS can_see_message
+          FROM conversations c WHERE c.id = ? AND c.organization_id = ? AND ${access.sql}`, [
+          ...(visibleMessage ? [visibleMessage.id, attachment.userId] : []), scope.conversationId, organizationId, ...access.params,
+        ])
+        revoke = !permission
+        if (permission && (!permission.can_see_message || event.type === 'access.changed' || event.type === 'CONVERSATION_LEAVE')) continue
+        if (scope.role === 'guest' && (event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE')) eventToSend = JSON.stringify({ ...event, location_id: null })
+      } else if (membership) {
+        if (scheduleOnly || !await canReceive(this.env, attachment, membership, event)) {
+          const seesSchedule = scheduledAuthor === '' ? await roleAllows({ ...membership, permissions: { operations: ['update'] } }) : scheduledAuthor === attachment.userId
+          if (seesSchedule) eventToSend = scheduledChange
+          else if (scheduleTaskChange && await canReceive(this.env, attachment, membership, event)) eventToSend = scheduleTaskChange
+          else continue
+        }
       }
-      if (!await canReceive(this.env, attachment, membership, event)) continue
+      if (socket.readyState !== WebSocket.OPEN) continue
       eligible += 1
       try {
-        socket.send(encoded)
+        if (revoke) {
+          if (scope) socket.send(JSON.stringify({ type: 'CONVERSATION_LEAVE', event_id: event.event_id,
+            organization_id: organizationId, conversation_id: scope.conversationId, user_id: attachment.userId, occurred_at: event.occurred_at }))
+          else if (event.type === 'access.changed') socket.send(encoded)
+          socket.close(1008, 'Session or conversation access ended')
+        } else socket.send(eventToSend)
       } catch (error) {
         failures.push(error instanceof Error ? error.message : String(error))
         socket.close(1011, 'Dashboard update delivery failed')

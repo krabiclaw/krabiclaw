@@ -5,11 +5,13 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
+import { type MemberAccessPrincipal, memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { cancelStay, createStay, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
-import { createTeamThread, getTeamThread, listTeamMessages, sendTeamMessage, teamAccessFor, type TeamAccess } from '../../server/domain/team-messages.ts'
+import { conversationPageFor } from './support/conversation-page.ts'
+import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
+import { createTeamThread, getTeamThread } from '../../server/domain/team-messages.ts'
 import { closeTask, jobKey, taskViewForUser, taskViewer, updateTask, type TaskRow } from '../../server/domain/tasks.ts'
-import { markConversationRead } from '../../server/domain/conversations.ts'
+import { markConversationRead, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { runOrganizationJobs } from '../../server/domain/cleaner-jobs.ts'
 import { claimSessionCapacity } from '../../server/utils/availability.ts'
 import { conversationTaskQueries } from '../../server/domain/guest-threads/repository.ts'
@@ -65,16 +67,15 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
       stay: { location_id: 'cabin-site', check_in_time: '15:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'm-cleaner' },
     } })
     const manager: StayAccess = { organizationId: ORG, actorId: 'owner', manage: true }
-    const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, role, organizationId: ORG } as never, { env })
-    const team = (userId: string, role: string, memberId: string) => teamAccessFor(principal(userId, role), memberId, 'send')
-    const owner = await team('owner', 'owner', 'm-owner')
-    const cleaner = await team('cleaner', 'member', 'm-cleaner')
-    const cook = await team('cook', 'member', 'm-cook')
+    const principal = (userId: string, role: string, memberId = 'm-' + userId) => memberAccessPrincipal({ userId, role, memberId, organizationId: ORG } as never, { env })
+    const owner = principal('owner', 'owner', 'm-owner')
+    const cleaner = principal('cleaner', 'member', 'm-cleaner')
+    const cook = principal('cook', 'member', 'm-cook')
     const taskRow = (key: string) => db.prepare('SELECT * FROM tasks WHERE dedupe_key = ?').bind(key).first<TaskRow>()
     const automatic = (threadId: string) => db.prepare("SELECT json_extract(payload_json, '$.key') AS key, body FROM messages WHERE conversation_id = ? AND author_kind = 'krabiclaw' ORDER BY sequence").bind(threadId).all<{ key: string; body: string }>().then(result => result.results)
     // The caller's team conversations, each as its conversation screen reads it.
-    const teamThreads = async (access: TeamAccess) => Promise.all((await db.prepare(`SELECT c.id FROM conversations c JOIN conversation_participants seat ON seat.conversation_id = c.id
-      WHERE c.organization_id = ? AND c.kind = 'team' AND seat.user_id = ? ORDER BY c.last_message_at DESC, c.id DESC`).bind(ORG, access.userId).all<{ id: string }>()).results.map(row => getTeamThread(env, db, access, row.id)))
+    const teamThreads = async (access: MemberAccessPrincipal) => Promise.all((await db.prepare(`SELECT c.id FROM conversations c JOIN conversation_participants seat ON seat.conversation_id = c.id
+      WHERE c.organization_id = ? AND c.kind = 'team' AND seat.user_id = ? ORDER BY c.last_message_at DESC, c.id DESC`).bind(ORG, access.userId).all<{ id: string }>()).results.map(row => getTeamThread(db, access, row.id)))
 
     // Dee leaves in three days; Lee arrives the same afternoon. The turnover is the cleaner's.
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(1), check_out_date: day(3), adults: 2, guest_name: 'Dee', total_minor: 30_000 })
@@ -96,10 +97,10 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.equal(job!.key, jobKey(turnover))
     assert.match(job!.body, /^Turnover: Cabin\n/)
     assert.match(job!.body, /Checkout 10:00 AM · Dee\nCheck-in 3:00 PM · Lee · 1 guest/)
-    const messages = (await listTeamMessages(db, cleaner, thread.id, {})).messages
+    const messages = (await conversationPageFor(db, cleaner, thread.id)).entries.filter(entry => entry.type === 'message').reverse()
     assert.deepEqual([messages[0]!.automatic, messages[0]!.author_user_id], [true, null])
     // The hosts read along, and it is unread for them too until they do.
-    assert.equal((await getTeamThread(env, db, owner, thread.id)).unread, true)
+    assert.equal((await getTeamThread(db, owner, thread.id)).unread, true)
     // The cleaner's alert is the message itself, sent to the cleaner alone.
     const alerted = (messageId: string) => db.prepare("SELECT COUNT(*) AS n FROM guest_thread_deliveries WHERE message_id = ? AND purpose = 'owner_alert' AND channel = 'email'").bind(messageId).first<number>('n')
     assert.equal(await alerted(messages[0]!.id), 1)
@@ -138,13 +139,13 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     // Done: the cook's note is their own message in the conversation, nobody is alerted, and the strip shows it done.
     const closed = await closeTask(db, await taskViewer(db, principal('cook', 'member')), turnover.id, { status: 'done', note: 'All clean, towels restocked', photos: [], env })
     assert.equal(closed.status, 'done')
-    const cookMessages = (await listTeamMessages(db, cook, cookThreads[0]!.id, {})).messages
+    const cookMessages = (await conversationPageFor(db, cook, cookThreads[0]!.id)).entries.filter(entry => entry.type === 'message').reverse()
     assert.deepEqual([cookMessages[0]!.author_user_id, cookMessages[0]!.automatic, cookMessages[0]!.body, cookMessages[0]!.deliveries], ['cook', false, 'All clean, towels restocked', []])
-    assert.equal((await getTeamThread(env, db, owner, cookThreads[0]!.id)).job?.status, 'done')
+    assert.equal((await getTeamThread(db, owner, cookThreads[0]!.id)).job?.status, 'done')
     // The cook's own message reads the conversation through for them and is unread for the hosts; the cleaner, no longer seated with it, never sees it.
-    assert.equal((await getTeamThread(env, db, owner, cookThreads[0]!.id)).unread, true)
-    assert.equal((await getTeamThread(env, db, cook, cookThreads[0]!.id)).unread, false)
-    await assert.rejects(getTeamThread(env, db, cleaner, cookThreads[0]!.id), { status: 404, data: { code: 'TEAM_THREAD_NOT_FOUND', field: 'conversation_id' } })
+    assert.equal((await getTeamThread(db, owner, cookThreads[0]!.id)).unread, true)
+    assert.equal((await getTeamThread(db, cook, cookThreads[0]!.id)).unread, false)
+    await assert.rejects(getTeamThread(db, cleaner, cookThreads[0]!.id), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
     // The cook, given the job at 13:10, was told today's turnover and the warning then; a closed job is told about no more.
     assert.deepEqual((await automatic(cookThreads[0]!.id)).map(message => message.key), [jobKey(turnover), `reminder:${turnover.id}:morning:${day(3)}`, `warning:${turnover.id}:${turnover.due_at}`])
     await runOrganizationJobs(env, db, ORG, at(day(3), '14:00'))
@@ -175,10 +176,10 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
 
     // A person's own message in a job conversation counts as unread for the others, from where they read.
     await markConversationRead(db, { organizationId: ORG, conversationId: thread.id, userId: 'cleaner' })
-    assert.equal((await getTeamThread(env, db, cleaner, thread.id)).unread, false)
-    await sendTeamMessage(env, db, owner, thread.id, { body: 'Thanks Cleo', photos: [], idempotency_key: 'thanks', senderName: 'Olive Owner' })
-    assert.equal((await getTeamThread(env, db, cleaner, thread.id)).unread, true)
-    assert.equal((await getTeamThread(env, db, owner, thread.id)).unread, false)
+    assert.equal((await getTeamThread(db, cleaner, thread.id)).unread, false)
+    await sendConversationMessage(env, { ...await resolveConversationAccess(db, owner.userId, thread.id), userId: owner.userId, body: 'Thanks Cleo', photos: [], idempotencyKey: 'thanks-cleo', senderName: 'Olive Owner' })
+    assert.equal((await getTeamThread(db, cleaner, thread.id)).unread, true)
+    assert.equal((await getTeamThread(db, owner, thread.id)).unread, false)
   } finally {
     await runtime.dispose()
   }
@@ -230,15 +231,15 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     const run = await runOrganizationJobs(env, db, ORG, morning)
     assert.deepEqual([run.next?.toISOString(), run.failures], [localDateTimeToInstant('2099-10-01', '18:00', 'America/New_York', 'compatible').toISOString(), []])
     await runOrganizationJobs(env, db, ORG, morning)
-    const attorney = await teamAccessFor(memberAccessPrincipal({ userId: 'host', role: 'member', organizationId: ORG } as never, { env }), 'host-member', 'send')
-    const threads = await Promise.all((await db.prepare("SELECT id FROM conversations WHERE kind = 'team' AND booking_id = ?").bind(booking.bookingId).all<{ id: string }>()).results.map(row => getTeamThread(env, db, attorney, row.id)))
+    const attorney = await memberAccessPrincipal({ userId: 'host', role: 'member', memberId: 'host-member', organizationId: ORG } as never, { env })
+    const threads = await Promise.all((await db.prepare("SELECT id FROM conversations WHERE kind = 'team' AND booking_id = ?").bind(booking.bookingId).all<{ id: string }>()).results.map(row => getTeamThread(db, attorney, row.id)))
     assert.deepEqual(threads.map(thread => [thread.name, thread.booking_id, thread.job?.id]), [['Client', booking.bookingId, prep!.id]])
     const posts = (await db.prepare("SELECT body FROM messages WHERE conversation_id = ? AND author_kind = 'krabiclaw'").bind(threads[0]!.id).all<{ body: string }>()).results.map(row => row.body)
     assert.equal(posts.filter(body => body === `Today: prepare for consultation with Client${view.when ? `, ${view.when}` : ''}.`).length, 1)
     assert.equal(posts.filter(body => body.includes('arrive')).length, 0)
 
     // Chatting about it reaches the same conversation; an unknown booking does not.
-    const partner = await teamAccessFor(memberAccessPrincipal({ userId: 'partner', role: 'owner', organizationId: ORG } as never, { env }), 'partner-member', 'send')
+    const partner = await memberAccessPrincipal({ userId: 'partner', role: 'owner', memberId: 'partner-member', organizationId: ORG } as never, { env })
     assert.deepEqual(await createTeamThread(env, db, partner, { member_user_ids: ['host'], booking_id: booking.bookingId }), { id: threads[0]!.id, created: false })
     await assert.rejects(createTeamThread(env, db, partner, { member_user_ids: ['host'], booking_id: 'not-a-booking' }), /booking/iu)
 
@@ -253,9 +254,9 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     assert.deepEqual((await jobs()).map(job => job.status), ['cancelled', 'cancelled'])
     const runJobs = async () => assert.deepEqual((await runOrganizationJobs(env, db, ORG)).failures, [])
     const oldThread = threads[0]!.id
-    const messages = (threadId: string) => listTeamMessages(db, attorney, threadId, { limit: 100 })
+    const messages = async (threadId: string) => (await conversationPageFor(db, attorney, threadId)).entries.filter(entry => entry.type === 'message')
     await runJobs()
-    assert.ok((await messages(oldThread)).messages.some(message => message.body.startsWith('Cancelled: prepare for consultation')))
+    assert.ok((await messages(oldThread)).some(message => message.body?.startsWith('Cancelled: prepare for consultation')))
     await db.prepare("UPDATE bookings SET status = 'confirmed', cancelled_at = NULL WHERE id = ?").bind(booking.bookingId).run()
     await recompute()
     assert.deepEqual((await jobs()).map(job => job.status), ['open', 'open'])
@@ -276,15 +277,15 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     await executeBatch(db, conversationTaskQueries(replacement.id, new Date().toISOString()), { operation: 'Recompute replacement consultation jobs' })
     await runJobs()
     const former = await messages(oldThread)
-    assert.ok(former.messages.some(message => message.body === 'No longer yours: prep for this session.'))
-    assert.ok(former.messages.every(message => !message.body.includes('Replacement')))
+    assert.ok(former.some(message => message.body === 'No longer yours: prep for this session.'))
+    assert.ok(former.every(message => !message.body?.includes('Replacement')))
     const newThread = await db.prepare("SELECT id FROM conversations WHERE kind = 'team' AND booking_id = ?").bind(newBooking.bookingId).first<string>('id')
     assert.ok(newThread)
-    assert.equal((await getTeamThread(env, db, attorney, newThread)).job?.id, prep!.id)
+    assert.equal((await getTeamThread(db, attorney, newThread)).job?.id, prep!.id)
     const viewer = await taskViewer(db, memberAccessPrincipal({ userId: 'host', role: 'member', organizationId: ORG } as never, { env }))
     const outcome = 'Private completion note for the current client'
     assert.equal((await closeTask(db, viewer, prep!.id, { status: 'done', note: outcome, photos: [], env })).status, 'done')
-    assert.ok((await messages(newThread)).messages.some(message => message.body === outcome))
-    assert.ok((await messages(oldThread)).messages.every(message => message.body !== outcome))
+    assert.ok((await messages(newThread)).some(message => message.body === outcome))
+    assert.ok((await messages(oldThread)).every(message => message.body !== outcome))
   } finally { await runtime.dispose() }
 })

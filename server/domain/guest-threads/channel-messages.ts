@@ -1,13 +1,14 @@
+import { initialConversationParticipants, initialListingParticipants, reconcileGuestListingParticipants } from '~/server/domain/conversation-participants'
 import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { publishConversationEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { ChannexError, type ChannexEnv } from '~/server/integrations/channex/client'
 import { landBookingRevision, pendingBookingRevisions } from '~/server/integrations/channex/booking-revisions'
 import { getChannexThread, listChannexMessages, listChannexThreads, sendChannexMessage, type ChannexMessage, type ChannexMessageThread } from '~/server/integrations/channex/messages'
-import { MEMBER_REPLY_EVENT, MIRRORED_EVENT, MessageDedupeConflictError, SCHEDULED_MESSAGE_EVENT, appendMessage, findMessageByDedupeKey, getMessage, messageQueries, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
+import { MIRRORED_EVENT, MessageDedupeConflictError, SCHEDULED_MESSAGE_EVENT, appendMessage, assertMessageWriteAccess, findMessageByDedupeKey, getMessage, parseMessagePayload, type ConversationGuard, type MessageRow } from '~/server/domain/conversations'
 import { getDeliveryById, getDeliveryByProviderMessageId, isDeliverySent, recordDeliveryOutcome } from './deliveries'
 import { conversationTaskQueries, reconcileConversationTasks } from './repository'
-import { assertMessagePhotos, attachGuestPhotos, discardMessagePhotos, isMessagePhoto, listMessagePhotos, messagePhotoPlacements, sortGuestFiles, uploadMessagePhotos, type MessagePhoto } from './attachments'
+import { assertMessagePhotos, attachGuestPhotos, isMessagePhoto, listMessagePhotos, sortGuestFiles, type MessagePhoto } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { getMediaAsset, readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
@@ -17,6 +18,7 @@ import { isAirbnbSupportMessage, notifyGuestThreadReply, notifyAirbnbInquiry } f
 import { readAirbnbInquiry } from '~/server/integrations/channex/live-feed'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
+import type { GuestThreadDeliveryRow } from './types'
 import type { StayChannel } from '~/shared/bookings'
 
 type ChannelEnv = ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv & UploadResolvedMediaInput['env']
@@ -99,16 +101,25 @@ export async function joinBookingConversationQueries(db: DbClient, input: { orga
   return [
     // The inquiry's messages are as read, and it has no booking of its own, or the batch fails here.
     { query: `SELECT CASE WHEN (SELECT COALESCE(MAX(sequence), 0) FROM messages WHERE conversation_id = ?) = ? AND (SELECT booking_id FROM conversations WHERE id = ?) IS NULL THEN NULL ELSE json('CHANNEL_CONVERSATION_CHANGED') END`, params: [input.into, last.sequence, input.into] },
+    { query: `DELETE FROM conversation_participants WHERE conversation_id = ? AND role = 'guest'
+        AND user_id = (SELECT c.user_id FROM conversations c WHERE c.id = conversation_participants.conversation_id)
+        AND user_id IS NOT (SELECT c.user_id FROM conversations c WHERE c.id = ?) AND ${owned}`,
+      params: [input.into, input.from, ...ownedParams] },
     { query: `UPDATE conversations SET user_id = (SELECT user_id FROM conversations WHERE id = ?),
         location_id = (SELECT location_id FROM conversations WHERE id = ?),
         last_message_at = max(last_message_at, (SELECT last_message_at FROM conversations WHERE id = ?)),
         payload_json = json_set(payload_json, '$.guest', json((SELECT json_extract(payload_json, '$.guest') FROM conversations WHERE id = ?)))
         WHERE id = ? AND organization_id = ? AND ${owned}`, params: [input.from, input.from, input.from, input.from, input.into, input.organizationId, ...ownedParams] },
     { query: `UPDATE messages SET conversation_id = ?, sequence = sequence + ? WHERE conversation_id = ? AND ${owned}`, params: [input.into, last.sequence, input.from, ...ownedParams] },
-    { query: `INSERT OR IGNORE INTO conversation_participants (conversation_id, organization_id, user_id, last_read_message_id, archived_at, created_at)
-        SELECT ?, organization_id, user_id, last_read_message_id, archived_at, created_at FROM conversation_participants WHERE conversation_id = ? AND ${owned}`, params: [input.into, input.from, ...ownedParams] },
+    { query: `INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role, host_listing_id, last_read_message_id, archived_at, created_at)
+        SELECT ?, organization_id, user_id, role, host_listing_id, last_read_message_id, archived_at, created_at
+        FROM conversation_participants WHERE conversation_id = ? AND ${owned}
+        ON CONFLICT(conversation_id,user_id) DO UPDATE SET role=excluded.role, host_listing_id=excluded.host_listing_id,
+          last_read_message_id=excluded.last_read_message_id, archived_at=excluded.archived_at
+        WHERE (excluded.role IS NOT NULL AND conversation_participants.role IS NULL)
+          OR (excluded.role='guest' AND conversation_participants.role='member')`, params: [input.into, input.from, ...ownedParams] },
     { query: `DELETE FROM conversation_participants WHERE conversation_id = ? AND ${owned}`, params: [input.from, ...ownedParams] },
-    ...['scheduled_guest_messages', 'content_reports', 'payment_checkout_holds'].map(table => ({
+    ...['scheduled_guest_messages', 'content_reports', 'payment_checkout_holds', 'conversation_guest_invites'].map(table => ({
       query: `UPDATE ${table} SET conversation_id = ? WHERE conversation_id = ? AND ${owned}`, params: [input.into, input.from, ...ownedParams],
     })),
     { query: `UPDATE google_calendar_event_links SET request_id = ? WHERE request_id = ? AND ${owned}`, params: [input.into, input.from, ...ownedParams] },
@@ -117,6 +128,7 @@ export async function joinBookingConversationQueries(db: DbClient, input: { orga
     // The booking is the inquiry's conversation's: unlinked from its own, then linked, then its own is gone.
     { query: "UPDATE conversations SET booking_id = NULL WHERE id = ? AND organization_id = ? AND booking_id = ? AND kind = 'booking'", params: [input.from, input.organizationId, input.bookingId] },
     { query: 'UPDATE conversations SET booking_id = ? WHERE id = ? AND organization_id = ? AND booking_id IS NULL AND changes() = 1', params: [input.bookingId, input.into, input.organizationId] },
+    ...reconcileGuestListingParticipants(input.organizationId, { query: 'c.id = ? AND c.booking_id = ?', params: [input.into, input.bookingId] }),
     { query: 'DELETE FROM conversations WHERE id = ? AND organization_id = ? AND booking_id IS NULL AND NOT EXISTS (SELECT 1 FROM messages WHERE conversation_id = ?)', params: [input.from, input.organizationId, input.from] },
   ]
 }
@@ -160,7 +172,7 @@ async function adoptThread(db: DbClient, env: ChannelEnv, home: HomeMapping, thr
       WHERE NOT EXISTS (SELECT 1 FROM conversations WHERE id = ?)
         AND NOT EXISTS (SELECT 1 FROM channel_threads WHERE provider = 'channex' AND external_thread_id = ?)`,
     params: [requestId, home.organization_id, home.location_id, JSON.stringify({ participant: { kind: 'channel', title: thread.title }, guest: { name: null, email: null, phone: null }, ip_hash: null, cancellation: { token_hash: null, expires_at: null, used_at: null } }), now, now, requestId, thread.id],
-  }, {
+  }, initialConversationParticipants(requestId, home.organization_id), {
     query: `INSERT INTO channel_threads (provider, external_thread_id, organization_id, product_id, conversation_id, external_booking_id, provider_updated_at, created_at, updated_at)
       SELECT 'channex', ?, ?, ?, r.id, ?, ?, ?, ? FROM conversations r WHERE r.id = ? AND r.organization_id = ? AND r.kind = 'booking'
         AND (CASE WHEN r.booking_id IS NULL THEN r.location_id = ?
@@ -176,7 +188,7 @@ async function adoptThread(db: DbClient, env: ChannelEnv, home: HomeMapping, thr
       WHERE id = ? AND organization_id = ? AND (json_type(payload_json, '$.participant') IS NULL OR json_extract(payload_json, '$.participant.kind') = 'channel')
         AND EXISTS (SELECT 1 FROM channel_threads WHERE provider = 'channex' AND external_thread_id = ? AND conversation_id = conversations.id)`,
     params: [thread.title, requestId, home.organization_id, thread.id],
-  }], { operation: 'Adopt channel guest conversation' })
+  }, initialListingParticipants(home.organization_id, requestId)], { operation: 'Adopt channel guest conversation' })
   const saved = await queryFirst<ChannelThreadMapping>(db, "SELECT * FROM channel_threads WHERE provider = 'channex' AND external_thread_id = ?", [thread.id])
   if (!saved || saved.organization_id !== home.organization_id || saved.product_id !== home.product_id) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The channel conversation could not be associated atomically', 'conversation_id')
   if (stay) {
@@ -394,40 +406,26 @@ export async function backfillChannexMessages(db: DbClient, env: ChannelEnv, pro
 }
 
 /** Channel replies use the same canonical ledger, photo owner and delivery receipts as every inbox reply. */
-export type ChannelReplyOutcome = { ok: true } | {
+export type ChannelReplyOutcome = { ok: true; message: MessageRow } | {
   ok: false; status: 409 | 502; code: 'CHANNEL_REPLY_FAILED'; field: 'delivery.status'; message: string
   mutation_applied: true; operation_completed: false; request_id: string; retry_with_same_idempotency_key: true
   provider_error?: ChannexError['data']
 }
 
-export function assertReplyIntent(entry: MessageRow, body: string, requestHash: string, eventName: string): void {
-  if (entry.event_name !== eventName) fail(409, 'IDEMPOTENCY_CONFLICT', 'The reply key was already used for a different message', 'idempotencyKey')
-  const payload = parseMessagePayload(entry)
-  if (typeof payload.request_hash !== 'string') fail(500, 'CHANNEL_REPLY_INTENT_INVALID', 'The channel reply intent has no recorded request hash', 'payload.request_hash')
-  if (entry.body !== body || payload.request_hash !== requestHash) fail(409, 'IDEMPOTENCY_CONFLICT', 'The reply key was already used for different content', 'idempotencyKey')
-}
-
 export async function replyThroughChannex(db: DbClient, env: ChannexEnv & UploadResolvedMediaInput['env'] & { MEDIA_BUCKET?: R2Bucket }, input: {
-  mapping: ChannelThreadMapping; body: string; actorUserId: string | null; idempotencyKey: string; requestHash: string
-  photoCount: number; resolvePhotos: () => Promise<MessagePhoto[]>
+  mapping: ChannelThreadMapping; body: string; guard: ConversationGuard
+  /** Register a new send only after Channex validates the conversation mapping. */
+  commit: () => Promise<MessageRow>
+  receipt: GuestThreadDeliveryRow | null
+  deliveryId: string
+  photoCount: number
 }): Promise<ChannelReplyOutcome> {
-  const eventName = input.actorUserId === null ? SCHEDULED_MESSAGE_EVENT : MEMBER_REPLY_EVENT
-  const purpose = input.actorUserId === null ? 'scheduled_message' : 'member_reply'
-  if (!input.body.trim() && !input.photoCount) fail(400, 'EMPTY_MESSAGE', 'Write a message or choose a photo before sending it', 'body')
-  if (input.photoCount > 1 || (input.photoCount && input.body.trim())) fail(400, 'CHANNEL_PHOTO_MESSAGE_INVALID', 'Send one Airbnb photo at a time, separately from text', 'photos')
-  const key = `guest-thread-operation:${input.mapping.conversation_id}:${input.idempotencyKey}`
-  const deliveryId = `guest-thread-channex:${input.mapping.conversation_id}:${input.idempotencyKey}`
-  const requestHash = input.requestHash
-  let entry = await findMessageByDedupeKey(db, key)
-  if (entry) {
-    assertReplyIntent(entry, input.body, requestHash, eventName)
-    const receipt = await getDeliveryById(db, deliveryId)
-    if (!receipt || receipt.message_id !== entry.id) fail(500, 'CHANNEL_RECEIPT_INVALID', 'The reply has no matching delivery receipt', 'delivery')
-    if (isDeliverySent(receipt)) {
-      if (!receipt.provider_message_id?.trim()) fail(500, 'CHANNEL_RECEIPT_INVALID', 'A successful channel reply has no provider message ID', 'delivery.provider_message_id')
-      await reconcileConversationTasks(db, input.mapping.conversation_id)
-      return { ok: true }
-    }
+  const { deliveryId } = input
+  if (input.receipt && isDeliverySent(input.receipt)) {
+    const entry = await input.commit()
+    if (!input.receipt.provider_message_id?.trim()) fail(500, 'CHANNEL_RECEIPT_INVALID', 'A successful channel reply has no provider message ID', 'delivery.provider_message_id')
+    await reconcileConversationTasks(db, input.mapping.conversation_id)
+    return { ok: true, message: entry }
   }
   // Whether the home may still be written to is the caller's (guestReplyDestination);
   // proven accepted replays above remain safe even after it is disconnected.
@@ -437,43 +435,13 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
   if (!home) throw new Error(`Channel thread ${input.mapping.conversation_id} names a home with no Channex mapping`)
   const current = await getChannexThread(env, input.mapping.external_thread_id)
   if (current.propertyId !== home.property_id || (current.channelId !== null && current.channelId !== home.channel_id)) fail(502, 'INVALID_PROVIDER_RESPONSE', 'The provider conversation is outside its local property mapping', 'relationships.property')
-  if (!entry) {
-    const photos = await input.resolvePhotos()
-    if (photos.length !== input.photoCount) throw new Error('Resolved reply photos do not match their declared sources')
-    const id = crypto.randomUUID(), now = new Date().toISOString()
-    const assetIds = input.actorUserId === null ? [] : await uploadMessagePhotos(db, env, input.mapping.organization_id, photos, { source: 'uploaded', userId: input.actorUserId })
-    try {
-      await executeBatch(db, [...messageQueries({ id, conversationId: input.mapping.conversation_id, authorKind: input.actorUserId === null ? 'krabiclaw' : 'member', authorUserId: input.actorUserId,
-        channel: 'airbnb', body: input.body, eventName, payload: { request_hash: requestHash }, dedupeKey: key, occurredAt: now,
-        guard: { sql: 'c.organization_id = ?', params: [input.mapping.organization_id] } }).queries, {
-        query: `INSERT INTO guest_thread_deliveries (id, message_id, channel, provider, purpose, status, created_at, updated_at)
-          SELECT ?, id, 'airbnb', 'channex', ?, 'pending', ?, ? FROM messages WHERE dedupe_key = ? AND conversation_id = ?
-          ON CONFLICT(id) DO NOTHING`,
-        params: [deliveryId, purpose, now, now, key, input.mapping.conversation_id],
-      }, ...messagePhotoPlacements(input.mapping.organization_id, 'message', id, assetIds, now)], { operation: 'Record channel reply intent' })
-    } catch (error) {
-      let concurrent: MessageRow | null
-      try {
-        concurrent = await findMessageByDedupeKey(db, key)
-      } catch (readError) {
-        throw new AggregateError([error, readError], 'The channel reply commit could not be read; its photos have been retained', { cause: readError })
-      }
-      if (concurrent?.id !== id) await discardMessagePhotos(db, env, input.mapping.organization_id, assetIds.splice(0), input.actorUserId, error)
-      if (!concurrent) throw error
-      assertReplyIntent(concurrent, input.body, requestHash, eventName)
-    }
-    entry = await findMessageByDedupeKey(db, key)
-    // Concurrent identical keys share one message; only its photo placements survive.
-    if (entry && entry.id !== id) await discardMessagePhotos(db, env, input.mapping.organization_id, assetIds, input.actorUserId, new Error('Concurrent channel reply retained the existing photo'))
-  }
-  if (!entry) fail(500, 'CHANNEL_REPLY_INTENT_INVALID', 'The reply intent was not recorded', 'entry')
-  assertReplyIntent(entry, input.body, requestHash, eventName)
-  const receipt = await getDeliveryById(db, deliveryId)
+  const entry = await input.commit()
+  const receipt = input.receipt ?? await getDeliveryById(db, deliveryId)
   if (!receipt || receipt.message_id !== entry.id) fail(500, 'CHANNEL_RECEIPT_INVALID', 'The reply has no matching delivery receipt', 'delivery')
   if (isDeliverySent(receipt)) {
     if (!receipt.provider_message_id?.trim()) fail(500, 'CHANNEL_RECEIPT_INVALID', 'A successful channel reply has no provider message ID', 'delivery.provider_message_id')
     await reconcileConversationTasks(db, input.mapping.conversation_id)
-    return { ok: true }
+    return { ok: true, message: entry }
   }
   let photo: ReturnType<typeof assertMessagePhotos>[number] | undefined
   if (input.photoCount) {
@@ -499,8 +467,12 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
     if (asset.provider === 'cloudflare_r2' && photo.contentType !== asset.mime_type) fail(409, 'CHANNEL_REPLY_PHOTO_UNAVAILABLE', 'The saved reply photo type differs from its recorded file', 'photos')
   }
   // One send at a time per reply: a pending or failed reply is claimed; one already being sent is not.
-  const claim = await execute(db, "UPDATE guest_thread_deliveries SET status = 'sending', error = NULL, updated_at = ? WHERE id = ? AND status IN ('pending', 'failed')", [new Date().toISOString(), deliveryId])
+  const claim = await execute(db, `UPDATE guest_thread_deliveries SET status = 'sending', error = NULL, updated_at = ?
+    WHERE id = ? AND status IN ('pending', 'failed')
+      AND EXISTS (SELECT 1 FROM conversations c WHERE c.id = ? AND (${input.guard.sql}))`,
+  [new Date().toISOString(), deliveryId, input.mapping.conversation_id, ...input.guard.params])
   if (claim.meta.changes !== 1) {
+    await assertMessageWriteAccess(db, input.mapping.conversation_id, input.guard)
     return { ok: false, status: 409, code: 'CHANNEL_REPLY_FAILED', field: 'delivery.status', message: 'This reply is already being sent.',
       mutation_applied: true, operation_completed: false, request_id: input.mapping.conversation_id, retry_with_same_idempotency_key: true }
   }
@@ -526,5 +498,5 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
     { query: `DELETE FROM messages WHERE id IN (${echoed})`, params: echoParams },
   ])
   await reconcileConversationTasks(db, input.mapping.conversation_id)
-  return { ok: true }
+  return { ok: true, message: entry }
 }

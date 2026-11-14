@@ -5,9 +5,11 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { openingSentence } from '../../server/domain/guest-threads/opening.ts'
-import { appendMessage } from '../../server/domain/conversations.ts'
-import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
-import { listConversations } from '../../server/domain/guest-threads/repository.ts'
+import { appendMessage, markConversationRead, resolveConversationAccess } from '../../server/domain/conversations.ts'
+import { loadConversationPage } from '../../server/domain/conversation-history.ts'
+import { acceptConversationGuestInvite, createConversationGuestInvite } from '../../server/domain/conversation-participants.ts'
+import { conversationPageFor } from './support/conversation-page.ts'
+import { countUnreadAsGuest, listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
@@ -45,19 +47,18 @@ test('a table booking opens with its own message and the guest note, written onc
     ].map(statement => db.prepare(statement)))
     const env = await runtime.getBindings<CloudflareEnv>()
     const principal = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
-    const viewer = { audience: 'member' as const, userId: OWNER, principal }
-    const reservation = async (id: string, note: string | null, opening: string) => {
+    const reservation = async (id: string, note: string | null, opening: string, booker: string | null = null) => {
       const payload = threadPayloadForGuest({ name: 'Filip Heurckmans', email: 'filip@example.test', phone: '+32475699444', locale: 'en', ipHash: null })
       await db.batch([
-        { query: `INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, policy_json, status, created_at, updated_at,location_id,starts_at,ends_at,timezone)
-            SELECT ?, ?, 'tables', 'seating', 'tables-v', 4, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}', 'confirmed', ?, ?,location_id,starts_at,ends_at,timezone FROM product_sessions WHERE id = 'seating'`, params: [`res-${id}`, ORG, CREATED, CREATED] },
-        ...requestInsertQueries({ id, kind: 'booking', organization_id: ORG, location_id: 'loc', booking_id: `res-${id}`, user_id: null, payload, created_at: CREATED }, undefined, { opening, note }),
+        { query: `INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, policy_json, status, created_at, updated_at,location_id,starts_at,ends_at,timezone,user_id)
+            SELECT ?, ?, 'tables', 'seating', 'tables-v', 4, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}', 'confirmed', ?, ?,location_id,starts_at,ends_at,timezone,? FROM product_sessions WHERE id = 'seating'`, params: [`res-${id}`, ORG, CREATED, CREATED, booker] },
+        ...requestInsertQueries({ id, kind: 'booking', organization_id: ORG, location_id: 'loc', booking_id: `res-${id}`, user_id: booker, payload, created_at: CREATED }, undefined, { opening, note }),
       ].map(query => db.prepare(query.query).bind(...(query.params ?? []))))
     }
     const sentence = openingSentence({ kind: 'booking', vertical: 'restaurant', productKind: 'table', productTitle: 'Krabi tables', guestName: 'Filip Heurckmans', guestPhone: '+32475699444', answers: [], partySize: 4, partySizeIsMinimum: false,
       startsAt: '2026-11-04T07:00:00.000Z', timezone: 'Asia/Bangkok', placeTitle: 'Kikuzuki Krabi' })
     assert.match(sentence, /^Table for 4 on Wed, Nov 4 at 2:00 PM at Kikuzuki Krabi\. Filip Heurckmans, \+32 /)
-    const messages = async (id: string) => (await getInboxThread(db, id, ORG, viewer, new Date('2026-11-05T00:00:00.000Z')))!.stream
+    const messages = async (id: string) => (await conversationPageFor(db, principal, id, { before: null, limit: 40 }, new Date('2026-11-05T00:00:00.000Z'))).entries
       .flatMap(item => item.type === 'message' ? [[item.side, item.body]] : [])
 
     // Created: the booking's own message, then the guest's note, and nothing twice on a replay of the same batch.
@@ -77,6 +78,55 @@ test('a table booking opens with its own message and the guest note, written onc
     await appendMessage(db, { conversationId: 'old', authorKind: 'guest', authorUserId: null, channel: 'email', body: 'Running ten minutes late', occurredAt: '2026-11-04T06:50:00.000Z' })
     const rows = await listConversations(db, ORG, { userId: OWNER, principal, mailbox: 'current' }, new Date('2026-11-05T00:00:00.000Z'))
     assert.deepEqual(rows.map(row => [row.id, row.preview_from, row.preview]), [['old', 'Filip', 'Running ten minutes late'], ['new', 'Filip', 'Window seat if possible']])
+
+    // Accept through the normal write, then read using the request's canonical seat and transcript projection.
+    const booker = { id: 'booker', email: 'filip@example.test', name: 'Filip Heurckmans', emailVerified: true }
+    const traveler = { id: 'traveler', email: 'traveler@example.test', name: 'Taylor Traveler', emailVerified: true }
+    await db.batch([booker, traveler].map(user => db.prepare(`INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt)
+      VALUES (?, ?, ?, 1, 0, 0)`).bind(user.id, user.name, user.email)))
+    await reservation('shared', 'Private booking note', sentence, booker.id)
+    const invite = await createConversationGuestInvite(db, principal, { conversationId: 'shared', email: traveler.email })
+    const publication = { GUEST_INBOX_HUBS: { idFromName: () => 'hub', get: () => ({ fetch: () => Promise.resolve(new Response(null, { status: 204 })) }) } } as unknown as Parameters<typeof acceptConversationGuestInvite>[1]
+    await acceptConversationGuestInvite(db, publication, { token: invite.token, user: traveler })
+    const page = async (userId: string, before: number | null = null, limit = 40) => loadConversationPage(db, {
+      ...await resolveConversationAccess(db, userId, 'shared'), userId, principal: null,
+    }, { before, limit })
+    const list = (q?: string) => listConversations(db, null, { userId: traveler.id, buyerAudience: true, q })
+    const privateWords = 'Private card receipt'
+    const payment = await appendMessage(db, { conversationId: 'shared', authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: privateWords })
+    const privatePage = await page(traveler.id)
+    assert.deepEqual(privatePage.entries, [])
+    if (privatePage.conversation.kind === 'team') throw new Error('Expected the traveler’s booking conversation')
+    assert.deepEqual([privatePage.conversation.booking_id, privatePage.conversation.when, privatePage.conversation.activity_path], [null, null, null])
+    const [travelerRow] = await list()
+    assert.deepEqual([travelerRow?.id, travelerRow?.preview, travelerRow?.when, travelerRow?.unread], ['shared', '', null, false])
+    assert.deepEqual(await list('Private booking note'), [])
+    assert.deepEqual(await list(privateWords), [])
+    assert.equal(await countUnreadAsGuest(db, traveler.id), 0)
+    await assert.rejects(markConversationRead(db, { organizationId: ORG, conversationId: 'shared', userId: traveler.id, throughMessageId: payment.id }), { statusCode: 422 })
+
+    const publicMessage = await appendMessage(db, { conversationId: 'shared', authorKind: 'guest', authorUserId: booker.id, channel: 'web', body: 'Meet at the table' })
+    assert.equal(await countUnreadAsGuest(db, traveler.id), 1)
+    assert.deepEqual(await markConversationRead(db, { organizationId: ORG, conversationId: 'shared', userId: traveler.id }), { read: true, last_read_message_id: publicMessage.id })
+    assert.equal(await countUnreadAsGuest(db, traveler.id), 0)
+    const travelerMessage = await appendMessage(db, { conversationId: 'shared', authorKind: 'guest', authorUserId: traveler.id, channel: 'web', body: 'I will be there' })
+    const latestPayment = await appendMessage(db, { conversationId: 'shared', authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: 'Another private payment' })
+    const first = await page(traveler.id, null, 1)
+    const shown = first.entries.filter(entry => entry.type === 'message')
+    assert.deepEqual(shown.map(entry => [entry.id, entry.author]), [[travelerMessage.id, 'You']])
+    assert.equal(first.page.before, travelerMessage.sequence)
+    assert.equal(first.page.newest, travelerMessage.sequence)
+    const previous = await page(traveler.id, first.page.before, 1)
+    assert.deepEqual(previous.entries.filter(entry => entry.type === 'message').map(entry => entry.id), [publicMessage.id])
+    assert.equal(previous.page.before, null)
+    assert.equal(await countUnreadAsGuest(db, traveler.id), 0)
+    assert.deepEqual((await list()).map(row => [row.preview, row.preview_from, row.unread]), [['I will be there', 'You', false]])
+    const original = await page(booker.id)
+    assert.equal(original.conversation.booking_id, 'res-shared')
+    assert.equal(original.page.newest, latestPayment.sequence)
+    assert(original.entries.some(entry => entry.type === 'message' && entry.body === sentence))
+    assert(original.entries.some(entry => entry.type === 'event' && entry.id === payment.id))
+    assert(original.entries.some(entry => entry.type === 'message' && entry.id === travelerMessage.id && entry.author === traveler.name))
   } finally {
     await runtime.dispose()
   }

@@ -4,7 +4,7 @@ import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession, type CloudflareEnv } from '~/server/utils/auth'
 import { queryFirst, type DbClient } from '~/server/db'
 import { oncePerRequest } from '~/server/utils/request-scope'
-import { assertLocationAccess, assertOrganizationWideAccess, assertProductAccess, memberAccessPrincipal, resolveOrganizationMembership, type ResolvedMembership } from '~/server/utils/member-access'
+import { assertLocationAccess, assertOrganizationWideAccess, assertProductAccess, memberAccessPrincipal, resolveMembership, resolveOrganizationMembership, type ResolvedMembership } from '~/server/utils/member-access'
 import type { H3Event } from 'nitro';
 import { getDashboardContext } from '~/server/utils/dashboard-context'
 
@@ -103,11 +103,7 @@ export async function requireLocationAccess(event: H3Event, organizationId: stri
   return { env, db, session, organization, location }
 }
 
-/** Resolve identity and tenant membership before the operation's resource guard. */
-export async function requireOrganizationMembership(
-  event: H3Event,
-  organizationId: string,
-) {
+async function organizationSession(event: H3Event) {
   const env = cloudflareEnv(event)
   const db = env.DB
   if (!db) throw new HTTPError({ statusCode: 500, message: 'Database not available', data: { code: 'DATABASE_UNAVAILABLE', field: 'DB' } })
@@ -115,6 +111,20 @@ export async function requireOrganizationMembership(
   const session = await getAuthSession(event, env)
   if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
 
+  return { env, db, session }
+}
+
+/** Authorize a workspace API that only needs the member's role and identity. */
+export async function requireOrganizationPrincipal(event: H3Event, organizationId: string) {
+  const { env, db, session } = await organizationSession(event)
+  const membership = await resolveMembership(env, { organizationId, userId: session.user.id }, event)
+  if (!membership) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
+  return { env, db, principal: memberAccessPrincipal(membership, { env, event }) }
+}
+
+/** Resolve identity and tenant membership before the operation's resource guard. */
+export async function requireOrganizationMembership(event: H3Event, organizationId: string) {
+  const { env, db, session } = await organizationSession(event)
   const organization = await loadMemberOrganizationRow(event, db, env, organizationId, session.user.id)
   if (!organization) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
 

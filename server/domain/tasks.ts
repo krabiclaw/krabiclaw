@@ -4,7 +4,7 @@ import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, t
 import { assertRoleAllows, assignedGuestThreadScope, assignedMemberSql, isOrganizationWideRole, locationMemberSql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { publishBusinessInvalidation, publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
-import { messageQueries } from '~/server/domain/conversations'
+import { messageQueries, participantGuard } from '~/server/domain/conversations'
 import { discardMessagePhotos, listMessagePhotos, messagePhotoPlacements, uploadMessagePhotos, MessagePhotoRejection, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
 import { firstName } from '~/server/domain/guest-threads/presentation'
 import { bookingEditorPath, guestConversationPath, productPaymentPath } from '~/server/utils/dashboard-links'
@@ -422,8 +422,6 @@ interface Context {
   messages: Map<string, { title: string; status: string; conversation_id: string | null; booking_id: string }>
   /** A booking's conversation, when it is and what was booked. */
   records: Map<string, { conversation_id: string | null; starts_at: string; ends_at: string; timezone: string; product_kind: ProductKind; unit: 'slot' | 'nights' }>
-  /** The message a change task is about. */
-  entries: Map<string, { event_name: string; author_kind: string; body: string | null }>
   photos: Map<string, TaskPhoto[]>
 }
 
@@ -445,8 +443,6 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
      WHERE br.organization_id = ? AND br.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(bookingIds)]) : []
   const records = booked.filter(record => record.unit === 'slot' || rows.some(row => row.kind === 'booking_review' && row.subject_id === record.id))
   const changeStayRequests = booked.filter(record => record.unit === 'nights' && rows.some(row => row.kind === 'booking_change' && row.subject_id === record.id))
-  const entryIds = rows.filter(row => row.kind === 'booking_change').map(row => row.dedupe_key.slice('booking_change:'.length))
-  const entries = entryIds.length ? await queryAll<{ id: string; event_name: string; author_kind: string; body: string | null }>(db, 'SELECT id, event_name, author_kind, body FROM messages WHERE id IN (SELECT value FROM json_each(?))', [d1JsonStringSet(entryIds)]) : []
   const requestIds = [...new Set([...ids(row => row.subject_type === 'conversation' ? row.subject_id : null),
     ...records.flatMap(record => record.conversation_id ? [record.conversation_id] : []), ...changeStayRequests.flatMap(stay => stay.conversation_id ? [stay.conversation_id] : [])])]
   // Stay writers load this module; the conversation repository is loaded when a view is drawn.
@@ -514,7 +510,6 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
     requests: new Map(requests.map(request => [request.id, request])),
     messages: new Map(messages.map(message => [message.id, { title: message.template_title, status: message.status, conversation_id: message.conversation_id, booking_id: message.booking_id }])),
     records: new Map(records.map(record => [record.id, record])),
-    entries: new Map(entries.map(entry => [entry.id, { event_name: entry.event_name, author_kind: entry.author_kind, body: entry.body }])),
     photos: new Map([...photos].map(([id, list]) => [id, list.map(photo => ({ id: photo.id, url: photo.url, thumbnail_url: photo.thumbnailUrl, width: photo.width, height: photo.height }))])),
   }
 }
@@ -731,20 +726,20 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       break
     }
     case 'booking_change': {
-      const entry = context.entries.get(row.dedupe_key.slice('booking_change:'.length))
       const stay = context.stays.get(row.subject_id!)
       const record = stay ? null : context.records.get(row.subject_id!)
       conversation_id = stay?.conversation_id ?? record?.conversation_id ?? null
       const request = conversation_id ? context.requests.get(conversation_id) : undefined
-      if (!entry || !conversation_id || !request) throw new Error(`Change task ${row.id} has no change or conversation`)
+      if (!conversation_id || !request) throw new Error(`Change task ${row.id} has no booking conversation`)
       booking_id = stay?.id ?? (record ? row.subject_id : null)
       face = 'compact'
       title = request.guest_name ? firstName(request.guest_name) : request.participant ?? 'Guest'
       avatar = { initial: initialOf(title), tone: 'cool' }
-      const waiting = entry.author_kind !== 'guest' && row.starts_at !== null && row.starts_at > now.toISOString()
-      status_line = [entry.author_kind === 'guest' ? 'Change requested' : waiting ? 'Change proposal waiting on the guest' : 'Change proposal expired', place].filter(Boolean).join(' · ')
+      const status = row.starts_at === null ? 'Change requested'
+        : row.starts_at > now.toISOString() ? 'Change proposal waiting on the guest' : 'Change proposal expired'
+      status_line = [status, place].filter(Boolean).join(' · ')
       detail = record ? `${day(record.starts_at)}, ${time(record.starts_at)}` : null
-      path = conversation(conversation_id)
+      path = booking_id ? stayPath(booking_id) : null
       // A change closes when it is answered or proposed again.
       action = { type: 'open', label: 'Review', path: path! }
       sheet = { heading: 'Change', title, date: null, checkout: null, checkin: null }
@@ -1160,11 +1155,11 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
     && await jobHasConversation(db, organizationId, current.assigned_member_id)))
   const thread = hasThread ? await queryFirst<{ id: string }>(db, `SELECT c.id FROM conversations c
       JOIN messages m ON m.conversation_id = c.id AND m.author_kind = 'krabiclaw'
-      JOIN conversation_participants seat ON seat.conversation_id = c.id AND seat.user_id = ?
+      JOIN conversation_participants seat ON seat.conversation_id = c.id AND seat.role = 'member' AND seat.user_id = ?
      WHERE c.organization_id = ? AND c.kind = 'team' AND c.booking_id = ?
        AND (? = 0 OR EXISTS (SELECT 1 FROM conversation_participants assignee
          JOIN member assigned ON assigned.organizationId = c.organization_id AND assigned.userId = assignee.user_id
-         WHERE assignee.conversation_id = c.id AND assigned.id = ?))
+         WHERE assignee.conversation_id = c.id AND assignee.role = 'member' AND assigned.id = ?))
        AND (json_extract(m.payload_json, '$.key') = ? OR instr(json_extract(m.payload_json, '$.key'), ?) = 1)
        AND (? = 0 OR NOT EXISTS (SELECT 1 FROM messages later JOIN json_each(?) stop
          ON json_extract(later.payload_json, '$.key') = stop.value OR instr(json_extract(later.payload_json, '$.key'), stop.value || ':') = 1
@@ -1177,7 +1172,7 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
   const message = thread ? messageQueries({
     conversationId: thread.id, authorKind: 'member', authorUserId: viewer.principal.userId,
     body: note ?? (input.status === 'done' ? 'Done' : 'Skipped'), dedupeKey: `team:${thread.id}:task-closed:${taskId}:${current.version + 1}`,
-    guard: { sql: 'EXISTS (SELECT 1 FROM conversation_participants seat WHERE seat.conversation_id = c.id AND seat.user_id = ?)', params: [viewer.principal.userId] },
+    guard: participantGuard('c', viewer.principal.userId, 'member'),
   }) : null
   const closedMessage: BatchQuery[] = message ? [...message.queries, ...messagePhotoPlacements(organizationId, 'message', message.id, assetIds, now)] : []
   try {

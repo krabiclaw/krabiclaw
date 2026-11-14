@@ -15,7 +15,7 @@ import type { OrganizationPermissions } from '~/utils/organization-access'
 
 /**
  * A membership this request actually resolved: one lookup keyed by
- * (organizationId, userId) that produced all three of these fields together.
+ * (organizationId, userId) that produced these fields together.
  *
  * The brand is what makes that a fact rather than a convention. Only the
  * resolvers in this module mint one, so `organizationId` and `role` cannot
@@ -28,11 +28,12 @@ export interface ResolvedMembership {
   readonly [resolvedMembership]: true
   readonly userId: string
   readonly organizationId: string
+  readonly memberId: string
   readonly role: string
 }
 
 /** The one place a ResolvedMembership is made. Not exported. */
-function resolvedMembershipOf<T extends { userId: string; organizationId: string; role: string }>(fields: T): T & ResolvedMembership {
+function resolvedMembershipOf<T extends { userId: string; organizationId: string; memberId: string; role: string }>(fields: T): T & ResolvedMembership {
   return fields as T & ResolvedMembership
 }
 
@@ -52,6 +53,7 @@ export interface MemberAccessPrincipal {
   readonly env: CloudflareEnv
   // The authenticated user, not the member row id.
   readonly userId: string
+  readonly memberId: string
   readonly role: string
   readonly organizationId: string
   // The request this principal was minted for, when there is one. Only used to
@@ -66,10 +68,19 @@ export function memberAccessPrincipal(
   return {
     env: input.env,
     userId: membership.userId,
+    memberId: membership.memberId,
     role: membership.role,
     organizationId: membership.organizationId,
     event: input.event,
   } as MemberAccessPrincipal
+}
+
+/** The conversation seat query has already joined this live Better Auth member row. */
+export function conversationMemberPrincipal(
+  membership: NonNullable<Awaited<ReturnType<typeof import('~/server/domain/conversations').resolveConversationAccess>>['membership']>,
+  input: { env: CloudflareEnv; event?: H3Event },
+): MemberAccessPrincipal {
+  return memberAccessPrincipal(resolvedMembershipOf(membership), input)
 }
 
 export async function resolveMemberId(
@@ -178,7 +189,7 @@ export async function resolveOrganizationMembership(
   env: CloudflareEnv,
   input: { organizationId: string; userId: string },
   event?: H3Event,
-): Promise<(ResolvedMembership & { memberId: string; organizationSlug: string; organizationName: string }) | null> {
+): Promise<(ResolvedMembership & { organizationSlug: string; organizationName: string }) | null> {
   const [member, organization] = await Promise.all([
     membershipRow(env, input, event),
     organizationById(env, input.organizationId, event),
@@ -206,14 +217,15 @@ export async function resolveOrganizationMembership(
 export async function resolveMembership(
   env: CloudflareEnv,
   input: { organizationId: string; userId: string },
+  event?: H3Event,
 ): Promise<ResolvedMembership | null> {
-  const adapter = await organizationAdapter(env)
-  const member = await adapter.findMemberByOrgId(input)
+  const member = await membershipRow(env, input, event)
   if (!member) return null
   return resolvedMembershipOf({
     userId: input.userId,
     organizationId: input.organizationId,
     role: member.role,
+    memberId: member.id,
   })
 }
 
@@ -225,7 +237,6 @@ export async function resolveUserOrganization(
   id: string
   name: string
   slug: string
-  memberId: string
 }) | null> {
   const organization = input.organizationId
     ? await organizationById(env, input.organizationId, event)
@@ -293,7 +304,7 @@ export interface OrganizationNotificationMember {
 export async function listOrganizationNotificationMembers(
   env: CloudflareEnv,
   organizationId: string,
-  options: { /** Explicit previous/new provider notices. */ includeMemberIds?: readonly string[]; /** The guest conversation whose handlers are told. */ requestId?: string } = {},
+  options: { /** Explicit previous/new provider notices. */ includeMemberIds?: readonly string[]; /** Operational notices about an assigned booking or location. */ requestId?: string; guestMessage?: boolean } = {},
 ): Promise<OrganizationNotificationMember[]> {
   const adapter = await organizationAdapter(env)
   const members = await listAllOrganizationMembers(adapter, organizationId)
@@ -301,14 +312,21 @@ export async function listOrganizationNotificationMembers(
   // a duplicated alert.
   const byUserId = new Map<string, { id: string; email: string; organizationWide: boolean }>()
   const included = new Set(options.includeMemberIds)
-  if (options.requestId) {
+  if (options.guestMessage) {
+    if (!options.requestId) throw new Error('Guest message notifications require a conversation')
+    const seats = await queryAll<{ id: string }>(env.DB, `SELECT m.id FROM conversation_participants seat
+      JOIN member m ON m.userId = seat.user_id AND m.organizationId = seat.organization_id
+      WHERE seat.organization_id = ? AND seat.conversation_id = ? AND seat.role = 'member'`, [organizationId, options.requestId])
+    included.clear()
+    for (const seat of seats) included.add(seat.id)
+  } else if (options.requestId) {
     const scope = assignedGuestThreadScope('r', { column: 'recipient.userId' })
     const responsible = await queryAll<{ id: string }>(env.DB, `SELECT recipient.id FROM member recipient JOIN conversations r ON r.organization_id = recipient.organizationId
       WHERE recipient.organizationId = ? AND r.id = ? AND ${scope.sql}`, [organizationId, options.requestId])
     for (const member of responsible) included.add(member.id)
   }
   for (const member of members) {
-    if (!(isOrganizationWideRole(member.role) || included.has(member.id))) continue
+    if (!included.has(member.id) && (options.guestMessage || !isOrganizationWideRole(member.role))) continue
     const organizationWide = isOrganizationWideRole(member.role) || byUserId.get(member.user.id)?.organizationWide === true
     byUserId.set(member.user.id, { id: member.user.id, email: member.user.email, organizationWide })
   }
@@ -413,7 +431,7 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, d
   const [left] = await executeBatch(db, [{
     query: `DELETE FROM conversation_participants WHERE organization_id = ?
       AND NOT EXISTS (SELECT 1 FROM member m WHERE m.organizationId = conversation_participants.organization_id AND m.userId = conversation_participants.user_id)
-      AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.id = conversation_participants.conversation_id AND c.user_id = conversation_participants.user_id)`,
+      AND role = 'member'`,
     params: [input.organizationId],
   }], { operation: 'Remove departed members from conversations' })
   if (Number(left?.meta.changes ?? 0) > 0) changed = true
@@ -459,10 +477,8 @@ export async function assertProductAccess(db: DbClient, input: MemberAccessPrinc
 }
 
 /**
- * The same assigned-conversation scope is used by lists, reads, writes and realtime.
- * A stay's guest conversation (a booking with no session) is not in it: a member
- * looking after a home reads its stays as turnovers (`stayTurnover`), never the
- * guest's messages or contact.
+ * Scope for operational records such as the agenda and booking work.
+ * Guest chat uses the messaging permission and its own audience.
  */
 export function assignedGuestThreadScope(alias: string, user: string | { /** Trusted query column, never request input. */ column: string }): { sql: string; params: string[] } {
   const userSql = typeof user === 'string' ? '?' : user.column

@@ -6,11 +6,13 @@ export interface GuestInboxPublicationEnv {
   GUEST_INBOX_HUBS?: DurableObjectNamespace
 }
 
+export const SCHEDULED_AUTHOR_HEADER = 'x-krabiclaw-scheduled-author'
+
 /** A message was written in a conversation, or it or the conversation changed: the gateway tells who may see it. */
 export async function publishConversationEvent(
   env: GuestInboxPublicationEnv,
   db: DbClient,
-  input: { conversationId: string; type: ConversationEvent['type'] },
+  input: { conversationId: string; scheduledAuthorId?: string | null } & Pick<ConversationEvent, 'type' | 'message' | 'scheduled'>,
 ): Promise<void> {
   const conversation = await queryFirst<{ id: string; organization_id: string; location_id: string | null; kind: string }>(db,
     'SELECT id, organization_id, location_id, kind FROM conversations WHERE id = ?', [input.conversationId])
@@ -22,8 +24,10 @@ export async function publishConversationEvent(
     location_id: conversation.location_id,
     conversation_id: conversation.id,
     team: conversation.kind === 'team',
+    ...input.message && { message: input.message },
+    ...input.scheduled && { scheduled: input.scheduled },
     occurred_at: new Date().toISOString(),
-  })
+  }, input.scheduledAuthorId)
 }
 
 /** One person's read position or archive moved; only their own apps hear it. */
@@ -35,6 +39,7 @@ export async function publishConversationAck(env: GuestInboxPublicationEnv, inpu
 export async function publishDashboardInvalidation(
   env: GuestInboxPublicationEnv,
   event: DashboardInvalidation,
+  scheduledAuthorId?: string | null,
 ): Promise<void> {
   if (!env.GUEST_INBOX_HUBS) {
     throw new HTTPError({ statusCode: 503, message: 'GUEST_INBOX_HUBS binding is not configured', data: { code: 'REALTIME_CONFIGURATION_REQUIRED', field: 'GUEST_INBOX_HUBS' } })
@@ -46,6 +51,8 @@ export async function publishDashboardInvalidation(
     headers: {
       'content-type': 'application/json',
       'x-krabiclaw-organization-id': event.organization_id,
+      // This header stays between the publisher and the private DO binding.
+      ...(scheduledAuthorId !== undefined && { [SCHEDULED_AUTHOR_HEADER]: scheduledAuthorId ?? '' }),
     },
     body: JSON.stringify(event),
   }

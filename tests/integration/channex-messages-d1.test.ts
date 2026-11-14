@@ -12,7 +12,7 @@ import { applyChannelBooking, createStay, type ChannelBooking } from '../../serv
 import { backfillChannexMessages, mirrorChannexMessageEvent, mirrorChannexThread } from '../../server/domain/guest-threads/channel-messages.ts'
 import { executeGuestThreadOperation, sendScheduledGuestReply } from '../../server/domain/guest-threads/operations.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
-import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
+import { conversationPageFor } from './support/conversation-page.ts'
 import { executeBatch } from '../../server/db/index.ts'
 import { conversationTaskQueries, expireReplyTasks, listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { appendMessage, assertConversationAccess } from '../../server/domain/conversations.ts'
@@ -254,10 +254,10 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     const afterToday = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
     assert.deepEqual([afterToday.guestName, afterToday.guestEmail, afterToday.guestPhone, afterToday.operationalRecord], [null, null, null, null])
     assert.equal(await db.prepare('SELECT count(*) FROM bookings').first('count(*)'), 0)
-    // An Airbnb conversation is the stay's guest conversation: owners and admins open it; a member does not, even one responsible for the home.
+    // The host has a seat from creation. Another member's booking duties cannot grant one.
     const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, organizationId: ORG, role }, { env })
     await assertConversationAccess(db, principal(OWNER, 'owner'), rows[0]!.id)
-    await assert.rejects(assertConversationAccess(db, principal(OWNER, 'member'), rows[0]!.id), code('THREAD_NOT_FOUND'))
+    await assertConversationAccess(db, principal(OWNER, 'member'), rows[0]!.id)
     await assert.rejects(assertConversationAccess(db, principal('unassigned-user', 'member'), rows[0]!.id), code('THREAD_NOT_FOUND'))
     await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal(await db.prepare('SELECT count(*) FROM messages').first('count(*)'), 2)
@@ -312,8 +312,8 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
 
     // The conversation reads as the guest's words alone, and the list previews them.
     const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
-    const thread = (await getInboxThread(db, requestId, ORG, { audience: 'member', userId: OWNER, principal: owner }))!
-    assert.deepEqual(thread.stream.filter(item => item.type === 'message').map(item => item.type === 'message' ? [item.side, item.body] : null), [['guest', 'Hello']])
+    const thread = await conversationPageFor(db, owner, requestId)
+    assert.deepEqual(thread.entries.filter(item => item.type === 'message').map(item => item.type === 'message' ? [item.side, item.body] : null), [['guest', 'Hello']])
     const [row] = await listConversations(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'current' })
     assert.deepEqual([row!.preview, row!.preview_from], ['Hello', 'Conversation supplied by Airbnb'])
 
@@ -470,7 +470,10 @@ test('the inbox exposes every page with a stable tie order and validates paginat
   try {
     const payload = JSON.stringify({ guest: { name: 'Guest', email: 'guest@example.test', phone: null }, subject: null, consent_at: null, ip_hash: null })
     for (const id of ['e', 'c', 'b', 'd', 'a']) {
-      await db.prepare("INSERT INTO conversations (id, kind, organization_id, payload_json, last_message_at, created_at) VALUES (?, 'contact', ?, ?, ?, ?)").bind(id, ORG, payload, NOW, NOW).run()
+      await db.batch([
+        db.prepare("INSERT INTO conversations (id, kind, organization_id, payload_json, last_message_at, created_at) VALUES (?, 'contact', ?, ?, ?, ?)").bind(id, ORG, payload, NOW, NOW),
+        db.prepare("INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role) VALUES (?, ?, ?, 'member')").bind(id, ORG, OWNER),
+      ])
     }
     const first = guestThreadListPage(await listConversations(db, ORG, { userId: OWNER, limit: 4, offset: 0 }), { limit: 3, offset: 0 })
     assert.deepEqual(first.threads.map(thread => thread.id), ['a', 'b', 'c'])
@@ -674,10 +677,18 @@ test('a reply is sent with the message id Channex returns, and any Channex error
 
     // Sending the failed reply again under its key sends it once, even when two retries race.
     const refusedInput = { ...input, body: 'Reply that fails: refused', idempotencyKey: 'refused' }
+    await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('retry-cohost', 'Cohost', 'retry-cohost@example.test', 1, 0, 0)").run()
+    await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('retry-cohost-member', ?, 'retry-cohost', 'member', 0)").bind(ORG).run()
+    await db.prepare("INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role) VALUES (?, ?, 'retry-cohost', 'member')").bind(result.conversation_id, ORG).run()
+    const cohostRetry = { ...refusedInput, actorUserId: 'retry-cohost' }
+    await assert.rejects(executeGuestThreadOperation(db, cohostRetry), code('IDEMPOTENCY_CONFLICT'))
+    assert.deepEqual(await executeGuestThreadOperation(db, { ...cohostRetry, retryMessageId: 'missing-message' }),
+      { ok: false, status: 404, reason: 'thread_not_found' })
+    const explicitRetry = { ...cohostRetry, retryMessageId: refusedEntry.id }
     const started = new Promise<void>(resolve => { provider.onSend = resolve })
     provider.holdReply = new Promise<void>(resolve => { releaseRetry = resolve })
     const sendsBefore = provider.sends
-    const recovering = Promise.all([executeGuestThreadOperation(db, refusedInput), executeGuestThreadOperation(db, refusedInput)])
+    const recovering = Promise.all([executeGuestThreadOperation(db, explicitRetry), executeGuestThreadOperation(db, refusedInput)])
     await started
     assert.equal((await db.prepare('SELECT status FROM guest_thread_deliveries WHERE message_id = ?').bind(refusedEntry.id).first('status')), 'sending')
     releaseRetry!()
@@ -691,6 +702,10 @@ test('a reply is sent with the message id Channex returns, and any Channex error
       assert.deepEqual([outcome.status, outcome.code, outcome.message], [409, 'CHANNEL_REPLY_FAILED', 'This reply is already being sent.'])
     }
     assert.equal(provider.sends - sendsBefore, 1, 'concurrent retries send once')
+    assert.equal(await db.prepare('SELECT author_user_id FROM messages WHERE id = ?').bind(refusedEntry.id).first('author_user_id'), OWNER)
+    await db.prepare("DELETE FROM conversation_participants WHERE conversation_id = ? AND user_id = 'retry-cohost'").bind(result.conversation_id).run()
+    assert.deepEqual(await executeGuestThreadOperation(db, explicitRetry), { ok: false, status: 404, reason: 'thread_not_found' })
+    assert.equal(provider.sends - sendsBefore, 1, 'a revoked cohost cannot replay the delivered message')
     assert.deepEqual(await db.prepare('SELECT status, provider_message_id, error FROM guest_thread_deliveries WHERE message_id = ?').bind(refusedEntry.id).first(),
       { status: 'accepted', provider_message_id: `accepted-${provider.sends}`, error: null })
     const recoveredProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
@@ -939,7 +954,9 @@ test('an in-flight or interrupted reply never blocks actual provider messages an
       { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: 'This home is disconnected from Airbnb, so its guest cannot be replied to here.' })
     // The inbox reads the same rule: a disconnected home's Airbnb conversation shows no composer, and says why.
     const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
-    assert.deepEqual((await getInboxThread(db, mirrored.conversation_id, ORG, { audience: 'member', userId: OWNER, principal: owner }))!.composer,
+    const disconnected = (await conversationPageFor(db, owner, mirrored.conversation_id)).conversation
+    if (disconnected.kind === 'team') throw new Error('Expected the disconnected Airbnb conversation')
+    assert.deepEqual(disconnected.composer,
       { channel: 'airbnb', available: false, reason: 'This home is disconnected from Airbnb, so its guest cannot be replied to here.' })
     assert.equal(await db.prepare('SELECT count(*) FROM messages').first('count(*)'), 5, 'failed preflight records no outbound message')
   } finally { release(); globalThis.fetch = realFetch; await runtime.dispose() }

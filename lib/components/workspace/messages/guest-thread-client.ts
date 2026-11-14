@@ -1,4 +1,7 @@
+import type { InjectionKey } from 'vue'
 import { isRecord } from '~/utils/api-clients'
+import { isMessageIdentity, type MessageIdentity } from '~/shared/dashboard-invalidations'
+import type { ConversationEntry, ConversationPage } from '~/shared/messages-contract'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import type {
   GuestThreadSubmissionType,
@@ -26,6 +29,8 @@ export type ThreadListPage = InboxListPage & { unread?: InboxUnreadCounts }
 export type ThreadDetail = InboxThread
 export type ThreadDetails = InboxThreadDetails
 export type StreamItem = InboxStreamItem
+
+export const removeInboxConversationKey: InjectionKey<(id: string) => void> = Symbol('remove-inbox-conversation')
 
 /**
  * The plural, for the filter that narrows a list to this kind. A booking may be
@@ -76,8 +81,6 @@ function isStreamItem(value: unknown): value is InboxStreamItem {
   if (!isRecord(value) || !isText(value.id)) return false
   if (value.type === 'day') return isText(value.label)
   if (value.type === 'event') return isText(value.text) && isText(value.sent_at)
-  if (value.type === 'change') return isText(value.sent_at) && isRecord(value.change)
-    && ['pending', 'accepted', 'declined', 'withdrawn', 'stale', 'expired'].includes(String(value.change.status))
   return value.type === 'message' && (value.side === 'guest' || value.side === 'business') && isText(value.author)
     && isNullableText(value.label) && isText(value.sent_at) && isNullableText(value.time) && isNullableText(value.body)
     && Array.isArray(value.photos) && value.photos.every(isPhoto)
@@ -85,18 +88,57 @@ function isStreamItem(value: unknown): value is InboxStreamItem {
     && isNullableText(value.receipt) && typeof value.retryable === 'boolean' && isCount(value.unshown_files)
 }
 
-export function isThreadDetailResponse(value: unknown): value is { thread: ThreadDetail } {
-  const thread = isRecord(value) ? value.thread : null
+export function isConversationOperation(value: unknown): value is { available_actions: string[]; message?: MessageIdentity } {
+  return isRecord(value) && Array.isArray(value.available_actions) && value.available_actions.every(isText)
+    && (value.message === undefined || isMessageIdentity(value.message))
+}
+
+function isGuestConversation(thread: unknown): thread is Omit<ThreadDetail, 'stream'> & Record<string, unknown> {
   return isRecord(thread)
     && isText(thread.id) && (thread.kind === 'guest' || thread.kind === 'support')
     && isText(thread.title) && isText(thread.avatar_initial) && (thread.channel === 'airbnb' || thread.channel === 'direct')
     && isNullableText(thread.home) && isNullableText(thread.when) && typeof thread.translated === 'boolean'
     && isNullableText(thread.booking_id) && isNullableText(thread.record_title) && (thread.record_kind === null || ['stay', 'booking'].includes(String(thread.record_kind)))
     && isNullableText(thread.activity_path)
-    && Array.isArray(thread.stream) && thread.stream.every(isStreamItem)
-    && Array.isArray(thread.pending) && thread.pending.every(item => isRecord(item) && isText(item.id) && (item.source === 'automatic' || item.source === 'later')
-      && isText(item.label) && isText(item.due_at) && isText(item.time) && typeof item.body === 'string' && typeof item.cancellable === 'boolean')
     && isRecord(thread.composer) && (thread.composer.channel === 'airbnb' || thread.composer.channel === 'email') && typeof thread.composer.available === 'boolean' && (thread.composer.reason === null || typeof thread.composer.reason === 'string')
+}
+
+const isSequence = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0
+
+export function isConversationEntry(value: unknown): value is ConversationEntry {
+  if (!isRecord(value) || !isStreamItem(value)) return false
+  if (value.type === 'day') return true
+  if (!isSequence(Reflect.get(value, 'sequence'))) return false
+  if (value.type !== 'message') return true
+  const deliveries = Reflect.get(value, 'deliveries')
+  return isNullableText(Reflect.get(value, 'author_user_id'))
+    && typeof Reflect.get(value, 'automatic') === 'boolean'
+    && Array.isArray(deliveries) && deliveries.every(delivery => isRecord(delivery)
+      && isText(delivery.id) && isText(delivery.channel) && isText(delivery.status)
+      && isNullableText(delivery.error) && isText(delivery.updated_at))
+}
+
+export function isConversationPage(value: unknown): value is ConversationPage {
+  if (!isRecord(value) || (value.viewer_role !== 'guest' && value.viewer_role !== 'member') || !isRecord(value.conversation)
+    || !isText(value.conversation.id) || !isText(value.conversation.organization_id)
+    || !Array.isArray(value.entries) || !value.entries.every(isConversationEntry) || !isRecord(value.page)
+    || !isRecord(value.capabilities)) return false
+  const { can_send, can_manage_participants, can_invite_guest, can_leave, can_view_read_receipts } = value.capabilities
+  if (typeof can_send !== 'boolean' || typeof can_manage_participants !== 'boolean' || typeof can_invite_guest !== 'boolean'
+    || typeof can_leave !== 'boolean' || typeof can_view_read_receipts !== 'boolean') return false
+  const { conversation, page } = value
+  if (!isText(conversation.title) || !Array.isArray(conversation.participants) || !conversation.participants.every(person =>
+    isRecord(person) && (isText(person.id) || (value.viewer_role === 'guest' && person.id === null)) && isText(person.name) && isNullableText(person.member_id) && isNullableText(person.image)
+    && (person.role === 'guest' || person.role === 'member') && typeof person.can_remove === 'boolean')) return false
+  if (conversation.kind === 'team'
+    ? typeof conversation.is_group !== 'boolean' || typeof conversation.can_manage !== 'boolean' || typeof conversation.can_leave !== 'boolean'
+      || !isNullableText(conversation.name) || !isNullableText(conversation.booking_id) || !isNullableText(conversation.location_id)
+    : !isGuestConversation(conversation)) return false
+  const cursor = (number: unknown) => number === null || isSequence(number)
+  return cursor(page.before) && cursor(page.oldest) && cursor(page.newest) && cursor(page.read_through)
+    && (page.before === null || page.before === page.oldest)
+    && (page.oldest === null ? page.newest === null : Number(page.oldest) <= Number(page.newest))
+    && Array.isArray(page.failed_messages) && page.failed_messages.every(isText)
 }
 
 export function isThreadDetails(value: unknown): value is ThreadDetails {
@@ -104,5 +146,5 @@ export function isThreadDetails(value: unknown): value is ThreadDetails {
     && Array.isArray(value.participants) && value.participants.every(person => isRecord(person) && isText(person.name) && isText(person.initial)
       && ['Guest', 'Host', 'Co-host', 'Airbnb Support'].includes(String(person.role)))
     && Array.isArray(value.photos) && value.photos.every(photo => isPhoto(photo) && isRecord(photo) && isText(photo.sent_at))
-    && isRecord(value.actions) && ['show_reservation', 'archive', 'unarchive', 'report', 'block', 'unblock'].every(key => typeof (value.actions as Record<string, unknown>)[key] === 'boolean')
+    && isRecord(value.actions) && ['archive', 'unarchive', 'report', 'block', 'unblock'].every(key => typeof (value.actions as Record<string, unknown>)[key] === 'boolean')
 }
