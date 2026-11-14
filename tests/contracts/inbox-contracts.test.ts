@@ -9,8 +9,8 @@ import { createProduct } from '../../server/utils/product-management.ts'
 import { applyBookingRevision } from '../../server/integrations/channex/booking-revisions.ts'
 import { mirrorChannexMessageEvent } from '../../server/domain/guest-threads/channel-messages.ts'
 import { runAlterationRequestFeed } from '../../server/domain/guest-threads/stay-change-requests.ts'
-import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
-import { getInboxThreadDetails } from '../../server/domain/guest-threads/inbox.ts'
+import { sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
+import { getConversationDetails } from '../../server/domain/guest-threads/inbox.ts'
 import { conversationPageFor } from '../integration/support/conversation-page.ts'
 import { scheduleGuestReply } from '../../server/domain/scheduled-guest-messages.ts'
 import { suggestGuestReplies } from '../../server/domain/suggested-reply.ts'
@@ -18,7 +18,7 @@ import { memberInbox } from '../../server/utils/dashboard-guest-threads.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { executeBatch } from '../../server/db/index.ts'
 import { requestInsertQueries } from '../../server/domain/requests.ts'
-import { appendMessage } from '../../server/domain/conversations.ts'
+import { appendMessage, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { archiveConversation } from '../../server/domain/guest-threads/repository.ts'
 import { stayCheckoutPolicy, stayFromCheckoutQueries } from '../../server/domain/stays.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -138,9 +138,8 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
       VALUES (?, ?, 'channex', 'listing', 'channel', ?, 'room', 'rate', 'complete', 1)`).bind(ORG, home.id, PROPERTY).run()
     const principal = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
-    const viewer = { audience: 'member' as const, userId: OWNER, principal }
 
-    // The booked stay and its conversation: a translated message, a photo, the host's Airbnb reply, then the guest's question, which alerts (unread).
+    // The booked stay and its conversation: a message, a photo, the host's Airbnb reply, then the guest's question, which alerts (unread).
     await applyBookingRevision(db, env, 'rev-contract')
     const mirrored = await mirrorChannexMessageEvent(db, env, { event: 'message', property_id: PROPERTY, payload: { id: 'guest-3', property_id: PROPERTY, message_thread_id: 'thread' } })
     assert.equal(mirrored.status, 'mirrored')
@@ -162,7 +161,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     // A payment the conversation records as KrabiClaw's event, as payments/notifications.ts writes it.
     await appendMessage(db, { conversationId: threadId, authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: 'Payment received\nAmount: $450.00',
       payload: { payment_id: 'contract-payment', status: 'succeeded', amount: 45000, currency: 'USD' }, dedupeKey: 'financial-operation:contract', occurredAt: NOW })
-    const refused = await executeGuestThreadOperation(db, { threadId, organizationId: ORG, action: 'reply', body: 'Check-in is from 4 PM.', actorUserId: OWNER, idempotencyKey: 'contract-reply', env })
+    const refused = await sendGuestThreadReply(db, { threadId, organizationId: ORG, body: 'Check-in is from 4 PM.', actorUserId: OWNER, idempotencyKey: 'contract-reply', env })
     assert.equal(refused.ok, false)
     // The outbox has a pending reply that does not appear in delivered chat history.
     await scheduleGuestReply(db, principal, threadId, { body: 'Enjoy your stay!', due_at: '2026-11-08T23:00:00.000Z' })
@@ -190,9 +189,11 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     assert.notEqual(thread.conversation.kind, 'team')
     if (thread.conversation.kind === 'team') throw new Error('Expected the Airbnb stay conversation')
     // Every item type the clients draw is in the contract thread.
-    const kinds = new Set(thread.entries.map(item => item.type === 'message' ? `${item.type}:${item.side}${item.label ? ':automatic' : ''}${item.photos.length ? ':photo' : ''}${item.translated ? ':translated' : ''}${item.retryable ? ':retryable' : ''}` : item.type))
-    for (const kind of ['day', 'event', 'message:guest:translated', 'message:guest:photo', 'message:business:automatic', 'message:business:retryable']) assert.ok(kinds.has(kind), `the contract thread has no ${kind}`)
+    const kinds = new Set(thread.entries.map(item => item.type === 'message' ? `${item.type}:${item.side}${item.automatic ? ':automatic' : ''}${item.photos.length ? ':photo' : ''}${item.retryable ? ':retryable' : ''}` : item.type))
+    for (const kind of ['day', 'event', 'message:guest:photo', 'message:business:automatic', 'message:business:retryable']) assert.ok(kinds.has(kind), `the contract thread has no ${kind}`)
     assert.ok(thread.entries.some(item => item.type === 'event' && /on Airbnb to change the stay/.test(item.text)))
+    assert.ok(thread.entries.some(item => item.type === 'message' && item.body === '¿En invierno dejan aparcar en la calle?'))
+    assert.ok(!JSON.stringify(thread).includes('In winter, can we park on the street?'))
     assert.ok(!JSON.stringify(thread).includes('Enjoy your stay!'))
 
     const opened = await conversationPageFor(db, principal, siteThreadId, { before: null, limit: 40 }, new Date(NOW))
@@ -209,7 +210,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     assert.deepEqual(thread.conversation.participants.filter(person => person.role === 'guest').map(person => person.id), [stay.user_id])
     await check('thread', thread, stay.user_id)
     await check('opening', opened)
-    await check('details', await getInboxThreadDetails(db, threadId, ORG, viewer, new Date(NOW)))
+    await check('details', await getConversationDetails(db, (await resolveConversationAccess(db, OWNER, threadId)).conversation, OWNER, 'member', new Date(NOW)))
     await check('suggestions', suggestions)
   } finally {
     globalThis.fetch = realFetch

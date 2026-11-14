@@ -191,16 +191,20 @@ export interface MessagePhotoRow {
   height: number | null
 }
 
-export function messagePhotosQuery(ownerType: MessageOwnerType, messageIds: string[]): BatchQuery {
-  return { query: `
-    SELECT mp.owner_id, ma.id, ma.public_url, ma.thumbnail_url, ma.alt_text, ma.width, ma.height
+export function messagePhotoRowsSql(scope: string, from = '', columns = '', order = 'mp.owner_id, mp.sort_order') {
+  return `
+    SELECT mp.owner_id, ma.id, ma.public_url, ma.thumbnail_url, ma.alt_text, ma.width, ma.height${columns}
       FROM media_placements mp
       JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id
-     WHERE mp.owner_type = ? AND mp.slot = 'attachments' AND mp.status = 'active'
+      ${from}
+     WHERE ${scope} AND mp.slot = 'attachments' AND mp.status = 'active'
        AND ma.status = 'active' AND ma.public_url IS NOT NULL
-       AND mp.owner_id IN (SELECT value FROM json_each(?))
-     ORDER BY mp.owner_id, mp.sort_order
-  `, params: [ownerType, d1JsonStringSet(messageIds)] }
+     ORDER BY ${order}
+  `
+}
+
+export function messagePhotosQuery(ownerType: MessageOwnerType, messageIds: string[]): BatchQuery {
+  return { query: messagePhotoRowsSql('mp.owner_type = ? AND mp.owner_id IN (SELECT value FROM json_each(?))'), params: [ownerType, d1JsonStringSet(messageIds)] }
 }
 
 export function groupMessagePhotos(rows: MessagePhotoRow[]): Map<string, GuestThreadEntryAttachmentViewModel[]> {

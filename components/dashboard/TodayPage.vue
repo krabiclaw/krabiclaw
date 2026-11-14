@@ -71,7 +71,7 @@
             <h2 v-if="part.section.title" class="wh2">{{ part.section.title }}<small v-if="part.section.subtitle">{{ part.section.subtitle }}</small></h2>
             <ul class="wgrid" role="list" :data-testid="`today-section-${part.section.id}`">
               <li v-for="task in part.section.tasks" :key="task.id">
-                <TaskCard :task="task" :busy="taskBusy[task.id] !== undefined" @open="openTask(task)" @skip="skip(task)" />
+                <TaskCard :task="task" @open="openTask(task)" />
               </li>
             </ul>
           </template>
@@ -147,7 +147,6 @@ const addItems = computed(() => [
 
 const kindLabels: Record<TaskKind, string> = {
   turnover: 'Turnovers',
-  guest_reply: 'Guest replies',
   message_delivery: 'Message delivery',
   booking_review: 'Booking reviews',
   booking_change: 'Booking changes',
@@ -230,7 +229,6 @@ watch(sheetOpen, (isOpen) => {
 async function taskChanged() { await refresh() }
 
 const actionError = ref<unknown>(null)
-const taskBusy = ref<Record<string, 'skip'>>({})
 const opportunityBusy = ref<Record<string, 'later'>>({})
 const tasksApi = computed(() => `/api/organizations/${encodeURIComponent(organizationId ?? '')}`)
 
@@ -247,7 +245,6 @@ async function act<T extends Record<string, string>>(busy: Ref<T>, id: string, s
     busy.value = rest as T
   }
 }
-const skip = (task: TaskView) => act(taskBusy, task.id, 'skip', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}/skip`, { method: 'POST', validate: isTaskResult, body: {} }))
 const isOpportunityResult = (value: unknown): value is { opportunity: { id: string } } => isRecord(value) && isRecord(value.opportunity) && typeof value.opportunity.id === 'string'
 const dismiss = (opportunity: OpportunityView) => act(opportunityBusy, opportunity.id, 'later', () => applicationFetch(`${tasksApi.value}/opportunities/${encodeURIComponent(opportunity.id)}/dismiss`, { method: 'POST', validate: isOpportunityResult, body: {} }))
 

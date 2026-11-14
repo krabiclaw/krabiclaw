@@ -1,5 +1,5 @@
 <template>
-  <DashboardLeafPanel id="new-team-conversation" title="New team conversation" save-label="Start" :disabled="!selected.length || !!membersError || !!stayError" :saving="saving" :error="actionError" @save="start">
+  <DashboardLeafPanel id="new-team-conversation" title="New conversation" save-label="Start" :disabled="!selected.length || !!membersError || !!stayError" :saving="saving" :error="actionError" @save="start">
     <UAlert v-if="membersError || stayError" class="mb-6" color="error" title="Conversation could not be prepared" :description="getErrorMessage(membersError || stayError, 'Team members could not be loaded')" />
     <template v-if="members">
       <UFormField v-if="selected.length >= 2 && !stayId && !locationId" label="Conversation name" class="mb-6">
@@ -68,7 +68,7 @@ async function start() {
       validate: (value): value is { conversation_id: string } => isRecord(value) && typeof value.conversation_id === 'string' && Boolean(value.conversation_id),
     })
     await navigateTo({ path: `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages/${encodeURIComponent(thread.conversation_id)}`, query: { kind: 'team' } })
-  } catch (error) { actionError.value = getErrorMessage(error, 'The team conversation could not be started') }
+  } catch (error) { actionError.value = getErrorMessage(error, 'The conversation could not be started') }
   finally { saving.value = false }
 }
 </script>

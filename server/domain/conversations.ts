@@ -5,6 +5,7 @@ import type { MessagePhotoInput } from './guest-threads/attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import type { GuestThreadDeliveryChannel, GuestThreadDeliveryProvider, GuestThreadDeliveryPurpose } from './guest-threads/types'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
+import type { ConversationParticipant } from '~/shared/messages-contract'
 
 /**
  * Conversations, as Slack and Discord have them (docs/domain-model.md): a
@@ -21,6 +22,20 @@ import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 export type ConversationKind = 'contact' | 'booking' | 'team'
 export type MessageAuthorKind = 'guest' | 'member' | 'krabiclaw'
 export type MessageChannel = 'web' | 'email' | 'whatsapp' | 'airbnb'
+
+export type ConversationParticipantRow = Omit<ConversationParticipant, 'can_remove'>
+
+/** Only the live roster is shown. Guests never receive internal account or member IDs. */
+export function conversationParticipantsSql(conversation: string, viewerRole: string): string {
+  return `SELECT CASE WHEN ${viewerRole} = 'member' OR seat.user_id = ? THEN u.id END AS id,
+           u.name, CASE WHEN ${viewerRole} = 'member' OR seat.user_id = ? THEN u.image END AS image, seat.role
+      FROM conversation_participants seat
+      JOIN user u ON u.id = seat.user_id
+      LEFT JOIN member m ON m.organizationId = seat.organization_id AND m.userId = seat.user_id
+      WHERE seat.organization_id = ${conversation}.organization_id AND seat.conversation_id = ${conversation}.id
+        AND (seat.role = 'guest' OR (seat.role = 'member' AND m.id IS NOT NULL))
+      ORDER BY seat.role, seat.created_at, seat.user_id`
+}
 
 export interface MessageRow {
   id: string
@@ -62,7 +77,7 @@ export const SUBMISSION_EVENT = 'thread.submission'
 /** A booking guest's note, written with the booking as their own message. */
 export const GUEST_NOTE_EVENT = 'thread.guest_note'
 /** KrabiClaw's messages that are words to read, not events about the booking. */
-const KRABICLAW_WORDS = new Set<string | null>([OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, MIRRORED_EVENT])
+const KRABICLAW_WORDS = new Set<string | null>([null, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, MIRRORED_EVENT])
 
 /** An event KrabiClaw recorded (a cancellation, a change, a payment), as opposed to words someone wrote. */
 export function isEventMessage(message: Pick<MessageRow, 'author_kind' | 'event_name'>): boolean {
@@ -103,16 +118,19 @@ function viewerMessageVisibility(message: string, conversation: string): string 
  * see them. A guest counts only what they can see. Every list row, the Unread filter, the
  * filter counts, the nav count, the app badge and MCP read this.
  */
-export function unreadSql(conversation: string, viewer: string): { sql: string; params: string[] } {
+export function unreadSql(conversation: string, viewer: string, readThrough?: number | null): { sql: string; params: (string | number)[] } {
+  const sequence = readThrough === undefined
+    ? { sql: `COALESCE((SELECT read_message.sequence FROM conversation_participants reader
+          JOIN messages read_message ON read_message.id = reader.last_read_message_id
+          WHERE reader.conversation_id = ${conversation}.id AND reader.user_id = ?), 0)`, param: viewer }
+    : { sql: '?', param: readThrough ?? 0 }
   return {
     sql: `EXISTS (SELECT 1 FROM messages unread_message
       WHERE unread_message.conversation_id = ${conversation}.id
         AND unread_message.author_user_id IS NOT ?
         AND ${viewerMessageVisibility('unread_message', conversation)}
-        AND unread_message.sequence > COALESCE((SELECT read_message.sequence FROM conversation_participants reader
-          JOIN messages read_message ON read_message.id = reader.last_read_message_id
-          WHERE reader.conversation_id = ${conversation}.id AND reader.user_id = ?), 0))`,
-    params: [viewer, viewer, viewer],
+        AND unread_message.sequence > ${sequence.sql})`,
+    params: [viewer, viewer, sequence.param],
   }
 }
 
@@ -246,19 +264,6 @@ export function parseTranscriptWindow(query: URLSearchParams): ConversationWindo
   return { before, limit: 40 }
 }
 
-export function conversationMessagesQuery(conversationId: string, guestUserId: string | null, window?: ConversationWindow, guard?: ConversationGuard, filter?: string): BatchQuery {
-  const source = `messages m${guard || guestUserId ? ' JOIN conversations c ON c.id = m.conversation_id' : ''}`
-  const scope = `m.conversation_id = ?${guard ? ` AND (${guard.sql})` : ''}${guestUserId ? ` AND ${guestVisibleSql('m', 'c.user_id = ?')}` : ''}${filter ? ` AND (${filter})` : ''}`
-  const params = [conversationId, ...(guard?.params ?? []), ...(guestUserId ? [guestUserId] : [])]
-  if (!window) return { query: `SELECT m.* FROM ${source} WHERE ${scope} ORDER BY m.sequence`, params }
-  return {
-    query: `SELECT * FROM (SELECT m.* FROM ${source} WHERE ${scope}
-      ${window.before === null ? '' : 'AND m.sequence < ?'}
-      ORDER BY m.sequence DESC LIMIT ?) ORDER BY sequence`,
-    params: [...params, ...(window.before === null ? [] : [window.before]), window.limit + 1],
-  }
-}
-
 /** A message already under this key is this message, or the key was given to a different one. */
 function sameMessage(existing: MessageRow, input: MessageInput): MessageRow {
   const matches = existing.conversation_id === input.conversationId
@@ -297,6 +302,24 @@ export async function assertMessageWriteAccess(db: DbClient, conversationId: str
   }
 }
 
+/** Sends share the scoped ledger write, including the sender's read position, photos and pending receipt. */
+export async function appendChatMessage(db: DbClient, input: Omit<MessageInput, 'conversationId' | 'guard'> & {
+  conversation: Pick<ConversationRow, 'id' | 'organization_id' | 'kind'>
+  role: ParticipantRole
+}, send: Omit<MessageSendWrite, 'organizationId' | 'extra'>): Promise<MessageRow> {
+  const { conversation, role, ...message } = input
+  if (conversation.kind === 'team' && role !== 'member') conversationAccessDenied()
+  const id = message.id ?? crypto.randomUUID()
+  const now = message.occurredAt ?? new Date().toISOString()
+  const extra = conversation.kind === 'booking' && message.eventName === MEMBER_REPLY_EVENT && message.channel === 'web'
+    ? [(await import('./guest-threads/repository')).resolveScheduledDeliveryFailure({ query: '?', params: [id] }, now)]
+    : undefined
+  return appendMessage(db, {
+    ...message, id, occurredAt: now, conversationId: conversation.id,
+    guard: conversationMessageGuard(conversation, send.uploaderUserId, role),
+  }, { ...send, organizationId: conversation.organization_id, extra })
+}
+
 /**
  * One durable append for the ledger and for sends. A send's pending receipt
  * and photo placements commit with the message. A concurrent replay keeps
@@ -307,7 +330,11 @@ export async function appendMessage(db: DbClient, input: MessageInput, additions
   const extra = Array.isArray(additions) ? additions : additions.extra ?? []
   const writer = messageQueries(input)
   const { id, dedupeKey } = writer
-  const existing = send && 'recorded' in send ? send.recorded : input.dedupeKey ? await findMessageByDedupeKey(db, dedupeKey) : null
+  // Text sends can let the guarded batch choose the winner without a read
+  // before it. For photos, check the key first to avoid uploading on replay.
+  const hasPhotos = send && (Array.isArray(send.photos) ? send.photos.length : send.photos.sourceIds.length)
+  const existing = send && 'recorded' in send ? send.recorded
+    : input.dedupeKey && (!send || hasPhotos) ? await findMessageByDedupeKey(db, dedupeKey) : null
   // Read again on a deliberate retry so an already removed message cannot be dispatched.
   if (send?.retryMessageId) {
     const saved = await findMessageByDedupeKey(db, dedupeKey)
@@ -432,17 +459,6 @@ export function archiveQuery(input: { organizationId: string; conversationId: st
     set: 'archived_at', value: input.archived ? input.now : null })
 }
 
-/** Archiving a guest conversation also dismisses its open reply task, as Dismiss does: what the guest said next is work again. */
-export function archiveReplyTaskQuery(input: { conversationId: string; organizationId: string; userId: string; guard?: ConversationGuard; now: string }): BatchQuery {
-  const guard = input.guard ?? participantGuard('c', input.userId)
-  return {
-    query: `UPDATE tasks SET status = 'skipped', closed_at = ?, closed_by_user_id = ?, version = version + 1, updated_at = ?
-      WHERE kind = 'guest_reply' AND subject_type = 'conversation' AND subject_id = ? AND status = 'open'
-        AND EXISTS (SELECT 1 FROM conversations c WHERE c.id = tasks.subject_id AND c.organization_id = ? AND ${guard.sql})`,
-    params: [input.now, input.userId, input.now, input.conversationId, input.organizationId, ...guard.params],
-  }
-}
-
 export const guestConversationSql = (alias: string) => `${alias}.kind IN ('contact', 'booking')`
 export type ParticipantRole = 'guest' | 'member'
 
@@ -462,24 +478,50 @@ export function conversationAccessSql(alias: string, principal: Pick<MemberAcces
   return participantGuard(alias, principal.userId, 'member')
 }
 
+/** Verify the destination and any signed-in sender's seat in the write itself. */
+export function conversationMessageGuard(
+  conversation: Pick<ConversationRow, 'organization_id' | 'kind'>,
+  userId: string | null,
+  role: ParticipantRole,
+): ConversationGuard {
+  const seat = userId === null ? null : participantGuard('c', userId, role)
+  return {
+    sql: `c.organization_id = ? AND c.kind = ?${seat ? ` AND ${seat.sql}` : ''}`,
+    params: [conversation.organization_id, conversation.kind, ...(seat?.params ?? [])],
+  }
+}
+
 export async function readGuestConversation(db: DbClient, userId: string, id: string): Promise<ConversationRow | null> {
   const access = participantGuard('c', userId, 'guest')
   return await queryFirst<ConversationRow>(db, `SELECT c.* FROM conversations c WHERE c.id = ? AND ${access.sql}`, [id, ...access.params]) ?? null
 }
 
-export async function resolveConversationAccess(db: DbClient, userId: string, conversationId: string) {
-  const row = await queryFirst<ConversationRow & { viewer_role: ParticipantRole; read_through: number | null; member_id: string | null; member_role: string | null }>(db, `
-    SELECT c.*, seat.role AS viewer_role, reader.sequence AS read_through, m.id AS member_id, m.role AS member_role
+export type ConversationAccessRow = ConversationRow & {
+  viewer_role: ParticipantRole; read_through: number | null; member_id: string | null; member_role: string | null
+}
+
+export function conversationAccessQuery(userId: string, conversationId: string, organizationId?: string): BatchQuery {
+  return { query: `
+    SELECT c.*, seat.role AS viewer_role, reader.sequence AS read_through, membership.id AS member_id, membership.role AS member_role
     FROM conversation_participants seat JOIN conversations c ON c.id = seat.conversation_id AND c.organization_id = seat.organization_id
+    LEFT JOIN member membership ON seat.role = 'member' AND membership.organizationId = seat.organization_id AND membership.userId = seat.user_id
     LEFT JOIN messages reader ON reader.id = seat.last_read_message_id AND reader.conversation_id = c.id
-    LEFT JOIN member m ON seat.role = 'member' AND m.organizationId = seat.organization_id AND m.userId = seat.user_id
     WHERE seat.conversation_id = ? AND seat.user_id = ?
-      AND (seat.role = 'guest' OR m.id IS NOT NULL)`,
-  [conversationId, userId])
+      AND ((seat.role = 'guest' AND c.kind <> 'team') OR membership.id IS NOT NULL)
+      ${organizationId === undefined ? '' : "AND c.organization_id = ? AND seat.role = 'member'"}`,
+  params: organizationId === undefined ? [conversationId, userId] : [conversationId, userId, organizationId] }
+}
+
+export function conversationAccessFromRow(row: ConversationAccessRow | undefined, userId: string) {
   if (!row) conversationAccessDenied()
   const { viewer_role, read_through, member_id, member_role, ...conversation } = row
   const membership = member_id && member_role !== null ? { userId, organizationId: conversation.organization_id, memberId: member_id, role: member_role } : null
   return { conversation, role: viewer_role, readThrough: read_through, membership }
+}
+
+export async function resolveConversationAccess(db: DbClient, userId: string, conversationId: string) {
+  const { query, params } = conversationAccessQuery(userId, conversationId)
+  return conversationAccessFromRow(await queryFirst<ConversationAccessRow>(db, query, params), userId)
 }
 
 export function conversationAccessDenied(): never {

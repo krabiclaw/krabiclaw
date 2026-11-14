@@ -11,8 +11,8 @@ import test, { mock } from 'node:test'
 import { Miniflare } from 'miniflare'
 import { createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isVisibleDeliveryFailure, listThreadDeliveries, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { appendMessage, resolveConversationAccess } from '../../server/domain/conversations.ts'
-import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
-import { countUnreadAsGuest, listConversations, reconcileConversationTasks } from '../../server/domain/guest-threads/repository.ts'
+import { executeGuestThreadOperation, sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
+import { countUnreadAsGuest, listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { moveBooking, requestBookingChange, respondToBookingChange } from '../../server/domain/guest-threads/booking-changes.ts'
 import { notifyContactSubmitted, notifyFinancialNotification, notifyStayCancelled, notifyBookingCreated } from '../../server/utils/notifications.ts'
 import { buyStay } from './support/stay-checkout.ts'
@@ -33,9 +33,6 @@ import { renderNotificationEmail } from '../../server/emails/render.ts'
 import { reviewRequestMessage } from '../../server/notifications/guest-events.ts'
 import { addLocalDays, formatCalendarDate, formatTimestamp, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
-
-/** The open reply tasks of a conversation, by dedupe key: the guest entry each one is about. */
-const openReplies = (db: D1Database, threadId: string) => db.prepare("SELECT dedupe_key FROM tasks WHERE kind = 'guest_reply' AND subject_type = 'conversation' AND subject_id = ? AND status = 'open'").bind(threadId).all<{ dedupe_key: string }>().then(rows => rows.results.map(row => row.dedupe_key))
 
 test('a guest-thread email is sent once per event: replays send nothing, a failed send goes again, and a late reply never moves the thread', async () => {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -172,13 +169,13 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     const [seating] = await listBookableSessions(db, { env, organizationId: 'org-proof', productId: tables.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 8 * 86_400_000).toISOString() })
     assert.equal(seating && formatTimestamp(seating.starts_at, 'en', 'Asia/Bangkok', { weekday: 'long', hour: 'numeric', minute: '2-digit' }), 'Monday 4:00 PM')
     const tablePolicy = JSON.stringify({ advance_notice_minutes: null, party_size_min: null, party_size_max: null, minimum_guest_age: null, accessibility_contact_required: false, payment: null })
-    await claimSessionCapacity(db, { env, organizationId: 'org-proof', productId: tables.id, sessionId: seating!.id, productVariantId: tables.variants[0]!.id, partySize: 1, userId: 'guest-proof', policyJson: tablePolicy,
+    const { bookingId: createdBookingId } = await claimSessionCapacity(db, { env, organizationId: 'org-proof', productId: tables.id, sessionId: seating!.id, productVariantId: tables.variants[0]!.id, partySize: 1, userId: 'guest-proof', policyJson: tablePolicy,
       following: bookingId => requestInsertQueries({ id: 'change-proof', kind: 'booking', organization_id: 'org-proof', location_id: 'booking-location', booking_id: bookingId,
         user_id: 'guest-proof', payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@proof.example', phone: '+66812345678' }), created_at: now },
       { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Table for 1', note: null }) })
     await notifyBookingCreated(env, db, { organizationId: 'org-proof', organizationName: 'Proof', vertical: 'restaurant', locationId: 'booking-location', status: 'confirmed',
-      bookingId: 'change-proof', guestName: 'Guest', email: 'guest@proof.example', guestPhone: '+66812345678', productId: tables.id, productKind: 'table', productTitle: tables.name,
-      startsAt: seating!.starts_at, timezone: 'Asia/Bangkok', partySize: 1, partySizeIsMinimum: false })
+      bookingId: 'change-proof', bookingRecordId: createdBookingId, guestName: 'Guest', email: 'guest@proof.example', guestPhone: '+66812345678', productId: tables.id, productKind: 'table', productTitle: tables.name,
+      startsAt: seating!.starts_at, timezone: 'Asia/Bangkok', partySize: 1, partySizeIsMinimum: false, answers: [] })
     const createdEmail=await db.prepare("SELECT d.status,d.email_json FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id WHERE e.conversation_id='change-proof' AND d.purpose='guest_acknowledgement'").first<{status:string;email_json:string}>()
     assert.equal(createdEmail?.status,'sent')
     assert.match(JSON.parse(createdEmail!.email_json).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/activity\/booking\/change-proof"/)
@@ -215,11 +212,9 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     const [accepted] = await Promise.all([respondToBookingChange(db, env, proposal), replayProposal()])
     assert.equal(accepted.status, 'accepted')
     const acceptedThread = await getGuestRequest(db, 'change-proof')
-    assert.deepEqual(await openReplies(db, 'change-proof'), [], 'accepting the change leaves no reply owed, and the late proposal replay below does not open one')
     const acceptedDeliveries = (await db.prepare('SELECT d.* FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id WHERE e.conversation_id = ? ORDER BY d.id').bind('change-proof').all()).results
     assert.deepEqual(await replayProposal(), { changeStatus: 'accepted' })
     assert.deepEqual(await getGuestRequest(db, 'change-proof'), acceptedThread)
-    assert.deepEqual(await openReplies(db, 'change-proof'), [])
     assert.deepEqual((await db.prepare('SELECT d.* FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id WHERE e.conversation_id = ? ORDER BY d.id').bind('change-proof').all()).results, acceptedDeliveries)
     assert.equal((await respondToBookingChange(db, env, proposal)).status, 'accepted')
     const acceptedMail=await db.prepare("SELECT d.email_json FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id WHERE e.conversation_id='change-proof' AND e.event_name='booking_change.accepted' AND d.purpose='status_update'").first<string>('email_json')
@@ -270,8 +265,8 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     await appendMessage(db, { id: 'entry-proof', conversationId: 'contact-proof', authorKind: 'guest', authorUserId: 'guest-proof', channel: 'email', dedupeKey: 'proof', body: 'Thanks', occurredAt: '2026-09-05T00:00:00.000Z' })
 
 
-    const reply = (body: string, idempotencyKey: string) => executeGuestThreadOperation(db, {
-      threadId: 'contact-proof', action: 'reply', actorUserId: 'user-proof', body, idempotencyKey, env })
+    const reply = (body: string, idempotencyKey: string) => sendGuestThreadReply(db, {
+      threadId: 'contact-proof', organizationId: 'org-proof', actorUserId: 'user-proof', body, idempotencyKey, env })
     const deliveryRow = (id: string) => db.prepare('SELECT status, provider_message_id, email_json, email_message_id FROM guest_thread_deliveries WHERE id = ?').bind(id).first<{ status: string; provider_message_id: string | null; email_json: string | null; email_message_id: string | null }>()
 
     // A reply is sent, and its receipt carries the provider's message id.
@@ -290,10 +285,6 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     assert.equal(recordedReply.message.references, undefined)
     assert.ok(recordedReply.message.html.includes('A reply'))
     assert.ok(recordedReply.message.text.includes('A reply'))
-    // A log-only send never reaches the guest, so the contact form is still owed a reply.
-    const openingEntry = await db.prepare('SELECT id FROM messages WHERE dedupe_key = ?').bind('conversation:contact-proof:submission').first<string>('id')
-    assert.deepEqual(await openReplies(db, 'contact-proof'), [`guest_reply:contact-proof:${openingEntry}`])
-
     // Replaying the same reply sends nothing: the receipt keeps its message id.
     assert.equal((await reply('A reply', operationKey)).ok, true)
     assert.equal((await deliveryRow(deliveryId))?.provider_message_id, sent?.provider_message_id)
@@ -302,8 +293,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     assert.equal(await countUnreadAsGuest(db, 'guest-proof'), 2)
 
 
-    // A reply whose send completes after a newer guest message leaves the
-    // thread on that message.
+    // A delayed delivery cannot replace a newer guest message in the inbox.
     const delayedOperationKey = 'delayed-reply-proof'
     const delayedReplyEntry = await appendMessage(db, {
       conversationId: 'contact-proof',
@@ -328,10 +318,10 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       body: 'A newer guest reply',
       dedupeKey: 'email:newer-guest-reply-proof',
     })
-    await reconcileConversationTasks(db, 'contact-proof')
     assert.deepEqual(await reply('A delayed reply', delayedOperationKey).then(outcome => ({ ok: outcome.ok, status: outcome.status })), { ok: true, status: 200 })
     assert.equal((await deliveryRow(`guest-thread-email:contact-proof:${delayedOperationKey}`))?.status, 'sent')
-    assert.deepEqual(await openReplies(db, 'contact-proof'), [`guest_reply:contact-proof:${openingEntry}`], 'a delayed reply does not answer the guest')
+    const [inboxRow] = await listConversations(db, 'org-proof', { userId: 'user-proof', unreadOnly: true, conversationIds: ['contact-proof'] })
+    assert.equal(inboxRow?.preview, 'A newer guest reply')
 
     // A failed send shows on the thread, and replaying the reply sends it again.
     const failedOperationKey = 'failed-reply-proof'
@@ -722,7 +712,7 @@ test('a booking move into a full session leaves the original booking exactly as 
       user_id: 'guest-move', payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@move.example', phone: '+66812345678' }), created_at: now }, undefined, { opening: 'Class for 1', note: null })
     await db.batch(thread.map(write => db.prepare(write.query).bind(...write.params)))
 
-    await notifyBookingCreated(env,db,{organizationId:'org-move',organizationName:'Move',bookingId:'move-proof',productId:'prod-move',productKind:'experience',productTitle:'Class',vertical:'experience',locationId:'loc-move',guestName:'Guest',email:'guest@move.example',startsAt:soon,timezone:'Asia/Bangkok',partySize:1,partySizeIsMinimum:false,status:'confirmed'})
+    await notifyBookingCreated(env,db,{organizationId:'org-move',organizationName:'Move',bookingId:'move-proof',bookingRecordId:'booking-move',productId:'prod-move',productKind:'experience',productTitle:'Class',vertical:'experience',locationId:'loc-move',guestName:'Guest',email:'guest@move.example',startsAt:soon,timezone:'Asia/Bangkok',partySize:1,partySizeIsMinimum:false,status:'confirmed',answers:[]})
     const classMail=await db.prepare("SELECT d.status,d.email_json FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id WHERE e.conversation_id='move-proof' AND d.purpose='guest_acknowledgement'").first<{status:string;email_json:string}>()
     assert.equal(classMail?.status,'sent')
     assert.match(JSON.parse(classMail!.email_json).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/activity\/booking\/move-proof"/)

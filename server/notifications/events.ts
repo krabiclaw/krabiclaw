@@ -280,7 +280,7 @@ export function contactReceivedMessage(input: ContactEventInput): MemberAlertMes
       fact('message', 'Message', input.message, true),
       input.consentAcknowledged ? fact('consent', 'Contact/privacy notice', 'Acknowledged') : null,
     ),
-    quote: { author: input.guestName, body: input.message, translation: null, photos: [] },
+    quote: { author: input.guestName, body: input.message, photos: [] },
     primaryAction: { url: input.replyUrl, label: 'Reply' },
     finePrint: REPLY_NOTE,
     category: 'messages',
@@ -333,7 +333,6 @@ export interface MessageEventInput {
   /** The words as written; empty when the message is only photos or files. */
   body: string
   photos: NotificationQuote['photos']
-  translation: NotificationQuote['translation']
   /** The conversation's last messages before this one, oldest first. */
   history: NotificationHistory
   record: ConversationRecord | null
@@ -358,7 +357,7 @@ export function messageReceived(input: MessageEventInput): MemberAlertMessage {
       fact('guestEmail', 'Email', input.sender.kind === 'person' ? input.sender.email : null),
       fact('message', 'Message', input.messagePreview, true),
     ),
-    quote: { author: first, body: input.body, translation: input.translation, photos: input.photos },
+    quote: { author: first, body: input.body, photos: input.photos },
     history: input.history,
     primaryAction: { url: input.replyUrl, label: 'Reply' },
     finePrint: REPLY_NOTE,
@@ -377,7 +376,6 @@ export interface InquiryEventInput {
   /** The guest's words that asked, as the conversation recorded them. */
   message: string
   photos: NotificationQuote['photos']
-  translation: NotificationQuote['translation']
   record: ConversationRecord & { replyBy: string }
   organizationName: string
   replyUrl: string
@@ -398,7 +396,7 @@ export function inquiryReceivedMessage(input: InquiryEventInput): MemberAlertMes
       fact('subject', 'Inquiry', `Airbnb inquiry · ${record.homeName}`, true),
       fact('message', 'Asking for', `Reply by ${record.replyBy} · ${dates} · ${nights} night${nights === 1 ? '' : 's'} · ${record.guests}`, true),
     ),
-    quote: { author: first, body: input.message, translation: input.translation, photos: input.photos },
+    quote: { author: first, body: input.message, photos: input.photos },
     primaryAction: { url: input.replyUrl, label: 'Reply' },
     finePrint: REPLY_NOTE,
     sections: [recordSection(record)],

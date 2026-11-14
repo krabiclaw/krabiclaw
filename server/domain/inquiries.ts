@@ -1,6 +1,5 @@
 import type { H3Event } from 'nitro'
 import { requestInsertQueries, getGuestRequest } from '~/server/domain/requests'
-import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { acceptFormAnswers, readFormQuestions } from '~/server/domain/form-questions'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { SUBMISSION_EVENT } from '~/server/domain/conversations'
@@ -151,7 +150,7 @@ export async function createInquiry(event: H3Event, input: { organizationId: str
       booking_id: null, user_id: userId, payload: { guest: { name, email, phone, locale: language.locale }, subject: subject || topic || null, consent_at: consentAcknowledged ? now : null, ip_hash: ipHash,
         source: source || null, route_context: routeContext || null, suggested_summary: suggestedSummary || null, agent_metadata: agentMetadata, answers,
         ...(idempotencyKey && fingerprint ? { submission: { idempotency_key: idempotencyKey, fingerprint, actor_user_id: operator?.userId ?? null, source: source || 'website', followups_completed: false } } : {}) },
-      created_at: now }, undefined, { words: message }).concat(conversationTaskQueries(id, now)))
+      created_at: now }, undefined, { words: message }))
   } catch (error) {
     // The same key committed by a concurrent attempt is that attempt's inquiry.
     const concurrent = await replay()

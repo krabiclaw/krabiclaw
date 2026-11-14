@@ -265,7 +265,7 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
       const payment = opportunities.find(item => item.path === `${editor}/booking/payment`)
       assert.ok(payment)
       const accepted = await acceptOpportunity(db, principal, payment.id, {})
-      const viewer = await taskViewer(db, principal)
+      const viewer = await taskViewer(principal)
       const task = await getTask(db, viewer, accepted.id)
       assert.deepEqual(task.action, { type: 'open', label: 'Open payment settings', path: payment.path })
       assert.equal(task.can.complete, false)

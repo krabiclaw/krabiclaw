@@ -12,6 +12,11 @@ import { readPlacesCalendar } from '~/server/domain/places'
 import { loadDashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
 import { addLocalDays, isValidCalendarDate, localDateAt } from '~/utils/timezone'
+import { readProductPhotos } from '~/server/utils/media-placement'
+import { mediaStillUrl } from '~/shared/media-placement-contract'
+import type { StayHome } from '~/server/domain/stays'
+
+export type BookingHome = Pick<StayHome, 'name' | 'internal_name' | 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'check_in_method' | 'check_in_instructions'> & { image_url: string | null }
 
 export function nightBooking<T extends { id: string }>({ id, ...record }: T) {
   return { ...record, booking_id: id, unit: 'nights' as const }
@@ -28,8 +33,8 @@ export async function dashboardBookingContext(event: H3Event) {
   const context = await dashboardBookingsContext(event)
   const bookingId = getRouterParam(event, 'booking_id')
   if (!bookingId) throw new HTTPError({ statusCode: 400, message: 'Booking ID is required' })
-  const booking = await queryFirst<Pick<BookedRecord, 'unit' | 'status' | 'respond_by'> & { conversation_id: string }>(context.db, `
-    SELECT b.unit, c.id AS conversation_id, b.status, b.respond_by FROM ${BOOKING_RECORDS_SQL} b
+  const booking = await queryFirst<Pick<BookedRecord, 'unit' | 'status' | 'respond_by' | 'product_id'> & { conversation_id: string }>(context.db, `
+    SELECT b.unit, c.id AS conversation_id, b.status, b.respond_by, b.product_id FROM ${BOOKING_RECORDS_SQL} b
       JOIN conversations c ON c.booking_id=b.id AND c.organization_id=b.organization_id AND c.kind='booking'
       WHERE b.organization_id = ? AND b.id = ?
         ${context.access.manage ? '' : `AND ${assignedMemberSql('b')}`}
@@ -43,8 +48,18 @@ export async function dashboardBookingDetails(event: H3Event) {
   if (booking.unit === 'slot') {
     return { booking: await loadDashboardBookingDetails(event, { type: 'booking', bookingId, lookup: 'booking' }), manage: access.manage }
   }
-  if (!access.manage) return { booking: nightBooking(await getStay(db, access, bookingId)), manage: false }
-  const stay = await getStay(db, access, bookingId)
+  const [stay, house, pictures] = await Promise.all([
+    getStay(db, access, bookingId),
+    queryFirst<Omit<BookingHome, 'image_url'>>(db, `SELECT p.name, s.internal_name, b.check_in_time, b.check_in_end_time, b.check_out_time,
+      s.check_in_method, s.check_in_instructions FROM product_stay_configs s
+      JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
+      JOIN product_booking_configs b ON b.organization_id = s.organization_id AND b.product_id = s.product_id
+      WHERE s.organization_id = ? AND s.product_id = ?`, [organization.id, booking.product_id]),
+    readProductPhotos(db, { organizationId: organization.id, productIds: [booking.product_id] }),
+  ])
+  if (!house) throw new Error('The booking has no home')
+  const home: BookingHome = { ...house, image_url: mediaStillUrl(pictures.get(booking.product_id)?.[0]) }
+  if (!('payments' in stay)) return { booking: nightBooking(stay), manage: false, home }
   const conversation = await getGuestRequest(db, booking.conversation_id, organization.id, 'booking')
   if (!conversation) throw new Error('The booking has no guest conversation')
   const [destination, record, pending_changes] = await Promise.all([
@@ -61,7 +76,7 @@ export async function dashboardBookingDetails(event: H3Event) {
     ...actions.filter(action => action === 'no_show' && !channelOwned),
     ...(stay.status === 'cancelled' ? [] : ['move', ...(!channelOwned ? ['edit', 'cancel'] : [])]),
   ]
-  return { booking: { ...nightBooking(stay), available_actions, pending_changes }, manage: true, can_message_guest: destination.channel !== null && !conversation.blocked_at }
+  return { booking: { ...nightBooking(stay), available_actions, pending_changes }, manage: true, home, can_message_guest: destination.channel !== null && !conversation.blocked_at }
 }
 
 interface BookingListQuery { unit?: unknown; from?: unknown; to?: unknown; product_id?: unknown; include_cancelled?: unknown }

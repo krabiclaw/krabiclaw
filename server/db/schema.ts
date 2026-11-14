@@ -230,7 +230,8 @@ export const messages = sqliteTable("messages", {
 }, table => [
 	foreignKey({ columns: [table.organization_id, table.conversation_id], foreignColumns: [conversations.organization_id, conversations.id], name: "messages_conversation_scope_fk" }).onDelete("cascade"),
 	uniqueIndex("messages_conversation_sequence_unique").on(table.conversation_id, table.sequence),
-	index("messages_conversation_event_idx").on(table.conversation_id, table.event_name),
+	index("messages_conversation_event_idx").on(table.conversation_id, table.event_name, table.author_kind),
+	index("messages_conversation_author_idx").on(table.conversation_id, table.author_kind),
 	check("messages_sequence_check", sql`sequence > 0`),
 	check("messages_payload_check", sql`json_valid(payload_json) AND json_type(payload_json) = 'object'`),
 	check("messages_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', occurred_at, '+0 days') IS occurred_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
@@ -367,7 +368,7 @@ export const opportunities = sqliteTable('opportunities', {
 
 // Work someone has to do (server/domain/tasks.ts). Every task but a custom
 // one is opened and closed by the batch that changes its subject: a stay's
-// turnover, a guest's unanswered message, a failed scheduled message, a
+// turnover, a failed scheduled message, a
 // booking awaiting approval, a change that needs the business, an accepted
 // opportunity. Kinds other than custom
 // and opportunity take their words from the subject, so title is NULL there.

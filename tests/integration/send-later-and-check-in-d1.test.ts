@@ -14,7 +14,7 @@ import { requestInsertQueries } from '../../server/domain/requests.ts'
 import { appendMessage } from '../../server/domain/conversations.ts'
 import { setListingMessagingAccess } from '../../server/domain/conversation-participants.ts'
 import { applyResendEmailEvent, createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
-import { executeGuestThreadOperation, operationDedupeKey } from '../../server/domain/guest-threads/operations.ts'
+import { sendGuestThreadReply, operationDedupeKey } from '../../server/domain/guest-threads/operations.ts'
 import { creationRequestHash } from '../../server/utils/organization-events.ts'
 
 // Every confirmed stay is sent its home's check-in instructions on its own, and
@@ -288,7 +288,7 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
     })
     const schedule = async (body: string) => { const message = await scheduleGuestReply(db, owner, 'recovery-thread', { body, due_at: minutes(1) }); return { ...message, threadId: message.conversation_id! } }
     const saved = (id: string) => db.prepare('SELECT status, reason, error_code, message_id, sent_at FROM scheduled_guest_messages WHERE id = ?').bind(id).first<{ status: string; reason: string | null; error_code: string | null; message_id: string | null; sent_at: string | null }>()
-    const retry = (body: string, id: string) => executeGuestThreadOperation(db, { threadId: 'recovery-thread', organizationId: ORG, action: 'reply', actorUserId: ADMIN, body, idempotencyKey: `send-later:${id}`, env })
+    const retry = (body: string, id: string) => sendGuestThreadReply(db, { threadId: 'recovery-thread', organizationId: ORG, actorUserId: ADMIN, body, idempotencyKey: `send-later:${id}`, env })
 
     // Resend refuses the send: the job is failed with Resend's error and its exact entry, not left Sending.
     const reply = await schedule('Your request is handled.')

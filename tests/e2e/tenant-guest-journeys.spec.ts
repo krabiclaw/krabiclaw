@@ -303,13 +303,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const threadURL = `${baseURL}/api/messages/${body.conversation_id}`
     const pendingThread = await request.get(threadURL)
     expect(pendingThread.status(), await pendingThread.text()).toBe(200)
-    expect((await pendingThread.json() as ConversationPage).conversation).toMatchObject({ id: body.conversation_id, title: 'Cancel Once', record_kind: 'booking' })
-    // The booking carries no question from the guest, so Today holds no reply task for it.
-    const todayBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
-    expect(todayBefore.status(), await todayBefore.text()).toBe(200)
-    const todayBeforePayload = await todayBefore.json() as { tasks: TaskSection[] }
-    const todayBeforeTasks = todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id)
-    expect(todayBeforeTasks.filter(task => task.kind === 'guest_reply')).toEqual([])
+    expect((await pendingThread.json() as ConversationPage).conversation).toMatchObject({ id: body.conversation_id, title: 'Cancel Once' })
     const day = persistedBooking.booking_date
     // Calendar owns confirmed commitments; quests do not repeat its agenda.
     const scheduleParams = { org: wheel.slug, from: day, to: day }

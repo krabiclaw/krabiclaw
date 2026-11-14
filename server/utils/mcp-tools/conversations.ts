@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { createTeamThread, listTeamMembers, operateTeamGroup } from '~/server/domain/team-messages'
-import { assertConversationAccess, conversationAccessDenied, conversationAccessSql, markConversationRead, markConversationUnread, resolveConversationAccess } from '~/server/domain/conversations'
+import { assertConversationAccess, conversationAccessSql, markConversationRead, markConversationUnread } from '~/server/domain/conversations'
 import { archiveConversation, countUnreadConversations, listConversations } from '~/server/domain/guest-threads/repository'
 import { loadConversationPage } from '~/server/domain/conversation-history'
 import { sendConversationMessage } from '~/server/domain/send-conversation-message'
@@ -33,12 +33,25 @@ const listRow = { type: 'object', properties: {
 }, required: ['conversation_id', 'kind', 'title', 'channel', 'home', 'when', 'preview', 'preview_from', 'time', 'unread'], additionalProperties: false }
 const unreadCounts = { type: 'object', properties: { all: { type: 'integer' }, guests: { type: 'integer' }, support: { type: 'integer' }, team: { type: 'integer' } }, required: ['all', 'guests', 'support', 'team'] }
 const cursor = { type: ['integer', 'null'], minimum: 1 }
+const messageEntries = { type: 'array', items: { type: 'object', properties: { id: text, type: { type: 'string', enum: ['message', 'day', 'event'] } }, required: ['id', 'type'] } }
+const messageWindow = { type: 'object', properties: { before: cursor, oldest: cursor, newest: cursor, read_through: cursor }, required: ['before', 'oldest', 'newest', 'read_through'] }
+const capabilities = { type: 'object', properties: {
+  can_manage_participants: { type: 'boolean' }, can_invite_guest: { type: 'boolean' }, can_leave: { type: 'boolean' },
+}, required: ['can_manage_participants', 'can_invite_guest', 'can_leave'] }
+const composer = { type: 'object', properties: {
+  channel: { type: 'string', enum: ['email', 'airbnb', 'team'] },
+}, required: ['channel'] }
 const messagePage = { type: 'object', properties: {
-  conversation: { type: 'object', properties: { id: text, organization_id: text, title: text, kind: { type: 'string', enum: ['guest', 'support', 'team'] }, participants: { type: 'array' } }, required: ['id', 'organization_id', 'title', 'kind', 'participants'] },
-  entries: { type: 'array', items: { type: 'object', properties: { id: text, type: { type: 'string', enum: ['message', 'day', 'event'] } }, required: ['id', 'type'] } },
-  page: { type: 'object', properties: { before: cursor, oldest: cursor, newest: cursor, failed_messages: { type: 'array', items: text } }, required: ['before', 'oldest', 'newest', 'failed_messages'] },
+  conversation: { type: 'object', properties: {
+    id: text, organization_id: text, title: text, kind: { type: 'string', enum: ['guest', 'support', 'team'] },
+    participants: { type: 'array' }, composer, booking_id: nullableText,
+  }, required: ['id', 'organization_id', 'title', 'kind', 'participants', 'composer', 'booking_id'] },
+  entries: messageEntries,
+  page: messageWindow,
   viewer_role: { const: 'member' },
-}, required: ['conversation', 'entries', 'page', 'viewer_role'] }
+  capabilities,
+}, required: ['conversation', 'entries', 'page', 'viewer_role', 'capabilities'] }
+const earlierPage = { type: 'object', properties: { conversation_id: text, entries: messageEntries, page: messageWindow }, required: ['conversation_id', 'entries', 'page'] }
 const readState = { type: 'object', properties: { conversation_id: text, unread: { type: 'boolean' }, last_read_message_id: nullableText }, required: ['conversation_id', 'unread', 'last_read_message_id'], additionalProperties: false }
 
 export const CONVERSATION_TOOLS: McpToolDefinition[] = [
@@ -54,9 +67,9 @@ export const CONVERSATION_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({ name: 'get_conversation', domain: 'conversations', minimumRole: 'member', description: 'Read the latest page of a conversation you participate in. Entries are in sequence order. Pass page.before to read older messages. Reading does not acknowledge messages.',
     inputSchema: { conversation_id: conversationId, before: { type: 'integer', minimum: 1 } }, required: ['conversation_id'],
-    outputSchema: messagePage,
+    outputSchema: { type: 'object', anyOf: [messagePage, earlierPage] },
   }),
-  organizationTool({ name: 'send_message', domain: 'conversations', minimumRole: 'member', description: 'Send text and/or one photo in a conversation, as you. In a guest conversation it is your reply through its reply_channel (get_conversation): Airbnb replies accept text or one photo, sent separately; email replies accept text, a photo or both; a guest with neither email nor account is refused with GUEST_UNREACHABLE. In a team conversation it reaches its participants by their notification choices. Reuse the same idempotency_key for an identical retry. A failed Airbnb attempt may retry only when retry_with_same_idempotency_key is true; a realtime failure may report committed:true and must retry that same request. A saved message does not prove delivery.',
+  organizationTool({ name: 'send_message', domain: 'conversations', minimumRole: 'member', description: 'Send text and/or one photo in a conversation, as you. Check conversation.composer.channel from get_conversation. Airbnb replies accept text or one photo, sent separately. Email replies accept text, a photo or both. A guest with neither email nor account is refused with GUEST_UNREACHABLE. Team replies reach participants according to their notification choices. Reuse the same idempotency_key for an identical retry. A failed Airbnb attempt may retry only when retry_with_same_idempotency_key is true; a realtime failure may report committed:true and must retry that same request. A saved message does not prove delivery.',
     inputSchema: { conversation_id: conversationId, message: { ...text, minLength: 1, maxLength: 5000, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' }, file: { ...chatgptFileInput, description: 'Optional photo supplied as a ChatGPT file attachment.' }, idempotency_key: { ...text, minLength: 8, maxLength: 128, pattern: '^[a-zA-Z0-9_-]{8,128}$' }, anyOf: [{ required: ['message'] }, { required: ['file'] }] }, required: ['conversation_id', 'idempotency_key'], fileParams: ['file'],
     outputSchema: { type: 'object', properties: { conversation_id: text, message: { type: 'object', properties: { id: text, sequence: { type: 'integer', minimum: 1 } }, required: ['id', 'sequence'] } }, required: ['conversation_id', 'message'] },
   }),
@@ -66,7 +79,7 @@ export const CONVERSATION_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'mark_conversation_unread', domain: 'conversations', minimumRole: 'member', description: 'Mark a conversation unread for you: its newest message from someone else is unread again. Needs a message from someone else (409 NOTHING_TO_MARK). Changes only your own read position.',
     inputSchema: { conversation_id: conversationId }, required: ['conversation_id'], outputSchema: readState,
   }),
-  organizationTool({ name: 'set_conversation_archived', domain: 'conversations', minimumRole: 'member', description: 'Archive a conversation for yourself (it moves to Past until someone else writes in it) or restore it. Archiving a guest conversation also dismisses its open reply task. It cancels no booking, sends nothing and leaves everyone else’s Messages unchanged. A conversation quiet for 30 days stays in Past; a blocked one is in Blocked.',
+  organizationTool({ name: 'set_conversation_archived', domain: 'conversations', minimumRole: 'member', description: 'Archive a conversation for yourself (it moves to Past until someone else writes in it) or restore it. It cancels no booking, sends nothing and leaves everyone else’s Messages unchanged. A conversation quiet for 30 days stays in Past; a blocked one is in Blocked.',
     inputSchema: { conversation_id: conversationId, archived: { type: 'boolean' } }, required: ['conversation_id', 'archived'],
     outputSchema: { type: 'object', properties: { conversation_id: text, archived: { type: 'boolean' } }, required: ['conversation_id', 'archived'], additionalProperties: false },
   }),
@@ -77,7 +90,7 @@ export const CONVERSATION_TOOLS: McpToolDefinition[] = [
     inputSchema: { member_user_ids: { type: 'array', minItems: 1, maxItems: 49, uniqueItems: true, items: { ...text, minLength: 1 } }, name: { ...text, minLength: 1, maxLength: 100, description: 'Optional name for a manually created group of at least three people; unavailable for direct or booking/location conversations.' }, idempotency_key: { ...text, minLength: 1, maxLength: 200, description: 'Required for a manually created group. Keep the same key for an identical retry.' }, booking_id: { ...text, minLength: 1, description: 'Optional booking ID you may read, a stay’s included.' }, location_id: { ...text, minLength: 1, description: 'Optional explicit location context you may read.' } }, required: ['member_user_ids'],
     outputSchema: { type: 'object', properties: { conversation_id: text, created: { type: 'boolean' } }, required: ['conversation_id', 'created'] },
   }),
-  organizationTool({ name: 'update_conversation_group', domain: 'conversations', minimumRole: 'member', description: 'Rename, add people to, remove someone from, or leave a manually created team group. The creator and participating workspace owners/admins can manage it; any participant can leave. Read can_manage/can_leave from get_conversation. Direct chats, guest conversations and booking/location conversations are protected. No action deletes the conversation or its messages. New members can read its history; removed members lose access. Use a stable idempotency_key and retry exactly the same action if committed:true is returned.',
+  organizationTool({ name: 'update_conversation_group', domain: 'conversations', minimumRole: 'member', description: 'Rename, add people to, remove someone from, or leave a manually created team group. The creator and participating workspace owners/admins can manage it; any participant can leave. Read capabilities.can_manage_participants and capabilities.can_leave from get_conversation. Direct chats, guest conversations and booking/location conversations are protected. No action deletes the conversation or its messages. New members can read its history; removed members lose access. Use a stable idempotency_key and retry exactly the same action if committed:true is returned.',
     inputSchema: { conversation_id: conversationId, action: { type: 'string', enum: ['rename', 'add', 'remove', 'leave'] }, idempotency_key: { ...text, minLength: 1, maxLength: 200 }, name: { type: ['string', 'null'], minLength: 1, maxLength: 100, description: 'Rename only: a name, or null to clear it.' }, member_user_ids: { type: 'array', minItems: 1, maxItems: 49, uniqueItems: true, items: { ...text, minLength: 1 }, description: 'Add only: current workspace users to add.' }, user_id: { ...text, minLength: 1, description: 'Remove only: the participant to remove. Use leave to remove yourself.' }, oneOf: [
       { properties: { action: { const: 'rename' } }, required: ['name'] },
       { properties: { action: { const: 'add' } }, required: ['member_user_ids'] },
@@ -114,9 +127,7 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
   if (toolName === 'get_conversation') {
     const before = args.before ?? null
     if (before !== null && (typeof before !== 'number' || !Number.isSafeInteger(before) || before < 1)) throw new HTTPError({ statusCode: 400, message: 'Invalid transcript cursor', data: { code: 'INVALID_TRANSCRIPT_CURSOR', field: 'before' } })
-    const access = await resolveConversationAccess(db, userId, conversationId)
-    if (access.role !== 'member' || access.conversation.organization_id !== organizationId) conversationAccessDenied()
-    return await loadConversationPage(db, { ...access, userId, principal }, { before, limit: 40 })
+    return loadConversationPage(db, { conversationId, userId, organizationId }, { before, limit: 40 })
   }
   const conversation = await assertConversationAccess(db, principal, conversationId)
   switch (toolName) {

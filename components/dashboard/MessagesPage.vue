@@ -10,7 +10,7 @@
     <template #right>
       <UButton icon="i-lucide-search" color="neutral" variant="soft" class="rounded-full" :aria-label="searching ? 'Close search' : 'Search messages'" :aria-pressed="searching" @click="toggleSearch" />
       <UButton v-if="!personalScope && canManageMessages" icon="i-lucide-settings" color="neutral" variant="soft" class="rounded-full" aria-label="Messaging settings" @click="settingsOpen = true" />
-      <UButton v-if="!personalScope && hasWorkspaceMembership" :to="`${listPath}/new`" icon="i-lucide-square-pen" color="neutral" variant="soft" class="rounded-full" aria-label="New team conversation" />
+      <UButton v-if="!personalScope && hasWorkspaceMembership" :to="`${listPath}/new`" icon="i-lucide-square-pen" color="neutral" variant="soft" class="rounded-full" aria-label="New conversation" />
     </template>
     <ConversationList v-if="personalScope || hasWorkspaceMembership" ref="conversationList" :personal-scope="personalScope" @first="firstThread = $event">
       <template #filters><ReuseControls /></template>
@@ -34,11 +34,11 @@ import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
 import { useTeamGroupLeaveRequest } from '~/lib/components/workspace/messages/team-thread-client'
 import { getErrorMessage } from '~/utils/errors'
-const props = defineProps<{ personalScope?: boolean }>()
 const route = useRoute()
+const personalScope = route.params.org_slug === undefined
 const router = useRouter()
 const dashboard = useDashboardOrganization()
-const listPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages`)
+const listPath = computed(() => personalScope ? '/dashboard/account/messages' : `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages`)
 const role = computed(() => dashboard.organization.value?.role as keyof typeof organizationRoles | undefined)
 const hasWorkspaceMembership = computed(() => Boolean(role.value))
 const canManageMessages = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['update'] } })))
@@ -61,7 +61,7 @@ watchDebounced(query, words => {
   void router.replace({ path: route.path, query: words.trim() ? { ...rest, q: words.trim() } : rest })
 }, { debounce: 250 })
 const pastOnly = computed(() => route.query.archived !== undefined)
-const blockedOnly = computed(() => !props.personalScope && route.query.blocked !== undefined)
+const blockedOnly = computed(() => !personalScope && route.query.blocked !== undefined)
 const firstThread = ref<RouteLocationRaw | null>(null)
 const conversationList = useTemplateRef('conversationList')
 provide(removeInboxConversationKey, id => {

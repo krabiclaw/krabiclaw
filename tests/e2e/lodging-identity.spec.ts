@@ -10,7 +10,7 @@ import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import type { TeamMember } from '../../server/domain/team-messages'
 import type { InboxRow } from '../../server/domain/guest-threads/types'
 import { ALL_VERTICALS } from '../../utils/vertical-copy'
-import type { ConversationMessage, ConversationPage } from '../../shared/messages-contract'
+import type { ConversationEntriesPage, ConversationMessage, ConversationPage } from '../../shared/messages-contract'
 import type { Product } from '../../server/types/products'
 
 // The native app authenticates with a Better Auth bearer session and nothing
@@ -121,7 +121,7 @@ test.describe('lodging identity boundary', () => {
         expect(response.status(), await response.text()).toBe(200)
         return mcpData<T>(await response.json())
       }
-      const messages = (page: ConversationPage) => page.entries.filter((entry): entry is ConversationMessage => entry.type === 'message')
+      const messages = (page: Pick<ConversationEntriesPage, 'entries'>) => page.entries.filter((entry): entry is ConversationMessage => entry.type === 'message')
       const teamRead = (args: { before?: number } = {}, client = request) => teamCall<ConversationPage>('get_conversation', { conversation_id: threadId, ...args }, client)
       const recipients = await teamCall<{ current_user_id: string; members: TeamMember[] }>('list_conversation_recipients')
       expect(recipients.current_user_id).toBe(fixture.id)
@@ -140,7 +140,9 @@ test.describe('lodging identity boundary', () => {
       expect(conversations.conversations).toEqual([expect.objectContaining({ conversation_id: threadId, kind: 'team', unread: false })])
       expect(conversations.page_info).toEqual({ has_more: false, next_cursor: null })
       const opened = (await teamRead()).conversation
-      expect(opened).toMatchObject({ id: threadId, unread: false, stay: null, location_id: null })
+      expect(opened).toMatchObject({ id: threadId, booking_id: null })
+      expect(opened).not.toHaveProperty('location_id')
+      expect(opened).not.toHaveProperty('stay')
       expect(opened.participants.map(member => member.id).sort()).toEqual([fixture.id, invitee.id].sort())
       const message = `The guest room is ready ${crypto.randomUUID()}`
       const idempotencyKey = crypto.randomUUID()
@@ -157,7 +159,10 @@ test.describe('lodging identity boundary', () => {
       expect(JSON.parse(changedRetryResult.content[0].text)).toMatchObject({ status: 409, code: 'IDEMPOTENCY_KEY_REUSED' })
       const nativeRead = await api.get(teamPath, { headers: inviteeBearer })
       expect(nativeRead.status, await nativeRead.text()).toBe(200)
-      expect(await nativeRead.json()).toMatchObject({ entries: [{ id: sent.message.id, body: message, author_user_id: fixture.id }], page: { before: null }, conversation: { id: threadId, unread: true, last_message_at: sent.message.sent_at } })
+      const nativePage = await nativeRead.json() as ConversationPage
+      expect(nativePage).toMatchObject({ page: { before: null }, conversation: { id: threadId } })
+      expect(nativePage.entries.map(entry => entry.type)).toEqual(['day', 'message'])
+      expect(messages(nativePage)).toMatchObject([{ id: sent.message.id, body: message, author_user_id: fixture.id }])
       const teamRows = async (headers: Record<string, string>) => {
         const response = await api.get(`/api/messages?organization_id=${organization.id}&kind=team`, { headers })
         expect(response.status, await response.text()).toBe(200)
@@ -196,7 +201,7 @@ test.describe('lodging identity boundary', () => {
       await page.goto(`/dashboard/${slug}/messages?kind=team`)
       await dismissPreviewToolbar(page)
       await expect(page.locator('[data-conversation-list-hydrated="true"]')).toBeVisible()
-      await page.getByRole('link', { name: 'New team conversation', exact: true }).click()
+      await page.getByRole('link', { name: 'New conversation', exact: true }).click()
       await page.getByRole('checkbox', { name: invitee.name, exact: true }).check()
       const reopened = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/dashboard/team/threads')
       await page.getByRole('button', { name: 'Start', exact: true }).click()
@@ -256,12 +261,14 @@ test.describe('lodging identity boundary', () => {
       await page.locator('input[type="file"]').setInputFiles({ name: 'team-message-proof.avif', mimeType: 'image/avif', buffer: await sharp('public/platform/apple-touch-icon.png').avif().toBuffer() })
       const photoSent = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === teamPath)
       await page.getByRole('button', { name: 'Send message', exact: true }).click()
-      expect((await photoSent).status()).toBe(200)
+      const photoResponse = await photoSent
+      expect(photoResponse.status()).toBe(200)
+      const sentPhoto = (await photoResponse.json() as { message: ConversationMessage }).message
+      expect(sentPhoto.deliveries).toEqual([expect.objectContaining({ channel: 'email', status: 'sent' })])
       const photoRead = await api.get(teamPath, { headers: inviteeBearer })
       expect(photoRead.status, await photoRead.text()).toBe(200)
       const photo = messages(await photoRead.json() as ConversationPage).at(-1)!
-      expect(photo).toMatchObject({ body: '', author_user_id: fixture.id })
-      expect(photo.deliveries).toEqual([expect.objectContaining({ channel: 'email', status: 'sent' })])
+      expect(photo).toMatchObject({ id: sentPhoto.id, body: '', author_user_id: fixture.id, deliveries: [] })
       expect(photo.photos).toHaveLength(1)
       const loadedPhoto = await api.get(photo.photos[0]!.url)
       expect(loadedPhoto.status).toBe(200)
@@ -304,8 +311,11 @@ test.describe('lodging identity boundary', () => {
       expect(retained.page.before).not.toBeNull()
       const older = await api.get(`${teamPath}?before=${retained.page.before}`, { headers: bearer })
       expect(older.status, await older.text()).toBe(200)
-      const prior = await older.json() as ConversationPage
+      const prior = await older.json() as ConversationEntriesPage
+      expect(Object.keys(prior).sort()).toEqual(['conversation_id', 'entries', 'page'])
+      expect(prior.conversation_id).toBe(threadId)
       expect(prior.page.before).toBeNull()
+      expect(prior.page.newest).toBeLessThan(retained.page.before!)
       expect(await page.locator('[data-team-message]').evaluateAll(rows => rows.map(row => row.getAttribute('data-team-message')))).toEqual([...messages(prior), ...messages(retained)].map(message => message.id))
       const reused = await api.post('/api/auth/organization/accept-invitation', { headers: inviteeBearer, data: { invitationId } })
       expect(reused.status).toBe(400)
@@ -400,7 +410,7 @@ test.describe('lodging identity boundary', () => {
         await page.goto(`${listPath}?kind=team`)
         await waitForNuxtHydration(page)
         await dismissPreviewToolbar(page)
-        await page.getByRole('link', { name: 'New team conversation', exact: true }).click()
+        await page.getByRole('link', { name: 'New conversation', exact: true }).click()
         await page.getByRole('checkbox', { name: invitee.name, exact: true }).check()
         await page.getByRole('checkbox', { name: teammate.name, exact: true }).check()
         const initialName = `Handover ${slug}`
@@ -428,9 +438,9 @@ test.describe('lodging identity boundary', () => {
           const response = await api.get(`/api/messages/${id}`, { headers })
           if (response.status === 404) return []
           expect(response.status, await response.text()).toBe(200)
-          const { conversation } = await response.json() as ConversationPage
+          const { conversation, capabilities } = await response.json() as ConversationPage
           if (conversation.kind !== 'team') throw new Error(`Expected a team conversation for ${id}`)
-          return [conversation]
+          return [{ ...conversation, capabilities }]
         }
         const history = async (headers: Record<string, string>) => {
           const response = await api.get(teamPath, { headers })
@@ -439,7 +449,7 @@ test.describe('lodging identity boundary', () => {
         }
         for (const [bearer, can_manage] of [[ownerBearer, true], [adminBearer, true], [memberBearer, false]] as const) {
           const group = (await threads(bearer)).find(thread => thread.id === threadId)!
-          expect(group).toMatchObject({ name: initialName, is_group: true, created_by_user_id: fixture.id, can_manage, can_leave: true, booking_id: null, location_id: null })
+          expect(group).toMatchObject({ name: initialName, is_group: true, created_by_user_id: fixture.id, capabilities: { can_manage_participants: can_manage, can_leave: true }, booking_id: null })
           expect(group.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id, teammate.id].sort())
         }
         const messageIds: string[] = []
@@ -472,8 +482,8 @@ test.describe('lodging identity boundary', () => {
           expect((await api.post(`${operations}?org=${slug}`, { headers, data: { action: 'rename', name: 'Outside', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
         }
 
-        await page.getByLabel('Conversation details', { exact: true }).click()
-        await page.getByRole('link', { name: /^Name/ }).click()
+        await page.getByLabel('In this conversation', { exact: true }).click()
+        const panel = page.getByRole('dialog', { name: 'In this conversation', exact: true })
         const renamed = `Named group ${slug}`
         await page.getByRole('textbox', { name: 'Conversation name', exact: true }).fill(renamed)
         await page.getByRole('button', { name: 'Save name', exact: true }).click()
@@ -481,8 +491,6 @@ test.describe('lodging identity boundary', () => {
         const memberManagement = await api.post(`${operations}?org=${slug}`, { headers: memberBearer, data: { action: 'remove', user_id: invitee.id, idempotency_key: crypto.randomUUID() } })
         expect(memberManagement.status, await memberManagement.text()).toBe(403)
 
-        await page.goto(`${groupPath}/group/members?kind=team`)
-        await waitForNuxtHydration(page)
         await page.getByRole('button', { name: `Remove ${teammate.name}`, exact: true }).click()
         const removed = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === operations)
         await page.getByRole('dialog').getByRole('button', { name: 'Remove', exact: true }).click()
@@ -497,18 +505,19 @@ test.describe('lodging identity boundary', () => {
         expect((await api.get(teamPath, { headers: memberBearer })).status).toBe(404)
         expect((await api.post(teamPath, { headers: memberBearer, data: { body: 'No seat', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
 
-        await page.getByRole('checkbox', { name: teammate.name, exact: true }).check()
-        await page.getByRole('button', { name: 'Add', exact: true }).click()
+        await panel.getByRole('button', { name: 'Add people', exact: true }).click()
+        await panel.getByRole('checkbox', { name: teammate.name, exact: true }).check()
+        await panel.getByRole('button', { name: 'Add', exact: true }).click()
         await expect.poll(async () => (await threads(adminBearer)).find(thread => thread.id === threadId)?.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id, teammate.id].sort())
         expect((await history(memberBearer)).map(message => message.id).sort()).toEqual([...messageIds].sort())
         await memberPage.goto(`${groupPath}?kind=team`)
         await waitForNuxtHydration(memberPage)
         await expect(memberPage.locator(`[data-team-message="${messageIds[0]}"]`)).toContainText(bodies[0]!)
-        await memberPage.getByLabel('Conversation details', { exact: true }).click()
-        await expect(memberPage.getByRole('link', { name: /^Name/ })).toHaveCount(0)
+        await memberPage.getByLabel('In this conversation', { exact: true }).click()
+        await expect(memberPage.getByRole('textbox', { name: 'Conversation name', exact: true })).toHaveCount(0)
         await memberPage.getByRole('button', { name: 'Leave conversation', exact: true }).click()
         const left = memberPage.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === operations)
-        await memberPage.getByRole('dialog').getByRole('button', { name: 'Leave conversation', exact: true }).click()
+        await memberPage.getByRole('dialog', { name: 'In this conversation' }).getByRole('button', { name: 'Leave conversation', exact: true }).click()
         const leftResponse = await left
         expect(leftResponse.status(), await leftResponse.text()).toBe(200)
         expect(await leftResponse.json()).toEqual({ status: 'left', conversation_id: threadId })
@@ -521,8 +530,6 @@ test.describe('lodging identity boundary', () => {
         expect(adminRename.status(), await adminRename.text()).toBe(200)
         expect(mcpData<{ status: 'updated'; conversation_id: string }>(await adminRename.json())).toEqual({ status: 'updated', conversation_id: threadId })
         expect((await threads(ownerBearer)).find(thread => thread.id === threadId)?.name).toBe('Admin handover')
-        await page.goto(`${groupPath}/group/members?kind=team`)
-        await waitForNuxtHydration(page)
         await expect(page.getByRole('button', { name: `Remove ${invitee.name}`, exact: true })).toBeVisible()
         await page.screenshot({ path: testInfo.outputPath('team-group-details-after-membership-changes.png'), fullPage: true })
         const ownerLeft = await api.post(`${operations}?org=${slug}`, { headers: ownerBearer, data: { action: 'leave', idempotency_key: crypto.randomUUID() } })
@@ -537,18 +544,20 @@ test.describe('lodging identity boundary', () => {
         const direct = await api.post(teamListPath, { headers: adminBearer, data: { member_user_ids: [fixture.id] } })
         expect(direct.status, await direct.text()).toBe(201)
         const { conversation_id: directId } = await direct.json() as { conversation_id: string }
-        expect((await threads(ownerBearer, directId)).find(thread => thread.id === directId)).toMatchObject({ name: null, is_group: false, can_manage: false, can_leave: false })
+        expect((await threads(ownerBearer, directId)).find(thread => thread.id === directId)).toMatchObject({ name: null, is_group: false, capabilities: { can_manage_participants: false, can_leave: false } })
         const protectedDirect = await api.post(`/api/dashboard/team/threads/${directId}/operations?org=${slug}`, { headers: ownerBearer, data: { action: 'leave', idempotency_key: crypto.randomUUID() } })
         expect(protectedDirect.status, await protectedDirect.text()).toBe(409)
         expect(await protectedDirect.json()).toMatchObject({ data: { code: 'TEAM_GROUP_PROTECTED', field: 'conversation_id' } })
         await page.goto(`${listPath}/${directId}?kind=team`)
         await waitForNuxtHydration(page)
-        await expect(page.getByLabel('Conversation details', { exact: true })).toHaveCount(0)
+        await page.getByLabel('In this conversation', { exact: true }).click()
+        await expect(panel).toBeVisible()
+        await expect(panel.getByRole('button', { name: 'Leave conversation', exact: true })).toHaveCount(0)
+        await expect(panel.getByRole('textbox', { name: 'Conversation name', exact: true })).toHaveCount(0)
         await loginAs(memberContext.request, baseURL!, buyer.id)
         await memberPage.goto('/dashboard/account/messages')
         await waitForNuxtHydration(memberPage)
-        await expect(memberPage.getByRole('link', { name: 'New team conversation', exact: true })).toHaveCount(0)
-        await expect(memberPage.getByLabel('Conversation details', { exact: true })).toHaveCount(0)
+        await expect(memberPage.getByRole('link', { name: 'New conversation', exact: true })).toHaveCount(0)
       } finally {
         try {
           const deleted = await api.post('/api/auth/organization/delete', { headers: ownerBearer, data: { organizationId: organization.id } })

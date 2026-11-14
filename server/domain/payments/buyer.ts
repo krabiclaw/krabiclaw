@@ -3,7 +3,7 @@ import {HTTPError} from 'nitro'
 import {executeBatch,queryAll,queryFirst,type DbClient} from '~/server/db'
 import {CURRENT_GUEST_SQL} from '~/server/domain/conversations'
 import {loadOwnerPictures} from '~/server/notifications/hero'
-import {accountActivityPath,isAccountActivityItem,isBuyerPaymentEntry,type AccountActivityItem,type AccountActivityResponse,type BuyerPaymentEntry} from '~/shared/account-activity'
+import {accountActivityPath,isAccountActivityItem,isBuyerPaymentEntry,type AccountActivityItem,type AccountActivityKind,type AccountActivityResponse,type BuyerPaymentEntry} from '~/shared/account-activity'
 
 export async function ownedBuyerRequest(db:DbClient,userId:string,id:string,lookup:'conversation'|'booking'='conversation') {
  // The conversation's booking is the buyer's: CURRENT_GUEST_SQL holds it to the conversation's own guest.
@@ -92,17 +92,41 @@ export async function buyerPaymentActivityPath(db:DbClient,userId:string,payment
  const item=resolvePaymentActivity(rows,payment)
  return accountActivityPath(item.kind,item.id)
 }
-/** Conversation links share the same actual visit/payment association resolver. */
-export async function buyerRequestActivityPath(db:DbClient,userId:string,conversation_id:string):Promise<string|null> {
- const rows=await buyerActivityRows(db,userId)
- const visits=rows.visits.filter(row=>row.conversation_id===conversation_id)
- if(visits.length>1)throw new Error('Owned conversation has ambiguous visit associations')
- if(visits[0])return accountActivityPath(visits[0].kind,visits[0].id)
- const payments=rows.payments.filter(row=>row.hold_conversation_id===conversation_id)
- if(payments.length>1)return '/dashboard/account/activity'
- if(!payments[0])return null
- const item=resolvePaymentActivity(rows,payments[0])
- return accountActivityPath(item.kind,item.id)
+/** The linked app booking takes precedence over a checkout for the same conversation. */
+export async function buyerRequestActivityPath(db: DbClient, input: { organizationId: string; conversationId: string; userId?: string }): Promise<string | null> {
+  const params = [input.conversationId, input.organizationId]
+  if (input.userId !== undefined) params.push(input.userId)
+  const rows = await queryAll<{ kind: AccountActivityKind; id: string; subject_type: string | null }>(db, `
+    WITH owned AS (
+      SELECT c.id, c.organization_id, c.user_id, c.booking_id FROM conversations c
+      WHERE c.id = ? AND c.organization_id = ? AND c.kind = 'booking' AND ${CURRENT_GUEST_SQL('c')}
+        ${input.userId === undefined ? '' : 'AND c.user_id = ?'}
+    ), visit AS (
+      SELECT CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END AS kind, c.id
+      FROM owned c JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id AND b.user_id = c.user_id AND b.owner = 'app'
+    ), checkout AS (
+      SELECT p.id, p.organization_id, p.buyer_user_id, p.subject_type, p.subject_id, po.id AS order_id
+      FROM owned c JOIN payments p ON p.buyer_user_id = c.user_id AND p.organization_id = c.organization_id
+      JOIN payment_checkout_holds h ON h.payment_id = p.id AND h.organization_id = p.organization_id AND h.buyer_user_id = p.buyer_user_id AND h.conversation_id = c.id
+      LEFT JOIN payment_orders po ON po.payment_id = p.id AND po.organization_id = p.organization_id AND po.buyer_user_id = p.buyer_user_id
+      WHERE NOT EXISTS (SELECT 1 FROM visit)
+      LIMIT 2
+    )
+    SELECT kind, id, NULL AS subject_type FROM visit
+    UNION ALL
+    SELECT CASE WHEN b.id IS NOT NULL THEN CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END
+      WHEN p.order_id IS NOT NULL THEN 'order' ELSE 'payment' END AS kind, COALESCE(r.id, b.id, p.id) AS id, p.subject_type
+    FROM checkout p
+    LEFT JOIN bookings b ON p.subject_type = 'booking' AND b.id = p.subject_id AND b.organization_id = p.organization_id AND b.user_id = p.buyer_user_id AND b.owner = 'app'
+      AND NOT EXISTS (SELECT 1 FROM conversations other WHERE other.booking_id = b.id AND other.kind = 'booking'
+        AND (other.organization_id <> b.organization_id OR other.user_id IS NOT b.user_id))
+    LEFT JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking'
+  `, params)
+  if (rows.length > 1) return '/dashboard/account/activity'
+  const activity = rows[0]
+  if (!activity) return null
+  if (activity.kind === 'order' && activity.subject_type !== 'order') throw new Error('Owned order does not match its payment subject')
+  return accountActivityPath(activity.kind, activity.id)
 }
 export async function tokenHash(token:string):Promise<string>{return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token)))).map(v=>v.toString(16).padStart(2,'0')).join('')}
 /** Hidden Checkout-return proof, accepted only after native Stripe verification. */

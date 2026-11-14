@@ -12,7 +12,7 @@ import { createProduct, deleteProduct, getProduct, removeProductLocation, setPro
 import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayGapCandidates, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { readBusinessProgressReference } from '../../server/utils/business-outcomes.ts'
 import { dismissOpportunity, listOpportunities } from '../../server/domain/opportunities.ts'
-import { listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
+import { getTask, listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { H3Event } from 'h3'
@@ -1406,9 +1406,14 @@ test('unknown home clocks preserve turnover dates without inventing task instant
     const first = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'unknown-first', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
     const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'unknown-next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
     const membership = await resolveMembership(env, { organizationId: ORG, userId: CLEANER })
-    const viewer = await taskViewer(db, memberAccessPrincipal(membership!, { env }))
+    const viewer = await taskViewer(memberAccessPrincipal(membership!, { env }))
     const before = new Date('2026-11-02T18:00:00.000Z')
+    // An earlier deployed Worker can still write an old reply task during the rollout.
+    await db.prepare(`INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, assigned_member_id, timezone, status, dedupe_key, created_at, updated_at)
+      VALUES ('retired-reply', ?, 'guest_reply', 'conversation', ?, ?, 'UTC', 'open', 'retired-reply', ?, ?)`)
+      .bind(ORG, first.conversation_id, `m-${CLEANER}`, before.toISOString(), before.toISOString()).run()
     assert.deepEqual((await listTasks(db, viewer, parseTaskListQuery({}), before)).sections, [])
+    await assert.rejects(getTask(db, viewer, 'retired-reply', before), { status: 404 })
     const upcoming = await listTasks(db, viewer, parseTaskListQuery({ range: 'upcoming' }), before)
     assert.deepEqual(upcoming.sections.map(section => [section.id, section.tasks.map(task => task.booking_id)]), [['2026-11-03', [first.id]], ['2026-11-05', [next.id]]])
     assert.equal(upcoming.sections[0]!.title, 'Tomorrow')
@@ -1448,7 +1453,7 @@ test('members see only the homes they look after and change nothing; a home with
       assert.deepEqual((await cleanerToday(now)).items.map(item => [item.booking_id, item.stay_moment]), [[cabinStay.id, moment]])
     }
     // The cleaner's Today is the turnover tasks at the homes they look after.
-    const cleanerTasks = async (now: string) => (await listTasks(db, await taskViewer(db, memberAccessPrincipal(cleanerMembership!, { env })), parseTaskListQuery({}), new Date(now)))
+    const cleanerTasks = async (now: string) => (await listTasks(db, await taskViewer(memberAccessPrincipal(cleanerMembership!, { env })), parseTaskListQuery({}), new Date(now)))
       .sections.flatMap(section => section.tasks).map(task => [task.kind, task.booking_id, task.detail])
     assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out']])
     const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
@@ -1474,9 +1479,10 @@ test('members see only the homes they look after and change nothing; a home with
   }
 })
 
-test('a member reads a stay at a home they look after as its turnover on every read path, and nothing of its guest, money or conversation', { timeout: 120_000 }, async () => {
+test('a member reads a stay at a home they look after as its turnover on every read path, and nothing of its guest, money or conversation', { timeout: 120_000 }, async (t) => {
   const { runtime, db, env } = await boot()
   try {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T18:00:00.000Z') })
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'turnover', check_in_date: '2026-11-01', check_out_date: '2026-11-03', arrival_time: '15:30',
       adults: 2, children: 1, infants: 1, guest_name: 'Ana Silva', guest_email: 'ana@example.test', private_notes: 'Door code 4411', total_minor: 45_000 })
@@ -1552,6 +1558,7 @@ test('a member reads a stay at a home they look after as its turnover on every r
     assert.deepEqual(await listed(true), [[stay.id, 'nights', { name: 'Ana Silva' }, turnover.starts_at]])
     assert.equal(((await mcp(ownerMembership, 'owner', 'get_stay_calendar', { product_id: cabin.id, ...window })).stays as Array<Record<string, unknown>>)[0]!.guest_name, 'Ana Silva')
   } finally {
+    t.mock.timers.reset()
     await runtime.dispose()
   }
 })
@@ -2201,12 +2208,12 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
     const owner = await resolveMembership(env, { organizationId: ORG, userId: OWNER })
     const cleanerMembership = await resolveMembership(env, { organizationId: ORG, userId: CLEANER })
     const visibleTasks = async (membership: NonNullable<typeof owner>) => (await listTasks(db,
-      await taskViewer(db, memberAccessPrincipal(membership, { env })), parseTaskListQuery({ kind: 'booking_review' }))).sections.flatMap(section => section.tasks)
+      await taskViewer(memberAccessPrincipal(membership, { env })), parseTaskListQuery({ kind: 'booking_review' }))).sections.flatMap(section => section.tasks)
 
     const approved = await submit('stay-approval', 8)
     assert.equal(approved.request_status, 'awaiting_approval')
     assert.equal(await claims(approved.id), 2)
-    assert((await visibleTasks(owner!)).some(task => task.booking_id === approved.id && task.action?.path === `/dashboard/org/bookings/stay/${approved.id}`))
+    assert((await visibleTasks(owner!)).some(task => task.booking_id === approved.id && task.action?.path === `/dashboard/org/bookings/${approved.id}`))
     assert.equal((await visibleTasks(cleanerMembership!)).length, 0)
     await notifyProductBookingCreated(env, db, ORG, approved.conversation_id)
     const { results: deliveries } = await db.prepare(`SELECT d.purpose, d.status FROM guest_thread_deliveries d JOIN messages m ON m.id=d.message_id

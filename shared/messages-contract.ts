@@ -1,5 +1,4 @@
-import type { GuestThreadDeliveryChannel, GuestThreadDeliveryStatus, InboxStreamItem, InboxThread } from '~/server/domain/guest-threads/types'
-import type { TeamThread } from '~/server/domain/team-messages'
+import type { GuestThreadDeliveryChannel, GuestThreadDeliveryStatus, InboxPhoto, InboxThreadKind } from '~/server/domain/guest-threads/types'
 
 export type ConversationViewerRole = 'guest' | 'member'
 
@@ -11,47 +10,73 @@ export interface ConversationDelivery {
   updated_at: string
 }
 
-export type ConversationMessage = Extract<InboxStreamItem, { type: 'message' }> & {
+export interface ConversationMessage {
+  type: 'message'
+  id: string
   sequence: number
   author_user_id: string | null
+  side: 'guest' | 'business'
+  author: string
   automatic: boolean
+  sent_at: string
+  time: string | null
+  body: string | null
+  photos: InboxPhoto[]
+  unshown_files: number
+  receipt: string | null
+  retryable: boolean
   deliveries: ConversationDelivery[]
 }
 
 export type ConversationEntry =
-  | Extract<InboxStreamItem, { type: 'day' }>
-  | (Extract<InboxStreamItem, { type: 'event' }> & { sequence: number })
+  | { type: 'day'; id: string; label: string }
+  | { type: 'event'; id: string; sequence: number; text: string; sent_at: string }
   | ConversationMessage
 
 export interface ConversationParticipant {
   id: string | null
   name: string
-  member_id: string | null
   image: string | null
   role: ConversationViewerRole
   can_remove: boolean
 }
 
-export type ConversationHeader =
-  | (Omit<InboxThread, 'stream'> & { kind: 'guest' | 'support'; organization_id: string; participants: ConversationParticipant[] })
-  | (Omit<TeamThread, 'participants'> & { kind: 'team'; organization_id: string; title: string; participants: ConversationParticipant[] })
+export interface ConversationHeader {
+  id: string
+  organization_id: string
+  kind: InboxThreadKind
+  title: string
+  name: string | null
+  is_group: boolean
+  created_by_user_id: string | null
+  booking_id: string | null
+  activity_path: string | null
+  participants: ConversationParticipant[]
+  composer: { channel: 'airbnb' | 'email' | 'team' }
+}
 
-export interface ConversationPage {
-  conversation: ConversationHeader
+export interface ConversationEntriesPage {
+  conversation_id: string
   entries: ConversationEntry[]
   page: {
     before: number | null
     oldest: number | null
     newest: number | null
     read_through: number | null
-    failed_messages: string[]
   }
+}
+
+export interface ConversationPage extends Omit<ConversationEntriesPage, 'conversation_id'> {
+  conversation: ConversationHeader
   viewer_role: ConversationViewerRole
   capabilities: {
-    can_send: boolean
     can_manage_participants: boolean
     can_invite_guest: boolean
     can_leave: boolean
-    can_view_read_receipts: boolean
   }
+}
+
+export interface ConversationDetails {
+  photos: Array<InboxPhoto & { sent_at: string }>
+  actions: { archive: boolean; unarchive: boolean; report: boolean; block: boolean; unblock: boolean }
 }

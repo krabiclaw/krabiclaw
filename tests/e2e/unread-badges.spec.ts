@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import type { InboxRow, InboxUnreadCounts } from '../../server/domain/guest-threads/types'
+import type { TaskSection } from '../../server/domain/tasks'
 import { openTenantPage } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
@@ -91,6 +92,13 @@ test('a new booking, its cancellation and a guest message are unread until read,
     // Counted once, and Messages on the dashboard shows the same number.
     const arrived = await unread()
     expect(arrived).toBe(before + 1)
+    expect(await row(threadId)).toMatchObject({ unread: true, preview: 'Is the patio open on Sunday evenings?' })
+    for (const range of ['today', 'upcoming']) {
+      const feed = await owner.get('/api/dashboard/today', { params: { org: restaurant.slug, range } })
+      expect(feed.status(), await feed.text()).toBe(200)
+      const { tasks } = await feed.json() as { tasks: TaskSection[] }
+      expect(tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === threadId)).toEqual([])
+    }
     await openTenantPage(page, `${baseURL}/dashboard/${restaurant.slug}/calendar`, {})
     await expect(page.getByTestId('dashboard-nav-unread')).toHaveText(arrived > 99 ? '99+' : String(arrived))
 
@@ -106,7 +114,7 @@ test('a new booking, its cancellation and a guest message are unread until read,
     await expect(listRow).toBeVisible()
     await expect(listRow.getByLabel('Unread badge proof: unread')).toHaveCount(0)
     await listRow.hover()
-    await page.getByRole('button', { name: 'Mark as unread: Unread badge proof' }).click()
+    await listRow.locator('xpath=../..').getByRole('button', { name: 'Mark as unread: Unread badge proof', exact: true }).click()
     await expect(listRow.getByLabel('Unread badge proof: unread')).toBeVisible()
     await expect.poll(async () => await unread()).toBe(before + 1)
     expect(await row(threadId)).toMatchObject({ unread: true })

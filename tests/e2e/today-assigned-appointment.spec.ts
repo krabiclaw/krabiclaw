@@ -91,13 +91,12 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     expect(assignedRead.booking).toMatchObject({ conversation_id: requestId, assigned_member_id: actor.id })
 
     // A member's Today is their own work: no opportunities, nobody to assign to,
-    // and only tasks given to them or replies in conversations they handle.
+    // and only tasks given to them.
     const today = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
     expect(today).toMatchObject({ opportunities: [], opportunity_issues: [], assignees: [] })
     for (const task of today.tasks.flatMap(section => section.tasks)) {
       expect(task.can, `${task.kind} ${task.id} is not a manager's`).toMatchObject({ assign: false, edit: false })
-      if (task.kind === 'guest_reply') await body(await memberContext.request.get(`/api/messages/${task.conversation_id}`), 200)
-      else expect(task.assignee, `${task.kind} ${task.id} is given to the member`).toMatchObject({ type: 'member', id: actor.id, you: true })
+      expect(task.assignee, `${task.kind} ${task.id} is given to the member`).toMatchObject({ type: 'member', id: actor.id, you: true })
     }
     // The consultation is the Calendar's: it is on its day there.
     const agenda = await body<{ items: Array<{ id: string; conversation_id: string; booking_id: string; starts_at: string; to: string }> }>(await memberContext.request.get('/api/dashboard/agenda', { params: { org: SLUG, from: day, to: new Date(Date.parse(day) + 86_400_000).toISOString().slice(0, 10) } }), 200)
@@ -168,8 +167,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await expect(detail.getByRole('link').filter({ hasText: /^\s*Attorney\b/ })).toHaveCount(0)
     await dismissPreviewToolbar(page)
     await page.setViewportSize({ width: 390, height: 844 })
-    const issuedLink = new URL(`${DASHBOARD}/bookings/booking/${requestId}`, baseURL!).toString()
-    expect((await page.goto(issuedLink))?.status()).toBe(200)
+    expect((await page.goto(new URL(bookingPath, baseURL!).toString()))?.status()).toBe(200)
     await expect(page).toHaveURL(new URL(bookingPath, baseURL!).toString())
     // The attorney is the practice area's: the owner reads who handles it and changes it on the practice area.
     const ownerDetail = page.locator('#dashboard-panel-booking-details')

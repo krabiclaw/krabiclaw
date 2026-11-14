@@ -4,9 +4,6 @@ import { createHmac } from 'node:crypto'
 import { expect, test, type APIRequestContext, type APIResponse } from '@playwright/test'
 import type {
   InboxRow,
-  InboxStreamItem,
-  InboxThread,
-  InboxThreadDetails,
 } from '../../server/domain/guest-threads/types'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
@@ -15,7 +12,7 @@ import { seededTenant } from './seed/manifest'
 import { devLoginHeaders, seededSiteHeaders, testBaseUrl } from './test-env'
 import type { TaskPerson, TaskSection } from '../../server/domain/tasks'
 import type { OpportunityView } from '../../server/domain/opportunities'
-import type { ConversationPage } from '../../shared/messages-contract'
+import type { ConversationDetails, ConversationEntry, ConversationHeader, ConversationPage } from '../../shared/messages-contract'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
 interface DeliveryView {
@@ -161,26 +158,19 @@ async function loadThreadDetail(
 }
 
 /** What "In this conversation" offers for the thread, read as the member it was asked by. */
-async function loadThreadActions(request: APIRequestContext, threadId: string, targetOrganizationId = organizationId()) {
-  const response = await request.get(`/api/dashboard/organizations/${targetOrganizationId}/guest-threads/${threadId}/details`)
+async function loadThreadActions(request: APIRequestContext, threadId: string) {
+  const response = await request.get(`/api/messages/${threadId}/details`)
   await expectStatus(response, 200)
-  return (await response.json() as InboxThreadDetails).actions
+  return (await response.json() as ConversationDetails).actions
 }
 
-type StreamMessage = Extract<InboxStreamItem, { type: 'message' }>
-type StreamEvent = Extract<InboxStreamItem, { type: 'event' }>
-const streamMessages = (thread: InboxThread) => thread.stream.filter((item): item is StreamMessage => item.type === 'message')
-const streamEvents = (thread: InboxThread, text: string) => thread.stream.filter((item): item is StreamEvent => item.type === 'event' && item.text === text)
-
-/** The owner's reply tasks on Today, open and done today, for one conversation. */
-async function loadReplyTasks(request: APIRequestContext, slug: string, threadId: string) {
-  const response = await request.get('/api/dashboard/today', { params: { org: slug, kind: 'guest_reply' } })
-  await expectStatus(response, 200)
-  return (await response.json() as BusinessToday).tasks.map(section => ({ section: section.id, tasks: section.tasks.filter(task => task.conversation_id === threadId) })).filter(section => section.tasks.length)
-}
+type StreamMessage = Extract<ConversationEntry, { type: 'message' }>
+type StreamEvent = Extract<ConversationEntry, { type: 'event' }>
+const streamMessages = (thread: ConversationHeader & { stream: ConversationEntry[] }) => thread.stream.filter((item): item is StreamMessage => item.type === 'message')
+const streamEvents = (thread: ConversationHeader & { stream: ConversationEntry[] }, text: string) => thread.stream.filter((item): item is StreamEvent => item.type === 'event' && item.text === text)
 
 /** Opening a conversation reads it through to the newest message shown; the GET that showed it wrote nothing. */
-async function readThrough(request: APIRequestContext, thread: InboxThread) {
+async function readThrough(request: APIRequestContext, thread: ConversationHeader & { stream: ConversationEntry[] }) {
   const newest = thread.stream.filter(item => item.type !== 'day').at(-1)!.id
   const response = await request.post(`/api/messages/${thread.id}/read`, { headers: authRequestHeaders(baseURL), data: { message_id: newest } })
   await expectStatus(response, 200)
@@ -236,22 +226,11 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
       id: threadId,
       kind: 'guest',
       title: guestName,
-      channel: 'direct',
-      when: null,
       booking_id: null,
-      record_kind: null,
-      composer: { channel: 'email', available: true },
     })
+    expect(detail.composer).toEqual({ channel: 'email' })
     // The guest's own words open the conversation, once, as their message.
-    expect(streamMessages(detail)).toMatchObject([{ side: 'guest', author: guestName, body: message, photos: [], translated: null }])
-    // The guest's question is the business's to answer: one open reply task on Today, which opens the conversation.
-    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({
-      kind: 'guest_reply', status: 'open', title: `Thread${nonce}`, detail: message, conversation_id: threadId, outcome: null,
-      action: { type: 'open', label: 'Reply', path: expect.stringContaining(threadId) },
-      can: expect.objectContaining({ complete: false }),
-    })] }])
-    const replyTask = (await loadReplyTasks(owner, organizationSlug(), threadId))[0]!.tasks[0]!
-
+    expect(streamMessages(detail)).toMatchObject([{ side: 'guest', author: guestName, body: message, photos: [] }])
     // Showing the conversation wrote nothing; reading it through is this owner's alone.
     expect((await loadThreadList(owner, guestName)).threads[0]).toMatchObject({ id: threadId, unread: true })
     await readThrough(owner, detail)
@@ -315,10 +294,6 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
       preview_from: 'You',
       unread: false,
     })
-    // A reply is an answer once a provider accepted it. This environment delivers email log-only, so the record
-    // shows no delivered answer: the one reply task stays open, for every owner alike.
-    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open', outcome: null })] }])
-    expect(await loadReplyTasks(secondOwner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open' })] }])
   } finally {
     await Promise.all([owner.dispose(), guest.dispose(), secondOwner.dispose(), foreignOwner.dispose()])
   }
@@ -386,10 +361,6 @@ test('archive and Move to messages file a conversation for the one member, witho
     expect((await loadMailbox(owner, 'current')).some(thread => thread.id === threadId)).toBe(false)
     expect((await loadMailbox(owner, 'past')).some(thread => thread.id === threadId)).toBe(true)
     expect((await loadMailbox(secondOwner, 'current')).some(thread => thread.id === threadId)).toBe(true)
-    // Archiving dismisses the reply the owner owed, as Dismiss does.
-    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'done', tasks: [
-      expect.objectContaining({ kind: 'guest_reply', status: 'skipped', conversation_id: threadId, outcome: expect.objectContaining({ closed_by: 'You' }) }),
-    ] }])
     expect(await loadThreadActions(owner, threadId)).toMatchObject({ archive: false, unarchive: true })
 
     const unarchive = () => owner.post(archiveUrl, { headers: authRequestHeaders(baseURL), data: { archived: false } })
@@ -410,7 +381,7 @@ test('archive and Move to messages file a conversation for the one member, witho
   }
 })
 
-test('suggested replies fill the composer, hide while typing or after ×, and come back from +', async ({ page, request }) => {
+test('suggested replies generate only when tapped and can fill the composer', async ({ page, request }) => {
   test.skip(!writable, 'Guest-thread writes require disposable local or preview data')
   await page.setViewportSize({ width: 1440, height: 900 })
   await loginAs(page.request, baseURL, ownerId)
@@ -422,38 +393,32 @@ test('suggested replies fill the composer, hide while typing or after ×, and co
   // The drafts come from Workers AI, which the E2E server has no binding for; the
   // composer's behaviour around them is what this covers, so their words are fixed here.
   const drafts = ['Thanks for writing, we will check and get back to you.', 'Happy to help with that.']
-  await page.route(new RegExp(`/guest-threads/${threadId}/suggested-reply(\\?|$)`), route => route.fulfill({ json: { generation_id: 'e2e-generation', suggestions: drafts } }))
+  let generations = 0
+  await page.route(new RegExp(`/guest-threads/${threadId}/suggested-reply(\\?|$)`), route => {
+    generations += 1
+    return route.fulfill({ json: { generation_id: 'e2e-generation', suggestions: drafts } })
+  })
   await dismissPreviewToolbar(page)
   await page.goto(`${baseURL}/dashboard/${organizationSlug()}/messages/${threadId}`)
 
   const label = page.getByText('Suggested replies', { exact: true })
   const rows = drafts.map(draft => page.getByRole('button', { name: draft, exact: true }))
   const field = page.getByRole('textbox', { name: 'Write a message…', exact: true })
-  const plus = page.getByRole('button', { name: 'Add to message', exact: true })
-  const recall = page.getByRole('menuitem', { name: 'Suggested replies' })
-  await expect(label).toBeVisible()
-  for (const row of rows) await expect(row).toBeVisible()
-  // Nothing is pre-written: the field starts empty.
-  await expect(field).toHaveValue('')
-
-  // While shown, + offers no way to show them.
-  await plus.click()
-  await expect(recall).toHaveCount(0)
-  await page.keyboard.press('Escape')
-
-  // Typing puts them away; + brings them back.
-  await field.fill('Let me check')
+  const suggest = page.getByRole('button', { name: 'Suggest a reply', exact: true })
+  await expect(suggest).toBeVisible()
   await expect(label).toHaveCount(0)
-  await plus.click()
-  await recall.click()
+  expect(generations).toBe(0)
+  await expect(field).toHaveValue('')
+  await field.fill('Let me check')
+  expect(generations).toBe(0)
+  await suggest.click()
   for (const row of rows) await expect(row).toBeVisible()
-
-  // × puts them away too; + brings them back again.
+  expect(generations).toBe(1)
   await page.getByRole('button', { name: 'Dismiss suggested replies', exact: true }).click()
   await expect(label).toHaveCount(0)
-  await plus.click()
-  await recall.click()
+  await suggest.click()
   await expect(label).toBeVisible()
+  expect(generations).toBe(2)
 
   // A tap fills the field and sends nothing.
   let replies = 0
@@ -834,7 +799,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   await expectStatus(pendingRecord, 200)
   expect(await pendingRecord.json()).toMatchObject({ booking: { pending_change: { message_id: requests[0]!.id, before: { party_size: before.booking.party_size }, after: { party_size: targetPartySize } } } })
   await page.goto(`${baseURL}/dashboard/${demoSlug()}/messages/${before.booking.conversation_id}`)
-  const reservationLink = page.getByRole('link', { name: 'Show reservation', exact: true })
+  const reservationLink = page.getByRole('link', { name: 'Show booking', exact: true })
   await expect(reservationLink).toHaveAttribute('href', `/dashboard/${demoSlug()}/bookings/${upcomingBookingId}`)
   await expect(page.getByTestId('booking-change-request')).toHaveCount(0)
   await reservationLink.click()
@@ -914,7 +879,7 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     try {
       await loginAs(ownerPage.request, baseURL, 'user-e2e-demo-owner')
       await ownerPage.goto(`${baseURL}/dashboard/${demoSlug()}/messages/${threadId}`)
-      const reservation = ownerPage.getByRole('link', { name: 'Show reservation', exact: true })
+      const reservation = ownerPage.getByRole('link', { name: 'Show booking', exact: true })
       await expect(reservation).toHaveAttribute('href', `/dashboard/${demoSlug()}/bookings/${booked.bookingId}`)
       await expect(ownerPage.getByTestId('booking-change-request')).toHaveCount(0)
       await reservation.click()
@@ -930,7 +895,7 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     expect(await guestUnread(), 'Opening the conversation reads it').toBe(unreadBefore)
     await expect(page.getByText(/^Requested .+ for 2 guests/)).toBeVisible()
     await expect(page.getByRole('button', { name: /^(Accept|Decline)( changes)?$/ })).toHaveCount(0)
-    await page.getByRole('link', { name: 'Show reservation', exact: true }).click()
+    await page.getByRole('link', { name: 'Show booking', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}/dashboard/account/activity/booking/${threadId}`)
     const card = page.getByTestId('booking-change-request')
     await expect(card).toContainText('1 guest')
@@ -980,10 +945,6 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     // A guest's request is a message for the business to answer; the reservation itself has not moved.
     const requested = await loadThreadDetail(owner, threadId, demoOrganizationId())
     expect(await read()).toMatchObject({ party_size: 2, booking_date: original.booking_date, booking_time: original.booking_time })
-    // It is the owner's open reply task on Today, quoting the guest's words.
-    expect(await loadReplyTasks(owner, demoSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({
-      kind: 'guest_reply', status: 'open', detail: changeMessage, conversation_id: threadId,
-    })] }])
     const customerRequest = streamMessages(requested).filter(item => item.side === 'guest' && item.body === changeMessage)
     expect(customerRequest).toMatchObject([{ author: 'E2E Buyer' }])
     const requestDelivery = await owner.get('/api/dev/notifications', { headers: devLoginHeaders(), params: { organization_id: demoOrganizationId(), since: sent_at } })

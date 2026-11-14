@@ -7,7 +7,7 @@ import { landBookingRevision, pendingBookingRevisions } from '~/server/integrati
 import { getChannexThread, listChannexMessages, listChannexThreads, sendChannexMessage, type ChannexMessage, type ChannexMessageThread } from '~/server/integrations/channex/messages'
 import { MIRRORED_EVENT, MessageDedupeConflictError, SCHEDULED_MESSAGE_EVENT, appendMessage, assertMessageWriteAccess, findMessageByDedupeKey, getMessage, parseMessagePayload, type ConversationGuard, type MessageRow } from '~/server/domain/conversations'
 import { getDeliveryById, getDeliveryByProviderMessageId, isDeliverySent, recordDeliveryOutcome } from './deliveries'
-import { conversationTaskQueries, reconcileConversationTasks } from './repository'
+import { resolveScheduledDeliveryFailure } from './repository'
 import { assertMessagePhotos, attachGuestPhotos, isMessagePhoto, listMessagePhotos, sortGuestFiles, type MessagePhoto } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { getMediaAsset, readMediaPlacements } from '~/server/utils/media-asset-manager'
@@ -29,16 +29,18 @@ function fail(statusCode: number, code: string, message: string, field: string):
   throw new HTTPError({ statusCode, message, data: { code, field } })
 }
 
+export type GuestThreadChannelRow = Omit<ChannelThreadMapping, 'product_id' | 'external_thread_id'> & {
+  product_id: string | null
+  mapped_product_id: string | null
+  external_thread_id: string | null
+  connected: number
+  booking_channel: StayChannel | null
+  booking_owner: 'app' | 'channel' | null
+}
+
 /** Channel routing and the home used to present this conversation come from the same join. */
-export async function guestThreadChannel(db: DbClient, conversationId: string, organizationId: string) {
-  const row = await queryFirst<Omit<ChannelThreadMapping, 'product_id' | 'external_thread_id'> & {
-    product_id: string | null
-    mapped_product_id: string | null
-    external_thread_id: string | null
-    connected: number
-    booking_channel: StayChannel | null
-    booking_owner: 'app' | 'channel' | null
-  }>(db, `
+export function guestThreadChannelQuery(conversationId: string, organizationId: string): BatchQuery {
+  return { query: `
     SELECT c.organization_id, c.id AS conversation_id, ct.external_thread_id, ct.external_booking_id, ct.moved_from_thread_id,
       ct.product_id AS mapped_product_id, COALESCE(ct.product_id, CASE WHEN b.owner = 'channel' THEN b.product_id END) AS product_id,
       EXISTS (SELECT 1 FROM product_channel_mappings pcm
@@ -47,8 +49,10 @@ export async function guestThreadChannel(db: DbClient, conversationId: string, o
     FROM conversations c
     LEFT JOIN channel_threads ct ON ct.organization_id = c.organization_id AND ct.conversation_id = c.id
     LEFT JOIN bookings b ON b.organization_id = c.organization_id AND b.id = c.booking_id AND c.kind = 'booking'
-    WHERE c.id = ? AND c.organization_id = ?`, [conversationId, organizationId])
-  if (!row) return null
+    WHERE c.id = ? AND c.organization_id = ?`, params: [conversationId, organizationId] }
+}
+
+export function parseGuestThreadChannel(row: GuestThreadChannelRow) {
   const { product_id, mapped_product_id, connected, booking_channel, booking_owner, ...mapping } = row
   return {
     productId: product_id,
@@ -58,6 +62,12 @@ export async function guestThreadChannel(db: DbClient, conversationId: string, o
     connected: connected === 1,
     booking: booking_channel !== null && booking_owner !== null ? { channel: booking_channel, owner: booking_owner } : null,
   }
+}
+
+export async function guestThreadChannel(db: DbClient, conversationId: string, organizationId: string) {
+  const { query, params } = guestThreadChannelQuery(conversationId, organizationId)
+  const row = await queryFirst<GuestThreadChannelRow>(db, query, params)
+  return row ? parseGuestThreadChannel(row) : null
 }
 
 async function homeMapping(db: DbClient, propertyId: string): Promise<HomeMapping | null> {
@@ -123,8 +133,6 @@ export async function joinBookingConversationQueries(db: DbClient, input: { orga
       query: `UPDATE ${table} SET conversation_id = ? WHERE conversation_id = ? AND ${owned}`, params: [input.into, input.from, ...ownedParams],
     })),
     { query: `UPDATE google_calendar_event_links SET request_id = ? WHERE request_id = ? AND ${owned}`, params: [input.into, input.from, ...ownedParams] },
-    { query: `UPDATE tasks SET subject_id = ?, dedupe_key = 'guest_reply:' || ? || substr(dedupe_key, length('guest_reply:' || ?) + 1)
-        WHERE kind = 'guest_reply' AND subject_type = 'conversation' AND subject_id = ? AND ${owned}`, params: [input.into, input.into, input.from, input.from, ...ownedParams] },
     // The booking is the inquiry's conversation's: unlinked from its own, then linked, then its own is gone.
     { query: "UPDATE conversations SET booking_id = NULL WHERE id = ? AND organization_id = ? AND booking_id = ? AND kind = 'booking'", params: [input.from, input.organizationId, input.bookingId] },
     { query: 'UPDATE conversations SET booking_id = ? WHERE id = ? AND organization_id = ? AND booking_id IS NULL AND changes() = 1', params: [input.bookingId, input.into, input.organizationId] },
@@ -227,7 +235,7 @@ async function mirrorMessage(db: DbClient, env: ChannelEnv, mapping: ChannelThre
     // retained exactly as Channex sent them: zoneless UTC.
     payload: { provider_message_id: message.id, provider_inserted_at: message.insertedAt, provider_updated_at: message.updatedAt,
       attachments: message.attachments, ...(message.meta === undefined ? {} : { meta: message.meta }) },
-  }, conversationTaskQueries(mapping.conversation_id, new Date().toISOString())).catch(async (error: unknown) => {
+  }, authorKind === 'member' ? [resolveScheduledDeliveryFailure({ query: 'SELECT id FROM messages WHERE dedupe_key = ?', params: [`channex-message:${message.id}`] }, new Date().toISOString())] : []).catch(async (error: unknown) => {
     if (error instanceof MessageDedupeConflictError) fail(409, 'CHANNEL_MESSAGE_ID_CONFLICT', 'The provider message ID differs from its immutable recorded fact; review the conversation', 'message.id')
     if (await alreadySent()) return null
     throw error
@@ -390,7 +398,7 @@ export async function mirrorChannexMessageEvent(db: DbClient, env: ChannelEnv, v
   if (!entry.body?.trim() && !attachments) return mirrored
   await notifyGuestThreadReply(env, db, {
     organizationId: request.organization_id, locationId: request.location_id,
-    threadId: request.id, messageId: entry.id, submissionType: 'stay', submissionId: request.id,
+    threadId: request.id, messageId: entry.id, entry, submissionType: 'stay', submissionId: request.id,
     participantLabel: summary.participantLabel, guestEmail: summary.guestEmail, guestPhone: summary.guestPhone,
     inboundChannel: 'airbnb',
   })
@@ -424,7 +432,6 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
   if (input.receipt && isDeliverySent(input.receipt)) {
     const entry = await input.commit()
     if (!input.receipt.provider_message_id?.trim()) fail(500, 'CHANNEL_RECEIPT_INVALID', 'A successful channel reply has no provider message ID', 'delivery.provider_message_id')
-    await reconcileConversationTasks(db, input.mapping.conversation_id)
     return { ok: true, message: entry }
   }
   // Whether the home may still be written to is the caller's (guestReplyDestination);
@@ -440,7 +447,6 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
   if (!receipt || receipt.message_id !== entry.id) fail(500, 'CHANNEL_RECEIPT_INVALID', 'The reply has no matching delivery receipt', 'delivery')
   if (isDeliverySent(receipt)) {
     if (!receipt.provider_message_id?.trim()) fail(500, 'CHANNEL_RECEIPT_INVALID', 'A successful channel reply has no provider message ID', 'delivery.provider_message_id')
-    await reconcileConversationTasks(db, input.mapping.conversation_id)
     return { ok: true, message: entry }
   }
   let photo: ReturnType<typeof assertMessagePhotos>[number] | undefined
@@ -497,6 +503,5 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
       params: [input.mapping.organization_id, ...echoParams] },
     { query: `DELETE FROM messages WHERE id IN (${echoed})`, params: echoParams },
   ])
-  await reconcileConversationTasks(db, input.mapping.conversation_id)
   return { ok: true, message: entry }
 }

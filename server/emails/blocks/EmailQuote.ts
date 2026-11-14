@@ -5,7 +5,7 @@ import type { NotificationQuote } from '~/server/notifications/messages'
 
 /**
  * Someone's own words, as a bordered card: their initial and name, the words as
- * written, the channel's translation beneath them, and any photos they sent.
+ * written, and any photos they sent.
  * Used where the message *is* the content — a guest's message, a business's
  * reply — so it leads and nothing is added around it.
  */
@@ -32,9 +32,6 @@ export default defineComponent({
           ]),
           quote.body
             ? h(EText, { style: `margin:12px 0 0;${type.body};color:${light.text};white-space:pre-wrap` }, () => quote.body)
-            : null,
-          quote.translation
-            ? h(EText, { style: `margin:8px 0 0;font-size:14px;line-height:1.5;color:${light.textMuted};white-space:pre-wrap` }, () => `Translated by ${quote.translation!.by}: ${quote.translation!.text}`)
             : null,
           ...quote.photos.map(photo =>
             h(EImg, { src: photo.imageUrl, alt: photo.alt, width: '514', style: `display:block;width:100%;max-width:100%;height:auto;margin-top:12px;border-radius:8px;background:${light.bg}` }),

@@ -125,6 +125,7 @@ interface BookingNotificationInput extends OrganizationContext {
   productId?: string | null
   locationId?: string | null
   bookingId: string
+  bookingRecordId: string
   guestName: string
   email: string
   guestPhone?: string | null
@@ -207,6 +208,7 @@ interface GuestThreadReplyNotificationInput extends Omit<OrganizationContext, 'o
   threadId: string
   /** The guest's (or Airbnb Support's) message the alert is about. */
   messageId: string
+  entry?: MessageRow
   submissionType: 'contact' | 'booking' | 'stay'
   submissionId: string
   /** Who the conversation is with: the contact's recorded name, or the channel's title for a channel thread. */
@@ -784,6 +786,7 @@ export async function notifyOwner(
     memberAlert?: { message: MemberAlertMessage; stayId: string }
     /** The stay an event without a conversation is about, which every recipient's push opens. */
     stayId?: string
+    bookingRecordId?: string
   }
 ) {
   const opening = opts.source ? null : opts.submissionType && opts.submissionType !== 'invitation' && opts.submissionId ? opts.submissionId : null
@@ -791,14 +794,12 @@ export async function notifyOwner(
     ? { conversationId: opts.source.conversationId, subject: { messageId: opts.source.messageId } }
     : opening ? await getOpeningThreadContext(db, opening) : null
   const stayId = opts.stayId ?? opts.memberAlert?.stayId
+  const bookingRecordId = stayId ?? opts.bookingRecordId
   let scheduleUrl: string | null = null
   if (isScheduleNotification(opts.template)) {
+    if (!bookingRecordId) throw new Error(`Schedule notification ${opts.template} has no booking destination`)
     const { orgSlug } = await resolveDashboardSlugs(env, db, { organizationId: opts.organizationId })
-    if (stayId) scheduleUrl = bookingEditorPath(orgSlug, 'stay', stayId)
-    else if (threadContext?.conversationId && opts.submissionType === 'booking') {
-      scheduleUrl = bookingEditorPath(orgSlug, opts.submissionType, threadContext.conversationId)
-    } else throw new Error(`Schedule notification ${opts.template} has no booking destination`)
-    scheduleUrl = new URL(scheduleUrl, dashboardOrigin(env, { orgSlug, locationSlug: null })).href
+    scheduleUrl = new URL(bookingEditorPath(orgSlug, bookingRecordId), platformOrigin(env)).href
   }
   let deliveryContext: DeliveryAnchor
   if (threadContext) deliveryContext = threadContext
@@ -808,9 +809,9 @@ export async function notifyOwner(
   }
 
   // Owners and admins hear about every booking; the member it is assigned to hears about theirs.
-  const assigned = opts.memberIds === undefined && opts.submissionType === 'booking' && opts.submissionId
+  const assigned = opts.memberIds === undefined && opts.submissionType === 'booking' && bookingRecordId
     ? await queryFirst<{ assigned_member_id: string | null }>(db, `SELECT c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.organization_id = b.organization_id AND c.product_id = b.product_id
-      WHERE b.organization_id = ? AND (b.id = (SELECT booking_id FROM conversations WHERE id = ?) OR b.id = ?) LIMIT 1`, [opts.organizationId, opts.submissionId, opts.submissionId])
+      WHERE b.organization_id = ? AND b.id = ?`, [opts.organizationId, bookingRecordId])
     : null
   const recipients = await resolveOwnerRecipients(env, db, {
     organizationId: opts.organizationId,
@@ -1626,6 +1627,7 @@ export async function notifyBookingChangeOwner(
   await notifyOwner(env, db, {
     organizationId: opts.organizationId, organizationName: opts.organizationName, locationId: opts.locationId,
     ...(submissionType === 'stay' ? {} : { submissionType, submissionId: opts.submissionId }),
+    bookingRecordId: opts.bookingId,
     template: `${change.recordKind}.change_${change.status}`,
     title: ownerMessage.title,
     payload: {
@@ -1678,8 +1680,10 @@ export async function notifyGuestThreadReply(
 
   // Who wrote decides the alert: a guest's message carries the conversation's
   // record under it; Airbnb Support writing about a case carries none.
-  const entry = await getMessage(db, opts.messageId)
-  if (!entry || entry.conversation_id !== opts.threadId) throw new Error(`Message ${opts.messageId} is not in conversation ${opts.threadId}`)
+  const entry = opts.entry ?? await getMessage(db, opts.messageId)
+  if (!entry || entry.id !== opts.messageId || entry.conversation_id !== opts.threadId || entry.organization_id !== opts.organizationId) {
+    throw new Error(`Message ${opts.messageId} is not in conversation ${opts.threadId}`)
+  }
   const support = isAirbnbSupportMessage(entry)
   if (entry.author_kind !== 'guest' && !support) throw new Error(`Message ${entry.id} is neither a guest's nor Airbnb Support's; nobody is alerted to it`)
   const { guestName, body, photos, preview, history } = await alertedMessage(db, thread, entry, business)
@@ -1689,7 +1693,6 @@ export async function notifyGuestThreadReply(
       conversationLabel: { email: 'Email reply', whatsapp: 'WhatsApp reply', web: 'Website reply', airbnb: 'Airbnb message' }[opts.inboundChannel],
       about: summary.productTitle ?? summary.locationTitle,
       messagePreview: preview, body, photos, history,
-      translation: airbnbTranslation(entry),
       record: support ? null : await conversationRecord(db, thread),
       organizationName: business,
       replyUrl,
@@ -1753,13 +1756,6 @@ async function alertedMessage(db: DbClient, thread: GuestRequest, entry: Message
 export function isAirbnbSupportMessage(entry: MessageRow): boolean {
   const meta = entry.channel === 'airbnb' ? parseMessagePayload(entry).meta : null
   return entry.author_kind === 'krabiclaw' && isRecord(meta) && meta.role === 'AGENT'
-}
-
-/** Airbnb's translation of a guest's message, which Channex sends as meta.translated_message beside the words as written. */
-function airbnbTranslation(entry: MessageRow): { by: string; text: string } | null {
-  const meta = entry.channel === 'airbnb' ? parseMessagePayload(entry).meta : null
-  const text = isRecord(meta) && typeof meta.translated_message === 'string' ? meta.translated_message.trim() : ''
-  return text ? { by: 'Airbnb', text } : null
 }
 
 /** The home a channel conversation belongs to, with the clock its dates are read in. */
@@ -1830,7 +1826,7 @@ export async function notifyAirbnbInquiry(env: NotificationEnv, db: DbClient, in
     listMessagePhotos(db, 'message', [asked.id]).then(found => found.get(asked.id) ?? []),
   ])
   const message = inquiryReceivedMessage({
-    guestName: input.inquiry.guestName, message: asked.body.trim(), translation: airbnbTranslation(asked), record, replyUrl,
+    guestName: input.inquiry.guestName, message: asked.body.trim(), record, replyUrl,
     photos: photos.map(photo => ({ imageUrl: photo.url, alt: photo.alt ?? `Photo from ${input.inquiry.guestName}` })),
     organizationName: organizationName({ organizationId: thread.organization_id, organizationName: home.organization_name }),
   })
@@ -1863,7 +1859,7 @@ export async function notifyTeamMessage(env: NotificationEnv, db: DbClient, inpu
     'SELECT name FROM organization WHERE id = ?', [input.organizationId])
   if (!organization) throw new HTTPError({ statusCode: 500, message: 'The team conversation organization is missing', data: { code: 'TEAM_ORGANIZATION_MISSING', field: 'organization_id' } })
   const replyUrl = await dashboardPathUrl(env, db, input.organizationId, `/messages/${encodeURIComponent(input.threadId)}`)
-  const message = { ...messageReceived({ sender: { kind: 'person', name: input.senderName, email: null }, conversationLabel: 'Team', about: null, messagePreview: input.messagePreview, body: input.messagePreview, photos: [], history: [], translation: null, record: null, organizationName: organization.name, replyUrl }),
+  const message = { ...messageReceived({ sender: { kind: 'person', name: input.senderName, email: null }, conversationLabel: 'Team', about: null, messagePreview: input.messagePreview, body: input.messagePreview, photos: [], history: [], record: null, organizationName: organization.name, replyUrl }),
     organizationLogoUrl: await organizationLogo(db, input.organizationId) }
   const recipients = (await resolveOwnerRecipients(env, db, {
     organizationId: input.organizationId, category: message.category, emailPurpose: message.emailPurpose,
@@ -2030,7 +2026,7 @@ export async function notifyGuestCancellation(env: NotificationEnv, db: DbClient
   await notifyBookingCancelled(env, db, {
     organizationId: request.organization_id, organizationName: organization?.name, vertical: organization?.vertical ?? null,
     locale: request.payload.guest.locale,
-    locationId: record.location_id, bookingId: request.id, guestName: request.payload.guest.name,
+    locationId: record.location_id, bookingId: request.id, bookingRecordId: record.id, guestName: request.payload.guest.name,
     email: request.payload.guest.email, guestPhone: request.payload.guest.phone,
     productId: record.product_id, productKind: record.product_kind, productTitle: record.product_name,
     startsAt: record.starts_at, timezone: record.timezone, partySize: record.party_size, partySizeIsMinimum: record.party_size_is_minimum,

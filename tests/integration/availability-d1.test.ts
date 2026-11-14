@@ -21,8 +21,8 @@ import {
 } from '../../server/utils/availability.ts'
 import { requestInsertQueries, threadPayloadForGuest, getThreadOperationalRecord } from '../../server/domain/requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
-import { appendMessage } from '../../server/domain/conversations.ts'
-import { conversationTaskQueries } from '../../server/domain/guest-threads/repository.ts'
+import { appendMessage, resolveConversationAccess } from '../../server/domain/conversations.ts'
+import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
 import { listDashboardLocations } from '../../server/utils/dashboard-context.ts'
 import { updateLocation } from '../../server/utils/location-management.ts'
 import { syncPlaceToLocation } from '../../server/utils/google-places.ts'
@@ -38,9 +38,6 @@ const LOCATION = 'loc-sessions'
 const PRODUCT = 'prod-class'
 const ACTOR = 'user-actor'
 const NOW = '2026-09-11T00:00:00.000Z'
-/** The open reply tasks of a conversation, by dedupe key: the guest entry each one is about. */
-const openReplies = (db: D1Database, threadId: string) => db.prepare("SELECT dedupe_key FROM tasks WHERE kind = 'guest_reply' AND subject_type = 'conversation' AND subject_id = ? AND status = 'open'").bind(threadId).all<{ dedupe_key: string }>().then(rows => rows.results.map(row => row.dedupe_key))
-
 async function boot() {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'availability-proof', compatibilityDate: '2024-11-01',
@@ -701,11 +698,10 @@ test('one provider\'s online offerings exclude overlapping pending requests and 
     assert.equal((await executeGuestThreadOperation(db, confirm)).ok, true)
     assert.equal((await executeGuestThreadOperation(db, confirm)).ok, true)
     assert.equal((await getThreadOperationalRecord(db, winner.requestId))?.status, 'confirmed')
-    assert.deepEqual(await openReplies(db, winner.requestId), [], 'a delivered decision leaves no reply owed on the booking')
-    const guestReply = await appendMessage(db, { conversationId: winner.requestId, authorKind: 'guest', authorUserId: null, channel: 'web', body: 'One more question', dedupeKey: 'question-after-confirmation' },
-      conversationTaskQueries(winner.requestId, new Date().toISOString()))
+    const guestReply = await appendMessage(db, { conversationId: winner.requestId, authorKind: 'guest', authorUserId: null, channel: 'web', body: 'One more question', dedupeKey: 'question-after-confirmation' })
     assert.equal((await executeGuestThreadOperation(db, confirm)).ok, true)
-    assert.deepEqual(await openReplies(db, winner.requestId), [`guest_reply:${winner.requestId}:${guestReply.id}`], 'replaying an older decision does not answer a new guest message')
+    assert.equal(await db.prepare('SELECT id FROM messages WHERE conversation_id = ? ORDER BY sequence DESC LIMIT 1').bind(winner.requestId).first('id'), guestReply.id,
+      'the repeated confirmation does not replace the newer guest message')
     assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings').first('n'), 1)
     const moved = await sessionMoveQuery(db, { env, bookingId: record!.id, organizationId: ORG, fromProductId: winner.productId, productId: winner.productId, productVariantId: winner.productVariantId, sessionId: winner.sessionId, partySize: 1, now: new Date().toISOString() })
     assert.equal((await db.prepare(moved.query).bind(...moved.params!).run()).meta.changes, 1, 'same-session changes exclude the allocation being moved')
@@ -716,13 +712,21 @@ test('one provider\'s online offerings exclude overlapping pending requests and 
     assert.equal((await executeGuestThreadOperation(db, cancel)).ok, true)
     assert.equal(await db.prepare("SELECT COUNT(*) n FROM messages WHERE event_name = 'booking.cancel'").first('n'), 1)
     const loser = inputs[1 - index]!
-    // A booking conversation without its own allocation is invalid. Neither
-    // a status transition nor a reply can manufacture its missing record.
+    // Booking transitions require an allocation. Chat needs a current seat
+    // and a destination, and sending must leave the allocation untouched.
     const missingRecord = { statusCode: 404, message: 'The conversation has no matching booking', data: { code: 'REQUEST_OPERATIONAL_RECORD_NOT_FOUND', request_id: loser.requestId } }
     await assert.rejects(executeGuestThreadOperation(db, { ...confirm, threadId: loser.requestId }), missingRecord)
-    const reply = { ...confirm, threadId: loser.requestId, action: 'reply', body: 'We can help with your booking.', idempotencyKey: 'before-allocation' }
-    await assert.rejects(executeGuestThreadOperation(db, reply), missingRecord)
-    assert.equal(await db.prepare('SELECT status FROM guest_thread_deliveries WHERE id = ?').bind(`guest-thread-email:${loser.requestId}:before-allocation`).first('status'), null)
+    await db.batch([
+      db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('operator-member', ?, ?, 'owner')").bind(ORG, ACTOR),
+      db.prepare("INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role) VALUES (?, ?, ?, 'member')").bind(loser.requestId, ORG, ACTOR),
+    ])
+    const { conversation, role } = await resolveConversationAccess(db, ACTOR, loser.requestId)
+    const reply = { conversation, role, userId: ACTOR, senderName: 'Operator', body: 'We can help with your booking.', photos: [], idempotencyKey: 'before-allocation' }
+    const sent = await sendConversationMessage(confirm.env, reply)
+    assert.equal((await sendConversationMessage(confirm.env, reply)).id, sent.id)
+    assert.deepEqual(await db.prepare('SELECT id, body FROM messages WHERE id = ?').bind(sent.id).first(), { id: sent.id, body: reply.body })
+    assert.equal(await db.prepare('SELECT booking_id FROM conversations WHERE id = ?').bind(loser.requestId).first('booking_id'), null)
+    assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings').first('n'), 1)
     await claim(loser)
     const reject = { ...confirm, threadId: loser.requestId, action: 'reject', idempotencyKey: 'reject-once' }
     assert.equal((await executeGuestThreadOperation(db, reject)).ok, true)
@@ -741,11 +745,10 @@ test('one provider\'s online offerings exclude overlapping pending requests and 
     const questionRequest = 'thread-question-before-confirmation'
     await db.batch(requestInsertQueries({ id: questionRequest, kind: 'booking', organization_id: ORG, location_id: null, user_id: null, booking_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com' }), created_at: NOW }).map(query => db.prepare(query.query).bind(...query.params!)))
     await claim({ ...winner, requestId: questionRequest })
-    const question = await appendMessage(db, { conversationId: questionRequest, authorKind: 'guest', authorUserId: null, channel: 'web', body: 'Can I bring my notes?', dedupeKey: 'question-before-confirmation' },
-      conversationTaskQueries(questionRequest, new Date().toISOString()))
+    const question = await appendMessage(db, { conversationId: questionRequest, authorKind: 'guest', authorUserId: null, channel: 'web', body: 'Can I bring my notes?', dedupeKey: 'question-before-confirmation' })
     assert.equal((await executeGuestThreadOperation(db, { ...confirm, threadId: questionRequest })).ok, true)
     assert.equal((await getThreadOperationalRecord(db, questionRequest))?.status, 'confirmed')
-    assert.deepEqual(await openReplies(db, questionRequest), [`guest_reply:${questionRequest}:${question.id}`], 'confirming a booking does not answer a separate guest message')
+    assert.equal(await db.prepare('SELECT body FROM messages WHERE id = ? AND conversation_id = ?').bind(question.id, questionRequest).first('body'), 'Can I bring my notes?')
   } finally { await runtime.dispose() }
 })
 

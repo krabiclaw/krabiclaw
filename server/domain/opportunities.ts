@@ -139,7 +139,7 @@ export async function acceptOpportunity(db: DbClient, principal: MemberAccessPri
     }
     fail(409, 'OPPORTUNITY_CHANGED', 'What this opportunity was based on has changed. Reload Today to see what is current.', 'opportunity_id')
   }
-  const viewer = await taskViewer(db, principal)
+  const viewer = await taskViewer(principal)
   const assigned = body.assigned_member_id === undefined
     ? viewer.memberId
     : await readTaskAssignee(db, principal.organizationId, body)

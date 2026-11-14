@@ -19,7 +19,7 @@ const ORG = '/dashboard/ember-slice-demo'
 /** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
 type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
 
-test('automation remains in Inbox while Today keeps the unanswered inquiry', async ({ page, request, browser, baseURL }, testInfo) => {
+test('the author can schedule and cancel a private reply from Messages', async ({ page, request, browser, baseURL }, testInfo) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Scheduled replies use disposable local data only')
   const organizationId = seededTenant('restaurant').organizationId
@@ -37,7 +37,7 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
       message: 'Can you accommodate a group for dinner next week?',
     } })
     expect(submitted.status(), await submitted.text()).toBe(201)
-    const inbox = await page.request.get('/api/messages', { params: { organization_id: organizationId, type: 'contact' } })
+    const inbox = await page.request.get('/api/messages', { params: { organization_id: organizationId, type: 'contact', q: marker } })
     expect(inbox.status(), await inbox.text()).toBe(200)
     const threads = (await inbox.json() as { threads: Array<{ id: string; title: string }> }).threads.filter(thread => thread.title === marker)
     expect(threads).toHaveLength(1)
@@ -51,20 +51,13 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
     expect(futureScheduled.status(), await futureScheduled.text()).toBe(201)
     futureMessageId = (await futureScheduled.json() as { message: { id: string } }).message.id
 
-    // The unanswered inquiry is one open reply task on Today; the scheduled sends are Inbox automation, not tasks.
-    const replyTasks = async (range: 'today' | 'upcoming') => {
-      const read = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo', range } })
-      expect(read.status(), await read.text()).toBe(200)
-      return (await read.json() as BusinessToday).tasks.map(section => ({ section: section.id, tasks: section.tasks.filter(task => task.conversation_id === threadId) })).filter(section => section.tasks.length)
-    }
-    const todayReplies = await replyTasks('today')
     const socketCapture = page.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket' })
     expect((await page.goto(ORG))?.status()).toBe(200)
     const socket = await socketCapture
-    const replyCard = page.getByTestId('today-task').filter({ hasText: marker })
-    const replyLink = replyCard.getByRole('link', { name: marker, exact: true })
-    await expect(replyLink).toHaveAttribute('href', `${ORG}/messages/${threadId}`)
-    await replyLink.click()
+    await page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link', { name: 'Messages', exact: true }).click()
+    const row = page.locator(`[data-thread-row="${threadId}"]`)
+    await expect(row).toContainText(marker)
+    await row.click()
     await expect(page).toHaveURL(new RegExp(`/messages/${threadId}(?:[?#]|$)`))
 
     // A second owner has the same conversation seat, but the reply is private to its author.
@@ -152,12 +145,6 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
       expect(chatReads).toEqual([])
     } finally { page.off('request', trackChatRead) }
 
-    expect(todayReplies).toEqual([{ section: 'open', tasks: [expect.objectContaining({
-      kind: 'guest_reply', status: 'open', title: marker, detail: 'Can you accommodate a group for dinner next week?', conversation_id: threadId, starts_at: null, due_at: null,
-      action: { type: 'open', label: 'Reply', path: `${ORG}/messages/${threadId}` },
-    })] }])
-    const replyTask = todayReplies[0]!.tasks[0]!
-    expect(await replyTasks('upcoming')).toEqual([])
     // The replies are in the one outbox, as the member's own.
     const outbox = () => page.request.get('/api/dashboard/scheduled-guest-messages', { params: { org: 'ember-slice-demo', conversation_id: threadId, limit: 25, offset: 0 } })
     const pending = await outbox()
@@ -190,23 +177,10 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
     expect(otherScheduleUpdates).toEqual([])
     const persisted = await outbox()
     expect(persisted.status(), await persisted.text()).toBe(200)
-    // The outbox keeps the cancelled reply with its status; cancelled work still leaves Upcoming independently below.
     expect((await persisted.json() as { messages: Array<{ id: string; status: string }> }).messages.filter(message => message.id === messageId).map(message => message.status)).toEqual(['cancelled'])
     await page.getByRole('link', { name: 'Back to conversation' }).click()
     await expect(page).toHaveURL(`${ORG}/messages/${threadId}`)
-    await page.goBack()
-    await expect(page).toHaveURL(ORG)
-    // Cancelling a scheduled send answers nothing: the question is still owed.
-    expect(await replyTasks('upcoming')).toEqual([])
-    expect(await replyTasks('today')).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open', version: replyTask.version })] }])
-    // The same task read through the tasks route.
-    const taskRead = await page.request.get(`/api/organizations/${organizationId}/tasks/${replyTask.id}`)
-    expect(taskRead.status(), await taskRead.text()).toBe(200)
-    expect((await taskRead.json() as { task: TaskView }).task).toMatchObject({ id: replyTask.id, kind: 'guest_reply', status: 'open', conversation_id: threadId, can: { complete: false }, dismiss: { label: 'Dismiss', card: true } })
-    // A reply task closes with its subject, not with Done.
-    const refused = await page.request.post(`/api/organizations/${organizationId}/tasks/${replyTask.id}/complete`, { data: {} })
-    expect(refused.status(), await refused.text()).toBe(409)
-    expect(await refused.json()).toMatchObject({ data: { code: 'TASK_CLOSES_WITH_SUBJECT' } })
+    await expect(page.getByText('Can you accommodate a group for dinner next week?', { exact: true })).toBeVisible()
   } finally {
     try {
       if (messageId && !cancelled) {
@@ -231,7 +205,8 @@ test.beforeEach(async ({ page }) => {
 
 test('an assigned member receives no owner work or unassigned restaurant work', async ({ page, browser, baseURL }, testInfo) => {
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Role changes use disposable local actors only')
-  const release = await acquireTenantMutationLock(testInfo, seededTenant('restaurant').organizationId)
+  const { organizationId } = seededTenant('restaurant')
+  const release = await acquireTenantMutationLock(testInfo, organizationId)
   await loginAs(page.request, baseURL!)
   const response = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
   expect(response.status(), await response.text()).toBe(200)
@@ -239,14 +214,19 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
   const actor = members.find(member => member.userId === 'user-e2e-demo-role-owner')
   expect(actor).toBeTruthy()
   const memberContext = await browser.newContext()
+  const taskRoot = `/api/organizations/${organizationId}/tasks`
+  let workId: string | null = null
   try {
+    const work = await page.request.post(taskRoot, { data: { title: 'Review the dining room checklist', idempotency_key: crypto.randomUUID() } })
+    expect(work.status(), await work.text()).toBe(201)
+    workId = (await work.json() as { task: TaskView }).task.id
     const ownerResponse = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
     expect(ownerResponse.status(), await ownerResponse.text()).toBe(200)
     const ownerFeed = await ownerResponse.json() as BusinessToday
-    expect(ownerFeed.tasks.length + ownerFeed.opportunities.length, 'The owner sees organization-wide work the member must not').toBeGreaterThan(0)
+    expect(ownerFeed.tasks.flatMap(section => section.tasks)).toContainEqual(expect.objectContaining({ id: workId, status: 'open', assignee: null }))
     expect(ownerFeed.assignees.map(person => person.id)).toContain(actor!.id)
     const changed = await page.request.post('/api/auth/organization/update-member-role', {
-      headers: authRequestHeaders(baseURL!), data: { organizationId: seededTenant('restaurant').organizationId, memberId: actor!.id, role: 'member' },
+      headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor!.id, role: 'member' },
     })
     expect(changed.status(), await changed.text()).toBe(200)
     await loginAs(memberContext.request, baseURL!, actor!.userId)
@@ -254,10 +234,10 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
     expect(memberFeed.status(), await memberFeed.text()).toBe(200)
     expect(await memberFeed.json()).toEqual({ website: null, reservations: { title: null, cards: [] }, tasks: [], opportunities: [], opportunity_issues: [], assignees: [], resolved_at: expect.any(String) })
     // Opportunities are the owner's decisions; the member cannot read or take one.
-    const memberOpportunities = await memberContext.request.get(`/api/organizations/${seededTenant('restaurant').organizationId}/opportunities`)
+    const memberOpportunities = await memberContext.request.get(`/api/organizations/${organizationId}/opportunities`)
     expect(memberOpportunities.status(), await memberOpportunities.text()).toBe(403)
     if (ownerFeed.opportunities.length) {
-      const taken = await memberContext.request.post(`/api/organizations/${seededTenant('restaurant').organizationId}/opportunities/${ownerFeed.opportunities[0]!.id}/accept`, { data: {} })
+      const taken = await memberContext.request.post(`/api/organizations/${organizationId}/opportunities/${ownerFeed.opportunities[0]!.id}/accept`, { data: {} })
       expect(taken.status(), await taken.text()).toBe(403)
     }
     const denied = await memberContext.request.get('/api/dashboard/analytics', { params: { org: 'ember-slice-demo' } })
@@ -266,15 +246,21 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
   } finally {
     try {
       const restored = await page.request.post('/api/auth/organization/update-member-role', {
-        headers: authRequestHeaders(baseURL!), data: { organizationId: seededTenant('restaurant').organizationId, memberId: actor!.id, role: actor!.role },
+        headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor!.id, role: actor!.role },
       })
       expect(restored.status(), await restored.text()).toBe(200)
       const read = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
       expect(read.status()).toBe(200)
       expect((await read.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.id === actor!.id)?.role).toBe(actor!.role)
     } finally {
-      await memberContext.close()
-      await release()
+      try {
+        if (workId) {
+          const complete = await page.request.post(`${taskRoot}/${workId}/complete`, { data: {} })
+          expect(complete.status(), await complete.text()).toBe(200)
+        }
+      } finally {
+        try { await memberContext.close() } finally { await release() }
+      }
     }
   }
 })
@@ -335,7 +321,7 @@ test('booking assignment and workspace admin promotion do not grant a conversati
     expect(ownerThread.status(), await ownerThread.text()).toBe(200)
     const { conversation: ownerConversation, viewer_role: role } = await ownerThread.json() as ConversationPage
     expect(role).toBe('member')
-    expect(ownerConversation).toMatchObject({ id: reservationId, kind: 'guest', title: guestName, channel: 'direct', home: booking.location_title, booking_id: booking.booking_id, record_kind: 'booking' })
+    expect(ownerConversation).toMatchObject({ id: reservationId, kind: 'guest', title: guestName, booking_id: booking.booking_id, composer: { channel: 'email' } })
     await loginAs(memberRequest, baseURL!, actor.userId)
     const verifyAccess = async (assigned: boolean) => {
       const agendaResponse = await memberRequest.get('/api/dashboard/agenda', { params: { org, from: day.date, to: day.date } })
@@ -515,11 +501,13 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
     expect(await draftOpportunity()).toBeUndefined()
     const taskRead = await page.request.get(`${tasksApi}/tasks/${acceptedTask.id}`)
     expect(taskRead.status(), await taskRead.text()).toBe(200)
-    expect((await taskRead.json() as { task: TaskView }).task).toMatchObject({
+    const { task } = await taskRead.json() as { task: TaskView }
+    expect(task).toMatchObject({
       id: acceptedTask.id, kind: 'opportunity', status: 'open', status_line: 'Accepted opportunity', title: `Publish “${title}”`,
       assignee: { type: 'member', name: 'You', you: true }, due_at: expect.any(String), action: { type: 'complete', label: 'Done' },
-      can: { complete: true, skip: true, reopen: false, assign: true, edit: true }, dismiss: { label: 'Skip', card: false },
+      can: { complete: true, skip: true, reopen: false, assign: true, edit: true },
     })
+    expect(task.dismiss).toEqual({ label: 'Skip' })
     expect((await readToday()).tasks.find(section => section.id === 'open')?.tasks.map(task => task.id)).toContain(acceptedTask.id)
 
     // Publishing from another surface is the work the task asked for: it is done, and the next growth opportunity is offered.

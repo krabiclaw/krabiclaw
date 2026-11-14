@@ -9,7 +9,7 @@ import { createProduct } from '../../server/utils/product-management.ts'
 import { applyBookingRevision } from '../../server/integrations/channex/booking-revisions.ts'
 import { mirrorChannexThread } from '../../server/domain/guest-threads/channel-messages.ts'
 import { runAlterationRequestFeed } from '../../server/domain/guest-threads/stay-change-requests.ts'
-import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
+import { listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { getStay } from '../../server/domain/stays.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import todayRoute from '../../server/api/dashboard/today.get.ts'
@@ -221,8 +221,6 @@ const stayRow = async (db: D1Database, id: string) => {
 const requests = (db: D1Database, threadId: string) => db.prepare("SELECT id, author_kind, channel, json_extract(payload_json, '$.live_feed_event_id') AS event FROM messages WHERE conversation_id = ? AND event_name = 'booking_change.requested' ORDER BY sequence").bind(threadId).all<{ id: string; author_kind: string; channel: string | null; event: string }>().then(rows => rows.results)
 const decision = (db: D1Database, requestId: string) => db.prepare("SELECT event_name, author_kind, author_user_id, body FROM messages WHERE dedupe_key = ?").bind(`booking-change-decision:${requestId}`).first()
 const alerts = (db: D1Database, requestId: string) => db.prepare("SELECT purpose, channel, status FROM guest_thread_deliveries WHERE message_id = ? ORDER BY channel").bind(requestId).all().then(rows => rows.results)
-/** The open reply tasks of a conversation, by their dedupe key (the guest entry they are about). */
-const openReplies = (db: D1Database, threadId: string) => db.prepare("SELECT dedupe_key FROM tasks WHERE kind = 'guest_reply' AND subject_type = 'conversation' AND subject_id = ? AND status = 'open'").bind(threadId).all<{ dedupe_key: string }>().then(rows => rows.results.map(row => row.dedupe_key))
 const firstGuestMessage = (db: D1Database, threadId: string) => db.prepare("SELECT id FROM messages WHERE conversation_id = ? AND author_kind = 'guest' ORDER BY sequence LIMIT 1").bind(threadId).first<string>('id')
 const denied = async (response: Response, status: number, code: string) => {
   assert.equal(response.status, status)
@@ -247,7 +245,6 @@ test('a guest change request lands once in the stay conversation, survives a rel
     assert.deepEqual(await alerts(db, request!.id), [{ purpose: 'owner_alert', channel: 'email', status: 'sent' }])
     const guestMessage = await firstGuestMessage(db, stay.conversation_id)
     assert.equal(typeof guestMessage, 'string')
-    assert.deepEqual(await openReplies(db, stay.conversation_id), [`guest_reply:${stay.conversation_id}:${guestMessage}`])
 
     // The reservation shows the current and proposed terms as distinct, before Airbnb confirms a change.
     assert.deepEqual((await reservation(stay.id)).booking.pending_changes, [{
@@ -256,8 +253,8 @@ test('a guest change request lands once in the stay conversation, survives a rel
       after: { dates: 'Jan 10, 2027 – Jan 14, 2027', guests: 3, total: '$600.00' },
     }])
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-13', adults: 2, total_minor: 45_000, version: 1 })
-    // The guest's change is the business's to answer: a change task beside the reply task.
-    const expectedToday = { tasks: [['guest_reply', stay.conversation_id], ['booking_change', stay.conversation_id]], opportunities: ['post.create', 'social.connect', 'article.create'] }
+    // The guest's change creates a booking task.
+    const expectedToday = { tasks: [['booking_change', stay.conversation_id]], opportunities: ['post.create', 'social.connect', 'article.create'] }
     assert.deepEqual(await today(), { ...expectedToday, changePath: `/dashboard/org/bookings/${stay.id}`, changeStatusLine: 'Change requested · Cabin' })
 
     // Assignment allows the turnover to be read. Even with a thread seat, it gives no decision permission.
@@ -289,14 +286,12 @@ test('a guest change request lands once in the stay conversation, survives a rel
     // Airbnb's confirmed revision is the change: landed and acknowledged, the stay now as the guest asked.
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-14', adults: 3, total_minor: 60_000, version: 2 })
     assert.deepEqual(channex.acked, ['rev-1', 'rev-2'])
-    // Answering the change closes its task, by the member who answered; the guest's message is still owed a reply.
+    // Answering the change closes its task. Opening the conversation still requires reading the guest's message.
     assert.deepEqual(await db.prepare("SELECT status, closed_by_user_id FROM tasks WHERE dedupe_key = ?").bind(`booking_change:${request!.id}`).first(), { status: 'done', closed_by_user_id: OWNER })
-    assert.deepEqual(await openReplies(db, stay.conversation_id), [`guest_reply:${stay.conversation_id}:${guestMessage}`])
-    const answeredThread = (await getGuestThreadDetail(db, stay.conversation_id, ORG))!
-    assert.equal(answeredThread.needsReply, true, 'the inbox preserves the separate unanswered message after a booking decision')
+    assert((await listConversations(db, ORG, { userId: OWNER, unreadOnly: true })).some(row => row.id === stay.conversation_id),
+      'the conversation remains unread after a booking decision')
     assert.deepEqual((await reservation(stay.id)).booking.pending_changes, [])
-    // The accepted change is recorded above; the guest's separate unanswered
-    // message remains the only action, rather than adding completion history.
+    // Today shows the completed booking change.
     const { changeStatusLine, ...afterToday } = await today()
     assert.match(changeStatusLine ?? '', /^Done at /)
     assert.deepEqual(afterToday, { ...expectedToday, changePath: undefined })

@@ -15,12 +15,11 @@ import { createProductBooking, quoteTimedBooking } from '../../server/domain/pro
 import { projectStripeConnectedAccount, reserveStripeConnectedAccount } from '../../server/utils/stripe-connect.ts'
 import { H3Event } from 'h3'
 import { ingestStripeFeeReport, stripeFeeMinor, stripeFeeScaled } from '../../server/domain/payments/costs.ts'
-import { buyerActivities, buyerPaymentActivityPath, claimCheckoutReturn, tokenHash } from '../../server/domain/payments/buyer.ts'
+import { buyerActivities, buyerPaymentActivityPath, buyerRequestActivityPath, claimCheckoutReturn, tokenHash } from '../../server/domain/payments/buyer.ts'
 import { loadBuyerBookingDetails } from '../../server/utils/dashboard-booking-details.ts'
 import { cancelBookingRequest, requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { appendMessage, markConversationRead, readGuestConversation, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { transferBookingGuestSeat } from '../../server/domain/conversation-participants.ts'
-import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
 import { conversationPageFor } from './support/conversation-page.ts'
 import { archiveConversation, listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
@@ -728,6 +727,8 @@ test('a payment back on the business’s site claims for that site’s buyer and
   await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,location_id,currency,amount,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,?,'acct_seller',0,'booking','dining','USD',10000,?,?,?)")
    .bind(ORG, 'guest', JSON.stringify({ title: 'Dining tables', tax_code: null, price: { unit_amount: 10000, currency: 'USD', tax_behavior: 'exclusive' }, quantity: 1, automatic_tax: false, method_configuration_id: 'pmc_seller', product_id: 'tables', variant_id: 'table-variant', session_id: 'seating', policy: TABLE_TERMS, answers: [] }), NOW, NOW).run()
   await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,location_id,timezone,buyer_user_id,conversation_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at) VALUES('deposit-hold',?,'tables','table-variant','table-price','seating','dining','UTC',?,'deposit-request','deposit',1,10000,'USD','2099-10-01T13:00:00.000Z','2099-10-01T15:00:00.000Z','active','2099-09-30T00:00:00.000Z',?)").bind(ORG, 'guest', NOW).run()
+  assert.equal(await buyerRequestActivityPath(db, { organizationId: ORG, conversationId: 'deposit-request', userId: 'guest' }), '/dashboard/account/activity/payment/deposit')
+  assert.equal(await buyerRequestActivityPath(db, { organizationId: ORG, conversationId: 'deposit-request', userId: 'verified' }), null)
   const claims: Record<string, string> = {}
   for (const id of ['deposit', 'clearing', 'declined']) {
    claims[id] = crypto.randomUUID() + crypto.randomUUID()
@@ -803,6 +804,7 @@ test('a payment back on the business’s site claims for that site’s buyer and
   const read = await call('/api/public/booking-requests/deposit-request', { headers: { authorization: `Bearer ${receipt.token}` } })
   assert.equal(read.status, 200)
   const booking = (await read.json() as { booking: Record<string, unknown> }).booking
+  assert.equal(booking.manage_url, 'https://proof.example/dashboard/account/activity/booking/deposit-request')
   assert.deepEqual({ kind: booking.kind, status: booking.status, name: booking.name, email: booking.email, starts_at: booking.starts_at, timezone: booking.timezone, guests: booking.guests, location_id: booking.location_id },
    { kind: 'booking', status: 'confirmed', name: 'Verified', email: 'verified@example.com', starts_at: '2099-10-01T13:00:00.000Z', timezone: 'UTC', guests: '1', location_id: 'dining' })
 
@@ -865,7 +867,7 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   assert.equal(retainedPayment.conversation_id,null)
   assert.equal(retainedPayment.payments![0]!.payment.id,'visit-payment')
   assert.equal(await db.prepare("SELECT buyer_user_id FROM payments WHERE id='visit-payment'").first('buyer_user_id'),'verified')
-  assert.equal(await getGuestThreadDetail(db,opening.id,ORG,{buyerUserId:'verified'}),null)
+  await assert.rejects(conversationPageFor(db,'verified',opening.id), {statusCode:404})
   assert.deepEqual(await listConversations(db,null,{userId:'verified',buyerAudience:true}),[])
  }finally{await runtime.dispose()}
 })
@@ -885,24 +887,15 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   await appendMessage(db,{conversationId:'buyer-conversation',authorKind:'krabiclaw',authorUserId:null,eventName:'payment.dispute_created',body:'Merchant dispute diagnostic',payload:{stripe_dispute_id:'private-dispute'},dedupeKey:'merchant-dispute'})
   // A member archived it for themselves; the guest's own view does not change.
   await archiveConversation(db,{organizationId:ORG,conversationId:'buyer-conversation',userId:'other',archived:true})
-  const view=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'verified'})
-  assert(view)
-  assert.deepEqual(view.entries.map(entry=>entry.id),[question,publicReply.id,capture.id])
-  assert(view.entries.every(entry=>(entry.actorUserId===null||(entry.actorKind==='guest'&&entry.actorUserId==='verified'))&&entry.deliveries.length===0))
-  assert.deepEqual(view.deliveryFailures,[])
-  assert.deepEqual(view.availableActions,[])
-  assert.equal(view.needsReply,false,'whether the business owes a reply is merchant state')
-  assert.equal(view.manuallyArchived,false)
-  assert.equal(view.archivedAt,null)
   const secrets=['private-ip-hash','private-diagnostic','private-charge','private-dispute','Internal staff note','Merchant dispute diagnostic']
-  for(const secret of secrets)assert.equal(JSON.stringify(view).includes(secret),false)
-  // The buyer's own conversation, as their inbox draws it, says only what the buyer may read.
   const thread=await conversationPageFor(db,'verified','buyer-conversation')
-  assert(thread)
+  assert.deepEqual(thread.entries.filter(entry=>entry.type!=='day').map(entry=>entry.id),[question,publicReply.id,capture.id])
+  assert(thread.entries.every(entry=>entry.type!=='message'||((entry.author_user_id===null||(entry.side==='guest'&&entry.author_user_id==='verified'))&&entry.deliveries.length===0)))
+  assert.equal(thread.capabilities.can_manage_participants,false)
   assert.deepEqual(thread.entries.filter(item=>item.type!=='day').map(item=>item.type==='message'?[item.side,item.author,item.body]:item.type==='event'?['event',item.text]:[item.type]),
    [['guest','You','My question'],['business','Payments','Public host reply'],['event','Payment received']])
   if(thread.conversation.kind==='team')throw new Error('Expected the buyer’s conversation')
-  assert.deepEqual(thread.conversation.composer,{channel:'email',available:true,reason:null})
+  assert.deepEqual(thread.conversation.composer,{channel:'email'})
   for(const secret of secrets)assert.equal(JSON.stringify(thread).includes(secret),false,secret)
   const inbox=await listConversations(db,null,{userId:'verified',buyerAudience:true})
   // The newest messages are the internal note and the dispute; the buyer's row previews the newest message they can read
@@ -914,7 +907,7 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   const readInbox=await listConversations(db,null,{userId:'verified',buyerAudience:true})
   assert.deepEqual(readInbox.map(row=>[row.id,row.unread]),[['buyer-conversation',false]])
   assert.deepEqual(await listConversations(db,null,{userId:'verified',buyerAudience:true,unreadOnly:true}),[])
-  assert.deepEqual((await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'verified'}))?.entries,view.entries)
+  assert.deepEqual((await conversationPageFor(db,'verified','buyer-conversation')).entries,thread.entries)
   const input={threadId:'buyer-conversation',userId:'verified',body:'My web reply',photos:[],idempotencyKey:'buyer-reply-key'}
   const send = async ({threadId,userId,...reply}: typeof input) => {
     const {conversation,role} = await resolveConversationAccess(db,userId,threadId)
@@ -927,9 +920,9 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   assert(message)
   assert.equal(message.author_user_id,'verified')
   assert.equal(message.channel,'web')
-  const ownReplyView=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'verified'})
-  assert.equal(ownReplyView?.entries.find(entry=>entry.id===message.id)?.actorUserId,'verified')
-  assert(ownReplyView?.entries.every(entry=>entry.actorUserId===null||(entry.actorKind==='guest'&&entry.actorUserId==='verified')))
+  const ownReplyView=await conversationPageFor(db,'verified','buyer-conversation')
+  assert.equal(ownReplyView.entries.find(entry=>entry.type==='message'&&entry.id===message.id)?.author_user_id,'verified')
+  assert(ownReplyView.entries.every(entry=>entry.type!=='message'||entry.author_user_id===null||(entry.side==='guest'&&entry.author_user_id==='verified')))
   // The conversation's projection: its inbox order and its reply tasks.
   const projectionOf=async()=>({last_message_at:await db.prepare("SELECT last_message_at FROM conversations WHERE id='buyer-conversation'").first<string>('last_message_at'),
    tasks:(await db.prepare("SELECT dedupe_key,status,version FROM tasks WHERE subject_type='conversation' AND subject_id='buyer-conversation' ORDER BY dedupe_key").all()).results})
@@ -951,14 +944,14 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   ])
   await assert.rejects(()=>send({...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===409)
   assert.deepEqual((await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results,ledger)
-  const previousActorView=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'other'})
-  assert(previousActorView?.entries.every(entry=>entry.actorUserId===null))
+  const previousActorView=await conversationPageFor(db,'other','buyer-conversation')
+  assert(previousActorView.entries.every(entry=>entry.type!=='message'||entry.author_user_id===null))
   await assert.rejects(()=>send(input),error=>error instanceof HTTPError&&error.statusCode===404)
   await db.prepare('UPDATE messages SET author_user_id=NULL WHERE id=?').bind(message.id).run()
   const retained=(await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results
   await assert.rejects(()=>send({...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===409)
-  const historicalNullView=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'other'})
-  assert(historicalNullView?.entries.every(entry=>entry.actorUserId===null))
+  const historicalNullView=await conversationPageFor(db,'other','buyer-conversation')
+  assert(historicalNullView.entries.every(entry=>entry.type!=='message'||entry.author_user_id===null))
   await assert.rejects(()=>send(input),error=>error instanceof HTTPError&&error.statusCode===404)
   assert.deepEqual((await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results,retained)
   assert.deepEqual(await projectionOf(),projection)

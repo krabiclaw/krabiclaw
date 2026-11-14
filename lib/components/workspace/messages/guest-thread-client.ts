@@ -1,15 +1,12 @@
 import type { InjectionKey } from 'vue'
 import { isRecord } from '~/utils/api-clients'
 import { isMessageIdentity, type MessageIdentity } from '~/shared/dashboard-invalidations'
-import type { ConversationEntry, ConversationPage } from '~/shared/messages-contract'
+import type { ConversationDetails, ConversationEntriesPage, ConversationEntry, ConversationPage } from '~/shared/messages-contract'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import type {
   GuestThreadSubmissionType,
   InboxListPage,
   InboxRow,
-  InboxStreamItem,
-  InboxThread,
-  InboxThreadDetails,
   InboxUnreadCounts,
 } from '~/server/domain/guest-threads/types'
 
@@ -25,10 +22,8 @@ import type {
 // stopped sending, so there is one declaration and this reads it.
 export type SubmissionType = GuestThreadSubmissionType
 export type ThreadListItem = InboxRow
-export type ThreadListPage = InboxListPage & { unread?: InboxUnreadCounts }
-export type ThreadDetail = InboxThread
-export type ThreadDetails = InboxThreadDetails
-export type StreamItem = InboxStreamItem
+export type ThreadListPage = InboxListPage & { unread?: InboxUnreadCounts; count?: number }
+export type ThreadDetails = ConversationDetails
 
 export const removeInboxConversationKey: InjectionKey<(id: string) => void> = Symbol('remove-inbox-conversation')
 
@@ -69,6 +64,7 @@ export function isThreadListResponse(value: unknown): value is ThreadListPage {
     && (!value.pagination.has_more || value.threads.length === Number(value.pagination.limit))
     && new Set(value.threads.map(thread => isRecord(thread) ? thread.id : undefined)).size === value.threads.length
     && value.threads.every(isRow)
+    && (value.count === undefined || isCount(value.count))
     && (value.unread === undefined || (isRecord(value.unread) && ['all', 'guests', 'support', 'team'].every(kind => isCount((value.unread as Record<string, unknown>)[kind]))))
 }
 
@@ -77,43 +73,23 @@ function isPhoto(value: unknown): boolean {
     && (value.width === null || isCount(value.width)) && (value.height === null || isCount(value.height))
 }
 
-function isStreamItem(value: unknown): value is InboxStreamItem {
-  if (!isRecord(value) || !isText(value.id)) return false
-  if (value.type === 'day') return isText(value.label)
-  if (value.type === 'event') return isText(value.text) && isText(value.sent_at)
-  return value.type === 'message' && (value.side === 'guest' || value.side === 'business') && isText(value.author)
-    && isNullableText(value.label) && isText(value.sent_at) && isNullableText(value.time) && isNullableText(value.body)
-    && Array.isArray(value.photos) && value.photos.every(isPhoto)
-    && (value.translated === null || (isRecord(value.translated) && typeof value.translated.original === 'string'))
-    && isNullableText(value.receipt) && typeof value.retryable === 'boolean' && isCount(value.unshown_files)
-}
-
-export function isConversationOperation(value: unknown): value is { available_actions: string[]; message?: MessageIdentity } {
-  return isRecord(value) && Array.isArray(value.available_actions) && value.available_actions.every(isText)
-    && (value.message === undefined || isMessageIdentity(value.message))
-}
-
-function isGuestConversation(thread: unknown): thread is Omit<ThreadDetail, 'stream'> & Record<string, unknown> {
-  return isRecord(thread)
-    && isText(thread.id) && (thread.kind === 'guest' || thread.kind === 'support')
-    && isText(thread.title) && isText(thread.avatar_initial) && (thread.channel === 'airbnb' || thread.channel === 'direct')
-    && isNullableText(thread.home) && isNullableText(thread.when) && typeof thread.translated === 'boolean'
-    && isNullableText(thread.booking_id) && isNullableText(thread.record_title) && (thread.record_kind === null || ['stay', 'booking'].includes(String(thread.record_kind)))
-    && isNullableText(thread.activity_path)
-    && isRecord(thread.composer) && (thread.composer.channel === 'airbnb' || thread.composer.channel === 'email') && typeof thread.composer.available === 'boolean' && (thread.composer.reason === null || typeof thread.composer.reason === 'string')
+export function isConversationOperation(value: unknown): value is { message?: MessageIdentity } {
+  return isRecord(value) && (value.message === undefined || isMessageIdentity(value.message))
 }
 
 const isSequence = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0
 
 export function isConversationEntry(value: unknown): value is ConversationEntry {
-  if (!isRecord(value) || !isStreamItem(value)) return false
-  if (value.type === 'day') return true
-  if (!isSequence(Reflect.get(value, 'sequence'))) return false
-  if (value.type !== 'message') return true
-  const deliveries = Reflect.get(value, 'deliveries')
-  return isNullableText(Reflect.get(value, 'author_user_id'))
-    && typeof Reflect.get(value, 'automatic') === 'boolean'
-    && Array.isArray(deliveries) && deliveries.every(delivery => isRecord(delivery)
+  if (!isRecord(value) || !isText(value.id)) return false
+  if (value.type === 'day') return isText(value.label)
+  if (!isSequence(value.sequence) || !isText(value.sent_at)) return false
+  if (value.type === 'event') return isText(value.text)
+  return value.type === 'message' && (value.side === 'guest' || value.side === 'business') && isText(value.author)
+    && isNullableText(value.time) && isNullableText(value.body)
+    && Array.isArray(value.photos) && value.photos.every(isPhoto)
+    && isNullableText(value.receipt) && typeof value.retryable === 'boolean' && isCount(value.unshown_files)
+    && isNullableText(value.author_user_id) && typeof value.automatic === 'boolean'
+    && Array.isArray(value.deliveries) && value.deliveries.every(delivery => isRecord(delivery)
       && isText(delivery.id) && isText(delivery.channel) && isText(delivery.status)
       && isNullableText(delivery.error) && isText(delivery.updated_at))
 }
@@ -123,28 +99,37 @@ export function isConversationPage(value: unknown): value is ConversationPage {
     || !isText(value.conversation.id) || !isText(value.conversation.organization_id)
     || !Array.isArray(value.entries) || !value.entries.every(isConversationEntry) || !isRecord(value.page)
     || !isRecord(value.capabilities)) return false
-  const { can_send, can_manage_participants, can_invite_guest, can_leave, can_view_read_receipts } = value.capabilities
-  if (typeof can_send !== 'boolean' || typeof can_manage_participants !== 'boolean' || typeof can_invite_guest !== 'boolean'
-    || typeof can_leave !== 'boolean' || typeof can_view_read_receipts !== 'boolean') return false
+  const { can_manage_participants, can_invite_guest, can_leave } = value.capabilities
+  if (typeof can_manage_participants !== 'boolean' || typeof can_invite_guest !== 'boolean'
+    || typeof can_leave !== 'boolean') return false
   const { conversation, page } = value
   if (!isText(conversation.title) || !Array.isArray(conversation.participants) || !conversation.participants.every(person =>
-    isRecord(person) && (isText(person.id) || (value.viewer_role === 'guest' && person.id === null)) && isText(person.name) && isNullableText(person.member_id) && isNullableText(person.image)
+    isRecord(person) && (isText(person.id) || (value.viewer_role === 'guest' && person.id === null)) && isText(person.name) && isNullableText(person.image)
     && (person.role === 'guest' || person.role === 'member') && typeof person.can_remove === 'boolean')) return false
-  if (conversation.kind === 'team'
-    ? typeof conversation.is_group !== 'boolean' || typeof conversation.can_manage !== 'boolean' || typeof conversation.can_leave !== 'boolean'
-      || !isNullableText(conversation.name) || !isNullableText(conversation.booking_id) || !isNullableText(conversation.location_id)
-    : !isGuestConversation(conversation)) return false
+  if ((conversation.kind !== 'team' && conversation.kind !== 'guest' && conversation.kind !== 'support')
+    || typeof conversation.is_group !== 'boolean' || !isNullableText(conversation.name) || !isNullableText(conversation.booking_id)
+    || !isNullableText(conversation.created_by_user_id) || !isNullableText(conversation.activity_path)
+    || !isRecord(conversation.composer)
+    || (conversation.composer.channel !== 'team' && conversation.composer.channel !== 'email' && conversation.composer.channel !== 'airbnb')) return false
+  return isConversationWindow(page)
+}
+
+export function isConversationEntriesPage(value: unknown): value is ConversationEntriesPage {
+  return isRecord(value) && isText(value.conversation_id)
+    && Array.isArray(value.entries) && value.entries.every(isConversationEntry)
+    && isConversationWindow(value.page)
+}
+
+function isConversationWindow(page: unknown): page is ConversationPage['page'] {
+  if (!isRecord(page)) return false
   const cursor = (number: unknown) => number === null || isSequence(number)
   return cursor(page.before) && cursor(page.oldest) && cursor(page.newest) && cursor(page.read_through)
     && (page.before === null || page.before === page.oldest)
     && (page.oldest === null ? page.newest === null : Number(page.oldest) <= Number(page.newest))
-    && Array.isArray(page.failed_messages) && page.failed_messages.every(isText)
 }
 
 export function isThreadDetails(value: unknown): value is ThreadDetails {
   return isRecord(value)
-    && Array.isArray(value.participants) && value.participants.every(person => isRecord(person) && isText(person.name) && isText(person.initial)
-      && ['Guest', 'Host', 'Co-host', 'Airbnb Support'].includes(String(person.role)))
     && Array.isArray(value.photos) && value.photos.every(photo => isPhoto(photo) && isRecord(photo) && isText(photo.sent_at))
     && isRecord(value.actions) && ['archive', 'unarchive', 'report', 'block', 'unblock'].every(key => typeof (value.actions as Record<string, unknown>)[key] === 'boolean')
 }

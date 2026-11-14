@@ -1,6 +1,5 @@
 import type { DbClient } from '~/server/db'
 import { HTTPError, type H3Event } from 'nitro'
-import { getInboxThreadDetails } from '~/server/domain/guest-threads/inbox'
 import { countUnreadConversations, listConversations } from '~/server/domain/guest-threads/repository'
 import type {
   GuestThreadSubmissionType,
@@ -133,11 +132,4 @@ export async function loadOrganizationConversationUnread(event: H3Event, organiz
 export async function memberConversation(event: H3Event, organizationId: string, conversationId: string, guestOnly = false): Promise<{ db: DbClient; env: CloudflareEnv; principal: MemberAccessPrincipal; conversation: ConversationRow }> {
   const { db, env, principal } = await requireOrganizationPrincipal(event, organizationId)
   return { db, env, principal, conversation: await assertConversationAccess(db, principal, conversationId, guestOnly) }
-}
-
-export async function loadDashboardGuestThreadDetails(event: H3Event, organizationId: string, threadId: string) {
-  const { db, conversation, principal } = await memberConversation(event, organizationId, threadId, true)
-  const details = await getInboxThreadDetails(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal, conversation })
-  if (!details) throw new HTTPError({ statusCode: 404, statusMessage: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
-  return details
 }

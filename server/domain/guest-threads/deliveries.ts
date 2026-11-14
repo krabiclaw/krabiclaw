@@ -2,6 +2,7 @@ import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type Batc
 import type { WebhookEventPayload } from 'resend'
 import { groupMessagePhotos, messagePhotosQuery, type MessagePhotoRow } from './attachments'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
+import { MessageStateConflictError, type ConversationGuard } from '~/server/domain/conversations'
 import { buildReplyToAddress } from '~/server/utils/reply-address'
 import { emailSender, getEmailDeliveryMode, isEmailMessageId, sendEmail, type EmailInput } from '~/server/utils/email-delivery'
 import { isRecord } from '~/server/utils/type-guards'
@@ -124,7 +125,7 @@ async function alertEmailParent(db: DbClient, delivery: GuestThreadDeliveryRow, 
 
 /** The one receipt-backed email dispatcher, shared by notifications and replies. */
 export async function deliverReceiptEmail(db: DbClient, input: {
-  env: ReplyEmailEnv; delivery: GuestThreadDeliveryRow; threadId: string | null; email: EmailInput
+  env: ReplyEmailEnv; delivery: GuestThreadDeliveryRow; threadId: string | null; email: EmailInput; guard?: ConversationGuard
 }): Promise<GuestThreadDeliveryRow> {
   let delivery = await getDeliveryById(db, input.delivery.id)
   if (!delivery || delivery.message_id !== input.delivery.message_id || delivery.activity_entry_id !== input.delivery.activity_entry_id
@@ -148,11 +149,28 @@ export async function deliverReceiptEmail(db: DbClient, input: {
         }
         // The first contender freezes the complete request. A retry never
         // changes ancestry, subject, recipient, sender, body or attachments.
-        await execute(db, 'UPDATE guest_thread_deliveries SET email_json = ? WHERE id = ? AND email_json IS NULL', [JSON.stringify(snapshot), delivery.id])
-        delivery = (await getDeliveryById(db, delivery.id))!
+        // A former participant cannot freeze a destination for the next sender.
+        await execute(db, `UPDATE guest_thread_deliveries SET email_json = ? WHERE id = ? AND email_json IS NULL${input.guard
+          ? ` AND EXISTS (SELECT 1 FROM conversations c JOIN messages m ON m.conversation_id = c.id
+            WHERE m.id = guest_thread_deliveries.message_id AND c.id = ? AND (${input.guard.sql}))` : ''}`,
+        [JSON.stringify(snapshot), delivery.id, ...(input.guard ? [input.threadId, ...input.guard.params] : [])])
+        const frozen = await getDeliveryById(db, delivery.id)
+        if (!frozen) throw new Error('Email delivery disappeared while preparing its request')
+        if (input.guard && frozen.email_json === null) throw new MessageStateConflictError('The conversation changed before the email was prepared')
+        delivery = frozen
       }
       const snapshot = readEmailSnapshot(delivery.email_json!)
       if (snapshot.message.to.trim().toLowerCase() !== input.email.to.trim().toLowerCase()) throw new Error('Email recipient differs from its recorded delivery')
+      // The address and ancestry can take several reads to freeze. Check the
+      // sending seat after those reads, immediately before provider dispatch.
+      if (input.guard) {
+        if (input.threadId === null) throw new Error('A scoped email must name its conversation')
+        if (!await queryFirst(db, `SELECT 1 FROM conversations c JOIN messages m ON m.conversation_id = c.id
+          JOIN guest_thread_deliveries d ON d.message_id = m.id
+          WHERE d.id = ? AND c.id = ? AND (${input.guard.sql})`, [delivery.id, input.threadId, ...input.guard.params])) {
+          throw new MessageStateConflictError('The conversation or message changed before the email could be sent')
+        }
+      }
       // The receipt's id is Resend's idempotency key, so sending it again sends nothing twice.
       // The email's RFC Message-ID arrives with Resend's delivered webhook.
       const result = await sendEmail({ ...input.env, ...(snapshot.sender ? { EMAIL_FROM: snapshot.sender } : {}) }, { ...snapshot.message, idempotencyKey: delivery.id })
@@ -168,6 +186,7 @@ export async function deliverReceiptEmail(db: DbClient, input: {
     if (!completed) throw new Error('Email delivery disappeared after dispatch')
     return completed
   } catch (error) {
+    if (error instanceof MessageStateConflictError) throw error
     // A send that threw did not send: it is failed with its error, and sending it again reuses
     // the receipt's id as Resend's idempotency key.
     await recordDeliveryOutcome(db, { deliveryId: delivery.id, status: 'failed', error: error instanceof Error ? error.message : String(error) })
@@ -267,14 +286,11 @@ export function compareDeliveryStatus(current: string | null, incoming: GuestThr
  * delivery cannot both write and a regression cannot land between the read
  * and the write. Returns whether the stored status changed.
  */
-/** Whether a reply reached the guest decides whether the business still owes one: the reply tasks change with the receipt. */
-async function deliveryTaskQueries(db: DbClient, deliveryId: string): Promise<BatchQuery[]> {
-  const message = await queryFirst<{ conversation_id: string; kind: string }>(db, `SELECT m.conversation_id, c.kind FROM guest_thread_deliveries d
-    JOIN messages m ON m.id = d.message_id JOIN conversations c ON c.id = m.conversation_id WHERE d.id = ?`, [deliveryId])
-  if (!message || message.kind === 'team') return []
-  // The conversation repository reads receipts through this module; it is loaded when used, not at import.
-  const { conversationTaskQueries } = await import('./repository')
-  return conversationTaskQueries(message.conversation_id, new Date().toISOString())
+async function scheduledDeliveryRecovery(deliveryId: string, status: GuestThreadDeliveryStatus): Promise<BatchQuery[]> {
+  if (!isDeliverySent({ status })) return []
+  const { resolveScheduledDeliveryFailure } = await import('./repository')
+  return [resolveScheduledDeliveryFailure({ query: `SELECT d.message_id FROM guest_thread_deliveries d
+    WHERE d.id = ? AND d.purpose = 'member_reply' AND d.provider <> 'log_only'`, params: [deliveryId] }, new Date().toISOString())]
 }
 
 export async function advanceDeliveryStatus(
@@ -284,7 +300,8 @@ export async function advanceDeliveryStatus(
   error: string | null,
 ): Promise<boolean> {
   let observed = delivery.status
-  const tasks = await deliveryTaskQueries(db, delivery.id)
+  if (!compareDeliveryStatus(observed, incoming)) return false
+  const tasks = await scheduledDeliveryRecovery(delivery.id, incoming)
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (!compareDeliveryStatus(observed, incoming)) return false
     const [result] = await executeBatch(db, [{
@@ -372,13 +389,15 @@ export async function recordDeliveryOutcome(
   },
   more: BatchQuery[] = [],
 ): Promise<GuestThreadDeliveryRow> {
-  await executeBatch(db, [{
+  const results = await executeBatch(db, [{
     query: `UPDATE guest_thread_deliveries
       SET status = ?, provider_message_id = COALESCE(?, provider_message_id), error = ?, updated_at = ?
       WHERE id = ? AND status NOT IN ('accepted', 'sent', 'delivered', 'read')`,
     params: [input.status, input.providerMessageId ?? null, input.error ?? null, new Date().toISOString(), input.deliveryId],
-  }, ...await deliveryTaskQueries(db, input.deliveryId), ...more], { operation: 'Record delivery outcome' })
-  const updated = await getDeliveryById(db, input.deliveryId)
+  }, ...more, ...await scheduledDeliveryRecovery(input.deliveryId, input.status), {
+    query: 'SELECT * FROM guest_thread_deliveries WHERE id = ?', params: [input.deliveryId],
+  }], { operation: 'Record delivery outcome' })
+  const updated = results.at(-1)?.results[0] as GuestThreadDeliveryRow | undefined
   if (!updated) throw new Error('Guest thread delivery not found')
   return updated
 }
@@ -398,13 +417,14 @@ export async function deliverGuestThreadEmail(
     subject: string
     email: { html: string; text: string }
     conversationId: string
+    guard?: ConversationGuard
   },
 ): Promise<GuestThreadDeliveryRow> {
   if (input.delivery.channel !== 'email') throw new Error('Delivery channel is not email')
   if (!input.delivery.message_id) throw new Error('A guest email is about a message')
   if (isDeliverySent(input.delivery) && !input.delivery.error) return input.delivery
   return deliverReceiptEmail(db, {
-    delivery: input.delivery, env: input.env, threadId: input.conversationId,
+    delivery: input.delivery, env: input.env, threadId: input.conversationId, guard: input.guard,
     email: {
       to: input.to, fromName: input.fromName, subject: input.subject,
       ...input.email, emailPurpose: 'transactional',
@@ -421,13 +441,17 @@ export async function deliverGuestThreadEmail(
  */
 export function threadDeliveriesQuery(threadId: string, messageIds?: string[], purpose?: GuestThreadDeliveryPurpose): BatchQuery {
   return { query: `
-    SELECT d.* FROM guest_thread_deliveries d
+    SELECT ${messageIds ? HISTORY_DELIVERY_COLUMNS : 'd.*'} FROM guest_thread_deliveries d
     JOIN messages m ON m.id = d.message_id
     WHERE m.conversation_id = ? ${messageIds ? 'AND m.id IN (SELECT value FROM json_each(?))' : ''}
       ${purpose ? 'AND d.purpose = ?' : ''}
     ORDER BY ${purpose ? 'd.created_at, d.id' : 'd.created_at DESC'}
   `, params: [threadId, ...(messageIds ? [d1JsonStringSet(messageIds)] : []), ...(purpose ? [purpose] : [])] }
 }
+
+export const HISTORY_DELIVERY_FIELDS = ['id', 'message_id', 'channel', 'provider', 'purpose', 'status', 'error', 'created_at', 'updated_at'] as const satisfies (keyof GuestThreadDeliveryRow)[]
+export const HISTORY_DELIVERY_COLUMNS = HISTORY_DELIVERY_FIELDS.map(field => `d.${field}`).join(', ')
+export type HistoryDelivery = Pick<GuestThreadDeliveryRow, typeof HISTORY_DELIVERY_FIELDS[number]>
 
 export async function listThreadDeliveries(db: DbClient, threadId: string): Promise<GuestThreadDeliveryRow[]> {
   const { query, params } = threadDeliveriesQuery(threadId)
@@ -445,15 +469,19 @@ export async function readConversationEnrichment(db: DbClient, messageIds: strin
   const results = batch.length ? await executeBatch(db, batch, { operation: 'Read conversation enrichment' }) : []
   const photos = photoQuery ? results.shift()!.results as MessagePhotoRow[] : []
   const actors = authorQuery ? results.shift()!.results as { id: string; name: string }[] : []
-  const deliveries = receipts ? results.shift()!.results as GuestThreadDeliveryRow[] : []
-  const deliveriesByMessage = new Map<string, GuestThreadDeliveryRow[]>()
+  const deliveries = receipts ? results.shift()!.results as HistoryDelivery[] : []
+  return { photos: groupMessagePhotos(photos), actors, deliveriesByMessage: groupMessageDeliveries(deliveries) }
+}
+
+export function groupMessageDeliveries(deliveries: HistoryDelivery[]) {
+  const deliveriesByMessage = new Map<string, HistoryDelivery[]>()
   for (const delivery of deliveries) {
     if (!delivery.message_id) throw new Error(`Message delivery ${delivery.id} names no message`)
     const attempts = deliveriesByMessage.get(delivery.message_id)
     if (attempts) attempts.push(delivery)
     else deliveriesByMessage.set(delivery.message_id, [delivery])
   }
-  return { photos: groupMessagePhotos(photos), actors, deliveries, deliveriesByMessage }
+  return deliveriesByMessage
 }
 
 /** A failure worth showing in the thread. */

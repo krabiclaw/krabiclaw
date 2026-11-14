@@ -2,30 +2,25 @@
   "capabilities": {
     "can_invite_guest": true,
     "can_leave": false,
-    "can_manage_participants": false,
-    "can_send": true,
-    "can_view_read_receipts": true
+    "can_manage_participants": false
   },
   "conversation": {
     "activity_path": null,
-    "avatar_initial": "M",
     "booking_id": "00000000-0000-4000-8000-000000000003",
-    "channel": "airbnb",
     "composer": {
-      "available": true,
-      "channel": "airbnb",
-      "reason": null
+      "channel": "airbnb"
     },
-    "home": "74 D · Sky",
+    "created_by_user_id": null,
     "id": "00000000-0000-4000-8000-000000000001",
+    "is_group": false,
     "kind": "guest",
+    "name": null,
     "organization_id": "org-contract",
     "participants": [
       {
         "can_remove": false,
         "id": "airbnb-guest-account",
         "image": null,
-        "member_id": null,
         "name": "Mililani Garcia",
         "role": "guest"
       },
@@ -33,20 +28,15 @@
         "can_remove": false,
         "id": "owner-contract",
         "image": null,
-        "member_id": "owner-member",
         "name": "Skyler Baird",
         "role": "member"
       }
     ],
-    "record_kind": "stay",
-    "record_title": "Reservation",
-    "title": "Mililani",
-    "translated": true,
-    "when": "In 3 days"
+    "title": "Mililani"
   },
   "entries": [
     {
-      "id": "day:00000000-0000-4000-8000-000000000004",
+      "id": "day:2026-11-04",
       "label": "Yesterday",
       "type": "day"
     },
@@ -54,10 +44,9 @@
       "author": "Mililani",
       "author_user_id": null,
       "automatic": false,
-      "body": "In winter, can we park on the street?",
+      "body": "¿En invierno dejan aparcar en la calle?",
       "deliveries": [],
       "id": "00000000-0000-4000-8000-000000000004",
-      "label": null,
       "photos": [],
       "receipt": null,
       "retryable": false,
@@ -65,9 +54,6 @@
       "sequence": 1,
       "side": "guest",
       "time": "11:16 AM",
-      "translated": {
-        "original": "¿En invierno dejan aparcar en la calle?"
-      },
       "type": "message",
       "unshown_files": 0
     },
@@ -78,7 +64,6 @@
       "body": null,
       "deliveries": [],
       "id": "00000000-0000-4000-8000-000000000005",
-      "label": null,
       "photos": [
         {
           "height": 3,
@@ -94,7 +79,6 @@
       "sequence": 2,
       "side": "guest",
       "time": null,
-      "translated": null,
       "type": "message",
       "unshown_files": 0
     },
@@ -105,7 +89,6 @@
       "body": "Yes, the street facing downhill is easiest.",
       "deliveries": [],
       "id": "00000000-0000-4000-8000-000000000007",
-      "label": null,
       "photos": [],
       "receipt": null,
       "retryable": false,
@@ -113,7 +96,6 @@
       "sequence": 3,
       "side": "business",
       "time": "11:23 AM",
-      "translated": null,
       "type": "message",
       "unshown_files": 0
     },
@@ -124,7 +106,6 @@
       "body": "Thank you! What time is check-in?",
       "deliveries": [],
       "id": "00000000-0000-4000-8000-000000000008",
-      "label": null,
       "photos": [],
       "receipt": null,
       "retryable": false,
@@ -132,23 +113,21 @@
       "sequence": 4,
       "side": "guest",
       "time": "11:31 AM",
-      "translated": null,
       "type": "message",
       "unshown_files": 0
     },
     {
-      "id": "day:automatic-contract",
+      "id": "day:2026-11-05",
       "label": "Today",
       "type": "day"
     },
     {
-      "author": "Skyler · Automatic",
+      "author": "Automatic",
       "author_user_id": null,
       "automatic": true,
       "body": "Your door code is 1106. Garage D is unlocked.",
       "deliveries": [],
       "id": "automatic-contract",
-      "label": "Check-in instructions",
       "photos": [],
       "receipt": null,
       "retryable": false,
@@ -156,7 +135,6 @@
       "sequence": 5,
       "side": "business",
       "time": "12:00 PM",
-      "translated": null,
       "type": "message",
       "unshown_files": 0
     },
@@ -181,7 +159,6 @@
       "body": "Check-in is from 4 PM.",
       "deliveries": [],
       "id": "00000000-0000-4000-8000-000000000011",
-      "label": null,
       "photos": [],
       "receipt": "Not delivered",
       "retryable": true,
@@ -189,16 +166,12 @@
       "sequence": 8,
       "side": "business",
       "time": "12:00 PM",
-      "translated": null,
       "type": "message",
       "unshown_files": 0
     }
   ],
   "page": {
     "before": null,
-    "failed_messages": [
-      "00000000-0000-4000-8000-000000000011"
-    ],
     "newest": 8,
     "oldest": 1,
     "read_through": 8

@@ -1,15 +1,18 @@
 import type { DashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
-import type { StayDetail, StayTurnover } from '~/server/domain/stays'
+import type { GuestStay, StayDetail, StayTurnover } from '~/server/domain/stays'
+import type { BookingHome } from '~/server/utils/dashboard-bookings'
 import type { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
+import { isGuestStay, isStayCheckInMethod } from '~/shared/stay-arrival'
 import { isRecord } from '~/utils/api-clients'
 
 type NightBooking<T> = Omit<T, 'id'> & { booking_id: string; unit: 'nights' }
 type StayChange = Awaited<ReturnType<typeof pendingStayChanges>>[number]
 type ManagedNightBooking = NightBooking<StayDetail> & { available_actions: string[]; pending_changes: StayChange[] }
 export type DashboardNightBooking =
-  | { booking: ManagedNightBooking; manage: true; can_message_guest: boolean }
-  | { booking: NightBooking<StayTurnover>; manage: false }
+  | { booking: ManagedNightBooking; manage: true; can_message_guest: boolean; home: BookingHome }
+  | { booking: NightBooking<StayTurnover>; manage: false; home: BookingHome }
 export type DashboardBooking = DashboardNightBooking | { booking: DashboardBookingDetails & { unit: 'slot' }; manage: boolean }
+export type AccountNightBooking = Omit<GuestStay, 'stay'> & { booking: NightBooking<StayDetail> }
 
 export const dashboardBookingPath = (bookingId: string) => `/api/dashboard/bookings/${encodeURIComponent(bookingId)}`
 export const dashboardBookingKey = (organizationSlug: string, bookingId: string) => `dashboard-booking:${organizationSlug}:${bookingId}`
@@ -36,6 +39,10 @@ export function isBookingDetailsResponse(value: unknown): value is { booking: Da
 export function isDashboardBooking(value: unknown): value is DashboardBooking {
   if (!isRecord(value) || !isRecord(value.booking) || typeof value.manage !== 'boolean' || typeof value.booking.booking_id !== 'string') return false
   if (value.booking.unit === 'nights') {
+    const home = value.home
+    if (!isRecord(home) || typeof home.name !== 'string' || typeof home.internal_name !== 'string' || !home.internal_name.trim()
+      || ![home.check_in_time, home.check_in_end_time, home.check_out_time, home.check_in_instructions, home.image_url].every(field => field === null || typeof field === 'string')
+      || (home.check_in_method !== null && !isStayCheckInMethod(home.check_in_method))) return false
     if (!value.manage) return true
     const isTerms = (terms: unknown) => isRecord(terms) && typeof terms.dates === 'string' && Number.isInteger(terms.guests) && typeof terms.total === 'string'
     return typeof value.can_message_guest === 'boolean'
@@ -47,9 +54,6 @@ export function isDashboardBooking(value: unknown): value is DashboardBooking {
   return value.booking.unit === 'slot' && isBookingDetailsResponse(value)
 }
 
-export function useDashboardBooking(bookingId: string) {
-  const route = useRoute()
-  const api = useDashboardApi()
-  return useAsyncData(dashboardBookingKey(String(route.params.org_slug), bookingId),
-    () => api(dashboardBookingPath(bookingId), { validate: isDashboardBooking }))
+export function isAccountNightBooking(value: unknown): value is AccountNightBooking {
+  return isRecord(value) && isNightBooking(value) && isGuestStay({ ...value, stay: { ...value.booking, id: value.booking.booking_id } })
 }
