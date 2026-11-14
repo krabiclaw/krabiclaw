@@ -276,10 +276,16 @@ function reconcileThread(rebuild = false) {
 }
 
 async function drainThreadChanges() {
-  if (reconciling || pending.value || sending.value || !reconcileRequested) return
+  if (reconciling || pending.value || sending.value) return
   reconciling = true
   try {
-    while (reconcileRequested && !sending.value) {
+    while (!pending.value && !sending.value) {
+      const creates = deferredCreates.splice(0)
+      const hasUnseenCreate = creates.some(message => {
+        const matches = (entry: ConversationEntry) => entry.type !== 'day' && entry.id === message.id && entry.sequence === message.sequence
+        return !entries.value.some(matches) && !older.value.some(page => page.entries.some(matches))
+      })
+      if (!reconcileRequested && !hasUnseenCreate) break
       reconcileRequested = false
       const rebuild = rebuildRequested
       rebuildRequested = false
@@ -446,7 +452,6 @@ async function sendReply() {
     if (!draft.value) draft.value = body
     if (!chosen.value.length) chosen.value = photos
   } finally {
-    if (deferredCreates.splice(0).some(message => message.id !== settledReply?.id || message.sequence !== settledReply.sequence)) reconcileThread()
     sending.value = false
   }
 }
@@ -526,9 +531,9 @@ watch(realtime.event, event => {
   }
   if ((event.type !== 'MESSAGE_CREATE' && event.type !== 'MESSAGE_UPDATE') || event.scheduled || event.conversation_id !== props.threadId) return
   if (event.type === 'MESSAGE_CREATE' && event.message) {
-    const message = event.message
-    if (sending.value) { deferredCreates.push(message); return }
-    if (message.id === settledReply?.id && message.sequence === settledReply.sequence) return
+    deferredCreates.push(event.message)
+    void drainThreadChanges()
+    return
   }
   const oldest = older.value[0]?.page.oldest ?? transcriptPage.value?.oldest
   if (event.type === 'MESSAGE_UPDATE' && event.message && oldest != null && event.message.sequence < oldest) return
