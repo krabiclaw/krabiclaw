@@ -77,14 +77,15 @@ export function safeRoute(event: H3Event): string {
   }
 }
 
-export function recordRequestPhase(event: H3Event, phase: string, startedAt: number) {
+export function recordRequestPhase(event: HTTPEvent, phase: string, startedAt: number) {
   const metrics = getRequestDataMetrics(event)
   metrics.phases[phase] = (metrics.phases[phase] ?? 0) + performance.now() - startedAt
 }
 
-export function beginTranscriptMetrics(event: H3Event) {
-  if (event.req.method !== 'GET' || !/^\/api\/messages\/[^/]+\/?$/.test(event.url.pathname)) return
-  if (event.url.pathname === '/api/messages/unread-count' || event.url.pathname === '/api/messages/unread-count/') return
+export function beginTranscriptMetrics(event: HTTPEvent) {
+  if (event.req.method !== 'GET' || !event.req.url.includes('/api/messages/')) return
+  const path = new URL(event.req.url).pathname.replace(/\/$/, '')
+  if (!/^\/api\/messages\/[^/]+$/.test(path) || path === '/api/messages/unread-count') return
   const metrics = getRequestDataMetrics(event)
   metrics.transcript = { finishDispatch: startTranscriptPhase(event, 'middleware') }
 }
@@ -100,13 +101,13 @@ export function markTranscriptMiddlewareComplete(event: H3Event) {
   transcript.finishDispatch = startTranscriptPhase(event, 'route_dispatch')
 }
 
-export function markTranscriptHandlerEntry(event: H3Event) {
+export function markTranscriptHandlerEntry(event: HTTPEvent) {
   const transcript = metricsByEvent.get(event)?.transcript
   transcript?.finishDispatch?.()
   if (transcript) delete transcript.finishDispatch
 }
 
-function startTranscriptPhase(event: H3Event, name: string) {
+function startTranscriptPhase(event: HTTPEvent, name: string) {
   const startedAt = performance.now()
   const span = event.req.runtime?.cloudflare?.context?.tracing?.startSpan(`messages.${name}`)
   return () => {
