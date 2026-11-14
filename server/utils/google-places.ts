@@ -137,12 +137,13 @@ export async function syncPlaceToLocation(
   locationId: string,
   placeId: string,
   scope: 'import' | 'provider',
+  sessionToken?: string,
 ): Promise<{ place: PlaceDetails; reviewsUpserted: number }> {
   const current = await queryFirst<{ updated_at: string; google_place_id: string | null }>(db,
     'SELECT updated_at, google_place_id FROM business_locations WHERE id = ? AND organization_id = ?', [locationId, organizationId])
   if (!current) throw new HTTPError({ statusCode: 404, statusMessage: 'Location not found' })
   if (scope === 'provider' && current.google_place_id !== placeId) throw new HTTPError({ statusCode: 409, statusMessage: 'The location is no longer connected to this Google place' })
-  const place = await getPlaceDetails(apiKey, placeId)
+  const place = await getPlaceDetails(apiKey, placeId, { sessionToken })
   if (!place.placeId) throw new Error(`Google Maps returned no place id for ${placeId}`)
   const now = new Date().toISOString()
   const version: BatchQuery = {

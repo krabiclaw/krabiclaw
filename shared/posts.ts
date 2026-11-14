@@ -165,3 +165,10 @@ export function callToActionLine(action: PostCallToAction | null): string | null
 export function providerCaption(body: string | null, action: PostCallToAction | null): string {
   return [body?.trim() ? body : null, callToActionLine(action)].filter(Boolean).join('\n\n')
 }
+
+export function articlePostFields(article: { title: string; excerpt?: string | null }, url: string) {
+  return {
+    body: [article.title, article.excerpt].filter(Boolean).join('\n\n'),
+    callToAction: { label: 'Read article', url } satisfies PostCallToAction,
+  }
+}

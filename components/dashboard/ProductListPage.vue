@@ -7,7 +7,7 @@
   -->
   <DashboardIndexPanel id="catalog" title="Catalog">
     <template #right>
-      <UButton :to="newProductTo" icon="i-lucide-plus" color="neutral" variant="soft" square aria-label="Add" data-testid="catalog-add" />
+      <UButton v-if="canCreate" :to="newProductTo" icon="i-lucide-plus" color="neutral" variant="soft" square aria-label="Add" data-testid="catalog-add" />
     </template>
 
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Catalog could not be loaded" :description="loadError" />
@@ -54,83 +54,43 @@
 </template>
 
 <script setup lang="ts">
-import { catalogProductItem } from '~/components/dashboard/CatalogProductList.vue'
 import OrganizationLocationSelector, { type OrganizationLocationSelectorItem } from '~/components/dashboard/OrganizationLocationSelector.vue'
-import type { ProductKind } from '~/shared/product-details'
-import { groupProductsByCollection } from '~/utils/product-presentation'
+import type { CatalogScreen } from '~/shared/catalog-screen'
 import { getErrorMessage } from '~/utils/errors'
 
+interface CatalogView {
+  screen: CatalogScreen
+  kind: string
+  filters: Array<{ value: string; label: string }>
+  can_create: boolean
+  has_stays: boolean
+}
 const level = useRouteLevel()
 const route = useRoute()
 const router = useRouter()
 const organizationId = useDashboardOrganizationId()
-// One authorized organization read. Location narrows this projection by its
-// explicit product relationships, without dropping membership needed by editors.
-const catalog = useProductCatalog(organizationId, ref(null))
-const [, { locations, error: locationsError }] = await Promise.all([
-  catalog.load,
-  useOrganizationLocations({ includeInactive: true }),
-])
-const { priceLabel } = useCatalogPrice(ref(null), locations)
-const loadError = computed(() => {
-  const cause = catalog.error.value ?? locationsError.value
-  return cause ? getErrorMessage(cause, 'The catalog could not be loaded') : null
-})
-
-// The kinds this business offers, in Catalog's order; a kind nobody sells is not a pill.
-type CatalogKind = 'all' | 'menu' | Exclude<ProductKind, 'dish'>
-const KINDS: Array<{ value: Exclude<CatalogKind, 'all'>; label: string }> = [
-  { value: 'menu', label: 'Menu' },
-  { value: 'experience', label: 'Experiences' },
-  { value: 'service', label: 'Services' },
-  { value: 'stay', label: 'Places to stay' },
-  { value: 'table', label: 'Tables' },
-]
-const grouped = computed(() => new Map(groupProductsByCollection(catalog.products.value, catalog.collections.value).map(group => [group.id, group])))
-// A section is the menu's when it holds dishes or nothing yet.
-const menuCollections = computed(() => catalog.collections.value.filter(collection => {
-  const members = grouped.value.get(collection.id)?.products ?? []
-  return !members.length || members.some(product => product.kind === 'dish')
-}))
-const hasMenu = computed(() => menuCollections.value.length > 0 || catalog.products.value.some(product => product.kind === 'dish'))
-const offered = (value: Exclude<CatalogKind, 'all'>) => value === 'menu' ? hasMenu.value : catalog.products.value.some(product => product.kind === value)
-// The chosen kind is held in the URL, so a filtered Catalog can be linked and gone Back to.
+const { organization } = useDashboardOrganization()
+const dashboardApi = useDashboardApi()
 const kind = computed({
-  get: (): CatalogKind => KINDS.find(row => row.value === route.query.kind)?.value ?? 'all',
+  get: () => typeof route.query.kind === 'string' ? route.query.kind : 'all',
   set: (value: string) => void navigateTo({ path: level.path.value, query: { ...route.query, kind: value === 'all' ? undefined : value } }),
 })
-const kindFilters = computed(() => [{ value: 'all' as const, label: 'All' }, ...KINDS.filter(row => row.value === kind.value || offered(row.value))])
+const { data: catalog, error: catalogError } = await useAsyncData(
+  () => `dashboard-catalog:${organizationId}:${kind.value}`,
+  () => dashboardApi('/api/dashboard/catalog', {
+    query: { kind: kind.value },
+    validate: (value): value is CatalogView => isRecord(value) && isRecord(value.screen) && Array.isArray(value.screen.rows) && Array.isArray(value.filters) && typeof value.can_create === 'boolean' && typeof value.has_stays === 'boolean',
+  }),
+)
+const loadError = computed(() => catalogError.value ? getErrorMessage(catalogError.value, 'The catalog could not be loaded') : null)
+const kindFilters = computed(() => catalog.value?.filters ?? [])
+const canCreate = computed(() => catalog.value?.can_create === true)
 const newProductTo = computed(() => router.resolve({ path: `${level.path.value}/new`, query: kind.value === 'all' ? {} : { kind: kind.value === 'menu' ? 'dish' : kind.value } }).fullPath)
-const activeFilterLabel = computed(() => kind.value === 'all' ? 'offerings' : KINDS.find(row => row.value === kind.value)!.label)
-
-// A menu belongs to a location: one card for each, holding that location's
-// sections and the ones every location shares. With no locations there is one menu.
-const menuCards = computed<OrganizationLocationSelectorItem[]>(() => {
-  const sectionCount = (id: string | null) => menuCollections.value.filter(collection => collection.location_id === null || collection.location_id === id).length
-  const sections = (count: number) => `${count} ${count === 1 ? 'section' : 'sections'}`
-  if (!locations.value.length) {
-    return [{ id: 'menu', label: 'Menu', eyebrow: 'Menu', summary: sections(sectionCount(null)), imageUrl: null, fallbackIcon: 'i-lucide-utensils', to: `${level.path.value}/menu` }]
-  }
-  return locations.value.map(location => ({
-    id: `menu-${location.id}`,
-    label: location.title,
-    eyebrow: `Menu${location.status === 'active' ? '' : ` (${location.status})`}`,
-    summary: sections(sectionCount(location.id)),
-    imageUrl: location.picture_url,
-    fallbackIcon: 'i-lucide-utensils',
-    to: router.resolve({ path: `${level.path.value}/menu`, query: { location_id: location.id } }).fullPath,
-  }))
-})
-const offerings = computed(() => catalog.products.value.filter(product => product.kind !== 'dish' && (kind.value === 'all' || product.kind === kind.value)))
-const items = computed<OrganizationLocationSelectorItem[]>(() => [
-  ...(hasMenu.value && (kind.value === 'all' || kind.value === 'menu') ? menuCards.value : []),
-  ...(kind.value === 'menu' ? [] : offerings.value.map(product => catalogProductItem(product, {
-    collections: catalog.collections.value,
-    locations: locations.value,
-    priceLabel,
-    to: `${level.path.value}/${product.id}`,
-  }))),
-])
+const activeFilterLabel = computed(() => catalog.value?.filters.find(item => item.value === catalog.value?.kind)?.label ?? 'offerings')
+const items = computed<OrganizationLocationSelectorItem[]>(() => (catalog.value?.screen.rows ?? []).map(row => {
+  if (!row.to) throw new Error('The Catalog row has no dashboard destination')
+  return { id: row.id, label: row.label, imageUrl: row.image ?? null, eyebrow: row.eyebrow ?? '', summary: row.summary ?? '', to: row.to }
+}))
 
 interface HomeSetupAction { label: string; detail: string; to: string }
 interface FirstHomeSetup { title: string; manual: HomeSetupAction; airbnb: HomeSetupAction & { can_connect: boolean } }
@@ -140,11 +100,9 @@ function isHomeSetupAction(value: unknown): value is HomeSetupAction {
     && typeof value.to === 'string' && value.to.startsWith('/dashboard/')
 }
 
-const { organization } = useDashboardOrganization()
-const dashboardApi = useDashboardApi()
-const showFirstHomeSetup = computed(() => organization.value?.vertical === 'lodging' && !offered('stay')
+const showFirstHomeSetup = computed(() => canCreate.value && organization.value?.vertical === 'lodging' && catalog.value?.has_stays === false
   && (kind.value === 'stay' || (kind.value === 'all' && items.value.length === 0)))
-const loadsHomeSetup = computed(() => organization.value?.vertical === 'lodging' && (kind.value === 'stay' || showFirstHomeSetup.value))
+const loadsHomeSetup = computed(() => canCreate.value && organization.value?.vertical === 'lodging' && (kind.value === 'stay' || showFirstHomeSetup.value))
 const { data: setup, error: setupError, pending: setupPending } = await useAsyncData(
   () => `first-home-setup:${organizationId}`,
   () => loadsHomeSetup.value

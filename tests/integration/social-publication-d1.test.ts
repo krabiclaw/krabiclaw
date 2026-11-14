@@ -13,16 +13,21 @@ import { handleTaskTools } from '../../server/utils/mcp-tools/tasks.ts'
 import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
 import { asMcpError, MCP_ERROR } from '../../server/utils/mcp-protocol.ts'
 import { isMcpRenderResponse } from '../../server/utils/mcp-render.ts'
-import { linkedAccountAccessToken, type CloudflareEnv } from '../../server/utils/auth.ts'
+import { createAuth, linkedAccountAccessToken, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { createPost, deletePost, getPost, listPublicSocialPosts, postPayloadFingerprint, updatePost } from '../../server/utils/post-management.ts'
-import { publishPost, reconcilePostPublication, type PublishTarget } from '../../server/utils/social-publication.ts'
+import { getSocialConnections, publishPost, reconcilePostPublication, type PublishTarget } from '../../server/utils/social-publication.ts'
 import { listChannelPosts, getChannelPost, deleteChannelPost } from '../../server/utils/social-channel-posts.ts'
 import { remainingMetaSubjectData } from '../../server/utils/integration-release.ts'
 import { deleteIntegration, listIntegrations, readIntegration, storeIntegration } from '../../server/utils/organization-integrations.ts'
 import { MetaGraphError, verifyMetaSignedRequest, configuredMetaApps } from '../../server/utils/meta-graph.ts'
 import { instagramAccessToken, listMedia, readAccountInsights, readMediaInsights } from '../../server/utils/instagram.ts'
 import { attachMediaPlacement } from '../../server/utils/media-placement.ts'
+import { getMediaAsset } from '../../server/utils/media-asset-manager.ts'
+import uploadMedia from '../../server/api/editor/organizations/[organization_id]/media/upload.post.ts'
 import { listLinkedFacebookPages, facebookPageToken } from '../../server/utils/facebook-pages.ts'
+import connectionAuthorization from '../../server/api/dashboard/connection-authorization.ts'
+import disconnectFacebook from '../../server/api/organizations/[organization_id]/integrations/facebook/disconnect.post.ts'
+import selectFacebook from '../../server/api/organizations/[organization_id]/integrations/facebook/select.post.ts'
 import deauthorizeCallback from '../../server/api/integrations/meta/deauthorize.post.ts'
 import { loadInstagramInsights } from '../../server/utils/instagram-insights.ts'
 import deleteCallback from '../../server/api/integrations/meta/data-deletion.post.ts'
@@ -448,6 +453,48 @@ test('publication: one result and one external post per target; a failure is the
     assert.deepEqual([emptyResult.ok, emptyResult.outcomes[0]!.code], [false, 'empty_post'])
     assert.deepEqual(await db.prepare('SELECT status, published_at FROM content_documents WHERE id = ?').bind(empty.post.id).first(), { status: 'draft', published_at: null })
 
+    await run("UPDATE account SET accessToken = 'deadbeef' WHERE id = 'ig-account'")
+    const connections = await getSocialConnections(env, 'org-a', { dashboardBase: 'https://proof.example/dashboard/org-a' })
+    assert.deepEqual(connections.channels.find(item => item.channel === 'facebook')?.problems, [])
+    assert.deepEqual(connections.channels.find(item => item.channel === 'instagram')?.problems.map(item => item.code), ['access_token_unavailable'])
+    await run("UPDATE account SET accessToken = 'ig-token' WHERE id = 'ig-account'")
+
+    const channelId = '1557308603734560779'
+    const guildId = '1557308603734560780'
+    const messageId = '1557308603734560781'
+    const botId = '1557308603734560782'
+    const discordEnv = { ...cardless, DISCORD_CLIENT_ID: botId, DISCORD_BOT_TOKEN: 'fixture-bot' }
+    await run("INSERT INTO account (id, accountId, providerId, userId) VALUES ('discord-account', 'discord-owner', 'discord', 'owner')")
+    const connectionRevision = await storeIntegration(db, 'org-a', 'discord', { account_id: 'discord-account', target_id: channelId, target_name: 'fixture-social' })
+    let postedMessages = 0
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(String(input))
+      if (url.hostname !== 'discord.com') return await meta.fetch(input, init)
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bot fixture-bot')
+      if (url.pathname === `/api/v10/channels/${channelId}` && init?.method === 'GET') {
+        return json({ id: channelId, guild_id: guildId, name: 'fixture-social', type: 0 })
+      }
+      assert.equal(url.pathname, `/api/v10/channels/${channelId}/messages`)
+      assert.equal(init?.method, 'POST')
+      const payload = JSON.parse(String(init?.body))
+      assert.equal(payload.content, 'A local Discord publication')
+      assert.equal(payload.enforce_nonce, true)
+      assert.equal(payload.nonce.length, 25)
+      postedMessages += 1
+      return json({ id: messageId, channel_id: channelId, author: { id: botId }, timestamp: '2026-09-28T10:00:00.000Z', attachments: [] })
+    }
+    const discordPost = await create('key-discord', { body: 'A local Discord publication' })
+    const discordTarget: PublishTarget = { channel: 'discord', target_id: channelId, connection_revision: connectionRevision }
+    const sendDiscord = () => publishPost(discordEnv, 'org-a', discordPost.post.id, { expectedUpdatedAt: discordPost.post.updated_at, targets: [discordTarget] }, 'owner')
+    assert.equal((await sendDiscord()).outcomes[0]?.status, 'published')
+    assert.equal((await sendDiscord()).outcomes[0]?.status, 'already_published')
+    assert.equal(postedMessages, 1)
+    const discordReceipt = (await getPost(db, discordEnv, 'org-a', discordPost.post.id))?.publications[0]
+    assert.equal(discordReceipt?.provider_post_id, messageId)
+    assert.equal(discordReceipt?.public_url, `https://discord.com/channels/${guildId}/${channelId}/${messageId}`)
+    assert.equal(await deleteIntegration(db, 'org-a', 'discord', { revision: connectionRevision }), true)
+    globalThis.fetch = meta.fetch as typeof fetch
+
     // Website, Facebook photos and an Instagram carousel in one call.
     const all = await publishPost(env, 'org-a', first.post.id, { expectedUpdatedAt: first.post.updated_at, targets: [targets.website, targets.facebook(), targets.instagram()] }, 'publisher')
     assert.equal(all.ok, true, JSON.stringify(all.outcomes))
@@ -680,6 +727,96 @@ test('publication: one result and one external post per target; a failure is the
     // Deleted keys answer gone.
     await assert.rejects(create('key-race', { media: [{ asset_id: 'a1', slot: 'cover' }] }), /deleted/)
     assert.equal(await db.prepare('PRAGMA foreign_key_check').all().then(result => result.results.length), 0)
+  } finally {
+    restore()
+    await runtime.dispose()
+  }
+})
+
+test('Better Auth returns the Instagram account it linked to the native Connections screen', async (t) => {
+  const { runtime, db, env, restore } = await setUp()
+  const providerFetch = globalThis.fetch
+  try {
+    await db.prepare("INSERT INTO member(id, organizationId, userId, role, createdAt) VALUES ('member-owner', 'org-a', 'owner', 'owner', ?)").bind(Date.now()).run()
+    const session = 'instagram-native-session'
+    await db.prepare('INSERT INTO session(id, token, userId, expiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind('instagram-native', session, 'owner', Date.now() + 60_000, Date.now(), Date.now()).run()
+    t.mock.method(globalThis, 'fetch', async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+      if (url.hostname === 'api.instagram.com' && url.pathname === '/oauth/access_token') return Response.json({ access_token: 'fixture-short' })
+      if (url.hostname === 'graph.instagram.com' && url.pathname === '/access_token') return Response.json({ access_token: 'fixture-long', expires_in: 3600 })
+      if (url.hostname === 'graph.instagram.com' && url.pathname === '/v23.0/me') return Response.json({ id: 'new-instagram-subject', user_id: 'new-professional-account', username: 'native_fixture' })
+      return providerFetch(input, init)
+    })
+    const app = new H3()
+    app.all('/api/dashboard/connection-authorization', connectionAuthorization)
+    const local = (input: string | URL, init?: RequestInit) => app.request(Object.assign(new Request(
+      new URL(input, 'https://proof.example'), init,
+    ), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    const attempt = crypto.randomUUID()
+    const start = await local('/api/dashboard/connection-authorization?org=org-a', {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}` },
+      body: JSON.stringify({ integration: 'instagram', attempt }),
+    })
+    assert.equal(start.status, 200, await start.clone().text())
+    const { authorization_url } = await start.json() as { authorization_url: string }
+    const authorization = await local(authorization_url)
+    assert.equal(authorization.status, 302)
+    const provider = new URL(authorization.headers.get('location')!)
+    assert.equal(provider.hostname, 'www.instagram.com')
+    const callback = new URL(provider.searchParams.get('redirect_uri')!)
+    callback.search = new URLSearchParams({ state: provider.searchParams.get('state')!, code: 'fixture-instagram-code' }).toString()
+    const cookies = authorization.headers.getSetCookie().map(entry => entry.split(';')[0]).join('; ')
+    const completed = await createAuth(env).handler(new Request(callback, { headers: { cookie: cookies } }))
+    assert.equal(completed.status, 302)
+    const result = new URL(completed.headers.get('location')!)
+    assert.equal(result.host, 'connections')
+    assert.equal(result.pathname, '/instagram')
+    assert.equal(result.searchParams.get('attempt'), attempt)
+    assert.equal(result.searchParams.get('error'), null)
+    const id = result.searchParams.get('account_id')
+    assert.ok(id)
+    const account = await db.prepare('SELECT providerId, accountId, userId FROM account WHERE id = ?').bind(id).first()
+    assert.deepEqual(account, { providerId: 'instagram', accountId: 'new-instagram-subject', userId: 'owner' })
+  } finally {
+    t.mock.restoreAll()
+    restore()
+    await runtime.dispose()
+  }
+})
+
+test('the shared Facebook selection route preserves the current connection until a replacement succeeds', async () => {
+  const { runtime, db, env, meta, restore } = await setUp()
+  try {
+    await db.prepare("INSERT INTO member(id, organizationId, userId, role, createdAt) VALUES ('member-owner', 'org-a', 'owner', 'owner', ?)").bind(Date.now()).run()
+    const session = 'facebook-reconnect-session'
+    await db.prepare('INSERT INTO session(id, token, userId, expiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind('facebook-reconnect', session, 'owner', Date.now() + 60_000, Date.now(), Date.now()).run()
+    const app = new H3()
+    app.post('/api/organizations/:organization_id/integrations/facebook/select', selectFacebook)
+    app.post('/api/organizations/:organization_id/integrations/facebook/disconnect', disconnectFacebook)
+    const select = (body: Record<string, string>, action = 'select') => app.request(Object.assign(new Request(`https://proof.example/api/organizations/org-a/integrations/facebook/${action}`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}` }, body: JSON.stringify(body),
+    }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    const before = await readIntegration(db, 'org-a', 'facebook')
+    assert.ok(before)
+    const stale = await select({ account_id: 'fb-account', page_id: PAGE, revision: 'stale' })
+    assert.equal(stale.status, 409)
+    const unavailable = await select({ account_id: 'fb-account', page_id: 'missing-page', revision: before.revision })
+    assert.equal(unavailable.status, 400)
+    assert.deepEqual(await readIntegration(db, 'org-a', 'facebook'), before)
+    const replacementPage = '1205835975938852'
+    meta.assignedPageResponses.set('', { data: [{ id: replacementPage, name: 'Replacement Page', access_token: 'replacement-page-token' }] })
+    const selected = await select({ account_id: 'fb-account', page_id: replacementPage, revision: before.revision })
+    assert.equal(selected.status, 200, await selected.clone().text())
+    const saved = await readIntegration(db, 'org-a', 'facebook')
+    assert.equal(saved?.target_id, replacementPage)
+    assert.equal(saved?.target_name, 'Replacement Page')
+    assert.equal(saved?.account_id, 'fb-account')
+    assert.notEqual(saved?.revision, before.revision)
+    const staleDisconnect = await select({ revision: before.revision }, 'disconnect')
+    assert.equal(staleDisconnect.status, 409)
+    assert.deepEqual(await readIntegration(db, 'org-a', 'facebook'), saved)
   } finally {
     restore()
     await runtime.dispose()
@@ -1138,7 +1275,32 @@ test('Facebook video: a Reel is published by finishing its upload session, any o
   const { runtime, db, env, cardless, meta, asset, restore } = await setUp()
   try {
     await asset('reel', 'video/mp4', 'video', { width: 720, height: 1280, duration: 12 })
-    await asset('wide', 'video/mp4', 'video', { width: 1920, height: 1080, duration: 20 })
+    await db.prepare("INSERT INTO member(id, organizationId, userId, role, createdAt) VALUES ('member-owner', 'org-a', 'owner', 'owner', ?)").bind(Date.now()).run()
+    const session = 'native-video-upload-session'
+    await db.prepare('INSERT INTO session(id, token, userId, expiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind('native-video-upload', session, 'owner', Date.now() + 60_000, Date.now(), Date.now()).run()
+    const form = new FormData()
+    const clip = readFileSync(new URL('../e2e/seed/media/clip.mp4', import.meta.url))
+    const poster = await sharp(readFileSync(new URL('../e2e/seed/media/poster.avif', import.meta.url))).jpeg().toBuffer()
+    form.set('video', new Blob([clip], { type: 'video/mp4' }), 'clip.mp4')
+    form.set('thumbnail', new Blob([poster], { type: 'image/jpeg' }), 'poster.jpg')
+    const app = new H3()
+    app.post('/api/editor/organizations/:organization_id/media/upload', uploadMedia)
+    const posted = await app.request(Object.assign(new Request('https://proof.example/api/editor/organizations/org-a/media/upload', {
+      method: 'POST', headers: { authorization: `Bearer ${session}` }, body: form,
+    }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    assert.equal(posted.status, 200, await posted.clone().text())
+    const upload = await posted.json() as { asset_id: string; public_url: string; thumbnail_url: string }
+    const savedAsset = await getMediaAsset(db, upload.asset_id, 'org-a')
+    assert.equal(savedAsset?.kind, 'video')
+    assert.equal(savedAsset.status, 'active')
+    assert.deepEqual([savedAsset.width, savedAsset.height, savedAsset.duration], [640, 360, 3])
+    assert.equal(savedAsset.thumbnail_url, upload.thumbnail_url)
+    assert.equal(savedAsset.public_url, upload.public_url)
+    assert.ok(savedAsset.r2_key)
+    const playback = await (await runtime.getR2Bucket('MEDIA_BUCKET')).get(savedAsset.r2_key)
+    assert.equal(playback?.httpMetadata?.contentType, 'video/mp4')
+    assert.equal(playback.size, clip.length)
     const create = (key: string, post: Record<string, unknown>) => createPost(db, cardless, 'org-a', { post, idempotencyKey: key }, 'owner')
     const publication = (postId: string) => db.prepare('SELECT state, provider_post_id, provider_permalink, error_code FROM post_publications WHERE post_id = ? AND channel = ?').bind(postId, 'facebook')
       .first<{ state: string; provider_post_id: string | null; provider_permalink: string | null; error_code: string | null }>()
@@ -1160,11 +1322,11 @@ test('Facebook video: a Reel is published by finishing its upload session, any o
     assert.equal(starts(), 1)
 
     // Any other video is published by its upload; the video Facebook accepted is the publication.
-    const wide = await create('key-fb-wide', { body: 'Kitchen tour', media: [{ asset_id: 'wide', slot: 'cover' }] })
+    const wide = await create('key-fb-wide', { body: 'Kitchen tour', media: [{ asset_id: upload.asset_id, slot: 'cover' }] })
     const uploaded = await publishPost(env, 'org-a', wide.post.id, { expectedUpdatedAt: wide.post.updated_at, targets: [targets.facebook()] }, 'owner')
     assert.equal(uploaded.outcomes[0]!.status, 'published', JSON.stringify(uploaded.outcomes))
     assert.deepEqual(meta.sent(request => request.path.endsWith(`${PAGE}/videos`)).map(request => [request.body.file_url, request.body.published, request.body.description]),
-      [['https://imagedelivery.example.test/hash/wide/public', undefined, 'Kitchen tour']])
+      [[upload.public_url, undefined, 'Kitchen tour']])
     assert.deepEqual(await publication(wide.post.id).then(row => [row!.state, row!.provider_post_id]), ['published', 'video-2'])
     // That video id has no Page prefix; the receipt of its publication to this Page is what lets it be deleted.
     await assert.rejects(deleteChannelPost(env, 'org-a', targets.facebook(), 'video-unrecorded', 'owner'), /selected Page/)

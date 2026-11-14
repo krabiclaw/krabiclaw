@@ -33,6 +33,9 @@ import { hashPassword, symmetricEncrypt } from 'better-auth/crypto'
 import { H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
 import servicesPostRoute from '../../server/api/dashboard/services.post.ts'
+import googleAdsAccountsRoute from '../../server/api/organizations/[organization_id]/integrations/google-ads/accounts.get.ts'
+import googleAdsSelectRoute from '../../server/api/organizations/[organization_id]/integrations/google-ads/select.post.ts'
+import { INTEGRATION_SCOPES } from '../../shared/organization-settings.ts'
 import servicesGetRoute from '../../server/api/dashboard/services.get.ts'
 import mcpRoute from '../../server/api/mcp.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[payment_id]/return.post.ts'
@@ -1768,6 +1771,8 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   const app = new H3()
   app.post('/api/dashboard/services', servicesPostRoute)
   app.get('/api/dashboard/services', servicesGetRoute)
+  app.get('/api/organizations/:organization_id/integrations/google-ads/accounts', googleAdsAccountsRoute)
+  app.post('/api/organizations/:organization_id/integrations/google-ads/select', googleAdsSelectRoute)
   app.post('/api/mcp', mcpRoute)
   const background: Promise<unknown>[] = []
   // Nitro initializes the Request context before H3; the bare in-process app shares it here too.
@@ -1834,6 +1839,9 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
      return Response.json({ mutateOperationResponses: [{ campaignResult: { resourceName: 'customers/1234567890/campaigns/222' } }] })
     }
     googleReads++
+    if (url.pathname === '/v25/customers:listAccessibleCustomers') {
+     return Response.json({ resourceNames: ['1234567890', '2222222222', '3333333333'].map(id => `customers/${id}`) })
+    }
     // The managed account, and the accounts a later free connection chooses from: 3333333333 is a manager account.
     assert.ok(['1234567890', '2222222222', '3333333333'].some(id => url.pathname === `/v25/customers/${id}/googleAds:search`), url.pathname)
     if (providerUnavailable) return Response.json({ error: 'Reporting unavailable at external boundary' }, { status: 503 })
@@ -1863,7 +1871,8 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   defaultCard = 'pm_default'
   await assert.rejects(agree, /Connect a Google Ads account billed in USD/u)
   const token = await symmetricEncrypt({ key: env.BETTER_AUTH_SECRET, data: 'managed-ads-token' })
-  await db.prepare("INSERT INTO account(id,accountId,providerId,userId,accessToken) VALUES('ads-linked','google-fixture','google','verified',?)").bind(token).run()
+  await db.prepare("INSERT INTO account(id,accountId,providerId,userId,accessToken,scope) VALUES('ads-linked','google-fixture','google','verified',?,?)")
+   .bind(token, INTEGRATION_SCOPES['google-ads'].join(',')).run()
   await storeIntegration(db, ORG, 'google_ads', { account_id: 'ads-linked', target_id: '1234567890', target_name: 'Managed ads fixture' }, { revision: null })
   const client = new Client({ name: 'payments-managed-ads-proof', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } })
   const transport = new StreamableHTTPClientTransport(new URL('https://proof.example/api/mcp'), {
@@ -1967,6 +1976,30 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   await assert.rejects(selectGoogleAdsCustomer(env, ORG, 'ads-linked', '3333333333', 'Manager account'), { status: 422, message: 'That is a Google Ads manager account. Choose one of the accounts it manages.' })
   // A new free connection cannot make the previous agreement bill its account.
   await selectGoogleAdsCustomer(env, ORG, 'ads-linked', '2222222222', 'New free connection')
+  const freeConnection = await readIntegration(db, ORG, 'google_ads')
+  currency = 'THB'
+  await assert.rejects(selectGoogleAdsCustomer(env, ORG, 'ads-linked', '1234567890', 'Replacement', true),
+   /requires a Google Ads account billed in USD/)
+  assert.deepEqual(await readIntegration(db, ORG, 'google_ads'), freeConnection)
+  currency = 'USD'
+  await assert.rejects(selectGoogleAdsCustomer(env, ORG, 'ads-linked', '1234567890', 'Stale replacement', true, { revision: null }),
+   /Google Ads changed/)
+  assert.deepEqual(await readIntegration(db, ORG, 'google_ads'), freeConnection)
+  assert.ok(freeConnection)
+  const adsPath = `/api/organizations/${ORG}/integrations/google-ads`
+  const accounts = await call(`${adsPath}/accounts?service=managed-ads&account_id=ads-linked`)
+  assert.equal(accounts.status, 200, await accounts.clone().text())
+  const inventory = await accounts.json() as { revision: string; accounts: Array<{ customerId: string }> }
+  assert.equal(inventory.revision, freeConnection.revision)
+  assert.deepEqual(inventory.accounts.map(account => account.customerId), ['1234567890', '2222222222'])
+  const savedAccount = await call(`${adsPath}/select`, 'POST', {
+   service: 'managed-ads', account_id: 'ads-linked', customer_id: '2222222222', customer_name: 'Managed replacement', revision: inventory.revision,
+  })
+  assert.equal(savedAccount.status, 200, await savedAccount.text())
+  const replacement = await readIntegration(db, ORG, 'google_ads')
+  assert.equal(replacement?.target_name, 'Managed replacement')
+  assert.equal(replacement?.target_id, '2222222222')
+  assert.notEqual(replacement?.revision, freeConnection?.revision)
   const readsBeforeDelivery = googleReads
   providerUnavailable = true
   deliveryUnavailable = false

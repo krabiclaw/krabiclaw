@@ -2,7 +2,7 @@ import { defineHandler } from 'nitro'
 import { readBody } from 'nitro/h3'
 import { HTTPError } from 'h3'
 import { jsonResponse } from '~/server/utils/api-response'
-import { syncPlaceToLocation } from '~/server/utils/google-places'
+import { isPlacesSessionToken, syncPlaceToLocation } from '~/server/utils/google-places'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { queryFirst } from '~/server/db'
@@ -18,7 +18,7 @@ import { requireRequestedLocationAccess } from '~/server/utils/location-access'
  * each is only ever a confirmed tenant action, and the hourly sync is not.
  */
 export default defineHandler(async (event) => {
-  const body = await readBody(event) as { organization_id?: string; location_id?: string; google_place_id?: string } | undefined
+  const body = await readBody(event) as { organization_id?: string; location_id?: string; google_place_id?: string; session_token?: string } | undefined
   const locationId = body?.location_id
   if (!locationId) return jsonResponse({ error: 'location_id is required' }, { status: 400 })
 
@@ -41,8 +41,10 @@ export default defineHandler(async (event) => {
   const placeId = body?.google_place_id?.trim() || location.google_place_id
   if (!placeId) return jsonResponse({ error: 'This location is not connected to Google Maps.' }, { status: 400 })
 
+  if (body?.session_token !== undefined && !isPlacesSessionToken(body.session_token)) return jsonResponse({ error: 'session_token must be a UUID' }, { status: 400 })
+
   try {
-    const { place, reviewsUpserted } = await syncPlaceToLocation(db, apiKey, organization.id, locationId, placeId, 'import')
+    const { place, reviewsUpserted } = await syncPlaceToLocation(db, apiKey, organization.id, locationId, placeId, 'import', body?.session_token)
     await purgePublicResourceCacheNow(env, organization.id)
 
     return jsonResponse({

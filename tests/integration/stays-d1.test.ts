@@ -1512,7 +1512,7 @@ test('a member reads a stay at a home they look after as its turnover on every r
     ]) await assert.rejects(change(), { status: 403, data: { code: 'STAY_ROLE_REQUIRED' } })
     assert.deepEqual(await getStay(db, manager, stay.id), whole)
     // The outbox shows a member only their own replies: none of the business's automatic messages the manager reads.
-    await saveMessageTemplate(db, env, manager, null, { title: 'After your stay', body: 'Thanks for staying.', schedule: { trigger: 'check_out', offset_days: 1, local_time: '10:00', product_ids: [cabin.id] } })
+    await saveMessageTemplate(db, env, manager, null, { title: 'After your stay', body: 'Thanks for staying.', schedule: { trigger: 'check_out', offset_days: 1, local_time: '10:00', product_ids: [cabin.id] } }, '2026-11-01T18:00:00.000Z')
     const [ownerMembership, cleanerMembership] = await Promise.all([OWNER, CLEANER].map(userId => resolveOrganizationMembership(env, { organizationId: ORG, userId })))
     assert(ownerMembership && cleanerMembership)
     const ownerPrincipal = memberAccessPrincipal(ownerMembership, { env })

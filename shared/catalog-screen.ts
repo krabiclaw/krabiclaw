@@ -1,0 +1,58 @@
+import { z } from 'zod'
+
+export interface CatalogRow {
+  id: string
+  label: string
+  summary?: string
+  eyebrow?: string
+  icon?: string
+  optional_detail?: boolean
+  image?: string | null
+  external_url?: string | null
+  copy_value?: string
+  to?: string
+  authorization?: string
+  group?: string
+  plan?: string | null
+  native?: string
+  replace?: boolean
+  query?: Record<string, string>
+  status?: 'success' | 'neutral' | 'error'
+  placeholder?: boolean
+}
+
+export interface CatalogField {
+  key: string
+  label: string
+  kind: 'text' | 'textarea' | 'number' | 'money' | 'toggle' | 'select' | 'photo' | 'datetime' | 'order'
+  value: string
+  choices?: Array<{ value: string; label: string; image?: string | null }>
+  optional?: boolean
+  display_url?: string | null
+  playback_url?: string | null
+  hint?: string
+  timezone?: string
+  media_kind?: 'image' | 'video' | 'any'
+}
+
+export interface CatalogScreen {
+  title: string
+  preview_url?: string | null
+  destination?: { view: string; query: Record<string, string> }
+  rows: CatalogRow[]
+  groups?: Array<{ id: string; label: string }>
+  filters?: Array<{ value: string; label: string }>
+  fields: CatalogField[]
+  revision?: string
+  save_label?: string
+  allow_unchanged?: boolean
+  empty_title?: string
+}
+
+export const catalogAnswer = z.object({
+  values: z.record(z.string(), z.string().max(10_000)),
+  revision: z.string(),
+  idempotency_key: z.uuid(),
+}).strict()
+
+export type CatalogAnswer = z.infer<typeof catalogAnswer>

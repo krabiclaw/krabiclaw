@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { expect, test, type APIRequestContext, type BrowserContext, type Page, type Request } from '@playwright/test'
 import sharp from 'sharp'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
@@ -13,6 +14,7 @@ import type { OrganizationMembersData } from '../../utils/organization-members'
 import { formatTimestamp, localNow, timezoneLabel } from '../../utils/timezone'
 import type { MemberSchedule } from '../../composables/useMemberAvailabilityEditor'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import type { CatalogScreen } from '../../shared/catalog-screen'
 import type { Collection, Product } from '../../server/types/products'
 import type { DashboardLocation } from '../../composables/useDashboardOrganization'
 import { countCatalog, type CatalogCounts } from '../../utils/product-presentation'
@@ -432,6 +434,23 @@ test.describe('dashboard pane hierarchy', () => {
       const recoveredRead = await mcpRequest(memberContext.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: actor.id } })
       expect(recoveredRead.status(), await recoveredRead.text()).toBe(200)
       expect(mcpData<{ profile: PublicProfile }>(await recoveredRead.json()).profile).toEqual(concurrent)
+      const nativeProfile = '/api/dashboard/offering'
+      const nativePhoto = { org, view: 'member-profile-field', member_id: actor.id, field: 'public_photo_url' }
+      const nativeRead = await page.request.get(nativeProfile, { params: nativePhoto })
+      expect(nativeRead.status(), await nativeRead.text()).toBe(200)
+      const nativeEditor = await nativeRead.json() as CatalogScreen
+      expect(nativeEditor.revision).toBe(concurrent.updated_at)
+      expect(nativeEditor.fields[0]).toMatchObject({ key: 'photo', value: concurrent.public_photo_url ?? '' })
+      const nativeSave = await page.request.post(nativeProfile, { params: nativePhoto, data: {
+        values: { photo: attemptedPhoto.id }, revision: nativeEditor.revision, idempotency_key: randomUUID(),
+      } })
+      expect(nativeSave.status(), await nativeSave.text()).toBe(200)
+      const nativeSavedRead = await memberContext.request.get(schedulingEndpoint)
+      expect(nativeSavedRead.status(), await nativeSavedRead.text()).toBe(200)
+      expect((await nativeSavedRead.json()).scheduling).toMatchObject({
+        public_photo_url: attemptedPhoto.public_url, public_approved: 0, timezone: unchangedProfile.timezone,
+        weekly: unchangedProfile.weekly, time_off: unchangedProfile.time_off,
+      })
     } catch (error) {
       failures.push(error)
     } finally {
@@ -786,6 +805,21 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(page).toHaveURL(`${schedulePath}?location_id=${location!.id}`)
 
       const sessionMonth = sessionDay.slice(0, 7)
+      const nativeRead = async (view: string, params: Record<string, string> = {}) => {
+        const response = await page.request.get('/api/dashboard/offering', { params: { org: seededTenant('experience').slug, view, ...params } })
+        expect(response.status(), await response.text()).toBe(200)
+        return await response.json() as CatalogScreen
+      }
+      const nativeIndex = await nativeRead('session-calendars')
+      expect(nativeIndex.rows).toContainEqual({ id: productId, label: product.name, native: 'sessions', query: { product_id: productId } })
+      const nativeCalendar = await nativeRead('sessions', { product_id: productId, month: sessionMonth, scope: location!.id })
+      expect(nativeCalendar.rows).toContainEqual(expect.objectContaining({ id: original!.id, native: 'session', query: expect.objectContaining({ scope: location!.id }) }))
+      const nativeEdit = await nativeRead('session', { product_id: productId, session_id: original!.id, month: sessionMonth, scope: location!.id })
+      expect(nativeEdit.fields.find(field => field.key === 'starts')).toMatchObject({ timezone: original!.timezone, value: original!.starts_at })
+      const futureMonth = new Date(Date.now() + 180 * 86_400_000).toISOString().slice(0, 7)
+      const future = await nativeRead('sessions', { product_id: productId, month: futureMonth, scope: location!.id })
+      expect(future.rows.find(row => row.id === 'next')).toMatchObject({ replace: true, native: 'sessions', query: { scope: location!.id } })
+      expect(future.rows.some(row => row.id === original!.id)).toBe(false)
       await open(page, `${calendarPath}?product_id=${productId}&month=${sessionMonth}`)
       const calendar = page.locator('#dashboard-panel-org-calendar')
       const locationFilter = calendar.getByRole('combobox', { name: 'Location', exact: true })
@@ -985,6 +1019,22 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('date') === sessionDay && url.searchParams.get('location_id') === original!.location_id)
       expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, location_id: original!.location_id, month: sessionDay.slice(0, 7), date: sessionDay })
       await expect(page.locator('#dashboard-panel-org-calendar').getByRole('button', { name: 'View: Month', exact: true })).toBeVisible()
+    }
+    const nativeEditorPath = '/api/dashboard/offering'
+    const nativeQuery = { org: restore.slug, view: 'session', product_id: productId, session_id: original!.id,
+      month: sessionDay.slice(0, 7), scope: original!.location_id! }
+    const nativeResponse = await page.request.get(nativeEditorPath, { params: nativeQuery })
+    expect(nativeResponse.status(), await nativeResponse.text()).toBe(200)
+    const nativeEditor = await nativeResponse.json() as CatalogScreen
+    const values = Object.fromEntries(nativeEditor.fields.map(field => [field.key, field.value]))
+    for (const capacity of ['9', '8']) {
+      const read = await page.request.get(nativeEditorPath, { params: nativeQuery })
+      expect(read.status(), await read.text()).toBe(200)
+      const revision = (await read.json() as CatalogScreen).revision
+      const saved = await page.request.post(nativeEditorPath, { params: nativeQuery,
+        data: { values: { ...values, capacity }, revision, idempotency_key: randomUUID() } })
+      expect(saved.status(), await saved.text()).toBe(200)
+      expect((await list()).find(row => row.id === original!.id)).toMatchObject({ capacity: Number(capacity), starts_at: original!.starts_at })
     }
     await page.setViewportSize(NARROW)
     await open(page, `${path}&view=year`)
@@ -1278,7 +1328,10 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(card).toContainText(`${count} ${count === 1 ? 'section' : 'sections'}`)
     }
     const offerings = products.filter(product => product.kind !== 'dish')
-    await expect(grid.locator('a[data-testid^="selector-item-"]')).toHaveCount(locations.length + offerings.length)
+    const hasShared = menuSections.some(section => section.location_id === null) || products.some(product => product.kind === 'dish' && !product.locations.length)
+    const menuCount = locations.length + Number(hasShared)
+    if (hasShared) await expect(grid.getByRole('link', { name: /Shared menu/ })).toHaveAttribute('href', `${ORG}/products/menu`)
+    await expect(grid.locator('a[data-testid^="selector-item-"]')).toHaveCount(menuCount + offerings.length)
     for (const product of offerings) {
       const card = grid.getByTestId(`selector-item-${product.id}`)
       await expect(card).toHaveAttribute('href', `${ORG}/products/${product.id}`)
@@ -1307,7 +1360,7 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(grid.locator('a[data-testid^="selector-item-menu-"]')).toHaveCount(0)
     await catalog.getByTestId('catalog-kind-menu').click()
     await expect(page).toHaveURL(`${ORG}/products?kind=menu`)
-    await expect(grid.locator('a[data-testid^="selector-item-"]')).toHaveCount(locations.length)
+    await expect(grid.locator('a[data-testid^="selector-item-"]')).toHaveCount(menuCount)
 
     // A phone shows the same cards, each the full width of the grid.
     await page.setViewportSize({ width: 390, height: 844 })
@@ -2001,6 +2054,152 @@ test.describe('dashboard pane hierarchy', () => {
     const afterRead = await page.request.get(`${endpoint}/${product!.id}`)
     expect(afterRead.status(), await afterRead.text()).toBe(200)
     expect((await afterRead.json() as { product: Product }).product.image?.asset_id).toBe(product!.image!.asset_id)
+  })
+
+  test('Website review preferences use the CMS moderation rules', async ({ page }) => {
+    const tenant = seededTenant('restaurant')
+    const response = await page.request.get('/api/dashboard/offering', { params: { org: tenant.slug, view: 'website-review-settings' } })
+    expect(response.status(), await response.text()).toBe(200)
+    const screen = await response.json() as CatalogScreen
+    expect(screen.fields).toEqual([])
+    expect(screen.rows.find(row => row.id === 'website-reviews')).toMatchObject({ native: 'website-reviews', to: `${ORG}/website/reviews` })
+    await open(page, `${ORG}/website/preferences/reviews`)
+    await expect(page.locator('#dashboard-panel-organization-website-reviews').getByText(screen.rows[0]!.summary!)).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Manage reviews', exact: true })).toHaveAttribute('href', `${ORG}/website/reviews`)
+  })
+
+  test('native Connections opens shared screens and starts a single-use provider authorization', async ({ page, baseURL }) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Uses local Better Auth and stops at the provider boundary.')
+    const tenant = seededTenant('restaurant')
+    const read = async (params: Record<string, string>) => {
+      const response = await page.request.get('/api/dashboard/offering', { params: { org: tenant.slug, ...params } })
+      expect(response.status(), await response.text()).toBe(200)
+      return await response.json() as CatalogScreen
+    }
+    const connections = await read({ view: 'connections' })
+    expect(connections.rows.map(row => row.id)).toEqual(expect.arrayContaining(['google-maps', 'google-calendar', 'facebook', 'instagram', 'discord']))
+    const web = await page.request.get('/api/dashboard/settings', { params: { org: tenant.slug, connections: '1' } })
+    expect(web.status(), await web.text()).toBe(200)
+    const webConnections = await web.json()
+    expect(webConnections.connections).toEqual(connections.rows)
+    expect(webConnections.connectionGroups).toEqual(connections.groups)
+    expect(webConnections.connectionFilters).toEqual(connections.filters)
+    const maps = await read({ view: 'connection', integration: 'google-maps' })
+    expect(maps.rows.find(row => row.id === tenant.locations.brooklyn.id)).toMatchObject({
+      native: 'connection-map', query: { integration: 'google-maps', location_id: tenant.locations.brooklyn.id },
+    })
+    const search = await read({ view: 'connection-map-search', integration: 'google-maps', location_id: tenant.locations.brooklyn.id })
+    const query = { org: tenant.slug, view: 'connection-map-search', integration: 'google-maps', location_id: tenant.locations.brooklyn.id }
+    const requestSearch = await page.request.post('/api/dashboard/offering', {
+      params: query, data: { revision: search.revision, values: { input: 'Brooklyn' }, idempotency_key: randomUUID() },
+    })
+    expect(requestSearch.status(), await requestSearch.text()).toBe(200)
+    const next = (await requestSearch.json()).destination
+    expect(next).toMatchObject({ view: 'connection-map-results', query: { location_id: tenant.locations.brooklyn.id, input: 'Brooklyn' } })
+    const withoutMaps = await page.request.get('/api/dashboard/offering', { params: { org: tenant.slug, view: next.view, ...next.query } })
+    expect(withoutMaps.status(), await withoutMaps.text()).toBe(503)
+    expect((await withoutMaps.json()).message).toContain('Google Maps search is unavailable')
+    const managed = await read({ view: 'connection', integration: 'google-ads', service: 'managed-ads' })
+    expect(managed.rows).toContainEqual(expect.objectContaining({ authorization: 'google-ads',
+      query: { integration: 'google-ads', service: 'managed-ads' } }))
+    const domains = await read({ view: 'website-domains' })
+    const connect = domains.rows.find(row => row.id === 'connect')
+    expect(connect).toMatchObject({ native: 'website-domain-action', query: { action: 'connect' } })
+    const domainForm = await read({ view: connect!.native!, ...connect!.query })
+    expect(domainForm.fields).toContainEqual(expect.objectContaining({ key: 'cutover', value: 'false' }))
+    const calendar = await read({ view: 'connection', integration: 'google-calendar' })
+    expect(calendar.rows).toContainEqual(expect.objectContaining({ authorization: 'google-calendar' }))
+    const link = await page.request.post('/api/dashboard/connection-authorization', {
+      params: { org: tenant.slug }, data: { integration: 'google-calendar', attempt: randomUUID() },
+    })
+    expect(link.status(), await link.text()).toBe(200)
+    const url = new URL((await link.json()).authorization_url)
+    expect(url.origin).toBe(new URL(baseURL!).origin)
+    const tampered = new URL(url)
+    tampered.searchParams.set('integration', 'facebook')
+    const rejected = await page.request.get(tampered.href, { maxRedirects: 0 })
+    expect(rejected.status()).toBe(302)
+    expect(new URL(rejected.headers().location!).searchParams.get('error')).toBe('This authorization link is invalid.')
+    const started = await page.request.get(url.href, { maxRedirects: 0 })
+    expect(started.status()).toBe(302)
+    const provider = new URL(started.headers().location!)
+    expect(provider.hostname).toBe('accounts.google.com')
+    expect(provider.searchParams.get('scope')).toContain('https://www.googleapis.com/auth/calendar.app.created')
+    expect(started.headers()['set-cookie']).toContain('state')
+    const callback = new URL(provider.searchParams.get('redirect_uri')!)
+    callback.search = new URLSearchParams({ state: provider.searchParams.get('state')!, error: 'access_denied' }).toString()
+    const cancelled = await page.request.get(callback.href, { maxRedirects: 0 })
+    expect(cancelled.status()).toBe(302)
+    const appReturn = new URL(cancelled.headers().location!)
+    expect(appReturn.protocol + '//' + appReturn.host + appReturn.pathname).toBe('krabiclaw://connections/google-calendar')
+    expect(appReturn.searchParams.get('attempt')).toBe(url.searchParams.get('attempt'))
+    expect(appReturn.searchParams.get('error')).toBe('access_denied')
+    const replay = await page.request.get(url.href, { maxRedirects: 0 })
+    expect(replay.status()).toBe(302)
+    expect(new URL(replay.headers().location!).searchParams.get('error')).toBe('Invalid token')
+  })
+
+  test('the native location editor saves to the shared dashboard record and keeps content scoped', async ({ page, baseURL }, testInfo) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Location edits require isolated local D1.')
+    const tenant = seededTenant('restaurant')
+    const locationId = tenant.locations.brooklyn.id
+    const otherLocationId = tenant.locations.williamsburg.id
+    const release = await acquireTenantMutationLock(testInfo, tenant.organizationId)
+    const overviewPath = `/api/dashboard/organizations/${tenant.organizationId}/locations/${locationId}/overview`
+    const endpoint = '/api/dashboard/offering'
+    const query = { org: tenant.slug, location_id: locationId }
+    const read = async (view: string, params: Record<string, string> = {}) => {
+      const response = await page.request.get(endpoint, { params: { ...query, view, ...params } })
+      expect(response.status(), await response.text()).toBe(200)
+      return await response.json() as CatalogScreen
+    }
+    const save = async (view: string, editor: CatalogScreen, changes: Record<string, string>) => {
+      const values = { ...Object.fromEntries(editor.fields.map(field => [field.key, field.value])), ...changes }
+      return page.request.post(endpoint, { params: { ...query, view }, data: { revision: editor.revision, values, idempotency_key: randomUUID() } })
+    }
+    let originalEmail: string | undefined
+    try {
+      const original = await read('business-location-contact')
+      originalEmail = original.fields.find(field => field.key === 'email')!.value
+      const email = `location-editor-${randomUUID()}@playwright.example`
+      const web = await page.request.get(overviewPath, { params: { org: tenant.slug } })
+      expect(web.status(), await web.text()).toBe(200)
+      const overview = await web.json() as { rows: CatalogScreen['rows']; settings: CatalogScreen['rows'][number] }
+      const native = await read('business-location')
+      expect(native.rows).toEqual([...overview.rows, overview.settings])
+      expect(native.rows.find(row => row.id === 'products')).toMatchObject({ native: 'scoped-catalog', query: { location_id: locationId } })
+      const scoped = await page.request.get('/api/dashboard/catalog', { params: { ...query, view: 'scoped-catalog' } })
+      expect(scoped.status(), await scoped.text()).toBe(200)
+      const scopedRows = (await scoped.json()).screen.rows as CatalogScreen['rows']
+      expect(scopedRows.find(row => row.native === 'menu')).toMatchObject({ query: { location_id: locationId } })
+      expect(scopedRows.some(row => row.query?.location_id === otherLocationId)).toBe(false)
+      for (const view of ['website-posts', 'website-qa']) {
+        const screen = await read(view)
+        expect(screen.rows.find(row => row.id === 'new')).toMatchObject({ query: { location_id: locationId } })
+      }
+      const changed = await save('business-location-contact', original, { email })
+      expect(changed.status(), await changed.text()).toBe(200)
+      const stale = await save('business-location-contact', original, { email: originalEmail })
+      expect(stale.status(), await stale.text()).toBe(409)
+      const persisted = await page.request.get(`/api/organizations/${tenant.organizationId}/locations/${locationId}`)
+      expect(persisted.status(), await persisted.text()).toBe(200)
+      const location = (await persisted.json()).location
+      expect(location).toMatchObject({ id: locationId, email })
+      await open(page, `${ORG}/locations/${location.slug}/contact`)
+      await expect(page.locator('#dashboard-panel-location-contact').getByRole('textbox', { name: 'Email', exact: true })).toHaveValue(email)
+      const foreign = await page.request.get(endpoint, { params: { ...query, view: 'business-location', location_id: seededTenant('experience').locations['ao-nang'].id } })
+      expect(foreign.status(), await foreign.text()).toBe(404)
+    } finally {
+      try {
+        if (originalEmail !== undefined) {
+          const current = await read('business-location-contact')
+          const restored = await save('business-location-contact', current, { email: originalEmail })
+          expect(restored.status(), await restored.text()).toBe(200)
+        }
+      } finally {
+        await release()
+      }
+    }
   })
 
   test('a timezone menu scrolls above its leaf and preserves its draft until the drawer is dismissed', async ({ page }) => {

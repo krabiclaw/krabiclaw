@@ -135,6 +135,10 @@ const unpublishedHost = computed(() => members.value?.members.find(member => mem
 const setting = computed(() => settings.value[concern.value as keyof typeof settings.value] ?? { title: '', lead: '' })
 watchEffect(() => {
   if (level.mode.value === 'yield') return
+  if (p.product.value && !p.managesCatalog.value && ['enabled', 'assignment', 'location'].includes(concern.value)) {
+    showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+    return
+  }
   // A table's length is set with its seating interval; every other offering sets a duration alone.
   if ((concern.value === 'seatings' && p.product.value && !table.value) || (concern.value === 'duration' && table.value) || (concern.value === 'location' && p.locationId.value && !['experience', 'service'].includes(p.product.value?.kind ?? '')) || !(concern.value in settings.value) || (concern.value !== 'enabled' && p.product.value && !p.loadError.value && !p.product.value.booking)) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
 })

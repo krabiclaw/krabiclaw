@@ -313,7 +313,7 @@ async function resolveLocale(db: DbClient, organizationId: string, locale?: stri
 
 export async function assertTenantPagePathAvailable(
   db: DbClient,
-  input: { organizationId: string; locale: string; path: string; site: PublicSiteDefinition; excludeVariantId?: string | null; allowOwnedRedirectVariantId?: string | null },
+  input: { organizationId: string; locale: string; path: string; site: PublicSiteDefinition; excludeVariantId?: string | null; allowOwnedRedirectVariantId?: string | null; translatingLinks?: boolean },
 ) {
   const sourceLocale = await resolveLocale(db, input.organizationId)
   const path = normalizeTenantPagePath(input.path)
@@ -321,7 +321,7 @@ export async function assertTenantPagePathAvailable(
   // nothing claims the path and the site's catch-all renders it. The hand
   // lists this replaced named routes that had been deleted and reserved routes
   // that do read a document.
-  if (!siteAllowsPageDocumentAt(input.site, CLAIMED_PUBLIC_ROUTES, path)) {
+  if (!(input.translatingLinks && path === '/links') && !siteAllowsPageDocumentAt(input.site, CLAIMED_PUBLIC_ROUTES, path)) {
     conflict('This path is reserved by a platform or product route')
   }
   // A venue's location overview may carry an authored page; it needs its location.

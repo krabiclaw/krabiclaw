@@ -344,3 +344,7 @@ The homes quote includes required nullable `homes.limit`: the live-home limit fo
 Better Auth may return either an HTTPS hosted approval URL or the exact requested `krabiclaw://billing/return` after applying a metered-item change or scheduling a downgrade. Native handles these as separate results, never opens a completed change as a browser URL, and re-reads canonical billing state. Existing paid-plan changes require explicit review and approval before the upgrade request; clients do not promise a second Stripe confirmation screen.
 
 The homes quote includes required nullable `upgrade`: on Basic it reports `{billable_homes, unit_amount_minor, amount_minor}` for all homes that would be live after choosing a paid plan; on an existing paid plan it is `null`. This is separate from Basic’s own allowance. Native upgrade approval displays this platform quote without subtracting Basic’s included home from the paid-plan charge.
+
+### Catalog and offering editors
+
+`GET /api/dashboard/catalog?org=<slug>` supplies Catalog filters and rows. Menu and section reads carry the selected location through to each dish. `GET /api/dashboard/offering?org=<slug>&product_id=<id>` supplies the offering's editor rows. A focused screen supplies its editable values, choices, and revision. The app posts that screen's answer to the same route, which authorizes the product and calls the existing product, booking, session, menu and media operations. Both clients render the same Catalog and offering summaries, with SwiftUI controls in the iPhone app.

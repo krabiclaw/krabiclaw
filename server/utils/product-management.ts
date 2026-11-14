@@ -1333,7 +1333,7 @@ export async function createProduct(db: DbClient, input: {
   page?: ProductPageInput
   idempotencyKey?: string
   booking?: { data: ProductBookingSetupInput; env: CloudflareEnv }
-  firstMenuSection?: { id: string; locationId: string; expectedProductIds?: string[] }
+  firstMenuSection?: { id: string; locationId: string | null; expectedProductIds?: string[] }
 }): Promise<Product> {
   const key = input.idempotencyKey?.trim()
   if (input.idempotencyKey !== undefined && (!key || key.length > 200)) invalid('idempotency_key must be 1 to 200 characters')
@@ -1369,19 +1369,21 @@ export async function createProduct(db: DbClient, input: {
     const writes = [...productWrites(input.organizationId, planned, input.actor, now, 'insert'), ...await stayBookingWrites(db, { organizationId: input.organizationId, planned, actorId: input.actor.actorId, env })]
     if (menu) {
       if (planned.kind !== 'dish' || input.publication?.published !== false) invalid('First menu setup requires an unpublished dish')
-      const section = await queryFirst(db, `SELECT 1 FROM collections c JOIN business_locations l
-        ON l.organization_id = c.organization_id AND (c.location_id IS NULL OR l.id = c.location_id)
-        WHERE c.organization_id = ? AND c.id = ? AND l.id = ? AND l.status = 'active'`, [input.organizationId, menu.id, menu.locationId])
+      const section = await queryFirst(db, `SELECT 1 FROM collections c
+        WHERE c.organization_id = ? AND c.id = ? AND (c.location_id IS NULL OR c.location_id = ?)
+          AND (? IS NULL OR EXISTS (
+            SELECT 1 FROM business_locations l WHERE l.organization_id = c.organization_id AND l.id = ? AND l.status = 'active'
+          ))`, [input.organizationId, menu.id, menu.locationId, menu.locationId, menu.locationId])
       if (!section) notFound('Menu section not found at this location')
       const expected = menu.expectedProductIds ?? []
       if (expected.length >= PRODUCT_LIMITS.collectionProducts) invalid('This section is full')
       writes.push(
         collectionProductsGuard(input.organizationId, menu.id, expected, input.actor),
-        {
+        ...(menu.locationId ? [{
           query: `INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_at, updated_at, created_by, updated_by)
             VALUES (?, ?, ?, 1, 0, ?, ?, ?, ?)`,
           params: [input.organizationId, planned.id, menu.locationId, now, now, input.actor.actorId, input.actor.actorId],
-        },
+        }] : []),
         ...collectionProductsWrites(input.organizationId, menu.id, [...expected, planned.id], input.actor, now),
       )
     }

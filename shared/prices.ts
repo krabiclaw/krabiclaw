@@ -217,6 +217,27 @@ export function selectPrice<T extends Pick<Price, 'id' | 'active' | 'currency' |
   return candidates[0]!
 }
 
+/** Change the amount in one scope, preserving the terms of every other offer. */
+export function scopedPriceAmountPatch(prices: readonly Price[], selection: PriceSelection, amount: string, loadedAmount: string) {
+  if (amount === loadedAmount) return []
+  const existing = selectPrice(prices.filter(price => price.location_id === selection.location_id), selection)
+  if (!amount) return existing ? [{ id: existing.id, active: false }] : []
+  const unit_amount = majorAmountToMinor(amount, selection.currency)
+  if (existing) return [{ id: existing.id, unit_amount }]
+  const displayed = selectPrice(prices, selection)
+  return [{
+    unit_amount, currency: selection.currency, location_id: selection.location_id,
+    ...(selection.billing?.type === 'recurring' ? {
+      type: selection.billing.type, recurring_interval: selection.billing.interval,
+      recurring_interval_count: selection.billing.interval_count,
+    } : {}),
+    ...(displayed ? {
+      tax_behavior: displayed.tax_behavior, compare_at_unit_amount: displayed.compare_at_unit_amount,
+      valid_from_at: displayed.valid_from_at, valid_until_at: displayed.valid_until_at, source: displayed.source,
+    } : {}),
+  }]
+}
+
 export function majorAmountToMinor(value: string, currency: CurrencyCode): number {
   const digits = currencyFractionDigits(currency)
   const pattern = new RegExp(digits === 0 ? '^(?:0|[1-9]\\d*)$' : `^(?:0|[1-9]\\d*)(?:\\.\\d{1,${digits}})?$`)

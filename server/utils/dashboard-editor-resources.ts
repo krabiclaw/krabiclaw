@@ -16,16 +16,23 @@ import {
 } from '~/server/utils/member-access'
 import { getMediaAsset, listMediaAssets } from '~/server/utils/media-asset-manager'
 import { getDashboardLocationContext } from '~/server/utils/dashboard-context'
+import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
 import { parseLocationPayload } from '~/server/utils/location-payload'
 import { getProduct, hydrateProductMedia, productPublicPresentation, summarizeLocationProducts } from '~/server/utils/product-management'
 import { requireBlogAccess } from '~/server/utils/blog-access'
 import { getBlogPost, listBlogPosts } from '~/server/utils/content/publishing'
 import { isArticleCollection } from '~/utils/article-collections'
 import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS } from '~/server/utils/preview-token'
-import { presentationForProduct } from '~/utils/product-presentation'
+import { catalogLabel, catalogSummary, presentationForProduct } from '~/utils/product-presentation'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 import { resolveOrganizationCmsCapabilities } from '~/server/utils/cms-capabilities'
 import { getEditablePages } from '~/config/content-registry'
+
+import { catalogPath, locationEditorPath } from '~/server/utils/dashboard-links'
+import { formatPostalAddress } from '~/utils/postal-address'
+import { formatPhone } from '~/utils/phone'
+import { getTodayHoursLabel } from '~/shared/reservation-hours'
+import type { CatalogRow } from '~/shared/catalog-screen'
 
 interface EditorLocationRow {
   id: string
@@ -207,13 +214,41 @@ export async function loadDashboardLocationOverview(
     summarizeLocationProducts(db, { organizationId: organization.id, locationId }),
     loadLocationContentCounts(db, organizationId, locationId),
   ])
+  const loc = parseLocationPayload(location)!
+  if (!organization.vertical || !organization.theme_id) throw new HTTPError({ statusCode: 500, message: 'Location website configuration is missing' })
+  const { capabilities } = resolveOrganizationCmsCapabilities(organization.vertical, organization.theme_id, null)
+  const features = new Set([...capabilities.pages.map(page => page.feature), ...capabilities.managers.map(manager => manager.id)])
+  const hasCatalog = features.has('products') || features.has('services')
+  const place = locationEditorPath(organization.slug, loc.slug)
+  const website = `/dashboard/${encodeURIComponent(organization.slug)}/website`
+  const scope = { location_id: locationId }
+  const search = new URLSearchParams(scope).toString()
+  const row = (id: string, label: string, summary: string, extras: Partial<CatalogRow> = {}): CatalogRow =>
+    ({ id, label, summary, to: `${place}/${id}`, native: `business-location-${id}`, query: scope, ...extras })
+  const count = (total: number, noun: string, empty: string) => total ? `${total} ${noun}${total === 1 ? '' : 's'}` : empty
+  const contact = [loc.phone && formatPhone(loc.phone), loc.email].filter(value => value?.trim()).join(' · ')
+  const trust = [
+    count(counts.qa, 'question', ''), count(counts.reviews, 'review', ''),
+    counts.organization_qa ? `${counts.organization_qa} organization-wide` : '',
+  ].filter(Boolean).join(' · ')
+  const picture = features.has('photos') ? (await loadPublicSocialMedia(db, organization.id, 'business_location', [locationId])).get(locationId)?.social_image : null
+  const rows = [
+    ...(features.has('photos') ? [row('photos', 'Media', count(counts.photos, 'item', 'Add media'), { image: picture?.url })] : []),
+    row('name', 'Name', loc.title),
+    row('description', 'Description', loc.short_description?.trim() || loc.description?.trim() || 'Describe this location'),
+    row('hours', 'Hours', getTodayHoursLabel(loc.opening_hours, 'Closed today', loc.timezone, new Date(), loc.special_hours) || 'Set your hours', { icon: 'i-lucide-clock' }),
+    row('address', 'Address', formatPostalAddress(loc.address) || 'Add the address', { icon: 'i-lucide-map-pin' }),
+    row('contact', 'Contact', contact || 'Add a phone or email', { icon: 'i-lucide-contact-round' }),
+    ...(hasCatalog ? [row('products', catalogLabel(organization.vertical, catalog), catalogSummary(organization.vertical, catalog), { icon: 'i-lucide-store', to: catalogPath(organization.slug, locationId), native: 'scoped-catalog' })] : []),
+    ...(features.has('posts') ? [row('posts', 'Posts', count(counts.posts, 'published post', 'Write your first post'), { icon: 'i-lucide-megaphone', to: `${website}/posts?${search}`, native: 'website-posts' })] : []),
+    ...(features.has('qa') ? [row('qa', 'Reviews and Q&A', trust || 'Answer your first question', { icon: 'i-lucide-message-circle-question', to: `${website}/qa?${search}`, native: 'website-qa' })] : []),
+  ]
   return {
-    location: {
-      success: true as const,
-      location: parseLocationPayload(location)!,
-    },
+    location: { success: true as const, location: loc },
     catalog,
     counts,
+    rows,
+    settings: row('settings', capabilities.locationVocabulary === 'office/service area' ? 'Office settings' : 'Location settings', loc.status === 'active' ? 'Published' : 'Draft', { native: 'business-location-status' }),
   }
 }
 
