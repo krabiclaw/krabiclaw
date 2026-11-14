@@ -129,19 +129,27 @@ export async function selectGoogleAdsCustomer(
   accountId: string,
   customerId: string,
   customerName: string,
+  managedAds = false,
+  expected?: { revision: string | null },
 ): Promise<string> {
   await requireRecordedManagedSpend(env.DB, env, organizationId)
-  if (await readIntegration(env.DB, organizationId, 'google_ads')) throw new HTTPError({ statusCode: 409, message: 'Disconnect Google Ads before connecting again.' })
+  const current = await readIntegration(env.DB, organizationId, 'google_ads')
+  if (expected && (current?.revision ?? null) !== expected.revision) {
+    throw new HTTPError({ statusCode: 409, message: 'Google Ads changed. Reload the connection before saving.' })
+  }
+  if (current && !managedAds) throw new HTTPError({ statusCode: 409, message: 'Disconnect Google Ads before connecting again.' })
   // A manager account holds other accounts; it has no campaigns or results of its own.
   const { accessToken } = await linkedAccountAccessToken(env, accountId)
-  if ((await getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, customerId)).is_manager) {
+  const account = await getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, customerId)
+  if (account.is_manager) {
     throw new HTTPError({ statusCode: 422, message: 'That is a Google Ads manager account. Choose one of the accounts it manages.' })
   }
+  if (managedAds && account.currencyCode !== 'USD') throw new HTTPError({ statusCode: 422, message: 'Managed ads requires a Google Ads account billed in USD.' })
   return await storeIntegration(env.DB, organizationId, 'google_ads', {
     account_id: accountId,
     target_id: customerId,
     target_name: customerName,
-  }, { revision: null })
+  }, { revision: current?.revision ?? null })
 }
 
 function googleAdsHeaders(accessToken: string, developerToken?: string): Record<string, string> {

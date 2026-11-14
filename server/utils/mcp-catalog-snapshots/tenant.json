@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:74f2e916c5328ed616dfb1e57678e7abe83524d29276ba00855a741f0e8b30df",
-  "documentationFingerprint": "sha256:7a196b0659ec414b2a0d7c63a57e3f8933bc94a51842f115e745b701a413ac1a",
+  "fingerprint": "sha256:951de6cfb99f3db5e94ab1c7a5970d456634789eb50702826294347c19bf267a",
+  "documentationFingerprint": "sha256:892ab9482e885de9340606ce126aa5282ae26cd65f0e5ce547be5402f7a415c3",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -1188,6 +1188,17 @@
                 ]
               },
               "secondary_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -4662,6 +4673,17 @@
                 ]
               },
               "secondary_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -14765,6 +14787,17 @@
                   "null"
                 ]
               },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
                 "type": [
                   "string",
@@ -16389,6 +16422,17 @@
                 ]
               },
               "secondary_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -22159,6 +22203,17 @@
                 ]
               },
               "secondary_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -30520,6 +30575,17 @@
                   "null"
                 ]
               },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
                 "type": [
                   "string",
@@ -34354,6 +34420,17 @@
                 ]
               },
               "secondary_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -39049,6 +39126,17 @@
                 ]
               },
               "secondary_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -43902,6 +43990,17 @@
                 ]
               },
               "secondary_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -57406,6 +57505,17 @@
                   "null"
                 ]
               },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
                 "type": [
                   "string",
@@ -61880,6 +61990,17 @@
                 ]
               },
               "secondary_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -74335,6 +74456,17 @@
                   "null"
                 ]
               },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
                 "type": [
                   "string",
@@ -79284,6 +79416,17 @@
                 ]
               },
               "secondary_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -91444,6 +91587,17 @@
                   "null"
                 ]
               },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
                 "type": [
                   "string",
@@ -93419,6 +93573,17 @@
                 ]
               },
               "secondary_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -103626,6 +103791,17 @@
                   "null"
                 ]
               },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
                 "type": [
                   "string",
@@ -105295,6 +105471,17 @@
                 ]
               },
               "secondary_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -119920,6 +120107,17 @@
                   "null"
                 ]
               },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
                 "type": [
                   "string",
@@ -123758,6 +123956,17 @@
                 ]
               },
               "secondary_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "hidden",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -127753,7 +127962,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:f7e979538daf37680ab576caa9a7e21728858fcb53da524b409476f3092a9dba",
+        "create_product": "sha256:73e37dfcdfb348be542001a9888b00bdada68a739d54c60360fe102f4c40e387",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
@@ -127808,7 +128017,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:f7e979538daf37680ab576caa9a7e21728858fcb53da524b409476f3092a9dba",
+        "create_product": "sha256:73e37dfcdfb348be542001a9888b00bdada68a739d54c60360fe102f4c40e387",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -127854,14 +128063,14 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "get_site_page": "sha256:19e8f6df9f3d8dba2fa2a14be053e505abd0564cdf279d649db199c2afdd46d6",
+        "get_site_page": "sha256:9618228ff74cee9b28c76564d329d9842cf4a2d0feae81656d8ff4abcbbf451f",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "remove_media": "sha256:70c3ad05014d52e9ce95b1a4363d6ab8b23b0d1ffd37c31b03a3da6684d49943",
         "reorder_media": "sha256:2ba6530e10b65684d8efd9d9543c6e3a62e760a988d7a876abe7962ff0fb7e75",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_site_page": "sha256:d1e8cc9a99c9970e6f8c84785867979a71b4adb09725cd72fe7d81c9af6350cb"
+        "update_site_page": "sha256:ddc337bdcab4df17d99b7913ea2dbf4ed1f0ba91a60a1f39f97b8e08a6e451ad"
       }
     },
     {
@@ -127877,7 +128086,7 @@
         "get_location": "sha256:eeb473e44df629a24ceb82a2db6873a6b1f108dd852c2fa923f605a637439f34",
         "get_post": "sha256:fd95e9d97a5f0624dda58886752832eee80a1fef08c9c7a64d8c2af4ff3481d1",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
-        "get_site_page": "sha256:19e8f6df9f3d8dba2fa2a14be053e505abd0564cdf279d649db199c2afdd46d6",
+        "get_site_page": "sha256:9618228ff74cee9b28c76564d329d9842cf4a2d0feae81656d8ff4abcbbf451f",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b"
@@ -127892,9 +128101,9 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft_id and updated_at. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:f7e979538daf37680ab576caa9a7e21728858fcb53da524b409476f3092a9dba",
+        "create_product": "sha256:73e37dfcdfb348be542001a9888b00bdada68a739d54c60360fe102f4c40e387",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
-        "get_site_page": "sha256:19e8f6df9f3d8dba2fa2a14be053e505abd0564cdf279d649db199c2afdd46d6",
+        "get_site_page": "sha256:9618228ff74cee9b28c76564d329d9842cf4a2d0feae81656d8ff4abcbbf451f",
         "get_website_draft": "sha256:c1444d21ed13337ab56e9d48764d8befe1e0016ba625bc70c8b7d6f29d179d24",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -127905,7 +128114,7 @@
         "save_website_draft": "sha256:175fdfcf6b66beeecf25d2db60354d5273ea34c59ad8140487e3e714001cfc35",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
         "update_organization_settings": "sha256:7191c77fc0ed6eb5ce818283be58acb26679a8cf793cbba600dccb694e8051a6",
-        "update_site_page": "sha256:d1e8cc9a99c9970e6f8c84785867979a71b4adb09725cd72fe7d81c9af6350cb"
+        "update_site_page": "sha256:ddc337bdcab4df17d99b7913ea2dbf4ed1f0ba91a60a1f39f97b8e08a6e451ad"
       }
     },
     {
@@ -127938,14 +128147,14 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "get_site_page": "sha256:19e8f6df9f3d8dba2fa2a14be053e505abd0564cdf279d649db199c2afdd46d6",
+        "get_site_page": "sha256:9618228ff74cee9b28c76564d329d9842cf4a2d0feae81656d8ff4abcbbf451f",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
         "update_product": "sha256:afed95fa490fdae7aed3b9d4e6f5db435e1ab4c8d3909b260fbe380a82f9d461",
-        "update_site_page": "sha256:d1e8cc9a99c9970e6f8c84785867979a71b4adb09725cd72fe7d81c9af6350cb"
+        "update_site_page": "sha256:ddc337bdcab4df17d99b7913ea2dbf4ed1f0ba91a60a1f39f97b8e08a6e451ad"
       }
     },
     {

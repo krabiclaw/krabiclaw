@@ -4,7 +4,7 @@
       <UInput :model-value="calculatorNote" class="w-full" @update:model-value="setCalculatorNote($event)" />
     </UFormField>
     <div class="grid gap-2 text-xs text-muted lg:grid-cols-4">
-      <span>Household size</span><span>250% limit</span><span>350% limit</span><span>400% limit</span>
+      <span v-for="label in PRICING_CALCULATOR_COLUMNS" :key="label">{{ label }}</span>
     </div>
     <div v-for="(row, rowIndex) in calculatorRows" :key="rowIndex" class="grid gap-2 lg:grid-cols-[repeat(4,minmax(0,1fr))_auto]">
       <UInput :model-value="cellValue(row, 0)" type="number" min="1" max="8" aria-label="Household size" @update:model-value="setCalculatorCell(rowIndex, 0, $event)" />
@@ -18,25 +18,19 @@
 </template>
 
 <script setup lang="ts">
+import { PRICING_CALCULATOR_COLUMNS, pricingCalculatorConfig, pricingCalculatorRows, updatePricingCalculator } from '~/utils/pricing-calculator'
 import { useTenantPageBlock } from '~/composables/useTenantPageDraft'
 
 /** The income table a pricing calculator reads, which is a grid and not a field. */
 const props = defineProps<{ organizationId: string; pageId: string; blockId: string }>()
 const block = useTenantPageBlock(props.organizationId, props.pageId, () => props.blockId)
 
-function calculatorConfig(): Record<string, unknown> {
-  const value = block.value.data.calculator
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-}
-
-const calculatorRows = computed(() => {
-  const rows = calculatorConfig().rows
-  return Array.isArray(rows) ? rows.filter((row): row is unknown[] => Array.isArray(row)).map(row => [...row]) : []
-})
-const calculatorNote = computed(() => String(calculatorConfig().note ?? ''))
+const config = computed(() => pricingCalculatorConfig(block.value.data.calculator))
+const calculatorRows = computed(() => pricingCalculatorRows(config.value))
+const calculatorNote = computed(() => String(config.value.note ?? ''))
 
 function setCalculator(rows: unknown[][], note = calculatorNote.value) {
-  block.value.data.calculator = { ...calculatorConfig(), note, rows }
+  block.value.data.calculator = updatePricingCalculator(config.value, rows, note)
 }
 
 function setCalculatorNote(value: unknown) {
@@ -64,10 +58,4 @@ function removeCalculatorRow(index: number) {
   setCalculator(calculatorRows.value.filter((_, rowIndex) => rowIndex !== index))
 }
 
-// ── Gallery ─────────────────────────────────────────────
-// `content_block:gallery` is an ordered collection: once this block is
-// persisted its membership only ever changes through the generic
-// attach/remove/reorder routes, never a local array mutation bundled into the
-// page's own save. Before that there is nothing to attach to, so edits stay
-// local until the first save creates the row.
 </script>

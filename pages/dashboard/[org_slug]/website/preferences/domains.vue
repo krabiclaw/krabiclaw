@@ -109,7 +109,7 @@
                         class="size-2 rounded-full"
                         :class="group.status === 'active' ? 'bg-emerald-500' : group.status === 'failed' ? 'bg-rose-500' : 'bg-amber-500'"
                       />
-                      <span>{{ statusLabel(group.status) }}</span>
+                      <span>{{ group.status_label }}</span>
                     </span>
                   </div>
                   <p v-if="group.www_domain_id" class="mt-1 text-xs text-muted">
@@ -312,6 +312,7 @@ interface DomainGroup {
   root_domain: string
   role: 'canonical' | 'secondary'
   status: DomainStatus
+  status_label: string
   primary_domain_id: string | null
   apex_domain_id: string | null
   www_domain_id: string | null
@@ -355,6 +356,7 @@ const isDomainGroup = (value: unknown): value is DomainGroup =>
   isRecord(value)
   && typeof value.id === 'string'
   && typeof value.domain === 'string'
+  && typeof value.status_label === 'string'
   && Array.isArray(value.domains)
   && value.domains.every(isDomainRow)
   && Array.isArray(value.records)
@@ -492,19 +494,6 @@ async function copy(value: string) {
   }
 }
 
-function statusLabel(status: DomainStatus) {
-  return {
-    active: 'Active',
-    pending: 'DNS required',
-    verifying: 'Checking',
-    stuck: 'Needs attention',
-    failed: 'Failed',
-    blocked: 'Blocked',
-    disabled: 'Disabled',
-    deleted: 'Deleted',
-  }[status] ?? status
-}
-
 function primaryAction(group: DomainGroup) {
   if (group.status === 'active' && group.role === 'canonical') return null
   if (group.status === 'active') return { label: 'Make primary', icon: 'i-lucide-star', color: 'neutral' as const, variant: 'soft' as const }
@@ -603,6 +592,10 @@ watch(() => route.params.org_slug, () => {
   expandedGroups.value = {}
 })
 
+watch(() => addForm.domain, () => {
+  liveCutoverWarning.value = null
+  addForm.acknowledge_live_cutover = false
+})
 watch(addModalOpen, (open) => {
   if (!open) resetAddModal()
 })

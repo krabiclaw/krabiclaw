@@ -66,7 +66,7 @@ async function select(event: H3Event) {
   const organizationId = getRouterParam(event, 'organization_id')
   if (!organizationId) return jsonResponse({ error: 'Organization ID is required' }, { status: 400 })
 
-  const body = await readBody<{ account_id?: string; channel_id?: string }>(event)
+  const body = await readBody<{ account_id?: string; channel_id?: string; revision?: string }>(event)
   const accountId = body?.account_id?.trim()
   const channelId = body?.channel_id?.trim()
   if (!accountId || !channelId) return jsonResponse({ error: 'Choose a Discord account and channel.' }, { status: 400 })
@@ -77,7 +77,7 @@ async function select(event: H3Event) {
   }
 
   const current = await readIntegration(env.DB, organization.id, 'discord')
-  if (current) return jsonResponse({ error: 'Disconnect Discord before connecting again.' }, { status: 409 })
+  if ((current?.revision ?? null) !== (body?.revision ?? null)) return jsonResponse({ error: 'Discord changed. Reload the connection before saving.' }, { status: 409 })
   await requireIntegrationAccount(env, accountId, {
     userId: session.user.id, currentAccountId: null, providerId: 'discord', scopes: GRANTED_SCOPES,
   })
@@ -88,7 +88,7 @@ async function select(event: H3Event) {
 
   await storeIntegration(env.DB, organization.id, 'discord', {
     account_id: accountId, target_id: channel.id, target_name: channel.name,
-  }, { revision: null })
+  }, { revision: current?.revision ?? null })
 
   return jsonResponse({ success: true, channel_id: channel.id, channel_name: channel.name })
 }

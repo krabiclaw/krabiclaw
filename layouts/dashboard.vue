@@ -13,4 +13,8 @@
 
 <script setup lang="ts">
 import '~/assets/css/dashboard.css'
+
+// The shell reads the theme breakpoints during setup, so the document must
+// load this stylesheet before running the dashboard entry script.
+useHead({ link: import.meta.dev ? [] : [{ rel: 'stylesheet', href: '/_nuxt/surfaces/dashboard.css' }] })
 </script>

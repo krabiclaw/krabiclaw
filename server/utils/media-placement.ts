@@ -366,6 +366,7 @@ export async function reorderMediaPlacements(db: DbClient, input: {
   principal?: MemberAccessPrincipal
   placement: MediaPlacementKey
   moves: MediaPlacementMove[]
+  expectedAssetIds?: readonly string[]
 }) {
   if (isSingleMediaPlacement(input.placement)) {
     throw new HTTPError({ statusCode: 400, statusMessage: 'This placement is single-valued and has no order' })
@@ -381,6 +382,9 @@ export async function reorderMediaPlacements(db: DbClient, input: {
   `, scopeParams)
   const currentOrder = currentRows.map(row => row.asset_id)
   const currentSet = new Set(currentOrder)
+  if (input.expectedAssetIds && JSON.stringify(input.expectedAssetIds) !== JSON.stringify(currentOrder)) {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'This collection changed while reordering. Reload and try again.' })
+  }
 
   for (const move of input.moves) {
     if (!currentSet.has(move.asset_id)) {
@@ -684,25 +688,16 @@ function buildMembershipGuardQuery(input: {
 }): BatchQuery {
   const scopeParams = [input.organizationId, input.placement.owner_type, input.placement.owner_id, input.placement.slot]
   const expectedAssetIds = d1JsonStringSet(input.expectedAssetIds)
-  const values = `SELECT value AS asset_id FROM json_each(?)`
   const now = new Date().toISOString()
   return {
     query: `INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id, sort_order, status, created_at, updated_at)
       SELECT ?, ?, ?, ?, ?, '__reorder_guard__', 0, '__reorder_guard__', ?, ?
-       WHERE EXISTS (
-         SELECT asset_id FROM media_placements WHERE organization_id = ? AND owner_type = ? AND owner_id = ? AND slot = ?
-         EXCEPT
-         ${values}
-       )
-       OR EXISTS (
-         ${values}
-         EXCEPT
-         SELECT asset_id FROM media_placements WHERE organization_id = ? AND owner_type = ? AND owner_id = ? AND slot = ?
-       )`,
+       WHERE (SELECT json_group_array(asset_id) FROM (
+         SELECT asset_id FROM media_placements WHERE organization_id = ? AND owner_type = ? AND owner_id = ? AND slot = ? ORDER BY sort_order ASC
+       )) <> ?`,
     params: [
       crypto.randomUUID(), input.organizationId, input.placement.owner_type, input.placement.owner_id, input.placement.slot, now, now,
       ...scopeParams, expectedAssetIds,
-      expectedAssetIds, ...scopeParams,
     ],
   }
 }

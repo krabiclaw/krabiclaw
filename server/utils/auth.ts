@@ -3,7 +3,7 @@ import { createAuthMiddleware, getOAuthState, isAPIError } from 'better-auth/api
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
-import { admin, anonymous, bearer, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
+import { admin, anonymous, bearer, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, oneTimeToken, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
 import { stripe as betterAuthStripe } from '@better-auth/stripe'
 import { oauthProvider } from '@better-auth/oauth-provider'
 import { cimd } from '@better-auth/cimd'
@@ -240,6 +240,7 @@ export function localDevelopmentOrigin(value: string | undefined): string | null
 }
 
 /** Where Stripe Checkout hands a host back to the iPhone app. */
+export const NATIVE_CONNECTION_RETURN_ORIGIN = 'krabiclaw://connections'
 export const NATIVE_BILLING_RETURN_ORIGIN = 'krabiclaw://billing'
 
 function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Request) => string[]) {
@@ -255,6 +256,7 @@ function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Requ
   // Better Auth matches a custom scheme by scheme and authority, so only the
   // billing returns are trusted, not any krabiclaw:// address.
   origins.add(NATIVE_BILLING_RETURN_ORIGIN)
+  origins.add(NATIVE_CONNECTION_RETURN_ORIGIN)
   // Sign in with Apple returns to the website by posting a form from Apple.
   origins.add('https://appleid.apple.com')
   if (import.meta.dev || env.E2E_ALLOW_DEV_ROUTES === 'true') {
@@ -455,6 +457,7 @@ function buildAuth(env: CloudflareEnv) {
     // deleteUser.beforeDelete.
     disabledPaths: [
       '/sign-in/phone-number', '/phone-number/request-password-reset', '/phone-number/reset-password', '/admin/remove-user',
+      '/one-time-token/generate', '/one-time-token/verify',
     ],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
@@ -507,10 +510,13 @@ function buildAuth(env: CloudflareEnv) {
         const callback = new URL(state.callbackURL, authBaseUrl)
         // Only a successful integration link continues to resource selection.
         if (new URL(location, authBaseUrl).href !== callback.href) return
-        const integration = callback.pathname.match(/^\/dashboard\/[^/]+\/integrations\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar|google-ads|meta-ads)$/)?.[1]
+        const nativeIntegration = callback.protocol === 'krabiclaw:' && callback.host === 'connections'
+          ? callback.pathname.match(/^\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar|google-ads|meta-ads|personal-calendar)$/)?.[1]
+          : undefined
+        const integration = nativeIntegration ?? callback.pathname.match(/^\/dashboard\/[^/]+\/integrations\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar|google-ads|meta-ads)$/)?.[1]
           ?? (/^\/dashboard\/[^/]+\/calendar\/settings\/availability\/google-calendar$/.test(callback.pathname) || /^\/dashboard\/account\/profile\/calendar\/[^/]+\/google-calendar$/.test(callback.pathname) ? 'google-calendar' : undefined)
         if (!integration) return
-        const provider = integration.startsWith('google-') ? 'google' : integration === 'meta-ads' ? 'facebook' : integration
+        const provider = (integration.startsWith('google-') || integration === 'personal-calendar') ? 'google' : integration === 'meta-ads' ? 'facebook' : integration
         if (ctx.params?.id !== provider) return
         const accountId = (ctx.context as IntegrationCallbackContext).integrationAccountId
         if (accountId) callback.searchParams.set('account_id', accountId)
@@ -664,6 +670,7 @@ function buildAuth(env: CloudflareEnv) {
     },
     plugins: [
       bearer(),
+      oneTimeToken({ disableClientRequest: true, disableSetSessionCookie: true, storeToken: 'hashed', expiresIn: 1 }),
       lastLoginMethod({ customResolveMethod: ctx => loginMethodForPath(ctx.path, ctx.body) }),
       jwt({
         // The plugin's default after-hook mints a fresh JWT on every

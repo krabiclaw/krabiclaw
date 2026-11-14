@@ -4,7 +4,7 @@
 // single source of truth both paths import from.
 
 export const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/webm"]);
-export const POSTER_IMAGE_MIME_TYPES = new Set(["image/avif", "image/gif", "image/jpeg", "image/png", "image/webp"]);
+export const POSTER_IMAGE_MIME_TYPES = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"]);
 export const R2_IMAGE_MIME_TYPES = new Set(["image/avif"]);
 // What counts as an image is the contract's answer, not each surface's. The
 // dashboard used to accept a different set at a different size from MCP, so the

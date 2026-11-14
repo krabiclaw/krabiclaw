@@ -28,5 +28,10 @@ const status = computed({
   get: () => p.form.published ? 'listed' : 'unlisted',
   set: (value: string) => { if (!p.saving.value && (value === 'listed' || value === 'unlisted')) p.form.published = value === 'listed' },
 })
+watchEffect(() => {
+  if (p.product.value && level.mode.value !== 'yield' && !p.managesCatalog.value) {
+    showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+  }
+})
 onBeforeRouteLeave(() => p.revert())
 </script>

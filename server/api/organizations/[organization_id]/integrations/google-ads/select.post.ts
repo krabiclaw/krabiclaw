@@ -13,7 +13,7 @@ export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organization_id')
   if (!organizationId) return jsonResponse({ error: 'Organization ID is required' }, { status: 400 })
 
-  const body = await readBody<{ account_id?: string; customer_id?: string; customer_name?: string }>(event)
+  const body = await readBody<{ account_id?: string; customer_id?: string; customer_name?: string; service?: string; revision?: string | null }>(event)
   const accountId = body?.account_id?.trim()
   const customerId = body?.customer_id?.trim()
   const customerName = body?.customer_name?.trim()
@@ -21,6 +21,13 @@ export default defineHandler(async (event) => {
     return jsonResponse({ error: 'Choose a Google account and a Google Ads account.' }, { status: 400 })
   }
 
+  const managedAds = body?.service === 'managed-ads'
+  if (managedAds && body?.revision === undefined) {
+    return jsonResponse({ error: 'Reload the Google Ads account before selecting it.', code: 'GOOGLE_ADS_REVISION_REQUIRED' }, { status: 400 })
+  }
+  if (body?.revision !== undefined && body.revision !== null && typeof body.revision !== 'string') {
+    return jsonResponse({ error: 'Invalid account revision' }, { status: 400 })
+  }
   const { env, session, organization } = await requireOrganizationAccess(event, organizationId)
   await requireIntegrationAccount(env, accountId, {
     userId: session.user.id, currentAccountId: null,
@@ -29,7 +36,8 @@ export default defineHandler(async (event) => {
   })
 
   try {
-    await selectGoogleAdsCustomer(env, organization.id, accountId, customerId, customerName)
+    await selectGoogleAdsCustomer(env, organization.id, accountId, customerId, customerName, managedAds,
+      body?.revision === undefined ? undefined : { revision: body.revision })
     return jsonResponse({ success: true, customer_id: customerId, customer_name: customerName })
   } catch (error) {
     rethrowHttpError(error)

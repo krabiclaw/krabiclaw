@@ -9,9 +9,14 @@ export default defineHandler(async (event) => {
   if (!organizationId) return jsonResponse({ error: 'Organization ID is required' }, { status: 400 })
 
   const { env, organization} = await requireOrganizationAccess(event, organizationId)
-  const result = await releaseIntegration(env, organization.id, 'instagram')
+  const body = await readBody<{ revision?: string }>(event)
+  const revision = body?.revision
+  if (revision !== undefined && (typeof revision !== 'string' || !revision.trim())) {
+    return jsonResponse({ error: 'Invalid connection revision' }, { status: 400 })
+  }
+  const result = await releaseIntegration(env, organization.id, 'instagram', revision === undefined ? undefined : { revision })
 
   return jsonResponse({ success: true, ...result })
 })
 import { defineHandler } from 'nitro';
-import { getRouterParam } from 'nitro/h3';
+import { getRouterParam, readBody } from 'nitro/h3'

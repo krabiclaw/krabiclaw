@@ -100,6 +100,7 @@
 </template>
 
 <script setup lang="ts">
+import { pricingCalculatorConfig, pricingCalculatorRows, pricingCalculatorTable } from '~/utils/pricing-calculator'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock, TenantPageMedia } from '~/utils/tenant-page-blocks'
 import { blockText, blockRecords, isInternalRoute } from '~/utils/tenant-page-block-data'
@@ -153,10 +154,7 @@ const plans = computed(() => blockRecords(props.block.data.items)
     features: blockText(item.description) ? [blockText(item.description)] : [],
   }))
   .filter(plan => plan.price))
-const calculator = computed(() => {
-  const value = props.block.data.calculator
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-})
+const calculator = computed(() => pricingCalculatorConfig(props.block.data.calculator))
 const isPricing = computed(() => plans.value.length > 0 || tableRows.value.length > 0 || props.page.recipe === 'pricing' || props.page.path === '/pricing')
 const individualPlans = computed(() => {
   const direct = blockRecords(props.block.data.individual_plans)
@@ -166,11 +164,9 @@ const businessPlans = computed(() => {
   const direct = blockRecords(props.block.data.business_plans)
   return direct.length ? direct : plans.value.slice(4)
 })
-const table = computed(() => (calculator.value.table && typeof calculator.value.table === 'object'
-  ? calculator.value.table as Record<string, unknown>
-  : { rows: Array.isArray(calculator.value.rows) ? calculator.value.rows : [], notice: '' }))
+const table = computed(() => pricingCalculatorTable(calculator.value))
 const tableColumns = computed(() => (Array.isArray(table.value.columns) ? table.value.columns.map(String) : []))
-const tableRows = computed(() => (Array.isArray(table.value.rows) ? table.value.rows.filter(Array.isArray) as unknown[][] : []))
+const tableRows = computed(() => pricingCalculatorRows(calculator.value))
 
 // Articles data
 const posts = computed(() => blockRecords(props.block.data.items).map(item => {

@@ -370,7 +370,7 @@ async function advance(addressSelected = false) {
       if (index < 0) throw new Error('Home setup returned an unknown step.')
       position.value = index
     } else if ('home' in response) {
-      await refreshNuxtData([`first-home-setup:${organizationId}`, `product-catalog:${organizationId}`])
+      await refreshNuxtData([`first-home-setup:${organizationId}`, `product-catalog:${organizationId}`, `dashboard-catalog:${organizationId}:stay`, `dashboard-catalog:${organizationId}:all`])
       await navigateTo(response.to, { replace: true })
     } else {
       throw new Error('Home setup did not advance.')
