@@ -827,6 +827,7 @@ async function reload() {
   if (loadFailure.value) throw loadFailure.value
   if (product.value) editVersion.value = product.value.updated_at
   await Promise.all([refreshCatalog(), refreshOfferingScreen(), ...(wasStay !== (product.value?.kind === 'stay') ? [dashboard.refresh()] : [])])
+  if (offeringScreenError.value) throw offeringScreenError.value
 }
 
 // ── The weekly schedule ─────────────────────────────────

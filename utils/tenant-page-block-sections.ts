@@ -15,7 +15,7 @@ import { TENANT_PAGE_BLOCK_REGISTRY, type TenantPageBlock, type TenantPageBlockT
 export type TenantPageBlockSectionKind = 'leaf' | 'list'
 
 /** The nested arrays a block stores its own records in. */
-export type TenantPageBlockCollection = 'items' | 'buttons' | 'steps' | 'tiers'
+export type TenantPageBlockCollection = keyof typeof TENANT_PAGE_RECORD_NOUNS
 
 export interface TenantPageBlockSection {
   /** The route segment, and the key the editors switch on. */
@@ -58,7 +58,17 @@ const SECTION_PRESENTATION: Record<string, { label: string; icon?: string }> = {
   booking: { label: 'Booking', icon: 'i-lucide-calendar-check' },
 }
 
-const COLLECTIONS = new Set<TenantPageBlockCollection>(['items', 'buttons', 'steps', 'tiers'])
+/** How one record of a nested collection is named in its list and its heading. */
+export const TENANT_PAGE_RECORD_NOUNS = {
+  items: { one: 'Item', add: 'Add an item' },
+  buttons: { one: 'Button', add: 'Add a button' },
+  steps: { one: 'Step', add: 'Add a step' },
+  tiers: { one: 'Tier', add: 'Add a tier' },
+  problem_items: { one: 'Item', add: 'Add an item' },
+  solution_items: { one: 'Item', add: 'Add an item' },
+}
+
+const COLLECTIONS = new Set(Object.keys(TENANT_PAGE_RECORD_NOUNS))
 
 /**
  * A block's sections are the distinct `section` values its fields declare, in
@@ -122,14 +132,6 @@ export function tenantPageBlockIsHub(block: TenantPageBlock): boolean {
 
 export function tenantPageBlockLabel(type: string): string {
   return TENANT_PAGE_BLOCK_REGISTRY[type as TenantPageBlockType]?.label ?? type
-}
-
-/** How one record of a nested collection is named in its list and its heading. */
-export const TENANT_PAGE_RECORD_NOUNS: Record<TenantPageBlockCollection, { one: string; add: string }> = {
-  items: { one: 'Item', add: 'Add an item' },
-  buttons: { one: 'Button', add: 'Add a button' },
-  steps: { one: 'Step', add: 'Add a step' },
-  tiers: { one: 'Tier', add: 'Add a tier' },
 }
 
 /** One concern of a record inside a nested collection. */

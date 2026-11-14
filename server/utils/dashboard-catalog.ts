@@ -6,6 +6,7 @@ import { hydrateProductMedia, listCollections, listOrganizationProducts } from '
 import { groupProductsByCollection } from '~/utils/product-presentation'
 import { formatProductPriceRange, summarizeProductPrices } from '~/utils/product-money'
 import { isCurrencyCode } from '~/shared/currencies'
+import { PRICING_NOTE_HANDLE } from '~/shared/product-details'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import type { CatalogRow, CatalogScreen } from '~/shared/catalog-screen'
 import type { Product } from '~/server/types/products'
@@ -53,9 +54,10 @@ export async function loadDashboardCatalog(event: H3Event) {
     })
     const scopes = locationId ? [locationId] : [null, ...locations.map(place => place.id)]
     const price = formatProductPriceRange(summarizeProductPrices(product.variants, scopes.map(location_id => ({ currency, location_id }))))
+    const note = product.details[PRICING_NOTE_HANDLE]
     return {
       id: product.id, label: product.stay ? product.stay.internal_name : product.name,
-      summary: [price ?? 'No price set', product.booking?.held_online ? 'Online' : null, ...bindings,
+      summary: [price ?? (typeof note === 'string' && note.trim() ? note : 'No price set'), product.booking?.held_online ? 'Online' : null, ...bindings,
         ...(!bindings.length && !product.booking?.held_online ? ['No locations set'] : [])].filter(Boolean).join(' · '),
       image: mediaStillUrl(product.image),
       to: `${base}/${product.id}${locationId ? `?location_id=${encodeURIComponent(locationId)}&kind=${product.kind}` : ''}`,

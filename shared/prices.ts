@@ -227,6 +227,10 @@ export function scopedPriceAmountPatch(prices: readonly Price[], selection: Pric
   const displayed = selectPrice(prices, selection)
   return [{
     unit_amount, currency: selection.currency, location_id: selection.location_id,
+    ...(selection.billing?.type === 'recurring' ? {
+      type: selection.billing.type, recurring_interval: selection.billing.interval,
+      recurring_interval_count: selection.billing.interval_count,
+    } : {}),
     ...(displayed ? {
       tax_behavior: displayed.tax_behavior, compare_at_unit_amount: displayed.compare_at_unit_amount,
       valid_from_at: displayed.valid_from_at, valid_until_at: displayed.valid_until_at, source: displayed.source,
