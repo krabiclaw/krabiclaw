@@ -2,18 +2,18 @@ import { PUBLICATION_CONTENT_BLOCK_TYPES } from '~/shared/content-registries'
 import { HTTPError, type H3Event } from 'nitro'
 import { getQuery } from 'nitro/h3'
 import { getDashboardMemberContext, listDashboardLocations } from '~/server/utils/dashboard-context'
-import { assertProductAccess, assertResourceAccess, isOrganizationWideRole, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
+import { assertLocationAccess, assertOrganizationWideAccess, assertProductAccess, assertResourceAccess, isOrganizationWideRole, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { createCollection, createProduct, deleteCollection, getProduct, hydrateProductMedia, listCollectionProducts, listCollections, listOrganizationProducts, reorderCollections, setCollectionProducts, setProductLocation, setProductPublication, updateCollection, updateProduct } from '~/server/utils/product-management'
 import { createSession, deleteProductBookingConfig, getScheduleSession, listAvailabilityRules, listScheduleSessions, replaceWeeklySchedule, setProductBookingConfig, updateSession } from '~/server/utils/availability'
 import { attachMediaPlacement, removeMediaPlacement, reorderMediaPlacements, setSingleMediaPlacement } from '~/server/utils/media-placement'
-import { hydrateMediaAssetRefs } from '~/server/utils/media-asset-manager'
+import { getMediaAsset, hydrateMediaAssetRefs, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
-import { memberSchedulingList } from '~/server/domain/member-scheduling'
+import { memberSchedulingList, readMemberScheduling, requireSchedulingAccess, writeMemberScheduling } from '~/server/domain/member-scheduling'
 import { editableProductKinds, PRODUCT_KIND_LABELS, productDetailFields, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS, STAY_QUIET_HOUR_TIMES, type ProductDetailsPatch } from '~/shared/product-details'
 import { STAY_SAFETY_FIELDS, STAY_SAFETY_SECTIONS, staySafetySectionKeys, type StaySafetySection } from '~/shared/stay-safety'
 import { formatMinorAmount, majorAmountToMinor, minorAmountToMajor, scopedPriceAmountPatch, selectPrice } from '~/shared/prices'
 import { CURRENCY_OPTIONS, isCurrencyCode } from '~/shared/currencies'
-import { mediaPlaybackUrl, mediaStillUrl } from '~/shared/media-placement-contract'
+import { LOGO_SHAPES, ORIGINAL_LOGO_PRESENTATION, mediaPlaybackUrl, mediaStillUrl } from '~/shared/media-placement-contract'
 import type { CatalogAnswer, CatalogField, CatalogRow, CatalogScreen } from '~/shared/catalog-screen'
 import type { UpdateProductInput } from '~/server/types/products'
 import { getVerticalCopy } from '~/utils/vertical-copy'
@@ -32,22 +32,22 @@ import { FORM_QUESTION_TYPE_LABELS, formQuestionRowSummary, formQuestionsSummary
 import { queryAll } from '~/server/db'
 import { assertOrganizationLanguage, findResourceLocalization, getLocalizationForAuthoring, getProductCatalogLocalization, putLocalizationForAuthoring, putResourceLocalization } from '~/server/utils/localization'
 import { z } from 'zod'
-import { groupProductsByCollection } from '~/utils/product-presentation'
+import { groupProductsByCollection, photoCategories } from '~/utils/product-presentation'
 import { createStayPhotoRoom, moveStayPhotos, readStayHome, removeStayPhotoRoom, stayAccessFor, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom } from '~/server/domain/stays'
 import { isStayHomeAccessibilityFeature, isStayRoomAccessibilityFeature, STAY_HOME_ACCESSIBILITY_FEATURES, STAY_ROOM_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
 import { STAY_BED_TYPES, STAY_PHOTO_ROOM_TYPES, stayPhotoRoomName, type StayBedType } from '~/shared/stay-photos'
 import { STAY_AMENITIES, STAY_LISTING_TYPES, STAY_MAP_SHARING_MODES, STAY_PROPERTY_SIZE_UNITS } from '~/shared/stay-listing'
-import { MINUTE_TIME_PATTERN } from '~/utils/timezone'
-import { getLocation } from '~/server/utils/location-management'
+import { isValidInstant, MINUTE_TIME_PATTERN, timezoneLabel } from '~/utils/timezone'
+import { createLocation, getLocation, updateLocation, type LocationRecord, type UpdateLocationInput } from '~/server/utils/location-management'
 import { getContentDocumentById, getContentEditorSnapshotForDocument, getContentRepresentation, type ContentBlockInput } from '~/server/utils/content/documents'
 import { createArticleCategory, deleteArticleCategory, listArticleCategories, reorderArticleCategories, updateArticleCategory } from '~/server/utils/content/article-categories'
 import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS, isArticleCollection } from '~/utils/article-collections'
 import { articleCollectionOf, createBlogPost, deleteBlogPost, getBlogPost, reorderArticles, updateBlogLifecycle, updateBlogPost } from '~/server/utils/content/publishing'
-import { loadDashboardBlogPosts } from '~/server/utils/dashboard-editor-resources'
+import { loadDashboardBlogPosts, loadDashboardLocationOverview } from '~/server/utils/dashboard-editor-resources'
 import { createPost, deletePost, getPost, listPosts, updatePost } from '~/server/utils/post-management'
 import { getSocialConnections, publishPost, type PublishTarget } from '~/server/utils/social-publication'
 import { articlePostFields, PostValidationError } from '~/shared/posts'
-import { createQa, deleteQa, listQa, updateQa } from '~/server/utils/location-qa'
+import { createQa, deleteQa, listQa, listQaPageScopes, normalizePagePath, reorderQa, updateQa } from '~/server/utils/location-qa'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { readLocalizedFormQuestions } from '~/server/domain/form-questions'
 import { setPublicConsultationMode } from '~/server/utils/professional-services'
@@ -57,7 +57,7 @@ import type { UpdateOrganizationSettingsRequest } from '~/server/types/organizat
 import { getLinksPage, OrganizationLinksValidationError, upsertLinksPage } from '~/server/utils/links-page'
 import { blankBlogLocalizedText, blogLocalizedTextFields, initialBlogEditorBlocks, type EditorContentBlock, readBlogLocalizedText, writeBlogLocalizedText } from '~/utils/blog-editor'
 import { PRICING_CALCULATOR_COLUMNS, pricingCalculatorConfig, pricingCalculatorRows, updatePricingCalculator } from '~/utils/pricing-calculator'
-import { SITE_PALETTE_MODES, SITE_PALETTE_ROLES, type SitePalettePatch } from '~/shared/site-palette'
+import { SITE_PALETTE_MODES, SITE_PALETTE_ROLES, STARTER_PALETTES, type SitePalettePatch } from '~/shared/site-palette'
 import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset } from '~/shared/organization-fonts'
 import { getOrganizationDomainsDashboardPayload } from '~/server/utils/domain-read-model'
 import { organizationPublicUrl, setCanonicalDomain } from '~/server/utils/domains'
@@ -65,9 +65,16 @@ import { changeDashboardDomain, checkDashboardDomainGroup, connectDashboardDomai
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
 import { listOrganizationReviews, setReviewStatus } from '~/server/utils/organization-reviews'
+import { REVIEW_STATUS_LABELS } from '~/utils/testimonials'
+import { OWNER_REVIEW_STATUSES } from '~/shared/organization-reviews'
+import { REVIEW_CATEGORIES, REVIEW_SUBJECTS } from '~/shared/review-questions'
 import { isPlatformSite } from '~/utils/site-routing'
 import { isRecord } from '~/server/utils/type-guards'
 import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS, previewSecretOf } from '~/server/utils/preview-token'
+
+import { formatPostalAddress } from '~/utils/postal-address'
+import { dayHoursSummary, exceptionLabel, exceptionSummary, WEEK_ROWS } from '~/lib/components/workspace/location/hours'
+import { toMinutes, toTimeString, type DatePeriod, type WeeklyPeriod, type SpecialHours } from '~/shared/reservation-hours'
 
 const STAY_ROOM_VIEWS = ['stay-rooms', 'stay-room', 'stay-room-add', 'stay-room-beds', 'stay-room-privacy', 'stay-room-remove', 'stay-photo-room', 'stay-room-amenities', 'stay-room-accessibility']
 
@@ -75,6 +82,81 @@ const invalid = (message: string): never => { throw new HTTPError({ statusCode: 
 const missing = (message: string): never => { throw new HTTPError({ statusCode: 404, message }) }
 const field = (key: string, label: string, kind: CatalogField['kind'], value: unknown, options: Partial<CatalogField> = {}): CatalogField =>
   ({ key, label, kind, value: value == null ? '' : String(value), ...options })
+
+async function catalogMedia(
+  db: Parameters<typeof attachMediaPlacement>[0],
+  context: Pick<Parameters<typeof attachMediaPlacement>[1], 'env' | 'organizationId' | 'principal'>,
+  item: {
+    ownerType: 'business_location' | 'content_document'
+    ownerId: string
+    title: string
+    primary: 'cover' | 'hero'
+    prefix: string
+    scope: Record<string, string>
+    media: Array<{ asset_id: string; slot: string; kind: string; public_url: string | null; thumbnail_url?: string | null }>
+    revision: string
+    categoryVertical?: string | null
+  },
+  view: string, query: Record<string, unknown>, answer?: CatalogAnswer,
+): Promise<CatalogScreen> {
+  const primaryLabel = item.primary === 'hero' ? 'Hero' : 'Cover'
+  const row = (id: string, label: string, slot: 'cover' | 'hero' | 'gallery', asset?: typeof item.media[number]): CatalogRow => ({
+    id, label, native: `${item.prefix}-item`, image: mediaStillUrl(asset),
+    query: { ...item.scope, slot, ...(asset ? { asset_id: asset.asset_id } : {}) },
+  })
+  const gallery = item.media.filter(item => item.slot === 'gallery')
+  const cover = item.media.find(media => media.slot === item.primary)
+  if (view === item.prefix) {
+    if (answer) return missing('Choose a media placement')
+    return { title: item.title, fields: [], rows: [
+      row(item.primary, primaryLabel, item.primary, cover),
+      ...gallery.map((asset, index) => row(asset.asset_id, `Gallery item ${index + 1}`, 'gallery', asset)),
+      row('add', 'Add to gallery', 'gallery'),
+      ...(gallery.length > 1 ? [{ id: 'order', label: 'Reorder gallery', native: `${item.prefix}-order`, query: { ...item.scope, slot: 'gallery' } }] : []),
+    ] }
+  }
+  const slot = query.slot === 'gallery' ? 'gallery' : query.slot === item.primary ? item.primary : missing('Media placement not found')
+  const order = view === `${item.prefix}-order`
+  if (order && slot !== 'gallery') return missing('Gallery not found')
+  const asset = slot === item.primary ? cover : query.asset_id === undefined ? null
+    : gallery.find(item => item.asset_id === query.asset_id) ?? missing('Media not found')
+  const ids = gallery.map(item => item.asset_id)
+  const title = order ? 'Reorder gallery' : slot === item.primary ? primaryLabel : asset ? 'Gallery item' : 'Add to gallery'
+  const editableAsset = slot === 'gallery' && asset && item.categoryVertical !== undefined
+    ? await getMediaAsset(db, asset.asset_id, context.organizationId) ?? missing('Media not found')
+    : null
+  const revision = JSON.stringify([item.revision, item.media.map(asset => [asset.slot, asset.asset_id]), editableAsset?.updated_at])
+  const screen = { title, revision, rows: [], fields: [
+    order ? field('value', title, 'order', ids.join('\n'), {
+      choices: gallery.map((item, index) => ({ value: item.asset_id, label: `Gallery item ${index + 1}`, image: mediaStillUrl(item) })),
+    }) : field('value', title, 'photo', asset?.asset_id, { media_kind: 'any', playback_url: mediaPlaybackUrl(asset), display_url: mediaStillUrl(asset), optional: true }),
+    ...(editableAsset ? [field('category', 'Category', 'select', editableAsset.category ?? 'other', {
+      choices: photoCategories(item.categoryVertical, [editableAsset.category]).map(choice => ({ value: choice.id, label: choice.label })),
+    })] : []),
+  ], save_label: 'Save' }
+  if (!answer) return screen
+  if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The media changed. Reopen it before saving.' })
+  const value = answer.values.value ?? invalid('Missing media value')
+  const input = { ...context, placement: { owner_type: item.ownerType, owner_id: item.ownerId, slot } }
+  if (order) {
+    const next = value.split('\n')
+    if (next.length !== ids.length || new Set(next).size !== ids.length || !next.every(id => ids.includes(id))) invalid('Include each gallery item once')
+    await reorderMediaPlacements(db, { ...input, expectedAssetIds: ids, moves: next.slice(1).map((asset_id, index) => ({ asset_id, after_asset_id: next[index]! })) })
+  } else if (slot === item.primary) {
+    await setSingleMediaPlacement(db, { ...input, assetId: value || null })
+  } else if (asset && !value) {
+    await removeMediaPlacement(db, { ...input, assetId: asset.asset_id })
+  } else if (!asset && value) {
+    await attachMediaPlacement(db, { ...input, assetId: value })
+  } else if (asset && value !== asset.asset_id) return invalid('Add the new media before removing the old item')
+  else if (editableAsset && answer.values.category !== (editableAsset.category ?? 'other')) {
+    const category = photoCategories(item.categoryVertical, [editableAsset.category]).find(choice => choice.id === answer.values.category)?.id ?? invalid('Choose a media category')
+    await assertOrganizationWideAccess(db, context.principal!)
+    if (!await updateMediaAssetMetadata(db, editableAsset.id, context.organizationId, { category })) return missing('Media not found')
+  }
+  await purgePublicResourceCacheNow(context.env, context.organizationId)
+  return screen
+}
 
 async function questionEditor(
   view: string, query: { question_id?: unknown }, scope: Record<string, string>, title: string,
@@ -148,6 +230,306 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
   const principal = memberAccessPrincipal(organization, { env, event })
   const query = getQuery(event)
   const view = typeof query.view === 'string' ? query.view : ''
+  if (view === 'member-profile' || view === 'member-profile-field' || view === 'member-hours' || view === 'member-time-off') {
+    const memberId = typeof query.member_id === 'string' && query.member_id ? query.member_id : missing('Member not found')
+    const actor = { env, organizationId: organization.id, userId }
+    const member = await requireSchedulingAccess(actor, memberId)
+    const admin = await roleAllows({ ...organization, permissions: { members: ['update'] } })
+    const schedule = await readMemberScheduling(db, env, organization.id, memberId)
+    const scope = { member_id: memberId }
+    const row = (id: string, label: string, summary?: string, native = 'member-profile-field'): CatalogRow =>
+      ({ id, label, summary, native, query: { ...scope, field: id } })
+    if (view === 'member-profile') {
+      if (answer) return invalid('Choose a member setting')
+      return { title: 'Profile & availability', fields: [], rows: [
+        row('hours', 'Hours', schedule?.timezone ? timezoneLabel(schedule.timezone) : 'Not set', 'member-hours'),
+        row('time-off', 'Time off', schedule?.time_off ? `${schedule.time_off.length} dates` : 'Not set', 'member-time-off'),
+        row('public_name', 'Public name', schedule?.public_name ?? undefined),
+        { ...row('public_photo_url', 'Public photo'), image: schedule?.public_photo_url },
+        row('public_bio', 'About you', schedule?.public_bio ?? undefined),
+        ...(admin ? [row('public_approved', 'Publish profile', schedule?.public_approved ? 'Published' : 'Not published')] : []),
+      ] }
+    }
+    if (view === 'member-hours') {
+      if (answer) return invalid('Choose an hours setting')
+      return { title: 'Hours', fields: [], rows: [
+        row('timezone', 'Timezone', schedule?.timezone ? timezoneLabel(schedule.timezone) : 'Not set'),
+        ...(schedule?.timezone ? WEEK_ROWS.map(day => row(day.slug, day.label,
+          schedule.weekly?.filter(slot => slot.weekday === day.value).map(slot => `${slot.start}–${slot.end}`).join(', ') || 'Unavailable')) : []),
+      ] }
+    }
+    const updated_at = schedule?.updated_at ?? null
+    const revision = updated_at ?? 'new'
+    const profileKey = query.field
+    const day = WEEK_ROWS.find(item => item.slug === profileKey)
+    const timeOff = view === 'member-time-off'
+    const dateFields = (entry: { start: string; end: string }, index: string) => [
+      field(`start:${index}`, index === 'new' ? 'New start' : 'Starts', 'datetime', entry.start, { optional: index === 'new' }),
+      field(`end:${index}`, index === 'new' ? 'New end' : 'Ends', 'datetime', entry.end, { optional: index === 'new' }),
+      ...(index === 'new' ? [] : [field(`remove:${index}`, 'Remove these dates', 'toggle', false)]),
+    ]
+    let fields: CatalogField[]
+    let title: string
+    if (timeOff) {
+      if (!schedule?.timezone) {
+        if (answer) return invalid('Choose a timezone before setting time off')
+        return { title: 'Time off', fields: [], rows: [row('timezone', 'Set your timezone')] }
+      }
+      fields = [
+        ...(schedule.time_off ?? []).flatMap((entry, index) => dateFields(entry, String(index))),
+        ...dateFields({ start: '', end: '' }, 'new'),
+      ]
+      title = 'Time off'
+    } else if (day && schedule?.timezone) {
+      title = day.label
+      fields = [field('windows', 'Working hours', 'textarea',
+        schedule.weekly?.filter(slot => slot.weekday === day.value).map(slot => `${slot.start}–${slot.end}`).join('\n'),
+        { optional: true, hint: 'One period per line in 24-hour time, such as 09:00–17:00.' })]
+    } else if (profileKey === 'timezone') {
+      title = 'Timezone'
+      fields = [field('timezone', title, 'text', schedule?.timezone, { hint: 'Use a timezone such as America/New_York or Asia/Bangkok' })]
+    } else if (profileKey === 'public_name' || profileKey === 'public_bio') {
+      title = profileKey === 'public_name' ? 'Public name' : 'About you'
+      fields = [field(profileKey, title, profileKey === 'public_name' ? 'text' : 'textarea', schedule?.[profileKey], {
+        optional: true, hint: 'An owner or admin publishes the updated profile after you save.',
+      })]
+    } else if (profileKey === 'public_photo_url') {
+      title = 'Public photo'
+      fields = admin
+        ? [field('photo', title, 'photo', schedule?.public_photo_url, { optional: true, display_url: schedule?.public_photo_url })]
+        : [field('account_photo', 'Use your account photo', 'toggle', Boolean(schedule?.public_photo_url))]
+    } else if (profileKey === 'public_approved' && admin) {
+      title = 'Publish profile'
+      fields = [field('public_approved', title, 'toggle', Boolean(schedule?.public_approved))]
+    } else return missing('Member setting not found')
+    const screen = { title, fields, rows: [], revision, save_label: 'Save' }
+    if (!answer) return screen
+    if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The member profile changed. Reopen the editor before saving.' })
+    const values = answer.values
+    if (fields.length !== Object.keys(values).length || fields.some(item => typeof values[item.key] !== 'string')) return invalid('The saved fields do not match this editor')
+    const changes: Parameters<typeof writeMemberScheduling>[2] = { updated_at }
+    if (timeOff) {
+      changes.time_off = [...(schedule?.time_off ?? []).keys()].flatMap(index => values[`remove:${index}`] === 'true' ? [] : [{
+        start: values[`start:${index}`]!, end: values[`end:${index}`]!,
+      }])
+      if (values['start:new'] || values['end:new']) {
+        if (!isValidInstant(values['start:new']) || !isValidInstant(values['end:new'])) return invalid('Choose a start and end for time off')
+        changes.time_off.push({ start: values['start:new']!, end: values['end:new']! })
+      }
+    } else if (day) {
+      changes.weekly = [
+        ...(schedule?.weekly ?? []).filter(slot => slot.weekday !== day.value),
+        ...values.windows!.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
+          const [start, end, extra] = line.split(/\s*[-–]\s*/)
+          if (!start || !end || extra !== undefined) return invalid('Enter each period as HH:mm–HH:mm')
+          return { weekday: day.value, start, end }
+        }),
+      ]
+    } else if (profileKey === 'timezone') {
+      changes.timezone = values.timezone!.trim()
+      if (!schedule?.timezone) Object.assign(changes, { weekly: [], time_off: [] })
+    } else if (profileKey === 'public_name' || profileKey === 'public_bio') {
+      changes[profileKey] = values[profileKey]!.trim() || null
+    } else if (profileKey === 'public_approved') {
+      if (values.public_approved !== 'true' && values.public_approved !== 'false') return invalid('Choose whether to publish the profile')
+      changes.public_approved = values.public_approved === 'true'
+    } else if (admin) {
+      const photo = values.photo
+      if (!photo || photo === schedule?.public_photo_url) changes.public_photo_url = photo || null
+      else {
+        const [asset] = await hydrateMediaAssetRefs(db, { organizationId: organization.id, refs: [{ asset_id: photo }], allowedKinds: ['image'] })
+        changes.public_photo_url = asset?.public_url ?? missing('Photo not found')
+      }
+    } else if (values.account_photo === 'false') {
+      changes.public_photo_url = null
+    } else {
+      if (values.account_photo !== 'true') return invalid('Choose whether to use your account photo')
+      if (member.userId !== userId) return missing('Photo not found')
+      changes.public_photo_url = session.user.image || invalid('Add a photo to your account first')
+    }
+    await writeMemberScheduling(actor, memberId, changes)
+    await purgePublicResourceCacheNow(env, organization.id)
+    return screen
+  }
+  if (view.startsWith('business-location')) {
+    const wide = isOrganizationWideRole(organization.role)
+    if (view === 'business-locations') {
+      if (answer) return invalid('Choose a location')
+      const locations = await listDashboardLocations(db, organization.id, wide ? undefined : userId, true)
+      const offices = organization.vertical === 'service'
+      const title = offices ? 'Offices' : 'Locations'
+      return { title, fields: [], empty_title: `No ${title.toLowerCase()} yet`, rows: [
+        ...locations.map(item => ({
+          id: item.id, label: item.title, image: item.picture_url, native: 'business-location',
+          summary: [formatPostalAddress(item.address), item.status !== 'active' ? 'Draft' : null].filter(Boolean).join(' · '),
+          query: { location_id: item.id },
+        })),
+        ...(wide ? [{ id: 'new', label: offices ? 'Add office' : 'Add location', native: 'business-location-new' }] : []),
+      ] }
+    }
+    const creating = view === 'business-location-new'
+    const locationId = creating ? 'new' : typeof query.location_id === 'string' ? query.location_id : missing('Location not found')
+    if (creating) await assertOrganizationWideAccess(db, principal)
+    else await assertLocationAccess(db, { ...principal, locationId })
+    if (view === 'business-location') {
+      if (answer) return invalid('Choose a location setting')
+      const overview = await loadDashboardLocationOverview(event, organization.id, locationId)
+      return { title: overview.location.location.title, fields: [], rows: [...overview.rows, overview.settings] }
+    }
+    const loc = creating ? null : await getLocation(db, organization.id, locationId) ?? missing('Location not found')
+    const revision = creating ? 'new' : loc?.updated_at ?? missing('Location version not found')
+    const scope = { location_id: locationId }
+    if (['business-location-photos', 'business-location-photos-item', 'business-location-photos-order'].includes(view) && loc) {
+      return catalogMedia(db, { env, principal, organizationId: organization.id }, {
+        ownerType: 'business_location', ownerId: loc.id, title: 'Media', primary: 'hero',
+        prefix: 'business-location-photos', scope, media: loc.media, revision,
+        categoryVertical: wide ? organization.vertical : undefined,
+      }, view, query, answer)
+    }
+    const row = (id: string, label: string, summary?: string, target = id, params: Record<string, string> = {}): CatalogRow =>
+      ({ id, label, summary, native: `business-location-${target}`, query: { ...scope, ...params } })
+    const screen = (title: string, rows: CatalogRow[]): CatalogScreen => ({ title, fields: [], rows })
+    const form = (title: string, fields: CatalogField[]): CatalogScreen => ({ title, fields, rows: [], revision, save_label: creating ? 'Create' : 'Save' })
+    const text = (key: keyof LocationRecord, label: string, kind: CatalogField['kind'] = 'text', optional = true) => field(key, label, kind, loc?.[key], { optional })
+    const key = view.slice('business-location-'.length)
+    const exceptions = loc?.special_hours ?? []
+    if (key === 'hours') {
+      if (answer) return invalid('Choose an hours setting')
+      return screen('Hours', [
+        row('timezone', 'Timezone', timezoneLabel(loc!.timezone)),
+        row('hours-mode', 'Opening schedule', !loc!.opening_hours ? 'No schedule' : loc!.opening_hours.periods.some(item => !item.close) ? 'Always open' : 'Weekly hours'),
+        ...(loc!.opening_hours?.periods.some(item => !item.close) ? [] : WEEK_ROWS.map(day => row(day.slug, day.label, dayHoursSummary(loc!.opening_hours, day.value), 'weekday', { weekday: day.slug }))),
+        row('exceptions', 'Exceptions'),
+      ])
+    }
+    if (key === 'exceptions') {
+      if (answer) return invalid('Choose an exception')
+      return screen('Exceptions', [
+        ...exceptions.map((entry, index) => row(String(index), exceptionLabel(entry), exceptionSummary(entry) ?? 'Closed', 'exception', { exception: String(index) })),
+        row('add-hours', 'Add special hours', undefined, 'exception', { exception: 'new-hours' }),
+        row('add-closure', 'Add closure', undefined, 'exception', { exception: 'new-closure' }),
+      ])
+    }
+    const formattedPeriod = (open: string, close: string, suffix = '') => `${open}–${close}${suffix}`
+    const clock = (point: WeeklyPeriod['open']) => toTimeString(point.hour * 60 + point.minute)
+    const periods = <Period>(text: string, read: (open: string, close: string, suffix: string) => Period): Period[] =>
+      text.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
+        const match = /^(\d{2}:\d{2})\s*[-–]\s*(\d{2}:\d{2})(?:\s+(.+))?$/.exec(line)
+        if (!match || !MINUTE_TIME_PATTERN.test(match[1]!) || !MINUTE_TIME_PATTERN.test(match[2]!)) return invalid('Enter each period as HH:mm–HH:mm')
+        return read(match[1]!, match[2]!, match[3] ?? '')
+      })
+    const weekday = WEEK_ROWS.find(day => day.slug === query.weekday)
+    const exceptionIndex = typeof query.exception === 'string' && /^\d+$/.test(query.exception) ? Number(query.exception) : -1
+    const exception = key !== 'exception' ? null : exceptionIndex >= 0 ? exceptions[exceptionIndex] ?? missing('Exception not found')
+      : query.exception === 'new-hours' ? { kind: 'hours' as const, date: '', periods: [], note: null }
+        : query.exception === 'new-closure' ? { kind: 'closure' as const, starts_on: '', ends_on: null, note: null } : missing('Exception not found')
+    const address = loc?.address
+    const addressFields = [
+      field('addressLines', 'Street address (one line per field line)', 'textarea', address?.addressLines.join('\n'), { optional: true }),
+      field('sublocality', 'Neighborhood', 'text', address?.sublocality, { optional: true }),
+      field('locality', 'City', 'text', address?.locality, { optional: true }),
+      field('administrativeArea', 'State or region', 'text', address?.administrativeArea, { optional: true }),
+      field('postalCode', 'Postal code', 'text', address?.postalCode, { optional: true }),
+      field('regionCode', 'Country code', 'text', address?.regionCode, { optional: true, hint: 'Two letters, such as US or TH' }),
+    ]
+    const timezone = text('timezone', 'Timezone', 'text', false)
+    timezone.hint = 'Use a timezone such as America/New_York or Asia/Bangkok'
+    const mode = !loc?.opening_hours ? 'unset' : loc.opening_hours.periods.some(item => !item.close) ? 'always' : 'weekly'
+    const status = field('status', 'Status', 'select', loc?.status, { choices: [{ value: 'active', label: 'Published' }, { value: 'inactive', label: 'Draft' }] })
+    let formScreen: CatalogScreen
+    if (creating) {
+      formScreen = form(organization.vertical === 'service' ? 'Add office' : 'Add location', [text('title', 'Name', 'text', false), timezone])
+    } else if (key === 'name') {
+      formScreen = form('Name', [text('title', 'Name', 'text', false)])
+    } else if (key === 'description') {
+      formScreen = form('Description', [text('short_description', 'Short description', 'textarea'), text('description', 'Description', 'textarea'), text('price_level', 'Price level')])
+    } else if (key === 'address') {
+      formScreen = form('Address', addressFields)
+    } else if (key === 'contact') {
+      formScreen = form('Contact', [text('phone', 'Phone'), text('email', 'Email'), text('website_url', 'Website URL'), text('maps_url', 'Maps URL'), text('google_review_url', 'Google review URL')])
+    } else if (key === 'status') {
+      formScreen = form('Status', [status])
+    } else if (key === 'timezone') {
+      formScreen = form('Timezone', [timezone])
+    } else if (key === 'hours-mode') {
+      formScreen = form('Opening schedule', [field('mode', 'Schedule', 'select', mode, { choices: [
+        { value: 'unset', label: 'No schedule' }, { value: 'weekly', label: 'Weekly hours' }, { value: 'always', label: 'Always open' },
+      ] })])
+    } else if (key === 'weekday' && weekday && mode !== 'always') {
+      const lines = (loc?.opening_hours?.periods ?? []).flatMap(item => {
+        if (item.open.day !== weekday.value || !item.close) return []
+        const nextDay = (weekday.value + 1) % 7
+        const usualCloseDay = clock(item.close) <= clock(item.open) ? nextDay : weekday.value
+        const suffix = item.close.day === usualCloseDay ? '' : ` ${WEEK_ROWS.find(day => day.value === item.close!.day)!.slug}`
+        return [formattedPeriod(clock(item.open), clock(item.close), suffix)]
+      })
+      formScreen = form(weekday.label, [field('periods', 'Hours', 'textarea', lines.join('\n'), {
+        optional: true, hint: 'One period per line in 24-hour time, such as 09:00–17:00.',
+      })])
+    } else if (exception) {
+      const closure = exception.kind === 'closure'
+      const title = exceptionIndex >= 0 ? exceptionLabel(exception) : closure ? 'Add closure' : 'Add special hours'
+      formScreen = form(title, [
+        field('date', closure ? 'Starts on' : 'Date', 'text', closure ? exception.starts_on : exception.date, { hint: 'YYYY-MM-DD' }),
+        closure
+          ? field('end', 'Ends on', 'text', exception.ends_on, { optional: true, hint: 'YYYY-MM-DD. Leave empty for an indefinite closure.' })
+          : field('periods', 'Hours', 'textarea', exception.periods.map(item => formattedPeriod(item.open_time, item.close_time, item.close_day_offset ? ' next day' : '')).join('\n'), {
+            hint: 'One period per line in 24-hour time. Add “next day” for overnight hours.',
+          }),
+        field('note', 'Note', 'textarea', exception.note, { optional: true }),
+        ...(exceptionIndex >= 0 ? [field('remove', 'Remove exception', 'toggle', false)] : []),
+      ])
+    } else return missing('Location setting not found')
+    if (!answer) return formScreen
+    if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The location changed. Reopen it before saving.' })
+    const values = answer.values
+    if (formScreen.fields.length !== Object.keys(values).length || formScreen.fields.some(item => typeof values[item.key] !== 'string')) return invalid('The saved fields do not match this editor')
+    const value = (key: string) => values[key]!.trim()
+    const optional = (key: string) => value(key) || null
+    if (creating) {
+      const result = await createLocation(env, db, organization.id, { title: value('title'), timezone: value('timezone') }, userId, { idempotencyKey: answer.idempotency_key })
+      if (!('location' in result.data) || result.status !== 201) throw new HTTPError({ statusCode: result.status, message: 'error' in result.data ? result.data.error : 'Could not create the location' })
+      await purgePublicResourceCacheNow(env, organization.id)
+      return { ...formScreen, destination: { view: 'business-location', query: { location_id: result.data.location.id } } }
+    }
+    let patch: UpdateLocationInput
+    if (key === 'address') {
+      const next = Object.fromEntries(addressFields.map(item => [item.key, optional(item.key)]))
+      patch = { address: Object.values(next).some(Boolean) ? { ...next, addressLines: value('addressLines').split('\n'), regionCode: value('regionCode').toUpperCase(), languageCode: address?.languageCode } : null }
+    } else if (key === 'hours-mode') {
+      const selected = value('mode')
+      if (selected !== 'unset' && selected !== 'weekly' && selected !== 'always') return invalid('Choose an opening schedule')
+      patch = { opening_hours: selected === 'unset' ? null : { periods: selected === 'always' ? [{ open: { day: 0, hour: 0, minute: 0 } }] : mode === 'weekly' ? loc!.opening_hours!.periods : [] } }
+    } else if (key === 'weekday' && weekday) {
+      const point = (day: number, time: string) => ({ day, hour: Math.floor(toMinutes(time) / 60), minute: toMinutes(time) % 60 })
+      const next = periods<WeeklyPeriod>(value('periods'), (open, close, suffix) => ({
+        open: point(weekday.value, open),
+        close: point(suffix ? WEEK_ROWS.find(day => day.slug === suffix)?.value ?? invalid('Choose a closing weekday') : toMinutes(close) <= toMinutes(open) ? (weekday.value + 1) % 7 : weekday.value, close),
+      }))
+      patch = { opening_hours: { periods: [...(loc!.opening_hours?.periods ?? []).filter(item => item.open.day !== weekday.value), ...next] } }
+    } else if (exception) {
+      const next = [...exceptions]
+      if (exceptionIndex >= 0 && value('remove') === 'true') next.splice(exceptionIndex, 1)
+      else {
+        const note = optional('note')
+        const entry: NonNullable<SpecialHours>[number] = exception.kind === 'closure' ? { kind: 'closure', starts_on: value('date'), ends_on: optional('end'), note }
+          : { kind: 'hours', date: value('date'), note, periods: periods<DatePeriod>(value('periods'), (open, close, suffix) => ({
+            open_time: open, close_time: close, close_day_offset: suffix === 'next day' ? 1 : suffix ? invalid('Use “next day” for overnight hours') : 0,
+          })) }
+        next[exceptionIndex < 0 ? next.length : exceptionIndex] = entry
+      }
+      patch = { special_hours: next.length ? next : null }
+    } else if (key === 'status') {
+      const selected = value('status')
+      if (selected !== 'active' && selected !== 'inactive') return invalid('Choose a status')
+      patch = { status: selected }
+    } else {
+      patch = Object.fromEntries(formScreen.fields.map(item => [item.key, item.optional ? optional(item.key) : value(item.key)]))
+    }
+    const result = await updateLocation(db, organization.id, locationId, { ...patch, updated_at: revision }, userId, env)
+    if (result.status !== 200) throw new HTTPError({ statusCode: result.status, message: 'error' in result.data ? result.data.error : 'Could not save the location' })
+    return formScreen
+  }
   if (['website', 'website-preferences', 'website-status', 'website-booking', 'website-booking-mode'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Website not found')
     const settings = await loadSettingsPayload(db, env, organization.id)
@@ -395,20 +777,29 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
-  if (view === 'document-translations' || view === 'document-translation') {
+  if (['document-translations', 'document-translation', 'document-translation-languages'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Content not found')
-    const language = await assertOrganizationLanguage(db, organization.id, query.locale)
-    if (language.source) return missing('Choose an additional language')
     const kind = query.kind
     if (kind !== 'article' && kind !== 'social_post' && kind !== 'qa' && kind !== 'links') return missing('Content kind not found')
+    if (view === 'document-translation-languages') {
+      if (answer) return invalid('Choose a language')
+      const documentId = typeof query.document_id === 'string' ? query.document_id : missing('Content not found')
+      const settings = await getOrganizationLanguageSettings(db, env, { organizationId: organization.id })
+      return { title: 'Translations', fields: [], empty_title: 'No additional languages', rows: settings.languages.filter(item => !item.is_source).map(item => ({
+        id: item.locale, label: item.label, native: 'document-translation', query: { document_id: documentId, locale: item.locale, kind },
+      })) }
+    }
+    const language = await assertOrganizationLanguage(db, organization.id, query.locale)
+    if (language.source) return missing('Choose an additional language')
     const links = kind === 'links' ? await getLinksPage(db, organization.id) : null
     const records = links ? links.page ? [{ id: links.page.id, title: links.page.title, summary: null, updated_at: links.page.updated_at, metadata_json: '{}' }] : []
       : await queryAll<{ id: string; title: string | null; summary: string | null; updated_at: string; metadata_json: string }>(db, `
         SELECT id, title, summary, updated_at, metadata_json FROM content_documents
-        WHERE organization_id = ? AND kind = ? AND row_role = 'root' AND status = 'published'
+        WHERE organization_id = ? AND kind = ? AND row_role = 'root'
+          ${view === 'document-translation' ? 'AND id = ?' : "AND status = 'published'"}
           AND (kind <> 'qa' OR source = 'manual')
         ORDER BY sort_order, created_at, id
-      `, [organization.id, kind])
+      `, [organization.id, kind, ...(view === 'document-translation' ? [typeof query.document_id === 'string' ? query.document_id : missing('Content not found')] : [])])
     const title = kind === 'article' ? 'Blog' : kind === 'social_post' ? 'Posts' : kind === 'qa' ? 'Q&A' : 'Links'
     if (view === 'document-translations') {
       if (answer) return missing('Choose content to translate')
@@ -719,93 +1110,88 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
-  if (['website-blog', 'website-posts', 'website-qa', 'website-content', 'post-destinations', 'post-publish', 'post-media', 'post-media-item', 'post-media-order'].includes(view)) {
-    if (!isOrganizationWideRole(organization.role)) return missing('Website content not found')
-    const scope = { organizationId: organization.id, locationId: null }
-    const kind = view === 'website-blog' ? 'article' : ['website-posts', 'post-destinations', 'post-publish', 'post-media', 'post-media-item', 'post-media-order'].includes(view) ? 'post' : view === 'website-qa' ? 'qa' : query.kind
+  if (['website-blog', 'website-posts', 'website-qa', 'website-content', 'post-destinations', 'post-publish', 'post-media', 'post-media-item', 'post-media-order', 'qa-order'].includes(view)) {
+    const locationId = query.location_id === undefined ? null : typeof query.location_id === 'string' && query.location_id ? query.location_id : missing('Location not found')
+    await assertResourceAccess(db, { ...principal, resourceLocationId: locationId })
+    const kind = view === 'website-blog' ? 'article' : ['website-posts', 'post-destinations', 'post-publish', 'post-media', 'post-media-item', 'post-media-order'].includes(view) ? 'post' : view === 'website-qa' || view === 'qa-order' ? 'qa' : query.kind
     if (kind !== 'article' && kind !== 'post' && kind !== 'qa') return missing('Content not found')
+    const pagePath = query.page_path === undefined ? null : kind === 'qa' && !locationId && typeof query.page_path === 'string'
+      && query.page_path.startsWith('/') && !query.page_path.startsWith('//') ? normalizePagePath(query.page_path) : invalid('Choose one page for these questions')
+    const contentQuery: Record<string, string> = locationId ? { location_id: locationId } : pagePath ? { page_path: pagePath } : {}
+    const scope = { organizationId: organization.id, locationId, pagePath }
+    if (kind === 'article' && locationId) return missing('Article not found')
     const articleCollection = kind === 'article' && query.collection !== undefined
       ? isArticleCollection(query.collection) ? query.collection : invalid('Choose an article collection') : undefined
     const platformBlog = kind === 'article' && isPlatformSite({ themeId: organization.theme_id })
     if (articleCollection === 'docs' && !platformBlog) return missing('Collection not found')
-    const articleStatus = query.status === 'draft' || query.status === 'published' ? query.status : undefined
+    const contentStatus = query.status === 'draft' || query.status === 'published' ? query.status : undefined
     const title = kind === 'article' ? 'Blog' : kind === 'post' ? 'Social posts' : 'Q&A'
     const row = (id: string, label: string, summary?: string): CatalogRow => ({
-      id, label, summary, native: 'website-content', query: { kind, ...(id === 'new' ? articleCollection ? { collection: articleCollection } : {} : { content_id: id }) },
+      id, label, summary, native: 'website-content', query: { kind, ...contentQuery, ...(id === 'new' ? articleCollection ? { collection: articleCollection } : {} : { content_id: id }) },
     })
+    const questions = kind === 'qa' && (view === 'website-qa' || view === 'qa-order')
+      ? (await listQa(db, organization.id, locationId, false, pagePath)).filter(item => item.source === 'manual')
+      : []
+    if (view === 'qa-order') {
+      const order = questions.map(item => item.id)
+      const revision = JSON.stringify(questions.map(item => [item.id, item.updated_at, item.sort_order]))
+      const screen = { title: 'Reorder questions', rows: [], revision, save_label: 'Save', fields: [
+        field('order', 'Question order', 'order', order.join('\n'), { choices: questions.map(item => ({ value: item.id, label: item.question })) }),
+      ] }
+      if (!answer) return screen
+      if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The questions changed. Reopen the editor before saving.' })
+      const ids = answer.values.order?.split('\n') ?? []
+      if (ids.length !== order.length || new Set(ids).size !== order.length || !ids.every(id => order.includes(id))) return invalid('Include each question once')
+      await reorderQa(db, scope, ids.map((id, sort_order) => ({ id, sort_order })), session.user)
+      await purgePublicResourceCacheNow(env, organization.id)
+      return screen
+    }
     if (['website-blog', 'website-posts', 'website-qa'].includes(view)) {
       if (answer) return missing('Choose content to edit')
       const cursor = typeof query.cursor === 'string' ? query.cursor : undefined
-      const resource = { resource: `native-posts:${organization.id}` }
-      const page = kind === 'article' ? await loadDashboardBlogPosts(event, organization.id, { cursor, status: articleStatus, collection: articleCollection })
-        : kind === 'post' ? await listPosts(db, env, organization.id, {}, mcpPageWindow(cursor ? { cursor } : {}, resource), resource)
+      const resource = { resource: `native-posts:${organization.id}:${locationId ?? 'all'}:${contentStatus ?? 'all'}` }
+      const page = kind === 'article' ? await loadDashboardBlogPosts(event, organization.id, { cursor, status: contentStatus, collection: articleCollection })
+        : kind === 'post' ? await listPosts(db, env, organization.id, { locationId, status: contentStatus }, mcpPageWindow(cursor ? { cursor } : {}, resource), resource)
         : null
       const rows = page ? page.posts.map(item => row(String(item.id), String(item.title || ('body' in item && item.body) || title), item.status === 'published' ? 'Published' : 'Draft'))
-        : (await listQa(db, organization.id, null)).filter(item => item.source === 'manual').map(item => row(item.id, item.question, item.answer ?? undefined))
-      return { title, fields: [], rows: [
-        ...(kind === 'article' && !cursor && !articleStatus && !articleCollection ? [
+        : questions.map(item => row(item.id, item.question, item.answer ?? undefined))
+      const questionScopes = new Map<string, string>()
+      if (kind === 'qa' && !locationId && !pagePath) {
+        const [pages, existingScopes] = await Promise.all([listTenantPages(db, organization.id), listQaPageScopes(db, organization.id)])
+        for (const page of pages) if (page.path && !questionScopes.has(page.path)) questionScopes.set(page.path, page.title || page.path)
+        for (const saved of existingScopes) if (!questionScopes.has(saved.page_path)) questionScopes.set(saved.page_path, saved.page_path)
+      }
+      return { title: pagePath ? `Q&A · ${pagePath}` : title, fields: [], rows: [
+        ...(kind === 'article' && !cursor && !contentStatus && !articleCollection ? [
           ...([{ id: 'draft', label: 'Drafts' }, { id: 'published', label: 'Published' }]).map(filter => ({ ...filter, native: view, query: { status: filter.id } })),
           ...(platformBlog ? ARTICLE_COLLECTION_SLUGS : ['blog'] as const).map(collection => ({ id: collection, label: ARTICLE_COLLECTIONS[collection].label, native: view, query: { collection } })),
         ] : []),
+        ...(kind === 'post' && !cursor && !contentStatus ? [
+          { id: 'drafts', label: 'Drafts', native: view, query: { ...contentQuery, status: 'draft' } },
+          { id: 'live', label: 'Live', native: view, query: { ...contentQuery, status: 'published' } },
+        ] : []),
+        ...Array.from(questionScopes, ([path, label]): CatalogRow => ({
+          id: `page:${path}`, label, native: 'website-qa', query: { page_path: path },
+        })),
         ...rows, row('new', kind === 'article' ? 'New article' : kind === 'post' ? 'New post' : 'Add a question'),
         ...(kind === 'article' ? [{ id: 'categories', label: 'Categories', native: 'article-categories', query: articleCollection ? { collection: articleCollection } : {} }] : []),
         ...(articleCollection && !cursor && ((page?.posts.length ?? 0) > 1 || page?.page_info.next_cursor) ? [{ id: 'reorder', label: 'Reorder articles', native: 'article-order', query: { collection: articleCollection } }] : []),
-        ...(kind === 'qa' ? [{ id: 'reviews', label: 'Reviews', native: 'website-reviews' }] : []),
-        ...(page?.page_info.next_cursor ? [{ id: 'more', label: 'More', native: view, query: { cursor: page.page_info.next_cursor, ...(articleStatus ? { status: articleStatus } : {}), ...(articleCollection ? { collection: articleCollection } : {}) } }] : []),
+        ...(questions.length > 1 ? [{ id: 'order', label: 'Reorder questions', native: 'qa-order', query: contentQuery }] : []),
+        ...(kind === 'qa' && isOrganizationWideRole(organization.role) ? [{ id: 'reviews', label: 'Reviews', native: 'website-reviews', query: locationId ? { location_id: locationId } : {} }] : []),
+        ...(page?.page_info.next_cursor ? [{ id: 'more', label: 'More', native: view, query: { ...contentQuery, cursor: page.page_info.next_cursor, ...(contentStatus ? { status: contentStatus } : {}), ...(articleCollection ? { collection: articleCollection } : {}) } }] : []),
       ] }
     }
     const id = query.content_id === undefined ? null : typeof query.content_id === 'string' ? query.content_id : missing('Content not found')
     const article = kind === 'article' && id ? await getBlogPost(db, id, organization.id, env) ?? missing('Article not found') : null
     const post = kind === 'post' && id ? await getPost(db, env, organization.id, id) ?? missing('Post not found') : null
+    if (post && locationId && post.location_id !== locationId) return missing('Post not found at this location')
     if (post) await assertResourceAccess(db, { ...principal, resourceLocationId: post.location_id })
     if (['post-media', 'post-media-item', 'post-media-order'].includes(view)) {
       if (!post) return missing('Post not found')
-      const row = (id: string, label: string, slot: 'cover' | 'gallery', asset?: typeof post.media[number]): CatalogRow => ({
-        id, label, native: 'post-media-item', image: mediaStillUrl(asset),
-        query: { content_id: post.id, slot, ...(asset ? { asset_id: asset.asset_id } : {}) },
-      })
-      const gallery = post.media.filter(item => item.slot === 'gallery')
-      const cover = post.media.find(item => item.slot === 'cover')
-      if (view === 'post-media') {
-        if (answer) return missing('Choose a media placement')
-        return { title: 'Post media', fields: [], rows: [
-          row('cover', 'Cover', 'cover', cover),
-          ...gallery.map((asset, index) => row(asset.asset_id, `Gallery item ${index + 1}`, 'gallery', asset)),
-          row('add', 'Add to gallery', 'gallery'),
-          ...(gallery.length > 1 ? [{ id: 'order', label: 'Reorder gallery', native: 'post-media-order', query: { content_id: post.id, slot: 'gallery' } }] : []),
-        ] }
-      }
-      const slot = query.slot
-      if (slot !== 'cover' && slot !== 'gallery') return missing('Media placement not found')
-      const order = view === 'post-media-order'
-      if (order && slot !== 'gallery') return missing('Gallery not found')
-      const asset = slot === 'cover' ? cover : query.asset_id === undefined ? null
-        : gallery.find(item => item.asset_id === query.asset_id) ?? missing('Media not found')
-      const ids = gallery.map(item => item.asset_id)
-      const title = order ? 'Reorder gallery' : slot === 'cover' ? 'Cover' : asset ? 'Gallery item' : 'Add to gallery'
-      const revision = post.updated_at
-      const screen = { title, revision, rows: [], fields: [
-        order ? field('value', title, 'order', ids.join('\n'), {
-          choices: gallery.map((item, index) => ({ value: item.asset_id, label: `Gallery item ${index + 1}`, image: mediaStillUrl(item) })),
-        }) : field('value', title, 'photo', asset?.asset_id, { media_kind: 'any', playback_url: mediaPlaybackUrl(asset), display_url: mediaStillUrl(asset), optional: true }),
-      ], save_label: 'Save' }
-      if (!answer) return screen
-      if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The post changed. Reopen it before saving.' })
-      const value = answer.values.value ?? invalid('Missing media value')
-      const input = { env, principal, organizationId: organization.id, placement: { owner_type: 'content_document' as const, owner_id: post.id, slot } }
-      if (order) {
-        const next = value.split('\n')
-        if (next.length !== ids.length || new Set(next).size !== ids.length || !next.every(id => ids.includes(id))) invalid('Include each gallery item once')
-        await reorderMediaPlacements(db, { ...input, expectedAssetIds: ids, moves: next.slice(1).map((asset_id, index) => ({ asset_id, after_asset_id: next[index]! })) })
-      } else if (slot === 'cover') {
-        await setSingleMediaPlacement(db, { ...input, assetId: value || null })
-      } else if (asset && !value) {
-        await removeMediaPlacement(db, { ...input, assetId: asset.asset_id })
-      } else if (!asset && value) {
-        await attachMediaPlacement(db, { ...input, assetId: value })
-      } else if (asset && value !== asset.asset_id) return invalid('Add the new media before removing the old item')
-      await purgePublicResourceCacheNow(env, organization.id)
-      return screen
+      return catalogMedia(db, { env, principal, organizationId: organization.id }, {
+        ownerType: 'content_document', ownerId: post.id, title: 'Post media', primary: 'cover',
+        prefix: 'post-media', scope: { content_id: post.id, ...contentQuery }, media: post.media, revision: post.updated_at,
+      }, view, query, answer)
     }
     if (view === 'post-destinations' || view === 'post-publish') {
       if (!post) return missing('Post not found')
@@ -831,7 +1217,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         if (answer) return missing('Choose a destination')
         return { title: 'Publishing', fields: [], rows: [
           ...channels.map(({ channel, label, status, receipt }) => ({ id: channel, label, summary: status || 'Ready to publish', external_url: receipt })),
-          ...(available.length ? [{ id: 'publish', label: 'Choose destinations', native: 'post-publish', query: { content_id: post.id, ...(typeof query.channel === 'string' ? { channel: query.channel } : {}) } }] : []),
+          ...(available.length ? [{ id: 'publish', label: 'Choose destinations', native: 'post-publish', query: { ...contentQuery, content_id: post.id, ...(typeof query.channel === 'string' ? { channel: query.channel } : {}) } }] : []),
         ] }
       }
       const revision = JSON.stringify([post.updated_at, available.map(item => item.target)])
@@ -854,15 +1240,15 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       }
       return screen
     }
-    const qa = kind === 'qa' && id ? (await listQa(db, organization.id, null, false, null, undefined, id))
-      .find(item => item.source === 'manual' && item.location_id === null) ?? missing('Question not found') : null
+    const qa = kind === 'qa' && id ? (await listQa(db, organization.id, locationId, false, pagePath, undefined, id))
+      .find(item => item.source === 'manual' && item.location_id === locationId && (item.page_path ?? null) === pagePath) ?? missing('Question not found') : null
     const stored = article ?? post ?? qa
     const contentTitle = typeof article?.title === 'string' ? article.title : post?.title ?? qa?.question ?? ''
     let revision = typeof stored?.updated_at === 'string' ? stored.updated_at : 'new'
     const action = query.action
     if (action !== undefined && action !== 'edit' && action !== 'delete' && action !== 'publish') return missing('Content action not found')
     const categories = kind === 'article' ? await listArticleCategories(db, organization.id, articleCollectionOf(article?.collection ?? articleCollection)) : []
-    const postLocations = kind === 'post' ? await listDashboardLocations(db, organization.id, undefined, true) : []
+    const postLocations = kind === 'post' ? await listDashboardLocations(db, organization.id, locationId && !isOrganizationWideRole(organization.role) ? userId : undefined, true) : []
     const preparedSource = kind === 'post' && !id && query.article_id !== undefined
       ? await getBlogPost(db, typeof query.article_id === 'string' ? query.article_id : invalid('Choose an article'), organization.id, env)
       : null
@@ -892,7 +1278,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         field('category', 'Category', 'select', article?.category?.id, { optional: true, choices: [{ value: '', label: 'Choose later' }, ...categories.map(item => ({ value: item.id, label: item.name }))] }),
         ...(!id ? articleEdits.map(item => field(item.key, item.label, 'textarea', item.value)) : []),
       ] : kind === 'post' ? [
-        field('location', 'Location', 'select', post?.location_id ?? requestedLocation, { optional: true, choices: [{ value: '', label: 'Whole website' }, ...postLocations.map(location => ({ value: location.id, label: location.title }))] }),
+        field('location', 'Location', 'select', post?.location_id ?? requestedLocation, { optional: !locationId, choices: [...(locationId ? [] : [{ value: '', label: 'Whole website' }]), ...postLocations.filter(location => !locationId || location.id === locationId).map(location => ({ value: location.id, label: location.title }))] }),
         field('body', 'Caption', 'textarea', prepared?.body ?? post?.body),
         field('button_label', 'Button label', 'text', post?.call_to_action?.label ?? prepared?.callToAction.label, { optional: true }),
         field('button_url', 'Button URL', 'text', post?.call_to_action?.url ?? prepared?.callToAction.url, { optional: true }),
@@ -910,14 +1296,16 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       const origin = article ? await organizationPublicUrl(env, db, organization.id) : null
       const reviewUrl = typeof preview === 'string' ? article ? origin ? new URL(preview, origin).toString() : null : preview : null
       return { title: contentTitle || title, fields: [], preview_url: reviewUrl, rows: [
-        { id: 'edit', label: article ? 'Article details' : 'Edit content', native: view, query: { kind, content_id: id, action: 'edit' } },
+        { id: 'edit', label: article ? 'Article details' : 'Edit content', native: view, query: { kind, ...contentQuery, content_id: id, action: 'edit' } },
         ...(article ? [{ id: 'sections', label: 'Article blocks', native: 'page-sections', query: { article_id: id } }] : []),
         ...(post ? [
-          { id: 'media', label: 'Media', native: 'post-media', query: { content_id: id } },
-          { id: 'destinations', label: 'Publish to', native: 'post-destinations', query: { content_id: id, ...(typeof query.channel === 'string' ? { channel: query.channel } : {}) } },
+          { id: 'media', label: 'Media', native: 'post-media', query: { ...contentQuery, content_id: id } },
+          { id: 'destinations', label: 'Publish to', native: 'post-destinations', query: { ...contentQuery, content_id: id, ...(typeof query.channel === 'string' ? { channel: query.channel } : {}) } },
         ] : []),
-        ...(article ? [{ id: 'publish', label: 'Visibility', summary: article.status === 'draft' ? 'Draft' : article.visibility === 'unlisted' ? 'Unlisted' : 'Published', native: view, query: { kind, content_id: id, action: 'publish' } }] : []),
-        { id: 'delete', label: 'Delete', native: view, query: { kind, content_id: id, action: 'delete' } },
+        ...(article ? [{ id: 'publish', label: 'Visibility', summary: article.status === 'draft' ? 'Draft' : article.visibility === 'unlisted' ? 'Unlisted' : 'Published', native: view, query: { kind, ...contentQuery, content_id: id, action: 'publish' } }] : []),
+        ...(isOrganizationWideRole(organization.role) ? [{ id: 'translations', label: 'Translations', native: 'document-translation-languages',
+          query: { kind: kind === 'post' ? 'social_post' : kind, document_id: id } }] : []),
+        { id: 'delete', label: 'Delete', native: view, query: { kind, ...contentQuery, content_id: id, action: 'delete' } },
       ] }
     }
     if ((action === 'delete' || action === 'publish') && (!stored || !id || (action === 'publish' && !article))) return missing('Content not found')
@@ -933,7 +1321,10 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         if (values.confirm !== 'true') return invalid('Confirm deletion')
         if (article) await deleteBlogPost(db, id!, organization.id)
         else if (post) await deletePost(db, organization.id, id!, userId)
-        else if (qa) await deleteQa(db, { ...scope, pagePath: qa.page_path }, id!)
+        else if (qa) {
+          const result = await deleteQa(db, { ...scope, pagePath: qa.page_path }, id!)
+          if (result.status !== 200) return missing('Question not found')
+        }
       } else if (action === 'publish') {
         const visibility = values.visibility
         if (visibility !== 'listed' && visibility !== 'unlisted') return invalid('Choose article visibility')
@@ -953,10 +1344,11 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         if (article) await updateBlogPost(db, id!, { ...content, updated_at: revision }, organization.id, userId, env)
         else await createBlogPost(db, userId, { ...content, collection: articleCollection, content_blocks: blocks as ContentBlockInput[], idempotency_key: answer.idempotency_key }, { organization_id: organization.id }, env)
       } else if (kind === 'post') {
-        const locationId = values.location || null
-        await assertResourceAccess(db, { ...principal, resourceLocationId: locationId })
+        const targetLocationId = values.location || null
+        if (locationId && targetLocationId !== locationId) return invalid('Choose the current location')
+        await assertResourceAccess(db, { ...principal, resourceLocationId: targetLocationId })
         const changes = {
-          location_id: locationId,
+          location_id: targetLocationId,
           title: values.title || null, body: values.body || null,
           call_to_action: values.button_label || values.button_url ? { label: values.button_label, url: values.button_url } : null,
         }
@@ -968,7 +1360,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
           }, userId)
           await purgePublicResourceCacheNow(env, organization.id)
           return { ...screen, destination: { view: 'website-content',
-            query: { kind, content_id: created.post.id, ...(preparedSource && typeof query.channel === 'string' ? { channel: query.channel } : {}) } } }
+            query: { kind, ...contentQuery, content_id: created.post.id, ...(preparedSource && typeof query.channel === 'string' ? { channel: query.channel } : {}) } } }
         }
       } else {
         const data = { question: values.title, answer: values.answer || null, status: values.visible === 'true' ? 'published' : 'hidden' }
@@ -1051,26 +1443,48 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     }
     return screen
   }
-  if (view === 'website-reviews' || view === 'website-review') {
-    if (!isOrganizationWideRole(organization.role)) return missing('Reviews not found')
-    const reviews = await listOrganizationReviews(db, organization.id)
+  if (view === 'website-reviews' || view === 'website-review' || view === 'website-review-status') {
+    const locationId = query.location_id === undefined ? undefined : typeof query.location_id === 'string' && query.location_id ? query.location_id : missing('Location not found')
+    await assertOrganizationWideAccess(db, principal)
+    if (locationId) await assertLocationAccess(db, { ...principal, locationId })
+    const reviews = await listOrganizationReviews(db, organization.id, { locationId: locationId ?? null })
+    const statusLabel = (status: unknown) => {
+      const key = OWNER_REVIEW_STATUSES.find(value => value === status) ?? invalid('Review status is unavailable')
+      return REVIEW_STATUS_LABELS[key]
+    }
     if (view === 'website-reviews') {
       if (answer) return missing('Choose a review')
-      return { title: 'Reviews', fields: [], rows: reviews.map(review => ({
-        id: String(review.id), label: String(review.title || review.author_name || 'Review'), summary: String(review.status),
-        native: 'website-review', query: { review_id: String(review.id) },
+      return { title: 'Reviews', fields: [], empty_title: 'No reviews yet', rows: reviews.map(review => ({
+        id: String(review.id), label: String(review.author_name), eyebrow: typeof review.rating === 'number' ? `${review.rating} stars` : undefined,
+        summary: [statusLabel(review.status), review.title, review.content].filter(Boolean).join(' · '),
+        native: 'website-review', query: { review_id: String(review.id), ...(locationId ? { location_id: locationId } : {}) },
       })) }
     }
     const review = reviews.find(item => item.id === query.review_id) ?? missing('Review not found')
-    const title = String(review.title || review.author_name || 'Review')
-    if (review.status === 'private') {
-      if (answer) return invalid('This guest shared their review privately')
-      return { title, fields: [], rows: [{ id: 'private', label: 'Private feedback', summary: String(review.private_feedback ?? '') }] }
+    const title = `Review from ${String(review.author_name)}`
+    if (view === 'website-review') {
+      if (answer) return invalid('Choose a review setting')
+      const categories = REVIEW_SUBJECTS.flatMap(subject => [...REVIEW_CATEGORIES[subject]])
+      return { title, fields: [], rows: [
+        { id: 'rating', label: `${String(review.rating)} stars` },
+        ...(review.title || review.content ? [{ id: 'content', label: String(review.title || 'Review'), summary: typeof review.content === 'string' ? review.content : undefined }] : []),
+        ...(review.category_ratings ?? []).map(rating => ({
+          id: rating.category, label: categories.find(category => category.key === rating.category)?.label ?? rating.category, summary: String(rating.rating),
+        })),
+        ...(review.private_feedback ? [{ id: 'private', label: 'Private feedback', summary: String(review.private_feedback) }] : []),
+        ...(review.status !== 'private' ? [{
+          id: 'status', label: 'Status', summary: statusLabel(review.status), native: 'website-review-status',
+          query: { review_id: String(review.id), ...(locationId ? { location_id: locationId } : {}) },
+        }] : []),
+      ] }
     }
+    if (review.status === 'private') return invalid('This guest shared their review privately')
     const revision = String(review.updated_at)
     const screen = { title, fields: [field('status', 'Visibility', 'select', review.status, {
-      hint: typeof review.content === 'string' ? review.content : undefined,
-      choices: [{ value: 'approved', label: 'Show on website' }, { value: 'rejected', label: 'Hide' }],
+      choices: [
+        ...(review.status === 'pending' ? [{ value: 'pending', label: 'Pending' }] : []),
+        { value: 'approved', label: 'Show on website' }, { value: 'rejected', label: 'Hide' },
+      ],
     })], rows: [], revision, save_label: 'Save' }
     if (!answer) return screen
     if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This review changed. Reopen it before saving.' })
@@ -1078,7 +1492,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
-  if (['website-brand', 'website-brand-field', 'website-seo', 'website-currency', 'website-announcement', 'website-colors'].includes(view)) {
+  if (['website-brand', 'website-brand-field', 'website-seo', 'website-currency', 'website-announcement', 'website-colors', 'website-color-starter'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Brand not found')
     const settings = await loadSettingsPayload(db, env, organization.id)
     const descriptors = [
@@ -1105,7 +1519,12 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     const currency = view === 'website-currency'
     const announcement = view === 'website-announcement'
     const colors = view === 'website-colors'
-    const palette = colors ? settings.palette ?? missing('This website has fixed colors') : null
+    const starter = view === 'website-color-starter'
+    const palette = colors || starter ? settings.palette ?? missing('This website has fixed colors') : null
+    const descriptor = view === 'website-brand-field' ? descriptors.find(item => item.key === query.field) ?? missing('Brand setting not found') : null
+    const logoSlot = descriptor?.key === 'logo' || descriptor?.key === 'logo_dark' ? descriptor.key : null
+    const logo = logoSlot ? settings.media.find(item => item.slot === logoSlot) : null
+    const presentation = logo && 'presentation' in logo ? logo.presentation : ORIGINAL_LOGO_PRESENTATION
     const announcementMedia = announcement ? settings.media.find(item => item.slot === 'announcement') : null
     const fields = announcement ? [
       field('enabled', 'Show announcement', 'toggle', settings.announcement?.enabled === true),
@@ -1116,7 +1535,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       field('format', 'Format', 'select', settings.announcement?.format ?? 'modal', { choices: [{ value: 'modal', label: 'Popup' }, { value: 'banner', label: 'Banner' }] }),
       field('dismissible', 'Allow visitors to dismiss', 'toggle', settings.announcement?.dismissible !== false),
       field('image', 'Image', 'photo', announcementMedia?.asset_id, { optional: true, display_url: mediaStillUrl(announcementMedia) }),
-    ] : palette ? [
+    ] : starter ? [field('preset', 'Palette', 'select', null, { choices: STARTER_PALETTES.map(item => ({ value: item.id, label: item.label })) })] : palette ? [
       ...SITE_PALETTE_MODES.flatMap(mode => SITE_PALETTE_ROLES.map(role => field(`${mode}.${role.role}`, `${role.label} (${mode})`, 'text', palette[mode][role.role], { hint: role.rule }))),
       field('reset', 'Restore default colors', 'toggle', false),
     ] : seo ? [
@@ -1125,12 +1544,18 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       field('canonical_url', 'Canonical URL', 'text', settings.canonical_url, { optional: true }),
     ] : currency ? [
       field('default_currency', 'Currency', 'select', settings.default_currency, { choices: CURRENCY_OPTIONS }),
-    ] : [descriptors.find(item => item.key === query.field) ?? missing('Brand setting not found')]
+    ] : [descriptor ?? missing('Brand setting not found'), ...(logoSlot ? [
+      field('shape', 'Shape', 'select', presentation.shape, { choices: LOGO_SHAPES.map(value => ({ value, label: value === 'original' ? 'Whole logo' : value === 'square' ? 'Square' : 'Circle' })) }),
+      field('focus_x', 'Horizontal focus (%)', 'number', presentation.focus.x * 100),
+      field('focus_y', 'Vertical focus (%)', 'number', presentation.focus.y * 100),
+    ] : [])]
     const item = fields[0]!
     const revision = JSON.stringify(fields.map(item => [item.key, item.value]))
-    const screen = { title: announcement ? 'Announcement' : colors ? 'Colors' : seo ? 'Search engine optimization' : item.label, fields, rows: [], revision, save_label: 'Save' }
+    const screen = { title: announcement ? 'Announcement' : colors ? 'Colors' : seo ? 'Search engine optimization' : item.label, fields,
+      rows: colors ? [{ id: 'starter', label: 'Start from a palette', native: 'website-color-starter' }] : [],
+      revision: starter ? JSON.stringify(palette) : revision, save_label: 'Save' }
     if (!answer) return screen
-    if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The brand setting changed. Reopen it before saving.' })
+    if (answer.revision !== screen.revision) throw new HTTPError({ statusCode: 409, message: 'The brand setting changed. Reopen it before saving.' })
     const value = answer.values[item.key] ?? invalid('Missing brand value')
     if (fields.length !== Object.keys(answer.values).length || fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this editor')
     const values = answer.values
@@ -1141,6 +1566,8 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         cta_label: values.cta_label || null, cta_url: values.cta_url || null, dismissible: values.dismissible === 'true', format,
       },
       ...(values.image !== announcementMedia?.asset_id ? { media: [{ slot: 'announcement', asset_id: values.image || null }] } : {}),
+    } : starter ? {
+      palette: STARTER_PALETTES.find(item => item.id === values.preset)?.palette ?? invalid('Choose a palette'),
     } : colors ? {
       palette: values.reset === 'true' ? null : Object.fromEntries(SITE_PALETTE_MODES.map(mode => [
         mode, Object.fromEntries(SITE_PALETTE_ROLES.map(({ role }) => [role, values[`${mode}.${role}`]])),
@@ -1148,7 +1575,14 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     } : seo
       ? Object.fromEntries(fields.map(item => [item.key, answer.values[item.key]!.trim() || null]))
       : item.kind === 'photo'
-        ? { media: [{ slot: item.key as 'logo' | 'logo_dark' | 'favicon' | 'social_share', asset_id: value || null }] }
+        ? { media: [{
+            slot: item.key as 'logo' | 'logo_dark' | 'favicon' | 'social_share',
+            asset_id: value || null,
+            ...(logoSlot && value ? { presentation: {
+              shape: LOGO_SHAPES.find(shape => shape === values.shape) ?? invalid('Choose a logo shape'),
+              focus: { x: Number(values.focus_x) / 100, y: Number(values.focus_y) / 100 },
+            } } : {}),
+          }] }
         : { [item.key]: value }
     if (item.key === 'font_preset' && !isOrganizationFontPreset(value)) return invalid('Choose a website font')
     const result = await updateOrganizationSettingsFields(db, env, organization.id, patch, userId)
@@ -2034,6 +2468,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         leaf('stay-accessibility', 'Accessibility'),
         leaf('stay-rooms', 'Photo tour rooms'),
         leaf('stay-property', 'Property details'),
+        ...(product.page ? [{ id: 'page', label: 'Page content', summary: product.page.title, native: 'page', query: { page_id: product.page.id } }] : []),
       ] }
     } else {
       const section = Object.keys(STAY_SAFETY_SECTIONS).find(key => key === query.section) as StaySafetySection | undefined

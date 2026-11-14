@@ -9,6 +9,7 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { bookTable, openSeating, seededTables, tableSeatings } from './helpers/tables'
 import { getDateIntervals, toTimeString, type OpeningHours, type SpecialHours } from '../../shared/reservation-hours'
 import { addLocalDays, localDateAt, localDateTimeToInstant, localNow } from '../../utils/timezone'
+import type { CatalogScreen } from '../../shared/catalog-screen'
 import type { Product } from '../../server/types/products'
 import type { InboxThreadDetails } from '../../server/domain/guest-threads/types'
 import type { ConversationPage } from '../../shared/messages-contract'
@@ -750,6 +751,19 @@ test.describe('stateless MCP server', () => {
       const readback = await page.request.get(qaUrl, { params: { id: createdId! } })
       expect(readback.status()).toBe(200)
       expect((await readback.json()).qa).toEqual([expect.objectContaining({ id: createdId, organization_id: qaOrganizationId, location_id: null, page_path: pagePath, question, answer, status: 'published', source: 'manual' })])
+      if (['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname)) {
+        const endpoint = '/api/dashboard/offering'
+        const wholeSite = await page.request.get(endpoint, { params: { org: slug, view: 'website-qa' } })
+        expect(wholeSite.status(), await wholeSite.text()).toBe(200)
+        const wholeSiteRows = (await wholeSite.json() as CatalogScreen).rows
+        expect(wholeSiteRows.find(row => row.query?.page_path === pagePath)).toMatchObject({ label: 'Pricing', native: 'website-qa' })
+        expect(wholeSiteRows.some(row => row.id === createdId)).toBe(false)
+        const nativeScope = await page.request.get(endpoint, { params: { org: slug, view: 'website-qa', page_path: pagePath } })
+        expect(nativeScope.status(), await nativeScope.text()).toBe(200)
+        expect((await nativeScope.json() as CatalogScreen).rows.find(row => row.id === createdId)).toMatchObject({
+          label: question, summary: answer, query: { kind: 'qa', content_id: createdId, page_path: pagePath },
+        })
+      }
       const scoped = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'list_organization_qa', args: { organization_id: qaOrganizationId, page_path: pagePath, limit: 100 } })
       expect(scoped.status()).toBe(200)
       expect(mcpData<{ items: Array<{ id: string; page_path: string }> }>(await scoped.json()).items).toContainEqual(expect.objectContaining({ id: createdId, page_path: pagePath, question, answer }))

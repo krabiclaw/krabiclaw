@@ -30,14 +30,17 @@ export async function loadDashboardCatalog(event: H3Event) {
   const query = getQuery(event)
   const kind = kinds.find(item => item.value === query.kind)?.value ?? 'all'
   const location = locations.find(item => item.id === query.location_id)
+  if (query.location_id !== undefined && !location) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
+  const scopedProducts = location ? products.filter(product => product.locations.some(binding => binding.location_id === location.id)) : products
+  const scopedCollections = location ? collections.filter(section => section.location_id === null || section.location_id === location.id) : collections
   const groups = groupProductsByCollection(products, collections)
-  const menu = collections.filter(section => {
+  const menu = scopedCollections.filter(section => {
     const items = groups.find(group => group.id === section.id)?.products ?? []
     return !items.length || items.some(product => product.kind === 'dish')
   })
   const offers = (value: string) => value === 'menu'
-    ? menu.length > 0 || products.some(product => product.kind === 'dish')
-    : products.some(product => product.kind === value)
+    ? menu.length > 0 || scopedProducts.some(product => product.kind === 'dish')
+    : scopedProducts.some(product => product.kind === value)
   const filters = [{ value: 'all', label: 'All' }, ...kinds.filter(item => item.value === kind || offers(item.value))]
   const base = `/dashboard/${encodeURIComponent(organization.slug)}/products`
   const currency = organization.default_currency
@@ -55,15 +58,14 @@ export async function loadDashboardCatalog(event: H3Event) {
       summary: [price ?? 'No price set', product.booking?.held_online ? 'Online' : null, ...bindings,
         ...(!bindings.length && !product.booking?.held_online ? ['No locations set'] : [])].filter(Boolean).join(' · '),
       image: mediaStillUrl(product.image),
-      to: `${base}/${product.id}${locationId ? `?location_id=${encodeURIComponent(locationId)}&kind=dish` : ''}`,
+      to: `${base}/${product.id}${locationId ? `?location_id=${encodeURIComponent(locationId)}&kind=${product.kind}` : ''}`,
       native: product.kind === 'stay' ? 'stay' : 'offering',
       query: { product_id: product.id, ...(locationId ? { location_id: locationId } : {}) },
     }
   }
-  const screen: CatalogScreen = { title: 'Catalog', fields: [], rows: [], empty_title: 'No offerings' }
+  const screen: CatalogScreen = { title: location ? `${location.title} catalog` : 'Catalog', fields: [], rows: [], empty_title: 'No offerings' }
   const wide = isOrganizationWideRole(organization.role)
   if (query.view === 'menu' || query.view === 'section') {
-    if (query.location_id && !location) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
     const locationId = location?.id
     const sections = menu.filter(section => !locationId || section.location_id === null || section.location_id === locationId)
     const dishes = products.filter(product => product.kind === 'dish' && (!locationId || product.locations.some(binding => binding.location_id === locationId)))
@@ -108,7 +110,7 @@ export async function loadDashboardCatalog(event: H3Event) {
       id: 'create-offering', label: 'Add offering', native: 'create-offering', query: {},
     })
     if ((kind === 'all' || kind === 'menu') && offers('menu')) {
-      const menuLocations = locations.length ? locations : [null]
+      const menuLocations = location ? [location] : locations.length ? locations : [null]
       screen.rows.push(...menuLocations.map((place): CatalogRow => {
         const count = menu.filter(section => section.location_id === null || section.location_id === place?.id).length
         return {
@@ -120,7 +122,7 @@ export async function loadDashboardCatalog(event: H3Event) {
         }
       }))
     }
-    screen.rows.push(...products.filter(product => product.kind !== 'dish' && (kind === 'all' || kind === product.kind)).map(product => item(product)))
+    screen.rows.push(...scopedProducts.filter(product => product.kind !== 'dish' && (kind === 'all' || kind === product.kind)).map(product => item(product, location?.id)))
   }
   return { screen, filters, kind, can_create, has_stays: offers('stay') }
 }

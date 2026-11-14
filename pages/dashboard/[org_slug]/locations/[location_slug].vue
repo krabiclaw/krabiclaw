@@ -4,7 +4,7 @@
     page shows it, each stating what it holds now. Every card is a level below
     this one; the gear opens the settings that a guest never sees.
   -->
-  <DashboardIndexPanel id="location-index" :title="isNew ? newLocation.title.value : location?.title || 'Location'" :auto-open="cards[0]?.to ?? null" :create="newLocation.firstStep.value">
+  <DashboardIndexPanel id="location-index" :title="isNew ? newLocation.title.value : location?.title || 'Location'" :auto-open="navigationGroups[0]?.items[0]?.to ?? null" :create="newLocation.firstStep.value">
     <template v-if="!isNew" #right>
       <UButton
         :to="`${level.path.value}/settings`"
@@ -12,7 +12,7 @@
         color="neutral"
         variant="soft"
         square
-        :aria-label="capabilities.locationVocabulary === 'office/service area' ? 'Office settings' : 'Location settings'"
+        :aria-label="overview?.settings.label ?? 'Location settings'"
       />
     </template>
 
@@ -39,50 +39,21 @@
 </template>
 
 <script setup lang="ts">
-import { formatPhone } from '~/utils/phone'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
-import { resolveCmsCapabilities, type ProductFeature } from '~/config/cms-registry'
-import { resolvePublicSite } from '~/utils/site-routing'
-import { getTodayHoursLabel, type OpeningHours } from '~/shared/reservation-hours'
-import { normalizeVertical, type OrganizationVertical } from '~/utils/vertical-copy'
-import { catalogLabel, catalogSummary, type CatalogCounts } from '~/utils/product-presentation'
-import { formatPostalAddress } from '~/utils/postal-address'
+import type { CatalogRow } from '~/shared/catalog-screen'
 import { NEW_LOCATION_SECTIONS, useNewLocation } from '~/lib/components/workspace/settings/LocationSettingsPage.vue'
 import { timezoneLabel } from '~/utils/timezone'
 
 // A location is a tile on Locations, a row on Menu; Locations is its pane and its Back.
 definePageMeta({ layout: 'dashboard' })
 
-interface LocationOverview {
-  id: string
-  title: string
-  status: string
-  short_description: string | null
-  description: string | null
-  phone: string | null
-  email: string | null
-  address: PostalAddress | null
-  rating: number | null
-  google_place_id: string | null
-  timezone: string
-  opening_hours?: OpeningHours
-}
-
-interface LocationContentCounts {
-  photos: number
-  posts: number
-  qa: number
-  reviews: number
-  organization_qa: number
-}
 interface LocationOverviewResource {
-  location: { success: boolean; location: LocationOverview }
-  catalog: CatalogCounts
-  counts: LocationContentCounts
+  location: { success: boolean; location: { id: string; title: string } }
+  rows: CatalogRow[]
+  settings: CatalogRow
 }
 
 const dashboardApi = useDashboardApi()
-const dashboard = useDashboardOrganization()
 const dashboardLocation = useDashboardLocation()
 // The level runs while setup is still synchronous: it injects the record the
 // `<RouterView>` above rendered, and an `await` before it would bind nothing.
@@ -105,114 +76,18 @@ const locationId = computed(() => dashboardLocation.currentLocationId.value)
 
 const location = computed(() => overview.value?.location.location ?? null)
 
-const dashboardLocationRow = computed(() => dashboard.locations.value.find(candidate => candidate.id === locationId.value) ?? null)
-const locationImage = computed(() => dashboardLocationRow.value?.social_image?.url ?? '')
-const addressSummary = computed(() => formatPostalAddress(location.value?.address ?? null) || 'Add the address')
-
-const capabilities = computed(() => {
-  const vertical = dashboard.organization.value?.vertical
-  if (!vertical) throw createError({ statusCode: 500, statusMessage: 'Organization vertical is not configured' })
-  // Deliberately unguarded: swallowing a capability error left the index with an
-  // empty feature set, which removes every content and reservation row and
-  // leaves a location that looks like it holds nothing.
-  return resolveCmsCapabilities(normalizeVertical(vertical) as OrganizationVertical, resolvePublicSite({ themeId: dashboard.organization.value?.theme_id}).slug, null)
+const navigationGroups = computed<EditorNavigationGroup[]>(() => {
+  const draft = newLocation.draft.value
+  const rows = isNew.value ? [
+    { id: 'name', label: 'Name', summary: draft.title.trim() || 'Not named yet', to: `${locationPath.value}/name` },
+    { id: 'hours', icon: 'i-lucide-clock', label: 'Hours', summary: draft.hours.timezone ? timezoneLabel(draft.hours.timezone) : 'Choose the time zone', to: `${locationPath.value}/hours` },
+  ] : overview.value?.rows ?? []
+  return [{ id: 'location', items: rows.flatMap(item => item.to ? [{ ...item, to: item.to }] : []) }]
 })
-const featureSet = computed(() => new Set<ProductFeature>([
-  ...(capabilities.value?.pages.map(page => page.feature) ?? []),
-  ...(capabilities.value?.managers.map(manager => manager.id) ?? []),
-]))
-const hasFeature = (feature: ProductFeature) => featureSet.value.has(feature)
-
-const currentOpeningState = computed(() => {
-  const hours = location.value?.opening_hours
-  if (!hours) return 'Set your hours'
-  return getTodayHoursLabel(hours, 'Closed today', location.value?.timezone) || 'Set your hours'
-})
-
-// What this branch's catalogue is called: a studio's classes are experiences, a
-// restaurant's dishes are its menu, and a restaurant that also takes bookings
-// holds both — which is a catalog, not a menu with experiences filed inside it.
-const catalogLabelText = (catalog: CatalogCounts) => catalogLabel(dashboard.organization.value?.vertical, catalog)
-// One count per surface, each in its own words: "24 dishes · 3 experiences".
-// Plurals are each presentation's own ("Dish" → "Dishes"); appending an "s" is
-// how "dishs" reaches a merchant's screen.
-const catalogSummaryText = (catalog: CatalogCounts) => catalogSummary(dashboard.organization.value?.vertical, catalog)
-
-function countSummary(total: number, noun: string, empty: string): string {
-  if (!total) return empty
-  return `${total} ${total === 1 ? noun : `${noun}s`}`
-}
-
-/** "5 questions · 18 reviews · 110 site-wide", or what to do when there are none. */
-function trustSummary(qa: number, reviews: number, organization_qa: number): string {
-  const parts = [
-    qa ? countSummary(qa, 'question', '') : '',
-    reviews ? countSummary(reviews, 'review', '') : '',
-    organization_qa ? `${organization_qa} organization-wide` : '',
-  ].filter(Boolean)
-  return parts.length ? parts.join(' · ') : 'Answer your first question'
-}
-
-interface HubCard { id: string; title: string; description: string; to: string; image?: string; icon?: string }
-
-const router = useRouter()
-const organizationLinks = dashboard.organizationPaths
-/** One of the organization's managers, scoped to this location by its id. */
-function scopedToLocation(path: string | undefined): string {
-  if (!path || !locationId.value) return locationPath.value
-  return router.resolve({ path, query: { location_id: locationId.value } }).fullPath
-}
-
-const cards = computed<HubCard[]>(() => {
-  if (isNew.value) {
-    const draft = newLocation.draft.value
-    return [
-      { id: 'name', title: 'Name', description: draft.title.trim() || 'Not named yet', to: `${locationPath.value}/name` },
-      { id: 'hours', icon: 'i-lucide-clock', title: 'Hours', description: draft.hours.timezone ? timezoneLabel(draft.hours.timezone) : 'Choose the time zone', to: `${locationPath.value}/hours` },
-    ]
-  }
-  const resource = overview.value
-  if (!resource) return []
-  const loc = resource.location.location
-  const counts = resource.counts
-  const contact = [loc.phone && formatPhone(loc.phone), loc.email].filter((value): value is string => Boolean(value?.trim())).join(' · ')
-  return [
-    { id: 'photos', title: 'Media', description: countSummary(counts.photos, 'item', 'Add media'), to: `${locationPath.value}/photos`, image: locationImage.value || undefined, visible: hasFeature('photos') },
-    { id: 'name', title: 'Name', description: loc.title, to: `${locationPath.value}/name`, visible: true },
-    { id: 'description', title: 'Description', description: loc.short_description?.trim() || loc.description?.trim() || 'Describe this location', to: `${locationPath.value}/description`, visible: true },
-    { id: 'hours', icon: 'i-lucide-clock', title: 'Hours', description: currentOpeningState.value, to: `${locationPath.value}/hours`, visible: true },
-    { id: 'address', icon: 'i-lucide-map-pin', title: 'Address', description: addressSummary.value, to: `${locationPath.value}/address`, visible: true },
-    { id: 'contact', icon: 'i-lucide-contact-round', title: 'Contact', description: contact || 'Add a phone or email', to: `${locationPath.value}/contact`, visible: true },
-    // What this location offers, its posts and its Q&A each have one manager,
-    // shared with the whole organization; these rows open it scoped to here.
-    // Built only when this site carries a catalogue at all: a vertical with no
-    // product presentation has no word for one, and asking for it throws.
-    ...(hasFeature('products')
-      ? [{ id: 'products', icon: 'i-lucide-store', title: catalogLabelText(resource.catalog), description: catalogSummaryText(resource.catalog), to: scopedToLocation(organizationLinks.value?.catalog), visible: true }]
-      : []),
-    { id: 'posts', icon: 'i-lucide-megaphone', title: 'Posts', description: countSummary(counts.posts, 'published post', 'Write your first post'), to: scopedToLocation(organizationLinks.value?.posts), visible: hasFeature('posts') },
-    { id: 'qa', icon: 'i-lucide-message-circle-question', title: 'Reviews and Q&A', description: trustSummary(counts.qa, counts.reviews, counts.organization_qa), to: scopedToLocation(organizationLinks.value?.qa), visible: hasFeature('qa') },
-  ].filter(card => card.visible).map(({ visible: _visible, ...card }) => card)
-})
-
-/** One group, because a location's things are one list in the order its page shows them. */
-const navigationGroups = computed<EditorNavigationGroup[]>(() => [{
-  id: 'location',
-  items: cards.value.map(card => ({
-    id: card.id,
-    label: card.title,
-    icon: card.icon,
-    summary: card.description,
-    to: card.to,
-    image: card.image ?? null,
-  })),
-}])
 
 const isOverviewResponse = (value: unknown): value is LocationOverviewResource =>
-  isRecord(value)
-  && isRecord(value.location) && isRecord(value.location.location)
-  && isRecord(value.catalog) && typeof value.catalog.total === 'number' && typeof value.catalog.experiences === 'number' && typeof value.catalog.dishes === 'number'
-  && isRecord(value.counts) && typeof value.counts.photos === 'number'
+  isRecord(value) && isRecord(value.location) && isRecord(value.location.location)
+  && typeof value.location.location.title === 'string' && Array.isArray(value.rows) && isRecord(value.settings)
 
 const overviewKey = computed(() => `dashboard-location-overview:${organizationId}:${locationId.value}`)
 const { data: overview, error: overviewError } = await useAsyncData<LocationOverviewResource | null>(overviewKey, async () => {

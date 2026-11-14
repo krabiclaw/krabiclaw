@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { expect, test, type APIRequestContext, type BrowserContext, type Page, type Request } from '@playwright/test'
 import sharp from 'sharp'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
@@ -13,6 +14,7 @@ import type { OrganizationMembersData } from '../../utils/organization-members'
 import { formatTimestamp, localNow, timezoneLabel } from '../../utils/timezone'
 import type { MemberSchedule } from '../../composables/useMemberAvailabilityEditor'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import type { CatalogScreen } from '../../shared/catalog-screen'
 import type { Collection, Product } from '../../server/types/products'
 import type { DashboardLocation } from '../../composables/useDashboardOrganization'
 import { countCatalog, type CatalogCounts } from '../../utils/product-presentation'
@@ -432,6 +434,23 @@ test.describe('dashboard pane hierarchy', () => {
       const recoveredRead = await mcpRequest(memberContext.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: actor.id } })
       expect(recoveredRead.status(), await recoveredRead.text()).toBe(200)
       expect(mcpData<{ profile: PublicProfile }>(await recoveredRead.json()).profile).toEqual(concurrent)
+      const nativeProfile = '/api/dashboard/offering'
+      const nativePhoto = { org, view: 'member-profile-field', member_id: actor.id, field: 'public_photo_url' }
+      const nativeRead = await page.request.get(nativeProfile, { params: nativePhoto })
+      expect(nativeRead.status(), await nativeRead.text()).toBe(200)
+      const nativeEditor = await nativeRead.json() as CatalogScreen
+      expect(nativeEditor.revision).toBe(concurrent.updated_at)
+      expect(nativeEditor.fields[0]).toMatchObject({ key: 'photo', value: concurrent.public_photo_url ?? '' })
+      const nativeSave = await page.request.post(nativeProfile, { params: nativePhoto, data: {
+        values: { photo: attemptedPhoto.id }, revision: nativeEditor.revision, idempotency_key: randomUUID(),
+      } })
+      expect(nativeSave.status(), await nativeSave.text()).toBe(200)
+      const nativeSavedRead = await memberContext.request.get(schedulingEndpoint)
+      expect(nativeSavedRead.status(), await nativeSavedRead.text()).toBe(200)
+      expect((await nativeSavedRead.json()).scheduling).toMatchObject({
+        public_photo_url: attemptedPhoto.public_url, public_approved: 0, timezone: unchangedProfile.timezone,
+        weekly: unchangedProfile.weekly, time_off: unchangedProfile.time_off,
+      })
     } catch (error) {
       failures.push(error)
     } finally {
@@ -2001,6 +2020,66 @@ test.describe('dashboard pane hierarchy', () => {
     const afterRead = await page.request.get(`${endpoint}/${product!.id}`)
     expect(afterRead.status(), await afterRead.text()).toBe(200)
     expect((await afterRead.json() as { product: Product }).product.image?.asset_id).toBe(product!.image!.asset_id)
+  })
+
+  test('the native location editor saves to the shared dashboard record and keeps content scoped', async ({ page, baseURL }, testInfo) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Location edits require isolated local D1.')
+    const tenant = seededTenant('restaurant')
+    const locationId = tenant.locations.brooklyn.id
+    const otherLocationId = tenant.locations.williamsburg.id
+    const release = await acquireTenantMutationLock(testInfo, tenant.organizationId)
+    const overviewPath = `/api/dashboard/organizations/${tenant.organizationId}/locations/${locationId}/overview`
+    const endpoint = '/api/dashboard/offering'
+    const query = { org: tenant.slug, location_id: locationId }
+    const read = async (view: string, params: Record<string, string> = {}) => {
+      const response = await page.request.get(endpoint, { params: { ...query, view, ...params } })
+      expect(response.status(), await response.text()).toBe(200)
+      return await response.json() as CatalogScreen
+    }
+    const save = async (view: string, editor: CatalogScreen, changes: Record<string, string>) => {
+      const values = { ...Object.fromEntries(editor.fields.map(field => [field.key, field.value])), ...changes }
+      return page.request.post(endpoint, { params: { ...query, view }, data: { revision: editor.revision, values, idempotency_key: randomUUID() } })
+    }
+    const original = await read('business-location-contact')
+    const originalEmail = original.fields.find(field => field.key === 'email')!.value
+    const email = `location-editor-${randomUUID()}@playwright.example`
+    try {
+      const web = await page.request.get(overviewPath, { params: { org: tenant.slug } })
+      expect(web.status(), await web.text()).toBe(200)
+      const overview = await web.json() as { rows: CatalogScreen['rows']; settings: CatalogScreen['rows'][number] }
+      const native = await read('business-location')
+      expect(native.rows).toEqual([...overview.rows, overview.settings])
+      expect(native.rows.find(row => row.id === 'products')).toMatchObject({ native: 'scoped-catalog', query: { location_id: locationId } })
+      const scoped = await page.request.get('/api/dashboard/catalog', { params: { ...query, view: 'scoped-catalog' } })
+      expect(scoped.status(), await scoped.text()).toBe(200)
+      const scopedRows = (await scoped.json()).screen.rows as CatalogScreen['rows']
+      expect(scopedRows.find(row => row.native === 'menu')).toMatchObject({ query: { location_id: locationId } })
+      expect(scopedRows.some(row => row.query?.location_id === otherLocationId)).toBe(false)
+      for (const view of ['website-posts', 'website-qa']) {
+        const screen = await read(view)
+        expect(screen.rows.find(row => row.id === 'new')).toMatchObject({ query: { location_id: locationId } })
+      }
+      const changed = await save('business-location-contact', original, { email })
+      expect(changed.status(), await changed.text()).toBe(200)
+      const stale = await save('business-location-contact', original, { email: originalEmail })
+      expect(stale.status(), await stale.text()).toBe(409)
+      const persisted = await page.request.get(`/api/organizations/${tenant.organizationId}/locations/${locationId}`)
+      expect(persisted.status(), await persisted.text()).toBe(200)
+      const location = (await persisted.json()).location
+      expect(location).toMatchObject({ id: locationId, email })
+      await open(page, `${ORG}/locations/${location.slug}/contact`)
+      await expect(page.locator('#dashboard-panel-location-contact').getByRole('textbox', { name: 'Email', exact: true })).toHaveValue(email)
+      const foreign = await page.request.get(endpoint, { params: { ...query, view: 'business-location', location_id: seededTenant('experience').locations['ao-nang'].id } })
+      expect(foreign.status(), await foreign.text()).toBe(404)
+    } finally {
+      try {
+        const current = await read('business-location-contact')
+        const restored = await save('business-location-contact', current, { email: originalEmail })
+        expect(restored.status(), await restored.text()).toBe(200)
+      } finally {
+        await release()
+      }
+    }
   })
 
   test('a timezone menu scrolls above its leaf and preserves its draft until the drawer is dismissed', async ({ page }) => {
