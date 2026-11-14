@@ -22,6 +22,8 @@ import { deleteIntegration, listIntegrations, readIntegration, storeIntegration 
 import { MetaGraphError, verifyMetaSignedRequest, configuredMetaApps } from '../../server/utils/meta-graph.ts'
 import { instagramAccessToken, listMedia, readAccountInsights, readMediaInsights } from '../../server/utils/instagram.ts'
 import { attachMediaPlacement } from '../../server/utils/media-placement.ts'
+import { getMediaAsset } from '../../server/utils/media-asset-manager.ts'
+import uploadMedia from '../../server/api/editor/organizations/[organization_id]/media/upload.post.ts'
 import { listLinkedFacebookPages, facebookPageToken } from '../../server/utils/facebook-pages.ts'
 import connectionAuthorization from '../../server/api/dashboard/connection-authorization.ts'
 import selectFacebook from '../../server/api/organizations/[organization_id]/integrations/facebook/select.post.ts'
@@ -1265,7 +1267,32 @@ test('Facebook video: a Reel is published by finishing its upload session, any o
   const { runtime, db, env, cardless, meta, asset, restore } = await setUp()
   try {
     await asset('reel', 'video/mp4', 'video', { width: 720, height: 1280, duration: 12 })
-    await asset('wide', 'video/mp4', 'video', { width: 1920, height: 1080, duration: 20 })
+    await db.prepare("INSERT INTO member(id, organizationId, userId, role, createdAt) VALUES ('member-owner', 'org-a', 'owner', 'owner', ?)").bind(Date.now()).run()
+    const session = 'native-video-upload-session'
+    await db.prepare('INSERT INTO session(id, token, userId, expiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind('native-video-upload', session, 'owner', Date.now() + 60_000, Date.now(), Date.now()).run()
+    const form = new FormData()
+    const clip = readFileSync(new URL('../e2e/seed/media/clip.mp4', import.meta.url))
+    const poster = await sharp(readFileSync(new URL('../e2e/seed/media/poster.avif', import.meta.url))).jpeg().toBuffer()
+    form.set('video', new Blob([clip], { type: 'video/mp4' }), 'clip.mp4')
+    form.set('thumbnail', new Blob([poster], { type: 'image/jpeg' }), 'poster.jpg')
+    const app = new H3()
+    app.post('/api/editor/organizations/:organization_id/media/upload', uploadMedia)
+    const posted = await app.request(Object.assign(new Request('https://proof.example/api/editor/organizations/org-a/media/upload', {
+      method: 'POST', headers: { authorization: `Bearer ${session}` }, body: form,
+    }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    assert.equal(posted.status, 200, await posted.clone().text())
+    const upload = await posted.json() as { asset_id: string; public_url: string; thumbnail_url: string }
+    const savedAsset = await getMediaAsset(db, upload.asset_id, 'org-a')
+    assert.equal(savedAsset?.kind, 'video')
+    assert.equal(savedAsset.status, 'active')
+    assert.deepEqual([savedAsset.width, savedAsset.height, savedAsset.duration], [640, 360, 3])
+    assert.equal(savedAsset.thumbnail_url, upload.thumbnail_url)
+    assert.equal(savedAsset.public_url, upload.public_url)
+    assert.ok(savedAsset.r2_key)
+    const playback = await (await runtime.getR2Bucket('MEDIA_BUCKET')).get(savedAsset.r2_key)
+    assert.equal(playback?.httpMetadata?.contentType, 'video/mp4')
+    assert.equal(playback.size, clip.length)
     const create = (key: string, post: Record<string, unknown>) => createPost(db, cardless, 'org-a', { post, idempotencyKey: key }, 'owner')
     const publication = (postId: string) => db.prepare('SELECT state, provider_post_id, provider_permalink, error_code FROM post_publications WHERE post_id = ? AND channel = ?').bind(postId, 'facebook')
       .first<{ state: string; provider_post_id: string | null; provider_permalink: string | null; error_code: string | null }>()
@@ -1287,11 +1314,11 @@ test('Facebook video: a Reel is published by finishing its upload session, any o
     assert.equal(starts(), 1)
 
     // Any other video is published by its upload; the video Facebook accepted is the publication.
-    const wide = await create('key-fb-wide', { body: 'Kitchen tour', media: [{ asset_id: 'wide', slot: 'cover' }] })
+    const wide = await create('key-fb-wide', { body: 'Kitchen tour', media: [{ asset_id: upload.asset_id, slot: 'cover' }] })
     const uploaded = await publishPost(env, 'org-a', wide.post.id, { expectedUpdatedAt: wide.post.updated_at, targets: [targets.facebook()] }, 'owner')
     assert.equal(uploaded.outcomes[0]!.status, 'published', JSON.stringify(uploaded.outcomes))
     assert.deepEqual(meta.sent(request => request.path.endsWith(`${PAGE}/videos`)).map(request => [request.body.file_url, request.body.published, request.body.description]),
-      [['https://imagedelivery.example.test/hash/wide/public', undefined, 'Kitchen tour']])
+      [[upload.public_url, undefined, 'Kitchen tour']])
     assert.deepEqual(await publication(wide.post.id).then(row => [row!.state, row!.provider_post_id]), ['published', 'video-2'])
     // That video id has no Page prefix; the receipt of its publication to this Page is what lets it be deleted.
     await assert.rejects(deleteChannelPost(env, 'org-a', targets.facebook(), 'video-unrecorded', 'owner'), /selected Page/)
