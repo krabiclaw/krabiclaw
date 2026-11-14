@@ -279,24 +279,25 @@ export function sessionPrepTaskQueries(sessions: BatchQuery, now: string): Batch
 
 export interface TaskViewer { principal: MemberAccessPrincipal; manage: boolean; memberId: string }
 
-export async function taskViewer(db: DbClient, principal: MemberAccessPrincipal): Promise<TaskViewer> {
+export async function taskViewer(principal: MemberAccessPrincipal): Promise<TaskViewer> {
   await assertRoleAllows({ ...principal, permissions: { task: ['read'] } })
-  const member = await queryFirst<{ id: string }>(db, 'SELECT id FROM member WHERE organizationId = ? AND userId = ?', [principal.organizationId, principal.userId])
-  if (!member) fail(404, 'MEMBER_NOT_FOUND', 'You are not a member of this organization')
-  return { principal, manage: await roleAllows({ ...principal, permissions: { task: ['assign'] } }), memberId: member.id }
+  return { principal, manage: await roleAllows({ ...principal, permissions: { task: ['assign'] } }), memberId: principal.memberId }
 }
 
 /** A member reads the tasks given to them, every task at an offering or location they are responsible for, and the replies in conversations they handle. */
 function scopeSql(viewer: TaskViewer, alias = 't'): { sql: string; params: unknown[] } {
-  if (viewer.manage) return { sql: '1 = 1', params: [] }
-  const conversation = assignedGuestThreadScope('r', viewer.principal.userId)
+  const { organizationId, userId } = viewer.principal
+  const membership = 'EXISTS (SELECT 1 FROM member m WHERE m.id = ? AND m.organizationId = ? AND m.userId = ?)'
+  const memberParams = [viewer.memberId, organizationId, userId]
+  if (viewer.manage) return { sql: membership, params: memberParams }
+  const conversation = assignedGuestThreadScope('r', userId)
   return {
-    sql: `NOT (${alias}.kind='booking_review' AND EXISTS (SELECT 1 FROM bookings b WHERE b.id=${alias}.subject_id
+    sql: `${membership} AND NOT (${alias}.kind='booking_review' AND EXISTS (SELECT 1 FROM bookings b WHERE b.id=${alias}.subject_id
       AND b.organization_id=${alias}.organization_id AND b.product_session_id IS NULL)) AND (${alias}.assigned_member_id = ?
       OR EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id = ${alias}.organization_id AND c.product_id = ${alias}.product_id AND ${assignedMemberSql('c')})
       OR (${alias}.product_id IS NULL AND ${alias}.location_id IS NOT NULL AND ${locationMemberSql(`${alias}.organization_id`, `${alias}.location_id`)})
       OR (${alias}.kind = 'guest_reply' AND EXISTS (SELECT 1 FROM conversations r WHERE r.id = ${alias}.subject_id AND r.organization_id = ${alias}.organization_id AND ${conversation.sql})))`,
-    params: [viewer.memberId, ...Array(2).fill(viewer.principal.userId), ...conversation.params],
+    params: [...memberParams, viewer.memberId, userId, userId, ...conversation.params],
   }
 }
 
@@ -428,70 +429,86 @@ interface Context {
 async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): Promise<Context> {
   const organizationId = viewer.principal.organizationId
   const ids = (pick: (row: TaskRow) => string | null) => [...new Set(rows.map(pick).filter((id): id is string => id !== null))]
+  const assignees = ids(row => row.assigned_member_id)
+  const closers = ids(row => row.closed_by_user_id)
+  const locationIds = ids(row => row.kind === 'turnover' ? null : row.location_id)
+  const opportunityIds = ids(row => row.kind === 'opportunity' ? row.opportunity_id : null)
   const messageIds = ids(row => row.subject_type === 'scheduled_guest_message' ? row.subject_id : null)
-  const messages = messageIds.length ? await queryAll<{ id: string; template_title: string; status: string; conversation_id: string | null; booking_id: string }>(db,
-    `SELECT m.id, m.template_title, m.status, (SELECT c.id FROM conversations c WHERE c.organization_id = m.organization_id AND c.booking_id = m.booking_id AND c.kind = 'booking') AS conversation_id, m.booking_id
-      FROM scheduled_guest_messages m WHERE m.organization_id = ? AND m.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(messageIds)]) : []
   const sessions = ids(row => row.subject_type === 'product_session' ? row.subject_id : null)
-  const privateConsultations = sessions.length ? await queryAll<{ id: string; booking_id: string | null }>(db,
-    `SELECT candidate.id, ${consultationBookingSql('candidate.id', 'candidate.organization_id')} AS booking_id FROM product_sessions candidate
-      WHERE candidate.organization_id = ? AND candidate.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(sessions)]) : []
+  const rowProductIds = ids(row => row.product_id)
+  const openReplies = ids(row => row.kind === 'guest_reply' && row.status === 'open' ? row.subject_id : null)
+  const [organization, members, locations, photos, paymentOpportunities, messages, privateConsultations, pictures, canUpdateOperations] = await Promise.all([
+    queryFirst<{ slug: string; vertical: string }>(db, 'SELECT slug, vertical FROM organization WHERE id = ?', [organizationId]),
+    assignees.length || closers.length ? queryAll<{ id: string; userId: string; name: string }>(db, `SELECT m.id, m.userId, u.name FROM member m
+      JOIN user u ON u.id = m.userId WHERE m.organizationId = ?
+      AND (m.id IN (SELECT value FROM json_each(?)) OR m.userId IN (SELECT value FROM json_each(?)))`,
+    [organizationId, d1JsonStringSet(assignees), d1JsonStringSet(closers)]) : [],
+    locationIds.length ? queryAll<{ id: string; title: string }>(db,
+      'SELECT id, title FROM business_locations WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))',
+    [organizationId, d1JsonStringSet(locationIds)]) : [],
+    listMessagePhotos(db, 'task', ids(row => row.status !== 'open' ? row.id : null)),
+    opportunityIds.length ? queryAll<{ id: string }>(db, "SELECT id FROM opportunities WHERE organization_id = ? AND operation = 'product.payment' AND id IN (SELECT value FROM json_each(?))",
+    [organizationId, d1JsonStringSet(opportunityIds)]) : [],
+    messageIds.length ? queryAll<{ id: string; template_title: string; status: string; conversation_id: string | null; booking_id: string }>(db,
+      `SELECT m.id, m.template_title, m.status, (SELECT c.id FROM conversations c WHERE c.organization_id = m.organization_id AND c.booking_id = m.booking_id AND c.kind = 'booking') AS conversation_id, m.booking_id
+        FROM scheduled_guest_messages m WHERE m.organization_id = ? AND m.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(messageIds)]) : [],
+    sessions.length ? queryAll<{ id: string; booking_id: string | null }>(db,
+      `SELECT candidate.id, ${consultationBookingSql('candidate.id', 'candidate.organization_id')} AS booking_id FROM product_sessions candidate
+        WHERE candidate.organization_id = ? AND candidate.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(sessions)]) : [],
+    loadOwnerPictures(db, organizationId, 'product', rowProductIds, { organizationFallback: false }),
+    openReplies.length && viewer.principal.role ? roleAllows({ ...viewer.principal, permissions: { operations: ['update'] } }) : false,
+  ])
+  if (!organization) throw new Error(`Organization ${organizationId} is missing`)
   const consultations = new Map(privateConsultations.flatMap(row => row.booking_id ? [[row.id, row.booking_id] as const] : []))
-  const bookingIds = [...new Set([...ids(row => row.subject_type === 'booking' ? row.subject_id : null), ...messages.map(message => message.booking_id), ...consultations.values()])]
-  const booked = bookingIds.length ? await queryAll<{ id: string; conversation_id: string | null; starts_at: string; ends_at: string; timezone: string; product_kind: ProductKind; unit: 'slot' | 'nights' }>(db, `SELECT br.id, br.starts_at, br.ends_at, br.timezone, br.product_kind, br.unit,
-       (SELECT c.id FROM conversations c WHERE c.organization_id = br.organization_id AND c.booking_id = br.id AND c.kind = 'booking') AS conversation_id FROM ${BOOKING_RECORDS_SQL} br
+  const bookingIds = [...new Set([...ids(row => row.subject_type === 'booking' && row.kind !== 'turnover' && row.kind !== 'stay_ready' ? row.subject_id : null),
+    ...messages.map(message => message.booking_id), ...consultations.values()])]
+  const booked = bookingIds.length ? await queryAll<{ id: string; conversation_id: string | null; starts_at: string; ends_at: string; timezone: string; product_kind: ProductKind; unit: 'slot' | 'nights' }>(db, `SELECT br.id, br.starts_at, br.ends_at, br.timezone, br.product_kind, br.unit, br.conversation_id FROM ${BOOKING_RECORDS_SQL} br
      WHERE br.organization_id = ? AND br.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(bookingIds)]) : []
   const records = booked.filter(record => record.unit === 'slot' || rows.some(row => row.kind === 'booking_review' && row.subject_id === record.id))
   const changeStayRequests = booked.filter(record => record.unit === 'nights' && rows.some(row => row.kind === 'booking_change' && row.subject_id === record.id))
-  const requestIds = [...new Set([...ids(row => row.subject_type === 'conversation' ? row.subject_id : null),
+  const requestIds = [...new Set([...ids(row => row.kind === 'guest_reply' ? row.subject_id : null),
     ...records.flatMap(record => record.conversation_id ? [record.conversation_id] : []), ...changeStayRequests.flatMap(stay => stay.conversation_id ? [stay.conversation_id] : [])])]
   // Stay writers load this module; the conversation repository is loaded when a view is drawn.
-  const { guestEntryAskedAtSql } = await import('~/server/domain/guest-threads/repository')
-  const [organization, members, locations, requests, photos, paymentOpportunities] = await Promise.all([
-    queryFirst<{ slug: string; vertical: string }>(db, 'SELECT slug, vertical FROM organization WHERE id = ?', [organizationId]),
-    queryAll<{ id: string; userId: string; name: string }>(db, 'SELECT m.id, m.userId, u.name FROM member m JOIN user u ON u.id = m.userId WHERE m.organizationId = ?', [organizationId]),
-    queryAll<{ id: string; title: string }>(db, 'SELECT id, title FROM business_locations WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [organizationId, d1JsonStringSet(ids(row => row.location_id))]),
+  const requestsRead = requestIds.length ? import('~/server/domain/guest-threads/repository').then(({ guestEntryAskedAtSql }) =>
     queryAll<{ id: string; guest_name: string | null; participant: string | null; preview: string | null; asked_at: string | null }>(db, `
       SELECT r.id, json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.participant.title') AS participant,
         (SELECT e.body FROM messages e JOIN tasks t ON t.subject_id = r.id AND t.kind = 'guest_reply'
           WHERE e.id = substr(t.dedupe_key, length('guest_reply:' || r.id || ':') + 1) ORDER BY t.created_at DESC LIMIT 1) AS preview,
         (SELECT ${guestEntryAskedAtSql('e')} FROM messages e JOIN tasks t ON t.subject_id = r.id AND t.kind = 'guest_reply'
           WHERE e.id = substr(t.dedupe_key, length('guest_reply:' || r.id || ':') + 1) ORDER BY t.created_at DESC LIMIT 1) AS asked_at
-      FROM conversations r WHERE r.organization_id = ? AND r.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(requestIds)]),
-    listMessagePhotos(db, 'task', rows.map(row => row.id)),
-    queryAll<{ id: string }>(db, "SELECT id FROM opportunities WHERE organization_id = ? AND operation = 'product.payment' AND id IN (SELECT value FROM json_each(?))",
-      [organizationId, d1JsonStringSet(ids(row => row.status === 'open' ? row.opportunity_id : null))]),
-  ])
-  if (!organization) throw new Error(`Organization ${organizationId} is missing`)
-  const stayIds = booked.filter(record => record.unit === 'nights').map(record => record.id)
-  const openReplies = ids(row => row.kind === 'guest_reply' && row.status === 'open' ? row.subject_id : null)
-  const replyRequests = openReplies.length && viewer.principal.role && await roleAllows({ ...viewer.principal, permissions: { operations: ['update'] } }) ? openReplies : []
-  const stays = (await queryAll<Omit<StayContextFacts, 'check_in_date' | 'check_out_date' | 'same_day_arrival'>>(db, `
+      FROM conversations r WHERE r.organization_id = ? AND r.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(requestIds)]))
+    : []
+  const stayIds = [...new Set([...ids(row => row.kind === 'turnover' ? row.subject_id : null), ...booked.filter(record => record.unit === 'nights').map(record => record.id)])]
+  const replyRequests = canUpdateOperations ? openReplies : []
+  const [stayRows, requests] = await Promise.all([
+    stayIds.length || replyRequests.length ? queryAll<Omit<StayContextFacts, 'check_in_date' | 'check_out_date'>>(db, `
     SELECT ${STAY_FACTS}, s.status, s.no_show_at, s.channel, s.overbooked, u.image AS guest_image_url
     FROM ${STAY_FACTS_FROM}
     LEFT JOIN user u ON u.id = s.user_id
     WHERE s.organization_id = ? AND s.product_session_id IS NULL AND (s.id IN (SELECT value FROM json_each(?)) OR r.id IN (SELECT value FROM json_each(?)))`,
-  [organizationId, d1JsonStringSet(stayIds), d1JsonStringSet(replyRequests)])).map(stayFacts)
+    [organizationId, d1JsonStringSet(stayIds), d1JsonStringSet(replyRequests)]) : [],
+    requestsRead,
+  ])
+  const stays = stayRows.map(row => stayFacts(row))
   // Whether the home's next guests arrive the day the guest of a conversation being answered leaves.
   const sameDay = new Set<string>()
   for (const stay of stays.filter(item => item.conversation_id && replyRequests.includes(item.conversation_id))) {
     if ((await nextArrival(db, organizationId, stay))?.check_in_date === stay.check_out_date) sameDay.add(stay.id)
   }
-  const productIds = [...new Set([...ids(row => row.product_id), ...stays.map(stay => stay.product_id)])]
-  const [products, pictures] = await Promise.all([
-    queryAll<{ id: string; name: string | null; kind: ProductKind }>(db, `
+  const stayProductIds = [...new Set(stays.map(stay => stay.product_id))].filter(id => !pictures.has(id))
+  const productIds = [...rowProductIds, ...stayProductIds]
+  const [products, stayPictures, arrivals] = await Promise.all([
+    productIds.length ? queryAll<{ id: string; name: string | null; kind: ProductKind }>(db, `
       SELECT p.id, p.kind, CASE WHEN p.kind = 'stay' THEN c.internal_name ELSE p.name END AS name
       FROM products p LEFT JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
-      WHERE p.organization_id = ? AND p.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(productIds)]),
-    loadOwnerPictures(db, organizationId, 'product', productIds, { organizationFallback: false }),
+      WHERE p.organization_id = ? AND p.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(productIds)]) : [],
+    loadOwnerPictures(db, organizationId, 'product', stayProductIds, { organizationFallback: false }),
+    // The next guests at the home, for the turnovers shown.
+    Promise.all(rows.filter(row => row.kind === 'turnover' && row.product_id !== null).map(async row => {
+      const stay = stays.find(item => item.id === row.subject_id)
+      return [row.id, stay ? await nextArrival(db, organizationId, { ...stay, product_id: row.product_id! }) : null] as const
+    })),
   ])
-  // The next guests at the home, for the turnovers shown.
-  const arrivals = new Map<string, StayFacts | null>()
-  for (const row of rows.filter(row => row.kind === 'turnover' && row.product_id !== null)) {
-    const stay = stays.find(item => item.id === row.subject_id)
-    if (!stay) continue
-    arrivals.set(row.id, await nextArrival(db, organizationId, { ...stay, product_id: row.product_id! }))
-  }
   return {
     slug: organization.slug,
     vertical: organization.vertical,
@@ -501,12 +518,12 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
     users: new Map(members.map(member => [member.userId, member.name])),
     products: new Map(products.map(product => {
       if (!product.name?.trim()) throw new Error(`Product ${product.id} has no name for this task`)
-      return [product.id, { name: product.name, kind: product.kind, imageUrl: pictures.get(product.id)?.imageUrl ?? null }]
+      return [product.id, { name: product.name, kind: product.kind, imageUrl: (pictures.get(product.id) ?? stayPictures.get(product.id))?.imageUrl ?? null }]
     })),
     locations: new Map(locations.map(location => [location.id, location.title])),
     stays: new Map(stays.map(stay => [stay.id, stay])),
     replyStays: new Map(stays.flatMap(stay => stay.conversation_id && replyRequests.includes(stay.conversation_id) ? [[stay.conversation_id, { ...stay, same_day_arrival: sameDay.has(stay.id) }]] : [])),
-    arrivals,
+    arrivals: new Map(arrivals),
     requests: new Map(requests.map(request => [request.id, request])),
     messages: new Map(messages.map(message => [message.id, { title: message.template_title, status: message.status, conversation_id: message.conversation_id, booking_id: message.booking_id }])),
     records: new Map(records.map(record => [record.id, record])),
@@ -867,6 +884,7 @@ export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskLis
     return (start !== null && start <= today(row)) || (due !== null && due <= today(row))
   }
   const shown = rows.filter(row => query.range === 'today' ? isToday(row) : row.status === 'open' && !isToday(row))
+  if (!shown.length) return { resolved_at: now.toISOString(), sections: [] }
   const context = await loadContext(db, viewer, shown)
   const views = shown.map(row => ({ row, view: present(row, viewer, context, now) }))
   const resolved_at = now.toISOString()
@@ -920,29 +938,31 @@ export async function taskViewForUser(db: DbClient, organizationId: string, task
 }
 
 export async function getTask(db: DbClient, viewer: TaskViewer, taskId: string, now = new Date()): Promise<TaskView> {
-  const row = await readTaskRow(db, viewer, taskId)
+  return taskView(db, viewer, await readTaskRow(db, viewer, taskId), now)
+}
+
+export async function taskView(db: DbClient, viewer: TaskViewer, row: TaskRow, now = new Date()): Promise<TaskView> {
   return present(row, viewer, await loadContext(db, viewer, [row]), now)
 }
 
 /**
- * The job of each stay the viewer may see, for the strip at the top of a stay's
- * team conversation: the open one first (the home must be ready before the
- * guest arrives, then turned over after), otherwise the one closed last.
+ * The authorized booking's job for the conversation strip: the open one
+ * first, otherwise the one closed last.
  */
-export async function subjectJobViews(db: DbClient, viewer: TaskViewer, subjectIds: readonly string[], now = new Date()): Promise<Map<string, TaskView>> {
-  if (!subjectIds.length) return new Map()
+export function bookingJobQuery(viewer: TaskViewer, bookingId: string): BatchQuery {
   const scope = scopeSql(viewer)
-  const rows = await queryAll<TaskRow & { job_booking_id: string }>(db, `SELECT t.*, ${jobBookingIdSql('t')} AS job_booking_id FROM tasks t
-    WHERE t.organization_id = ? AND (${JOB_TASK_SQL('t')} OR t.kind = 'consultation_prep') AND ${scope.sql}
-      AND job_booking_id IN (SELECT value FROM json_each(?))
-    ORDER BY CASE t.status WHEN 'open' THEN 0 ELSE 1 END, CASE WHEN t.status = 'open' THEN COALESCE(t.due_at, t.starts_at, t.created_at) END, t.closed_at DESC, t.updated_at DESC`,
-  [viewer.principal.organizationId, ...scope.params, d1JsonStringSet(subjectIds)])
-  const chosen = new Map<string, TaskRow>()
-  for (const row of rows) {
-    if (!chosen.has(row.job_booking_id)) chosen.set(row.job_booking_id, row)
+  const { organizationId } = viewer.principal
+  return {
+    query: `SELECT t.* FROM tasks t
+      WHERE t.organization_id = ? AND ${scope.sql}
+        AND ((t.subject_type = 'booking' AND t.subject_id = ? AND (${JOB_TASK_SQL('t')} OR t.kind = 'consultation_prep'))
+          OR (t.subject_type = 'product_session' AND t.kind = 'consultation_prep'
+            AND t.subject_id = (SELECT b.product_session_id FROM bookings b WHERE b.organization_id = ? AND b.id = ?)
+            AND ${jobBookingIdSql('t')} = ?))
+      ORDER BY CASE t.status WHEN 'open' THEN 0 ELSE 1 END, CASE WHEN t.status = 'open' THEN COALESCE(t.due_at, t.starts_at, t.created_at) END, t.closed_at DESC, t.updated_at DESC
+      LIMIT 1`,
+    params: [organizationId, ...scope.params, bookingId, organizationId, bookingId, bookingId],
   }
-  const context = await loadContext(db, viewer, [...chosen.values()])
-  return new Map([...chosen].map(([subjectId, row]) => [subjectId, present(row, viewer, context, now)]))
 }
 
 // ---------------------------------------------------------------------------

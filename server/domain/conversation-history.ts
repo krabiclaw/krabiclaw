@@ -2,17 +2,17 @@ import { queryFirst, type DbClient } from '~/server/db'
 import type { ConversationMessage, ConversationPage, ConversationViewerRole } from '~/shared/messages-contract'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import { conversationAccessDenied, participantGuard, type ConversationRow, type ConversationWindow, type MessageRow } from './conversations'
-import { conversationDeliveryReceipt, projectGuestConversation, readConversationParticipants } from './guest-threads/inbox'
+import { conversationDeliveryReceipt, conversationParticipantsQuery, projectGuestConversation, type ConversationParticipantRow } from './guest-threads/inbox'
 import { getTeamThread } from './team-messages'
 import { guestHistoryContext } from './guest-threads/detail'
-import { enrichConversationHistory, readConversationHistory } from './conversation-history-data'
+import { readConversationHistory } from './conversation-history-data'
 
 import { readConversationEnrichment, threadDeliveriesQuery } from './guest-threads/deliveries'
 import { parseGuestRequest, participantLabel } from './requests'
 
 type MessageEnrichment = Awaited<ReturnType<typeof readConversationEnrichment>>
 
-function projectMessage(message: MessageRow, author: string, enrichment: MessageEnrichment, team: boolean): ConversationMessage {
+function projectMessage(message: MessageRow, author: string, enrichment: Pick<MessageEnrichment, 'photos' | 'deliveriesByMessage'>, team: boolean): ConversationMessage {
   return {
     type: 'message', id: message.id, sequence: message.sequence, side: message.author_kind === 'guest' ? 'guest' : 'business', author_user_id: message.author_user_id,
     author, automatic: message.author_kind === 'krabiclaw', label: null, sent_at: team ? message.created_at : message.occurred_at, time: null,
@@ -64,17 +64,18 @@ export async function loadConversationPage(
   if (role === 'member' && (!principal || principal.userId !== userId || principal.organizationId !== organizationId)) conversationAccessDenied()
   if (role === 'guest' && conversation.kind === 'team') conversationAccessDenied()
   const guestUserId = role === 'guest' ? userId : null
-  const history = readConversationHistory(db, id, { guestUserId, guard }, window,
-    conversation.kind === 'team' ? [] : guestHistoryContext(conversation, guestUserId, window))
+  const history = readConversationHistory(db, id, { guestUserId, guard, kind: conversation.kind }, window,
+    conversation.kind === 'team' ? [] : [
+      ...guestHistoryContext(conversation, guestUserId, window),
+      conversationParticipantsQuery(conversation, userId, role),
+    ])
   if (conversation.kind === 'team') {
     if (!principal) conversationAccessDenied()
-    const [thread, { entries, page }, enrichment] = await Promise.all([
-      getTeamThread(db, principal, id),
+    const [thread, { entries, page, photos, deliveriesByMessage }] = await Promise.all([
+      getTeamThread(db, principal, conversation, readThrough),
       history,
-      history.then(({ entries }) => enrichConversationHistory(db, conversation, entries, null, window)),
     ])
     const { participants, ...header } = thread
-    if (!participants.some(person => person.id === userId)) conversationAccessDenied()
     const names = new Map(participants.map(person => [person.id, person.name]))
     const title = header.name ?? participants.filter(person => person.id !== userId).map(person => person.name).join(', ')
     return {
@@ -84,12 +85,9 @@ export async function loadConversationPage(
       },
       entries: entries.map(message => projectMessage(
         message, message.author_kind === 'krabiclaw' ? 'Sent automatically' : message.author_user_id === userId ? 'You' : names.get(message.author_user_id ?? '') ?? 'Former member',
-        enrichment, true,
+        { photos, deliveriesByMessage }, true,
       )),
-      page: {
-        ...page,
-        read_through: readThrough, failed_messages: [],
-      },
+      page: { ...page, read_through: readThrough },
       viewer_role: role,
       capabilities: {
         can_send: true, can_manage_participants: header.can_manage, can_invite_guest: false,
@@ -97,12 +95,13 @@ export async function loadConversationPage(
       },
     }
   }
-  const [thread, participants] = await Promise.all([
+  const [thread, { context }] = await Promise.all([
     projectGuestConversation(db, conversation, role === 'member' && principal
       ? { audience: 'member', userId, principal }
       : { audience: 'buyer', userId }, now, window, history),
-    readConversationParticipants(db, conversation, userId, role),
+    history,
   ])
+  const participants = context.at(-1)!.results as ConversationParticipantRow[]
   if (!thread || thread.kind === 'team' || !participants.some(person => person.id === userId && person.role === role)) conversationAccessDenied()
   const { stream, page, ...header } = thread
   const bookingHost = role === 'member' && conversation.kind === 'booking' && conversation.booking_id !== null

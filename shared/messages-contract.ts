@@ -44,7 +44,6 @@ export interface ConversationPage {
     oldest: number | null
     newest: number | null
     read_through: number | null
-    failed_messages: string[]
   }
   viewer_role: ConversationViewerRole
   capabilities: {

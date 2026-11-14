@@ -17,9 +17,6 @@
         <TaskCard v-if="thread.job" class="mt-3" :task="thread.job" data-testid="team-thread-job" @open="jobOpen = true" />
       </div>
       <div ref="scroller" class="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-default" style="overflow-anchor: none">
-        <div v-if="olderFailureCount" class="px-4 pt-3 text-center text-sm text-error" role="status">
-          {{ olderFailureCount === 1 ? 'An older message has a delivery failure.' : `${olderFailureCount} older messages have delivery failures.` }}
-        </div>
         <div v-if="before || olderError" class="flex flex-col items-center gap-2 pt-3">
           <UButton v-if="before" color="neutral" variant="ghost" :loading="loadingOlder" @click="loadOlder">{{ thread.kind === 'team' ? 'Earlier messages' : 'Load older messages' }}</UButton>
           <p v-if="olderError" class="text-sm text-error" role="alert">{{ olderError }}</p>
@@ -161,12 +158,6 @@ const olderError = ref<string | null>(null)
 const loadingOlder = ref(false)
 const transcriptPage = computed(() => data.value?.page)
 const jobOpen = ref(false)
-const olderFailureCount = computed(() => {
-  const failures = transcriptPage.value?.failed_messages ?? []
-  if (!failures.length) return 0
-  const loaded = new Set([...entries.value, ...older.value.flatMap(page => page.entries)].map(item => item.id))
-  return failures.filter(id => !loaded.has(id)).length
-})
 const before = computed(() => older.value.length ? older.value[0]!.page.before : transcriptPage.value?.before)
 let olderRequest: AbortController | undefined
 
@@ -559,11 +550,7 @@ watch(realtime.event, event => {
     if (message.id === settledReply?.id && message.sequence === settledReply.sequence) return
   }
   const oldest = older.value[0]?.page.oldest ?? transcriptPage.value?.oldest
-  if (event.type === 'MESSAGE_UPDATE' && event.message && oldest != null && event.message.sequence < oldest) {
-    // Thread-wide delivery failure summaries still depend on offscreen messages.
-    reconcileThread()
-    return
-  }
+  if (event.type === 'MESSAGE_UPDATE' && event.message && oldest != null && event.message.sequence < oldest) return
   reconcileThread(event.type === 'MESSAGE_UPDATE' && (!event.message || transcriptPage.value?.oldest == null || event.message.sequence < transcriptPage.value.oldest))
 }, { flush: 'sync' })
 

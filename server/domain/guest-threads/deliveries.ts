@@ -421,13 +421,17 @@ export async function deliverGuestThreadEmail(
  */
 export function threadDeliveriesQuery(threadId: string, messageIds?: string[], purpose?: GuestThreadDeliveryPurpose): BatchQuery {
   return { query: `
-    SELECT d.* FROM guest_thread_deliveries d
+    SELECT ${messageIds ? HISTORY_DELIVERY_COLUMNS : 'd.*'} FROM guest_thread_deliveries d
     JOIN messages m ON m.id = d.message_id
     WHERE m.conversation_id = ? ${messageIds ? 'AND m.id IN (SELECT value FROM json_each(?))' : ''}
       ${purpose ? 'AND d.purpose = ?' : ''}
     ORDER BY ${purpose ? 'd.created_at, d.id' : 'd.created_at DESC'}
   `, params: [threadId, ...(messageIds ? [d1JsonStringSet(messageIds)] : []), ...(purpose ? [purpose] : [])] }
 }
+
+export const HISTORY_DELIVERY_FIELDS = ['id', 'message_id', 'channel', 'provider', 'purpose', 'status', 'error', 'created_at', 'updated_at'] as const satisfies (keyof GuestThreadDeliveryRow)[]
+export const HISTORY_DELIVERY_COLUMNS = HISTORY_DELIVERY_FIELDS.map(field => `d.${field}`).join(', ')
+export type HistoryDelivery = Pick<GuestThreadDeliveryRow, typeof HISTORY_DELIVERY_FIELDS[number]>
 
 export async function listThreadDeliveries(db: DbClient, threadId: string): Promise<GuestThreadDeliveryRow[]> {
   const { query, params } = threadDeliveriesQuery(threadId)
@@ -445,15 +449,19 @@ export async function readConversationEnrichment(db: DbClient, messageIds: strin
   const results = batch.length ? await executeBatch(db, batch, { operation: 'Read conversation enrichment' }) : []
   const photos = photoQuery ? results.shift()!.results as MessagePhotoRow[] : []
   const actors = authorQuery ? results.shift()!.results as { id: string; name: string }[] : []
-  const deliveries = receipts ? results.shift()!.results as GuestThreadDeliveryRow[] : []
-  const deliveriesByMessage = new Map<string, GuestThreadDeliveryRow[]>()
+  const deliveries = receipts ? results.shift()!.results as HistoryDelivery[] : []
+  return { photos: groupMessagePhotos(photos), actors, deliveriesByMessage: groupMessageDeliveries(deliveries) }
+}
+
+export function groupMessageDeliveries(deliveries: HistoryDelivery[]) {
+  const deliveriesByMessage = new Map<string, HistoryDelivery[]>()
   for (const delivery of deliveries) {
     if (!delivery.message_id) throw new Error(`Message delivery ${delivery.id} names no message`)
     const attempts = deliveriesByMessage.get(delivery.message_id)
     if (attempts) attempts.push(delivery)
     else deliveriesByMessage.set(delivery.message_id, [delivery])
   }
-  return { photos: groupMessagePhotos(photos), actors, deliveries, deliveriesByMessage }
+  return deliveriesByMessage
 }
 
 /** A failure worth showing in the thread. */

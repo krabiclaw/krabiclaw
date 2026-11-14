@@ -103,16 +103,19 @@ function viewerMessageVisibility(message: string, conversation: string): string 
  * see them. A guest counts only what they can see. Every list row, the Unread filter, the
  * filter counts, the nav count, the app badge and MCP read this.
  */
-export function unreadSql(conversation: string, viewer: string): { sql: string; params: string[] } {
+export function unreadSql(conversation: string, viewer: string, readThrough?: number | null): { sql: string; params: (string | number)[] } {
+  const sequence = readThrough === undefined
+    ? { sql: `COALESCE((SELECT read_message.sequence FROM conversation_participants reader
+          JOIN messages read_message ON read_message.id = reader.last_read_message_id
+          WHERE reader.conversation_id = ${conversation}.id AND reader.user_id = ?), 0)`, param: viewer }
+    : { sql: '?', param: readThrough ?? 0 }
   return {
     sql: `EXISTS (SELECT 1 FROM messages unread_message
       WHERE unread_message.conversation_id = ${conversation}.id
         AND unread_message.author_user_id IS NOT ?
         AND ${viewerMessageVisibility('unread_message', conversation)}
-        AND unread_message.sequence > COALESCE((SELECT read_message.sequence FROM conversation_participants reader
-          JOIN messages read_message ON read_message.id = reader.last_read_message_id
-          WHERE reader.conversation_id = ${conversation}.id AND reader.user_id = ?), 0))`,
-    params: [viewer, viewer, viewer],
+        AND unread_message.sequence > ${sequence.sql})`,
+    params: [viewer, viewer, sequence.param],
   }
 }
 

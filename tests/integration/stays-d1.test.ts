@@ -1406,7 +1406,7 @@ test('unknown home clocks preserve turnover dates without inventing task instant
     const first = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'unknown-first', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
     const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'unknown-next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
     const membership = await resolveMembership(env, { organizationId: ORG, userId: CLEANER })
-    const viewer = await taskViewer(db, memberAccessPrincipal(membership!, { env }))
+    const viewer = await taskViewer(memberAccessPrincipal(membership!, { env }))
     const before = new Date('2026-11-02T18:00:00.000Z')
     assert.deepEqual((await listTasks(db, viewer, parseTaskListQuery({}), before)).sections, [])
     const upcoming = await listTasks(db, viewer, parseTaskListQuery({ range: 'upcoming' }), before)
@@ -1448,7 +1448,7 @@ test('members see only the homes they look after and change nothing; a home with
       assert.deepEqual((await cleanerToday(now)).items.map(item => [item.booking_id, item.stay_moment]), [[cabinStay.id, moment]])
     }
     // The cleaner's Today is the turnover tasks at the homes they look after.
-    const cleanerTasks = async (now: string) => (await listTasks(db, await taskViewer(db, memberAccessPrincipal(cleanerMembership!, { env })), parseTaskListQuery({}), new Date(now)))
+    const cleanerTasks = async (now: string) => (await listTasks(db, await taskViewer(memberAccessPrincipal(cleanerMembership!, { env })), parseTaskListQuery({}), new Date(now)))
       .sections.flatMap(section => section.tasks).map(task => [task.kind, task.booking_id, task.detail])
     assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out']])
     const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
@@ -1474,9 +1474,10 @@ test('members see only the homes they look after and change nothing; a home with
   }
 })
 
-test('a member reads a stay at a home they look after as its turnover on every read path, and nothing of its guest, money or conversation', { timeout: 120_000 }, async () => {
+test('a member reads a stay at a home they look after as its turnover on every read path, and nothing of its guest, money or conversation', { timeout: 120_000 }, async (t) => {
   const { runtime, db, env } = await boot()
   try {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T18:00:00.000Z') })
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'turnover', check_in_date: '2026-11-01', check_out_date: '2026-11-03', arrival_time: '15:30',
       adults: 2, children: 1, infants: 1, guest_name: 'Ana Silva', guest_email: 'ana@example.test', private_notes: 'Door code 4411', total_minor: 45_000 })
@@ -1552,6 +1553,7 @@ test('a member reads a stay at a home they look after as its turnover on every r
     assert.deepEqual(await listed(true), [[stay.id, 'nights', { name: 'Ana Silva' }, turnover.starts_at]])
     assert.equal(((await mcp(ownerMembership, 'owner', 'get_stay_calendar', { product_id: cabin.id, ...window })).stays as Array<Record<string, unknown>>)[0]!.guest_name, 'Ana Silva')
   } finally {
+    t.mock.timers.reset()
     await runtime.dispose()
   }
 })
@@ -2201,7 +2203,7 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
     const owner = await resolveMembership(env, { organizationId: ORG, userId: OWNER })
     const cleanerMembership = await resolveMembership(env, { organizationId: ORG, userId: CLEANER })
     const visibleTasks = async (membership: NonNullable<typeof owner>) => (await listTasks(db,
-      await taskViewer(db, memberAccessPrincipal(membership, { env })), parseTaskListQuery({ kind: 'booking_review' }))).sections.flatMap(section => section.tasks)
+      await taskViewer(memberAccessPrincipal(membership, { env })), parseTaskListQuery({ kind: 'booking_review' }))).sections.flatMap(section => section.tasks)
 
     const approved = await submit('stay-approval', 8)
     assert.equal(approved.request_status, 'awaiting_approval')

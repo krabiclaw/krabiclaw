@@ -196,9 +196,6 @@
   ],
   "page": {
     "before": null,
-    "failed_messages": [
-      "00000000-0000-4000-8000-000000000011"
-    ],
     "newest": 8,
     "oldest": 1,
     "read_through": 8

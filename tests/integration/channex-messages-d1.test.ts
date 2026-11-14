@@ -50,7 +50,7 @@ const openReplies = (db: D1Database, threadId: string) => db.prepare(`SELECT t.o
 const waitingOn = async (db: D1Database, threadId: string) => (await openReplies(db, threadId)).map(row => row.entry)
 /** The reply tasks on Today as the owner reads them at `now`: conversation and status line ("Asked 1d ago · home"). */
 async function replyEyebrows(db: D1Database, env: CloudflareEnv, now: Date) {
-  const viewer = await taskViewer(db, memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env }))
+  const viewer = await taskViewer(memberAccessPrincipal({ userId: OWNER, organizationId: ORG, memberId: 'owner-member', role: 'owner' }, { env }))
   return (await listTasks(db, viewer, parseTaskListQuery({}), now)).sections.flatMap(section => section.tasks).filter(task => task.kind === 'guest_reply').map(task => [task.conversation_id, task.status_line])
 }
 const GROWTH = ['post.create', 'social.connect', 'article.create']
@@ -360,7 +360,7 @@ test('a dismissed question needs no note and stays closed until the guest writes
     await backfillChannexMessages(db, env, 'property', ORG)
     assert.deepEqual(await waitingOn(db, requestId), ['channex-message:first'])
 
-    const viewer = await taskViewer(db, memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env }))
+    const viewer = await taskViewer(memberAccessPrincipal({ userId: OWNER, organizationId: ORG, memberId: 'owner-member', role: 'owner' }, { env }))
     const taskId = await db.prepare("SELECT id FROM tasks WHERE kind = 'guest_reply' AND subject_id = ? AND status = 'open'").bind(requestId).first<string>('id')
     assert.ok(taskId)
     const dismissed = await closeTask(db, viewer, taskId, { status: 'skipped', note: '', photos: [], env })

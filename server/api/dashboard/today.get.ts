@@ -21,7 +21,7 @@ import { isDemoOrganization } from '~/shared/demo'
 export default defineHandler(async (event) => {
   const { db, env, organization } = await getDashboardMemberContext(event, {})
   const principal = memberAccessPrincipal(organization, { env, event })
-  const viewer = await taskViewer(db, principal)
+  const viewer = await taskViewer(principal)
   const query = parseTaskListQuery(getQuery(event), { range: 'today', assignee: 'all' })
   const now = new Date()
   const [list, assignees, opportunities, reservations] = await Promise.all([

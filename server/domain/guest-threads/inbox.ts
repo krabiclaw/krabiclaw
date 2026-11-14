@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { queryAll, type BatchQuery, type DbClient } from '~/server/db'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import { loadGuestThreadDetail, type TranscriptView } from './detail'
@@ -95,16 +95,8 @@ export function inboxGuestNames(raw: Pick<TranscriptView, 'entries' | 'guestName
   return { kind, guestName, guestFullName }
 }
 
-async function threadFacts(db: DbClient, raw: TranscriptView, organizationId: string, timeZone: string, now: Date): Promise<ThreadFacts> {
+function threadFacts(raw: TranscriptView, timeZone: string, now: Date): ThreadFacts {
   const { kind, guestName } = inboxGuestNames(raw)
-  const automaticIds = raw.entries.filter(entry => entry.eventName === SCHEDULED_MESSAGE_EVENT).map(entry => entry.id)
-  const [owner, automatic] = await Promise.all([
-    automaticIds.length ? queryFirst<{ name: string }>(db, `SELECT u.name FROM member m JOIN user u ON u.id = m.userId
-      WHERE m.organizationId = ? AND m.role = 'owner' ORDER BY m.createdAt, m.id LIMIT 1`, [organizationId]) : null,
-    automaticIds.length ? queryAll<{ message_id: string; template_title: string }>(db,
-      'SELECT message_id, template_title FROM scheduled_guest_messages WHERE organization_id = ? AND message_id IN (SELECT value FROM json_each(?))',
-      [organizationId, d1JsonStringSet(automaticIds)]) : [],
-  ])
   const inquiry = raw.inquiry
   const record = raw.operationalRecord
   // A stay is its nights; a booking is its start, in the home's clock; an inquiry is the dates asked about.
@@ -114,8 +106,8 @@ async function threadFacts(db: DbClient, raw: TranscriptView, organizationId: st
   return {
     raw, kind, guestName, channel: raw.conversationChannel,
     home: raw.locationLabel, when, timeZone,
-    ownerFirstName: owner ? firstName(owner.name) : null,
-    automaticTitles: new Map(automatic.map(row => [row.message_id, row.template_title])),
+    ownerFirstName: raw.automaticOwner ? firstName(raw.automaticOwner) : null,
+    automaticTitles: raw.templateTitles,
     inquiry,
   }
 }
@@ -288,8 +280,8 @@ export async function projectGuestConversation(db: DbClient, conversation: Conve
     : { memberUserId: viewer.userId, conversation }, now, true, window, history)
   if (!detail) return null
   const { view: raw, timeZone } = detail
-  const [facts, replyComposer, { page }] = await Promise.all([
-    threadFacts(db, raw, organizationId, timeZone, now),
+  const facts = threadFacts(raw, timeZone, now)
+  const [replyComposer, { page }] = await Promise.all([
     viewer.audience === 'member' ? guestReplyDestination(db, detail.request, detail.channelFacts) : null,
     history,
   ])
@@ -309,10 +301,7 @@ export async function projectGuestConversation(db: DbClient, conversation: Conve
     record_title: record ? recordTitle(record, raw.organizationVertical) : null,
     activity_path: raw.activityPath,
     stream: items,
-    page: {
-      ...page,
-      failed_messages: raw.window?.failedMessages ?? [],
-    },
+    page,
     composer: {
       channel: viewer.audience === 'member' && raw.conversationChannel === 'airbnb' ? 'airbnb' : 'email',
       available: replyComposer?.channel !== null,
@@ -321,9 +310,11 @@ export async function projectGuestConversation(db: DbClient, conversation: Conve
   } satisfies Omit<InboxThread, 'stream'> & { stream: ConversationEntry[]; page: Omit<ConversationPage['page'], 'read_through'> }
 }
 
+export type ConversationParticipantRow = Omit<ConversationParticipant, 'can_remove'> & { membership_role: string | null }
+
 /** Only the live roster is shown. Guests never receive internal account or member IDs. */
-export async function readConversationParticipants(db: DbClient, conversation: Pick<ConversationRow, 'organization_id' | 'id'>, userId: string, role: ConversationViewerRole) {
-  return await queryAll<Omit<ConversationParticipant, 'can_remove'> & { membership_role: string | null }>(db, `
+export function conversationParticipantsQuery(conversation: Pick<ConversationRow, 'organization_id' | 'id'>, userId: string, role: ConversationViewerRole): BatchQuery {
+  return { query: `
     SELECT CASE WHEN ? = 'member' OR seat.user_id = ? THEN u.id END AS id,
            u.name, CASE WHEN ? = 'member' THEN m.id END AS member_id,
            CASE WHEN ? = 'member' OR seat.user_id = ? THEN u.image END AS image, seat.role,
@@ -334,7 +325,12 @@ export async function readConversationParticipants(db: DbClient, conversation: P
       WHERE seat.organization_id = ? AND seat.conversation_id = ?
         AND (seat.role = 'guest' OR (seat.role = 'member' AND m.id IS NOT NULL))
       ORDER BY seat.role, seat.created_at, seat.user_id
-  `, [role, userId, role, role, userId, role, conversation.organization_id, conversation.id])
+  `, params: [role, userId, role, role, userId, role, conversation.organization_id, conversation.id] }
+}
+
+export async function readConversationParticipants(db: DbClient, conversation: Pick<ConversationRow, 'organization_id' | 'id'>, userId: string, role: ConversationViewerRole) {
+  const { query, params } = conversationParticipantsQuery(conversation, userId, role)
+  return queryAll<ConversationParticipantRow>(db, query, params)
 }
 
 /**

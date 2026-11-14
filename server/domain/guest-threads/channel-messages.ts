@@ -29,16 +29,18 @@ function fail(statusCode: number, code: string, message: string, field: string):
   throw new HTTPError({ statusCode, message, data: { code, field } })
 }
 
+export type GuestThreadChannelRow = Omit<ChannelThreadMapping, 'product_id' | 'external_thread_id'> & {
+  product_id: string | null
+  mapped_product_id: string | null
+  external_thread_id: string | null
+  connected: number
+  booking_channel: StayChannel | null
+  booking_owner: 'app' | 'channel' | null
+}
+
 /** Channel routing and the home used to present this conversation come from the same join. */
-export async function guestThreadChannel(db: DbClient, conversationId: string, organizationId: string) {
-  const row = await queryFirst<Omit<ChannelThreadMapping, 'product_id' | 'external_thread_id'> & {
-    product_id: string | null
-    mapped_product_id: string | null
-    external_thread_id: string | null
-    connected: number
-    booking_channel: StayChannel | null
-    booking_owner: 'app' | 'channel' | null
-  }>(db, `
+export function guestThreadChannelQuery(conversationId: string, organizationId: string): BatchQuery {
+  return { query: `
     SELECT c.organization_id, c.id AS conversation_id, ct.external_thread_id, ct.external_booking_id, ct.moved_from_thread_id,
       ct.product_id AS mapped_product_id, COALESCE(ct.product_id, CASE WHEN b.owner = 'channel' THEN b.product_id END) AS product_id,
       EXISTS (SELECT 1 FROM product_channel_mappings pcm
@@ -47,8 +49,10 @@ export async function guestThreadChannel(db: DbClient, conversationId: string, o
     FROM conversations c
     LEFT JOIN channel_threads ct ON ct.organization_id = c.organization_id AND ct.conversation_id = c.id
     LEFT JOIN bookings b ON b.organization_id = c.organization_id AND b.id = c.booking_id AND c.kind = 'booking'
-    WHERE c.id = ? AND c.organization_id = ?`, [conversationId, organizationId])
-  if (!row) return null
+    WHERE c.id = ? AND c.organization_id = ?`, params: [conversationId, organizationId] }
+}
+
+export function parseGuestThreadChannel(row: GuestThreadChannelRow) {
   const { product_id, mapped_product_id, connected, booking_channel, booking_owner, ...mapping } = row
   return {
     productId: product_id,
@@ -58,6 +62,12 @@ export async function guestThreadChannel(db: DbClient, conversationId: string, o
     connected: connected === 1,
     booking: booking_channel !== null && booking_owner !== null ? { channel: booking_channel, owner: booking_owner } : null,
   }
+}
+
+export async function guestThreadChannel(db: DbClient, conversationId: string, organizationId: string) {
+  const { query, params } = guestThreadChannelQuery(conversationId, organizationId)
+  const row = await queryFirst<GuestThreadChannelRow>(db, query, params)
+  return row ? parseGuestThreadChannel(row) : null
 }
 
 async function homeMapping(db: DbClient, propertyId: string): Promise<HomeMapping | null> {

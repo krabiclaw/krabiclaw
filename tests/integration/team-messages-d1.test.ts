@@ -90,10 +90,13 @@ test('members talk in team conversations, see unread state and receive recorded 
       return sendConversationMessage({ ...env, DB: writeDb }, { ...input, conversation, role, userId: access.userId })
     }
     const refused = (status: number, code: string, field: string) => ({ status, data: { code, field } })
+    const teamThread = async (access: MemberAccessPrincipal, id: string) => {
+      const { conversation, readThrough } = await resolveConversationAccess(db, access.userId, id)
+      return getTeamThread(db, access, conversation, readThrough)
+    }
     // The caller's team conversations, each as its conversation screen reads it.
     const teamThreads = async (access: MemberAccessPrincipal) => Promise.all((await db.prepare(`SELECT c.id FROM conversations c JOIN conversation_participants seat ON seat.conversation_id = c.id
-      WHERE c.organization_id = ? AND c.kind = 'team' AND seat.user_id = ? ORDER BY c.last_message_at DESC, c.id DESC`).bind(ORG, access.userId).all<{ id: string }>()).results.map(row => getTeamThread(db, access, row.id)))
-    const teamThread = (access: MemberAccessPrincipal, id: string) => getTeamThread(db, access, id)
+      WHERE c.organization_id = ? AND c.kind = 'team' AND seat.user_id = ? ORDER BY c.last_message_at DESC, c.id DESC`).bind(ORG, access.userId).all<{ id: string }>()).results.map(row => teamThread(access, row.id)))
 
     // Everyone in the organization, owners first; nobody from another one.
     assert.deepEqual((await listTeamMembers(env, cleaner)).map(member => [member.member_id, member.id, member.role, member.image]),
@@ -374,7 +377,7 @@ test('members talk in team conversations, see unread state and receive recorded 
         const rows = await listConversations(revokingDb, ORG, { userId: 'cook', principal: cook, kind: 'team' })
         assert.equal(interleaved, true)
         assert.equal(JSON.stringify(rows).includes('After preview access ended'), false)
-        await assert.rejects(getTeamThread(db, cook, separateGroup.id), refused(404, 'THREAD_NOT_FOUND', 'conversation_id'))
+        await assert.rejects(teamThread(cook, separateGroup.id), refused(404, 'THREAD_NOT_FOUND', 'conversation_id'))
         assert.equal((await conversationPageFor(db, owner, separateGroup.id)).entries.filter(entry => entry.type === 'message').at(-1)?.body, 'After preview access ended')
       } finally {
         await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'add', member_user_ids: ['cook'], idempotency_key: 'list-race-readd' })

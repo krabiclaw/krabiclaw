@@ -86,17 +86,17 @@ export async function handleTaskTools(ctx: McpExecutorContext): Promise<unknown>
   const principal = memberAccessPrincipal(organization.membership, { env, event: ctx.event })
   switch (toolName) {
     case 'list_tasks': {
-      const viewer = await taskViewer(db, principal)
+      const viewer = await taskViewer(principal)
       const query = parseTaskListQuery(args)
       const [list, assignees] = await Promise.all([listTasks(db, viewer, query), listTaskAssignees(db, viewer)])
       return { ...list, assignees }
     }
     case 'create_task': {
-      const result = await createTask(db, await taskViewer(db, principal), args)
+      const result = await createTask(db, await taskViewer(principal), args)
       return { task: result.task }
     }
     case 'update_task':
-      return { task: await updateTask(db, await taskViewer(db, principal), requiredString(args, 'task_id'), args) }
+      return { task: await updateTask(db, await taskViewer(principal), requiredString(args, 'task_id'), args) }
     case 'complete_task':
     case 'skip_task': {
       const file = toolName === 'complete_task' && args.file !== undefined ? toolFileReference(args.file, 'file') : null
@@ -105,7 +105,7 @@ export async function handleTaskTools(ctx: McpExecutorContext): Promise<unknown>
         if (resolved.kind !== 'image') throw new HTTPError({ statusCode: 422, statusMessage: 'A task accepts only photos', data: { code: 'INVALID_PHOTO', field: 'file' } })
         return [{ bytes: resolved.buffer, filename: resolved.filename }]
       })() : []
-      return { task: await closeTask(db, await taskViewer(db, principal), requiredString(args, 'task_id'), { status: toolName === 'complete_task' ? 'done' : 'skipped', note: args.note, photos, env }) }
+      return { task: await closeTask(db, await taskViewer(principal), requiredString(args, 'task_id'), { status: toolName === 'complete_task' ? 'done' : 'skipped', note: args.note, photos, env }) }
     }
     case 'list_opportunities': return await listOpportunities(db, principal, { locationId: optionalString(args, 'location_id') ?? undefined })
     case 'accept_opportunity': return { task: await acceptOpportunity(db, principal, requiredString(args, 'opportunity_id'), args) }

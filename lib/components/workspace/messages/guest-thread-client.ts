@@ -138,7 +138,6 @@ export function isConversationPage(value: unknown): value is ConversationPage {
   return cursor(page.before) && cursor(page.oldest) && cursor(page.newest) && cursor(page.read_through)
     && (page.before === null || page.before === page.oldest)
     && (page.oldest === null ? page.newest === null : Number(page.oldest) <= Number(page.newest))
-    && Array.isArray(page.failed_messages) && page.failed_messages.every(isText)
 }
 
 export function isThreadDetails(value: unknown): value is ThreadDetails {

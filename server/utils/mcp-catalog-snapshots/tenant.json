@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:00b9694d135a5756bfd5c8c6a6f958bcd0ea4a70ed39a2e93b19948e9bf6f4ff",
-  "documentationFingerprint": "sha256:a2a5c02d321a5742db3d44289cb838f3ebec7812a8509f0dd24c6a286d7f4d72",
+  "fingerprint": "sha256:7371ed872de1fc55031284295aa08c81b503c78219d1044a3a43ffba924f6f4a",
+  "documentationFingerprint": "sha256:f5dc0efb9abfbfff3f384e914acc8d23e2fbfbf0fe0399c6f3fc9574cfc115b4",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -47837,12 +47837,6 @@
                   "null"
                 ]
               },
-              "failed_messages": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
               "newest": {
                 "minimum": 1,
                 "type": [
@@ -47861,8 +47855,7 @@
             "required": [
               "before",
               "oldest",
-              "newest",
-              "failed_messages"
+              "newest"
             ],
             "type": "object"
           },
@@ -127710,7 +127703,7 @@
       "toolContracts": {
         "cancel_product_booking": "sha256:117436c3b77b52e28d4c7baa8f2a7b128c044f4265fc20d038ef5a8e72ddd0f6",
         "confirm_product_booking": "sha256:44be0ae50ae38e0e7f9610cd8eff82af1212af3eb160c66d082804673dafd71e",
-        "get_conversation": "sha256:e11cc7a96a999e502c71e835faddbd0ef06c6590d8db3d9acfe32e185638dc29",
+        "get_conversation": "sha256:04b4a3472ac57b3a0b395cce83bd2a4f674f5dc2220940d278e4c5d2718d16e0",
         "get_product_booking": "sha256:dc627db96028c7e276e50d86819579fe2e1ec552cda94ea7e3b75edab8ceae15",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
@@ -127840,7 +127833,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:a2a95f5e752b47a10f2d42dfaaca0caca19afd2a4110adc3fd97dad2eb8a763a",
-        "get_conversation": "sha256:e11cc7a96a999e502c71e835faddbd0ef06c6590d8db3d9acfe32e185638dc29",
+        "get_conversation": "sha256:04b4a3472ac57b3a0b395cce83bd2a4f674f5dc2220940d278e4c5d2718d16e0",
         "get_organization_analytics": "sha256:4fcc7f6cef537aa552200cc74b666d866684657015427e256651d7791140b814",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
