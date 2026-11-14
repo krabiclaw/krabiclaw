@@ -6,6 +6,7 @@ import { mcpOrganizationId, mcpRequest, mcpData } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
 import { seededSiteHeaders, seededSiteURL } from './test-env'
+import type { CatalogScreen } from '../../shared/catalog-screen'
 
 const tenantBaseURL = () => seededSiteURL('restaurant')
 const tenantExtraHeaders = () => seededSiteHeaders('restaurant')
@@ -821,15 +822,27 @@ test.describe('stateless MCP server', () => {
       expect(unlisted.visibility).toBe('unlisted')
       expect(unlisted.public_url).toBe(published.public_url)
       expect(unlisted.published_at).toBe(published.published_at)
-      // Publish existing library media through the article's native block writer
-      // and read it back on the article itself.
+      // The native editor saves to the same article read by MCP and the public site.
       const photo = seededTenant('restaurant').media.margherita!
-      const photoBlock = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'append_content_block', args: {
-        organization_id: organizationId, document_id: postId, type: 'image', data: { caption: 'Kitchen photo' },
-        media: [{ asset_id: photo.id, slot: 'media' }],
+      const catalogPath = '/api/dashboard/offering'
+      const articleQuery = { org: seededTenant('restaurant').slug, article_id: postId }
+      const section = { ...articleQuery, view: 'page-section-add', block_type: 'image' }
+      const editorResponse = await request.get(catalogPath, { params: section })
+      expect(editorResponse.status(), await editorResponse.text()).toBe(200)
+      const nativeEditor = await editorResponse.json() as CatalogScreen
+      expect(nativeEditor.fields.find(field => field.key === 'initial-media')).toMatchObject({ media_kind: 'image' })
+      const caption = nativeEditor.fields.find(field => field.label === 'Caption')
+      expect(caption).toBeDefined()
+      const fields = Object.fromEntries(nativeEditor.fields.map(field => [field.key, field.value]))
+      const photoBlock = await request.post(catalogPath, { params: section, data: {
+        revision: nativeEditor.revision, idempotency_key: crypto.randomUUID(),
+        values: { ...fields, 'initial-media': photo.id, [caption!.key]: 'Kitchen photo' },
       } })
-      expect(photoBlock.status()).toBe(200)
-      expect(mcpData<{ blocks: unknown[] }>(await photoBlock.json()).blocks).toHaveLength(1)
+      expect(photoBlock.status(), await photoBlock.text()).toBe(200)
+      const saved = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_blog_post', args: { organization_id: organizationId, post_id: postId } })
+      expect(mcpData<{ post: { content_blocks: unknown[] } }>(await saved.json()).post.content_blocks).toContainEqual(
+        expect.objectContaining({ type: 'image', data: expect.objectContaining({ caption: 'Kitchen photo' }), media: expect.arrayContaining([expect.objectContaining({ asset_id: photo.id })]) }),
+      )
       const article = await openTenantPage(page, `${tenantBaseURL()}${new URL(unlisted.public_url).pathname}`, tenantExtraHeaders())
       expect(article?.status()).toBe(200)
       await waitForNuxtHydration(page)
