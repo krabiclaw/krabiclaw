@@ -1,9 +1,10 @@
 import { HTTPError } from 'nitro'
 import { createCustomDomainPair, deleteCustomDomain, inspectDomainResolution, syncDomainWithCloudflare, validateCustomDomain, type DomainRecord } from '~/server/utils/domains'
 import { buildDashboardUrl } from '~/server/utils/dashboard-links'
-import { canonicalDomainForPair } from '~/server/utils/domain-shared'
+import { canonicalDomainForPair, rootDomainForPair } from '~/server/utils/domain-shared'
 import { notifyDomainLifecycle } from '~/server/utils/domain-notifications'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
+import { getOrganizationDomains, groupCustomDomains } from '~/server/utils/domain-read-model'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
 type DomainActor = { organizationId: string; organizationSlug: string; actorId: string; actorType: 'owner' | 'admin' }
@@ -56,4 +57,18 @@ export async function changeDashboardDomain(env: CloudflareEnv, db: D1Database, 
   await deleteCustomDomain(env, db, domain.id, actorType, actorId)
   await notifyDomainLifecycle(env, db, { organizationId, event: action, domain, dashboardUrl })
   return domain
+}
+
+export async function checkDashboardDomainGroup(env: CloudflareEnv, db: D1Database, actor: DomainActor, domain: DomainRecord) {
+  if (domain.organization_id !== actor.organizationId || domain.type !== 'custom') throw new HTTPError({ statusCode: 404, message: 'Custom domain not found' })
+  const root = rootDomainForPair(domain.domain)
+  const group = groupCustomDomains(await getOrganizationDomains(db, actor.organizationId)).find(item => item.id === root)
+  const targets = group?.domains.filter(item => item.desired_state === 'active' && item.status !== 'disabled') ?? []
+  if (!targets.some(item => item.id === domain.id)) throw new HTTPError({ statusCode: 409, message: 'This domain can no longer be checked.' })
+  let result = domain
+  for (const target of targets) {
+    const checked = await changeDashboardDomain(env, db, actor, target, 'synced')
+    if (target.id === domain.id) result = checked
+  }
+  return result
 }

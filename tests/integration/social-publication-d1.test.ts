@@ -15,7 +15,7 @@ import { asMcpError, MCP_ERROR } from '../../server/utils/mcp-protocol.ts'
 import { isMcpRenderResponse } from '../../server/utils/mcp-render.ts'
 import { linkedAccountAccessToken, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { createPost, deletePost, getPost, listPublicSocialPosts, postPayloadFingerprint, updatePost } from '../../server/utils/post-management.ts'
-import { publishPost, reconcilePostPublication, type PublishTarget } from '../../server/utils/social-publication.ts'
+import { getSocialConnections, publishPost, reconcilePostPublication, type PublishTarget } from '../../server/utils/social-publication.ts'
 import { listChannelPosts, getChannelPost, deleteChannelPost } from '../../server/utils/social-channel-posts.ts'
 import { remainingMetaSubjectData } from '../../server/utils/integration-release.ts'
 import { deleteIntegration, listIntegrations, readIntegration, storeIntegration } from '../../server/utils/organization-integrations.ts'
@@ -447,6 +447,12 @@ test('publication: one result and one external post per target; a failure is the
     const emptyResult = await publishPost(env, 'org-a', empty.post.id, { expectedUpdatedAt: empty.post.updated_at, targets: [targets.website] }, 'owner')
     assert.deepEqual([emptyResult.ok, emptyResult.outcomes[0]!.code], [false, 'empty_post'])
     assert.deepEqual(await db.prepare('SELECT status, published_at FROM content_documents WHERE id = ?').bind(empty.post.id).first(), { status: 'draft', published_at: null })
+
+    await run("UPDATE account SET accessToken = 'deadbeef' WHERE id = 'ig-account'")
+    const connections = await getSocialConnections(env, 'org-a', { dashboardBase: 'https://proof.example/dashboard/org-a' })
+    assert.deepEqual(connections.channels.find(item => item.channel === 'facebook')?.problems, [])
+    assert.deepEqual(connections.channels.find(item => item.channel === 'instagram')?.problems.map(item => item.code), ['access_token_unavailable'])
+    await run("UPDATE account SET accessToken = 'ig-token' WHERE id = 'ig-account'")
 
     // Website, Facebook photos and an Instagram carousel in one call.
     const all = await publishPost(env, 'org-a', first.post.id, { expectedUpdatedAt: first.post.updated_at, targets: [targets.website, targets.facebook(), targets.instagram()] }, 'publisher')

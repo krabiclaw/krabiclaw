@@ -322,10 +322,10 @@ async function getCloudflareHostname(env: DomainEnv, id: string, signal?: AbortS
   return cloudflareRequest<CloudflareCustomHostname>(env, `/zones/${env.CF_ZONE_ID}/custom_hostnames/${id}`, {}, signal)
 }
 
-async function patchCloudflareHostname(env: DomainEnv, id: string, signal?: AbortSignal): Promise<CloudflareCustomHostname> {
+async function patchCloudflareHostname(env: DomainEnv, id: string, strategy: DomainRecord['validation_strategy'], signal?: AbortSignal): Promise<CloudflareCustomHostname> {
   return cloudflareRequest<CloudflareCustomHostname>(env, `/zones/${env.CF_ZONE_ID}/custom_hostnames/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify({ ssl: cloudflareSslSettings() })
+    body: JSON.stringify({ ssl: cloudflareSslSettings(strategy) })
   }, signal)
 }
 
@@ -737,13 +737,13 @@ export async function syncDomainWithCloudflare(
     signal?.throwIfAborted()
     let hostname = await getCloudflareHostname(env, domain.cloudflare_hostname_id, signal)
     signal?.throwIfAborted()
-    const shouldPatch = options.forceRevalidation
+    const shouldPatch = (options.forceRevalidation && (hostname.status !== 'active' || hostname.ssl?.status !== 'active'))
       || hostname.status === 'moved'
       || domain.status === 'failed'
       || (dnsInspection.points_to_saas === true && hostname.status !== 'active')
     let triggeredRevalidation = false
     if (shouldPatch) {
-      hostname = await patchCloudflareHostname(env, domain.cloudflare_hostname_id, signal)
+      hostname = await patchCloudflareHostname(env, domain.cloudflare_hostname_id, domain.validation_strategy, signal)
       triggeredRevalidation = true
       signal?.throwIfAborted()
     }

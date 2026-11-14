@@ -46,7 +46,7 @@ import { articleCollectionOf, createBlogPost, deleteBlogPost, getBlogPost, reord
 import { loadDashboardBlogPosts } from '~/server/utils/dashboard-editor-resources'
 import { createPost, deletePost, getPost, listPosts, updatePost } from '~/server/utils/post-management'
 import { getSocialConnections, publishPost, type PublishTarget } from '~/server/utils/social-publication'
-import { PostValidationError } from '~/shared/posts'
+import { articlePostFields, PostValidationError } from '~/shared/posts'
 import { createQa, deleteQa, listQa, updateQa } from '~/server/utils/location-qa'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { readLocalizedFormQuestions } from '~/server/domain/form-questions'
@@ -61,7 +61,7 @@ import { SITE_PALETTE_MODES, SITE_PALETTE_ROLES, type SitePalettePatch } from '~
 import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset } from '~/shared/organization-fonts'
 import { getOrganizationDomainsDashboardPayload } from '~/server/utils/domain-read-model'
 import { organizationPublicUrl, setCanonicalDomain } from '~/server/utils/domains'
-import { changeDashboardDomain, connectDashboardDomain } from '~/server/utils/domain-dashboard-actions'
+import { changeDashboardDomain, checkDashboardDomainGroup, connectDashboardDomain } from '~/server/utils/domain-dashboard-actions'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
 import { listOrganizationReviews, setReviewStatus } from '~/server/utils/organization-reviews'
@@ -812,31 +812,32 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       const connections = await getSocialConnections(env, organization.id, { dashboardBase: dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null }) })
       const channels = [
         { channel: 'organization' as const, label: 'Website', status: post.status === 'published' ? 'Published' : undefined,
-          target: { channel: 'organization' } as PublishTarget, destination: connections.website.label },
+          target: { channel: 'organization' } as PublishTarget, destination: connections.website.label, receipt: post.canonical_url },
         ...connections.channels.map(connection => {
           const publication = post.publications.find(item => item.channel === connection.channel)
-          const status = publication?.state === 'published' ? 'Published'
+          const status = publication?.state === 'published' ? [connection.target_name, 'Published', publication.local_content_changed ? 'The draft has changed since it was published here.' : null].filter(Boolean).join(' · ')
             : publication?.state === 'removed' ? 'Removed'
             : [connection.target_name, publication?.message, ...connection.problems.map(item => item.message)].filter(Boolean).join(' · ')
           const target: PublishTarget | null = !connection.problems.length && connection.target_id && connection.connection_revision
             && (!publication || publication.state === 'failed')
             ? { channel: connection.channel, target_id: connection.target_id, connection_revision: connection.connection_revision } : null
           const label = connection.channel === 'facebook' ? 'Facebook' : connection.channel === 'instagram' ? 'Instagram' : 'Discord'
-          return { channel: connection.channel, label, status, target, destination: connection.target_name }
+          return { channel: connection.channel, label, status, target, destination: connection.target_name,
+            receipt: publication?.state === 'published' ? publication.public_url : null }
         }),
       ]
       const available = channels.filter(item => item.target && !(item.channel === 'organization' && post.status === 'published'))
       if (view === 'post-destinations') {
         if (answer) return missing('Choose a destination')
         return { title: 'Publishing', fields: [], rows: [
-          ...channels.map(({ channel, label, status }) => ({ id: channel, label, summary: status || 'Ready to publish' })),
-          ...(available.length ? [{ id: 'publish', label: 'Choose destinations', native: 'post-publish', query: { content_id: post.id } }] : []),
+          ...channels.map(({ channel, label, status, receipt }) => ({ id: channel, label, summary: status || 'Ready to publish', external_url: receipt })),
+          ...(available.length ? [{ id: 'publish', label: 'Choose destinations', native: 'post-publish', query: { content_id: post.id, ...(typeof query.channel === 'string' ? { channel: query.channel } : {}) } }] : []),
         ] }
       }
       const revision = JSON.stringify([post.updated_at, available.map(item => item.target)])
-      const fields = available.map(item => field(item.channel, item.label, 'toggle', false, { hint: item.destination ?? undefined }))
+      const fields = available.map(item => field(item.channel, item.label, 'toggle', query.channel === item.channel, { hint: item.destination ?? undefined }))
       if (!fields.length) return missing('No publication destinations are available')
-      const screen = { title: 'Publish to', fields, rows: [], revision, save_label: 'Publish' }
+      const screen = { title: 'Publish to', fields, rows: [], revision, save_label: 'Publish', allow_unchanged: fields.some(item => item.value === 'true') }
       if (!answer) return screen
       if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The post or destinations changed. Reopen them before publishing.' })
       if (fields.length !== Object.keys(answer.values).length || fields.some(item => !['true', 'false'].includes(answer.values[item.key]!))) invalid('Choose available destinations')
@@ -857,11 +858,27 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       .find(item => item.source === 'manual' && item.location_id === null) ?? missing('Question not found') : null
     const stored = article ?? post ?? qa
     const contentTitle = typeof article?.title === 'string' ? article.title : post?.title ?? qa?.question ?? ''
-    const revision = typeof stored?.updated_at === 'string' ? stored.updated_at : 'new'
+    let revision = typeof stored?.updated_at === 'string' ? stored.updated_at : 'new'
     const action = query.action
     if (action !== undefined && action !== 'edit' && action !== 'delete' && action !== 'publish') return missing('Content action not found')
     const categories = kind === 'article' ? await listArticleCategories(db, organization.id, articleCollectionOf(article?.collection ?? articleCollection)) : []
     const postLocations = kind === 'post' ? await listDashboardLocations(db, organization.id, undefined, true) : []
+    const preparedSource = kind === 'post' && !id && query.article_id !== undefined
+      ? await getBlogPost(db, typeof query.article_id === 'string' ? query.article_id : invalid('Choose an article'), organization.id, env)
+      : null
+    const preparedOrigin = preparedSource ? await organizationPublicUrl(env, db, organization.id) : null
+    if (preparedSource && (preparedSource.status !== 'published' || typeof preparedSource.public_path !== 'string' || !preparedOrigin)) {
+      return invalid('Publish the article on a website with a public address before sharing it.')
+    }
+    const prepared = preparedSource && preparedOrigin
+      ? articlePostFields({
+          title: typeof preparedSource.title === 'string' ? preparedSource.title : missing('Article title not found'),
+          excerpt: typeof preparedSource.excerpt === 'string' ? preparedSource.excerpt : null,
+        }, new URL(String(preparedSource.public_path), preparedOrigin).toString()) : null
+    if (preparedSource) revision = JSON.stringify([preparedSource.id, preparedSource.updated_at])
+    const requestedLocation = kind === 'post' && !id && query.location_id !== undefined
+      ? postLocations.find(location => location.id === query.location_id)?.id ?? missing('Location not found')
+      : null
     const blocks: EditorContentBlock[] = article?.content_document.blocks ?? initialBlogEditorBlocks()
     const articleEdits = kind === 'article' ? blocks.flatMap((block, index) => blogLocalizedTextFields(block).map(item => ({
       ...item, block, key: `block:${index}:${item.path.join('.')}`,
@@ -869,16 +886,19 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     const fields = action === 'publish' ? [field('visibility', 'Visibility', 'select', article?.visibility, { choices: [
       { value: 'listed', label: 'Listed' }, { value: 'unlisted', label: 'Unlisted' },
     ] })] : action === 'delete' ? [field('confirm', 'Confirm deletion', 'toggle', false)] : [
-      field('title', kind === 'qa' ? 'Question' : 'Title', 'text', contentTitle, { optional: kind === 'post' }),
+      field('title', kind === 'qa' ? 'Question' : 'Title', 'text', preparedSource?.title ?? contentTitle, { optional: kind === 'post' }),
       ...(kind === 'article' ? [
         field('excerpt', 'Excerpt', 'textarea', article?.excerpt, { optional: true }),
         field('category', 'Category', 'select', article?.category?.id, { optional: true, choices: [{ value: '', label: 'Choose later' }, ...categories.map(item => ({ value: item.id, label: item.name }))] }),
         ...(!id ? articleEdits.map(item => field(item.key, item.label, 'textarea', item.value)) : []),
       ] : kind === 'post' ? [
-        field('location', 'Location', 'select', post?.location_id, { optional: true, choices: [{ value: '', label: 'Whole website' }, ...postLocations.map(location => ({ value: location.id, label: location.title }))] }),
-        field('body', 'Caption', 'textarea', post?.body),
-        field('button_label', 'Button label', 'text', post?.call_to_action?.label, { optional: true }),
-        field('button_url', 'Button URL', 'text', post?.call_to_action?.url, { optional: true }),
+        field('location', 'Location', 'select', post?.location_id ?? requestedLocation, { optional: true, choices: [{ value: '', label: 'Whole website' }, ...postLocations.map(location => ({ value: location.id, label: location.title }))] }),
+        field('body', 'Caption', 'textarea', prepared?.body ?? post?.body),
+        field('button_label', 'Button label', 'text', post?.call_to_action?.label ?? prepared?.callToAction.label, { optional: true }),
+        field('button_url', 'Button URL', 'text', post?.call_to_action?.url ?? prepared?.callToAction.url, { optional: true }),
+        ...(!id ? [field('cover', 'Cover', 'photo', preparedSource?.cover?.asset_id, {
+          optional: true, media_kind: 'any', display_url: preparedSource?.cover?.thumbnail_url ?? preparedSource?.cover?.public_url,
+        })] : []),
       ] : [
         field('answer', 'Answer', 'textarea', qa?.answer, { optional: true }),
         field('visible', 'Show on website', 'toggle', qa?.status !== 'hidden'),
@@ -887,12 +907,14 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     if (id && action === undefined) {
       if (answer) return missing('Choose a content setting')
       const preview = article ? article.preview_url ?? article.public_url : post?.preview_url ?? post?.canonical_url
-      return { title: contentTitle || title, fields: [], preview_url: typeof preview === 'string' ? preview : null, rows: [
+      const origin = article ? await organizationPublicUrl(env, db, organization.id) : null
+      const reviewUrl = typeof preview === 'string' ? article ? origin ? new URL(preview, origin).toString() : null : preview : null
+      return { title: contentTitle || title, fields: [], preview_url: reviewUrl, rows: [
         { id: 'edit', label: article ? 'Article details' : 'Edit content', native: view, query: { kind, content_id: id, action: 'edit' } },
         ...(article ? [{ id: 'sections', label: 'Article blocks', native: 'page-sections', query: { article_id: id } }] : []),
         ...(post ? [
           { id: 'media', label: 'Media', native: 'post-media', query: { content_id: id } },
-          { id: 'destinations', label: 'Publish to', native: 'post-destinations', query: { content_id: id } },
+          { id: 'destinations', label: 'Publish to', native: 'post-destinations', query: { content_id: id, ...(typeof query.channel === 'string' ? { channel: query.channel } : {}) } },
         ] : []),
         ...(article ? [{ id: 'publish', label: 'Visibility', summary: article.status === 'draft' ? 'Draft' : article.visibility === 'unlisted' ? 'Unlisted' : 'Published', native: view, query: { kind, content_id: id, action: 'publish' } }] : []),
         { id: 'delete', label: 'Delete', native: view, query: { kind, content_id: id, action: 'delete' } },
@@ -900,7 +922,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     }
     if ((action === 'delete' || action === 'publish') && (!stored || !id || (action === 'publish' && !article))) return missing('Content not found')
     const screen = { title: action === 'publish' ? 'Visibility' : contentTitle || title, fields, rows: [], revision,
-      allow_unchanged: action === 'publish' && article?.status === 'draft',
+      allow_unchanged: Boolean(prepared) || action === 'publish' && article?.status === 'draft',
       save_label: action === 'publish' && article?.status === 'draft' ? 'Publish' : action === 'delete' ? 'Delete' : 'Save' }
     if (!answer) return screen
     if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The content changed. Reopen it before saving.' })
@@ -939,7 +961,15 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
           call_to_action: values.button_label || values.button_url ? { label: values.button_label, url: values.button_url } : null,
         }
         if (post) await updatePost(db, env, organization.id, post.id, { changes, expectedUpdatedAt: revision }, userId)
-        else await createPost(db, env, organization.id, { post: changes, idempotencyKey: answer.idempotency_key }, userId)
+        else {
+          const created = await createPost(db, env, organization.id, {
+            post: { ...changes, ...(values.cover ? { media: [{ asset_id: values.cover, slot: 'cover' }] } : {}) },
+            idempotencyKey: answer.idempotency_key,
+          }, userId)
+          await purgePublicResourceCacheNow(env, organization.id)
+          return { ...screen, destination: { view: 'website-content',
+            query: { kind, content_id: created.post.id, ...(preparedSource && typeof query.channel === 'string' ? { channel: query.channel } : {}) } } }
+        }
       } else {
         const data = { question: values.title, answer: values.answer || null, status: values.visible === 'true' ? 'published' : 'hidden' }
         if (qa) await updateQa(db, { ...scope, pagePath: qa.page_path }, qa.id, data, session.user)
@@ -964,7 +994,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       return { title: 'Domains', fields: [], rows: [
         ...(included ? [{ id: included.id, label: included.domain, summary: 'Included address' }] : []),
         ...payload.domain_groups.map(group => ({
-          id: group.id, label: group.domain, summary: group.role === 'canonical' && group.status === 'active' ? 'Primary' : group.status,
+          id: group.id, label: group.domain, summary: group.role === 'canonical' && group.status === 'active' ? 'Primary' : group.status_label,
           native: 'website-domain', query: { domain_id: group.id },
         })),
         ...(canConnect ? [{ id: 'connect', label: 'Connect domain', native: 'website-domain-action', query: { action: 'connect' } }]
@@ -979,9 +1009,11 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         id: action, label, native: 'website-domain-action', query: { action, domain_id: group.id },
       })
       return { title: group.domain, fields: [], rows: [
-        ...group.records.map((record, index) => ({ id: `dns-${index}`, label: `${record.type} · ${record.name}`, summary: record.value })),
+        { id: 'status', label: 'Status', summary: group.role === 'canonical' && group.status === 'active' ? 'Primary' : group.status_label },
+        { id: 'address', label: 'Domain', summary: group.domain, copy_value: group.domain },
+        ...group.records.map((record, index) => ({ id: `dns-${index}`, label: `${record.type} · ${record.name}`, summary: record.value, copy_value: record.value })),
         ...[group.warning, group.error].flatMap((message, index) => message ? [{ id: `notice-${index}`, label: message }] : []),
-        ...(group.primary_domain_id && group.status !== 'deleted' ? [row('synced', 'Check connection')] : []),
+        ...(group.domains.some(domain => domain.id === group.primary_domain_id && domain.desired_state === 'active' && domain.status !== 'disabled') ? [row('synced', 'Check connection')] : []),
         ...(group.status === 'active' && group.role !== 'canonical' ? [row('primary', 'Make primary')] : []),
         row('deleted', 'Remove domain'),
       ] }
@@ -1014,7 +1046,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       } else if (domain && action === 'primary' && domain.status === 'active') {
         await setCanonicalDomain(db, organization.id, domain.id, actorType, userId)
       } else if (domain && action === 'synced' && domain.status !== 'deleted') {
-        await changeDashboardDomain(env, db, actor, domain, action)
+        await checkDashboardDomainGroup(env, db, actor, domain)
       } else return invalid('This action is unavailable for the domain')
     }
     return screen

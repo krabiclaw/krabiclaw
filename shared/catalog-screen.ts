@@ -8,6 +8,8 @@ export interface CatalogRow {
   icon?: string
   optional_detail?: boolean
   image?: string | null
+  external_url?: string | null
+  copy_value?: string
   to?: string
   native?: string
   query?: Record<string, string>
@@ -31,6 +33,7 @@ export interface CatalogField {
 export interface CatalogScreen {
   title: string
   preview_url?: string | null
+  destination?: { view: string; query: Record<string, string> }
   rows: CatalogRow[]
   fields: CatalogField[]
   revision?: string

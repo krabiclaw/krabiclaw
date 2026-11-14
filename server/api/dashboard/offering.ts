@@ -10,8 +10,8 @@ export default defineHandler(async event => {
     if (event.req.method !== 'POST') throw new HTTPError({ statusCode: 405, message: 'Method not allowed' })
     const answer = catalogAnswer.safeParse(await readRequiredBody(event))
     if (!answer.success) throw new HTTPError({ statusCode: 422, message: 'Invalid offering answer' })
-    await dashboardOffering(event, answer.data)
-    return jsonResponse({ success: true })
+    const { destination } = await dashboardOffering(event, answer.data)
+    return jsonResponse({ success: true, destination })
   } catch (error) {
     if (!HTTPError.isError(error) || error.status < 400 || error.status >= 500) throw error
     const details = isRecord(error.data) ? error.data : {}
