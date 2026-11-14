@@ -175,40 +175,69 @@ test('listing messaging grants and verified trip invites use the live conversati
     await expectStatus(currentGrants, 200)
     expect(await currentGrants.json()).toEqual({ member_ids: [memberId] })
     const cohostPage = await cohost.newPage()
-    // Replay the first open after the server-rendered transcript is on screen.
+    // Release the first open after the transcript is on screen.
     // A real reconnect is tested below, with a message written while offline.
     await cohostPage.addInitScript(() => {
       const subscribe = WebSocket.prototype.addEventListener
       WebSocket.prototype.addEventListener = function (type, listener, options) {
         if (type === 'open' && typeof listener === 'function' && new URL(this.url).pathname === '/api/dashboard/guest-inbox/socket') {
-          const socket = this
-          return subscribe.call(socket, type, event => {
-            window.addEventListener('test:open-dashboard-socket', () => listener.call(socket, event), { once: true })
+          return subscribe.call(this, type, event => {
+            window.addEventListener('test:open-dashboard-socket', () => listener.call(this, event), { once: true })
             document.documentElement.dataset.dashboardSocketReady = 'true'
           }, options)
         }
         return subscribe.call(this, type, listener, options)
       }
     })
-    const transcriptReads: Request[] = []
+    let transcriptReads = 0
     cohostPage.on('request', request => {
-      if (request.method() === 'GET' && new URL(request.url()).pathname === path) transcriptReads.push(request)
+      if (request.method() === 'GET' && new URL(request.url()).pathname === path) transcriptReads++
     })
     const socketCapture = cohostPage.waitForEvent('websocket', {
       predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket',
     })
     await cohostPage.goto(`/dashboard/${slug}/messages/${booking.conversation_id}`)
-    const socket = await socketCapture
+    await socketCapture
     await expect(cohostPage.getByText(reply, { exact: true })).toBeVisible()
     await expect(cohostPage.getByRole('textbox', { name: 'Write a message…' })).toBeVisible()
     await waitForNuxtHydration(cohostPage)
     await expect(cohostPage.locator('html')).toHaveAttribute('data-dashboard-socket-ready', 'true')
-    const readsBeforeOpen = transcriptReads.length
+    expect(transcriptReads).toBe(1)
     await cohostPage.evaluate(async () => {
       window.dispatchEvent(new Event('test:open-dashboard-socket'))
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     })
-    expect(transcriptReads).toHaveLength(readsBeforeOpen)
+    expect(transcriptReads).toBe(1)
+
+    const snapshotReady = Promise.withResolvers<undefined>()
+    const releaseSnapshot = Promise.withResolvers<undefined>()
+    await cohostPage.route(url => url.pathname === path, async route => {
+      const response = await route.fetch()
+      snapshotReady.resolve(undefined)
+      await releaseSnapshot.promise
+      await route.fulfill({ response })
+    }, { times: 1 })
+    const pendingSocket = cohostPage.waitForEvent('websocket', {
+      predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket',
+    })
+    let socket: WebSocket
+    try {
+      await cohostPage.reload({ waitUntil: 'domcontentloaded' })
+      await snapshotReady.promise
+      await expect(cohostPage.locator('html')).toHaveAttribute('data-dashboard-socket-ready', 'true')
+      socket = await pendingSocket
+      const received = socket.waitForEvent('framereceived', { predicate: frame => {
+        if (frame.payload === 'pong') return false
+        const event: unknown = JSON.parse(String(frame.payload))
+        return isDashboardInvalidation(event) && event.type === 'MESSAGE_CREATE' && event.conversation_id === booking.conversation_id
+      } })
+      await cohostPage.evaluate(() => window.dispatchEvent(new Event('test:open-dashboard-socket')))
+      const incoming = 'This reply arrived while the transcript was loading.'
+      await expectStatus(await page.request.post(path, { headers, data: { body: incoming, idempotency_key: crypto.randomUUID() } }), 200)
+      await received
+      releaseSnapshot.resolve(undefined)
+      await expect(cohostPage.getByText(incoming, { exact: true })).toBeVisible()
+    } finally { releaseSnapshot.resolve(undefined) }
 
     const invitation = await page.request.post(`${path}/invite`, { headers, data: { email: travelerEmail } })
     await expectStatus(invitation, 201)
