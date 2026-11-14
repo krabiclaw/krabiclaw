@@ -51,7 +51,7 @@ export async function loadDashboardCatalog(event: H3Event) {
     const scopes = locationId ? [locationId] : [null, ...locations.map(place => place.id)]
     const price = formatProductPriceRange(summarizeProductPrices(product.variants, scopes.map(location_id => ({ currency, location_id }))))
     return {
-      id: product.id, label: product.name,
+      id: product.id, label: product.stay ? product.stay.internal_name : product.name,
       summary: [price ?? 'No price set', product.booking?.held_online ? 'Online' : null, ...bindings,
         ...(!bindings.length && !product.booking?.held_online ? ['No locations set'] : [])].filter(Boolean).join(' · '),
       image: mediaStillUrl(product.image),
