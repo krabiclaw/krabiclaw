@@ -592,6 +592,10 @@ watch(() => route.params.org_slug, () => {
   expandedGroups.value = {}
 })
 
+watch(() => addForm.domain, () => {
+  liveCutoverWarning.value = null
+  addForm.acknowledge_live_cutover = false
+})
 watch(addModalOpen, (open) => {
   if (!open) resetAddModal()
 })

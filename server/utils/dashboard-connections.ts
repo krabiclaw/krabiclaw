@@ -157,7 +157,8 @@ export async function dashboardConnections(
   }
   if (!definition || definition.key === 'airbnb') return invalid('Connection not found', 404)
   const integration = definition.key
-  const scope = { integration }
+  const managedAds = integration === 'google-ads' && query.service === 'managed-ads'
+  const scope: Record<string, string> = { integration, ...(managedAds ? { service: 'managed-ads' } : {}) }
   const entitled = !definition.entitlement || await hasOrganizationEntitlement(env, organization.id, definition.entitlement)
   if (integration === 'google-maps') {
     if (view === 'connection') {
@@ -220,7 +221,7 @@ export async function dashboardConnections(
     : null
   const accountId = typeof query.account_id === 'string' && query.account_id ? query.account_id : null
   const social = integration === 'facebook' || integration === 'instagram' || integration === 'discord'
-  const authorize = { id: 'authorize', label: connected ? 'Reconnect account' : 'Link account', authorization: integration }
+  const authorize = { id: 'authorize', label: connected ? 'Reconnect account' : 'Link account', authorization: integration, query: scope }
   if (view === 'connection') {
     if (answer) return invalid('Choose an action')
     const health = social && connected ? (await getSocialConnections(env, organization.id, {
@@ -234,7 +235,7 @@ export async function dashboardConnections(
         summary: `${members.members.filter(member => member.scheduling?.calendar_ids.length).length} of ${members.members.length} team members checking their calendar` }] : []),
       ...(calendarState?.calendar && connected ? [{ id: 'calendar', label: 'Add bookings to', summary: connection?.name ?? undefined,
         external_url: `https://calendar.google.com/calendar/u/0/r?cid=${encodeURIComponent(Buffer.from(calendarState.calendar.calendar_id).toString('base64').replace(/=+$/, ''))}` }] : []),
-      ...(entitled && !calendarState?.cleanup_pending && (!connected || social || calendar) ? [authorize] : []),
+      ...(entitled && !calendarState?.cleanup_pending && (!connected || social || calendar || managedAds) ? [authorize] : []),
       ...(connected ? [row('disconnect', 'Disconnect', 'connection-action', { ...scope, action: 'disconnect' })] : []),
       ...(calendar && (connection?.state === 'error' || calendarState?.cleanup_pending) ? [row('retry', 'Retry sync', 'connection-action', { ...scope, action: 'sync' })] : []),
       ...(!entitled ? [{ id: 'plan', label: 'Your plan does not include this connection' }] : []),
@@ -259,37 +260,42 @@ export async function dashboardConnections(
   const spec = inventory[integration as keyof typeof inventory]
   let choices: Array<{ value: string; label: string; name?: string }> = []
   if (spec) {
-    const data = await api<Record<string, unknown>>(`${path}/${spec.path}?${new URLSearchParams({ account_id: accountId })}`)
+    const data = await api<Record<string, unknown>>(`${path}/${spec.path}?${new URLSearchParams({ account_id: accountId, ...(managedAds ? { service: 'managed-ads' } : {}) })}`)
     const items = data[spec.list]
     if (!Array.isArray(items)) return invalid('Could not read provider destinations', 502)
     choices = items.flatMap(item => {
-      if (!item || typeof item[spec.id] !== 'string' || item.not_enabled || item.error) return []
+      if (!item || typeof item[spec.id] !== 'string' || item.not_enabled || item.error || (integration === 'google-ads' && item.is_manager)) return []
       const name = typeof item[spec.name] === 'string' ? item[spec.name] : item[spec.id]
       return [{ value: item[spec.id], label: typeof item.server === 'string' ? `${item.server} · ${name}` : name, name }]
     })
     if (integration === 'google-search-console' && typeof data.site_url === 'string' && !choices.some(choice => choice.value === data.site_url)) {
       choices.unshift({ value: data.site_url, label: `${data.site_url} (verify for me)` })
     }
-    if (!choices.length) return { ...index(definition.name, [authorize]), empty_title: 'No destinations found' }
+    if (!choices.length) {
+      const message = managedAds ? 'No eligible Google Ads accounts billed in USD' : 'No destinations found'
+      if (answer) return invalid(message, 409)
+      return { ...index(definition.name, [authorize]), empty_title: message }
+    }
   } else if (integration === 'instagram') {
     const account = await auth.api.accountInfo({ headers: event.req.headers, query: { accountId } })
     if (!account.user.name) return invalid('Instagram did not return an account name', 502)
     choices = [{ value: accountId, label: account.user.name }]
   }
   const title = connected ? `Reconnect ${definition.name}` : `Connect ${definition.name}`
-  const current = social ? await readIntegration(db, organization.id, integration) : null
+  const current = social ? await readIntegration(db, organization.id, integration)
+    : managedAds ? await readIntegration(db, organization.id, 'google_ads') : null
   const revision = JSON.stringify([connection, current?.revision, accountId, choices])
   const screen = form(title, revision, [
-    ...(choices.length ? [{ key: 'destination', kind: 'select' as const, label: 'Destination', value: choices.length === 1 ? choices[0]!.value : '', choices }] : []),
+    ...(choices.length ? [{ key: 'destination', kind: 'select' as const, label: managedAds ? 'Google Ads account billed in USD' : 'Destination', value: choices.length === 1 ? choices[0]!.value : '', choices }] : []),
     { key: 'confirm', label: title, kind: 'toggle', value: 'false' },
-  ], 'Connect')
+  ], managedAds ? 'Use this account' : 'Connect')
   if (!answer) return screen
   if (answer.revision !== revision || answer.values.confirm !== 'true') return invalid('Review and confirm the current selection')
   const selected = choices.find(item => item.value === answer.values.destination)
   if (choices.length && !selected) return invalid('Choose a destination')
   const body = { account_id: accountId, ...(current ? { revision: current.revision } : {}), ...(spec && selected ? { [spec.key]: selected.value,
     ...('nameKey' in spec ? { [spec.nameKey]: selected.name } : {}) } : {}) }
-  if (connected && !calendar && !social) return invalid('Disconnect this account before selecting a new one', 409)
-  await api(`${path}/${calendar ? 'connect' : integration === 'discord' ? 'channels' : 'select'}`, body)
-  return { ...screen, destination: { view: 'connection', query: scope } }
+  if (connected && !calendar && !social && !managedAds) return invalid('Disconnect this account before selecting a new one', 409)
+  await api(`${path}/${calendar ? 'connect' : integration === 'discord' ? 'channels' : 'select'}`, { ...body, ...(managedAds ? { service: 'managed-ads', revision: current?.revision ?? null } : {}) })
+  return managedAds ? screen : { ...screen, destination: { view: 'connection', query: scope } }
 }

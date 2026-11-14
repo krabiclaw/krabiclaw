@@ -5,7 +5,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import * as schema from '../../server/db/schema.ts'
 import { createSystemSubdomain, isSystemSubdomainSpent, ensureDomainAvailable, reconcileDueDomains, syncDomainWithCloudflare, deleteCustomDomain } from '../../server/utils/domains.ts'
 import { listDashboardEvents } from '../../server/utils/dashboard-events.ts'
-import { checkDashboardDomainGroup } from '../../server/utils/domain-dashboard-actions.ts'
+import { checkDashboardDomainGroup, connectDashboardDomain } from '../../server/utils/domain-dashboard-actions.ts'
 import { getOrganizationDomains, groupCustomDomains } from '../../server/utils/domain-read-model.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
@@ -26,11 +26,17 @@ test('a stale domain result changes nothing and permanent subdomain reservations
     await assert.rejects(ensureDomainAvailable(db, ['first.example.test'], 'audit'))
     await assert.rejects(db.prepare("INSERT INTO organization_domains(id,domain,type,status) VALUES('bad','bad.example.test','custom','pending')").run())
     await db.prepare("INSERT INTO organization_domains(id,organization_id,domain,type,status) VALUES('custom','audit','custom.example.test','custom','pending')").run()
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status) VALUES ('sub-audit', 'growth', 'audit', 'active')").run()
     let requestsMade = 0
-    let providerMode: 'pending' | 'stale' | 'delete-failed' | 'delete-success' | 'activate' = 'pending'
+    let providerMode: 'pending' | 'stale' | 'delete-failed' | 'delete-success' | 'activate' | 'live-cutover' = 'pending'
     const checkedHostnames: string[] = []
     let zarazConfig: unknown = { tools: {}, triggers: {}, settings: { ecommerce: true } }
     t.mock.method(globalThis, 'fetch', async (url, init) => {
+      if (providerMode === 'live-cutover') {
+        const request = new URL(String(url))
+        assert.equal(request.hostname, 'cloudflare-dns.com')
+        return Response.json({ Status: 0, Answer: request.searchParams.get('name') === 'live.example.org' && request.searchParams.get('type') === 'A' ? [{ type: 1, data: '192.0.2.17' }] : [] })
+      }
       if (providerMode === 'activate') {
         const request = new URL(String(url))
         if (request.hostname === 'cloudflare-dns.com') return Response.json({ Status: 0, Answer: request.searchParams.get('type') === 'CNAME' ? [{ type: 5, data: 'target.example.test.' }] : [] })
@@ -54,6 +60,22 @@ test('a stale domain result changes nothing and permanent subdomain reservations
       if (providerMode === 'delete-success') { assert.equal(init?.method, 'DELETE'); return Response.json({ success: true, result: {} }) }
       return Response.json({ success: true, result: { id: 'provider-id', hostname: 'custom.example.test', status: 'pending', ssl: { status: 'pending_validation' } } })
     })
+    providerMode = 'live-cutover'
+    const dashboardEnv = { ...env, DB: db, CLOUDFLARE_API_TOKEN: 'test', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://provider.example.test',
+      BETTER_AUTH_URL: 'https://provider.example.test', BETTER_AUTH_SECRET: 'fixture-domain-auth-secret-long-enough', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests',
+    } as CloudflareEnv
+    await assert.rejects(connectDashboardDomain(dashboardEnv, db,
+      { organizationId: 'audit', organizationSlug: 'audit', actorId: 'operator', actorType: 'owner' }, 'live.example.org', true, false), {
+      status: 409, data: {
+        code: 'DOMAIN_LIVE_CUTOVER',
+        live_cutover_warning: {
+          hostname: 'live.example.org', records: [{ type: 'A', value: '192.0.2.17' }],
+          message: 'live.example.org currently points elsewhere and may be live. Changing DNS can take it offline until KrabiClaw validation finishes.',
+        },
+      },
+    })
+    assert.deepEqual((await getOrganizationDomains(db, 'audit')).map(domain => domain.domain), ['custom.example.test'])
+    providerMode = 'pending'
     assert.deepEqual(await reconcileDueDomains(env, db), { checked: 1, failed: 0 })
     assert.equal(requestsMade, 1)
     assert.equal((await db.prepare("SELECT status FROM organization_domains WHERE id='custom'").first())?.status, 'verifying')
@@ -88,10 +110,7 @@ test('a stale domain result changes nothing and permanent subdomain reservations
     const www = (await getOrganizationDomains(db, 'audit')).find(row => row.id === 'www')
     assert.ok(www)
     providerMode = 'activate'
-    await checkDashboardDomainGroup({
-      ...env, DB: db, CLOUDFLARE_API_TOKEN: 'test', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://provider.example.test',
-      BETTER_AUTH_URL: 'https://provider.example.test', BETTER_AUTH_SECRET: 'fixture-domain-auth-secret-long-enough', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests',
-    } as CloudflareEnv, db,
+    await checkDashboardDomainGroup(dashboardEnv, db,
       { organizationId: 'audit', organizationSlug: 'audit', actorId: 'operator', actorType: 'owner' }, www)
     assert.deepEqual(checkedHostnames.sort(), ['apex-provider', 'www-provider'])
     const [group] = groupCustomDomains(await getOrganizationDomains(db, 'audit'))

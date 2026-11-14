@@ -44,6 +44,7 @@ interface AdsLeaf {
   ads: ConnectedIntegration | null
   accounts: Array<{ customerId: string; formatted_customer_id: string; descriptiveName: string | null; currencyCode?: string; is_manager?: boolean; not_enabled?: true; error?: string }>
   error: string | null
+  revision: string | null
 }
 
 const route = useRoute()
@@ -58,17 +59,17 @@ const ads = computed(() => integrations.summary.value?.google_ads ?? null)
 
 const isLeaf = (value: unknown): value is AdsLeaf =>
   isRecord(value) && (value.account_id === null || typeof value.account_id === 'string') && Array.isArray(value.accounts)
-  && (value.ads === null || isRecord(value.ads))
+  && (value.ads === null || isRecord(value.ads)) && (value.revision === null || typeof value.revision === 'string')
 const isSuccess = (value: unknown): value is { success: true } => isRecord(value) && value.success === true
 
 const { data, refresh, error: loadError } = await useAsyncData(
   () => `integration-google-ads:${integrations.organizationId}:${accountId.value ?? ''}`,
-  () => dashboardApi(`${api}/accounts`, { query: (!ads.value || managedAdsPath.value) && accountId.value ? { account_id: accountId.value } : {}, validate: isLeaf }),
+  () => dashboardApi(`${api}/accounts`, { query: { ...((!ads.value || managedAdsPath.value) && accountId.value ? { account_id: accountId.value } : {}), ...(managedAdsPath.value ? { service: 'managed-ads' } : {}) }, validate: isLeaf }),
   { watch: [accountId] },
 )
 const selected = ref<string | undefined>()
 
-const options = computed(() => (data.value?.accounts ?? []).filter(account => !account.not_enabled && (!managedAdsPath.value || (account.currencyCode === 'USD' && !account.is_manager && !account.error))).map(account => ({
+const options = computed(() => (data.value?.accounts ?? []).filter(account => !account.not_enabled).map(account => ({
   label: `${account.descriptiveName ? `${account.descriptiveName} (${account.formatted_customer_id})` : account.formatted_customer_id}${account.is_manager ? ' · manager account' : ''}`,
   value: account.customerId,
   // A manager account holds other accounts and has no campaigns or results of its own.
@@ -85,13 +86,14 @@ const disconnecting = ref(false)
 
 async function select() {
   const account = data.value?.accounts.find(candidate => candidate.customerId === selected.value)
-  if (!account || !accountId.value || (managedAdsPath.value && account.currencyCode !== 'USD')) return
+  const inventory = data.value
+  if (!inventory || !account || !accountId.value) return
   saving.value = true
   error.value = ''
   try {
     await dashboardApi(`${api}/select`, {
       method: 'POST',
-      body: { account_id: accountId.value, customer_id: account.customerId, customer_name: account.descriptiveName },
+      body: { account_id: accountId.value, customer_id: account.customerId, customer_name: account.descriptiveName || account.formatted_customer_id, ...(managedAdsPath.value ? { service: 'managed-ads', revision: inventory.revision } : {}) },
       validate: isSuccess,
     })
     await clear()

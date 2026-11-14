@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { createCustomDomainPair, deleteCustomDomain, inspectDomainResolution, syncDomainWithCloudflare, validateCustomDomain, type DomainRecord } from '~/server/utils/domains'
 import { buildDashboardUrl } from '~/server/utils/dashboard-links'
-import { canonicalDomainForPair, rootDomainForPair } from '~/server/utils/domain-shared'
+import { domainPair, rootDomainForPair } from '~/server/utils/domain-shared'
 import { notifyDomainLifecycle } from '~/server/utils/domain-notifications'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { getOrganizationDomains, groupCustomDomains } from '~/server/utils/domain-read-model'
@@ -21,17 +21,19 @@ export async function connectDashboardDomain(
   const validation = validateCustomDomain(env, requestedDomain)
   if (!validation.valid) throw new HTTPError({ statusCode: 400, message: validation.reason })
 
-  const canonicalHostname = canonicalDomainForPair(requestedDomain, includeWww)
-  let liveResolution
-  try {
-    liveResolution = await inspectDomainResolution(env, canonicalHostname)
-  } catch (error) {
-    throw new HTTPError({ statusCode: 502, message: `Could not check where ${canonicalHostname} points: ${error instanceof Error ? error.message : String(error)}` })
-  }
-  if (liveResolution.resolves_elsewhere && acknowledgeCutover !== true) {
-    throw new HTTPError({ statusCode: 409, message: 'This domain currently points somewhere else.', data: {
-      live_cutover_warning: { hostname: liveResolution.hostname, records: liveResolution.records,
-        message: 'This domain currently points elsewhere and may be live. Changing DNS now can take it offline until KrabiClaw validation finishes.' },
+  const resolutions = await Promise.all(domainPair(requestedDomain, includeWww).map(async hostname => {
+    try {
+      return await inspectDomainResolution(env, hostname)
+    } catch (error) {
+      throw new HTTPError({ statusCode: 502, message: `Could not check where ${hostname} points: ${error instanceof Error ? error.message : String(error)}` })
+    }
+  }))
+  const liveResolution = resolutions.find(result => result.records.length > 0 && result.points_to_saas !== true)
+  if (liveResolution && acknowledgeCutover !== true) {
+    const message = `${liveResolution.hostname} currently points elsewhere and may be live. Changing DNS can take it offline until KrabiClaw validation finishes.`
+    throw new HTTPError({ statusCode: 409, message, data: {
+      code: 'DOMAIN_LIVE_CUTOVER', live_cutover_warning: { hostname: liveResolution.hostname, records: liveResolution.records,
+        message },
     } })
   }
 

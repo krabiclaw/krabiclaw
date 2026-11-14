@@ -2096,6 +2096,14 @@ test.describe('dashboard pane hierarchy', () => {
     const withoutMaps = await page.request.get('/api/dashboard/offering', { params: { org: tenant.slug, view: next.view, ...next.query } })
     expect(withoutMaps.status(), await withoutMaps.text()).toBe(503)
     expect((await withoutMaps.json()).message).toContain('Google Maps search is unavailable')
+    const managed = await read({ view: 'connection', integration: 'google-ads', service: 'managed-ads' })
+    expect(managed.rows).toContainEqual(expect.objectContaining({ authorization: 'google-ads',
+      query: { integration: 'google-ads', service: 'managed-ads' } }))
+    const domains = await read({ view: 'website-domains' })
+    const connect = domains.rows.find(row => row.id === 'connect')
+    expect(connect).toMatchObject({ native: 'website-domain-action', query: { action: 'connect' } })
+    const domainForm = await read({ view: connect!.native!, ...connect!.query })
+    expect(domainForm.fields).toContainEqual(expect.objectContaining({ key: 'cutover', value: 'false' }))
     const calendar = await read({ view: 'connection', integration: 'google-calendar' })
     expect(calendar.rows).toContainEqual(expect.objectContaining({ authorization: 'google-calendar' }))
     const link = await page.request.post('/api/dashboard/connection-authorization', {

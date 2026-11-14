@@ -1449,7 +1449,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     const fields = connecting ? [
       field('domain', 'Domain', 'text', ''),
       field('www', 'Include www', 'toggle', true),
-      field('cutover', 'Allow moving a domain that already points elsewhere', 'toggle', false),
+      field('cutover', 'I understand changing DNS can interrupt the current site until validation finishes', 'toggle', false),
     ] : [field('confirm', `${title} · ${group!.domain}`, 'toggle', false)]
     const screen = { title, fields, rows: [], revision, save_label: title }
     if (!answer) return screen
