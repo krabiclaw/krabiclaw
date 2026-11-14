@@ -88,8 +88,12 @@ test('public discovery resolves translations through current publication owners'
       product: { kind: 'experience', name: 'Branch workshop', active: true, order_url: 'https://booking.example/workshop' }, publication: { published: true } })
     await setProductLocation(createDb(db), { env, organizationId: 'tenant', productId: experience.id, locationId: 'branch',
       active: true, published: true, actor: { actorId: 'discovery-owner' } })
-    await putResourceLocalization(env, createDb(db), { organizationId: 'tenant', resourceType: 'product', resourceId: experience.id,
-      locale: 'th', values: { name: 'Translated branch workshop' }, userId: 'discovery-owner' })
+    const translationTarget = { organizationId: 'tenant', resourceType: 'product', resourceId: experience.id, locale: 'th', userId: 'discovery-owner' }
+    const initial = await putResourceLocalization(env, createDb(db), { ...translationTarget, expectedResourceUpdatedAt: null, values: { name: 'Initial translation' } })
+    await assert.rejects(putResourceLocalization(env, createDb(db), { ...translationTarget, expectedResourceUpdatedAt: null, values: { name: 'Stale creation' } }), { status: 409 })
+    const savedTranslation = await putResourceLocalization(env, createDb(db), { ...translationTarget, expectedResourceUpdatedAt: initial.updated_at, values: { name: 'Translated branch workshop' } })
+    assert.notEqual(savedTranslation.updated_at, initial.updated_at)
+    await assert.rejects(putResourceLocalization(env, createDb(db), { ...translationTarget, expectedResourceUpdatedAt: initial.updated_at, values: { name: 'Stale edit' } }), { status: 409 })
     await createContentDocumentWithBlocks(db, { id: 'branch-qa', organizationId: 'tenant', kind: 'qa', rowRole: 'root', locale: 'en',
       locationId: 'branch', title: 'Where is the workshop?', summary: 'At this branch.', status: 'published', source: 'manual' }, [])
     await createContentDocumentWithBlocks(db, { id: 'branch-qa-th', organizationId: 'tenant', kind: 'qa', rowRole: 'representation', rootId: 'branch-qa',

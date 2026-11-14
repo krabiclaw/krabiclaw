@@ -1998,6 +1998,7 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   assert.equal(savedAccount.status, 200, await savedAccount.text())
   const replacement = await readIntegration(db, ORG, 'google_ads')
   assert.equal(replacement?.target_name, 'Managed replacement')
+  assert.equal(replacement?.target_id, '2222222222')
   assert.notEqual(replacement?.revision, freeConnection?.revision)
   const readsBeforeDelivery = googleReads
   providerUnavailable = true

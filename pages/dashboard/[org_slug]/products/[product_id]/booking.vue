@@ -25,7 +25,7 @@ const groups = computed<EditorNavigationGroup[]>(() => {
   const config = p.product.value?.booking
   const copy = p.bookingCopy.value
   const occurrence = legal.value ? 'consultation' : 'session'
-  const items: EditorNavigationItem[] = config ? [] : [row('enabled', legal.value ? 'Consultation calendar' : 'Booking calendar', 'Not set up', 'i-lucide-calendar-check')]
+  const items: EditorNavigationItem[] = config || !p.managesCatalog.value ? [] : [row('enabled', legal.value ? 'Consultation calendar' : 'Booking calendar', 'Not set up', 'i-lucide-calendar-check')]
   // A table is seated through its location's opening hours: its length and interval are its schedule.
   const tableLocation = table.value ? p.allOrganizationLocations.value.find(entry => p.product.value?.locations.some(placement => placement.location_id === entry.id)) ?? null : null
   if (config) items.push(

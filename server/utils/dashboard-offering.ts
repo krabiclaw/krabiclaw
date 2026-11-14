@@ -61,7 +61,7 @@ import { blankBlogLocalizedText, blogLocalizedTextFields, initialBlogEditorBlock
 import { PRICING_CALCULATOR_COLUMNS, pricingCalculatorConfig, pricingCalculatorRows, updatePricingCalculator } from '~/utils/pricing-calculator'
 import { SITE_PALETTE_MODES, SITE_PALETTE_ROLES, STARTER_PALETTES, type SitePalettePatch } from '~/shared/site-palette'
 import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset } from '~/shared/organization-fonts'
-import { getOrganizationDomainsDashboardPayload } from '~/server/utils/domain-read-model'
+import { domainInstructions, getOrganizationDomainsDashboardPayload } from '~/server/utils/domain-read-model'
 import { organizationPublicUrl, setCanonicalDomain } from '~/server/utils/domains'
 import { changeDashboardDomain, checkDashboardDomainGroup, connectDashboardDomain } from '~/server/utils/domain-dashboard-actions'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
@@ -763,7 +763,8 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       })) }
     }
     const item = rows.find(item => item.id === query.resource_id && item.type === query.resource_type) ?? missing('Catalog item not found')
-    const values = (item.localization?.values ?? {}) as Record<string, unknown>
+    const saved = await findResourceLocalization(db, organization.id, item.type, item.id, catalog.locale)
+    const values = (saved?.values ?? {}) as Record<string, unknown>
     const original = item.source
     const currentDetails = isRecord(values.details) ? values.details : {}
     const definitions = item.type === 'product' ? productDetailFields(item.kind).filter(definition => definition.localizable) : []
@@ -779,7 +780,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
           })
       }) : []),
     ]
-    const revision = JSON.stringify([original, values])
+    const revision = JSON.stringify([original, values, saved?.updated_at])
     const screen = { title: original.name, rows: [], fields, revision, save_label: 'Save' }
     if (!answer) return screen
     if (isDemoOrganization(organization) && !await hasPlatformEventPermission(event, env, { platform: ['access'] })) throw new HTTPError({ statusCode: 403, message: 'Demo organization is read-only' })
@@ -799,7 +800,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       else Reflect.deleteProperty(target, name)
     }
     if (Object.keys(details).length || Object.hasOwn(next, 'details')) next.details = details
-    await putResourceLocalization(env, db, { organizationId: organization.id, resourceType: item.type, resourceId: item.id, locale: catalog.locale, values: next, userId })
+    await putResourceLocalization(env, db, { organizationId: organization.id, resourceType: item.type, resourceId: item.id, locale: catalog.locale, values: next, expectedResourceUpdatedAt: saved?.updated_at ?? null, userId })
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
@@ -922,7 +923,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The category changed. Reopen the translation before saving.' })
     if (fields.length !== Object.keys(answer.values).length || fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this translation')
     await putResourceLocalization(env, db, {
-      organizationId: organization.id, resourceType: 'article_category', resourceId: category.id, locale: language.locale,
+      organizationId: organization.id, resourceType: 'article_category', resourceId: category.id, locale: language.locale, expectedResourceUpdatedAt: saved?.updated_at ?? null,
       values: Object.fromEntries(Object.entries(answer.values).map(([key, value]) => [key, value.trim()]).filter(([, value]) => value)),
       userId,
     })
@@ -979,7 +980,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     }
     if (Object.keys(nextAddress).length) next.address = nextAddress
     else Reflect.deleteProperty(next, 'address')
-    await putResourceLocalization(env, db, { organizationId: organization.id, resourceType: 'business_location', resourceId: location.id, locale: language.locale, values: next, userId })
+    await putResourceLocalization(env, db, { organizationId: organization.id, resourceType: 'business_location', resourceId: location.id, locale: language.locale, values: next, expectedResourceUpdatedAt: saved?.updated_at ?? null, userId })
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
@@ -1014,7 +1015,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       if (ctaLabel) next.consultation = { cta_label: ctaLabel }
       else Reflect.deleteProperty(next, 'consultation')
     }
-    await putResourceLocalization(env, db, { organizationId: organization.id, resourceType: 'organization', resourceId: organization.id, locale: language.locale, values: next, userId })
+    await putResourceLocalization(env, db, { organizationId: organization.id, resourceType: 'organization', resourceId: organization.id, locale: language.locale, values: next, expectedResourceUpdatedAt: saved?.updated_at ?? null, userId })
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
@@ -1434,6 +1435,10 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         { id: 'status', label: 'Status', summary: group.role === 'canonical' && group.status === 'active' ? 'Primary' : group.status_label },
         { id: 'address', label: 'Domain', summary: group.domain, copy_value: group.domain },
         ...group.records.map((record, index) => ({ id: `dns-${index}`, label: `${record.type} · ${record.name}`, summary: record.value, copy_value: record.value })),
+        ...group.domains.flatMap(domain => {
+          const note = domainInstructions(domain).apex_note
+          return note ? [{ id: 'apex-forwarding', label: 'Apex forwarding', summary: note }] : []
+        }),
         ...[group.warning, group.error].flatMap((message, index) => message ? [{ id: `notice-${index}`, label: message }] : []),
         ...(group.domains.some(domain => domain.id === group.primary_domain_id && domain.desired_state === 'active' && domain.status !== 'disabled') ? [row('synced', 'Check connection')] : []),
         ...(group.status === 'active' && group.role !== 'canonical' ? [row('primary', 'Make primary')] : []),

@@ -1380,7 +1380,7 @@ watchEffect(() => {
   }
   // A product that failed to load has no rows, and every real section would
   // read as unsupported; the failure is shown instead, never a 404.
-  if (!product.value) return
+  if (!product.value || loadError.value) return
   // Private rows exist only after their home is read. A pending or failed
   // read shows its own state rather than rejecting the concern being opened.
   if (arrivalTab.value && (!arrivalHome.value || arrivalError.value)) return

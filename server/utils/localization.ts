@@ -513,19 +513,27 @@ function resourceLocalizationWriteQueries(input: {
   id: string
   prior?: PriorLocalization | null
   now: string
+  expectedResourceUpdatedAt?: string | null
 }): BatchQuery[] {
   const statements: BatchQuery[] = []
   statements.push({
+    // A failed revision uses the required timestamp constraint to roll back the
+    // entire batch, including dependent validation and invalidation statements.
     query: `INSERT INTO content_documents
       (id, organization_id, kind, row_role, resource_type, resource_id, locale, metadata_json, path,
        created_at, created_by, updated_at, updated_by)
-      VALUES (?, ?, 'resource', 'representation', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, 'resource', 'representation', ?, ?, ?, ?, ?, ?, ?, ${input.expectedResourceUpdatedAt === undefined ? '?' : `CASE WHEN (
+        SELECT updated_at FROM content_documents
+        WHERE organization_id = ? AND resource_type = ? AND resource_id = ? AND locale = ?
+      ) IS ? THEN ? ELSE NULL END`}, ?)
       ON CONFLICT(organization_id, resource_type, resource_id, locale) DO UPDATE SET
         metadata_json = excluded.metadata_json, path = excluded.path,
         updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
     params: [input.id, input.organizationId, input.resourceType, input.resourceId, input.locale,
       JSON.stringify(input.values), input.routePath,
-      input.prior?.created_at ?? input.now, input.prior?.created_by_user_id ?? input.userId, input.now, input.userId],
+      input.prior?.created_at ?? input.now, input.prior?.created_by_user_id ?? input.userId,
+      ...(input.expectedResourceUpdatedAt === undefined ? [] : [input.organizationId, input.resourceType, input.resourceId, input.locale, input.expectedResourceUpdatedAt]),
+      input.now, input.userId],
   })
   statements.push(canonicalResourceGuard(input.organizationId, input.resourceType, input.resourceId))
   if (input.resourceType === 'product' && isRecord(input.values.details)) {
@@ -554,6 +562,7 @@ export async function putResourceLocalization(
     locale: unknown
     values: unknown
     routePath?: unknown
+    expectedResourceUpdatedAt?: string | null
     userId: string
   },
 ): Promise<ResourceLocalizationRecord> {
@@ -572,23 +581,26 @@ export async function putResourceLocalization(
     const sourceDetails = validateProductDetails('stay', JSON.parse(source.details_json))
     for (const code of STAY_ALARM_AMENITIES) if (Object.hasOwn(values.details, STAY_ALARM_DETAIL_KEYS[code]) && typeof sourceDetails[STAY_ALARM_DETAIL_KEYS[code]] !== 'string') localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', `Write source details.${STAY_ALARM_DETAIL_KEYS[code]} before translating it`, { field: `details.${STAY_ALARM_DETAIL_KEYS[code]}` })
   }
-  const existing = await queryFirst<{ id: string; route_path: string | null; created_at: string; created_by_user_id: string }>(db, `
-    SELECT id, route_path, created_at, created_by_user_id
+  const existing = await queryFirst<{ id: string; route_path: string | null; created_at: string; created_by_user_id: string; updated_at: string }>(db, `
+    SELECT id, route_path, created_at, created_by_user_id, updated_at
       FROM ${RESOURCE_LOCALIZATIONS_SQL}
      WHERE organization_id = ?  AND resource_type = ? AND resource_id = ? AND locale = ?
      LIMIT 1
   `, [input.organizationId, resourceType, input.resourceId, locale])
   const routePath = validateLocalizedRoutePath(resourceType, locale, input.routePath, canonical.slug, existing?.route_path, canonical.vertical)
   const id = existing?.id ?? crypto.randomUUID()
-  const now = new Date().toISOString()
+  const now = new Date(Math.max(Date.now(), existing ? Date.parse(existing.updated_at) + 1 : 0)).toISOString()
   const statements: BatchQuery[] = resourceLocalizationWriteQueries({
     organizationId: input.organizationId, resourceType, resourceId: input.resourceId,
-    locale, values, routePath, userId: input.userId, id, prior: existing, now,
+    locale, values, routePath, userId: input.userId, id, prior: existing, now, expectedResourceUpdatedAt: input.expectedResourceUpdatedAt,
   })
   statements.push(publicResourceCacheInvalidationQuery(input.organizationId, 'resource-localization-put'))
   try {
     await executeBatch(db, statements, { operation: 'replace resource localization' })
   } catch (error) {
+    if (input.expectedResourceUpdatedAt !== undefined && error instanceof Error && /NOT NULL constraint failed: content_documents\.updated_at/.test(error.message)) {
+      localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'This translation changed. Reopen it before saving.')
+    }
     if (error instanceof Error && /NOT NULL constraint failed: content_documents\.metadata_json/.test(error.message)) localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'The source alarm details changed while translating; read the home again before saving', { field: 'details' })
     if (error instanceof Error && /content_documents_route_unique|UNIQUE constraint failed: content_documents\.organization_id, content_documents\.locale, content_documents\.path/.test(error.message)) {
       localizationError(409, 'LOCALIZED_ROUTE_CONFLICT', 'Localized route path is already owned by another resource', { route_path: routePath })

@@ -69,8 +69,10 @@ export async function loadDashboardCatalog(event: H3Event) {
   const wide = isOrganizationWideRole(organization.role)
   if (query.view === 'menu' || query.view === 'section') {
     const locationId = location?.id
-    const sections = menu.filter(section => !locationId || section.location_id === null || section.location_id === locationId)
-    const dishes = products.filter(product => product.kind === 'dish' && (!locationId || product.locations.some(binding => binding.location_id === locationId)))
+    const sections = menu.filter(section => section.location_id === null || section.location_id === locationId)
+    const dishes = products.filter(product => product.kind === 'dish' && (locationId
+      ? product.locations.some(binding => binding.location_id === locationId)
+      : !product.locations.length || product.collections.some(membership => sections.some(section => section.id === membership.collection_id))))
     screen.title = location ? `${location.title} menu` : 'Menu'
     screen.empty_title = 'No dishes'
     if (query.view === 'section') {
@@ -102,7 +104,7 @@ export async function loadDashboardCatalog(event: H3Event) {
           ? [{ id: 'menu-order', native: 'menu-order', label: 'Reorder sections', query: locationId ? { location_id: locationId } : {} }] : []),
         ...sections.map(section => ({
           id: section.id, label: section.name, image: mediaStillUrl(section.image), native: 'section',
-          query: { section_id: section.id, ...(locationId ? { location_id: locationId } : {}) },
+          query: { section_id: section.id, ...(section.location_id ? { location_id: section.location_id } : {}) },
         })),
         ...dishes.filter(dish => !dish.collections.some(membership => sections.some(section => section.id === membership.collection_id))).map(dish => item(dish, locationId)),
       ]
@@ -112,11 +114,13 @@ export async function loadDashboardCatalog(event: H3Event) {
       id: 'create-offering', label: 'Add offering', native: 'create-offering', query: {},
     })
     if ((kind === 'all' || kind === 'menu') && offers('menu')) {
-      const menuLocations = location ? [location] : locations.length ? locations : [null]
+      const hasSharedMenu = menu.some(section => section.location_id === null)
+        || products.some(product => product.kind === 'dish' && !product.locations.length)
+      const menuLocations = location ? [location] : [...(hasSharedMenu || !locations.length ? [null] : []), ...locations]
       screen.rows.push(...menuLocations.map((place): CatalogRow => {
         const count = menu.filter(section => section.location_id === null || section.location_id === place?.id).length
         return {
-          id: place ? `menu-${place.id}` : 'menu', label: place?.title ?? 'Menu',
+          id: place ? `menu-${place.id}` : 'menu', label: place?.title ?? (locations.length ? 'Shared menu' : 'Menu'),
           eyebrow: place && place.status !== 'active' ? `Menu (${place.status})` : 'Menu',
           summary: `${count} ${count === 1 ? 'section' : 'sections'}`, image: place?.picture_url ?? null,
           to: `${base}/menu${place ? `?location_id=${encodeURIComponent(place.id)}` : ''}`,

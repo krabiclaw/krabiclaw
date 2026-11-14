@@ -1328,7 +1328,10 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(card).toContainText(`${count} ${count === 1 ? 'section' : 'sections'}`)
     }
     const offerings = products.filter(product => product.kind !== 'dish')
-    await expect(grid.locator('a[data-testid^="selector-item-"]')).toHaveCount(locations.length + offerings.length)
+    const hasShared = menuSections.some(section => section.location_id === null) || products.some(product => product.kind === 'dish' && !product.locations.length)
+    const menuCount = locations.length + Number(hasShared)
+    if (hasShared) await expect(grid.getByRole('link', { name: /Shared menu/ })).toHaveAttribute('href', `${ORG}/products/menu`)
+    await expect(grid.locator('a[data-testid^="selector-item-"]')).toHaveCount(menuCount + offerings.length)
     for (const product of offerings) {
       const card = grid.getByTestId(`selector-item-${product.id}`)
       await expect(card).toHaveAttribute('href', `${ORG}/products/${product.id}`)
@@ -1357,7 +1360,7 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(grid.locator('a[data-testid^="selector-item-menu-"]')).toHaveCount(0)
     await catalog.getByTestId('catalog-kind-menu').click()
     await expect(page).toHaveURL(`${ORG}/products?kind=menu`)
-    await expect(grid.locator('a[data-testid^="selector-item-"]')).toHaveCount(locations.length)
+    await expect(grid.locator('a[data-testid^="selector-item-"]')).toHaveCount(menuCount)
 
     // A phone shows the same cards, each the full width of the grid.
     await page.setViewportSize({ width: 390, height: 844 })

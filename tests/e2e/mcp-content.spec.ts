@@ -840,9 +840,9 @@ test.describe('stateless MCP server', () => {
       } })
       expect(photoBlock.status(), await photoBlock.text()).toBe(200)
       const saved = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_blog_post', args: { organization_id: organizationId, post_id: postId } })
-      expect(mcpData<{ post: { content_blocks: unknown[] } }>(await saved.json()).post.content_blocks).toContainEqual(
-        expect.objectContaining({ type: 'image', data: expect.objectContaining({ caption: 'Kitchen photo' }), media: expect.arrayContaining([expect.objectContaining({ asset_id: photo.id })]) }),
-      )
+      const matching = mcpData<{ post: { content_blocks: Array<{ type: string; data: { caption?: string }; media: Array<{ asset_id: string }> }> } }>(await saved.json()).post.content_blocks
+        .filter(block => block.type === 'image' && block.data.caption === 'Kitchen photo' && block.media.some(item => item.asset_id === photo.id))
+      expect(matching).toHaveLength(1)
       const article = await openTenantPage(page, `${tenantBaseURL()}${new URL(unlisted.public_url).pathname}`, tenantExtraHeaders())
       expect(article?.status()).toBe(200)
       await waitForNuxtHydration(page)

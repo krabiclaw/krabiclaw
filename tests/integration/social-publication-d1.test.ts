@@ -785,7 +785,7 @@ test('Better Auth returns the Instagram account it linked to the native Connecti
 })
 
 test('the shared Facebook selection route preserves the current connection until a replacement succeeds', async () => {
-  const { runtime, db, env, restore } = await setUp()
+  const { runtime, db, env, meta, restore } = await setUp()
   try {
     await db.prepare("INSERT INTO member(id, organizationId, userId, role, createdAt) VALUES ('member-owner', 'org-a', 'owner', 'owner', ?)").bind(Date.now()).run()
     const session = 'facebook-reconnect-session'
@@ -803,10 +803,13 @@ test('the shared Facebook selection route preserves the current connection until
     const unavailable = await select({ account_id: 'fb-account', page_id: 'missing-page', revision: before.revision })
     assert.equal(unavailable.status, 400)
     assert.deepEqual(await readIntegration(db, 'org-a', 'facebook'), before)
-    const selected = await select({ account_id: 'fb-account', page_id: PAGE, revision: before.revision })
+    const replacementPage = '1205835975938852'
+    meta.assignedPageResponses.set('', { data: [{ id: replacementPage, name: 'Replacement Page', access_token: 'replacement-page-token' }] })
+    const selected = await select({ account_id: 'fb-account', page_id: replacementPage, revision: before.revision })
     assert.equal(selected.status, 200, await selected.clone().text())
     const saved = await readIntegration(db, 'org-a', 'facebook')
-    assert.equal(saved?.target_id, PAGE)
+    assert.equal(saved?.target_id, replacementPage)
+    assert.equal(saved?.target_name, 'Replacement Page')
     assert.equal(saved?.account_id, 'fb-account')
     assert.notEqual(saved?.revision, before.revision)
   } finally {
