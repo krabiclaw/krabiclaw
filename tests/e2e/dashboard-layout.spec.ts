@@ -2077,7 +2077,10 @@ test.describe('dashboard pane hierarchy', () => {
     expect(connections.rows.map(row => row.id)).toEqual(expect.arrayContaining(['google-maps', 'google-calendar', 'facebook', 'instagram', 'discord']))
     const web = await page.request.get('/api/dashboard/settings', { params: { org: tenant.slug, connections: '1' } })
     expect(web.status(), await web.text()).toBe(200)
-    expect((await web.json()).connections).toEqual(connections.rows)
+    const webConnections = await web.json()
+    expect(webConnections.connections).toEqual(connections.rows)
+    expect(webConnections.connectionGroups).toEqual(connections.groups)
+    expect(webConnections.connectionFilters).toEqual(connections.filters)
     const maps = await read({ view: 'connection', integration: 'google-maps' })
     expect(maps.rows.find(row => row.id === tenant.locations.brooklyn.id)).toMatchObject({
       native: 'connection-map', query: { integration: 'google-maps', location_id: tenant.locations.brooklyn.id },

@@ -13,9 +13,9 @@ export default defineHandler(async (event) => {
 
   return jsonResponse({
     success: true, settings,
-    ...(getQuery(event).connections === '1' ? { connections: await connectionRows({ db, env, organization }, settings.integrations) } : {}),
+    ...(getQuery(event).connections === '1' ? { connectionFilters, connectionGroups, connections: await connectionRows({ db, env, organization }, settings.integrations) } : {}),
   })
 })
 import { getQuery } from 'nitro/h3'
-import { connectionRows } from '~/server/utils/dashboard-connections'
+import { connectionFilters, connectionGroups, connectionRows } from '~/server/utils/dashboard-connections'
 import { defineHandler } from 'nitro';

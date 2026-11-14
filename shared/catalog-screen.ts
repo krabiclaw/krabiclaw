@@ -12,6 +12,8 @@ export interface CatalogRow {
   copy_value?: string
   to?: string
   authorization?: string
+  group?: string
+  plan?: string | null
   native?: string
   replace?: boolean
   query?: Record<string, string>
@@ -38,6 +40,8 @@ export interface CatalogScreen {
   preview_url?: string | null
   destination?: { view: string; query: Record<string, string> }
   rows: CatalogRow[]
+  groups?: Array<{ id: string; label: string }>
+  filters?: Array<{ value: string; label: string }>
   fields: CatalogField[]
   revision?: string
   save_label?: string

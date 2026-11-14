@@ -64,8 +64,7 @@ export const integrationsKey = Symbol('integrations') as InjectionKey<{
 </script>
 <script setup lang="ts">
 import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vue'
-import { BUSINESS_PLAN_ID, GROWTH_PLAN_ID, STARTER_PLAN_ID } from '~/shared/billing-model'
-import type { CatalogRow } from '~/shared/catalog-screen'
+import type { CatalogRow, CatalogScreen } from '~/shared/catalog-screen'
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
 useSeoMeta({ title: 'Connections | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 const route = useRoute()
@@ -73,26 +72,23 @@ const level = useRouteLevel()
 const dashboardApi = useDashboardApi()
 const organizationId = useDashboardOrganizationId()
 type ConnectionRow = CatalogRow & { group: 'sync' | 'connection'; plan: string | null; to: string }
-const isSummaryResponse = (value: unknown): value is { settings: { integrations: IntegrationsSummary }; connections: ConnectionRow[] } =>
+const isSummaryResponse = (value: unknown): value is { settings: { integrations: IntegrationsSummary }; connections: ConnectionRow[]; connectionGroups: NonNullable<CatalogScreen['groups']>; connectionFilters: NonNullable<CatalogScreen['filters']> } =>
   isRecord(value) && isRecord(value.settings) && isRecord(value.settings.integrations)
   && Array.isArray(value.settings.integrations.google_maps) && Array.isArray(value.connections)
+  && Array.isArray(value.connectionGroups) && Array.isArray(value.connectionFilters)
 const { data, error, refresh } = await useAsyncData(
   () => `dashboard-integrations:${String(route.params.org_slug)}`,
   () => dashboardApi('/api/dashboard/settings', { query: { connections: '1' }, validate: isSummaryResponse }),
 )
 const summary = computed(() => data.value?.settings.integrations)
 const plan = ref('all')
-const planTabs = [
-  { label: 'All', value: 'all' }, { label: 'Free', value: STARTER_PLAN_ID },
-  { label: 'Growth', value: GROWTH_PLAN_ID }, { label: 'Business', value: BUSINESS_PLAN_ID },
-]
+const planTabs = computed(() => data.value?.connectionFilters ?? [])
 const items = computed(() => (data.value?.connections ?? [])
   .filter(item => item.plan === null || plan.value === 'all' || item.plan === plan.value)
   .map(({ icon, ...item }) => ({ ...item, lead: { icon } })))
-const groups = computed(() => [
-  { id: 'sync', label: 'Sync', items: items.value.filter(item => item.group === 'sync') },
-  { id: 'connections', label: 'Connections', items: items.value.filter(item => item.group === 'connection') },
-].filter(group => group.items.length))
+const groups = computed(() => (data.value?.connectionGroups ?? [])
+  .map(group => ({ ...group, items: items.value.filter(item => item.group === group.id) }))
+  .filter(group => group.items.length))
 
 provide(integrationsKey, {
   organizationId,

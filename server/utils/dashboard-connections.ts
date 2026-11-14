@@ -27,6 +27,9 @@ const inventory = {
 
 const plans = [STARTER_PLAN_ID, GROWTH_PLAN_ID, BUSINESS_PLAN_ID] as const
 const planLabel = (plan: string) => plan === STARTER_PLAN_ID ? 'Free' : plan.charAt(0).toUpperCase() + plan.slice(1)
+export const connectionGroups = [{ id: 'sync', label: 'Sync' }, { id: 'connection', label: 'Connections' }]
+export const connectionFilters = [{ value: 'all', label: 'All' }, ...plans.map(plan => ({ value: plan, label: planLabel(plan) }))]
+
 type Summary = Awaited<ReturnType<typeof loadSettingsPayload>>['integrations']
 type ConnectionRow = CatalogRow & { group: 'sync' | 'connection'; plan: typeof plans[number] | null }
 
@@ -150,7 +153,7 @@ export async function dashboardConnections(
   const { integrations: summary } = await loadSettingsPayload(db, env, organization.id)
   if (view === 'connections') {
     if (answer) return invalid('Choose a connection')
-    return index('Connections', await connectionRows(context, summary))
+    return { ...index('Connections', await connectionRows(context, summary)), groups: connectionGroups, filters: connectionFilters }
   }
   if (!definition || definition.key === 'airbnb') return invalid('Connection not found', 404)
   const integration = definition.key
