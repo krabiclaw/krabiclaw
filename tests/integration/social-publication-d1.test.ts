@@ -454,6 +454,42 @@ test('publication: one result and one external post per target; a failure is the
     assert.deepEqual(connections.channels.find(item => item.channel === 'instagram')?.problems.map(item => item.code), ['access_token_unavailable'])
     await run("UPDATE account SET accessToken = 'ig-token' WHERE id = 'ig-account'")
 
+    const channelId = '1557308603734560779'
+    const guildId = '1557308603734560780'
+    const messageId = '1557308603734560781'
+    const botId = '1557308603734560782'
+    const discordEnv = { ...cardless, DISCORD_CLIENT_ID: botId, DISCORD_BOT_TOKEN: 'fixture-bot' }
+    await run("INSERT INTO account (id, accountId, providerId, userId) VALUES ('discord-account', 'discord-owner', 'discord', 'owner')")
+    const connectionRevision = await storeIntegration(db, 'org-a', 'discord', { account_id: 'discord-account', target_id: channelId, target_name: 'fixture-social' })
+    let postedMessages = 0
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(String(input))
+      if (url.hostname !== 'discord.com') return await meta.fetch(input, init)
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bot fixture-bot')
+      if (url.pathname === `/api/v10/channels/${channelId}` && init?.method === 'GET') {
+        return json({ id: channelId, guild_id: guildId, name: 'fixture-social', type: 0 })
+      }
+      assert.equal(url.pathname, `/api/v10/channels/${channelId}/messages`)
+      assert.equal(init?.method, 'POST')
+      const payload = JSON.parse(String(init?.body))
+      assert.equal(payload.content, 'A local Discord publication')
+      assert.equal(payload.enforce_nonce, true)
+      assert.equal(payload.nonce.length, 25)
+      postedMessages += 1
+      return json({ id: messageId, channel_id: channelId, author: { id: botId }, timestamp: '2026-09-28T10:00:00.000Z', attachments: [] })
+    }
+    const discordPost = await create('key-discord', { body: 'A local Discord publication' })
+    const discordTarget: PublishTarget = { channel: 'discord', target_id: channelId, connection_revision: connectionRevision }
+    const sendDiscord = () => publishPost(discordEnv, 'org-a', discordPost.post.id, { expectedUpdatedAt: discordPost.post.updated_at, targets: [discordTarget] }, 'owner')
+    assert.equal((await sendDiscord()).outcomes[0]?.status, 'published')
+    assert.equal((await sendDiscord()).outcomes[0]?.status, 'already_published')
+    assert.equal(postedMessages, 1)
+    const discordReceipt = (await getPost(db, discordEnv, 'org-a', discordPost.post.id))?.publications[0]
+    assert.equal(discordReceipt?.provider_post_id, messageId)
+    assert.equal(discordReceipt?.public_url, `https://discord.com/channels/${guildId}/${channelId}/${messageId}`)
+    assert.equal(await deleteIntegration(db, 'org-a', 'discord', { revision: connectionRevision }), true)
+    globalThis.fetch = meta.fetch as typeof fetch
+
     // Website, Facebook photos and an Instagram carousel in one call.
     const all = await publishPost(env, 'org-a', first.post.id, { expectedUpdatedAt: first.post.updated_at, targets: [targets.website, targets.facebook(), targets.instagram()] }, 'publisher')
     assert.equal(all.ok, true, JSON.stringify(all.outcomes))
