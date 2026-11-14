@@ -8,6 +8,7 @@ import { createDb } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { createTables } from './support/table-product.ts'
 import { listOrganizationNotificationMembers, memberAccessPrincipal, reconcileResponsibilities, type MemberAccessPrincipal } from '../../server/utils/member-access.ts'
+import { loadConversationPage } from '../../server/domain/conversation-history.ts'
 import { assertConversationAccess, markConversationRead, markConversationUnread, parseTranscriptWindow, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { createStay, listStayHomes, stayAccessFor, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
@@ -166,7 +167,8 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stayConversation })).map(member => member.userId).sort(), ['owner'], 'handling the site\'s tables does not reach a lodging conversation either')
     assert.deepEqual(await createTeamThread(env, db, cook, { member_user_ids: ['owner'], location_id: 'cabin-site' }), { id: floorChat.id, created: false })
     const cookFloorView = await teamThread(cook, floorChat.id)
-    assert.equal(cookFloorView.location_id, 'cabin-site')
+    assert.deepEqual([cookFloorView.id, cookFloorView.capabilities.can_leave], [floorChat.id, false])
+    assert.equal(await db.prepare('SELECT location_id FROM conversations WHERE id = ?').bind(floorChat.id).first('location_id'), 'cabin-site')
 
     // One message per key; the same key with different words is refused.
     await assert.rejects(send(cleaner, direct.id, { body: '  ', photos: [], idempotencyKey: 'empty-test', senderName: 'cleaner' }), refused(400, 'EMPTY_MESSAGE', 'body'))
@@ -219,7 +221,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     const cursor = page.page.before
     assert.notEqual(cursor, null)
     assert.deepEqual(page.entries.map(entry => entry.type === 'message' ? entry.body : entry.type), ['day', 'Second', 'Thanks'])
-    const earlier = await conversationPageFor(db, owner, direct.id, { before: cursor, limit: 2 })
+    const earlier = await loadConversationPage(db, { conversationId: direct.id, userId: owner.userId, organizationId: owner.organizationId }, { before: cursor, limit: 2 })
     assert.equal(earlier.page.before, null)
     assert.deepEqual(earlier.entries.map(entry => entry.type === 'message' ? entry.body : entry.type), ['day', 'Towels are out'])
     assert.throws(() => parseTranscriptWindow(new URLSearchParams({ before: '2026-01-01T00:00:00.000Z' })), refused(400, 'INVALID_TRANSCRIPT_CURSOR', 'before'))
@@ -338,23 +340,22 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(receiveMemberEmail(env, { ...emailedReply, from: 'owner@example.test', messageId: '<team-forged@mail.example.test>' }, unexpectedReport), InboundEmailRejection)
     assert.equal((await conversationPageFor(db, owner, contextualGroup.id)).entries.filter(entry => entry.type === 'message').filter(message => message.body === 'On my way').length, 1)
     const readingDb = createDb(db)
-    await context.test('revocation between a seat check and its transcript read exposes no later message', async () => {
+    await context.test('revocation before the transcript batch exposes no later message', async () => {
       let interleaved = false
-      const revokingDb = new Proxy(readingDb, { get(target, key) {
-        if (key === 'get') return async (query: Parameters<typeof readingDb.get>[0]) => {
-          const row = await target.get(query)
+      const client = new Proxy(db, { get(target, key) {
+        if (key === 'batch') return async (statements: Parameters<typeof db.batch>[0]) => {
           if (!interleaved) {
             interleaved = true
             await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'remove', user_id: 'cook', idempotency_key: 'transcript-race-remove' })
             await send(owner, separateGroup.id, { body: 'After transcript access ended', photos: [], idempotencyKey: 'transcript-race-message', senderName: 'owner' })
           }
-          return row
+          return target.batch(statements)
         }
         const value = Reflect.get(target, key, target)
         return typeof value === 'function' ? value.bind(target) : value
       } })
       try {
-        await assert.rejects(conversationPageFor(revokingDb, cook, separateGroup.id), refused(404, 'THREAD_NOT_FOUND', 'conversation_id'))
+        await assert.rejects(conversationPageFor(client, cook, separateGroup.id), refused(404, 'THREAD_NOT_FOUND', 'conversation_id'))
         assert.equal(interleaved, true)
         assert.equal((await conversationPageFor(db, owner, separateGroup.id)).entries.filter(entry => entry.type === 'message').at(-1)?.body, 'After transcript access ended')
       } finally {

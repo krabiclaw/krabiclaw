@@ -1,6 +1,5 @@
 import { executeBatch, type DbClient } from '~/server/db'
 import type { ConversationDetails, ConversationViewerRole } from '~/shared/messages-contract'
-import type { ThreadWideFacts } from './detail'
 import { messagePhotoRowsSql, type MessagePhotoRow } from './attachments'
 import type { HistoryDelivery } from './deliveries'
 import { resolveGuestThreadMailbox } from './mailbox'
@@ -9,13 +8,10 @@ import { providerTimestamp } from '~/server/integrations/channex/messages'
 import { conversationAccessDenied, guestVisibleSql, isEventMessage, MIRRORED_EVENT, participantGuard, SUPPORT_CONVERSATION_SQL, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
 import { firstName, providerInstant } from './presentation'
 
-export function guestConversationNames(thread: GuestRequest, facts: ThreadWideFacts, channel: 'airbnb' | 'direct') {
-  const kind = facts.support ? 'support' as const : 'guest' as const
-  const recordedName = thread.payload.guest.name
-  const channelName = facts.channel_guest_name
-  const full = kind === 'support' ? 'Airbnb Support' : recordedName ?? channelName ?? participantLabel(thread)
-  const title = kind === 'support' ? full : channelName ?? (channel === 'airbnb' && recordedName ? firstName(recordedName) : full)
-  return { kind, full, title }
+export function conversationGuestName(thread: GuestRequest, support: boolean, airbnb: boolean): string {
+  if (support) return 'Airbnb Support'
+  const name = thread.payload.guest.name
+  return airbnb && name ? firstName(name) : participantLabel(thread)
 }
 
 const RECEIPT_RANK = ['pending', 'sending', 'accepted', 'sent', 'delivered', 'read'] as const

@@ -5,7 +5,7 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { openingSentence } from '../../server/domain/guest-threads/opening.ts'
-import { appendMessage, markConversationRead, resolveConversationAccess } from '../../server/domain/conversations.ts'
+import { appendMessage, markConversationRead } from '../../server/domain/conversations.ts'
 import { loadConversationPage } from '../../server/domain/conversation-history.ts'
 import { acceptConversationGuestInvite, createConversationGuestInvite } from '../../server/domain/conversation-participants.ts'
 import { conversationPageFor } from './support/conversation-page.ts'
@@ -88,9 +88,7 @@ test('a table booking opens with its own message and the guest note, written onc
     const invite = await createConversationGuestInvite(db, principal, { conversationId: 'shared', email: traveler.email })
     const publication = { GUEST_INBOX_HUBS: { idFromName: () => 'hub', get: () => ({ fetch: () => Promise.resolve(new Response(null, { status: 204 })) }) } } as unknown as Parameters<typeof acceptConversationGuestInvite>[1]
     await acceptConversationGuestInvite(db, publication, { token: invite.token, user: traveler })
-    const page = async (userId: string, before: number | null = null, limit = 40) => loadConversationPage(db, {
-      ...await resolveConversationAccess(db, userId, 'shared'), userId, principal: null,
-    }, { before, limit })
+    const page = (userId: string, limit = 40) => loadConversationPage(db, { conversationId: 'shared', userId }, { before: null, limit })
     const list = (q?: string) => listConversations(db, null, { userId: traveler.id, buyerAudience: true, q })
     const privateWords = 'Private card receipt'
     const payment = await appendMessage(db, { conversationId: 'shared', authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: privateWords })
@@ -111,12 +109,12 @@ test('a table booking opens with its own message and the guest note, written onc
     assert.equal(await countUnreadAsGuest(db, traveler.id), 0)
     const travelerMessage = await appendMessage(db, { conversationId: 'shared', authorKind: 'guest', authorUserId: traveler.id, channel: 'web', body: 'I will be there' })
     const latestPayment = await appendMessage(db, { conversationId: 'shared', authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: 'Another private payment' })
-    const first = await page(traveler.id, null, 1)
+    const first = await page(traveler.id, 1)
     const shown = first.entries.filter(entry => entry.type === 'message')
     assert.deepEqual(shown.map(entry => [entry.id, entry.author]), [[travelerMessage.id, 'You']])
     assert.equal(first.page.before, travelerMessage.sequence)
     assert.equal(first.page.newest, travelerMessage.sequence)
-    const previous = await page(traveler.id, first.page.before, 1)
+    const previous = await loadConversationPage(db, { conversationId: 'shared', userId: traveler.id }, { before: first.page.before, limit: 1 })
     assert.deepEqual(previous.entries.filter(entry => entry.type === 'message').map(entry => entry.id), [publicMessage.id])
     assert.equal(previous.page.before, null)
     assert.equal(await countUnreadAsGuest(db, traveler.id), 0)

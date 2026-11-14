@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:7880b3fde97ecfcea1bd211290d3715fbe1942deb167f2565ea4addca27f05e5",
-  "documentationFingerprint": "sha256:a7839b1d01bbe1b0d55ac8afd9bd0510afc141050dec8e8672f37dcf4dc6e72a",
+  "fingerprint": "sha256:74f2e916c5328ed616dfb1e57678e7abe83524d29276ba00855a741f0e8b30df",
+  "documentationFingerprint": "sha256:7a196b0659ec414b2a0d7c63a57e3f8933bc94a51842f115e745b701a413ac1a",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -47781,13 +47781,9 @@
                   },
                   "can_manage_participants": {
                     "type": "boolean"
-                  },
-                  "can_send": {
-                    "type": "boolean"
                   }
                 },
                 "required": [
-                  "can_send",
                   "can_manage_participants",
                   "can_invite_guest",
                   "can_leave"
@@ -47811,17 +47807,10 @@
                           "team"
                         ],
                         "type": "string"
-                      },
-                      "reason": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
                       }
                     },
                     "required": [
-                      "channel",
-                      "reason"
+                      "channel"
                     ],
                     "type": "object"
                   },
@@ -127839,7 +127828,7 @@
       "toolContracts": {
         "cancel_product_booking": "sha256:117436c3b77b52e28d4c7baa8f2a7b128c044f4265fc20d038ef5a8e72ddd0f6",
         "confirm_product_booking": "sha256:44be0ae50ae38e0e7f9610cd8eff82af1212af3eb160c66d082804673dafd71e",
-        "get_conversation": "sha256:b9c1e306c53ee2fceac6eda4d347d14f45554285a1b3d3741f38879b681e3350",
+        "get_conversation": "sha256:5007b5cc2485f51db503b10ae92e88691fe6d2ffa56dafced5194e41abd1fd3f",
         "get_product_booking": "sha256:dc627db96028c7e276e50d86819579fe2e1ec552cda94ea7e3b75edab8ceae15",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
@@ -127969,7 +127958,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:a2a95f5e752b47a10f2d42dfaaca0caca19afd2a4110adc3fd97dad2eb8a763a",
-        "get_conversation": "sha256:b9c1e306c53ee2fceac6eda4d347d14f45554285a1b3d3741f38879b681e3350",
+        "get_conversation": "sha256:5007b5cc2485f51db503b10ae92e88691fe6d2ffa56dafced5194e41abd1fd3f",
         "get_organization_analytics": "sha256:4fcc7f6cef537aa552200cc74b666d866684657015427e256651d7791140b814",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",

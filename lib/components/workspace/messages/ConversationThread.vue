@@ -25,7 +25,7 @@
 
             <div v-else class="flex min-w-0 max-w-[76%] flex-col gap-0.5" :class="item.mine ? 'items-end self-end' : 'relative items-start self-start pl-10'" :data-message="item.key">
               <span v-if="!item.mine" class="absolute bottom-0 left-0"><InboxAvatar :name="item.runs[0]!.author" :initial="initialOf(item.runs[0]!.author)" :support="thread.kind === 'support'" size="sm" /></span>
-              <p class="mb-1 mt-2.5 text-sm text-muted"><span class="text-highlighted">{{ item.runs[0]!.label ? `${item.runs[0]!.author} · ${item.runs[0]!.label}` : item.runs[0]!.author }}</span> {{ item.runs[0]!.time }}</p>
+              <p class="mb-1 mt-2.5 text-sm text-muted"><span class="text-highlighted">{{ item.runs[0]!.author }}</span> {{ item.runs[0]!.time }}</p>
               <div v-for="message in item.runs" :key="settledKeys[message.id] ?? message.id" class="flex min-w-0 flex-col" :class="item.mine ? 'items-end' : 'items-start'" :data-team-message="thread.kind === 'team' ? message.id : undefined" :data-automatic="message.automatic || undefined">
                 <div v-if="message.photos.length" class="grid max-w-sm gap-1" :class="[message.photos.length > 1 ? 'grid-cols-2' : 'grid-cols-1', message.sending ? 'opacity-60' : '']">
                   <button
@@ -93,9 +93,7 @@
         </p>
 
         <UAlert v-if="requestingChange" class="mb-3" color="info" variant="soft" :description="t(changeRequestSent ? 'booking.change_request_sent' : 'booking.change_request_help')" />
-        <!-- Where the reply operation cannot send (no email, account or connected Airbnb home), there is no composer: its reason shows instead. -->
-        <p v-if="!canSend" class="rounded-2xl bg-elevated px-4 py-3 text-sm text-muted">{{ thread.composer.reason ?? 'Sending is unavailable in this conversation.' }}</p>
-        <MessageComposer v-else v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :sending="sending" :channel="thread.composer.channel" :send-later="!personalScope && thread.kind !== 'team'" :suggest-reply="suggestionsOn && !!latestGuestMessage && !personalScope" :generating-suggestions="generatingSuggestions" :placeholder="thread.kind === 'team' ? 'Message your team' : undefined" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : guestThread ? 'Send reply' : 'Send message'" @send="sendReply" @suggest-reply="generateSuggestions" />
+        <MessageComposer v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :sending="sending" :channel="thread.composer.channel" :send-later="!personalScope && thread.kind !== 'team'" :suggest-reply="suggestionsOn && !!latestGuestMessage && !personalScope" :generating-suggestions="generatingSuggestions" :placeholder="thread.kind === 'team' ? 'Message your team' : undefined" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : guestThread ? 'Send reply' : 'Send message'" @send="sendReply" @suggest-reply="generateSuggestions" />
         <MessagePhotoViewer v-model="viewer" />
         <ReportDialog :open="reporting !== null" title="Report this message" :description="reporting ? `Tell KrabiClaw what is wrong with ${reporting.author}'s message.` : ''" confirm-label="Report" :saving="reportSaving" :error="reportError" @submit="report" @close="reporting = null" />
       </div>
@@ -139,7 +137,6 @@ const scheduledTo = computed(() => !props.personalScope && guestThread.value ? {
   query: { ...route.query, conversation_id: props.threadId },
 } : null)
 const entries = computed(() => data.value?.entries ?? [])
-const canSend = computed(() => data.value?.capabilities.can_send === true)
 const clockFormat = computed(() => new Intl.DateTimeFormat(locale.value, { hour: 'numeric', minute: '2-digit' }))
 const older = shallowRef<ConversationEntriesPage[]>([])
 const olderError = ref<string | null>(null)
@@ -319,7 +316,7 @@ const rows = computed<Row[]>(() => {
   }
   if (attempt.value && sending.value && !items.some(item => item.type === 'message' && settledKeys.value[item.id] === `pending:${attempt.value?.key}`)) {
     items.push({
-      type: 'message', id: `pending:${attempt.value.key}`, sequence: Number.MAX_SAFE_INTEGER, side: mineSide.value, author: 'You', author_user_id: userId.value ?? null, automatic: false, deliveries: [], label: null, sent_at: new Date().toISOString(),
+      type: 'message', id: `pending:${attempt.value.key}`, sequence: Number.MAX_SAFE_INTEGER, side: mineSide.value, author: 'You', author_user_id: userId.value ?? null, automatic: false, deliveries: [], sent_at: new Date().toISOString(),
       time: 'Sending', body: attempt.value.body || null, receipt: null, retryable: false, unshown_files: 0, sending: true,
       photos: attempt.value.photos.map((photo, at) => ({ id: `${attempt.value!.key}:${at}`, url: photo.url, thumbnail_url: photo.url, width: null, height: null })),
     })
@@ -350,7 +347,7 @@ const usedSuggestion = ref<{ generation_id: string; index: number } | null>(null
 const suggestionError = ref<string | null>(null)
 const generatingSuggestions = ref(false)
 const latestGuestMessage = computed(() => {
-  if (!canSend.value || !guestThread.value) return null
+  if (!guestThread.value) return null
   const last = entries.value.findLast(item => item.type === 'message')
   return last?.type === 'message' && last.side === 'guest' && guestThread.value.kind === 'guest' ? last.id : null
 })
@@ -383,7 +380,7 @@ async function generateSuggestions() {
 async function sendReply() {
   const body = draft.value.trim()
   const photos = chosen.value
-  if (!thread.value || !canSend.value || (!body && !photos.length) || sending.value) return
+  if (!thread.value || (!body && !photos.length) || sending.value) return
   if (sendAt.value) {
     sending.value = true
     actionError.value = null

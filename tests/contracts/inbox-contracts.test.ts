@@ -189,7 +189,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     assert.notEqual(thread.conversation.kind, 'team')
     if (thread.conversation.kind === 'team') throw new Error('Expected the Airbnb stay conversation')
     // Every item type the clients draw is in the contract thread.
-    const kinds = new Set(thread.entries.map(item => item.type === 'message' ? `${item.type}:${item.side}${item.label ? ':automatic' : ''}${item.photos.length ? ':photo' : ''}${item.retryable ? ':retryable' : ''}` : item.type))
+    const kinds = new Set(thread.entries.map(item => item.type === 'message' ? `${item.type}:${item.side}${item.automatic ? ':automatic' : ''}${item.photos.length ? ':photo' : ''}${item.retryable ? ':retryable' : ''}` : item.type))
     for (const kind of ['day', 'event', 'message:guest:photo', 'message:business:automatic', 'message:business:retryable']) assert.ok(kinds.has(kind), `the contract thread has no ${kind}`)
     assert.ok(thread.entries.some(item => item.type === 'event' && /on Airbnb to change the stay/.test(item.text)))
     assert.ok(thread.entries.some(item => item.type === 'message' && item.body === '¿En invierno dejan aparcar en la calle?'))

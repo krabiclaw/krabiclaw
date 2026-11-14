@@ -1,4 +1,4 @@
-import type { GuestThreadDeliveryChannel, GuestThreadDeliveryStatus, InboxChannel, InboxPhoto, InboxThreadKind } from '~/server/domain/guest-threads/types'
+import type { GuestThreadDeliveryChannel, GuestThreadDeliveryStatus, InboxPhoto, InboxThreadKind } from '~/server/domain/guest-threads/types'
 
 export type ConversationViewerRole = 'guest' | 'member'
 
@@ -18,7 +18,6 @@ export interface ConversationMessage {
   side: 'guest' | 'business'
   author: string
   automatic: boolean
-  label: string | null
   sent_at: string
   time: string | null
   body: string | null
@@ -37,7 +36,6 @@ export type ConversationEntry =
 export interface ConversationParticipant {
   id: string | null
   name: string
-  member_id: string | null
   image: string | null
   role: ConversationViewerRole
   can_remove: boolean
@@ -49,14 +47,12 @@ export interface ConversationHeader {
   kind: InboxThreadKind
   title: string
   name: string | null
-  channel: InboxChannel
   is_group: boolean
   created_by_user_id: string | null
   booking_id: string | null
-  location_id: string | null
   activity_path: string | null
   participants: ConversationParticipant[]
-  composer: { channel: 'airbnb' | 'email' | 'team'; reason: string | null }
+  composer: { channel: 'airbnb' | 'email' | 'team' }
 }
 
 export interface ConversationEntriesPage {
@@ -74,7 +70,6 @@ export interface ConversationPage extends Omit<ConversationEntriesPage, 'convers
   conversation: ConversationHeader
   viewer_role: ConversationViewerRole
   capabilities: {
-    can_send: boolean
     can_manage_participants: boolean
     can_invite_guest: boolean
     can_leave: boolean

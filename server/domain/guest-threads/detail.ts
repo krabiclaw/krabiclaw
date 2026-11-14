@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { queryFirst, type DbClient } from '~/server/db'
-import { MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUPPORT_CONVERSATION_SQL, messageHasContentSql, messageRole, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
+import { MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, messageHasContentSql, messageRole, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
 import { readConversationHistory } from '~/server/domain/conversation-history-data'
 import type { GuestRequest } from '~/server/domain/requests'
 import { readConversationEnrichment } from './deliveries'
@@ -9,17 +9,13 @@ const channelGuestNameSql = (conversationId: string) => `SELECT trim(json_extrac
   WHERE m.conversation_id = ${conversationId} AND m.author_kind = 'guest' AND m.event_name = '${MIRRORED_EVENT}'
     AND json_type(m.payload_json, '$.meta.name') = 'text' AND trim(json_extract(m.payload_json, '$.meta.name')) <> ''
   ORDER BY m.sequence DESC LIMIT 1`
-export type ThreadWideFacts = { support: number; channel_guest_name: string | null }
-export const guestNameColumns = (alias: string) => `
-  ${SUPPORT_CONVERSATION_SQL(alias)} AS support,
-  (${channelGuestNameSql(`${alias}.id`)}) AS channel_guest_name`
 
 /** The alert projects only its message and the prior messages it can quote. */
 export async function guestMessageAlertWindow(db: DbClient, entry: MessageRow, guest: GuestRequest, business: string, historyLimit: number) {
   const filter = `(m.author_kind <> 'krabiclaw' OR m.event_name IN ('${OPENING_EVENT}', '${SCHEDULED_MESSAGE_EVENT}', '${MIRRORED_EVENT}'))
     AND (${messageHasContentSql('m')} OR json_array_length(m.payload_json, '$.unshownFiles') > 0)`
   const [history, anchor, sender] = await Promise.all([
-    readConversationHistory(db, entry.conversation_id, { guestUserId: null, filter }, { before: entry.sequence, limit: historyLimit }),
+    readConversationHistory(db, entry.conversation_id, filter, { before: entry.sequence, limit: historyLimit }),
     readConversationEnrichment(db, [entry.id], entry.author_user_id ? [entry.author_user_id] : []),
     entry.channel === 'airbnb' ? queryFirst<{ name: string | null }>(db, `SELECT (${channelGuestNameSql('?')}) AS name`, [guest.id]) : null,
   ])
@@ -45,7 +41,7 @@ export async function guestMessageAlertWindow(db: DbClient, entry: MessageRow, g
  * KrabiClaw alone writes a relayed provider message, an automatic message or
  * an event nobody caused.
  */
-function actorLabel(entry: MessageRow, role: MessageRow['author_kind'], mirrored: boolean, actorNames: Map<string, string>, business: string): string | null {
+function actorLabel(entry: Pick<MessageRow, 'author_kind' | 'author_user_id' | 'event_name' | 'id'>, role: MessageRow['author_kind'], mirrored: boolean, actorNames: Map<string, string>, business: string): string | null {
   // The host's Airbnb messages are the business's side, whoever typed them on Airbnb.
   if (mirrored) return entry.author_kind === 'krabiclaw' ? 'Airbnb' : entry.author_kind === 'member' ? business : null
   if (entry.event_name === SCHEDULED_MESSAGE_EVENT) return 'Scheduled message'

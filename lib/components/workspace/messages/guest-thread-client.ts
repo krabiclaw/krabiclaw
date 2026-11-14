@@ -85,7 +85,7 @@ export function isConversationEntry(value: unknown): value is ConversationEntry 
   if (!isSequence(value.sequence) || !isText(value.sent_at)) return false
   if (value.type === 'event') return isText(value.text)
   return value.type === 'message' && (value.side === 'guest' || value.side === 'business') && isText(value.author)
-    && isNullableText(value.label) && isNullableText(value.time) && isNullableText(value.body)
+    && isNullableText(value.time) && isNullableText(value.body)
     && Array.isArray(value.photos) && value.photos.every(isPhoto)
     && isNullableText(value.receipt) && typeof value.retryable === 'boolean' && isCount(value.unshown_files)
     && isNullableText(value.author_user_id) && typeof value.automatic === 'boolean'
@@ -99,18 +99,17 @@ export function isConversationPage(value: unknown): value is ConversationPage {
     || !isText(value.conversation.id) || !isText(value.conversation.organization_id)
     || !Array.isArray(value.entries) || !value.entries.every(isConversationEntry) || !isRecord(value.page)
     || !isRecord(value.capabilities)) return false
-  const { can_send, can_manage_participants, can_invite_guest, can_leave } = value.capabilities
-  if (typeof can_send !== 'boolean' || typeof can_manage_participants !== 'boolean' || typeof can_invite_guest !== 'boolean'
+  const { can_manage_participants, can_invite_guest, can_leave } = value.capabilities
+  if (typeof can_manage_participants !== 'boolean' || typeof can_invite_guest !== 'boolean'
     || typeof can_leave !== 'boolean') return false
   const { conversation, page } = value
   if (!isText(conversation.title) || !Array.isArray(conversation.participants) || !conversation.participants.every(person =>
-    isRecord(person) && (isText(person.id) || (value.viewer_role === 'guest' && person.id === null)) && isText(person.name) && isNullableText(person.member_id) && isNullableText(person.image)
+    isRecord(person) && (isText(person.id) || (value.viewer_role === 'guest' && person.id === null)) && isText(person.name) && isNullableText(person.image)
     && (person.role === 'guest' || person.role === 'member') && typeof person.can_remove === 'boolean')) return false
   if ((conversation.kind !== 'team' && conversation.kind !== 'guest' && conversation.kind !== 'support')
-    || (conversation.channel !== 'direct' && conversation.channel !== 'airbnb')
     || typeof conversation.is_group !== 'boolean' || !isNullableText(conversation.name) || !isNullableText(conversation.booking_id)
-    || !isNullableText(conversation.created_by_user_id) || !isNullableText(conversation.location_id) || !isNullableText(conversation.activity_path)
-    || !isRecord(conversation.composer) || !isNullableText(conversation.composer.reason)
+    || !isNullableText(conversation.created_by_user_id) || !isNullableText(conversation.activity_path)
+    || !isRecord(conversation.composer)
     || (conversation.composer.channel !== 'team' && conversation.composer.channel !== 'email' && conversation.composer.channel !== 'airbnb')) return false
   return isConversationWindow(page)
 }

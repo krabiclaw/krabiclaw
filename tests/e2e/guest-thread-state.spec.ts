@@ -226,10 +226,9 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
       id: threadId,
       kind: 'guest',
       title: guestName,
-      channel: 'direct',
       booking_id: null,
-      composer: { channel: 'email', reason: null },
     })
+    expect(detail.composer).toEqual({ channel: 'email' })
     // The guest's own words open the conversation, once, as their message.
     expect(streamMessages(detail)).toMatchObject([{ side: 'guest', author: guestName, body: message, photos: [] }])
     // Showing the conversation wrote nothing; reading it through is this owner's alone.

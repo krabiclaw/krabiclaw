@@ -654,13 +654,7 @@ export type GuestReplyDestination =
   | { channel: 'account'; email: string | null }
   | { channel: null; reason: string }
 
-export type GuestReplyAccount = { email: string | null; readable: number }
-export const guestReplyAccountQuery = (userId: string): BatchQuery => ({
-  query: `SELECT CASE WHEN "emailVerified" = 1 AND COALESCE("isAnonymous", 0) = 0 THEN email END AS email,
-      COALESCE("isAnonymous", 0) = 0 OR EXISTS (SELECT 1 FROM session WHERE session."userId" = user.id) AS readable FROM user WHERE id = ?`,
-  params: [userId],
-})
-
+type GuestReplyAccount = { email: string | null; readable: number }
 /**
  * The one rule for whether, and where, a member can reply to a guest. The reply
  * operation sends by it and refuses before any send when it says nowhere; the
@@ -675,7 +669,6 @@ export async function guestReplyDestination(
   db: DbClient,
   thread: Pick<GuestRequest, 'id' | 'organization_id' | 'user_id' | 'payload'>,
   channelFacts?: Awaited<ReturnType<typeof guestThreadChannel>>,
-  accountFacts?: GuestReplyAccount | null,
 ): Promise<GuestReplyDestination> {
   const facts = channelFacts === undefined ? await guestThreadChannel(db, thread.id, thread.organization_id) : channelFacts
   if (!facts) throw new Error(`Conversation ${thread.id} has no channel facts`)
@@ -687,8 +680,8 @@ export async function guestReplyDestination(
   if (thread.user_id === null) return { channel: null, reason: GUEST_UNREACHABLE_MESSAGE }
   // An account inbox is read by whoever signs in to it: a named account, or an anonymous guest's browser while it is signed in.
   // The anonymous user a host or a channel gave a guest has never been signed in to, so nobody reads it.
-  const { query, params } = guestReplyAccountQuery(thread.user_id)
-  const account = accountFacts === undefined ? await queryFirst<GuestReplyAccount>(db, query, params) : accountFacts
+  const account = await queryFirst<GuestReplyAccount>(db, `SELECT CASE WHEN "emailVerified" = 1 AND COALESCE("isAnonymous", 0) = 0 THEN email END AS email,
+      COALESCE("isAnonymous", 0) = 0 OR EXISTS (SELECT 1 FROM session WHERE session."userId" = user.id) AS readable FROM user WHERE id = ?`, [thread.user_id])
   if (!account?.readable) return { channel: null, reason: GUEST_UNREACHABLE_MESSAGE }
   return { channel: 'account', email: account.email }
 }

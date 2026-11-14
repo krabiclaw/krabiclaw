@@ -140,7 +140,8 @@ test.describe('lodging identity boundary', () => {
       expect(conversations.conversations).toEqual([expect.objectContaining({ conversation_id: threadId, kind: 'team', unread: false })])
       expect(conversations.page_info).toEqual({ has_more: false, next_cursor: null })
       const opened = (await teamRead()).conversation
-      expect(opened).toMatchObject({ id: threadId, booking_id: null, location_id: null })
+      expect(opened).toMatchObject({ id: threadId, booking_id: null })
+      expect(opened).not.toHaveProperty('location_id')
       expect(opened).not.toHaveProperty('stay')
       expect(opened.participants.map(member => member.id).sort()).toEqual([fixture.id, invitee.id].sort())
       const message = `The guest room is ready ${crypto.randomUUID()}`
@@ -260,12 +261,14 @@ test.describe('lodging identity boundary', () => {
       await page.locator('input[type="file"]').setInputFiles({ name: 'team-message-proof.avif', mimeType: 'image/avif', buffer: await sharp('public/platform/apple-touch-icon.png').avif().toBuffer() })
       const photoSent = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === teamPath)
       await page.getByRole('button', { name: 'Send message', exact: true }).click()
-      expect((await photoSent).status()).toBe(200)
+      const photoResponse = await photoSent
+      expect(photoResponse.status()).toBe(200)
+      const sentPhoto = (await photoResponse.json() as { message: ConversationMessage }).message
+      expect(sentPhoto.deliveries).toEqual([expect.objectContaining({ channel: 'email', status: 'sent' })])
       const photoRead = await api.get(teamPath, { headers: inviteeBearer })
       expect(photoRead.status, await photoRead.text()).toBe(200)
       const photo = messages(await photoRead.json() as ConversationPage).at(-1)!
-      expect(photo).toMatchObject({ body: '', author_user_id: fixture.id })
-      expect(photo.deliveries).toEqual([expect.objectContaining({ channel: 'email', status: 'sent' })])
+      expect(photo).toMatchObject({ id: sentPhoto.id, body: '', author_user_id: fixture.id, deliveries: [] })
       expect(photo.photos).toHaveLength(1)
       const loadedPhoto = await api.get(photo.photos[0]!.url)
       expect(loadedPhoto.status).toBe(200)
@@ -446,7 +449,7 @@ test.describe('lodging identity boundary', () => {
         }
         for (const [bearer, can_manage] of [[ownerBearer, true], [adminBearer, true], [memberBearer, false]] as const) {
           const group = (await threads(bearer)).find(thread => thread.id === threadId)!
-          expect(group).toMatchObject({ name: initialName, is_group: true, created_by_user_id: fixture.id, capabilities: { can_manage_participants: can_manage, can_leave: true }, booking_id: null, location_id: null })
+          expect(group).toMatchObject({ name: initialName, is_group: true, created_by_user_id: fixture.id, capabilities: { can_manage_participants: can_manage, can_leave: true }, booking_id: null })
           expect(group.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id, teammate.id].sort())
         }
         const messageIds: string[] = []

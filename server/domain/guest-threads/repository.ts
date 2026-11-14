@@ -1,11 +1,12 @@
 import { HTTPError } from 'nitro'
 import { sessionPrepTaskQueries } from '~/server/domain/tasks'
-import { BOOKING_ENDS_SQL, BOOKING_RECORDS_SQL, bookingDay, parseGuestRequest, participantLabel, stayRequestPayBySql, stayRequestRespondBySql } from '~/server/domain/requests'
+import { BOOKING_ENDS_SQL, BOOKING_RECORDS_SQL, bookingDay, parseGuestRequest, stayRequestPayBySql, stayRequestRespondBySql } from '~/server/domain/requests'
 import {
   MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SUPPORT_CONVERSATION_SQL,
   archiveQuery, conversationAccessDenied, participantGuard, guestVisibleSql, listUnreadIds, messageHasContentSql, unreadSql, type ConversationGuard, type UnreadCounts,
 } from '~/server/domain/conversations'
 import { messagePreview } from './attachments'
+import { conversationGuestName } from './inbox'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import type { GuestThreadSubmissionType, InboxRow, ListGuestThreadsOptions } from './types'
@@ -153,7 +154,6 @@ type ListRow = {
   organization_name: string
   location_title: string | null
   time_zone: string
-  airbnb_name: string | null
   record_unit: 'slot' | 'nights' | null
   record_starts_at: string | null
   record_stored_ends_at: string | null
@@ -183,9 +183,6 @@ export async function listConversations(
   const rows = await queryAll<ListRow & Record<string, unknown>>(db, `
     SELECT gt.*, ${REPLY_CHANNEL_SQL} AS reply_channel, ${SUPPORT_CONVERSATION_SQL('gt')} AS support,
       o.name AS organization_name, ${threadLocationTitleSql(opts.buyerAudience)} AS location_title, COALESCE(bl.timezone, o.timezone) AS time_zone,
-      (SELECT json_extract(e.payload_json, '$.meta.name') FROM messages e
-        WHERE e.conversation_id = gt.id AND e.author_kind = 'guest' AND e.event_name = '${MIRRORED_EVENT}'
-          AND json_extract(e.payload_json, '$.meta.name') IS NOT NULL ORDER BY e.sequence DESC LIMIT 1) AS airbnb_name,
       op.unit AS record_unit, op.starts_at AS record_starts_at, op.stored_ends_at AS record_stored_ends_at, op.timezone AS record_timezone,
       (SELECT COALESCE(sc.internal_name, p.name) FROM products p LEFT JOIN product_stay_configs sc ON sc.organization_id = p.organization_id AND sc.product_id = p.id
         WHERE p.organization_id = gt.organization_id AND p.id = op.product_id) AS record_title,
@@ -226,9 +223,7 @@ export async function listConversations(
     }
     const request = parseGuestRequest(row)
     const support = row.support === 1
-    const recordedName = request.payload.guest.name ?? participantLabel(request)
-    // Airbnb's first name from the guest's messages, else the booked guest's first name, else what the conversation was recorded as.
-    const guestName = support ? 'Airbnb Support' : row.airbnb_name ?? (row.reply_channel === 'airbnb' && request.payload.guest.name ? firstName(request.payload.guest.name) : recordedName)
+    const guestName = conversationGuestName(request, support, row.reply_channel === 'airbnb')
     const shownName = opts.buyerAudience ? row.organization_name : guestName
     const traveler = opts.buyerAudience && row.user_id !== opts.userId
     const inquiry = request.kind === 'booking' ? request.payload.inquiry : undefined

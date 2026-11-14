@@ -5,7 +5,7 @@ import type { MessagePhotoInput } from './guest-threads/attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import type { GuestThreadDeliveryChannel, GuestThreadDeliveryProvider, GuestThreadDeliveryPurpose } from './guest-threads/types'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
-import type { ConversationParticipant, ConversationViewerRole } from '~/shared/messages-contract'
+import type { ConversationParticipant } from '~/shared/messages-contract'
 
 /**
  * Conversations, as Slack and Discord have them (docs/domain-model.md): a
@@ -23,22 +23,18 @@ export type ConversationKind = 'contact' | 'booking' | 'team'
 export type MessageAuthorKind = 'guest' | 'member' | 'krabiclaw'
 export type MessageChannel = 'web' | 'email' | 'whatsapp' | 'airbnb'
 
-export type ConversationParticipantRow = Omit<ConversationParticipant, 'can_remove'> & { membership_role: string | null }
+export type ConversationParticipantRow = Omit<ConversationParticipant, 'can_remove'>
 
 /** Only the live roster is shown. Guests never receive internal account or member IDs. */
-export function conversationParticipantsQuery(conversation: Pick<ConversationRow, 'organization_id' | 'id'>, userId: string, role: ConversationViewerRole): BatchQuery {
-  return { query: `
-    SELECT CASE WHEN ? = 'member' OR seat.user_id = ? THEN u.id END AS id,
-           u.name, CASE WHEN ? = 'member' THEN m.id END AS member_id,
-           CASE WHEN ? = 'member' OR seat.user_id = ? THEN u.image END AS image, seat.role,
-           CASE WHEN ? = 'member' THEN m.role END AS membership_role
+export function conversationParticipantsSql(conversation: string, viewerRole: string): string {
+  return `SELECT CASE WHEN ${viewerRole} = 'member' OR seat.user_id = ? THEN u.id END AS id,
+           u.name, CASE WHEN ${viewerRole} = 'member' OR seat.user_id = ? THEN u.image END AS image, seat.role
       FROM conversation_participants seat
       JOIN user u ON u.id = seat.user_id
       LEFT JOIN member m ON m.organizationId = seat.organization_id AND m.userId = seat.user_id
-      WHERE seat.organization_id = ? AND seat.conversation_id = ?
+      WHERE seat.organization_id = ${conversation}.organization_id AND seat.conversation_id = ${conversation}.id
         AND (seat.role = 'guest' OR (seat.role = 'member' AND m.id IS NOT NULL))
-      ORDER BY seat.role, seat.created_at, seat.user_id
-  `, params: [role, userId, role, role, userId, role, conversation.organization_id, conversation.id] }
+      ORDER BY seat.role, seat.created_at, seat.user_id`
 }
 
 export interface MessageRow {
@@ -266,19 +262,6 @@ export function parseTranscriptWindow(query: URLSearchParams): ConversationWindo
     throw new HTTPError({ statusCode: 400, message: 'Invalid transcript cursor', data: { code: 'INVALID_TRANSCRIPT_CURSOR', field: 'before' } })
   }
   return { before, limit: 40 }
-}
-
-export function conversationMessagesQuery(conversationId: string, guestUserId: string | null, window?: ConversationWindow, guard?: ConversationGuard, filter?: string): BatchQuery {
-  const source = `messages m${guard || guestUserId ? ' JOIN conversations c ON c.id = m.conversation_id' : ''}`
-  const scope = `m.conversation_id = ?${guard ? ` AND (${guard.sql})` : ''}${guestUserId ? ` AND ${guestVisibleSql('m', 'c.user_id = ?')}` : ''}${filter ? ` AND (${filter})` : ''}`
-  const params = [conversationId, ...(guard?.params ?? []), ...(guestUserId ? [guestUserId] : [])]
-  if (!window) return { query: `SELECT m.* FROM ${source} WHERE ${scope} ORDER BY m.sequence`, params }
-  return {
-    query: `SELECT * FROM (SELECT m.* FROM ${source} WHERE ${scope}
-      ${window.before === null ? '' : 'AND m.sequence < ?'}
-      ORDER BY m.sequence DESC LIMIT ?) ORDER BY sequence`,
-    params: [...params, ...(window.before === null ? [] : [window.before]), window.limit + 1],
-  }
 }
 
 /** A message already under this key is this message, or the key was given to a different one. */
@@ -513,19 +496,32 @@ export async function readGuestConversation(db: DbClient, userId: string, id: st
   return await queryFirst<ConversationRow>(db, `SELECT c.* FROM conversations c WHERE c.id = ? AND ${access.sql}`, [id, ...access.params]) ?? null
 }
 
-export async function resolveConversationAccess(db: DbClient, userId: string, conversationId: string) {
-  const row = await queryFirst<ConversationRow & { viewer_role: ParticipantRole; read_through: number | null; member_id: string | null; member_role: string | null }>(db, `
-    SELECT c.*, seat.role AS viewer_role, reader.sequence AS read_through, m.id AS member_id, m.role AS member_role
+export type ConversationAccessRow = ConversationRow & {
+  viewer_role: ParticipantRole; read_through: number | null; member_id: string | null; member_role: string | null
+}
+
+export function conversationAccessQuery(userId: string, conversationId: string, organizationId?: string): BatchQuery {
+  return { query: `
+    SELECT c.*, seat.role AS viewer_role, reader.sequence AS read_through, membership.id AS member_id, membership.role AS member_role
     FROM conversation_participants seat JOIN conversations c ON c.id = seat.conversation_id AND c.organization_id = seat.organization_id
+    LEFT JOIN member membership ON seat.role = 'member' AND membership.organizationId = seat.organization_id AND membership.userId = seat.user_id
     LEFT JOIN messages reader ON reader.id = seat.last_read_message_id AND reader.conversation_id = c.id
-    LEFT JOIN member m ON seat.role = 'member' AND m.organizationId = seat.organization_id AND m.userId = seat.user_id
     WHERE seat.conversation_id = ? AND seat.user_id = ?
-      AND (seat.role = 'guest' OR m.id IS NOT NULL)`,
-  [conversationId, userId])
+      AND ((seat.role = 'guest' AND c.kind <> 'team') OR membership.id IS NOT NULL)
+      ${organizationId === undefined ? '' : "AND c.organization_id = ? AND seat.role = 'member'"}`,
+  params: organizationId === undefined ? [conversationId, userId] : [conversationId, userId, organizationId] }
+}
+
+export function conversationAccessFromRow(row: ConversationAccessRow | undefined, userId: string) {
   if (!row) conversationAccessDenied()
   const { viewer_role, read_through, member_id, member_role, ...conversation } = row
   const membership = member_id && member_role !== null ? { userId, organizationId: conversation.organization_id, memberId: member_id, role: member_role } : null
   return { conversation, role: viewer_role, readThrough: read_through, membership }
+}
+
+export async function resolveConversationAccess(db: DbClient, userId: string, conversationId: string) {
+  const { query, params } = conversationAccessQuery(userId, conversationId)
+  return conversationAccessFromRow(await queryFirst<ConversationAccessRow>(db, query, params), userId)
 }
 
 export function conversationAccessDenied(): never {

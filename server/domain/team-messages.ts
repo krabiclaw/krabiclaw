@@ -72,7 +72,7 @@ function groupName(value: unknown): string | null {
 
 const groupCreationKey = (access: MemberAccessPrincipal, key: string) => `team-group-create:${access.organizationId}:${access.userId}:${key}`
 
-async function canManageGroups(access: MemberAccessPrincipal): Promise<boolean> {
+async function canManageGroups(access: Pick<MemberAccessPrincipal, 'organizationId' | 'role'>): Promise<boolean> {
   return await roleAllows({ ...access, permissions: { member: ['update'] } })
 }
 
@@ -102,7 +102,7 @@ async function publishThreadChanged(env: GuestInboxPublicationEnv, db: DbClient,
   }
 }
 
-export async function conversationGroupCapabilities(access: MemberAccessPrincipal | null, thread: ConversationRow) {
+export async function conversationGroupCapabilities(access: Pick<MemberAccessPrincipal, 'organizationId' | 'role' | 'userId'> | null, thread: ConversationRow) {
   const mutableGroup = access !== null && thread.kind === 'team' && thread.is_group === 1 && !thread.booking_id && !thread.location_id
   return {
     can_manage_participants: mutableGroup && (thread.created_by_user_id === access.userId || await canManageGroups(access)),

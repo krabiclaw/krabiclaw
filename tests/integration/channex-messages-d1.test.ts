@@ -198,7 +198,7 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     assert.deepEqual(entries.map(entry => [entry.body, entry.author_kind, JSON.parse(entry.payload_json).provider_inserted_at]), [['Hello', 'guest', RAW], [null, 'krabiclaw', RAW]])
     const detail = await hostConversation(db, env, rows[0]!.id)
     assert(detail.conversation.kind === 'guest')
-    assert.deepEqual([detail.conversation.booking_id, detail.conversation.channel, detail.conversation.title], [null, 'airbnb', 'Conversation supplied by Airbnb'])
+    assert.deepEqual([detail.conversation.booking_id, detail.conversation.composer, detail.conversation.title], [null, { channel: 'airbnb' }, 'Conversation supplied by Airbnb'])
     const visible = detail.entries.filter(entry => entry.type === 'message')
     // Airbnb's photo is read once when the message lands and kept as the business's own media, placed on that message.
     assert.deepEqual(provider.fileReads, ['/attachment/file'])
@@ -805,13 +805,12 @@ test('an in-flight or interrupted reply never blocks actual provider messages an
     // A new reply to a disconnected home is nowhere to send, refused before anything is recorded or sent.
     assert.deepEqual(await sendGuestThreadReply(db, { ...input, idempotencyKey: 'disconnected-new', body: 'Not attempted' }),
       { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: 'This home is disconnected from Airbnb, so its guest cannot be replied to here.' })
-    // The inbox reads the same rule: a disconnected home's Airbnb conversation shows no composer, and says why.
+    // Disconnecting the provider leaves the conversation readable and its composer identifies the channel.
     const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
-    const { conversation: disconnected, capabilities } = await conversationPageFor(db, owner, mirrored.conversation_id)
-    if (disconnected.kind === 'team') throw new Error('Expected the disconnected Airbnb conversation')
-    assert.deepEqual(disconnected.composer,
-      { channel: 'airbnb', reason: 'This home is disconnected from Airbnb, so its guest cannot be replied to here.' })
-    assert.equal(capabilities.can_send, false)
+    const disconnected = await conversationPageFor(db, owner, mirrored.conversation_id)
+    assert.equal(disconnected.conversation.kind, 'guest')
+    assert.deepEqual(disconnected.conversation.composer, { channel: 'airbnb' })
+    assert.deepEqual(disconnected.entries.filter(entry => entry.type === 'message'), accepted)
     assert.equal(await db.prepare('SELECT count(*) FROM messages').first('count(*)'), 5, 'failed preflight records no outbound message')
   } finally { release(); globalThis.fetch = realFetch; await runtime.dispose() }
 })
@@ -829,7 +828,8 @@ test('a scheduled Airbnb message and its provider echo appear once in the conver
     const scheduled = await sendScheduledGuestReply(db, { threadId, organizationId: ORG, body, idempotencyKey: 'automatic-instructions', env })
     assert.equal(scheduled.outcome.ok, true)
     await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.deepEqual((await hostMessages(db, env, threadId)).filter(entry => entry.body === body).map(entry => entry.id), [scheduled.messageId])
+    assert.deepEqual((await hostMessages(db, env, threadId)).filter(entry => entry.body === body).map(entry => [entry.id, entry.author, entry.automatic]),
+      [[scheduled.messageId, 'Automatic', true]])
     assert.deepEqual((await listThreadDeliveries(db, threadId)).filter(delivery => delivery.message_id === scheduled.messageId).map(delivery => [delivery.status, delivery.provider_message_id]),
       [['accepted', 'accepted-1']])
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }

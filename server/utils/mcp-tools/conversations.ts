@@ -1,8 +1,8 @@
 import { HTTPError } from 'nitro'
 import { createTeamThread, listTeamMembers, operateTeamGroup } from '~/server/domain/team-messages'
-import { assertConversationAccess, conversationAccessDenied, conversationAccessSql, markConversationRead, markConversationUnread, resolveConversationAccess } from '~/server/domain/conversations'
+import { assertConversationAccess, conversationAccessSql, markConversationRead, markConversationUnread } from '~/server/domain/conversations'
 import { archiveConversation, countUnreadConversations, listConversations } from '~/server/domain/guest-threads/repository'
-import { loadConversationPage, loadEarlierConversationEntries } from '~/server/domain/conversation-history'
+import { loadConversationPage } from '~/server/domain/conversation-history'
 import { sendConversationMessage } from '~/server/domain/send-conversation-message'
 import { queryFirst } from '~/server/db'
 import type { InboxThreadKind } from '~/server/domain/guest-threads/types'
@@ -36,11 +36,11 @@ const cursor = { type: ['integer', 'null'], minimum: 1 }
 const messageEntries = { type: 'array', items: { type: 'object', properties: { id: text, type: { type: 'string', enum: ['message', 'day', 'event'] } }, required: ['id', 'type'] } }
 const messageWindow = { type: 'object', properties: { before: cursor, oldest: cursor, newest: cursor, read_through: cursor }, required: ['before', 'oldest', 'newest', 'read_through'] }
 const capabilities = { type: 'object', properties: {
-  can_send: { type: 'boolean' }, can_manage_participants: { type: 'boolean' }, can_invite_guest: { type: 'boolean' }, can_leave: { type: 'boolean' },
-}, required: ['can_send', 'can_manage_participants', 'can_invite_guest', 'can_leave'] }
+  can_manage_participants: { type: 'boolean' }, can_invite_guest: { type: 'boolean' }, can_leave: { type: 'boolean' },
+}, required: ['can_manage_participants', 'can_invite_guest', 'can_leave'] }
 const composer = { type: 'object', properties: {
-  channel: { type: 'string', enum: ['email', 'airbnb', 'team'] }, reason: nullableText,
-}, required: ['channel', 'reason'] }
+  channel: { type: 'string', enum: ['email', 'airbnb', 'team'] },
+}, required: ['channel'] }
 const messagePage = { type: 'object', properties: {
   conversation: { type: 'object', properties: {
     id: text, organization_id: text, title: text, kind: { type: 'string', enum: ['guest', 'support', 'team'] },
@@ -127,11 +127,7 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
   if (toolName === 'get_conversation') {
     const before = args.before ?? null
     if (before !== null && (typeof before !== 'number' || !Number.isSafeInteger(before) || before < 1)) throw new HTTPError({ statusCode: 400, message: 'Invalid transcript cursor', data: { code: 'INVALID_TRANSCRIPT_CURSOR', field: 'before' } })
-    const access = await resolveConversationAccess(db, userId, conversationId)
-    if (access.role !== 'member' || access.conversation.organization_id !== organizationId) conversationAccessDenied()
-    const viewer = { ...access, userId, principal }
-    return before === null ? loadConversationPage(db, viewer, { before, limit: 40 })
-      : loadEarlierConversationEntries(db, viewer, { before, limit: 40 })
+    return loadConversationPage(db, { conversationId, userId, organizationId }, { before, limit: 40 })
   }
   const conversation = await assertConversationAccess(db, principal, conversationId)
   switch (toolName) {

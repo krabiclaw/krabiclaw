@@ -15,9 +15,13 @@ export async function messageSession(event: H3Event) {
 
 export async function conversationRequest(event: H3Event) {
   const request = await messageSession(event)
-  const conversationId = getRouterParam(event, 'conversation_id')
-  if (!conversationId) throw new HTTPError({ statusCode: 400, message: 'A conversation is required', data: { code: 'VALIDATION_ERROR', field: 'conversation_id' } })
-  return { ...request, ...await resolveConversationAccess(request.db, request.user.id, conversationId) }
+  return { ...request, ...await resolveConversationAccess(request.db, request.user.id, conversationIdParam(event)) }
+}
+
+export function conversationIdParam(event: H3Event): string {
+  const id = getRouterParam(event, 'conversation_id')
+  if (!id) throw new HTTPError({ statusCode: 400, message: 'A conversation is required', data: { code: 'VALIDATION_ERROR', field: 'conversation_id' } })
+  return id
 }
 
 export async function listingMessagingContext(event: H3Event) {
