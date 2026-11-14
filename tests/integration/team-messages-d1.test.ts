@@ -13,7 +13,7 @@ import { listConversations } from '../../server/domain/guest-threads/repository.
 import { createStay, listStayHomes, stayAccessFor, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
 import { InboundEmailRejection, parseReplyToAddress } from '../../server/utils/reply-address.ts'
-import { createTeamThread, getTeamThread, listTeamMembers, operateTeamGroup } from '../../server/domain/team-messages.ts'
+import { createTeamThread, listTeamMembers, operateTeamGroup } from '../../server/domain/team-messages.ts'
 import { conversationPageFor } from './support/conversation-page.ts'
 import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
 import { setNotificationPreference } from '../../server/domain/notification-preferences.ts'
@@ -91,8 +91,9 @@ test('members talk in team conversations, see unread state and receive recorded 
     }
     const refused = (status: number, code: string, field: string) => ({ status, data: { code, field } })
     const teamThread = async (access: MemberAccessPrincipal, id: string) => {
-      const { conversation, readThrough } = await resolveConversationAccess(db, access.userId, id)
-      return getTeamThread(db, access, conversation, readThrough)
+      const { conversation } = await conversationPageFor(db, access, id)
+      assert.equal(conversation.kind, 'team')
+      return conversation
     }
     // The caller's team conversations, each as its conversation screen reads it.
     const teamThreads = async (access: MemberAccessPrincipal) => Promise.all((await db.prepare(`SELECT c.id FROM conversations c JOIN conversation_participants seat ON seat.conversation_id = c.id
@@ -166,7 +167,6 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.deepEqual(await createTeamThread(env, db, cook, { member_user_ids: ['owner'], location_id: 'cabin-site' }), { id: floorChat.id, created: false })
     const cookFloorView = await teamThread(cook, floorChat.id)
     assert.equal(cookFloorView.location_id, 'cabin-site')
-    assert.deepEqual(cookFloorView.location, { id: 'cabin-site', title: 'Pine Cabin', slug: 'cabin', timezone: 'America/Denver' })
 
     // One message per key; the same key with different words is refused.
     await assert.rejects(send(cleaner, direct.id, { body: '  ', photos: [], idempotencyKey: 'empty-test', senderName: 'cleaner' }), refused(400, 'EMPTY_MESSAGE', 'body'))
@@ -185,14 +185,15 @@ test('members talk in team conversations, see unread state and receive recorded 
 
     // Unread is the recipient's, until they read it; the sender has read their own.
     const ownerView = await teamThread(owner, direct.id)
-    assert.deepEqual({ unread: ownerView.unread, stay: ownerView.stay }, { unread: true, stay: null })
+    assert.deepEqual({ unread: ownerView.unread, bookingId: ownerView.booking_id }, { unread: true, bookingId: null })
     assert.deepEqual(ownerView.participants.map(participant => participant.id).sort(), ['cleaner', 'owner'])
     assert.equal((await teamThread(cleaner, direct.id)).unread, false)
     // The one list says the same, with the same statement.
     const ownerRow = (await listConversations(db, ORG, { userId: 'owner', principal: owner, kind: 'team' })).find(row => row.id === direct.id)
     assert.deepEqual([ownerRow?.kind, ownerRow?.unread, ownerRow?.preview], ['team', true, 'Towels are out'])
     const stayView = await teamThread(owner, about.id)
-    assert.deepEqual(stayView.stay, { id: stay.id, product_id: cabin.id, name: 'Cabin', check_in_date: day(3), check_out_date: day(5), status: stay.status })
+    assert.equal(stayView.booking_id, stay.id)
+    assert.ok(!('stay' in stayView))
     await markConversationRead(db, { organizationId: ORG, conversationId: direct.id, userId: 'owner' })
     assert.equal((await teamThread(owner, direct.id)).unread, false)
     // Marked unread from the list: the cleaner's newest message counts as new again, then read again.
@@ -215,10 +216,10 @@ test('members talk in team conversations, see unread state and receive recorded 
     const page = await conversationPageFor(db, owner, direct.id, { before: null, limit: 2 })
     const cursor = page.page.before
     assert.notEqual(cursor, null)
-    assert.deepEqual(page.entries.map(entry => entry.type === 'message' ? entry.body : entry.type), ['Second', 'Thanks'])
+    assert.deepEqual(page.entries.map(entry => entry.type === 'message' ? entry.body : entry.type), ['day', 'Second', 'Thanks'])
     const earlier = await conversationPageFor(db, owner, direct.id, { before: cursor, limit: 2 })
     assert.equal(earlier.page.before, null)
-    assert.deepEqual(earlier.entries.map(entry => entry.type === 'message' ? entry.body : entry.type), ['Towels are out'])
+    assert.deepEqual(earlier.entries.map(entry => entry.type === 'message' ? entry.body : entry.type), ['day', 'Towels are out'])
     assert.throws(() => parseTranscriptWindow(new URLSearchParams({ before: '2026-01-01T00:00:00.000Z' })), refused(400, 'INVALID_TRANSCRIPT_CURSOR', 'before'))
 
     // A committed host photo can finish publication after its download URL expires.

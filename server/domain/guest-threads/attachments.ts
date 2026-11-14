@@ -191,14 +191,15 @@ export interface MessagePhotoRow {
   height: number | null
 }
 
-export function messagePhotoRowsSql(scope: string) {
+export function messagePhotoRowsSql(scope: string, from = '', columns = '', order = 'mp.owner_id, mp.sort_order') {
   return `
-    SELECT mp.owner_id, ma.id, ma.public_url, ma.thumbnail_url, ma.alt_text, ma.width, ma.height
+    SELECT mp.owner_id, ma.id, ma.public_url, ma.thumbnail_url, ma.alt_text, ma.width, ma.height${columns}
       FROM media_placements mp
       JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id
+      ${from}
      WHERE ${scope} AND mp.slot = 'attachments' AND mp.status = 'active'
        AND ma.status = 'active' AND ma.public_url IS NOT NULL
-     ORDER BY mp.owner_id, mp.sort_order
+     ORDER BY ${order}
   `
 }
 

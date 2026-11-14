@@ -9,10 +9,10 @@ import { bookingDay, canMarkNoShow, getGuestRequest, getThreadOperationalRecord,
 import type { StayAccess } from '~/server/domain/stays'
 import { revokeReviewRequestQuery } from '~/server/utils/review-requests'
 import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deliveries'
-import { MEMBER_REPLY_EVENT, SCHEDULED_MESSAGE_EVENT, MessageDedupeConflictError, MessageStateConflictError, appendMessage, assertMessageWriteAccess, findMessageByDedupeKey, messageQueries, parseMessagePayload, participantGuard, type ConversationGuard, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
+import { MEMBER_REPLY_EVENT, SCHEDULED_MESSAGE_EVENT, MessageDedupeConflictError, MessageStateConflictError, appendMessage, assertMessageWriteAccess, conversationMessageGuard, findMessageByDedupeKey, messageQueries, parseMessagePayload, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
 import { listMessagePhotos, MessagePhotoRejection, messagePhotoCount, messagePhotoHashes, type MessagePhotoInput } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
-import { conversationTaskQueries, reconcileConversationTasks } from './repository'
+import { conversationReplyTaskQueries, conversationTaskQueries, reconcileConversationTasks } from './repository'
 import { renderNotificationEmail } from '~/server/emails/render'
 import { guestThreadReplyMessage, guestThreadStatusMessage } from '~/server/notifications/guest-events'
 import { organizationLogo } from '~/server/notifications/hero'
@@ -41,13 +41,11 @@ import type {
 // (server/domain/tasks.ts): a reply, a cancellation, archiving or blocking
 // closes it. There is no separate resolve or reopen. Archiving is each
 // person's own (conversations.ts archiveQuery), not an operation here.
-export const GUEST_THREAD_ACTIONS = new Set(['report', 'block', 'unblock', 'retry'])
+type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[] }
 
-type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[]; message?: MessageRow }
-
-export type OperationOutcome =
-  | SuccessfulOperationOutcome
-  | { ok: false; status: 404; reason: 'thread_not_found' | 'source_not_found' }
+export type OperationFailure =
+  | { ok: false; status: 404; reason: 'thread_not_found' }
+  | { ok: false; status: 404; reason: 'source_not_found' }
   | { ok: false; status: 409; reason: 'invalid_transition'; message: string }
   | { ok: false; status: 400; reason: 'empty_body' }
   | { ok: false; status: 409; reason: 'guest_unreachable'; code: 'GUEST_UNREACHABLE'; field: 'conversation_id'; message: string }
@@ -55,21 +53,20 @@ export type OperationOutcome =
   | { ok: false; status: 400; reason: 'invalid_photo'; message: string }
   | { ok: false; status: 409 | 502; reason: 'delivery_failed'; code: string; field: string; message: string; mutation_applied?: true; operation_completed?: false; conversation_id?: string; record?: ThreadOperationalRecord; retry_with_same_idempotency_key?: boolean; provider_error?: ChannexError['data'] }
 
+export type OperationOutcome = SuccessfulOperationOutcome | OperationFailure
+type ReplyOutcome = { ok: true; status: 200; message: MessageRow } | OperationFailure
+type ModerationOutcome = { ok: true; status: 200 } | OperationFailure
 type NotFoundOutcome = Extract<OperationOutcome, { status: 404 }>
 
 export type ExecuteOperationInput = {
   conversation?: ConversationRow
   principal?: MemberAccessPrincipal
-  messageGuard?: ConversationGuard
   threadId: string
   organizationId: string
   action: string
   body?: string
   /** Why a member reports or blocks the guest. */
   reason?: string
-  retryMessageId?: string
-  /** The photos a reply carries, in the order they were chosen. */
-  photos?: MessagePhotoInput
   env: ReplyEmailEnv & UploadResolvedMediaInput['env'] & ChannexEnv & ContentReportEnv & CloudflareEnv
   idempotencyKey?: string
   actorUserId: string
@@ -295,16 +292,20 @@ function replySubject(submissionType: GuestThreadSubmissionType, fromName: strin
  * outbound message. A member's reply leads with their own words; a status
  * update leads with what changed.
  */
-async function renderMemberReply(env: ReplyEmailEnv, db: DbClient, organizationId: string, organizationName: string, entry: MessageRow, locale: string | undefined) {
-  const guest = await guestPresentation(db, { organizationId, organizationName, locale })
-  const organizationLogoUrl = await organizationLogo(db, organizationId)
-  const photos = (await listMessagePhotos(db, 'message', [entry.id])).get(entry.id) ?? []
+async function renderMemberReply(env: ReplyEmailEnv, db: DbClient, organizationId: string, organizationName: string, entry: MessageRow, locale: string | undefined, photoCount: number) {
+  const [guest, organizationLogoUrl, photoRows, manageUrl] = await Promise.all([
+    guestPresentation(db, { organizationId, organizationName, locale }),
+    organizationLogo(db, organizationId),
+    photoCount ? listMessagePhotos(db, 'message', [entry.id]) : null,
+    buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: entry.conversation_id }),
+  ])
+  const photos = photoRows?.get(entry.id) ?? []
   return renderNotificationEmail(guestThreadReplyMessage({
     locale: guest.locale,
     organizationName: guest.organizationName,
     organizationLogoUrl,
     body: entry.body ?? '',
-    manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: entry.conversation_id }),
+    manageUrl,
     photos: photos.map(photo => ({ imageUrl: photo.url, alt: photo.alt ?? `Photo from ${organizationName}` })),
   }), { platformDomain: getPlatformDomain(env) })
 }
@@ -491,47 +492,50 @@ async function executeSourceMutation(
 }
 
 /** A member reply, or a scheduled message the workspace saved (no member actor). */
-type ReplyInput = Omit<ExecuteOperationInput, 'actorUserId'> & { actorUserId: string | null }
-
-function replyOutcome(context: ThreadContext, message: MessageRow): SuccessfulOperationOutcome {
-  return {
-    ok: true, status: 200, thread: context.thread,
-    message,
-    availableActions: requestActions(context.record, new Date().toISOString()),
-  }
+type ReplyInput = Pick<ExecuteOperationInput, 'conversation' | 'threadId' | 'organizationId' | 'env' | 'idempotencyKey'> & {
+  actorUserId: string | null
+  body: string
+  photos?: MessagePhotoInput
+  retryMessageId?: string
 }
 
-async function executeReply(
-  db: DbClient,
-  context: ThreadContext,
-  input: ReplyInput,
-): Promise<OperationOutcome> {
-  const body = (input.body ?? '').trim()
+export async function sendGuestThreadReply(db: DbClient, input: ReplyInput): Promise<ReplyOutcome> {
+  const { threadId, organizationId, conversation, actorUserId, idempotencyKey } = input
+  if (!idempotencyKey) return { ok: false, status: 400, reason: 'missing_idempotency_key' }
+  const body = input.body.trim()
   const photoInput = input.photos ?? []
   const photoCount = messagePhotoCount(photoInput)
   if (!body && !photoCount) return { ok: false, status: 400, reason: 'empty_body' }
-  const actorUserId = input.actorUserId
   if (actorUserId === null && photoCount) throw new HTTPError({ statusCode: 400, message: 'Scheduled messages carry text only', data: { code: 'SCHEDULED_MESSAGE_PHOTOS_UNSUPPORTED', field: 'photos' } })
-  const access = input.messageGuard ?? (actorUserId === null ? null : participantGuard('c', actorUserId, 'member'))
-  const guard = {
-    sql: `c.organization_id = ?${access ? ` AND ${access.sql}` : ''}`,
-    params: [context.thread.organization_id, ...(access?.params ?? [])],
-  }
   const eventName = actorUserId === null ? SCHEDULED_MESSAGE_EVENT : MEMBER_REPLY_EVENT
   const purpose = actorUserId === null ? 'scheduled_message' : 'member_reply'
   const photoIdentity = Array.isArray(photoInput)
     ? (await messagePhotoHashes(photoInput)).map((hash, index) => ({ filename: photoInput[index]!.filename, hash }))
     : photoInput.sourceIds
-  const requestHash = await creationRequestHash({ body, photos: photoIdentity })
   const dedupeKey = operationDedupeKey(input)
-  const [recorded, channelFacts] = await Promise.all([
+  const scheduledId = actorUserId !== null && idempotencyKey.startsWith('send-later:') ? idempotencyKey.slice('send-later:'.length) : null
+  const [thread, requestHash, recorded, channelFacts, scheduled] = await Promise.all([
+    conversation ? validateGuestRequest(db, conversation) : getGuestRequest(db, threadId, organizationId),
+    creationRequestHash({ body, photos: photoIdentity }),
     findMessageByDedupeKey(db, dedupeKey),
-    guestThreadChannel(db, context.thread.id, context.thread.organization_id),
+    guestThreadChannel(db, threadId, organizationId),
+    scheduledId === null ? null : queryFirst<{ id: string; status: string; message_id: string | null; author_user_id: string; body: string }>(db, `
+      SELECT id, status, message_id, author_user_id, body FROM scheduled_guest_messages
+        WHERE id = ? AND organization_id = ? AND conversation_id = ? AND author_user_id IS NOT NULL`, [scheduledId, organizationId, threadId]),
   ])
-  const retryMessageId = input.retryMessageId ?? (input.idempotencyKey?.startsWith('send-later:') ? recorded?.id : undefined)
+  if (!thread) return { ok: false, status: 404, reason: 'thread_not_found' }
+  if (thread.id !== threadId || thread.organization_id !== organizationId) throw new Error('The authorized conversation does not match the reply')
+  const guard = conversationMessageGuard(thread, actorUserId, 'member')
+  if (scheduledId !== null && (!scheduled || !['sending', 'failed', 'needs_review', 'sent'].includes(scheduled.status)
+    || scheduled.body !== body || scheduled.author_user_id !== (recorded?.author_user_id ?? actorUserId)
+    || (recorded && (recorded.conversation_id !== threadId || recorded.event_name !== MEMBER_REPLY_EVENT))
+    || (scheduled.message_id !== null && scheduled.message_id !== recorded?.id))) {
+    throw new Error('Reply does not match an already-started scheduled message')
+  }
+  const retryMessageId = input.retryMessageId ?? (scheduled ? recorded?.id : undefined)
   if (retryMessageId && recorded?.id !== retryMessageId) return { ok: false, status: 404, reason: 'thread_not_found' }
   const recordedAuthor = retryMessageId && recorded ? recorded.author_user_id : actorUserId
-  const destination = await guestReplyDestination(db, context.thread, channelFacts)
+  const destination = await guestReplyDestination(db, thread, channelFacts)
   const mapped = recorded?.channel === 'airbnb' ? channelFacts?.mapping ?? null : null
   if (recorded?.channel === 'airbnb' && !mapped) throw new Error(`Reply ${recorded.id} was recorded on Airbnb but its conversation has no channel mapping`)
   const channel = recorded ? mapped : destination.channel === 'airbnb' ? destination.mapping : null
@@ -543,7 +547,7 @@ async function executeReply(
     if (recorded.channel === 'airbnb') throw new HTTPError({ statusCode: 409, message: 'The reply key was already used for a different message', data: { code: 'IDEMPOTENCY_CONFLICT', field: 'idempotencyKey' } })
     return conflict()
   }
-  const deliveryId = channel ? `guest-thread-channex:${context.thread.id}:${input.idempotencyKey}` : deliveryDedupeKey(input)
+  const deliveryId = channel ? `guest-thread-channex:${threadId}:${idempotencyKey}` : deliveryDedupeKey(input)
   const delivered = recorded && recorded.channel !== 'web' ? await getDeliveryById(db, deliveryId) : null
   if (destination.channel === null && !(delivered && isDeliverySent(delivered))) return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: destination.reason }
   if (recorded && recorded.channel !== 'web' && (!delivered || delivered.message_id !== recorded.id)) {
@@ -552,24 +556,41 @@ async function executeReply(
   const guestEmail = destination.channel === 'email' || destination.channel === 'account' ? destination.email : null
   const messageChannel = recorded?.channel ?? (channel ? 'airbnb' : guestEmail ? 'email' : 'web')
   const commit = () => appendMessage(db, {
-    conversationId: context.thread.id, authorKind: actorUserId === null ? 'krabiclaw' : 'member', authorUserId: recordedAuthor,
+    conversationId: threadId, authorKind: actorUserId === null ? 'krabiclaw' : 'member', authorUserId: recordedAuthor,
     channel: messageChannel, body: messageChannel === 'airbnb' ? body : body || null, eventName, payload: { request_hash: requestHash }, dedupeKey, guard,
   }, {
-    organizationId: context.thread.organization_id, env: input.env, photos: photoInput, uploaderUserId: actorUserId, recorded, retryMessageId,
+    organizationId, env: input.env, photos: photoInput, uploaderUserId: actorUserId, recorded, retryMessageId,
     receipt: messageChannel === 'web' ? undefined : {
       id: deliveryId, channel: messageChannel === 'airbnb' ? 'airbnb' : 'email', provider: messageChannel === 'airbnb' ? 'channex' : emailProvider(input.env), purpose,
     },
+    extra: messageChannel === 'web' ? conversationReplyTaskQueries(threadId, new Date().toISOString()) : undefined,
   })
+  const sentReply = async (message: MessageRow): Promise<ReplyOutcome> => {
+    if (scheduled) {
+      if (message.author_user_id !== scheduled.author_user_id || message.body !== scheduled.body) throw new Error('Sent scheduled reply does not match its conversation message')
+      if (scheduled.status !== 'sent') {
+        const now = new Date().toISOString()
+        const saved = await execute(db, `UPDATE scheduled_guest_messages SET status = 'sent', reason = NULL, error_code = NULL, error_field = NULL,
+          message_id = ?, sent_at = ?, updated_at = ? WHERE id = ? AND status = ? AND (message_id IS NULL OR message_id = ?)`,
+        [message.id, now, now, scheduled.id, scheduled.status, message.id])
+        if (saved.meta.changes !== 1) {
+          const current = await queryFirst<{ status: string; message_id: string | null }>(db, 'SELECT status, message_id FROM scheduled_guest_messages WHERE id = ?', [scheduled.id])
+          if (current?.status !== 'sent' || current.message_id !== message.id) throw new Error('Scheduled reply changed before its sent outcome was recorded')
+        }
+      }
+      await publishConversationEvent(input.env, db, { conversationId: threadId, type: 'MESSAGE_CREATE', scheduledAuthorId: scheduled.author_user_id })
+    }
+    return { ok: true, status: 200, message }
+  }
   let entry: MessageRow
   try {
     if (channel) {
       const sent = await replyThroughChannex(db, input.env, { mapping: channel, body, guard, receipt: delivered, deliveryId, photoCount, commit })
-      return sent.ok ? replyOutcome(context, sent.message) : { ...sent, reason: 'delivery_failed' }
+      return sent.ok ? sentReply(sent.message) : { ...sent, reason: 'delivery_failed' }
     }
     if (recorded && delivered && isDeliverySent(delivered) && !delivered.error) {
       entry = await commit()
-      await reconcileConversationTasks(db, context.thread.id)
-      return replyOutcome(context, entry)
+      return sentReply(entry)
     }
     if (destination.channel === null || destination.channel === 'airbnb') return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: destination.channel === null ? destination.reason : GUEST_UNREACHABLE_MESSAGE }
     entry = await commit()
@@ -584,22 +605,20 @@ async function executeReply(
   }
   if (entry.channel === 'web') {
     // The guest reads it in their own inbox, where it is unread until they open it.
-    await reconcileConversationTasks(db, context.thread.id)
-    return await replyOutcome(context, entry)
+    return sentReply(entry)
   }
   // A reply saved for email whose address has since been removed is not sent anywhere else.
   if (!guestEmail) return { ok: false, status: 409, reason: 'delivery_failed', code: 'GUEST_EMAIL_REQUIRED', field: 'guest.email', message: 'This reply was saved to be emailed, but the guest no longer has an email address.' }
   const delivery = delivered ?? await getDeliveryById(db, deliveryId)
   if (!delivery || delivery.message_id !== entry.id) throw new Error('Reply delivery receipt does not match its message')
   if (isDeliverySent(delivery) && !delivery.error) {
-    await reconcileConversationTasks(db, context.thread.id)
-    return replyOutcome(context, entry)
+    return sentReply(entry)
   }
 
-  const fromName = await getOrganizationBrandName(db, context.thread.organization_id)
-  const email = await renderMemberReply(input.env, db, context.thread.organization_id, fromName, entry, context.thread.payload.guest.locale)
+  const fromName = await getOrganizationBrandName(db, organizationId)
+  const email = await renderMemberReply(input.env, db, organizationId, fromName, entry, thread.payload.guest.locale, photoCount)
   try {
-    await assertMessageWriteAccess(db, context.thread.id, guard)
+    await assertMessageWriteAccess(db, threadId, guard)
   } catch (error) {
     if (error instanceof MessageStateConflictError) return { ok: false, status: 404, reason: 'thread_not_found' }
     throw error
@@ -609,14 +628,13 @@ async function executeReply(
     env: input.env,
     to: guestEmail,
     fromName,
-    subject: replySubject(context.thread.kind, fromName),
+    subject: replySubject(thread.kind, fromName),
     email,
-    conversationId: context.thread.id,
+    conversationId: threadId,
   })
 
   if (isDeliverySent(outcome)) {
-    await reconcileConversationTasks(db, context.thread.id)
-    return await replyOutcome(context, entry)
+    return sentReply(entry)
   }
   if (typeof outcome.error !== 'string' || !outcome.error.trim()) {
     throw new HTTPError({ statusCode: 502, statusMessage: 'Failed email delivery did not provide its error', data: { code: 'INVALID_DELIVERY_RESPONSE', field: 'error' } })
@@ -672,35 +690,39 @@ export async function guestReplyDestination(
  * together, and KrabiClaw's operators are emailed before the member hears it
  * worked. The report's id comes from the key, so a retry files nothing new.
  */
-async function executeReport(db: DbClient, context: ThreadContext, input: ExecuteOperationInput, block: boolean): Promise<OperationOutcome> {
+export async function moderateGuestThread(db: DbClient, input: {
+  conversation: ConversationRow; action: 'report' | 'block' | 'unblock'; actorUserId: string;
+  idempotencyKey: string; reason?: string; env: ContentReportEnv
+}): Promise<ModerationOutcome> {
+  const thread = await validateGuestRequest(db, input.conversation)
+  const now = new Date().toISOString()
+  if (input.action === 'unblock') {
+    const [update] = await executeBatch(db, [{
+      query: 'UPDATE conversations SET blocked_at = NULL WHERE organization_id = ? AND id = ? AND blocked_at IS NOT NULL',
+      params: [thread.organization_id, thread.id],
+    }, ...conversationReplyTaskQueries(thread.id, now)], { operation: 'Unblock a guest' })
+    if ((update?.meta?.changes ?? 0) === 0 && thread.blocked_at === null) return conflict('This guest is not blocked')
+    return { ok: true, status: 200 }
+  }
+  const block = input.action === 'block'
   const reason = reportReason(input.reason)
-  const id = contentReportId(input.actorUserId, input.idempotencyKey as string)
+  const id = contentReportId(input.actorUserId, input.idempotencyKey)
   await executeBatch(db, [
     contentReportInsert({
-      id, organizationId: context.thread.organization_id, reporterUserId: input.actorUserId, subject: 'conversation',
-      conversationId: context.thread.id, messageId: null, authorUserId: context.thread.user_id, reason,
-      excerpt: await guestThreadExcerpt(db, context.thread.id), blocked: block,
+      id, organizationId: thread.organization_id, reporterUserId: input.actorUserId, subject: 'conversation',
+      conversationId: thread.id, messageId: null, authorUserId: thread.user_id, reason,
+      excerpt: await guestThreadExcerpt(db, thread.id), blocked: block,
     }),
     // Only the request that filed the report blocks: a retry of an earlier
     // block must not undo an unblock made since.
     ...(block ? [{
       query: 'UPDATE conversations SET blocked_at = COALESCE(blocked_at, ?) WHERE organization_id = ? AND id = ? AND changes() = 1',
-      params: [new Date().toISOString(), context.thread.organization_id, context.thread.id],
-    }, ...conversationTaskQueries(context.thread.id, new Date().toISOString())] : []),
+      params: [now, thread.organization_id, thread.id],
+    }, ...conversationReplyTaskQueries(thread.id, now)] : []),
   ], { operation: block ? 'Block and report a guest' : 'Report a guest conversation' })
-  await assertSameReport(db, id, { subject: 'conversation', conversationId: context.thread.id, messageId: null, reason, blocked: block })
+  await assertSameReport(db, id, { subject: 'conversation', conversationId: thread.id, messageId: null, reason, blocked: block })
   await announceContentReport(input.env, db, id)
-  return await successfulOutcome(db, context)
-}
-
-/** Bring a blocked guest's conversation back to the inbox; the report stays filed. */
-async function executeUnblock(db: DbClient, context: ThreadContext): Promise<OperationOutcome> {
-  const [update] = await executeBatch(db, [{
-    query: 'UPDATE conversations SET blocked_at = NULL WHERE organization_id = ? AND id = ? AND blocked_at IS NOT NULL',
-    params: [context.thread.organization_id, context.thread.id],
-  }, ...conversationTaskQueries(context.thread.id, new Date().toISOString())], { operation: 'Unblock a guest' })
-  if ((update?.meta?.changes ?? 0) === 0 && context.thread.blocked_at === null) return conflict('This guest is not blocked')
-  return await successfulOutcome(db, context)
+  return { ok: true, status: 200 }
 }
 
 export async function executeBookingStatus(db: DbClient, input: Omit<ExecuteOperationInput, 'threadId'> & {
@@ -738,43 +760,6 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
   if ('ok' in context) return context
   if (bookingId && context.record?.id !== bookingId) return { ok: false, status: 404, reason: 'source_not_found' }
 
-  if (input.action === 'reply') {
-    const scheduled = input.idempotencyKey.startsWith('send-later:')
-      ? await queryFirst<{ id: string; status: string; message_id: string | null; author_user_id: string; body: string }>(db, `SELECT id, status, message_id, author_user_id, body FROM scheduled_guest_messages
-        WHERE id = ? AND organization_id = ? AND conversation_id = ? AND author_user_id IS NOT NULL`,
-      [input.idempotencyKey.slice('send-later:'.length), input.organizationId, input.threadId])
-      : null
-    if (input.idempotencyKey.startsWith('send-later:')) {
-      const original = await findMessageByDedupeKey(db, operationDedupeKey(input))
-      if (!scheduled || !['sending', 'failed', 'needs_review', 'sent'].includes(scheduled.status)
-        || scheduled.body !== (input.body ?? '').trim() || scheduled.author_user_id !== (original?.author_user_id ?? input.actorUserId)
-        || (original && (original.conversation_id !== input.threadId || original.event_name !== MEMBER_REPLY_EVENT))
-        || (scheduled.message_id !== null && scheduled.message_id !== original?.id)) {
-        throw new Error('Reply does not match an already-started scheduled message')
-      }
-    }
-    const outcome = await executeReply(db, context, input)
-    if (outcome.ok && scheduled) {
-      // The original entry owns the author, even when another authorized
-      // member retries it. Finish the same scheduled reply after real delivery.
-      const entry = await findMessageByDedupeKey(db, operationDedupeKey(input))
-      if (!entry || entry.author_user_id !== scheduled.author_user_id || entry.body !== scheduled.body) throw new Error('Sent scheduled reply does not match its conversation message')
-      if (scheduled.status !== 'sent') {
-        const now = new Date().toISOString()
-        const saved = await execute(db, `UPDATE scheduled_guest_messages SET status = 'sent', reason = NULL, error_code = NULL, error_field = NULL,
-          message_id = ?, sent_at = ?, updated_at = ? WHERE id = ? AND status = ? AND (message_id IS NULL OR message_id = ?)`,
-        [entry.id, now, now, scheduled.id, scheduled.status, entry.id])
-        if (saved.meta.changes !== 1) {
-          const current = await queryFirst<{ status: string; message_id: string | null }>(db, 'SELECT status, message_id FROM scheduled_guest_messages WHERE id = ?', [scheduled.id])
-          if (current?.status !== 'sent' || current.message_id !== entry.id) throw new Error('Scheduled reply changed before its sent outcome was recorded')
-        }
-      }
-      await publishConversationEvent(input.env, db, { conversationId: input.threadId, type: 'MESSAGE_CREATE', scheduledAuthorId: scheduled.author_user_id })
-    }
-    return outcome
-  }
-  if (input.action === 'report' || input.action === 'block') return await executeReport(db, context, input, input.action === 'block')
-  if (input.action === 'unblock') return await executeUnblock(db, context)
   if (input.action === 'no_show') return await executeNoShow(db, context, input)
   return await executeSourceMutation(db, context, input)
 }
@@ -818,15 +803,9 @@ async function executeNoShow(db: DbClient, context: ThreadContext, input: Execut
  * A reply nobody is sending right now: an automatic message (no author), or a
  * member's send-later message, sent as that member's own reply.
  */
-export async function sendScheduledGuestReply(db: DbClient, input: { threadId: string; organizationId: string; body: string; idempotencyKey: string; actorUserId?: string; env: ExecuteOperationInput['env'] }): Promise<{ outcome: OperationOutcome; messageId: string | null }> {
-  let outcome: OperationOutcome
-  if (input.actorUserId !== undefined) {
-    outcome = await executeGuestThreadOperation(db, { ...input, action: 'reply', actorUserId: input.actorUserId })
-  } else {
-    const context = await loadThreadContext(db, input.threadId, input.organizationId)
-    if ('ok' in context) return { outcome: context, messageId: null }
-    outcome = await executeReply(db, context, { ...input, action: 'reply', actorUserId: null })
-  }
+export async function sendScheduledGuestReply(db: DbClient, input: { threadId: string; organizationId: string; body: string; idempotencyKey: string; actorUserId?: string; env: ExecuteOperationInput['env'] }): Promise<{ outcome: ReplyOutcome; messageId: string | null }> {
+  const outcome = await sendGuestThreadReply(db, { ...input, actorUserId: input.actorUserId ?? null })
+  if (outcome.ok) return { outcome, messageId: outcome.message.id }
   const entry = await findMessageByDedupeKey(db, operationDedupeKey(input))
   return { outcome, messageId: entry?.id ?? null }
 }

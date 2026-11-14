@@ -143,8 +143,8 @@ export function insightsPath(orgSlug: string, query?: { start_date: string; end_
   return query ? `${path}?${new URLSearchParams(query)}` : path
 }
 
-export function bookingEditorPath(orgSlug: string, kind: 'booking' | 'stay', requestId: string): string {
-  return `${organizationBase(orgSlug)}/bookings/${kind}/${encodeURIComponent(requestId)}`
+export function bookingEditorPath(orgSlug: string, bookingId: string): string {
+  return `${organizationBase(orgSlug)}/bookings/${encodeURIComponent(bookingId)}`
 }
 
 export function guestConversationPath(orgSlug: string, requestId: string): string {

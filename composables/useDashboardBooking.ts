@@ -10,6 +10,7 @@ export type DashboardNightBooking =
   | { booking: ManagedNightBooking; manage: true; can_message_guest: boolean }
   | { booking: NightBooking<StayTurnover>; manage: false }
 export type DashboardBooking = DashboardNightBooking | { booking: DashboardBookingDetails & { unit: 'slot' }; manage: boolean }
+export type DashboardBookingResource = Awaited<ReturnType<typeof useDashboardBooking>>
 
 export const dashboardBookingPath = (bookingId: string) => `/api/dashboard/bookings/${encodeURIComponent(bookingId)}`
 export const dashboardBookingKey = (organizationSlug: string, bookingId: string) => `dashboard-booking:${organizationSlug}:${bookingId}`

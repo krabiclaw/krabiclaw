@@ -422,7 +422,7 @@ interface Context {
   requests: Map<string, { guest_name: string | null; participant: string | null; preview: string | null; asked_at: string | null }>
   messages: Map<string, { title: string; status: string; conversation_id: string | null; booking_id: string }>
   /** A booking's conversation, when it is and what was booked. */
-  records: Map<string, { conversation_id: string | null; starts_at: string; ends_at: string; timezone: string; product_kind: ProductKind; unit: 'slot' | 'nights' }>
+  records: Map<string, { id: string; conversation_id: string | null; starts_at: string; ends_at: string; timezone: string; product_kind: ProductKind; unit: 'slot' | 'nights' }>
   photos: Map<string, TaskPhoto[]>
 }
 
@@ -562,7 +562,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
   const closerName = row.closed_by_user_id === null ? null : row.closed_by_user_id === viewer.principal.userId ? 'You' : context.users.get(row.closed_by_user_id) ?? 'A former member'
   const closer: TaskPerson | null = closerName === null ? null : { type: 'member', id: row.closed_by_user_id!, name: closerName, initial: initialOf(closerName === 'You' ? context.users.get(row.closed_by_user_id!) ?? 'Y' : closerName), you: closerName === 'You' }
   const conversation = (conversation_id: string | null) => conversation_id ? guestConversationPath(context.slug, conversation_id) : null
-  const stayPath = (booking_id: string) => `/dashboard/${encodeURIComponent(context.slug)}/bookings/${encodeURIComponent(booking_id)}`
+  const bookingPath = (bookingId: string) => bookingEditorPath(context.slug, bookingId)
   const who = (name: string | null) => name ? firstName(name) : 'Guest'
   let face: TaskView['face'] = product ? 'photo' : 'compact', tag: string | null = null, avatar: TaskView['avatar'] = null
   let status_line: string | null = null, title = '', when: string | null = null, detail: string | null = null, error: string | null = null, path: string | null = null
@@ -588,7 +588,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       const checkinTime = row.due_at === null ? 'Time not set' : time(row.due_at)
       when = sameDayArrival && row.due_at !== null ? `${checkoutTime} – ${checkinTime}` : row.starts_at === null ? 'Time not set' : `From ${checkoutTime}`
       detail = [`${who(stay.guest_name)} out`, next === null ? null : sameDayArrival ? `${who(next.guest_name)} in` : `Next guest ${calendarDay(next.check_in_date)}`].filter(Boolean).join(' · ')
-      path = viewer.manage ? stayPath(stay.id) : null
+      path = viewer.manage ? bookingPath(stay.id) : null
       sheet = { heading: 'Turnover', title: product.name, date: row.starts_at === null ? calendarDay(stay.check_out_date) : day(row.starts_at),
         checkout: { label: 'Checkout', time: checkoutTime, guest: who(stay.guest_name) },
         checkin: next === null ? null : { label: 'Check-in', time: sameDayArrival ? checkinTime : `${calendarDay(next.check_in_date)}, ${checkinTime}`, guest: `${who(next.guest_name)} · ${guests(next)}` } }
@@ -656,7 +656,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
           : stay.check_in_date === today ? 'Arriving today' : stay.check_out_date > today ? 'Staying now' : `Checked out ${calendarDay(stay.check_out_date)}`
         status_line = [arrival, home].filter(Boolean).join(' · ')
         title = who(stay.guest_name)
-        path = conversation(message.conversation_id) ?? stayPath(message.booking_id)
+        path = conversation(message.conversation_id) ?? bookingPath(message.booking_id)
         action = { type: 'open', label: message.conversation_id ? 'Open conversation' : 'Open stay', path }
       } else {
         // A consultation, class or table: its time and place, and its conversation when it has one.
@@ -685,7 +685,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       const checkin = nights ? bookingDay(record.starts_at, record.timezone) : null
       const checkout = nights ? bookingDay(record.ends_at, record.timezone) : null
       detail = checkin && checkout ? `${calendarDay(checkin)} – ${calendarDay(checkout)}` : `${day(record.starts_at)}, ${time(record.starts_at)}`
-      path = bookingEditorPath(context.slug, nights ? 'stay' : 'booking', nights ? row.subject_id! : record.conversation_id)
+      path = bookingPath(record.id)
       action = { type: 'open', label: 'Review', path }
       sheet = { heading: nights ? 'Stay request' : 'Booking request', title, date: checkin ? calendarDay(checkin) : day(record.starts_at), checkout: null, checkin: null }
       break
@@ -703,7 +703,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
         avatar = { initial: initialOf(title), tone: 'warm' }
         status_line = [heading, place].filter(Boolean).join(' · ')
         detail = `${day(record.starts_at)}, ${time(record.starts_at)}`
-        path = bookingEditorPath(context.slug, 'booking', record.conversation_id)
+        path = bookingPath(record.id)
         sheet = { heading, title, date: null, checkout: null, checkin: null }
         break
       }
@@ -738,7 +738,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       avatar = { initial: initialOf(title), tone: 'warm' }
       status_line = [heading, place].filter(Boolean).join(' · ')
       detail = `${day(record.starts_at)}, ${time(record.starts_at)}`
-      path = bookingEditorPath(context.slug, 'booking', record.conversation_id)
+      path = bookingPath(record.id)
       sheet = { heading, title, date: null, checkout: null, checkin: null }
       break
     }
@@ -756,7 +756,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
         : row.starts_at > now.toISOString() ? 'Change proposal waiting on the guest' : 'Change proposal expired'
       status_line = [status, place].filter(Boolean).join(' · ')
       detail = record ? `${day(record.starts_at)}, ${time(record.starts_at)}` : null
-      path = booking_id ? stayPath(booking_id) : null
+      path = booking_id ? bookingPath(booking_id) : null
       // A change closes when it is answered or proposed again.
       action = { type: 'open', label: 'Review', path: path! }
       sheet = { heading: 'Change', title, date: null, checkout: null, checkin: null }
@@ -938,31 +938,8 @@ export async function taskViewForUser(db: DbClient, organizationId: string, task
 }
 
 export async function getTask(db: DbClient, viewer: TaskViewer, taskId: string, now = new Date()): Promise<TaskView> {
-  return taskView(db, viewer, await readTaskRow(db, viewer, taskId), now)
-}
-
-export async function taskView(db: DbClient, viewer: TaskViewer, row: TaskRow, now = new Date()): Promise<TaskView> {
+  const row = await readTaskRow(db, viewer, taskId)
   return present(row, viewer, await loadContext(db, viewer, [row]), now)
-}
-
-/**
- * The authorized booking's job for the conversation strip: the open one
- * first, otherwise the one closed last.
- */
-export function bookingJobQuery(viewer: TaskViewer, bookingId: string): BatchQuery {
-  const scope = scopeSql(viewer)
-  const { organizationId } = viewer.principal
-  return {
-    query: `SELECT t.* FROM tasks t
-      WHERE t.organization_id = ? AND ${scope.sql}
-        AND ((t.subject_type = 'booking' AND t.subject_id = ? AND (${JOB_TASK_SQL('t')} OR t.kind = 'consultation_prep'))
-          OR (t.subject_type = 'product_session' AND t.kind = 'consultation_prep'
-            AND t.subject_id = (SELECT b.product_session_id FROM bookings b WHERE b.organization_id = ? AND b.id = ?)
-            AND ${jobBookingIdSql('t')} = ?))
-      ORDER BY CASE t.status WHEN 'open' THEN 0 ELSE 1 END, CASE WHEN t.status = 'open' THEN COALESCE(t.due_at, t.starts_at, t.created_at) END, t.closed_at DESC, t.updated_at DESC
-      LIMIT 1`,
-    params: [organizationId, ...scope.params, bookingId, organizationId, bookingId, bookingId],
-  }
 }
 
 // ---------------------------------------------------------------------------

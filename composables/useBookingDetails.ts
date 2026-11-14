@@ -2,6 +2,7 @@ import { localDateAt } from '~/utils/timezone'
 import { resolveBookingPresentation, type BookingPresentation } from '~/utils/booking-presentation'
 import { paymentStateLabel } from '~/shared/payment-display'
 import type { DashboardBookingDetails, DashboardRecordType } from '~/server/utils/dashboard-booking-details'
+import type { DashboardBookingResource } from '~/composables/useDashboardBooking'
 
 // A purchase is not a booking of anything; its one word is the same for every vertical.
 const PURCHASE: BookingPresentation = {
@@ -15,7 +16,7 @@ const PURCHASE: BookingPresentation = {
   formatCount: count => String(count),
 }
 
-export async function useBookingDetails(bookingType: DashboardRecordType, bookingId: string, personalScope = false) {
+export async function useBookingDetails(bookingType: DashboardRecordType, bookingId: string, personalScope = false, canonical?: DashboardBookingResource) {
   const route = useRoute()
   // The heading follows the clock while the page stays open.
   const now = ref(new Date())
@@ -30,9 +31,7 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
   const orgSlug = computed(() => personalScope ? 'account' : String(route.params.org_slug || ''))
 
   const key = computed(() => `dashboard-booking:${orgSlug.value}:${bookingType}:${bookingId}`)
-  const canonical = !personalScope && bookingType === 'booking'
-    ? await useDashboardBooking(bookingId)
-    : null
+  if (!canonical && !personalScope && bookingType === 'booking') throw new Error('Dashboard bookings require their parent booking resource')
   const accountOrPurchase = canonical ? null : await useAsyncData<{ booking: DashboardBookingDetails }>(
     key, () => dashboardApi(endpoint, { validate: isBookingDetailsResponse }),
   )

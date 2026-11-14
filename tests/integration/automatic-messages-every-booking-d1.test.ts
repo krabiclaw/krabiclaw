@@ -10,7 +10,6 @@ import { sendDueScheduledGuestMessages } from '../../server/domain/scheduled-gue
 import { createProductBooking, quoteTimedBooking } from '../../server/domain/product-bookings.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { moveBooking } from '../../server/domain/guest-threads/booking-changes.ts'
-import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
 import { getGuestRequest } from '../../server/domain/requests.ts'
 import { listBookableSessions } from '../../server/utils/availability.ts'
 import { createTables } from './support/table-product.ts'
@@ -185,8 +184,8 @@ test('consultations, classes and table bookings are sent their automatic message
     const later = hourOn(10, 0)
     assert.deepEqual(await sendDueScheduledGuestMessages(db, env, later), { sent: 4, failed: 0, needs_review: 0 })
     assert.deepEqual(await sendDueScheduledGuestMessages(db, env, later), { sent: 0, failed: 0, needs_review: 0 })
-    const conversation = async (organizationId: string, requestId: string) => (await getGuestThreadDetail(db, requestId, organizationId))!.entries
-      .filter(entry => entry.eventName === 'thread.scheduled_message').map(entry => entry.body)
+    const conversation = async (organizationId: string, requestId: string) => (await db.prepare(`SELECT body FROM messages
+      WHERE organization_id = ? AND conversation_id = ? AND event_name = 'thread.scheduled_message' ORDER BY sequence`).bind(organizationId, requestId).all<{ body: string }>()).results.map(row => row.body)
     assert.deepEqual((await conversation(law.organizationId, ana.requestId)).sort(), ['Please bring your lease and any notices.', 'We have your consultation request.'])
     assert.deepEqual(await conversation(law.organizationId, ben.requestId), [])
     assert.deepEqual(await conversation(studio.organizationId, cy.requestId), ['Wear clothes you can get clay on.'])

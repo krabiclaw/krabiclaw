@@ -188,7 +188,7 @@ export async function acceptConversationGuestInvite(db: DbClient, env: GuestInbo
     JOIN conversation_participants p ON p.conversation_id = i.conversation_id AND p.organization_id = i.organization_id AND p.user_id = i.accepted_user_id AND p.role = 'guest'
     WHERE i.token_hash = ? AND i.accepted_user_id = ? AND i.accepted_at IS NOT NULL AND i.expires_at > ?`, [hash, userId, now])
   if (!invite) throw new HTTPError({ statusCode: 404, message: 'Conversation invitation not found' })
-  await publishAccessInvalidation(env, { organizationId: invite.organization_id })
+  await publishConversationEvent(env, db, { conversationId: invite.conversation_id, type: 'MESSAGE_UPDATE' })
   return invite
 }
 

@@ -246,6 +246,7 @@ import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDia
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import { getErrorMessage } from '~/utils/errors'
 import { getVerticalCopy } from '~/utils/vertical-copy'
+import type { DashboardBookingResource } from '~/composables/useDashboardBooking'
 
 const props = defineProps<{
   bookingType: DashboardRecordType
@@ -254,6 +255,7 @@ const props = defineProps<{
   editorPath: string
   /** The account that booked, reading its own record: no team controls, its own cancel. */
   personalScope?: boolean
+  dashboardBooking?: DashboardBookingResource
 }>()
 const recordLevel = useRouteLevel()
 const route = useRoute()
@@ -263,12 +265,8 @@ type ActionColor = 'success' | 'error' | 'neutral'
 const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const actionError = ref<string | null>(null)
 const editorPath = computed(() => props.editorPath)
-const { resource, booking, error, presentation, noun, pageTitle, orgSlug, purchase, refresh: refreshDetails } = await useBookingDetails(props.bookingType, props.bookingId, props.personalScope)
-const realtime = useConversationInvalidations(
-  computed(() => booking.value?.conversation_id ?? ''),
-  computed(() => booking.value?.organization_id),
-  props.personalScope && props.bookingType === 'booking',
-)
+const { resource, booking, error, presentation, noun, pageTitle, orgSlug, purchase, refresh: refreshDetails } = await useBookingDetails(props.bookingType, props.bookingId, props.personalScope, props.dashboardBooking)
+const realtime = useDashboardInvalidations()
 watchEffect(() => {
   if (error.value && !booking.value) showError(error.value)
 })
@@ -399,7 +397,7 @@ function openCancel() {
 }
 
 watch(realtime.event, (event) => {
-  if (!event || !booking.value || props.bookingType !== 'booking') return
+  if (!event || !booking.value || event.organization_id !== booking.value.organization_id || props.bookingType !== 'booking') return
   if (event.type === 'access.changed' || (
     (event.type === 'CONVERSATION_LEAVE' || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.scheduled))
     && event.conversation_id === booking.value.conversation_id

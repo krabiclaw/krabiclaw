@@ -41,12 +41,11 @@
     "record_kind": "stay",
     "record_title": "Reservation",
     "title": "Ana Ruiz",
-    "translated": false,
     "when": "Nov 20 – 23"
   },
   "entries": [
     {
-      "id": "day:00000000-0000-4000-8000-000000000012",
+      "id": "day:2026-11-05",
       "label": "Today",
       "type": "day"
     },
@@ -65,7 +64,6 @@
       "sequence": 1,
       "side": "guest",
       "time": "12:00 PM",
-      "translated": null,
       "type": "message",
       "unshown_files": 0
     },
@@ -84,7 +82,6 @@
       "sequence": 2,
       "side": "guest",
       "time": null,
-      "translated": null,
       "type": "message",
       "unshown_files": 0
     }

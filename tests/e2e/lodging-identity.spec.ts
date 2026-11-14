@@ -10,7 +10,7 @@ import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import type { TeamMember } from '../../server/domain/team-messages'
 import type { InboxRow } from '../../server/domain/guest-threads/types'
 import { ALL_VERTICALS } from '../../utils/vertical-copy'
-import type { ConversationMessage, ConversationPage } from '../../shared/messages-contract'
+import type { ConversationEntriesPage, ConversationMessage, ConversationPage } from '../../shared/messages-contract'
 import type { Product } from '../../server/types/products'
 
 // The native app authenticates with a Better Auth bearer session and nothing
@@ -121,7 +121,7 @@ test.describe('lodging identity boundary', () => {
         expect(response.status(), await response.text()).toBe(200)
         return mcpData<T>(await response.json())
       }
-      const messages = (page: ConversationPage) => page.entries.filter((entry): entry is ConversationMessage => entry.type === 'message')
+      const messages = (page: Pick<ConversationEntriesPage, 'entries'>) => page.entries.filter((entry): entry is ConversationMessage => entry.type === 'message')
       const teamRead = (args: { before?: number } = {}, client = request) => teamCall<ConversationPage>('get_conversation', { conversation_id: threadId, ...args }, client)
       const recipients = await teamCall<{ current_user_id: string; members: TeamMember[] }>('list_conversation_recipients')
       expect(recipients.current_user_id).toBe(fixture.id)
@@ -140,7 +140,8 @@ test.describe('lodging identity boundary', () => {
       expect(conversations.conversations).toEqual([expect.objectContaining({ conversation_id: threadId, kind: 'team', unread: false })])
       expect(conversations.page_info).toEqual({ has_more: false, next_cursor: null })
       const opened = (await teamRead()).conversation
-      expect(opened).toMatchObject({ id: threadId, unread: false, stay: null, location_id: null })
+      expect(opened).toMatchObject({ id: threadId, unread: false, booking_id: null, location_id: null })
+      expect(opened).not.toHaveProperty('stay')
       expect(opened.participants.map(member => member.id).sort()).toEqual([fixture.id, invitee.id].sort())
       const message = `The guest room is ready ${crypto.randomUUID()}`
       const idempotencyKey = crypto.randomUUID()
@@ -157,7 +158,10 @@ test.describe('lodging identity boundary', () => {
       expect(JSON.parse(changedRetryResult.content[0].text)).toMatchObject({ status: 409, code: 'IDEMPOTENCY_KEY_REUSED' })
       const nativeRead = await api.get(teamPath, { headers: inviteeBearer })
       expect(nativeRead.status, await nativeRead.text()).toBe(200)
-      expect(await nativeRead.json()).toMatchObject({ entries: [{ id: sent.message.id, body: message, author_user_id: fixture.id }], page: { before: null }, conversation: { id: threadId, unread: true, last_message_at: sent.message.sent_at } })
+      const nativePage = await nativeRead.json() as ConversationPage
+      expect(nativePage).toMatchObject({ page: { before: null }, conversation: { id: threadId, unread: true, last_message_at: sent.message.sent_at } })
+      expect(nativePage.entries.map(entry => entry.type)).toEqual(['day', 'message'])
+      expect(messages(nativePage)).toMatchObject([{ id: sent.message.id, body: message, author_user_id: fixture.id }])
       const teamRows = async (headers: Record<string, string>) => {
         const response = await api.get(`/api/messages?organization_id=${organization.id}&kind=team`, { headers })
         expect(response.status, await response.text()).toBe(200)
@@ -304,8 +308,11 @@ test.describe('lodging identity boundary', () => {
       expect(retained.page.before).not.toBeNull()
       const older = await api.get(`${teamPath}?before=${retained.page.before}`, { headers: bearer })
       expect(older.status, await older.text()).toBe(200)
-      const prior = await older.json() as ConversationPage
+      const prior = await older.json() as ConversationEntriesPage
+      expect(Object.keys(prior).sort()).toEqual(['conversation_id', 'entries', 'page'])
+      expect(prior.conversation_id).toBe(threadId)
       expect(prior.page.before).toBeNull()
+      expect(prior.page.newest).toBeLessThan(retained.page.before!)
       expect(await page.locator('[data-team-message]').evaluateAll(rows => rows.map(row => row.getAttribute('data-team-message')))).toEqual([...messages(prior), ...messages(retained)].map(message => message.id))
       const reused = await api.post('/api/auth/organization/accept-invitation', { headers: inviteeBearer, data: { invitationId } })
       expect(reused.status).toBe(400)

@@ -274,11 +274,13 @@ import { formatCalendarDate, formatTime, localDateAt } from '~/utils/timezone'
 import { formatPostalAddress } from '~/utils/postal-address'
 import { getErrorMessage } from '~/utils/errors'
 import { ApiClientError } from '~/utils/api-clients'
+import type { DashboardBookingResource } from '~/composables/useDashboardBooking'
 
 const props = defineProps<{
   stayId: string
   /** The guest's own stay, read and cancelled from their account; stayId is then its activity ID. */
   personalScope?: boolean
+  dashboardBooking?: DashboardBookingResource
 }>()
 const recordLevel = useRouteLevel()
 const dashboardApi = useDashboardApi()
@@ -289,7 +291,8 @@ const toast = useToast()
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 const manageOpen = ref(false)
 
-const canonical = !props.personalScope ? await useDashboardBooking(props.stayId) : null
+const canonical = props.dashboardBooking
+if (!canonical && !props.personalScope) throw new Error('Dashboard stays require their parent booking resource')
 const buyer = props.personalScope ? await useAsyncData(`account-stay:${props.stayId}`, async (): Promise<GuestStay> => {
   const response = await applicationFetch(`/api/account/bookings/${encodeURIComponent(props.stayId)}?lookup=conversation`, {
     validate: (value): value is Omit<GuestStay, 'stay'> & { booking: Omit<GuestStay['stay'], 'id'> & { booking_id: string } } =>

@@ -187,7 +187,7 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
     notifyBookingCreated(env, db, {
       organizationId, organizationName: organization.name, vertical: organization.vertical, locationId: record.location_id,
       guestAcknowledgement: request.payload.provenance?.guest_acknowledgement ?? true,
-      bookingId: requestId, status: creation.status, guestName,
+      bookingId: requestId, bookingRecordId: record.id, status: creation.status, guestName,
       email: guestEmail, guestPhone: request.payload.guest.phone,
       productId: record.product_id, productKind: record.product_kind, productTitle: record.product_name, startsAt: record.starts_at,
       timezone: record.timezone, partySize: record.party_size, partySizeIsMinimum: record.party_size_is_minimum, notes: note?.body ?? null,

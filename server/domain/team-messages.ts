@@ -8,9 +8,8 @@ import { notifyTeamMessage } from '~/server/utils/notifications'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import type { MessageIdentity } from '~/shared/dashboard-invalidations'
 import { getStay, stayAccessFor } from '~/server/domain/stays'
-import { bookingJobQuery, taskView, taskViewer, type JobSubject, type TaskRow, type TaskView } from '~/server/domain/tasks'
-import { BOOKING_RECORDS_SQL, bookingDay } from '~/server/domain/requests'
-import { appendMessage, conversationAccessDenied, participantGuard, unreadSql, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
+import type { JobSubject } from '~/server/domain/tasks'
+import { appendMessage, conversationAccessDenied, participantGuard, type ConversationParticipantRow, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
 import { messagePreview } from '~/server/domain/guest-threads/attachments'
 
 /**
@@ -45,25 +44,8 @@ export interface TeamParticipant {
   image: string | null
 }
 
-export interface TeamStaySummary {
-  id: string
-  product_id: string
-  name: string
-  check_in_date: string
-  check_out_date: string
-  status: 'pending' | 'confirmed' | 'cancelled'
-}
-
-export interface TeamLocationSummary {
-  id: string
-  title: string
-  slug: string
-  timezone: string
-}
-
 export interface TeamThread {
   id: string
-  /** A group's name; a stay conversation is titled by the home the guest sleeps in. */
   name: string | null
   is_group: boolean
   created_by_user_id: string | null
@@ -71,15 +53,8 @@ export interface TeamThread {
   can_leave: boolean
   created_at: string
   last_message_at: string
-  /** The booking the conversation is about, if any: a stay's (`stay`) or a table's, class's or consultation's (`record`). */
   booking_id: string | null
   location_id: string | null
-  stay: TeamStaySummary | null
-  /** A booking of a table, a class or a consultation: who booked, or what. */
-  record: { id: string; title: string } | null
-  /** The stay's cleaning job (its turnover, or the job to get a home ready after a move), as the Today card draws it; null when the stay has none. */
-  job: TaskView | null
-  location: TeamLocationSummary | null
   participants: TeamParticipant[]
   /** A message from someone else after the caller's read position (conversations.ts unreadSql). */
   unread: boolean
@@ -148,54 +123,15 @@ async function publishThreadChanged(env: GuestInboxPublicationEnv, db: DbClient,
  * The list of conversations is the one list (guest-threads/repository.ts
  * listConversations).
  */
-export async function getTeamThread(db: DbClient, access: MemberAccessPrincipal, thread: ConversationRow, readThrough: number | null): Promise<TeamThread> {
-  if (thread.organization_id !== access.organizationId || thread.kind !== 'team') conversationAccessDenied()
-  const unread = unreadSql('c', access.userId, readThrough)
-  const viewer = thread.booking_id ? await taskViewer(access) : null
+export async function presentGroupConversation(access: MemberAccessPrincipal, thread: ConversationRow, roster: ConversationParticipantRow[], unread: boolean): Promise<TeamThread> {
   const mutableGroup = thread.is_group === 1 && !thread.booking_id && !thread.location_id
-  type Booking = {
-    unit: 'slot' | 'nights'; id: string; title: string; product_id: string; home_name: string | null
-    starts_at: string; ends_at: string; timezone: string; status: TeamStaySummary['status']
-  }
-  // A stay is titled by its home; any other booking by who booked, else what: the offering, or a table's place.
-  const bookingQuery = thread.booking_id ? { query: `
-    SELECT br.unit, br.id, COALESCE(json_extract(guest.payload_json, '$.guest.name'), CASE WHEN br.product_kind = 'table' THEN l.title END, br.product_name) AS title,
-           br.product_id, br.product_internal_name AS home_name, br.starts_at, br.ends_at, br.timezone, br.status FROM ${BOOKING_RECORDS_SQL} br
-      LEFT JOIN conversations guest ON guest.organization_id = br.organization_id AND guest.booking_id = br.id AND guest.kind = 'booking'
-      LEFT JOIN business_locations l ON l.id = br.location_id AND l.organization_id = br.organization_id
-     WHERE br.organization_id = ? AND br.id = ?`, params: [access.organizationId, thread.booking_id] } : null
-  const locationQuery = thread.location_id ? {
-    query: 'SELECT id, title, slug, timezone FROM business_locations WHERE organization_id = ? AND id = ?',
-    params: [access.organizationId, thread.location_id],
-  } : null
-  const [participantsResult, unreadResult, ...linked] = await executeBatch(db, [
-    { query: `SELECT u.id, m.id AS member_id, u.name, u.image FROM conversation_participants seat
-      JOIN member m ON m.organizationId = seat.organization_id AND m.userId = seat.user_id
-      JOIN user u ON u.id = m.userId
-      WHERE seat.conversation_id = ? AND seat.organization_id = ? AND seat.role = 'member' ORDER BY seat.created_at, seat.user_id`,
-    params: [thread.id, access.organizationId] },
-    { query: `SELECT ${unread.sql} AS unread FROM (SELECT ? AS id, ? AS user_id) c`,
-      params: [...unread.params, thread.id, thread.user_id] },
-    ...(bookingQuery ? [bookingQuery, bookingJobQuery(viewer!, thread.booking_id!)] : []),
-    ...(locationQuery ? [locationQuery] : []),
-  ], { operation: 'Read team conversation context' })
-  const participants = participantsResult!.results as unknown as TeamParticipant[]
+  const participants = roster.flatMap(({ id, member_id, name, image, role }) =>
+    role === 'member' && id && member_id ? [{ id, member_id, name, image }] : [])
   if (!participants.some(person => person.id === access.userId && person.member_id === access.memberId)) conversationAccessDenied()
-  const booked = bookingQuery ? linked[0]?.results[0] as Booking | undefined : undefined
-  const location = locationQuery ? (linked[bookingQuery ? 2 : 0]?.results[0] as TeamLocationSummary | undefined) ?? null : null
-  if (thread.booking_id && !booked) throw new Error(`Team conversation ${thread.id} names booking ${thread.booking_id}, which was not found`)
-  if (thread.location_id && !location) throw new Error(`Team conversation ${thread.id} names location ${thread.location_id}, which was not found`)
-  const job = bookingQuery ? linked[1]?.results[0] as unknown as TaskRow | undefined : undefined
-  if (booked?.unit === 'nights' && !booked.home_name) throw new Error(`Team conversation ${thread.id} names stay ${booked.id}, whose home has no name`)
-  const stay = booked?.unit === 'nights' ? { id: booked.id, product_id: booked.product_id, name: booked.home_name!, check_in_date: bookingDay(booked.starts_at, booked.timezone), check_out_date: bookingDay(booked.ends_at, booked.timezone), status: booked.status } : null
-  const record = booked?.unit === 'slot' ? { id: booked.id, title: booked.title } : null
-  const [jobView, managesGroup] = await Promise.all([
-    job && viewer ? taskView(db, viewer, job) : null,
-    mutableGroup && (thread.created_by_user_id === access.userId || canManageGroups(access)),
-  ])
+  const managesGroup = mutableGroup && (thread.created_by_user_id === access.userId || await canManageGroups(access))
   return {
     id: thread.id,
-    name: thread.name ?? stay?.name ?? record?.title ?? null,
+    name: thread.name,
     is_group: thread.is_group === 1,
     created_by_user_id: thread.created_by_user_id,
     can_manage: managesGroup,
@@ -204,12 +140,8 @@ export async function getTeamThread(db: DbClient, access: MemberAccessPrincipal,
     last_message_at: thread.last_message_at,
     booking_id: thread.booking_id,
     location_id: thread.location_id,
-    record,
-    stay,
-    job: jobView,
-    location,
     participants,
-    unread: (unreadResult!.results[0] as { unread: number }).unread === 1,
+    unread,
   }
 }
 

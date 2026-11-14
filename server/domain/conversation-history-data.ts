@@ -2,6 +2,47 @@ import { executeBatch, queryAll, type BatchQuery, type DbClient } from '~/server
 import { SCHEDULED_MESSAGE_EVENT, conversationMessagesQuery, type ConversationGuard, type ConversationRow, type ConversationWindow, type MessageRow } from './conversations'
 import { groupMessagePhotos, messagePhotoRowsSql, type MessagePhotoRow } from './guest-threads/attachments'
 import { HISTORY_DELIVERY_COLUMNS, HISTORY_DELIVERY_FIELDS, groupMessageDeliveries, type HistoryDelivery } from './guest-threads/deliveries'
+import type { ConversationEntry, ConversationMessage } from '~/shared/messages-contract'
+import type { GuestThreadEntryAttachmentViewModel } from './guest-threads/types'
+import { transcriptDays } from './guest-threads/presentation'
+
+export function groupConversationEntries(entries: Exclude<ConversationEntry, { type: 'day' }>[], timeZone: string, now: Date): ConversationEntry[] {
+  const dates = transcriptDays(timeZone, now)
+  const rows: ConversationEntry[] = []
+  let day: string | undefined
+  let previous: ConversationMessage | undefined
+  for (const entry of entries) {
+    const instant = new Date(entry.sent_at)
+    const date = dates.date(instant)
+    if (date.key !== day) {
+      rows.push({ type: 'day', id: `day:${date.key}`, label: dates.label(instant, date) })
+      day = date.key
+      previous = undefined
+    }
+    if (entry.type === 'message') {
+      const sameSender = previous?.author === entry.author && previous.author_user_id === entry.author_user_id && previous.side === entry.side
+      entry.time = sameSender && previous && !previous.automatic && !entry.automatic ? null : dates.time(instant)
+      previous = entry
+    } else previous = undefined
+    rows.push(entry)
+  }
+  return rows
+}
+
+export function conversationMessage(input: {
+  id: string; sequence: number; authorUserId: string | null; side: ConversationMessage['side']; author: string;
+  automatic: boolean; sentAt: string; body: string | null; attachments: GuestThreadEntryAttachmentViewModel[];
+  deliveries?: HistoryDelivery[]; label?: string | null; time?: string | null; unshownFiles?: number;
+}): ConversationMessage {
+  return {
+    type: 'message', id: input.id, sequence: input.sequence, author_user_id: input.authorUserId,
+    side: input.side, author: input.author, automatic: input.automatic, label: input.label ?? null,
+    sent_at: input.sentAt, time: input.time ?? null, body: input.body, unshown_files: input.unshownFiles ?? 0,
+    photos: input.attachments.map(({ id, url, thumbnailUrl, width, height }) => ({ id, url, thumbnail_url: thumbnailUrl, width, height })),
+    deliveries: input.deliveries?.map(({ id, channel, status, error, updated_at }) => ({ id, channel, status, error, updated_at })) ?? [],
+    receipt: null, retryable: false,
+  }
+}
 
 type HistoryRow = MessageRow & {
   author_name: string | null
@@ -48,7 +89,7 @@ export async function readConversationHistory(
       SELECT page.*, ${window ? 'sequence <> min(sequence) OVER () OR count(*) OVER () <= ?' : '1'} AS enrich FROM page
     )${automatic}
     SELECT m.*,
-      ${team ? 'NULL' : `CASE WHEN enrich THEN (SELECT u.name FROM user u WHERE u.id = m.author_user_id ${staff ? '' : "AND m.author_kind = 'guest'"}) END`} AS author_name,
+      CASE WHEN enrich THEN (SELECT u.name FROM user u WHERE u.id = m.author_user_id ${staff ? '' : "AND m.author_kind = 'guest'"}) END AS author_name,
       CASE WHEN enrich THEN (SELECT json_group_array(json_object('owner_id', p.owner_id, 'id', p.id, 'public_url', p.public_url,
         'thumbnail_url', p.thumbnail_url, 'alt_text', p.alt_text, 'width', p.width, 'height', p.height)) FROM (${photos}) p) END AS photo_rows,
       CASE WHEN enrich THEN ${receipts} END AS delivery_rows,

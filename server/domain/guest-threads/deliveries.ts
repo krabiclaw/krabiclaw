@@ -269,12 +269,12 @@ export function compareDeliveryStatus(current: string | null, incoming: GuestThr
  */
 /** Whether a reply reached the guest decides whether the business still owes one: the reply tasks change with the receipt. */
 async function deliveryTaskQueries(db: DbClient, deliveryId: string): Promise<BatchQuery[]> {
-  const message = await queryFirst<{ conversation_id: string; kind: string }>(db, `SELECT m.conversation_id, c.kind FROM guest_thread_deliveries d
-    JOIN messages m ON m.id = d.message_id JOIN conversations c ON c.id = m.conversation_id WHERE d.id = ?`, [deliveryId])
-  if (!message || message.kind === 'team') return []
+  const message = await queryFirst<{ conversation_id: string }>(db, `SELECT m.conversation_id FROM guest_thread_deliveries d
+    JOIN messages m ON m.id = d.message_id WHERE d.id = ? AND d.purpose = 'member_reply'`, [deliveryId])
+  if (!message) return []
   // The conversation repository reads receipts through this module; it is loaded when used, not at import.
-  const { conversationTaskQueries } = await import('./repository')
-  return conversationTaskQueries(message.conversation_id, new Date().toISOString())
+  const { conversationReplyTaskQueries } = await import('./repository')
+  return conversationReplyTaskQueries(message.conversation_id, new Date().toISOString())
 }
 
 export async function advanceDeliveryStatus(
@@ -377,7 +377,7 @@ export async function recordDeliveryOutcome(
       SET status = ?, provider_message_id = COALESCE(?, provider_message_id), error = ?, updated_at = ?
       WHERE id = ? AND status NOT IN ('accepted', 'sent', 'delivered', 'read')`,
     params: [input.status, input.providerMessageId ?? null, input.error ?? null, new Date().toISOString(), input.deliveryId],
-  }, ...await deliveryTaskQueries(db, input.deliveryId), ...more], { operation: 'Record delivery outcome' })
+  }, ...more, ...await deliveryTaskQueries(db, input.deliveryId)], { operation: 'Record delivery outcome' })
   const updated = await getDeliveryById(db, input.deliveryId)
   if (!updated) throw new Error('Guest thread delivery not found')
   return updated

@@ -41,12 +41,11 @@
     "record_kind": "stay",
     "record_title": "Reservation",
     "title": "Mililani",
-    "translated": true,
     "when": "In 3 days"
   },
   "entries": [
     {
-      "id": "day:00000000-0000-4000-8000-000000000004",
+      "id": "day:2026-11-04",
       "label": "Yesterday",
       "type": "day"
     },
@@ -54,7 +53,7 @@
       "author": "Mililani",
       "author_user_id": null,
       "automatic": false,
-      "body": "In winter, can we park on the street?",
+      "body": "¿En invierno dejan aparcar en la calle?",
       "deliveries": [],
       "id": "00000000-0000-4000-8000-000000000004",
       "label": null,
@@ -65,9 +64,6 @@
       "sequence": 1,
       "side": "guest",
       "time": "11:16 AM",
-      "translated": {
-        "original": "¿En invierno dejan aparcar en la calle?"
-      },
       "type": "message",
       "unshown_files": 0
     },
@@ -94,7 +90,6 @@
       "sequence": 2,
       "side": "guest",
       "time": null,
-      "translated": null,
       "type": "message",
       "unshown_files": 0
     },
@@ -113,7 +108,6 @@
       "sequence": 3,
       "side": "business",
       "time": "11:23 AM",
-      "translated": null,
       "type": "message",
       "unshown_files": 0
     },
@@ -132,12 +126,11 @@
       "sequence": 4,
       "side": "guest",
       "time": "11:31 AM",
-      "translated": null,
       "type": "message",
       "unshown_files": 0
     },
     {
-      "id": "day:automatic-contract",
+      "id": "day:2026-11-05",
       "label": "Today",
       "type": "day"
     },
@@ -156,7 +149,6 @@
       "sequence": 5,
       "side": "business",
       "time": "12:00 PM",
-      "translated": null,
       "type": "message",
       "unshown_files": 0
     },
@@ -189,7 +181,6 @@
       "sequence": 8,
       "side": "business",
       "time": "12:00 PM",
-      "translated": null,
       "type": "message",
       "unshown_files": 0
     }

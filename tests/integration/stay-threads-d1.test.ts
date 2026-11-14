@@ -7,8 +7,9 @@ import { createProduct } from '../../server/utils/product-management.ts'
 import { acceptConversationGuestInvite, createConversationGuestInvite, removeConversationGuest, setListingMessagingAccess } from '../../server/domain/conversation-participants.ts'
 import { readGuestConversation } from '../../server/domain/conversations.ts'
 import { createStay, updateStay, type StayAccess } from '../../server/domain/stays.ts'
-import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
-import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
+import { getInboxThreadDetails } from '../../server/domain/guest-threads/inbox.ts'
+import { conversationPageFor } from './support/conversation-page.ts'
+import { executeGuestThreadOperation, sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
 import { listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { findSubmissionByPhone } from '../../server/utils/submission-messages.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
@@ -81,7 +82,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     // A guest reachable by phone alone has a thread too, but no email and no account anyone signs in to: a reply has nowhere to go and says so.
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(30), check_out_date: day(31), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 15_000 })
     assert.deepEqual(JSON.parse((await thread(dee.conversation_id))!.payload_json).guest, { name: 'Dee', email: null, phone: '+61491570151' })
-    assert.deepEqual(await executeGuestThreadOperation(db, { threadId: dee.conversation_id, organizationId: ORG, action: 'reply', body: 'Hi', actorUserId: OWNER, idempotencyKey: 'dee-reply', env }),
+    assert.deepEqual(await sendGuestThreadReply(db, { threadId: dee.conversation_id, organizationId: ORG, body: 'Hi', actorUserId: OWNER, idempotencyKey: 'dee-reply', env }),
       { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: 'This guest has no email or KrabiClaw account to reply to.' })
 
     // With neither an email nor a phone the guest still has their conversation, by name; contact added later is its contact.
@@ -121,9 +122,12 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual(await listConversations(db, ORG, { userId: OWNER, principal: principal(OWNER, 'owner'), type: 'stay' }), [])
 
     // The thread is answered like any other; a stay is changed from its own screen, not its thread.
-    const detail = (await getGuestThreadDetail(db, ana.conversation_id, ORG))!
-    assert.deepEqual([detail.submissionType, detail.operationalRecord?.id, detail.operationalRecord?.unit, detail.availableActions], ['stay', ana.id, 'nights', []])
-    const reply = await executeGuestThreadOperation(db, { threadId: ana.conversation_id, organizationId: ORG, action: 'reply', body: 'The gate code is in your confirmation.', actorUserId: OWNER, idempotencyKey: 'reply-1', env })
+    const hostConversation = await conversationPageFor(db, principal(OWNER, 'owner'), ana.conversation_id)
+    const detail = hostConversation.conversation
+    assert(detail.kind === 'guest')
+    assert.deepEqual([detail.record_kind, detail.booking_id], ['stay', ana.id])
+    const sheet = () => getInboxThreadDetails(db, ana.conversation_id, ORG, { audience: 'member', userId: OWNER, principal: principal(OWNER, 'owner') })
+    const reply = await sendGuestThreadReply(db, { threadId: ana.conversation_id, organizationId: ORG, body: 'The gate code is in your confirmation.', actorUserId: OWNER, idempotencyKey: 'reply-1', env })
     assert.deepEqual([reply.ok, reply.status], [true, 200])
     assert.deepEqual(await db.prepare(`SELECT d.channel, d.status FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id
       WHERE e.conversation_id = ? AND d.purpose = 'member_reply'`).bind(ana.conversation_id).first(), { channel: 'email', status: 'sent' })
@@ -137,7 +141,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual({ ...listed[0]!, time: undefined }, { id: ana.conversation_id, kind: 'guest', title: 'Ana Silva', avatar_initial: 'A', channel: 'direct', home: 'Cabin',
       when: `In ${arrivalIn} days`, preview: 'The gate code is in your confirmation.', preview_from: 'You', time: undefined, unread: false })
     assert.deepEqual(await db.prepare("SELECT b.product_id, b.channel, c.id AS conversation_id FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.id = ?").bind(ana.id).first(), { product_id: cabin.id, channel: 'direct', conversation_id: ana.conversation_id })
-    assert.equal((await getGuestThreadDetail(db, ana.conversation_id, ORG))?.mailbox, 'current')
+    assert.equal((await sheet())?.actions.archive, true)
     assert.deepEqual(await listConversations(db, ORG, { userId: CLEANER, principal: principal(CLEANER, 'member') }), [])
     assert.deepEqual(await listConversations(db, ORG, { userId: OUTSIDER, principal: principal(OUTSIDER, 'member') }), [])
     const host = principal(OWNER, 'owner')
@@ -182,7 +186,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     await db.prepare('UPDATE messages SET occurred_at = ? WHERE conversation_id = ?').bind(`${day(-40)}T00:00:00.000Z`, ana.conversation_id).run()
     await db.prepare('UPDATE conversations SET created_at = ?, last_message_at = ? WHERE id = ?').bind(`${day(-50)}T00:00:00.000Z`, `${day(-40)}T00:00:00.000Z`, ana.conversation_id).run()
     assert.equal((await listConversations(db, ORG, { userId: OWNER, principal: principal(OWNER, 'owner'), type: 'stay', mailbox: 'past' })).some(row => row.id === ana.conversation_id), true)
-    assert.equal((await getGuestThreadDetail(db, ana.conversation_id, ORG))?.mailbox, 'past')
+    assert.deepEqual((await sheet())?.actions, { archive: false, unarchive: false, report: true, block: true, unblock: false })
 
     // A guest's WhatsApp number finds their stay's thread; a cancelled stay's thread is not found.
     assert.deepEqual(await findSubmissionByPhone(db, '+61491570150'), { submissionType: 'booking', submissionId: ana.conversation_id, organizationId: ORG })

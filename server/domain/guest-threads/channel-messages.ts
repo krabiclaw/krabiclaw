@@ -7,7 +7,7 @@ import { landBookingRevision, pendingBookingRevisions } from '~/server/integrati
 import { getChannexThread, listChannexMessages, listChannexThreads, sendChannexMessage, type ChannexMessage, type ChannexMessageThread } from '~/server/integrations/channex/messages'
 import { MIRRORED_EVENT, MessageDedupeConflictError, SCHEDULED_MESSAGE_EVENT, appendMessage, assertMessageWriteAccess, findMessageByDedupeKey, getMessage, parseMessagePayload, type ConversationGuard, type MessageRow } from '~/server/domain/conversations'
 import { getDeliveryById, getDeliveryByProviderMessageId, isDeliverySent, recordDeliveryOutcome } from './deliveries'
-import { conversationTaskQueries, reconcileConversationTasks } from './repository'
+import { conversationTaskQueries } from './repository'
 import { assertMessagePhotos, attachGuestPhotos, isMessagePhoto, listMessagePhotos, sortGuestFiles, type MessagePhoto } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { getMediaAsset, readMediaPlacements } from '~/server/utils/media-asset-manager'
@@ -434,7 +434,6 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
   if (input.receipt && isDeliverySent(input.receipt)) {
     const entry = await input.commit()
     if (!input.receipt.provider_message_id?.trim()) fail(500, 'CHANNEL_RECEIPT_INVALID', 'A successful channel reply has no provider message ID', 'delivery.provider_message_id')
-    await reconcileConversationTasks(db, input.mapping.conversation_id)
     return { ok: true, message: entry }
   }
   // Whether the home may still be written to is the caller's (guestReplyDestination);
@@ -450,7 +449,6 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
   if (!receipt || receipt.message_id !== entry.id) fail(500, 'CHANNEL_RECEIPT_INVALID', 'The reply has no matching delivery receipt', 'delivery')
   if (isDeliverySent(receipt)) {
     if (!receipt.provider_message_id?.trim()) fail(500, 'CHANNEL_RECEIPT_INVALID', 'A successful channel reply has no provider message ID', 'delivery.provider_message_id')
-    await reconcileConversationTasks(db, input.mapping.conversation_id)
     return { ok: true, message: entry }
   }
   let photo: ReturnType<typeof assertMessagePhotos>[number] | undefined
@@ -507,6 +505,5 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
       params: [input.mapping.organization_id, ...echoParams] },
     { query: `DELETE FROM messages WHERE id IN (${echoed})`, params: echoParams },
   ])
-  await reconcileConversationTasks(db, input.mapping.conversation_id)
   return { ok: true, message: entry }
 }

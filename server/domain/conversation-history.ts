@@ -1,28 +1,24 @@
 import { queryFirst, type DbClient } from '~/server/db'
-import type { ConversationMessage, ConversationPage, ConversationViewerRole } from '~/shared/messages-contract'
+import type { ConversationEntriesPage, ConversationMessage, ConversationPage, ConversationViewerRole } from '~/shared/messages-contract'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
-import { conversationAccessDenied, participantGuard, type ConversationRow, type ConversationWindow, type MessageRow } from './conversations'
-import { conversationDeliveryReceipt, conversationParticipantsQuery, projectGuestConversation, type ConversationParticipantRow } from './guest-threads/inbox'
-import { getTeamThread } from './team-messages'
+import { conversationAccessDenied, conversationParticipantsQuery, participantGuard, unreadSql, type ConversationParticipantRow, type ConversationRow, type ConversationWindow, type MessageRow } from './conversations'
+import { conversationDeliveryReceipt, projectGuestConversation } from './guest-threads/inbox'
+import { presentGroupConversation } from './team-messages'
 import { guestHistoryContext } from './guest-threads/detail'
-import { readConversationHistory } from './conversation-history-data'
+import { conversationMessage, groupConversationEntries, readConversationHistory, type ConversationHistory } from './conversation-history-data'
 
 import { readConversationEnrichment, threadDeliveriesQuery } from './guest-threads/deliveries'
 import { parseGuestRequest, participantLabel } from './requests'
 
 type MessageEnrichment = Awaited<ReturnType<typeof readConversationEnrichment>>
+type ConversationViewer = { conversation: ConversationRow; userId: string; role: ConversationViewerRole; principal: MemberAccessPrincipal | null; readThrough: number | null }
 
 function projectMessage(message: MessageRow, author: string, enrichment: Pick<MessageEnrichment, 'photos' | 'deliveriesByMessage'>, team: boolean): ConversationMessage {
-  return {
-    type: 'message', id: message.id, sequence: message.sequence, side: message.author_kind === 'guest' ? 'guest' : 'business', author_user_id: message.author_user_id,
-    author, automatic: message.author_kind === 'krabiclaw', label: null, sent_at: team ? message.created_at : message.occurred_at, time: null,
-    body: team ? message.body ?? '' : message.body,
-    photos: (enrichment.photos.get(message.id) ?? []).map(photo => ({
-      id: photo.id, url: photo.url, thumbnail_url: photo.thumbnailUrl, width: photo.width, height: photo.height,
-    })),
-    translated: null, unshown_files: 0, receipt: null, retryable: false,
-    deliveries: team ? (enrichment.deliveriesByMessage.get(message.id) ?? []).map(({ id, channel, status, error, updated_at }) => ({ id, channel, status, error, updated_at })) : [],
-  }
+  return conversationMessage({
+    id: message.id, sequence: message.sequence, side: message.author_kind === 'guest' ? 'guest' : 'business', authorUserId: message.author_user_id,
+    author, automatic: message.author_kind === 'krabiclaw', sentAt: message.occurred_at, body: message.body,
+    attachments: enrichment.photos.get(message.id) ?? [], deliveries: team ? enrichment.deliveriesByMessage.get(message.id) : undefined,
+  })
 }
 
 /** Settle the optimistic send with its exact canonical row and bounded enrichment. */
@@ -51,10 +47,41 @@ export async function projectSentConversationMessage(
   return projected
 }
 
+function internalEntries(history: ConversationHistory, userId: string, now: Date) {
+  const org = history.context[0]?.results[0] as { timezone: string } | undefined
+  if (!org) throw new Error('Conversation has no organization')
+  return groupConversationEntries(history.entries.map(message => projectMessage(
+    message, message.author_user_id === userId ? 'You'
+      : message.author_kind === 'krabiclaw' ? 'Sent automatically' : history.actors.get(message.author_user_id ?? '') ?? 'Former member',
+    history, true,
+  )), org.timezone, now)
+}
+
+const timezoneQuery = (organizationId: string) => ({ query: 'SELECT timezone FROM organization WHERE id = ?', params: [organizationId] })
+
+export async function loadEarlierConversationEntries(db: DbClient, viewer: ConversationViewer, window: ConversationWindow): Promise<ConversationEntriesPage> {
+  const { conversation, userId, role, principal, readThrough } = viewer
+  const guestUserId = role === 'guest' ? userId : null
+  const guard = participantGuard('c', userId, role)
+  const [organization, ...contextQueries] = conversation.kind === 'team'
+    ? [timezoneQuery(conversation.organization_id)] : guestHistoryContext(conversation, guestUserId, window)
+  const history = readConversationHistory(db, conversation.id, { guestUserId, guard, kind: conversation.kind }, window, [{
+    query: `${organization!.query} AND EXISTS (SELECT 1 FROM conversations c WHERE c.id = ? AND ${guard.sql})`,
+    params: [...(organization!.params ?? []), conversation.id, ...guard.params],
+  }, ...contextQueries])
+  const { context, page } = await history
+  if (!context[0]?.results.length) conversationAccessDenied()
+  const entries = conversation.kind === 'team' ? internalEntries(await history, userId, new Date())
+    : (await projectGuestConversation(db, conversation, principal
+      ? { audience: 'member', userId, principal } : { audience: 'buyer', userId }, new Date(), window, history, false))?.stream
+  if (!entries) conversationAccessDenied()
+  return { conversation_id: conversation.id, entries, page: { ...page, read_through: readThrough } }
+}
+
 /** The same cursor window and wire projection serve every Messages surface. */
 export async function loadConversationPage(
   db: DbClient,
-  input: { conversation: ConversationRow; userId: string; role: ConversationViewerRole; principal: MemberAccessPrincipal | null; readThrough: number | null },
+  input: ConversationViewer,
   window?: ConversationWindow,
   now = new Date(),
 ): Promise<ConversationPage> {
@@ -64,30 +91,32 @@ export async function loadConversationPage(
   if (role === 'member' && (!principal || principal.userId !== userId || principal.organizationId !== organizationId)) conversationAccessDenied()
   if (role === 'guest' && conversation.kind === 'team') conversationAccessDenied()
   const guestUserId = role === 'guest' ? userId : null
-  const history = readConversationHistory(db, id, { guestUserId, guard, kind: conversation.kind }, window,
-    conversation.kind === 'team' ? [] : [
-      ...guestHistoryContext(conversation, guestUserId, window),
-      conversationParticipantsQuery(conversation, userId, role),
-    ])
+  const unread = unreadSql('c', userId, readThrough)
+  const history = readConversationHistory(db, id, { guestUserId, guard, kind: conversation.kind }, window, [
+    ...(conversation.kind === 'team' ? [timezoneQuery(organizationId), {
+      query: `SELECT ${unread.sql} AS unread FROM (SELECT ? AS id, ? AS user_id) c`,
+      params: [...unread.params, id, conversation.user_id],
+    }] : guestHistoryContext(conversation, guestUserId, window)),
+    conversationParticipantsQuery(conversation, userId, role),
+  ])
+  const [loaded, guestThread] = await Promise.all([history, conversation.kind === 'team' ? null
+    : projectGuestConversation(db, conversation, role === 'member' && principal
+      ? { audience: 'member', userId, principal } : { audience: 'buyer', userId }, now, window, history)])
+  const roster = loaded.context.at(-1)!.results as ConversationParticipantRow[]
+  if (!roster.some(person => person.id === userId && person.role === role)) conversationAccessDenied()
   if (conversation.kind === 'team') {
     if (!principal) conversationAccessDenied()
-    const [thread, { entries, page, photos, deliveriesByMessage }] = await Promise.all([
-      getTeamThread(db, principal, conversation, readThrough),
-      history,
-    ])
+    const { unread } = loaded.context[1]!.results[0] as { unread: number }
+    const thread = await presentGroupConversation(principal, conversation, roster, unread === 1)
     const { participants, ...header } = thread
-    const names = new Map(participants.map(person => [person.id, person.name]))
     const title = header.name ?? participants.filter(person => person.id !== userId).map(person => person.name).join(', ')
     return {
       conversation: {
         ...header, kind: 'team', title: title || 'You', organization_id: organizationId,
         participants: participants.map(person => ({ ...person, role: 'member', can_remove: false })),
       },
-      entries: entries.map(message => projectMessage(
-        message, message.author_kind === 'krabiclaw' ? 'Sent automatically' : message.author_user_id === userId ? 'You' : names.get(message.author_user_id ?? '') ?? 'Former member',
-        { photos, deliveriesByMessage }, true,
-      )),
-      page: { ...page, read_through: readThrough },
+      entries: internalEntries(loaded, userId, now),
+      page: { ...loaded.page, read_through: readThrough },
       viewer_role: role,
       capabilities: {
         can_send: true, can_manage_participants: header.can_manage, can_invite_guest: false,
@@ -95,20 +124,14 @@ export async function loadConversationPage(
       },
     }
   }
-  const [thread, { context }] = await Promise.all([
-    projectGuestConversation(db, conversation, role === 'member' && principal
-      ? { audience: 'member', userId, principal }
-      : { audience: 'buyer', userId }, now, window, history),
-    history,
-  ])
-  const participants = context.at(-1)!.results as ConversationParticipantRow[]
-  if (!thread || thread.kind === 'team' || !participants.some(person => person.id === userId && person.role === role)) conversationAccessDenied()
+  const thread = guestThread
+  if (!thread) conversationAccessDenied()
   const { stream, page, ...header } = thread
   const bookingHost = role === 'member' && conversation.kind === 'booking' && conversation.booking_id !== null
   return {
     conversation: {
       ...header, kind: thread.kind, organization_id: organizationId,
-      participants: participants.map(({ membership_role: _, ...person }) => ({
+      participants: roster.map(({ membership_role: _, ...person }) => ({
         ...person, can_remove: bookingHost && person.role === 'guest' && person.id !== conversation.user_id,
       })),
     },

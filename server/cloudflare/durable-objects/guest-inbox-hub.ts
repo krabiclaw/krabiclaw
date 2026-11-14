@@ -1,24 +1,23 @@
 import { DurableObject } from 'cloudflare:workers'
 import { HTTPError } from 'nitro'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../../shared/dashboard-invalidations'
-import { queryFirst } from '~/server/db'
+import { queryAll, queryFirst } from '~/server/db'
 import { assignedMemberSql, memberAccessPrincipal, resolveMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
-import { assertConversationAccess, guestVisibleSql, participantGuard, resolveConversationAccess, type ParticipantRole } from '~/server/domain/conversations'
+import { assertConversationAccess, guestVisibleSql } from '~/server/domain/conversations'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { runOrganizationJobs } from '~/server/domain/cleaner-jobs'
-import { SCHEDULED_AUTHOR_HEADER } from '~/server/cloudflare/guest-inbox-events'
+import { guestInboxTarget, SCHEDULED_AUTHOR_HEADER } from '~/server/cloudflare/guest-inbox-events'
 
 type GuestInboxHubEnv = CloudflareEnv
 
 const JOBS_ORGANIZATION = 'jobs:organization'
 
 interface InboxSocketAttachment {
-  organizationId: string
+  organizationId: string | null
   userId: string
   sessionId: string
   /** Better Auth's opaque session credential, private across hibernation. */
   sessionToken: string
-  scope?: { conversationId: string; role: ParticipantRole }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -27,12 +26,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isSocketAttachment(value: unknown): value is InboxSocketAttachment {
   return isRecord(value)
-    && typeof value.organizationId === 'string'
+    && (value.organizationId === null || typeof value.organizationId === 'string')
+    && value.scope === undefined
     && typeof value.userId === 'string'
     && typeof value.sessionId === 'string'
     && typeof value.sessionToken === 'string' && Boolean(value.sessionToken)
-    && (value.scope === undefined || (isRecord(value.scope) && typeof value.scope.conversationId === 'string'
-      && (value.scope.role === 'guest' || value.scope.role === 'member')))
 }
 
 function failure(status: number, code: string, message: string, field: string): Response {
@@ -48,8 +46,7 @@ async function socketSession(env: GuestInboxHubEnv, attachment: InboxSocketAttac
   return session
 }
 
-async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachment, membership: ResolvedMembership, event: DashboardInvalidation): Promise<boolean> {
-  if (attachment.organizationId !== event.organization_id) return false
+async function canReceive(env: GuestInboxHubEnv, membership: ResolvedMembership, event: DashboardInvalidation): Promise<boolean> {
   // Scope changes carry no resource or person identity. Former assignees must
   // learn to re-read too, even though resource events no longer reach them.
   if (event.type === 'access.changed' || event.type === 'business.changed') return true
@@ -58,7 +55,7 @@ async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachme
   if (event.type === 'CONVERSATION_LEAVE') {
     // An old keyed retry must not evict someone who has since been added again.
     return !await queryFirst(env.DB, 'SELECT 1 FROM conversation_participants WHERE organization_id = ? AND conversation_id = ? AND user_id = ?',
-      [attachment.organizationId, event.conversation_id, attachment.userId])
+      [membership.organizationId, event.conversation_id, membership.userId])
   }
   if (event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') {
     // Only current conversation participants can receive its message events.
@@ -75,7 +72,29 @@ async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachme
   // What remains is a home's stay or nights change: the home's responsible members.
   return Boolean(await queryFirst(env.DB, `SELECT c.product_id FROM product_stay_configs s JOIN product_booking_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
       WHERE c.organization_id = ? AND c.product_id = ? AND (${assignedMemberSql('c')})`,
-    [attachment.organizationId, event.product_id, attachment.userId]))
+    [membership.organizationId, event.product_id, membership.userId]))
+}
+
+/** Use the conversation's guest seats and the same visibility rule as its history. */
+async function guestAudience(env: GuestInboxHubEnv, event: DashboardInvalidation): Promise<string[]> {
+  if (!('conversation_id' in event)) return []
+  if (event.type === 'CONVERSATION_LEAVE') {
+    // The committed removal names a former recipient. A retry must not remove
+    // a traveler who gained a seat again in the meantime.
+    const removed = await queryFirst(env.DB, `SELECT 1 FROM conversations c
+      WHERE c.organization_id = ? AND c.id = ? AND c.kind <> 'team' AND NOT EXISTS (
+        SELECT 1 FROM conversation_participants seat WHERE seat.conversation_id = c.id AND seat.user_id = ? AND seat.role = 'guest')`,
+    [event.organization_id, event.conversation_id, event.user_id])
+    return removed ? [event.user_id] : []
+  }
+  const message = 'message' in event ? event.message : undefined
+  const rows = await queryAll<{ user_id: string }>(env.DB, `SELECT seat.user_id
+    FROM conversation_participants seat JOIN conversations c ON c.id = seat.conversation_id AND c.organization_id = seat.organization_id
+    WHERE c.organization_id = ? AND c.id = ? AND c.kind <> 'team' AND seat.role = 'guest'
+    ${event.type === 'MESSAGE_ACK' ? 'AND seat.user_id = ?' : ''}
+    ${message ? `AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.id = ? AND ${guestVisibleSql('m', 'c.user_id = seat.user_id')})` : ''}`,
+  [event.organization_id, event.conversation_id, ...(event.type === 'MESSAGE_ACK' ? [event.user_id] : []), ...(message ? [message.id] : [])])
+  return rows.map(row => row.user_id)
 }
 
 export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
@@ -104,37 +123,21 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
       return failure(426, 'WEBSOCKET_UPGRADE_REQUIRED', 'Expected WebSocket upgrade', 'Upgrade')
     }
 
-    const organizationId = request.headers.get('x-krabiclaw-organization-id')
-    if (!organizationId) return failure(400, 'ORGANIZATION_REQUIRED', 'An explicit organization is required', 'org')
-    const auth = createAuth(this.env)
-    const session = await auth.api.getSession({ headers: request.headers, query: { disableCookieCache: true, disableRefresh: true } })
-    if (!session) return failure(401, 'UNAUTHORIZED', 'Authentication required', 'session')
-    const conversationId = request.headers.get('x-krabiclaw-conversation-id')
-    let scope: InboxSocketAttachment['scope']
-    if (conversationId) {
-      try {
-        const { conversation, role } = await resolveConversationAccess(this.env.DB, session.user.id, conversationId)
-        if (conversation.organization_id !== organizationId) return failure(404, 'THREAD_NOT_FOUND', 'Conversation not found', 'conversation_id')
-        scope = { conversationId, role }
-      } catch (error) {
-        if (error instanceof HTTPError && error.status === 404) return failure(404, 'THREAD_NOT_FOUND', 'Conversation not found', 'conversation_id')
-        throw error
-      }
-    } else if (!await resolveMembership(this.env, { organizationId, userId: session.user.id })) {
-      return failure(403, 'FORBIDDEN', 'Access denied', 'permissions')
+    // The public Worker verifies the session and scope before creating these
+    // headers for the private binding. No client headers are forwarded.
+    const attachment = {
+      organizationId: request.headers.get('x-krabiclaw-organization-id'),
+      userId: request.headers.get('x-krabiclaw-user-id'),
+      sessionId: request.headers.get('x-krabiclaw-session-id'),
+      sessionToken: request.headers.get('x-krabiclaw-session-token'),
     }
+    if (!isSocketAttachment(attachment)) return failure(401, 'UNAUTHORIZED', 'Authentication required', 'session')
     const pair = new WebSocketPair()
     const client = pair[0]
     const server = pair[1]
     if (!client || !server) return failure(500, 'WEBSOCKET_UNAVAILABLE', 'WebSocket pair unavailable', 'realtime')
     this.ctx.acceptWebSocket(server)
-    server.serializeAttachment({
-      organizationId,
-      userId: session.user.id,
-      sessionId: session.session.id,
-      sessionToken: session.session.token,
-      ...(scope && { scope }),
-    } satisfies InboxSocketAttachment)
+    server.serializeAttachment(attachment)
     return new Response(null, { status: 101, webSocket: client })
   }
 
@@ -184,6 +187,14 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     if (!organizationId || !isDashboardInvalidation(event) || event.organization_id !== organizationId) {
       return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid dashboard invalidation', 'body')
     }
+    const accountUserId = request.headers.get('x-krabiclaw-account-user-id')
+    if (accountUserId !== null) {
+      if (!accountUserId || !('conversation_id' in event) || ('scheduled' in event && event.scheduled) || ('team' in event && event.team)
+        || ('user_id' in event && event.user_id !== accountUserId)) {
+        return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid account conversation event', 'body')
+      }
+      return this.broadcastToSockets(event, accountUserId)
+    }
     const scheduledAuthor = request.headers.get(SCHEDULED_AUTHOR_HEADER)
     const scheduleOnly = event.type === 'MESSAGE_UPDATE' && event.scheduled === true
     const scheduledSend = event.type === 'MESSAGE_CREATE' && !event.team && scheduledAuthor !== null
@@ -193,6 +204,29 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     // A stay, booking or task write is announced this way (a booking's in its guest conversation); the organization's jobs follow it.
     if (event.type === 'stay.changed' || event.type === 'business.changed' || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.team)) await this.wakeJobs(organizationId)
 
+    const accounts = !scheduleOnly && !('team' in event && event.team) ? await guestAudience(this.env, event) : []
+    const namespace = this.env.GUEST_INBOX_HUBS
+    if (accounts.length && !namespace) return failure(503, 'REALTIME_CONFIGURATION_REQUIRED', 'Guest inbox binding is not configured', 'realtime')
+    const guestEvent = event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE' ? { ...event, location_id: null } : event
+    const responses = await Promise.all([
+      this.broadcastToSockets(event, null, scheduledAuthor),
+      ...accounts.map(userId => {
+        const binding = namespace!
+        const recipient = binding.get(binding.idFromName(guestInboxTarget(null, userId)))
+        return recipient.fetch('https://guest-inbox.internal/broadcast', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-krabiclaw-organization-id': organizationId, 'x-krabiclaw-account-user-id': userId },
+          body: JSON.stringify(guestEvent),
+        })
+      }),
+    ])
+    return responses.find(response => !response.ok) ?? new Response(null, { status: 204 })
+  }
+
+  private async broadcastToSockets(event: DashboardInvalidation, accountUserId: string | null, scheduledAuthor: string | null = null): Promise<Response> {
+    const organizationId = event.organization_id
+    const scheduleOnly = event.type === 'MESSAGE_UPDATE' && event.scheduled === true
+    const scheduledSend = event.type === 'MESSAGE_CREATE' && !event.team && scheduledAuthor !== null
     // Every eligible dashboard must receive the event. A socket whose send
     // throws is closed so its client reconnects and reconciles, and the
     // publication fails with its code so the committed write's caller sees it
@@ -206,6 +240,9 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     } satisfies DashboardInvalidation) : null
     let eligible = 0
     const failures: string[] = []
+    const sessions = new Map<string, Awaited<ReturnType<typeof socketSession>>>()
+    const memberships = new Map<string, ResolvedMembership | null>()
+    const deliveries = new Map<string, string | null>()
     for (const socket of this.ctx.getWebSockets()) {
       if (socket.readyState !== WebSocket.OPEN) continue
       const attachment: unknown = socket.deserializeAttachment()
@@ -213,41 +250,34 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
         socket.close(1008, 'Authentication required')
         continue
       }
-      if (attachment.organizationId !== organizationId) continue
-      const scope = attachment.scope
-      if (scope && scheduleOnly) continue
-      if (scope && event.type !== 'access.changed' && (!('conversation_id' in event) || event.conversation_id !== scope.conversationId)) continue
+      if (accountUserId === null ? attachment.organizationId !== organizationId : attachment.organizationId !== null || attachment.userId !== accountUserId) continue
       if ((event.type === 'CONVERSATION_LEAVE' || event.type === 'MESSAGE_ACK') && event.user_id !== attachment.userId) continue
-      const session = await socketSession(this.env, attachment)
-      const membership = session && !scope ? await resolveMembership(this.env, { organizationId, userId: attachment.userId }) : null
+      const sessionKey = JSON.stringify([attachment.userId, attachment.sessionId, attachment.sessionToken])
+      if (!sessions.has(sessionKey)) sessions.set(sessionKey, await socketSession(this.env, attachment))
+      const session = sessions.get(sessionKey)
+      if (session && accountUserId === null && !memberships.has(attachment.userId)) {
+        memberships.set(attachment.userId, await resolveMembership(this.env, { organizationId, userId: attachment.userId }))
+      }
+      const membership = session ? memberships.get(attachment.userId) : null
       let eventToSend = encoded
-      let revoke = !session || (!scope && !membership)
-      if (scope && session) {
-        const access = participantGuard('c', attachment.userId, scope.role)
-        const visibleMessage = scope.role === 'guest' && (event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') ? event.message : undefined
-        const visible = visibleMessage ? `EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.id = ? AND ${guestVisibleSql('m', 'c.user_id = ?')})` : '1'
-        const permission = await queryFirst<{ can_see_message: number }>(this.env.DB, `SELECT ${visible} AS can_see_message
-          FROM conversations c WHERE c.id = ? AND c.organization_id = ? AND ${access.sql}`, [
-          ...(visibleMessage ? [visibleMessage.id, attachment.userId] : []), scope.conversationId, organizationId, ...access.params,
-        ])
-        revoke = !permission
-        if (permission && (!permission.can_see_message || event.type === 'access.changed' || event.type === 'CONVERSATION_LEAVE')) continue
-        if (scope.role === 'guest' && (event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE')) eventToSend = JSON.stringify({ ...event, location_id: null })
-      } else if (membership) {
-        if (scheduleOnly || !await canReceive(this.env, attachment, membership, event)) {
-          const seesSchedule = scheduledAuthor === '' ? await roleAllows({ ...membership, permissions: { operations: ['update'] } }) : scheduledAuthor === attachment.userId
-          if (seesSchedule) eventToSend = scheduledChange
-          else if (scheduleTaskChange && await canReceive(this.env, attachment, membership, event)) eventToSend = scheduleTaskChange
-          else continue
+      const revoke = !session || (accountUserId === null && !membership)
+      if (membership) {
+        if (!deliveries.has(attachment.userId)) {
+          const seesConversation = !scheduleOnly || scheduleTaskChange ? await canReceive(this.env, membership, event) : false
+          const seesSchedule = (scheduleOnly || !seesConversation) && (scheduledAuthor === ''
+            ? await roleAllows({ ...membership, permissions: { operations: ['update'] } }) : scheduledAuthor === attachment.userId)
+          deliveries.set(attachment.userId, !scheduleOnly && seesConversation ? encoded
+            : seesSchedule ? scheduledChange : seesConversation ? scheduleTaskChange : null)
         }
+        const delivery = deliveries.get(attachment.userId)
+        if (!delivery) continue
+        eventToSend = delivery
       }
       if (socket.readyState !== WebSocket.OPEN) continue
       eligible += 1
       try {
         if (revoke) {
-          if (scope) socket.send(JSON.stringify({ type: 'CONVERSATION_LEAVE', event_id: event.event_id,
-            organization_id: organizationId, conversation_id: scope.conversationId, user_id: attachment.userId, occurred_at: event.occurred_at }))
-          else if (event.type === 'access.changed') socket.send(encoded)
+          if (event.type === 'access.changed') socket.send(encoded)
           socket.close(1008, 'Session or conversation access ended')
         } else socket.send(eventToSend)
       } catch (error) {

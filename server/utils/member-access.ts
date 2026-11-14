@@ -175,7 +175,7 @@ export function organizationById(env: CloudflareEnv, id: string, event?: H3Event
   return event ? oncePerRequest(event, `organization:${id}`, read) : read()
 }
 
-function organizationBySlug(env: CloudflareEnv, slug: string, event?: H3Event) {
+export function organizationBySlug(env: CloudflareEnv, slug: string, event?: H3Event) {
   const read = async () => (await organizationAdapter(env)).findOrganizationBySlug(slug)
   return event ? oncePerRequest(event, `organization-slug:${slug}`, read) : read()
 }

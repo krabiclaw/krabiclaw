@@ -1,7 +1,7 @@
 <template>
   <!-- How this person writes to guests: each choice is theirs, whatever their role. -->
   <div class="space-y-6">
-    <USwitch v-model="suggestionsOn" label="Suggested replies" description="When a guest writes, drafted replies appear above the message field. Tap one to put it in the field, then edit before sending." />
+    <USwitch v-model="suggestionsOn" label="Suggested replies" description="Tap the sparkles by the message field to draft a reply you can edit before sending." />
     <!-- The business's automatic messages, and the outbox: every message sent and still to send this person may see. -->
     <nav class="-mx-2 flex flex-col">
       <NuxtLink v-for="link in links" :key="link.to" :to="link.to" class="flex items-center gap-3 rounded-xl px-2 py-3 text-base text-highlighted hover:bg-elevated" @click="emit('navigate')">

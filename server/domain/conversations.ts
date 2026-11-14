@@ -5,6 +5,7 @@ import type { MessagePhotoInput } from './guest-threads/attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import type { GuestThreadDeliveryChannel, GuestThreadDeliveryProvider, GuestThreadDeliveryPurpose } from './guest-threads/types'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
+import type { ConversationParticipant, ConversationViewerRole } from '~/shared/messages-contract'
 
 /**
  * Conversations, as Slack and Discord have them (docs/domain-model.md): a
@@ -21,6 +22,24 @@ import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 export type ConversationKind = 'contact' | 'booking' | 'team'
 export type MessageAuthorKind = 'guest' | 'member' | 'krabiclaw'
 export type MessageChannel = 'web' | 'email' | 'whatsapp' | 'airbnb'
+
+export type ConversationParticipantRow = Omit<ConversationParticipant, 'can_remove'> & { membership_role: string | null }
+
+/** Only the live roster is shown. Guests never receive internal account or member IDs. */
+export function conversationParticipantsQuery(conversation: Pick<ConversationRow, 'organization_id' | 'id'>, userId: string, role: ConversationViewerRole): BatchQuery {
+  return { query: `
+    SELECT CASE WHEN ? = 'member' OR seat.user_id = ? THEN u.id END AS id,
+           u.name, CASE WHEN ? = 'member' THEN m.id END AS member_id,
+           CASE WHEN ? = 'member' OR seat.user_id = ? THEN u.image END AS image, seat.role,
+           CASE WHEN ? = 'member' THEN m.role END AS membership_role
+      FROM conversation_participants seat
+      JOIN user u ON u.id = seat.user_id
+      LEFT JOIN member m ON m.organizationId = seat.organization_id AND m.userId = seat.user_id
+      WHERE seat.organization_id = ? AND seat.conversation_id = ?
+        AND (seat.role = 'guest' OR (seat.role = 'member' AND m.id IS NOT NULL))
+      ORDER BY seat.role, seat.created_at, seat.user_id
+  `, params: [role, userId, role, role, userId, role, conversation.organization_id, conversation.id] }
+}
 
 export interface MessageRow {
   id: string
@@ -463,6 +482,19 @@ export function participantGuard(alias: string, userId: string, role?: Participa
 
 export function conversationAccessSql(alias: string, principal: Pick<MemberAccessPrincipal, 'userId'>): ConversationGuard {
   return participantGuard(alias, principal.userId, 'member')
+}
+
+/** Verify the destination and any signed-in sender's seat in the write itself. */
+export function conversationMessageGuard(
+  conversation: Pick<ConversationRow, 'organization_id' | 'kind'>,
+  userId: string | null,
+  role: ParticipantRole,
+): ConversationGuard {
+  const seat = userId === null ? null : participantGuard('c', userId, role)
+  return {
+    sql: `c.organization_id = ? AND c.kind = ?${seat ? ` AND ${seat.sql}` : ''}`,
+    params: [conversation.organization_id, conversation.kind, ...(seat?.params ?? [])],
+  }
 }
 
 export async function readGuestConversation(db: DbClient, userId: string, id: string): Promise<ConversationRow | null> {

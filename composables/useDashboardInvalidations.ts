@@ -11,6 +11,7 @@ export interface DashboardInvalidationConnection {
    * first gap between their initial read and the completed socket upgrade.
    */
   connectionEpoch: Ref<number>
+  accessEnded: Ref<number>
   connect: () => void
 }
 
@@ -19,18 +20,19 @@ const CONNECT_TIMEOUT_MS = 8_000
 const HEARTBEAT_INTERVAL_MS = 20_000
 const HEARTBEAT_TIMEOUT_MS = 8_000
 
-function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationId: Readonly<Ref<string | null | undefined>>): DashboardInvalidationConnection {
+function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationId: Readonly<Ref<string | null | undefined>>, reader: Readonly<Ref<string | undefined>>): DashboardInvalidationConnection {
   // `nuxt dev` cannot carry this socket: its dev server answers the upgrade
   // with a plain 200 (docs/local-development.md). Realtime runs under
   // `yarn dev:worker`, staging and production; here the dashboard stays on its
   // reads instead of retrying a connection that cannot open and reporting it.
   if (import.meta.dev) {
-    return { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), connect: () => {} }
+    return { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), accessEnded: ref(0), connect: () => {} }
   }
 
   const status = ref<DashboardInvalidationStatus>('closed')
   const event = shallowRef<DashboardInvalidation | null>(null)
   const connectionEpoch = ref(0)
+  const accessEnded = ref(0)
   let receivedAccessChange = false
   const seenEventIds = new Set<string>()
   let socket: WebSocket | null = null
@@ -133,8 +135,10 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
       if (socket !== nextSocket) return
       clearHealthTimer()
       socket = null
-      if (closed.code === 1008 && organizationId.value && !receivedAccessChange) {
-        event.value = { type: 'access.changed', organization_id: organizationId.value, event_id: crypto.randomUUID(), occurred_at: new Date().toISOString() }
+      if (closed.code === 1008 && !receivedAccessChange) {
+        if (organizationId.value) {
+          event.value = { type: 'access.changed', organization_id: organizationId.value, event_id: crypto.randomUUID(), occurred_at: new Date().toISOString() }
+        } else accessEnded.value++
       }
       if (stopped || !path.value) {
         status.value = 'closed'
@@ -175,7 +179,7 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     if (!stopped && path.value) connect()
   }
 
-  watch(path, resetConnection, { flush: 'sync' })
+  watch([path, reader], resetConnection, { flush: 'sync' })
 
   onMounted(() => {
     mounted = true
@@ -195,20 +199,18 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     status.value = 'closed'
   })
 
-  return { status, event, connectionEpoch, connect }
+  return { status, event, connectionEpoch, accessEnded, connect }
 }
 
-export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>): DashboardInvalidationConnection {
-  const path = computed(() => organizationSlug.value ? `/api/dashboard/guest-inbox/socket?org=${encodeURIComponent(organizationSlug.value)}` : null)
-  const connection = useInvalidationSocket(path, useDashboardOrganization().organizationId)
+export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>, personal: Readonly<Ref<boolean>>, reader: Readonly<Ref<string | undefined>>): DashboardInvalidationConnection {
+  const path = computed(() => {
+    if (!reader.value) return null
+    if (organizationSlug.value) return `/api/dashboard/guest-inbox/socket?org=${encodeURIComponent(organizationSlug.value)}`
+    return personal.value ? '/api/dashboard/guest-inbox/socket?scope=account' : null
+  })
+  const connection = useInvalidationSocket(path, useDashboardOrganization().organizationId, reader)
   provide(dashboardInvalidationKey, connection)
   return connection
-}
-
-export function useConversationInvalidations(threadId: Readonly<Ref<string>>, organizationId: Readonly<Ref<string | undefined>>, personalScope: boolean) {
-  if (!personalScope) return useDashboardInvalidations()
-  const path = computed(() => threadId.value && organizationId.value ? `/api/messages/${encodeURIComponent(threadId.value)}/socket` : null)
-  return useInvalidationSocket(path, organizationId)
 }
 
 export function useDashboardInvalidations(): DashboardInvalidationConnection {

@@ -2,7 +2,7 @@ import { HTTPError } from 'nitro'
 import { createTeamThread, listTeamMembers, operateTeamGroup } from '~/server/domain/team-messages'
 import { assertConversationAccess, conversationAccessDenied, conversationAccessSql, markConversationRead, markConversationUnread, resolveConversationAccess } from '~/server/domain/conversations'
 import { archiveConversation, countUnreadConversations, listConversations } from '~/server/domain/guest-threads/repository'
-import { loadConversationPage } from '~/server/domain/conversation-history'
+import { loadConversationPage, loadEarlierConversationEntries } from '~/server/domain/conversation-history'
 import { sendConversationMessage } from '~/server/domain/send-conversation-message'
 import { queryFirst } from '~/server/db'
 import type { InboxThreadKind } from '~/server/domain/guest-threads/types'
@@ -33,12 +33,15 @@ const listRow = { type: 'object', properties: {
 }, required: ['conversation_id', 'kind', 'title', 'channel', 'home', 'when', 'preview', 'preview_from', 'time', 'unread'], additionalProperties: false }
 const unreadCounts = { type: 'object', properties: { all: { type: 'integer' }, guests: { type: 'integer' }, support: { type: 'integer' }, team: { type: 'integer' } }, required: ['all', 'guests', 'support', 'team'] }
 const cursor = { type: ['integer', 'null'], minimum: 1 }
+const messageEntries = { type: 'array', items: { type: 'object', properties: { id: text, type: { type: 'string', enum: ['message', 'day', 'event'] } }, required: ['id', 'type'] } }
+const messageWindow = { type: 'object', properties: { before: cursor, oldest: cursor, newest: cursor }, required: ['before', 'oldest', 'newest'] }
 const messagePage = { type: 'object', properties: {
   conversation: { type: 'object', properties: { id: text, organization_id: text, title: text, kind: { type: 'string', enum: ['guest', 'support', 'team'] }, participants: { type: 'array' } }, required: ['id', 'organization_id', 'title', 'kind', 'participants'] },
-  entries: { type: 'array', items: { type: 'object', properties: { id: text, type: { type: 'string', enum: ['message', 'day', 'event'] } }, required: ['id', 'type'] } },
-  page: { type: 'object', properties: { before: cursor, oldest: cursor, newest: cursor }, required: ['before', 'oldest', 'newest'] },
+  entries: messageEntries,
+  page: messageWindow,
   viewer_role: { const: 'member' },
 }, required: ['conversation', 'entries', 'page', 'viewer_role'] }
+const earlierPage = { type: 'object', properties: { conversation_id: text, entries: messageEntries, page: messageWindow }, required: ['conversation_id', 'entries', 'page'] }
 const readState = { type: 'object', properties: { conversation_id: text, unread: { type: 'boolean' }, last_read_message_id: nullableText }, required: ['conversation_id', 'unread', 'last_read_message_id'], additionalProperties: false }
 
 export const CONVERSATION_TOOLS: McpToolDefinition[] = [
@@ -54,7 +57,7 @@ export const CONVERSATION_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({ name: 'get_conversation', domain: 'conversations', minimumRole: 'member', description: 'Read the latest page of a conversation you participate in. Entries are in sequence order. Pass page.before to read older messages. Reading does not acknowledge messages.',
     inputSchema: { conversation_id: conversationId, before: { type: 'integer', minimum: 1 } }, required: ['conversation_id'],
-    outputSchema: messagePage,
+    outputSchema: { type: 'object', anyOf: [messagePage, earlierPage] },
   }),
   organizationTool({ name: 'send_message', domain: 'conversations', minimumRole: 'member', description: 'Send text and/or one photo in a conversation, as you. In a guest conversation it is your reply through its reply_channel (get_conversation): Airbnb replies accept text or one photo, sent separately; email replies accept text, a photo or both; a guest with neither email nor account is refused with GUEST_UNREACHABLE. In a team conversation it reaches its participants by their notification choices. Reuse the same idempotency_key for an identical retry. A failed Airbnb attempt may retry only when retry_with_same_idempotency_key is true; a realtime failure may report committed:true and must retry that same request. A saved message does not prove delivery.',
     inputSchema: { conversation_id: conversationId, message: { ...text, minLength: 1, maxLength: 5000, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' }, file: { ...chatgptFileInput, description: 'Optional photo supplied as a ChatGPT file attachment.' }, idempotency_key: { ...text, minLength: 8, maxLength: 128, pattern: '^[a-zA-Z0-9_-]{8,128}$' }, anyOf: [{ required: ['message'] }, { required: ['file'] }] }, required: ['conversation_id', 'idempotency_key'], fileParams: ['file'],
@@ -116,7 +119,9 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
     if (before !== null && (typeof before !== 'number' || !Number.isSafeInteger(before) || before < 1)) throw new HTTPError({ statusCode: 400, message: 'Invalid transcript cursor', data: { code: 'INVALID_TRANSCRIPT_CURSOR', field: 'before' } })
     const access = await resolveConversationAccess(db, userId, conversationId)
     if (access.role !== 'member' || access.conversation.organization_id !== organizationId) conversationAccessDenied()
-    return await loadConversationPage(db, { ...access, userId, principal }, { before, limit: 40 })
+    const viewer = { ...access, userId, principal }
+    return before === null ? loadConversationPage(db, viewer, { before, limit: 40 })
+      : loadEarlierConversationEntries(db, viewer, { before, limit: 40 })
   }
   const conversation = await assertConversationAccess(db, principal, conversationId)
   switch (toolName) {

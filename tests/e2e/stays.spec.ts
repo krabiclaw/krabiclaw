@@ -192,7 +192,10 @@ test('listing messaging grants and verified trip invites use the live conversati
     const travelerPage = await traveler.newPage()
     await travelerPage.goto(inviteLink.pathname + inviteLink.search)
     const personalSocket = travelerPage.waitForEvent('websocket', {
-      predicate: socket => new URL(socket.url()).pathname === `${path}/socket`,
+      predicate: socket => {
+        const url = new URL(socket.url())
+        return url.pathname === '/api/dashboard/guest-inbox/socket' && url.searchParams.get('scope') === 'account'
+      },
     })
     await travelerPage.getByRole('button', { name: 'Accept invitation', exact: true }).click()
     await expect(travelerPage).toHaveURL(`/dashboard/account/messages/${booking.conversation_id}`)
@@ -201,6 +204,41 @@ test('listing messaging grants and verified trip invites use the live conversati
     const followUp = 'The door code is in your arrival guide.'
     await expectStatus(await page.request.post(path, { headers, data: { body: followUp, idempotency_key: crypto.randomUUID() } }), 200)
     await expect(travelerPage.getByText(followUp, { exact: true })).toBeVisible()
+
+    const received = new Set<string>()
+    travelerSocket.on('framereceived', frame => {
+      if (frame.payload === 'pong') return
+      const event: unknown = JSON.parse(String(frame.payload))
+      if (isDashboardInvalidation(event) && 'conversation_id' in event) received.add(event.conversation_id)
+    })
+    const otherMade = await page.request.post(api('bookings'), { data: { product_id: productId, check_in_date: localDay(12), check_out_date: localDay(15),
+      adults: 1, guest_name: 'Second synthetic booking contact', guest_email: `${slug}-second@playwright.example`, total_minor: 120_000, idempotency_key: crypto.randomUUID() } })
+    await expectStatus(otherMade, 201)
+    const { booking: otherBooking } = await otherMade.json() as { booking: NightBooking }
+    const otherPath = `/api/messages/${otherBooking.conversation_id}`
+    const otherReply = 'The cabin has a separate arrival guide.'
+    await expectStatus(await page.request.post(otherPath, { headers, data: { body: otherReply, idempotency_key: crypto.randomUUID() } }), 200)
+    expect(received.has(otherBooking.conversation_id)).toBe(false)
+    const otherInvite = await page.request.post(`${otherPath}/invite`, { headers, data: { email: travelerEmail } })
+    await expectStatus(otherInvite, 201)
+    const otherToken = new URL((await otherInvite.json() as { url: string }).url).searchParams.get('token')
+    const otherAppears = travelerSocket.waitForEvent('framereceived', { predicate: frame => {
+      if (frame.payload === 'pong') return false
+      const event: unknown = JSON.parse(String(frame.payload))
+      return isDashboardInvalidation(event) && event.type === 'MESSAGE_UPDATE' && event.conversation_id === otherBooking.conversation_id
+    } })
+    await expectStatus(await traveler.request.post('/api/messages/invites/accept', { headers, data: { token: otherToken } }), 200)
+    await otherAppears
+    await expect(travelerPage.locator(`a[href='/dashboard/account/messages/${otherBooking.conversation_id}']`)).toContainText(otherReply)
+    const disconnected = travelerSocket.waitForEvent('close')
+    await travelerPage.evaluate(() => window.dispatchEvent(new Event('offline')))
+    await disconnected
+    const reconnectText = 'Your second arrival guide was updated.'
+    await expectStatus(await page.request.post(otherPath, { headers, data: { body: reconnectText, idempotency_key: crypto.randomUUID() } }), 200)
+    const reconnectedSocket = travelerPage.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).searchParams.get('scope') === 'account' })
+    await travelerPage.evaluate(() => window.dispatchEvent(new Event('online')))
+    const activeTravelerSocket = await reconnectedSocket
+    await expect(travelerPage.locator(`a[href='/dashboard/account/messages/${otherBooking.conversation_id}']`)).toContainText(reconnectText)
 
     const revoked = socket.waitForEvent('framereceived', { predicate: frame => {
       if (frame.payload === 'pong') return false
@@ -218,7 +256,7 @@ test('listing messaging grants and verified trip invites use the live conversati
     expect(await accepted.json()).toMatchObject({ viewer_role: 'guest', conversation: { id: booking.conversation_id } })
 
     const travelerId = 'user-e2e-buyer'
-    const left = travelerSocket.waitForEvent('framereceived', { predicate: frame => {
+    const left = activeTravelerSocket.waitForEvent('framereceived', { predicate: frame => {
       if (frame.payload === 'pong') return false
       const event: unknown = JSON.parse(String(frame.payload))
       return isDashboardInvalidation(event) && event.type === 'CONVERSATION_LEAVE' && event.conversation_id === booking.conversation_id && event.user_id === travelerId
@@ -237,6 +275,8 @@ test('listing messaging grants and verified trip invites use the live conversati
     await left
     await expect(travelerPage.getByText(followUp, { exact: true })).toHaveCount(0)
     await expect(travelerPage.getByRole('textbox', { name: 'Write a message…' })).toHaveCount(0)
+    await expect(travelerPage.locator(`a[href='/dashboard/account/messages/${booking.conversation_id}']`)).toHaveCount(0)
+    await expect(travelerPage.locator(`a[href='/dashboard/account/messages/${otherBooking.conversation_id}']`)).toContainText(reconnectText)
     await expectStatus(await traveler.request.get(path), 404)
     await expectStatus(await traveler.request.post('/api/messages/invites/accept', { headers, data: { token } }), 404)
     await expectStatus(await page.request.delete(participant, { headers }), 200)
@@ -624,8 +664,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
 
     // The team's turnover is a job in the stay's conversation with the host: the
     // Worker's hub posts it after the stay write, and "Message host" from the
-    // member lands in that same conversation, titled by the home, with the
-    // job strip that opens the task sheet.
+    // member lands in that same conversation, titled by the home.
     // The member's team conversations are rows of the one conversation list; each one's screen says what it is about.
     const teamRows = () => memberContext.request.get(`/api/messages?organization_id=${organizationId}&kind=team`).then(async response => { await expectStatus(response, 200); return (await response.json() as { threads: InboxRow[] }).threads })
     const teamThread = (id: string) => memberContext.request.get(`/api/messages/${id}?limit=1`).then(async response => {
@@ -638,14 +677,14 @@ test('a responsible home member reads its stays as turnovers on every surface un
     await expect.poll(async () => {
       for (const row of await teamRows()) {
         const thread = await teamThread(row.id)
-        if (thread.booking_id === stay.booking_id && thread.job) jobThreadId = thread.id
+        if (thread.booking_id === stay.booking_id) jobThreadId = thread.id
       }
       return jobThreadId
     }, { timeout: 30_000, message: 'the hub opens the turnover’s conversation after the stay write' }).not.toBe('')
     const hosted = await memberContext.request.post(api('team/threads'), { data: { member_user_ids: ['user-e2e-lodging-host'], booking_id: stay.booking_id } })
     await expectStatus(hosted, 200)
     expect((await hosted.json() as { conversation_id: string }).conversation_id).toBe(jobThreadId)
-    expect(await teamThread(jobThreadId)).toMatchObject({ name: 'Cliff Cabin', booking_id: stay.booking_id, job: expect.objectContaining({ kind: 'turnover', status: 'open', title: 'Cliff Cabin', booking_id: stay.booking_id }) })
+    expect(await teamThread(jobThreadId)).toMatchObject({ name: 'Cliff Cabin', booking_id: stay.booking_id })
     await expect.poll(async () => {
       const read = await memberContext.request.get(`/api/messages/${jobThreadId}`)
       await expectStatus(read, 200)
@@ -656,14 +695,9 @@ test('a responsible home member reads its stays as turnovers on every surface un
     await memberPage.goto(`/dashboard/${slug}/messages/${jobThreadId}?kind=team`)
     await expect(memberPage.getByText('Sent automatically')).toBeVisible()
     await expect.poll(async () => (await teamRows()).find(row => row.id === jobThreadId)?.unread).toBe(false)
-    const strip = memberPage.getByTestId('team-thread-job')
-    await expect(strip).toContainText('Cliff Cabin')
-    await strip.getByRole('button', { name: 'Cliff Cabin', exact: true }).click()
-    const sheet = memberPage.getByRole('dialog', { name: 'Turnover', exact: true })
-    await expect(sheet.getByRole('heading', { name: 'Turnover', exact: true })).toBeVisible()
-    await expect(sheet.getByText('Checkout', { exact: false })).toBeVisible()
-    await expect(sheet.getByText(guestName, { exact: false })).toBeVisible()
-    await memberPage.keyboard.press('Escape')
+    const turnoverPost = memberPage.locator('[data-team-message][data-automatic]').filter({ hasText: 'Turnover: Cliff Cabin' })
+    await expect(turnoverPost).toHaveCount(1)
+    await expect(turnoverPost).toContainText(new RegExp(`Checkout[^\\n]+· ${guestName}`, 'u'))
     // The host can move the guest; this business has no other home to move them to.
     await page.goto(`/dashboard/${slug}/bookings/${stay.booking_id}`)
     await page.getByTestId('stay-move').click()
@@ -4784,7 +4818,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
           const response = await cleaner.request.get(`/api/messages/${row.id}?limit=1`)
           await expectStatus(response, 200)
           const { conversation } = await response.json() as ConversationPage
-          if (conversation.kind === 'team' && conversation.booking_id === stays[0]!.booking_id && conversation.job?.id === turnover.id) jobThread = conversation
+          if (conversation.kind === 'team' && conversation.booking_id === stays[0]!.booking_id) jobThread = conversation
         }
         return jobThread?.id ?? ''
       }, { timeout: 30_000, message: 'the organization’s jobs open the cleaner’s conversation for the turnover' }).not.toBe('')

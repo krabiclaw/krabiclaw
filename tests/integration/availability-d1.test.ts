@@ -21,7 +21,8 @@ import {
 } from '../../server/utils/availability.ts'
 import { requestInsertQueries, threadPayloadForGuest, getThreadOperationalRecord } from '../../server/domain/requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
-import { appendMessage } from '../../server/domain/conversations.ts'
+import { appendMessage, resolveConversationAccess } from '../../server/domain/conversations.ts'
+import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
 import { conversationTaskQueries } from '../../server/domain/guest-threads/repository.ts'
 import { listDashboardLocations } from '../../server/utils/dashboard-context.ts'
 import { updateLocation } from '../../server/utils/location-management.ts'
@@ -714,13 +715,21 @@ test('one provider\'s online offerings exclude overlapping pending requests and 
     assert.equal((await executeGuestThreadOperation(db, cancel)).ok, true)
     assert.equal(await db.prepare("SELECT COUNT(*) n FROM messages WHERE event_name = 'booking.cancel'").first('n'), 1)
     const loser = inputs[1 - index]!
-    // A booking conversation without its own allocation is invalid. Neither
-    // a status transition nor a reply can manufacture its missing record.
+    // Booking transitions require an allocation. Chat needs a current seat
+    // and a destination, and sending must leave the allocation untouched.
     const missingRecord = { statusCode: 404, message: 'The conversation has no matching booking', data: { code: 'REQUEST_OPERATIONAL_RECORD_NOT_FOUND', request_id: loser.requestId } }
     await assert.rejects(executeGuestThreadOperation(db, { ...confirm, threadId: loser.requestId }), missingRecord)
-    const reply = { ...confirm, threadId: loser.requestId, action: 'reply', body: 'We can help with your booking.', idempotencyKey: 'before-allocation' }
-    await assert.rejects(executeGuestThreadOperation(db, reply), missingRecord)
-    assert.equal(await db.prepare('SELECT status FROM guest_thread_deliveries WHERE id = ?').bind(`guest-thread-email:${loser.requestId}:before-allocation`).first('status'), null)
+    await db.batch([
+      db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('operator-member', ?, ?, 'owner')").bind(ORG, ACTOR),
+      db.prepare("INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role) VALUES (?, ?, ?, 'member')").bind(loser.requestId, ORG, ACTOR),
+    ])
+    const { conversation, role } = await resolveConversationAccess(db, ACTOR, loser.requestId)
+    const reply = { conversation, role, userId: ACTOR, senderName: 'Operator', body: 'We can help with your booking.', photos: [], idempotencyKey: 'before-allocation' }
+    const sent = await sendConversationMessage(confirm.env, reply)
+    assert.equal((await sendConversationMessage(confirm.env, reply)).id, sent.id)
+    assert.deepEqual(await db.prepare('SELECT id, body FROM messages WHERE id = ?').bind(sent.id).first(), { id: sent.id, body: reply.body })
+    assert.equal(await db.prepare('SELECT booking_id FROM conversations WHERE id = ?').bind(loser.requestId).first('booking_id'), null)
+    assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings').first('n'), 1)
     await claim(loser)
     const reject = { ...confirm, threadId: loser.requestId, action: 'reject', idempotencyKey: 'reject-once' }
     assert.equal((await executeGuestThreadOperation(db, reject)).ok, true)

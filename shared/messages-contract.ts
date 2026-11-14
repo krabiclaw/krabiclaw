@@ -36,8 +36,8 @@ export type ConversationHeader =
   | (Omit<InboxThread, 'stream'> & { kind: 'guest' | 'support'; organization_id: string; participants: ConversationParticipant[] })
   | (Omit<TeamThread, 'participants'> & { kind: 'team'; organization_id: string; title: string; participants: ConversationParticipant[] })
 
-export interface ConversationPage {
-  conversation: ConversationHeader
+export interface ConversationEntriesPage {
+  conversation_id: string
   entries: ConversationEntry[]
   page: {
     before: number | null
@@ -45,6 +45,10 @@ export interface ConversationPage {
     newest: number | null
     read_through: number | null
   }
+}
+
+export interface ConversationPage extends Omit<ConversationEntriesPage, 'conversation_id'> {
+  conversation: ConversationHeader
   viewer_role: ConversationViewerRole
   capabilities: {
     can_send: boolean

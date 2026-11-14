@@ -1,11 +1,10 @@
-import { HTTPError } from 'nitro'
 import EmailReplyParser from 'email-reply-parser'
 import { compile } from 'html-to-text'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
-import { getGuestRequest, validateGuestRequest, requestSummary, type GuestRequest } from '~/server/domain/requests'
-import { MessageDedupeConflictError, MessageStateConflictError, appendMessage, findMessageByDedupeKey, getMessage, participantGuard, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
+import { getGuestRequest, participantLabel, validateGuestRequest, type GuestRequest } from '~/server/domain/requests'
+import { MessageDedupeConflictError, appendMessage, conversationMessageGuard, findMessageByDedupeKey, getMessage, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
 import { messagePhotoHashes, sortGuestFiles, type MessagePhoto, type MessagePhotoInput } from '~/server/domain/guest-threads/attachments'
-import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
+import { conversationReplyTaskQueries } from '~/server/domain/guest-threads/repository'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { notifyGuestThreadReply } from '~/server/utils/notifications'
 import { findSubmissionByPhone } from '~/server/utils/submission-messages'
@@ -139,14 +138,8 @@ export async function receiveMemberEmail(env: CloudflareEnv, email: InboundMembe
 /** The web session and verified provider events supply the guest identity. */
 export async function receiveGuestWebReply(env: CloudflareEnv, input: { conversation: ConversationRow; userId: string; body: string; photos: MessagePhotoInput; idempotencyKey: string }): Promise<MessageRow> {
   const thread = await validateGuestRequest(env.DB, input.conversation)
-  try {
-    return await receiveGuestReply(env, { thread, body: input.body, photos: input.photos, unshown: [], channel: 'web',
-      userId: input.userId, dedupeKey: `guest-web-reply:${thread.id}:${input.idempotencyKey}` })
-  } catch (error) {
-    if (error instanceof MessageStateConflictError) throw new HTTPError({ statusCode: 404, statusMessage: 'Conversation not found', data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
-    if (error instanceof MessageDedupeConflictError) throw new HTTPError({ statusCode: 409, statusMessage: 'This reply key belongs to a different message', data: { code: 'IDEMPOTENCY_KEY_REUSED', field: 'idempotency_key' } })
-    throw error
-  }
+  return receiveGuestReply(env, { thread, body: input.body, photos: input.photos, unshown: [], channel: 'web',
+    userId: input.userId, dedupeKey: `guest-web-reply:${thread.id}:${input.idempotencyKey}` })
 }
 
 async function receiveGuestReply(env: CloudflareEnv, input: {
@@ -159,7 +152,6 @@ async function receiveGuestReply(env: CloudflareEnv, input: {
   const photoManifest = Array.isArray(photos)
     ? photos.map((photo, index) => ({ filename: photo.filename, sha256: hashes[index] }))
     : { sourceIds: photos.sourceIds }
-  const seat = input.userId ? participantGuard('c', input.userId, 'guest') : null
   let entry: MessageRow
   try {
     entry = await appendMessage(db, {
@@ -171,8 +163,8 @@ async function receiveGuestReply(env: CloudflareEnv, input: {
         ...(input.channel === 'email' ? { email: input.headers } : {}),
       },
       dedupeKey: input.dedupeKey,
-      guard: { sql: `c.organization_id = ?${seat ? ` AND ${seat.sql}` : ''}`, params: [thread.organization_id, ...(seat?.params ?? [])] },
-    }, { organizationId: thread.organization_id, env, photos, uploaderUserId: input.userId, extra: conversationTaskQueries(thread.id, now) })
+      guard: conversationMessageGuard(thread, input.userId, 'guest'),
+    }, { organizationId: thread.organization_id, env, photos, uploaderUserId: input.userId, extra: conversationReplyTaskQueries(thread.id, now) })
   } catch (error) {
     if (input.channel === 'email' && error instanceof MessageDedupeConflictError) {
       throw new InboundEmailRejection('A different message with this Message-ID was already received.')
@@ -181,11 +173,10 @@ async function receiveGuestReply(env: CloudflareEnv, input: {
   }
   // The guest's message is in the conversation before the owner is alerted, so an alert that fails cannot hide it.
   await publishConversationEvent(env, db, { conversationId: thread.id, type: 'MESSAGE_CREATE', message: { id: entry.id, sequence: entry.sequence } })
-  const summary=await requestSummary(db,thread)
   await notifyGuestThreadReply(env,db,{
-    organizationId:thread.organization_id,locationId:summary.locationId,threadId:thread.id,messageId:entry.id,
+    organizationId:thread.organization_id,locationId:thread.location_id,threadId:thread.id,messageId:entry.id,
     submissionType:thread.kind,submissionId:thread.id,
-    participantLabel:summary.participantLabel,guestEmail:summary.guestEmail,guestPhone:summary.guestPhone,
+    participantLabel:participantLabel(thread),guestEmail:thread.payload.guest.email,guestPhone:thread.payload.guest.phone,
     inboundChannel:input.channel,
   })
   return entry

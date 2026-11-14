@@ -2208,7 +2208,7 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
     const approved = await submit('stay-approval', 8)
     assert.equal(approved.request_status, 'awaiting_approval')
     assert.equal(await claims(approved.id), 2)
-    assert((await visibleTasks(owner!)).some(task => task.booking_id === approved.id && task.action?.path === `/dashboard/org/bookings/stay/${approved.id}`))
+    assert((await visibleTasks(owner!)).some(task => task.booking_id === approved.id && task.action?.path === `/dashboard/org/bookings/${approved.id}`))
     assert.equal((await visibleTasks(cleanerMembership!)).length, 0)
     await notifyProductBookingCreated(env, db, ORG, approved.conversation_id)
     const { results: deliveries } = await db.prepare(`SELECT d.purpose, d.status FROM guest_thread_deliveries d JOIN messages m ON m.id=d.message_id

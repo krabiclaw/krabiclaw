@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:7371ed872de1fc55031284295aa08c81b503c78219d1044a3a43ffba924f6f4a",
-  "documentationFingerprint": "sha256:f5dc0efb9abfbfff3f384e914acc8d23e2fbfbf0fe0399c6f3fc9574cfc115b4",
+  "fingerprint": "sha256:5f9b2af7b9aa2f1cd0f98e2160c7ebdde9c774e8db6789408eebbd0e3e15db3b",
+  "documentationFingerprint": "sha256:f6b1cea54d042ab78632ec3f5d4c079aa7a7957bc2017d472d0a4164c25ff30a",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -47771,104 +47771,176 @@
       },
       "outputSchema": {
         "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "conversation": {
+        "anyOf": [
+          {
             "properties": {
-              "id": {
-                "type": "string"
-              },
-              "kind": {
-                "enum": [
-                  "guest",
-                  "support",
-                  "team"
+              "conversation": {
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "guest",
+                      "support",
+                      "team"
+                    ],
+                    "type": "string"
+                  },
+                  "organization_id": {
+                    "type": "string"
+                  },
+                  "participants": {
+                    "type": "array"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "organization_id",
+                  "title",
+                  "kind",
+                  "participants"
                 ],
-                "type": "string"
+                "type": "object"
               },
-              "organization_id": {
-                "type": "string"
-              },
-              "participants": {
+              "entries": {
+                "items": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "enum": [
+                        "message",
+                        "day",
+                        "event"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type"
+                  ],
+                  "type": "object"
+                },
                 "type": "array"
               },
-              "title": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "organization_id",
-              "title",
-              "kind",
-              "participants"
-            ],
-            "type": "object"
-          },
-          "entries": {
-            "items": {
-              "properties": {
-                "id": {
-                  "type": "string"
+              "page": {
+                "properties": {
+                  "before": {
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "newest": {
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "oldest": {
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
                 },
-                "type": {
-                  "enum": [
-                    "message",
-                    "day",
-                    "event"
-                  ],
-                  "type": "string"
-                }
+                "required": [
+                  "before",
+                  "oldest",
+                  "newest"
+                ],
+                "type": "object"
               },
-              "required": [
-                "id",
-                "type"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "page": {
-            "properties": {
-              "before": {
-                "minimum": 1,
-                "type": [
-                  "integer",
-                  "null"
-                ]
-              },
-              "newest": {
-                "minimum": 1,
-                "type": [
-                  "integer",
-                  "null"
-                ]
-              },
-              "oldest": {
-                "minimum": 1,
-                "type": [
-                  "integer",
-                  "null"
-                ]
+              "viewer_role": {
+                "const": "member"
               }
             },
             "required": [
-              "before",
-              "oldest",
-              "newest"
+              "conversation",
+              "entries",
+              "page",
+              "viewer_role"
             ],
             "type": "object"
           },
-          "viewer_role": {
-            "const": "member"
+          {
+            "properties": {
+              "conversation_id": {
+                "type": "string"
+              },
+              "entries": {
+                "items": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "enum": [
+                        "message",
+                        "day",
+                        "event"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "page": {
+                "properties": {
+                  "before": {
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "newest": {
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "oldest": {
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "before",
+                  "oldest",
+                  "newest"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "conversation_id",
+              "entries",
+              "page"
+            ],
+            "type": "object"
           }
-        },
-        "required": [
-          "conversation",
-          "entries",
-          "page",
-          "viewer_role"
         ],
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "type": "object"
       },
       "annotations": {
@@ -127703,7 +127775,7 @@
       "toolContracts": {
         "cancel_product_booking": "sha256:117436c3b77b52e28d4c7baa8f2a7b128c044f4265fc20d038ef5a8e72ddd0f6",
         "confirm_product_booking": "sha256:44be0ae50ae38e0e7f9610cd8eff82af1212af3eb160c66d082804673dafd71e",
-        "get_conversation": "sha256:04b4a3472ac57b3a0b395cce83bd2a4f674f5dc2220940d278e4c5d2718d16e0",
+        "get_conversation": "sha256:a7ec72a45979748485be7d6333687f328bd4edb79e3d0893c324cd3290f1bb5a",
         "get_product_booking": "sha256:dc627db96028c7e276e50d86819579fe2e1ec552cda94ea7e3b75edab8ceae15",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
@@ -127833,7 +127905,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:a2a95f5e752b47a10f2d42dfaaca0caca19afd2a4110adc3fd97dad2eb8a763a",
-        "get_conversation": "sha256:04b4a3472ac57b3a0b395cce83bd2a4f674f5dc2220940d278e4c5d2718d16e0",
+        "get_conversation": "sha256:a7ec72a45979748485be7d6333687f328bd4edb79e3d0893c324cd3290f1bb5a",
         "get_organization_analytics": "sha256:4fcc7f6cef537aa552200cc74b666d866684657015427e256651d7791140b814",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",

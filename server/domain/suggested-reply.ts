@@ -14,22 +14,16 @@ Never claim the business approved a request or changed a booking unless the fact
 If the facts do not answer the question, draft a short reply saying you will check and get back to them.
 Output only a JSON array of the reply strings, without commentary, markdown, or a signature. Each is a draft the person edits before sending.`
 
-/**
- * One to three draft replies for the web composer's Suggested replies, the way
- * the iPhone drafts them on the device: from the whole conversation and
- * everything the business saved about the home, stay or booking behind it. Nothing is
- * sent; nothing is stored.
- */
+/** Drafts generated on request from the latest message window and the linked booking. */
 export async function suggestGuestReplies(db: DbClient, env: Record<string, unknown>, principal: MemberAccessPrincipal, threadId: string): Promise<{ generation_id: string; suggestions: string[] }> {
   const context = await guestThreadMessagingContext(db, principal, threadId)
   // The conversation as it is shown: a contact form's words are the guest's opening message too.
   const access = await resolveConversationAccess(db, principal.userId, threadId)
   if (access.role !== 'member') messagingError(404, 'THREAD_NOT_FOUND', 'This conversation is not in the workspace', 'conversation_id')
-  const { conversation: thread, entries } = await loadConversationPage(db, { ...access, userId: principal.userId, principal })
+  const { conversation: thread, entries } = await loadConversationPage(db, { ...access, userId: principal.userId, principal }, { before: null, limit: 40 })
   if (thread.kind !== 'guest') messagingError(409, 'SUGGESTION_NEEDS_GUEST_MESSAGE', 'Airbnb Support cases have no suggested replies', 'conversation_id')
   const messages = entries
     .flatMap(item => item.type === 'message' && item.body?.trim() ? [{ from: item.side, at: item.sent_at, text: item.body }] : [])
-    .slice(-40)
   if (messages.at(-1)?.from !== 'guest') messagingError(409, 'SUGGESTION_NEEDS_GUEST_MESSAGE', 'A reply is suggested only when the guest wrote last', 'conversation_id')
   // Operator identity must not enter a draft addressed to the guest.
   const home = context.home ? (({ internal_name: _internalName, ...listing }) => listing)(context.home) : null

@@ -11,14 +11,9 @@
     </div>
 
     <template v-else-if="thread">
-      <div v-if="thread.kind === 'team' && (thread.stay || thread.record || thread.location)" class="pb-2 pt-3" :class="dashboardGutterClass">
-        <span v-if="thread.stay" class="text-sm text-muted">{{ thread.stay.name }} · {{ thread.stay.check_in_date }} – {{ thread.stay.check_out_date }}</span>
-        <span v-else class="text-sm text-muted">{{ thread.record?.title ?? thread.location?.title }}</span>
-        <TaskCard v-if="thread.job" class="mt-3" :task="thread.job" data-testid="team-thread-job" @open="jobOpen = true" />
-      </div>
       <div ref="scroller" class="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-default" style="overflow-anchor: none">
         <div v-if="before || olderError" class="flex flex-col items-center gap-2 pt-3">
-          <UButton v-if="before" color="neutral" variant="ghost" :loading="loadingOlder" @click="loadOlder">{{ thread.kind === 'team' ? 'Earlier messages' : 'Load older messages' }}</UButton>
+          <UButton v-if="before" color="neutral" variant="ghost" :loading="loadingOlder" @click="loadOlder">Earlier messages</UButton>
           <p v-if="olderError" class="text-sm text-error" role="alert">{{ olderError }}</p>
         </div>
         <div class="flex flex-col gap-1 py-4" :class="dashboardGutterClass">
@@ -48,12 +43,9 @@
                   v-if="message.body"
                   class="max-w-full whitespace-pre-wrap break-words rounded-[18px] px-3.5 py-2.5 text-base [overflow-wrap:anywhere]"
                   :class="[item.mine ? 'rounded-br-md bg-inverted text-inverted' : 'rounded-bl-md bg-elevated text-default', message.sending ? 'opacity-60' : '']"
-                >{{ message.translated && originals.has(message.id) ? message.translated.original : message.body }}</div>
+                >{{ message.body }}</div>
                 <p v-if="message.unshown_files" class="mx-1 mt-0.5 flex items-center gap-1.5 text-xs text-muted">
                   <UIcon name="i-lucide-paperclip" class="size-3.5 shrink-0" />{{ message.unshown_files === 1 ? 'Sent a file that can’t be shown here' : `Sent ${message.unshown_files} files that can’t be shown here` }}
-                </p>
-                <p v-if="message.translated" class="mx-1 mt-0.5 text-xs text-muted">
-                  Translated · <button type="button" class="text-highlighted underline underline-offset-2" @click="toggleOriginal(message.id)">{{ originals.has(message.id) ? 'Show translation' : 'Show original' }}</button>
                 </p>
                 <p v-if="message.receipt" class="mt-0.5 text-xs" :class="message.receipt === 'Not delivered' ? 'text-error' : 'text-muted'">
                   {{ message.receipt }}<template v-if="message.retryable"> · <button type="button" class="underline underline-offset-2 disabled:opacity-50" :disabled="retrying" @click="retry(message.id)">Try again</button></template>
@@ -81,15 +73,15 @@
         <UButton v-if="scheduledTo" :to="scheduledTo" label="Sent and upcoming" icon="i-lucide-clock" color="neutral" variant="link" size="sm" class="mb-1" />
 
         <!-- Suggested replies: rows above the composer, never side by side; one fills the field and does not send. -->
-        <div v-if="shownSuggestions.length" class="mb-2">
+        <div v-if="suggestions.length" class="mb-2">
           <div class="mb-2 flex items-center gap-2 text-sm font-semibold text-highlighted">
             <UIcon name="i-lucide-sparkles" class="size-[18px]" />Suggested replies
-            <button type="button" class="ms-auto flex size-6 items-center justify-center" aria-label="Dismiss suggested replies" @click="dismissedFor = latestGuestMessage; recalledFor = null">
+            <button type="button" class="ms-auto flex size-6 items-center justify-center" aria-label="Dismiss suggested replies" @click="suggestions = []">
               <UIcon name="i-lucide-x" class="size-4" />
             </button>
           </div>
           <div class="flex flex-col gap-2">
-            <button v-for="(option, index) in shownSuggestions" :key="option" type="button" class="flex min-h-12 items-center gap-3 rounded-2xl bg-elevated px-4 py-3 text-left text-base text-highlighted transition hover:bg-accented" @click="useSuggestion(option, index)">
+            <button v-for="(option, index) in suggestions" :key="option" type="button" class="flex min-h-12 items-center gap-3 rounded-2xl bg-elevated px-4 py-3 text-left text-base text-highlighted transition hover:bg-accented" @click="useSuggestion(option, index)">
               <span class="flex-1">{{ option }}</span>
               <UIcon name="i-lucide-arrow-up-right" class="size-4 shrink-0 text-muted" />
             </button>
@@ -97,15 +89,14 @@
         </div>
         <p v-if="suggestionError" class="mb-2 flex items-center gap-2 text-xs text-muted">
           {{ suggestionError }}
-          <UButton label="Retry" color="neutral" variant="link" size="xs" @click="suggestionAttempt += 1" />
+          <UButton label="Retry" color="neutral" variant="link" size="xs" @click="generateSuggestions" />
         </p>
 
         <UAlert v-if="requestingChange" class="mb-3" color="info" variant="soft" :description="t(changeRequestSent ? 'booking.change_request_sent' : 'booking.change_request_help')" />
         <!-- Where the reply operation cannot send (no email, account or connected Airbnb home), there is no composer: its reason shows instead. -->
         <p v-if="!canSend" class="rounded-2xl bg-elevated px-4 py-3 text-sm text-muted">{{ guestThread?.composer.reason ?? 'Sending is unavailable in this conversation.' }}</p>
-        <MessageComposer v-else v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :sending="sending" :channel="guestThread?.composer.channel ?? 'team'" :send-later="!personalScope && guestThread !== null" :suggestions-hidden="suggestionsHidden" :placeholder="thread.kind === 'team' ? 'Message your team' : undefined" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : guestThread ? 'Send reply' : 'Send message'" @send="sendReply" @show-suggestions="recallSuggestions" />
+        <MessageComposer v-else v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :sending="sending" :channel="guestThread?.composer.channel ?? 'team'" :send-later="!personalScope && guestThread !== null" :suggest-reply="suggestionsOn && !!latestGuestMessage && !personalScope" :generating-suggestions="generatingSuggestions" :placeholder="thread.kind === 'team' ? 'Message your team' : undefined" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : guestThread ? 'Send reply' : 'Send message'" @send="sendReply" @suggest-reply="generateSuggestions" />
         <MessagePhotoViewer v-model="viewer" />
-        <TodayTaskSheet v-if="thread.kind === 'team' && thread.job && dashboard.organizationId.value" v-model:open="jobOpen" :task="thread.job" :organization-id="dashboard.organizationId.value" :assignees="[]" @changed="refresh()" />
         <ReportDialog :open="reporting !== null" title="Report this message" :description="reporting ? `Tell KrabiClaw what is wrong with ${reporting.author}'s message.` : ''" confirm-label="Report" :saving="reportSaving" :error="reportError" @submit="report" @close="reporting = null" />
       </div>
     </template>
@@ -114,19 +105,17 @@
 
 <script setup lang="ts">
 import { isConversationEntry, isConversationOperation } from './guest-thread-client'
-import type { ConversationEntry, ConversationPage } from '~/shared/messages-contract'
+import type { ConversationEntriesPage, ConversationEntry, ConversationPage } from '~/shared/messages-contract'
 import type { MessageIdentity } from '~/shared/dashboard-invalidations'
 
 import { useDocumentVisibility } from '@vueuse/core'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
-import { useConversationInvalidations } from '~/composables/useDashboardInvalidations'
+import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
 import { authClient } from '~/lib/auth-client'
 import MessageComposer, { messageReplyForm, sameMessagePhotos, useMessagePhotoDraft, type MessagePhotoDraft } from './MessageComposer.vue'
 import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'
 import InboxAvatar from './InboxAvatar.vue'
 import ReportDialog from './ReportDialog.vue'
-import TaskCard from '~/components/dashboard/TaskCard.vue'
-import TodayTaskSheet from '~/components/dashboard/TodayTaskSheet.vue'
 import { isScheduledMessageResponse, isSuggestedReplies, useSuggestedReplies } from './guest-messaging-client'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
@@ -143,7 +132,7 @@ const { readPage, path, organizationId } = props.history
 const { data, pending, error, refresh: refreshHead, clear } = props.history.request
 const thread = computed(() => data.value?.conversation ?? null)
 const conversationOrganization = computed(() => thread.value?.organization_id ?? organizationId.value ?? undefined)
-const realtime = useConversationInvalidations(computed(() => props.threadId), conversationOrganization, props.personalScope)
+const realtime = useDashboardInvalidations()
 const guestThread = computed(() => thread.value?.kind === 'team' ? null : thread.value)
 const scheduledTo = computed(() => !props.personalScope && guestThread.value ? {
   path: `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages/scheduled`,
@@ -151,13 +140,11 @@ const scheduledTo = computed(() => !props.personalScope && guestThread.value ? {
 } : null)
 const entries = computed(() => data.value?.entries ?? [])
 const canSend = computed(() => data.value?.capabilities.can_send === true)
-const dateFormat = computed(() => new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }))
 const clockFormat = computed(() => new Intl.DateTimeFormat(locale.value, { hour: 'numeric', minute: '2-digit' }))
-const older = shallowRef<ConversationPage[]>([])
+const older = shallowRef<ConversationEntriesPage[]>([])
 const olderError = ref<string | null>(null)
 const loadingOlder = ref(false)
 const transcriptPage = computed(() => data.value?.page)
-const jobOpen = ref(false)
 const before = computed(() => older.value.length ? older.value[0]!.page.before : transcriptPage.value?.before)
 let olderRequest: AbortController | undefined
 
@@ -176,7 +163,7 @@ async function loadOlder() {
   olderError.value = null
   try {
     const previous = await readPage(cursor, controller.signal)
-    if (controller.signal.aborted || cursor !== before.value || previous.conversation.id !== props.threadId) return
+    if (controller.signal.aborted || cursor !== before.value || previous.conversation_id !== props.threadId) return
     const el = scroller.value
     const height = el?.scrollHeight ?? 0
     const top = el?.scrollTop ?? 0
@@ -226,7 +213,7 @@ async function reconcileOlder(previousHead: typeof transcriptPage.value | undefi
   if (olderPages && nextHead) {
     const controller = new AbortController()
     olderRequest = controller
-    const pages: ConversationPage[] = []
+    const pages: ConversationEntriesPage[] = []
     let cursor = nextHead.before
     const oldest = older.value[0]?.page.oldest ?? previousHead?.oldest
     try {
@@ -320,7 +307,6 @@ const rows = computed<Row[]>(() => {
   const items: Array<ConversationEntry | MessageItem> = []
   const seen = new Set<string>()
   let previousDay: string | undefined
-  let previousMessage: MessageItem | undefined
   const currentIds = new Set(entries.value.map(item => item.id))
   for (const item of [...older.value.flatMap(page => page.entries).filter(item => !currentIds.has(item.id)), ...entries.value]) {
     if (seen.has(item.id)) continue
@@ -328,24 +314,13 @@ const rows = computed<Row[]>(() => {
       if (previousDay === item.label) continue
       previousDay = item.label
     }
-    if (current.kind === 'team' && item.type === 'message') {
-      const date = new Date(item.sent_at)
-      const day = dateFormat.value.format(date)
-      if (previousDay !== day) {
-        items.push({ type: 'day', id: `day:${day}`, label: day })
-        previousDay = day
-        previousMessage = undefined
-      }
-      const startsRun = !previousMessage || item.automatic || previousMessage.automatic || item.author_user_id !== previousMessage.author_user_id
-      items.push({ ...item, time: startsRun ? clockFormat.value.format(date) : null })
-      previousMessage = item
-    } else items.push(item)
+    items.push(item)
     seen.add(item.id)
   }
   if (attempt.value && sending.value && !items.some(item => item.type === 'message' && settledKeys.value[item.id] === `pending:${attempt.value?.key}`)) {
     items.push({
       type: 'message', id: `pending:${attempt.value.key}`, sequence: Number.MAX_SAFE_INTEGER, side: mineSide.value, author: 'You', author_user_id: userId.value ?? null, automatic: false, deliveries: [], label: null, sent_at: new Date().toISOString(),
-      time: 'Sending', body: attempt.value.body || null, translated: null, receipt: null, retryable: false, unshown_files: 0, sending: true,
+      time: 'Sending', body: attempt.value.body || null, receipt: null, retryable: false, unshown_files: 0, sending: true,
       photos: attempt.value.photos.map((photo, at) => ({ id: `${attempt.value!.key}:${at}`, url: photo.url, thumbnail_url: photo.url, width: null, height: null })),
     })
   }
@@ -356,7 +331,7 @@ const rows = computed<Row[]>(() => {
     else if (item.type === 'event') out.push({ type: 'event', key, text: item.text })
     else {
       const last = out.at(-1)
-      const mine = current.kind === 'team' ? item.author === 'You' : item.side === mineSide.value
+      const mine = item.author === 'You' || (userId.value != null && item.author_user_id === userId.value)
       if (item.time === null && last?.type === 'run' && last.mine === mine && last.runs[0]!.author === item.author) last.runs.push(item)
       else out.push({ type: 'run', key, mine, runs: [item] })
     }
@@ -366,57 +341,44 @@ const rows = computed<Row[]>(() => {
 
 const initialOf = (name: string) => [...name.trim()][0]?.toUpperCase() ?? '?'
 
-// "Show original" swaps a translated bubble to the guest's own words.
-const originals = ref(new Set<string>())
-function toggleOriginal(id: string) {
-  const next = new Set(originals.value)
-  if (!next.delete(id)) next.add(id)
-  originals.value = next
-}
 const viewer = ref<MessagePhotoViewerState | null>(null)
 
-/*
-  Suggested replies, from the latest guest message: none for a support case or
-  while the host is typing, gone on ×, and asked again when the guest writes.
-*/
 const suggestionsOn = useSuggestedReplies(() => dashboard.organizationId.value)
 const suggestions = ref<string[]>([])
 const generationId = ref<string | null>(null)
-// The draft the field was filled from, sent with the reply so the server meters it; edits keep it.
 const usedSuggestion = ref<{ generation_id: string; index: number } | null>(null)
 const suggestionError = ref<string | null>(null)
-const suggestionAttempt = ref(0)
-const dismissedFor = ref<string | null>(null)
-// None for a conversation nobody can reply to: it has no composer, so nothing is drafted for it.
+const generatingSuggestions = ref(false)
 const latestGuestMessage = computed(() => {
   if (!guestThread.value?.composer.available) return null
   const last = entries.value.findLast(item => item.type === 'message')
   return last?.type === 'message' && last.side === 'guest' && guestThread.value.kind === 'guest' ? last.id : null
 })
-// Typing or × puts them away; the composer's + brings them back until the guest writes again.
-const recalledFor = ref<string | null>(null)
-const suggestionsVisible = computed(() => recalledFor.value === latestGuestMessage.value || (!draft.value.trim() && dismissedFor.value !== latestGuestMessage.value))
-const shownSuggestions = computed(() => suggestionsVisible.value ? suggestions.value : [])
-const suggestionsHidden = computed(() => suggestions.value.length > 0 && !suggestionsVisible.value)
-function recallSuggestions() { recalledFor.value = latestGuestMessage.value }
+watch(latestGuestMessage, () => { suggestions.value = []; suggestionError.value = null })
+watch(draft, words => { if (!words.trim()) usedSuggestion.value = null })
 function useSuggestion(option: string, index: number) {
   draft.value = option
   usedSuggestion.value = generationId.value ? { generation_id: generationId.value, index } : null
-}
-// Clearing the field lets go of the draft it came from.
-watch(draft, words => { if (!words.trim()) usedSuggestion.value = null })
-watch([latestGuestMessage, suggestionsOn, suggestionAttempt], async ([messageId, on]) => {
   suggestions.value = []
-  generationId.value = null
+}
+async function generateSuggestions() {
+  const messageId = latestGuestMessage.value
+  if (!messageId || !suggestionsOn.value || props.personalScope || generatingSuggestions.value) return
+  const revision = accessRevision
+  generatingSuggestions.value = true
+  suggestions.value = []
   suggestionError.value = null
-  if (props.personalScope || !on || !messageId || !import.meta.client) return
   try {
     const result = await dashboardApi(`${guestActions.value}/suggested-reply`, { method: 'POST', validate: isSuggestedReplies })
-    if (latestGuestMessage.value === messageId) { suggestions.value = result.suggestions; generationId.value = result.generation_id }
+    if (revision !== accessRevision || latestGuestMessage.value !== messageId) return
+    generationId.value = result.generation_id
+    suggestions.value = result.suggestions
   } catch (err) {
-    suggestionError.value = `Replies could not be suggested: ${getErrorMessage(err, 'Suggested reply request failed')}`
+    if (revision === accessRevision && latestGuestMessage.value === messageId) suggestionError.value = getErrorMessage(err, 'Suggested replies could not be generated')
+  } finally {
+    generatingSuggestions.value = false
   }
-}, { immediate: true })
+}
 
 async function sendReply() {
   const body = draft.value.trim()
@@ -533,13 +495,32 @@ async function retry(messageId: string) {
   }
 }
 
+function clearAccess() {
+  accessRevision++
+  settledReply = undefined
+  deferredCreates.length = 0
+  reconcileRequested = false
+  rebuildRequested = false
+  resetTranscriptState()
+  clear()
+}
+
+function resetTranscriptState() {
+  older.value = []
+  olderRequest?.abort()
+  draft.value = ''
+  chosen.value = []
+  viewer.value = null
+  attempt.value = null
+  sendAt.value = null
+  suggestions.value = []
+}
+
+watch(realtime.accessEnded, clearAccess, { flush: 'sync' })
 watch(realtime.event, event => {
   if (!event || event.organization_id !== conversationOrganization.value) return
   if (event.type === 'access.changed' || (event.type === 'CONVERSATION_LEAVE' && event.conversation_id === props.threadId && event.user_id === userId.value)) {
-    accessRevision++
-    settledReply = undefined
-    deferredCreates.length = 0
-    clearTranscript()
+    clearAccess()
     if (event.type === 'access.changed') reconcileThread()
     return
   }
@@ -555,20 +536,12 @@ watch(realtime.event, event => {
 }, { flush: 'sync' })
 
 watch(error, cause => {
-  if (cause?.statusCode !== 403 && cause?.statusCode !== 404) return
-  older.value = []
-  olderRequest?.abort()
-  draft.value = ''
-  chosen.value = []
-  viewer.value = null
-  attempt.value = null
-  sendAt.value = null
-  suggestions.value = []
+  if (cause?.statusCode === 403 || cause?.statusCode === 404) resetTranscriptState()
 }, { flush: 'sync' })
 
-watch(realtime.connectionEpoch, (epoch) => {
-  if (epoch > 1) reconcileThread(true)
-})
+watch(realtime.connectionEpoch, () => {
+  if (props.history.missedEvents()) reconcileThread(true)
+}, { immediate: true })
 
 const documentVisibility = useDocumentVisibility()
 
@@ -598,7 +571,7 @@ async function readThroughNewest() {
     })
     readThrough = target
     readError.value = null
-    if (props.personalScope || realtime.status.value !== 'open') refreshConversationUnreadCount()
+    if (realtime.status.value !== 'open') refreshConversationUnreadCount()
   } catch (cause) { readError.value = getErrorMessage(cause, 'Message read state could not be saved') }
   finally {
     markingRead = false

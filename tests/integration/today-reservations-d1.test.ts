@@ -11,7 +11,7 @@ import { createSession, listBookableSessions, setProductBookingConfig } from '..
 import { createProductBooking } from '../../server/domain/product-bookings.ts'
 import { createTables } from './support/table-product.ts'
 import { createStay, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
-import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
+import { sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
 import { listOpportunities } from '../../server/domain/opportunities.ts'
 import { memberAccessPrincipal, resolveOrganizationMembership } from '../../server/utils/member-access.ts'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
@@ -184,8 +184,8 @@ test('Today shows every booking type as a reservation card for its own business,
     assert.deepEqual(listed.map(opportunity => [opportunity.id, opportunity.conversation_id, opportunity.message]), [[law.reservations.cards[0]!.suggestion!.id, evaConsultation, consultationMessage]])
 
     // The host's message takes the suggestion off the card; the card stays.
-    const replied = await executeGuestThreadOperation(db, { threadId: evaConsultation, organizationId: 'law', action: 'reply', body: consultationMessage,
-      actorUserId: OWNER, idempotencyKey: 'eva-welcome', env, financialWritesAllowed: false })
+    const replied = await sendGuestThreadReply(db, { threadId: evaConsultation, organizationId: 'law', body: consultationMessage,
+      actorUserId: OWNER, idempotencyKey: 'eva-welcome', env })
     assert.equal(replied.ok, true, JSON.stringify(replied))
     const after = await today('law', 'upcoming')
     assert.deepEqual(after.reservations.cards.map(shape), [

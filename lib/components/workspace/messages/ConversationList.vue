@@ -94,7 +94,6 @@
 </template>
 
 <script setup lang="ts">
-import { useIntervalFn, useDocumentVisibility } from '@vueuse/core'
 import { authClient } from '~/lib/auth-client'
 import type { LocationQueryRaw } from 'vue-router'
 import { getErrorMessage } from '~/utils/errors'
@@ -103,7 +102,7 @@ import { useDashboardInvalidations } from '~/composables/useDashboardInvalidatio
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import InboxAvatar from './InboxAvatar.vue'
 import MessageRowActions from './MessageRowActions.vue'
-import { useInboxUnread } from './inbox-unread'
+import { useInboxUnread, usePersonalInboxUnread } from './inbox-unread'
 
 /*
   The one list of conversations: guests', Airbnb Support's and the team's, in
@@ -144,6 +143,7 @@ const realtime = useDashboardInvalidations()
 onMounted(() => { listHydrated.value = true })
 
 const unreadCounts = useInboxUnread(organizationId)
+const personalUnread = usePersonalInboxUnread()
 
 const emptyTitle = computed(() => search.value || kind.value || unreadOnly.value ? 'No conversations match' : 'No conversations yet.')
 const emptyDescription = computed(() => {
@@ -177,9 +177,11 @@ const loadingMore = ref(false)
 let pageController: AbortController | null = null
 let loadedScope = listKey.value
 let loadedPages = 1
+let readConnectionEpoch = 0
+const listScope = computed(() => props.personalScope ? {} : { organization_id: organizationId.value })
 async function loadPage(offset: number, signal?: AbortSignal): Promise<ThreadListPage> {
   if (!props.personalScope && !organizationId.value) throw createError({ statusCode: 400, statusMessage: 'Messages require a workspace' })
-  const query = { ...listQuery.value, limit: 100, offset, ...!props.personalScope && { organization_id: organizationId.value, sort_key: '1' } }
+  const query = { ...listQuery.value, ...listScope.value, limit: 100, offset, sort_key: '1' }
   const page = await applicationFetch<ThreadListPage>('/api/messages', { query, signal, validate: isThreadListResponse })
   if (page.pagination.limit !== query.limit || page.pagination.offset !== offset) throw createError({ statusCode: 502, statusMessage: 'Messages returned a different page than requested' })
   return page
@@ -220,6 +222,7 @@ const { data, pending, error: threadsError, refresh, clear } = await useAsyncDat
   pageController?.abort()
   nextPageError.value = null
   const scope = listKey.value
+  readConnectionEpoch = realtime.connectionEpoch.value
   if (loadedScope !== scope) { loadedScope = scope; loadedPages = 1 }
   const { page, fetched } = await loadWindow(loadedPages, scope, signal)
   if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
@@ -272,9 +275,6 @@ async function loadMore() {
 }
 watch(listKey, () => pageController?.abort())
 onScopeDispose(() => pageController?.abort())
-
-const documentVisibility=useDocumentVisibility()
-useIntervalFn(()=>{if(props.personalScope&&documentVisibility.value==='visible')void refresh()},15_000)
 
 // The newest thread, for the index above to open into its second column on
 // arrival. The list only says which; whether there is a column is the shell's.
@@ -354,7 +354,9 @@ let disposed = false
 let reconcileAbort: AbortController | undefined
 
 function publishUnread(value: ThreadListPage | undefined) {
-  if (!props.personalScope && value?.unread) unreadCounts.value = value.unread
+  if (props.personalScope) {
+    if (value?.count !== undefined) personalUnread.value = value.count
+  } else if (value?.unread) unreadCounts.value = value.unread
 }
 watch(page, value => publishUnread(value ?? undefined), { immediate: true })
 watch(listKey, () => {
@@ -399,7 +401,7 @@ async function drainChanges() {
     const controller = new AbortController()
     reconcileAbort = controller
     const changed = await applicationFetch<ThreadListPage>('/api/messages', {
-      query: { ...listQuery.value, organization_id: organizationId.value, sort_key: '1', ids: ids.join(',') },
+      query: { ...listQuery.value, ...listScope.value, sort_key: '1', ids: ids.join(',') },
       signal: controller.signal, validate: isThreadListResponse,
     })
     if (disposed || generationAtStart !== generation || scope !== listKey.value) return
@@ -424,7 +426,7 @@ async function drainChanges() {
       return
     }
     const threads = before.pagination.has_more ? rows.slice(0, before.threads.length) : rows
-    data.value = { ...before, threads, unread: changed.unread }
+    data.value = { ...before, threads, unread: changed.unread, count: changed.count }
   } catch (error) {
     if (!disposed && generationAtStart === generation && scope === listKey.value) nextPageError.value = error
   } finally {
@@ -435,30 +437,46 @@ async function drainChanges() {
 }
 watch([pending, loadingMore], () => { void drainChanges() })
 
+function clearInbox() {
+  generation++
+  changedIds.clear()
+  fullRefresh = false
+  reconcileAbort?.abort()
+  pageController?.abort()
+  if (props.personalScope) personalUnread.value = null
+  else unreadCounts.value = null
+  clear()
+  loadedPages = 1
+}
+
 watch(realtime.event, event => {
-  if (props.personalScope || !event || event.organization_id !== organizationId.value) return
+  if (!event || (!props.personalScope && event.organization_id !== organizationId.value)) return
   if (event.type === 'MESSAGE_UPDATE' && event.scheduled) return
   if ((event.type === 'MESSAGE_ACK' || event.type === 'CONVERSATION_LEAVE') && event.user_id !== session.value.data?.user.id) return
   if (event.type === 'access.changed') {
-    generation++
-    reconcileAbort?.abort()
-    pageController?.abort()
-    unreadCounts.value = null
-    clear()
-    loadedPages = 1
+    clearInbox()
     reconcile()
   } else if ('conversation_id' in event) {
     if (event.type === 'CONVERSATION_LEAVE') {
       generation++
       reconcileAbort?.abort()
-      if (data.value) data.value = { ...data.value, threads: data.value.threads.filter(row => row.id !== event.conversation_id), unread: undefined }
-      unreadCounts.value = null
+      if (pending.value) {
+        clearInbox()
+        reconcile()
+        return
+      }
+      else {
+        if (data.value) data.value = { ...data.value, threads: data.value.threads.filter(row => row.id !== event.conversation_id), unread: undefined, count: undefined }
+        if (props.personalScope) personalUnread.value = null
+        else unreadCounts.value = null
+      }
     }
     reconcile(event.conversation_id)
   }
 }, { flush: 'sync' })
 
+watch(realtime.accessEnded, clearInbox, { flush: 'sync' })
 watch(realtime.connectionEpoch, epoch => {
-  if (epoch > 1 && !props.personalScope) reconcile()
-})
+  if (epoch > readConnectionEpoch) reconcile()
+}, { immediate: true })
 </script>

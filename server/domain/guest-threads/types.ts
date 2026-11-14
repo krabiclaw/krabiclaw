@@ -1,4 +1,4 @@
-import type { GuestRequest, ThreadOperationalRecord } from '~/server/domain/requests'
+import type { GuestRequest } from '~/server/domain/requests'
 import type { MessageAuthorKind, MessageChannel } from '~/server/domain/conversations'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { GuestThreadMailbox } from './mailbox'
@@ -27,54 +27,6 @@ export interface GuestThreadDeliveryRow {
   created_at: string
   updated_at: string
 }
-
-export interface ThreadSummaryProjection {
-  guestName: string | null
-  participantLabel: string
-  guestEmail: string | null
-  guestPhone: string | null
-  organizationId: string
-  locationId: string | null
-  locationTitle: string | null
-  createdAt: string
-  operationalStatus: string | null
-}
-
-/**
- * The opening submission's fields, named once here so the detail API and the
- * conversation view cannot drift apart. A `Record<string, unknown>` is what let
- * the view read `date`/`time`/`requests` — names the API never emitted — and
- * silently render a booking with no date on it.
- *
- * A contact thread carries `subject`/`message`; a booking
- * carries the occurrence, read from its operational record. A field the thread
- * does not have is null, never a stand-in from somewhere else.
- */
-export interface ThreadDetailSourceFields {
-  subject?: string | null
-  message?: string | null
-  whenLabel?: string | null
-  startsAt?: string | null
-  /** When the occurrence ends, which is when the thread moves to Past on its own. */
-  endsAt?: string | null
-  timezone?: string | null
-  guests?: string | null
-  partySize?: number | null
-  notes?: string | null
-  locationTitle?: string | null
-  productTitle?: string | null
-  /** The guest's answers to the business's own questions, in the wording they answered: part of the form like its notes. */
-  answers: import('~/shared/form-questions').FormAnswerSnapshot[]
-}
-
-export interface ThreadDetailSourceModel {
-  submissionType: GuestThreadSubmissionType
-  submissionId: string
-  operationalStatus: string | null
-  operationalStatusLabel: string | null
-  fields: ThreadDetailSourceFields
-}
-
 
 export interface GuestThreadPagination {
   limit: number
@@ -127,53 +79,6 @@ export interface GuestThreadEntryViewModel {
   providerTimestamp: string | null
   deliveries: GuestThreadEntryDeliveryViewModel[]
   attachments: GuestThreadEntryAttachmentViewModel[]
-}
-
-export interface GuestThreadDeliveryFailureViewModel {
-  id: string
-  channel: GuestThreadDeliveryChannel
-  purpose: GuestThreadDeliveryPurpose
-  recipient: string | null
-  error: string | null
-  status: GuestThreadDeliveryStatus
-  createdAt: string
-}
-
-export interface GuestThreadDetailViewModel {
-  id: string
-  organizationName: string | null
-  organizationVertical: string | null
-  activityPath: string | null
-  guestName: string | null
-  participantLabel: string
-  /** Where the conversation lives: Airbnb's own thread, or KrabiClaw directly. Where a reply can go is `guestReplyDestination`'s. */
-  conversationChannel: 'airbnb' | 'direct'
-  guestEmail: string | null
-  guestPhone: string | null
-  submissionType: GuestThreadSubmissionType
-  submissionId: string
-  locationLabel: string | null
-  /** An open guest_reply task: the guest asked something nobody has answered. */
-  needsReply: boolean
-  source: ThreadDetailSourceModel
-  /** A stay's check-in and checkout days in its home's clock; null for any other booking. */
-  operationalRecord: (Pick<ThreadOperationalRecord, 'id' | 'unit' | 'product_kind' | 'status' | 'starts_at' | 'ends_at' | 'timezone' | 'party_size'> & { check_in_date: string | null; check_out_date: string | null }) | null
-  entries: GuestThreadEntryViewModel[]
-  /** The dates a channel's guest asked about before booking; null once there is no such inquiry. */
-  inquiry: { checkIn: string; checkOut: string } | null
-  /** What can be done to the booking. Where the conversation lives is below, separately. */
-  availableActions: string[]
-  /** From `resolveGuestThreadMailbox`, for the viewer. */
-  mailbox: GuestThreadMailbox
-  manuallyArchived: boolean
-  /** When the viewer archived it; archive is each person's own. */
-  archivedAt: string | null
-  blockedAt: string | null
-  canArchive: boolean
-  canUnarchive: boolean
-  deliveryFailures: GuestThreadDeliveryFailureViewModel[]
-  createdAt: string
-  lastMessageAt: string
 }
 
 /*
@@ -240,11 +145,8 @@ export type InboxStreamItem =
     sent_at: string
     /** "2:33 PM" on the first message of a run from one side; null on the rest of the run. */
     time: string | null
-    /** The words shown, which are the translation when Airbnb translated the message. */
     body: string | null
     photos: InboxPhoto[]
-    /** The guest's own words when `body` is Airbnb's translation of them. */
-    translated: { original: string } | null
     /** Files the message carried that are not photos the conversation can show, such as a PDF. */
     unshown_files: number
     /** On the newest business message only: Sending, Sent, Delivered, Read by <name>, Not delivered, Recorded locally. */
@@ -262,8 +164,6 @@ export interface InboxThread {
   channel: InboxChannel
   home: string | null
   when: string | null
-  /** A message in the conversation was translated: the header says "Translation on". */
-  translated: boolean
   /** The stored booking attached to this conversation, whether it uses nights or a session. */
   booking_id: string | null
   record_kind: 'stay' | 'booking' | null

@@ -168,8 +168,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await expect(detail.getByRole('link').filter({ hasText: /^\s*Attorney\b/ })).toHaveCount(0)
     await dismissPreviewToolbar(page)
     await page.setViewportSize({ width: 390, height: 844 })
-    const issuedLink = new URL(`${DASHBOARD}/bookings/booking/${requestId}`, baseURL!).toString()
-    expect((await page.goto(issuedLink))?.status()).toBe(200)
+    expect((await page.goto(new URL(bookingPath, baseURL!).toString()))?.status()).toBe(200)
     await expect(page).toHaveURL(new URL(bookingPath, baseURL!).toString())
     // The attorney is the practice area's: the owner reads who handles it and changes it on the practice area.
     const ownerDetail = page.locator('#dashboard-panel-booking-details')

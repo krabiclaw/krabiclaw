@@ -8,6 +8,10 @@ export interface GuestInboxPublicationEnv {
 
 export const SCHEDULED_AUTHOR_HEADER = 'x-krabiclaw-scheduled-author'
 
+export function guestInboxTarget(organizationId: string | null, userId: string) {
+  return organizationId ?? `account:${userId}`
+}
+
 /** A message was written in a conversation, or it or the conversation changed: the gateway tells who may see it. */
 export async function publishConversationEvent(
   env: GuestInboxPublicationEnv,

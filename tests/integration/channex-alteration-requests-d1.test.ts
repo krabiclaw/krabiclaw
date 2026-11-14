@@ -9,7 +9,7 @@ import { createProduct } from '../../server/utils/product-management.ts'
 import { applyBookingRevision } from '../../server/integrations/channex/booking-revisions.ts'
 import { mirrorChannexThread } from '../../server/domain/guest-threads/channel-messages.ts'
 import { runAlterationRequestFeed } from '../../server/domain/guest-threads/stay-change-requests.ts'
-import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
+import { listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { getStay } from '../../server/domain/stays.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import todayRoute from '../../server/api/dashboard/today.get.ts'
@@ -292,8 +292,8 @@ test('a guest change request lands once in the stay conversation, survives a rel
     // Answering the change closes its task, by the member who answered; the guest's message is still owed a reply.
     assert.deepEqual(await db.prepare("SELECT status, closed_by_user_id FROM tasks WHERE dedupe_key = ?").bind(`booking_change:${request!.id}`).first(), { status: 'done', closed_by_user_id: OWNER })
     assert.deepEqual(await openReplies(db, stay.conversation_id), [`guest_reply:${stay.conversation_id}:${guestMessage}`])
-    const answeredThread = (await getGuestThreadDetail(db, stay.conversation_id, ORG))!
-    assert.equal(answeredThread.needsReply, true, 'the inbox preserves the separate unanswered message after a booking decision')
+    assert((await listConversations(db, ORG, { userId: OWNER, needsReply: true })).some(row => row.id === stay.conversation_id),
+      'the inbox preserves the separate unanswered message after a booking decision')
     assert.deepEqual((await reservation(stay.id)).booking.pending_changes, [])
     // The accepted change is recorded above; the guest's separate unanswered
     // message remains the only action, rather than adding completion history.

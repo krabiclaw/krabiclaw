@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
-import { MessageDedupeConflictError, MessageStateConflictError, appendMessage, conversationAccessDenied, participantGuard, type ConversationRow, type MessageRow, type ParticipantRole } from './conversations'
+import { MessageDedupeConflictError, MessageStateConflictError, appendMessage, conversationAccessDenied, conversationMessageGuard, type ConversationRow, type MessageRow, type ParticipantRole } from './conversations'
 import { receiveGuestWebReply } from './guest-threads/inbound-email'
-import { executeGuestThreadOperation, type OperationOutcome } from './guest-threads/operations'
+import { sendGuestThreadReply, type OperationFailure } from './guest-threads/operations'
 import { MAX_MESSAGE_PHOTOS, MessagePhotoRejection, messagePhotoCount, messagePhotoHashes, type MessagePhotoInput } from './guest-threads/attachments'
 import { deliverTeamMessage, teamMessageKey } from './team-messages'
 import { projectSentConversationMessage } from './conversation-history'
@@ -10,7 +10,7 @@ import { creationRequestHash } from '~/server/utils/organization-events'
 import type { ConversationMessage } from '~/shared/messages-contract'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
-export function assertConversationOperation(outcome: OperationOutcome): asserts outcome is Extract<OperationOutcome, { ok: true }> {
+export function assertConversationOperation<T extends { ok: true } | OperationFailure>(outcome: T): asserts outcome is Extract<T, { ok: true }> {
   if (outcome.ok) return
   if ('code' in outcome) throw new HTTPError({ statusCode: outcome.status, message: outcome.message, data: { ...outcome } })
   const failures = {
@@ -56,8 +56,7 @@ export async function sendConversationMessage(env: CloudflareEnv, input: Message
   if ((!providerReply || conversation.kind === 'team') && body.length > 5000) throw new HTTPError({ statusCode: 422, message: 'A message can be at most 5000 characters', data: { code: 'MESSAGE_TOO_LONG', field: 'body' } })
   const threadId = conversation.id
   const db = env.DB
-  const guard = participantGuard('c', userId, role)
-  let message: MessageRow | null
+  let message: MessageRow
   try {
     if (conversation.kind === 'team') {
       if (role !== 'member') conversationAccessDenied()
@@ -68,13 +67,31 @@ export async function sendConversationMessage(env: CloudflareEnv, input: Message
       message = await appendMessage(db, {
         id, conversationId: threadId, authorKind: 'member', authorUserId: userId, body,
         dedupeKey: teamMessageKey(threadId, idempotencyKey), payload: { request_hash: requestHash },
-        guard: { sql: `c.organization_id = ? AND c.kind = 'team' AND ${guard.sql}`, params: [conversation.organization_id, ...guard.params] },
+        guard: conversationMessageGuard(conversation, userId, role),
       }, { organizationId: conversation.organization_id, env, photos, uploaderUserId: userId })
       await deliverTeamMessage(env, db, message, senderName, count, message.id === id)
     } else if (role === 'guest') {
       message = await receiveGuestWebReply(env, { conversation, userId, body, photos, idempotencyKey })
     } else {
-      message = null
+      const outcome = await sendGuestThreadReply(db, {
+        conversation, threadId, organizationId: conversation.organization_id,
+        actorUserId: userId, body, photos, idempotencyKey, env,
+      })
+      if (outcome.ok || outcome.reason === 'delivery_failed') {
+        try {
+          await publishConversationEvent(env, db, {
+            conversationId: threadId, type: outcome.ok ? 'MESSAGE_CREATE' : 'MESSAGE_UPDATE',
+            message: outcome.ok ? { id: outcome.message.id, sequence: outcome.message.sequence } : undefined,
+          })
+        } catch (cause) {
+          throw new HTTPError({
+            statusCode: 503, message: 'The reply was saved, but live updates failed. Retry with the same message key.',
+            data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, conversation_id: threadId }, cause,
+          })
+        }
+      }
+      assertConversationOperation(outcome)
+      message = outcome.message
     }
   } catch (error) {
     if (error instanceof MessagePhotoRejection) throw new HTTPError({ statusCode: 400, message: error.message, data: { code: 'INVALID_PHOTO', field: 'photos' } })
@@ -82,28 +99,5 @@ export async function sendConversationMessage(env: CloudflareEnv, input: Message
     if (error instanceof MessageStateConflictError) conversationAccessDenied()
     throw error
   }
-  if (message) {
-    if (!providerReply) return projectSentConversationMessage(db, { message, userId, role, conversation }, senderName)
-    return
-  }
-
-  const outcome = await executeGuestThreadOperation(db, {
-    conversation, threadId, organizationId: conversation.organization_id, action: 'reply',
-    actorUserId: userId, messageGuard: guard, body, photos, idempotencyKey, env,
-    financialWritesAllowed: false,
-  })
-  if (outcome.ok || outcome.reason === 'delivery_failed') {
-    try {
-      await publishConversationEvent(env, db, { conversationId: threadId, type: outcome.ok ? 'MESSAGE_CREATE' : 'MESSAGE_UPDATE', message: outcome.ok && outcome.message ? { id: outcome.message.id, sequence: outcome.message.sequence } : undefined })
-    } catch (cause) {
-      throw new HTTPError({
-        statusCode: 503, message: 'The reply was saved, but live updates failed. Retry with the same message key.',
-        data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, conversation_id: threadId }, cause,
-      })
-    }
-  }
-  assertConversationOperation(outcome)
-  if (providerReply) return
-  if (!outcome.message) throw new Error('Sending did not return the committed message')
-  return projectSentConversationMessage(db, { message: outcome.message, userId, role, conversation }, senderName)
+  if (!providerReply) return projectSentConversationMessage(db, { message, userId, role, conversation }, senderName)
 }

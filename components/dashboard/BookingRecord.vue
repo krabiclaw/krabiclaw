@@ -1,6 +1,6 @@
 <template>
-  <StayDetails v-if="unit === 'nights'" :stay-id="bookingId" />
-  <BookingDetails v-else-if="unit === 'slot'" booking-type="booking" :booking-id="bookingId" :editor-path="editorPath" />
+  <StayDetails v-if="unit === 'nights'" :stay-id="bookingId" :dashboard-booking="booking" />
+  <BookingDetails v-else-if="unit === 'slot'" booking-type="booking" :booking-id="bookingId" :editor-path="editorPath" :dashboard-booking="booking" />
   <p v-else-if="error" role="alert" class="p-4 text-sm text-error">{{ getErrorMessage(error, 'Booking could not be loaded') }}</p>
 </template>
 
@@ -11,7 +11,8 @@ import { normalizeApiError } from '~/utils/api-clients'
 import { getErrorMessage, showNotFound } from '~/utils/errors'
 
 const props = defineProps<{ bookingId: string; editorPath: string }>()
-const { data, error } = await useDashboardBooking(props.bookingId)
+const booking = await useDashboardBooking(props.bookingId)
+const { data, error } = booking
 const unit = computed(() => data.value?.booking.unit)
 
 watchEffect(() => {

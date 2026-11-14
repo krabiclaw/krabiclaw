@@ -5,7 +5,7 @@
         <InboxAvatar :name="guestConversation.title" :initial="guestConversation.avatar_initial" :support="guestConversation.kind === 'support'" />
         <div class="min-w-0">
           <p class="truncate text-2xl font-semibold text-highlighted">{{ guestConversation.title }}</p>
-          <p class="truncate text-sm text-muted">{{ [guestConversation.home, guestConversation.when, guestConversation.translated ? 'Translation on' : null].filter(Boolean).join(' · ') }}</p>
+          <p class="truncate text-sm text-muted">{{ [guestConversation.home, guestConversation.when].filter(Boolean).join(' · ') }}</p>
         </div>
       </div>
     </template>
@@ -38,8 +38,8 @@ const { data, refresh } = await history.request
 const conversation = computed(() => data.value?.conversation)
 const guestConversation = computed(() => conversation.value?.kind === 'team' ? null : conversation.value)
 const sheetOpen = ref(false)
-const reservationTo = computed(() => guestConversation.value?.booking_id
-  ? `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/bookings/${encodeURIComponent(guestConversation.value.booking_id)}`
+const reservationTo = computed(() => conversation.value?.booking_id
+  ? `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/bookings/${encodeURIComponent(conversation.value.booking_id)}`
   : null)
 
 async function moved(transition: string) {

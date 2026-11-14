@@ -297,19 +297,18 @@ export async function listConversations(
 
 type LatestMessage = { authorKind: string; actorUserId: string | null; actorName: string | null; eventName: string | null; text: string | null; photos: number; sentAt: string }
 
-/** The last message of each listed conversation: who sent it, its words (Airbnb's translation where there is one) and when. */
+/** The last message of each listed conversation: who sent it, its words and when. */
 async function latestMessages(db: DbClient, ids: string[]): Promise<Map<string, LatestMessage>> {
   if (!ids.length) return new Map()
-  const rows = await queryAll<{ id: string; author_kind: string; author_user_id: string | null; actor_name: string | null; event_name: string | null; body: string | null; translated: string | null; provider_inserted_at: string | null; occurred_at: string; photos: number }>(db, `
+  const rows = await queryAll<{ id: string; author_kind: string; author_user_id: string | null; actor_name: string | null; event_name: string | null; body: string | null; provider_inserted_at: string | null; occurred_at: string; photos: number }>(db, `
     SELECT e.id, e.author_kind, e.author_user_id, u.name AS actor_name, e.event_name, e.body,
-      json_extract(e.payload_json, '$.meta.translated_message') AS translated,
       json_extract(e.payload_json, '$.provider_inserted_at') AS provider_inserted_at, e.occurred_at,
       (SELECT COUNT(*) FROM media_placements mp WHERE mp.owner_type = 'message' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active') AS photos
     FROM messages e LEFT JOIN user u ON u.id = e.author_user_id
     WHERE e.id IN (SELECT value FROM json_each(?))`, [d1JsonStringSet(ids)])
   return new Map(rows.map(row => [row.id, {
     authorKind: row.author_kind, actorUserId: row.author_user_id, actorName: row.actor_name, eventName: row.event_name,
-    text: row.author_kind === 'guest' && row.translated?.trim() ? row.translated : row.body,
+    text: row.body,
     photos: row.photos,
     sentAt: row.provider_inserted_at ? providerInstant(row.provider_inserted_at) : row.occurred_at,
   }]))
@@ -443,10 +442,9 @@ function bookingFollowUpQueries(conversationId: string, now: string): BatchQuery
  * reply turned out not to be delivered. A person's Dismiss (and an archive,
  * which dismisses) covers everything the guest had said by then; the guest's
  * next message opens a new task. A failed scheduled message the business has
- * since answered in person is done too. Bookings awaiting approval, changes
- * that need the business and follow-ups follow the booking. Prep follows the session while it has confirmed bookings.
+ * since answered in person is done too.
  */
-export function conversationTaskQueries(conversationId: string, now: string, previousSessionId: string | null = null): BatchQuery[] {
+export function conversationReplyTaskQueries(conversationId: string, now: string): BatchQuery[] {
   const entryOf = `substr(tasks.dedupe_key, length('guest_reply:' || tasks.subject_id || ':') + 1)`
   const unanswered = `guest_entry.id = ${entryOf} AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}`
   return [{
@@ -486,7 +484,12 @@ export function conversationTaskQueries(conversationId: string, now: string, pre
          WHERE c.id = ? AND EXISTS (
           SELECT 1 FROM messages reply WHERE reply.conversation_id = c.id AND ${successfulBusinessReplySql('reply')} AND reply.occurred_at > m.updated_at))`,
     params: [now, now, conversationId],
-  }, {
+  }]
+}
+
+/** Booking mutations also reconcile approval, follow-ups, session prep and change requests. */
+export function conversationTaskQueries(conversationId: string, now: string, previousSessionId: string | null = null): BatchQuery[] {
+  return [...conversationReplyTaskQueries(conversationId, now), {
     // A booking waiting for the business's approval is work until it is approved, declined or cancelled.
     query: `UPDATE tasks SET status = CASE WHEN b.status = 'cancelled' THEN 'cancelled' ELSE 'done' END, closed_at = ?, version = tasks.version + 1, updated_at = ?,
         closed_by_user_id = (SELECT e.author_user_id FROM messages e WHERE e.conversation_id = c.id AND e.event_name IN ('booking.confirm', 'booking.reject', 'booking.cancel') ORDER BY e.sequence DESC LIMIT 1)

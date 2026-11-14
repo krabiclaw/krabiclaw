@@ -285,7 +285,7 @@ export function guestThreadReplyMessage(input: {
     preheader: input.body ? input.body.slice(0, 120) : `${input.organizationName} sent ${photos.length === 1 ? 'a photo' : `${photos.length} photos`}`,
     hero: null,
     facts: [],
-    quote: { author: input.organizationName, body: input.body, translation: null, photos },
+    quote: { author: input.organizationName, body: input.body, photos },
     primaryAction: manageAction(input),
     finePrint: 'Reply to this email and your message goes straight back to the same conversation.',
     emailPurpose: 'transactional',
