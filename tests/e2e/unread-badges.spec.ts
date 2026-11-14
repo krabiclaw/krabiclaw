@@ -1,8 +1,9 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
+import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import type { InboxRow, InboxUnreadCounts } from '../../server/domain/guest-threads/types'
 import type { TaskSection } from '../../server/domain/tasks'
 import { openTenantPage } from './helpers'
-import { authRequestHeaders, loginAs } from './helpers/auth'
+import { acceptOrganizationInvitation, authRequestHeaders, loginAs, sendOrganizationInvitation } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
 import { seededSiteHeaders, testBaseUrl } from './test-env'
@@ -11,6 +12,76 @@ import { bookTable, openSeating } from './helpers/tables'
 import type { ConversationPage } from '../../shared/messages-contract'
 
 type WorkspaceInbox = { threads: InboxRow[]; unread: InboxUnreadCounts }
+
+test('a signed-in reader sees an empty inbox until a message arrives and loses workspace inbox access when removed', async ({ playwright, baseURL }) => {
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates and removes an isolated local workspace')
+  const origin = baseURL!
+  const headers = authRequestHeaders(origin)
+  const fixture = findE2eAuthFixture('user-e2e-demo-role-owner')
+  const owner = await playwright.request.newContext({ baseURL: origin })
+  const reader = await playwright.request.newContext({ baseURL: origin })
+  const slug = `e2e-inbox-access-${crypto.randomUUID().slice(0, 8)}`
+  let organizationId: string | undefined
+  try {
+    await loginAs(owner, origin)
+    await loginAs(reader, origin, fixture.id)
+    const workspace = await owner.post('/api/auth/organization/create', {
+      headers, data: { name: slug, slug, default_currency: 'THB', timezone: 'Asia/Bangkok', keepCurrentActiveOrganization: true },
+    })
+    expect(workspace.status(), await workspace.text()).toBe(200)
+    organizationId = (await workspace.json() as { id: string }).id
+    const invitationId = await sendOrganizationInvitation(owner, origin, organizationId, fixture.email, 'member')
+    const member = await acceptOrganizationInvitation(reader, origin, invitationId)
+    const workspaceParams = { organization_id: organizationId }
+    const inbox = (request: APIRequestContext) => request.get('/api/messages', { params: { ...workspaceParams, mailbox: 'current' } })
+    const badge = () => reader.get('/api/messages/unread-count', { params: workspaceParams })
+    const zero = { all: 0, guests: 0, support: 0, team: 0 }
+    const empty = await inbox(reader)
+    expect(empty.status(), await empty.text()).toBe(200)
+    expect(await empty.json()).toMatchObject({ threads: [], unread: zero })
+    const emptyBadge = await badge()
+    expect(emptyBadge.status(), await emptyBadge.text()).toBe(200)
+    expect(await emptyBadge.json()).toEqual({ unread: zero })
+
+    const conversation = await owner.post('/api/dashboard/team/threads', { params: { org: slug }, headers, data: { member_user_ids: [fixture.id] } })
+    expect(conversation.status(), await conversation.text()).toBe(201)
+    const { conversation_id: conversationId } = await conversation.json() as { conversation_id: string }
+    const message = 'The member can read this before removal.'
+    const sent = await owner.post(`/api/messages/${conversationId}`, { headers, data: { body: message, idempotency_key: crypto.randomUUID() } })
+    expect(sent.status(), await sent.text()).toBe(200)
+    const seeded = await inbox(reader)
+    expect(seeded.status(), await seeded.text()).toBe(200)
+    expect(await seeded.json()).toMatchObject({ threads: [{ id: conversationId, preview: message, unread: true }], unread: { ...zero, all: 1, team: 1 } })
+    const seededBadge = await badge()
+    expect(seededBadge.status(), await seededBadge.text()).toBe(200)
+    expect(await seededBadge.json()).toEqual({ unread: { ...zero, all: 1, team: 1 } })
+    const session = await reader.get('/api/auth/get-session')
+    expect(session.status(), await session.text()).toBe(200)
+    const { session: { id: sessionId } } = await session.json() as { session: { id: string } }
+
+    const revoked = await owner.post('/api/auth/organization/remove-member', { headers, data: { organizationId, memberIdOrEmail: member.id } })
+    expect(revoked.status(), await revoked.text()).toBe(200)
+    for (const response of await Promise.all([inbox(reader), badge()])) {
+      expect(response.status(), await response.text()).toBe(404)
+      expect(await response.json()).toMatchObject({ data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
+    }
+    const stillSignedIn = await reader.get('/api/auth/get-session')
+    expect(stillSignedIn.status(), await stillSignedIn.text()).toBe(200)
+    expect(await stillSignedIn.json()).toMatchObject({ session: { id: sessionId }, user: { id: fixture.id } })
+    const retained = await inbox(owner)
+    expect(retained.status(), await retained.text()).toBe(200)
+    expect(await retained.json()).toMatchObject({ threads: [{ id: conversationId, preview: message }] })
+  } finally {
+    try {
+      if (organizationId) {
+        const deleted = await owner.post('/api/auth/organization/delete', { headers, data: { organizationId } })
+        expect(deleted.status(), await deleted.text()).toBe(200)
+      }
+    } finally {
+      await Promise.all([owner.dispose(), reader.dispose()])
+    }
+  }
+})
 
 test('a new booking, its cancellation and a guest message are unread until read, and one count says so everywhere', async ({ browser, playwright }, testInfo) => {
   test.setTimeout(60_000)

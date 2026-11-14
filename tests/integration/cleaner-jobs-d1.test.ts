@@ -38,7 +38,7 @@ const readTeamThread = async (db: DbClient, viewer: MemberAccessPrincipal, id: s
 }
 
 const isUnread = async (db: DbClient, viewer: MemberAccessPrincipal, id: string) =>
-  (await listConversations(db, viewer.organizationId, { userId: viewer.userId, principal: viewer, kind: 'team' })).find(row => row.id === id)?.unread
+  (await listConversations(db, viewer.organizationId, { userId: viewer.userId, kind: 'team' })).find(row => row.id === id)?.unread
 
 test('a cleaning job lives in the stay’s team conversation from assignment to Done', { timeout: 180_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {

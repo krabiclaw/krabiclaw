@@ -103,7 +103,7 @@ export async function requireLocationAccess(event: H3Event, organizationId: stri
   return { env, db, session, organization, location }
 }
 
-async function organizationSession(event: H3Event) {
+export async function organizationSession(event: H3Event) {
   const env = cloudflareEnv(event)
   const db = env.DB
   if (!db) throw new HTTPError({ statusCode: 500, message: 'Database not available', data: { code: 'DATABASE_UNAVAILABLE', field: 'DB' } })

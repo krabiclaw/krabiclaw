@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { createTeamThread, listTeamMembers, operateTeamGroup } from '~/server/domain/team-messages'
 import { assertConversationAccess, conversationAccessSql, markConversationRead, markConversationUnread } from '~/server/domain/conversations'
-import { archiveConversation, countUnreadConversations, listConversations } from '~/server/domain/guest-threads/repository'
+import { archiveConversation, readWorkspaceInbox } from '~/server/domain/guest-threads/repository'
 import { loadConversationPage } from '~/server/domain/conversation-history'
 import { sendConversationMessage } from '~/server/domain/send-conversation-message'
 import { queryFirst } from '~/server/db'
@@ -112,8 +112,8 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
       const filter = { kind, mailbox: (args.mailbox as 'current' | 'past' | 'blocked' | undefined) ?? null, unreadOnly: args.unread === true, type: (args.type as 'contact' | 'booking' | 'stay' | undefined) ?? null, q: optionalString(args, 'q'), locationId: optionalString(args, 'location_id') }
       const resource = { resource: `conversations:${JSON.stringify([organizationId, userId, filter])}` }
       const window = mcpPageWindow(args, resource)
-      const options = { ...filter, principal, userId, limit: window.limit + 1, offset: window.offset }
-      const [rows, unread] = await Promise.all([listConversations(db, organizationId, options), countUnreadConversations(db, organizationId, options)])
+      const options = { ...filter, userId, limit: window.limit + 1, offset: window.offset }
+      const { threads: rows, unread } = await readWorkspaceInbox(db, organizationId, options)
       const conversations = rows.slice(0, window.limit).map(row => ({ conversation_id: row.id, kind: row.kind, title: row.title, channel: row.channel, home: row.home, when: row.when, preview: row.preview, preview_from: row.preview_from, time: row.time, unread: row.unread }))
       return { conversations, unread, page_info: mcpPageInfo(window, conversations.length, rows.length > window.limit, resource) }
     }

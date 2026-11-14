@@ -1,5 +1,4 @@
 import type { GuestRequest } from '~/server/domain/requests'
-import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { GuestThreadMailbox } from './mailbox'
 
 export type GuestThreadSubmissionType = 'contact' | 'booking' | 'stay'
@@ -92,8 +91,6 @@ export interface ListGuestThreadsOptions {
   organizationId?: string | null
   locationId?: string | null
   assignedMemberId?: string | null
-  /** The viewer's role in the organization; absent for a server read on the viewer's behalf. */
-  principal?: Pick<MemberAccessPrincipal, 'organizationId' | 'role' | 'userId'> | null
   userId: string
   type?: GuestThreadSubmissionType | null
   unreadOnly?: boolean

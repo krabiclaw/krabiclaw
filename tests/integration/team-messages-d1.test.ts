@@ -187,13 +187,13 @@ test('members talk in team conversations, see unread state and receive recorded 
 
     // Unread is the recipient's, until they read it; the sender has read their own.
     const isUnread = async (access: MemberAccessPrincipal, id: string) =>
-      (await listConversations(db, ORG, { userId: access.userId, principal: access, kind: 'team' })).find(row => row.id === id)?.unread
+      (await listConversations(db, ORG, { userId: access.userId, kind: 'team' })).find(row => row.id === id)?.unread
     const ownerView = await teamThread(owner, direct.id)
     assert.deepEqual({ unread: await isUnread(owner, direct.id), bookingId: ownerView.booking_id }, { unread: true, bookingId: null })
     assert.deepEqual(ownerView.participants.map(participant => participant.id).sort(), ['cleaner', 'owner'])
     assert.equal(await isUnread(cleaner, direct.id), false)
     // The one list says the same, with the same statement.
-    const ownerRow = (await listConversations(db, ORG, { userId: 'owner', principal: owner, kind: 'team' })).find(row => row.id === direct.id)
+    const ownerRow = (await listConversations(db, ORG, { userId: 'owner', kind: 'team' })).find(row => row.id === direct.id)
     assert.deepEqual([ownerRow?.kind, ownerRow?.unread, ownerRow?.preview], ['team', true, 'Towels are out'])
     const stayView = await teamThread(owner, about.id)
     assert.equal(stayView.booking_id, stay.id)
@@ -378,7 +378,7 @@ test('members talk in team conversations, see unread state and receive recorded 
         return typeof value === 'function' ? value.bind(target) : value
       } })
       try {
-        const rows = await listConversations(revokingDb, ORG, { userId: 'cook', principal: cook, kind: 'team' })
+        const rows = await listConversations(revokingDb, ORG, { userId: 'cook', kind: 'team' })
         assert.equal(interleaved, true)
         assert.equal(JSON.stringify(rows).includes('After preview access ended'), false)
         await assert.rejects(teamThread(cook, separateGroup.id), refused(404, 'THREAD_NOT_FOUND', 'conversation_id'))
@@ -443,6 +443,12 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(operateTeamGroup(env, db, cleaner, group.id, { action: 'add', member_user_ids: ['cleaner'], idempotency_key: 'removed-creator-add' }), refused(404, 'TEAM_THREAD_NOT_FOUND', 'conversation_id'))
     await assert.rejects(createTeamThread(env, db, cleaner, groupInput), refused(404, 'TEAM_THREAD_NOT_FOUND', 'conversation_id'))
     assert.deepEqual((await groupView())?.participants.map(person => person.id).sort(), ['cook', 'owner'])
+    const departingViewer = { conversationId: group.id, userId: cook.userId }
+    const transcriptWindows = [null, groupMessage.sequence + 1].map(before => ({ before, limit: 40 }))
+    for (const window of transcriptWindows) {
+      const snapshot = await loadConversationPage(db, departingViewer, window)
+      assert(snapshot.entries.some(entry => entry.id === groupMessage.id))
+    }
     await publicationCache.put('team-publication:refuse', 'true')
     const leaving = { action: 'leave', idempotency_key: 'cook-leave' }
     await assert.rejects(operateTeamGroup(env, db, cook, group.id, leaving), (error: unknown) => {
@@ -452,6 +458,11 @@ test('members talk in team conversations, see unread state and receive recorded 
       return true
     })
     assert.equal(await groupView(cook), undefined)
+    // The leave committed even though the realtime hub rejected the update.
+    // Both transcript page shapes must enforce it directly from D1.
+    for (const window of transcriptWindows) {
+      await assert.rejects(loadConversationPage(db, departingViewer, window), refused(404, 'THREAD_NOT_FOUND', 'conversation_id'))
+    }
     assert.partialDeepStrictEqual(await publicationCache.get('team-publication:last', 'json'), { type: 'CONVERSATION_LEAVE', conversation_id: group.id, user_id: 'cook' })
     await publicationCache.delete('team-publication:refuse')
     assert.deepEqual(await operateTeamGroup(env, db, cook, group.id, leaving), { status: 'left', conversation_id: group.id })

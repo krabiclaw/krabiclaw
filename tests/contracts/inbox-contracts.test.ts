@@ -199,8 +199,8 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     const opened = await conversationPageFor(db, principal, siteThreadId, { before: null, limit: 40 }, new Date(NOW))
     assert.deepEqual(opened.entries.flatMap(item => item.type === 'message' ? [[item.side, item.body?.split('\n')[0]]] : []),
       [['guest', '74 D · Sky from Fri, Nov 20 to Mon, Nov 23 for 2 guests. Ana Ruiz, +1 303 555 0123.'], ['guest', 'We arrive late, around 9 PM.']])
-    const current = await memberInbox(db, ORG, principal, { limit: 100, offset: 0, mailbox: 'current', locationId: null, type: null, kind: null, q: null, unreadOnly: false })
-    const past = await memberInbox(db, ORG, principal, { limit: 100, offset: 0, mailbox: 'past', locationId: null, type: null, kind: null, q: null, unreadOnly: false })
+    const current = await memberInbox(db, ORG, principal.userId, { limit: 100, offset: 0, mailbox: 'current', locationId: null, type: null, kind: null, q: null, unreadOnly: false })
+    const past = await memberInbox(db, ORG, principal.userId, { limit: 100, offset: 0, mailbox: 'past', locationId: null, type: null, kind: null, q: null, unreadOnly: false })
     assert.deepEqual([current.threads.map(row => row.id).sort(), past.threads.map(row => row.id)], [[siteThreadId, threadId].sort(), ['quiet-contact']])
 
     await check('list', current)

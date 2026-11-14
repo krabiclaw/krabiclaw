@@ -118,7 +118,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual(await db.prepare("SELECT json_extract(r.payload_json, '$.guest.email') AS guest_email, r.id AS conversation_id FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking' WHERE b.id = ?").bind(cy.id).first(), { guest_email: 'cy@example.test', conversation_id: cy.conversation_id })
 
     // A booking lands as a stay, not as a conversation: until someone writes, the inbox does not list it.
-    assert.deepEqual(await listConversations(db, ORG, { userId: OWNER, principal: principal(OWNER, 'owner'), type: 'stay' }), [])
+    assert.deepEqual(await listConversations(db, ORG, { userId: OWNER, type: 'stay' }), [])
 
     // The thread is answered like any other; a stay is changed from its own screen, not its thread.
     const hostConversation = await conversationPageFor(db, principal(OWNER, 'owner'), ana.conversation_id)
@@ -133,7 +133,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
 
     // Once written to, the inbox lists it for its host with the guest, home and dates in the home's own clock.
     // A stay's guest conversation is not a member's, even the member who looks after the home: they read its stays as turnovers.
-    const listed = await listConversations(db, ORG, { userId: OWNER, principal: principal(OWNER, 'owner'), type: 'stay' })
+    const listed = await listConversations(db, ORG, { userId: OWNER, type: 'stay' })
     assert.deepEqual(listed.map(row => row.id), [ana.conversation_id])
     const homeToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
     const arrivalIn = Math.round((Date.parse(`${day(3)}T00:00:00Z`) - Date.parse(`${homeToday}T00:00:00Z`)) / 86_400_000)
@@ -141,20 +141,20 @@ test('a stay opens its guest conversation in the one inbox', async () => {
       when: `In ${arrivalIn} days`, preview: 'The gate code is in your confirmation.', preview_from: 'You', time: undefined, unread: false })
     assert.deepEqual(await db.prepare("SELECT b.product_id, b.channel, c.id AS conversation_id FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.id = ?").bind(ana.id).first(), { product_id: cabin.id, channel: 'direct', conversation_id: ana.conversation_id })
     assert.equal((await sheet())?.actions.archive, true)
-    assert.deepEqual(await listConversations(db, ORG, { userId: CLEANER, principal: principal(CLEANER, 'member') }), [])
-    assert.deepEqual(await listConversations(db, ORG, { userId: OUTSIDER, principal: principal(OUTSIDER, 'member') }), [])
+    assert.deepEqual(await listConversations(db, ORG, { userId: CLEANER }), [])
+    assert.deepEqual(await listConversations(db, ORG, { userId: OUTSIDER }), [])
     const host = principal(OWNER, 'owner')
     const cohost = principal(CLEANER, 'member')
     const grant = { listingId: cabin.id, memberId: `m-${CLEANER}` }
     await assert.rejects(setListingMessagingAccess(db, env, cohost, { ...grant, allowed: true }), { statusCode: 403 })
     await setListingMessagingAccess(db, env, host, { ...grant, allowed: true })
-    assert.deepEqual((await listConversations(db, ORG, { userId: CLEANER, principal: cohost })).map(row => row.id), [ana.conversation_id])
+    assert.deepEqual((await listConversations(db, ORG, { userId: CLEANER })).map(row => row.id), [ana.conversation_id])
     const newReservation = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cohost-future', check_in_date: day(51), check_out_date: day(52), adults: 1,
       guest_name: 'Leah', guest_email: 'leah@example.test', total_minor: 15_000 })
     assert.deepEqual(await db.prepare(`SELECT role, host_listing_id FROM conversation_participants WHERE conversation_id = ? AND user_id = ?`).bind(newReservation.conversation_id, CLEANER).first(),
       { role: 'member', host_listing_id: cabin.id })
     await setListingMessagingAccess(db, env, host, { ...grant, allowed: false })
-    assert.deepEqual(await listConversations(db, ORG, { userId: CLEANER, principal: cohost }), [])
+    assert.deepEqual(await listConversations(db, ORG, { userId: CLEANER }), [])
     assert.equal(await db.prepare('SELECT COUNT(*) n FROM conversation_participants WHERE organization_id = ? AND user_id = ?').bind(ORG, CLEANER).first('n'), 0)
 
     const invite = await createConversationGuestInvite(db, host, { conversationId: ana.conversation_id, email: `${OUTSIDER.toUpperCase()}@example.test` })
@@ -165,7 +165,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual(await acceptConversationGuestInvite(db, env, { token: invite.token, user: traveler }), accepted)
     assert.equal((await readGuestConversation(db, OUTSIDER, ana.conversation_id))?.id, ana.conversation_id)
     assert.equal(await readGuestConversation(db, OUTSIDER, bo.conversation_id), null)
-    assert.deepEqual(await listConversations(db, ORG, { userId: OUTSIDER, principal: principal(OUTSIDER, 'member') }), [])
+    assert.deepEqual(await listConversations(db, ORG, { userId: OUTSIDER }), [])
     const outstanding = await createConversationGuestInvite(db, host, { conversationId: ana.conversation_id, email: traveler.email })
     const removal = { organizationId: ORG, conversationId: ana.conversation_id, hostUserId: OWNER, travelerUserId: OUTSIDER }
     await assert.rejects(removeConversationGuest(db, env, { ...removal, hostUserId: CLEANER }), { statusCode: 404 })
@@ -180,11 +180,11 @@ test('a stay opens its guest conversation in the one inbox', async () => {
 
     // An ended stay stays in Current, as Airbnb keeps an ended trip; it leaves once quiet for 30 days.
     await db.prepare('UPDATE bookings SET starts_at = ?, ends_at = ? WHERE id = ?').bind(day(-6), day(-2), ana.id).run()
-    assert.equal((await listConversations(db, ORG, { userId: OWNER, principal: principal(OWNER, 'owner'), type: 'stay', mailbox: 'current' })).some(row => row.id === ana.conversation_id), true)
+    assert.equal((await listConversations(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'current' })).some(row => row.id === ana.conversation_id), true)
     await db.prepare('UPDATE bookings SET starts_at = ?, ends_at = ? WHERE id = ?').bind(day(-45), day(-40), ana.id).run()
     await db.prepare('UPDATE messages SET occurred_at = ? WHERE conversation_id = ?').bind(`${day(-40)}T00:00:00.000Z`, ana.conversation_id).run()
     await db.prepare('UPDATE conversations SET created_at = ?, last_message_at = ? WHERE id = ?').bind(`${day(-50)}T00:00:00.000Z`, `${day(-40)}T00:00:00.000Z`, ana.conversation_id).run()
-    assert.equal((await listConversations(db, ORG, { userId: OWNER, principal: principal(OWNER, 'owner'), type: 'stay', mailbox: 'past' })).some(row => row.id === ana.conversation_id), true)
+    assert.equal((await listConversations(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'past' })).some(row => row.id === ana.conversation_id), true)
     assert.deepEqual((await sheet())?.actions, { archive: false, unarchive: false, report: true, block: true, unblock: false })
 
     // A guest's WhatsApp number finds their stay's thread; a cancelled stay's thread is not found.

@@ -106,7 +106,7 @@ function kindWhere(kind: NonNullable<ListGuestThreadsOptions['kind']>): string {
  * which mailbox, which kind, what was searched, joined to the viewer's own
  * participant row `me`. Params run in SQL order: the `me` join, then the WHERE.
  */
-async function inboxScope(organizationId: string | null, opts: ListGuestThreadsOptions, now: string): Promise<{ from: string; where: string; params: Array<string | number> }> {
+function inboxScope(organizationId: string | null, opts: ListGuestThreadsOptions, now: string) {
   if (!organizationId && !opts.buyerAudience) throw new Error('Conversation list requires organization scope')
   if (!opts.userId) throw new Error('Conversation list requires the viewer')
   const params: Array<string | number> = [opts.userId]
@@ -176,11 +176,16 @@ export async function listConversations(
   opts: ListGuestThreadsOptions,
   now = new Date(),
 ): Promise<InboxRow[]> {
-  const scope = await inboxScope(organizationId, opts, now.toISOString())
+  const { query, params } = conversationListQuery(organizationId, opts, now)
+  return presentConversationList(db, await queryAll<ListRow>(db, query, params), opts, now)
+}
+
+function conversationListQuery(organizationId: string | null, opts: ListGuestThreadsOptions, now: Date): BatchQuery {
+  const scope = inboxScope(organizationId, opts, now.toISOString())
   const visible = opts.buyerAudience ? ` AND ${guestVisibleSql('e', 'gt.user_id = me.user_id')}` : ''
   const unread = unreadSql('gt', opts.userId)
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 200))
-  const rows = await queryAll<ListRow & Record<string, unknown>>(db, `
+  return { query: `
     SELECT gt.*, ${REPLY_CHANNEL_SQL} AS reply_channel, ${SUPPORT_CONVERSATION_SQL('gt')} AS support,
       o.name AS organization_name, ${threadLocationTitleSql(opts.buyerAudience)} AS location_title, COALESCE(bl.timezone, o.timezone) AS time_zone,
       op.unit AS record_unit, op.starts_at AS record_starts_at, op.stored_ends_at AS record_stored_ends_at, op.timezone AS record_timezone,
@@ -194,8 +199,10 @@ export async function listConversations(
     WHERE ${scope.where}${opts.unreadOnly ? ` AND ${unread.sql}` : ''}
     ORDER BY gt.last_message_at DESC, gt.id
     LIMIT ? OFFSET ?
-  `, [...unread.params, ...scope.params, ...(opts.unreadOnly ? unread.params : []), limit, opts.offset ?? 0])
+  `, params: [...unread.params, ...scope.params, ...(opts.unreadOnly ? unread.params : []), limit, opts.offset ?? 0] }
+}
 
+async function presentConversationList(db: DbClient, rows: ListRow[], opts: ListGuestThreadsOptions, now: Date): Promise<InboxRow[]> {
   const teamIds = rows.filter(row => row.kind === 'team').map(row => row.id)
   const [latest, people] = await Promise.all([
     latestMessages(db, rows.flatMap(row => row.latest_message_id ? [row.latest_message_id] : [])),
@@ -280,26 +287,62 @@ function previewFrom(message: LatestMessage, context: { guestName: string; viewe
   return message.authorKind === 'krabiclaw' ? 'KrabiClaw' : 'You'
 }
 
+type UnreadCountRow = { list_kind: 'guests' | 'support' | 'team'; count: number }
+
 /**
  * Unread conversations in the Current mailbox per list kind, for the filter
  * menu (All, Guests, Airbnb Support, Team) and the nav count: the list's own
  * scope and the one unread statement, so a count never disagrees with a row.
  */
-export async function countUnreadConversations(db: DbClient, organizationId: string, opts: ListGuestThreadsOptions): Promise<UnreadCounts> {
-  const scope = await inboxScope(organizationId, { ...opts, conversationIds: undefined, kind: null, q: null, mailbox: 'current', unreadOnly: false }, new Date().toISOString())
+function unreadConversationsQuery(organizationId: string, opts: ListGuestThreadsOptions, now: Date): BatchQuery {
+  const scope = inboxScope(organizationId, { ...opts, conversationIds: undefined, kind: null, q: null, mailbox: 'current', unreadOnly: false }, now.toISOString())
   const unread = unreadSql('gt', opts.userId)
-  const rows = await queryAll<{ list_kind: 'guests' | 'support' | 'team'; count: number }>(db, `
+  return { query: `
     SELECT CASE WHEN gt.kind = 'team' THEN 'team' WHEN ${SUPPORT_CONVERSATION_SQL('gt')} THEN 'support' ELSE 'guests' END AS list_kind, COUNT(*) AS count
       FROM ${scope.from}
      WHERE ${scope.where} AND ${unread.sql}
-     GROUP BY 1`, [...scope.params, ...unread.params])
-  const count = (kind: 'guests' | 'support' | 'team') => Number(rows.find(row => row.list_kind === kind)?.count ?? 0)
+     GROUP BY 1`, params: [...scope.params, ...unread.params] }
+}
+
+function presentUnreadCounts(rows: UnreadCountRow[]): UnreadCounts {
+  const count = (kind: UnreadCountRow['list_kind']) => Number(rows.find(row => row.list_kind === kind)?.count ?? 0)
   return { all: count('guests') + count('support') + count('team'), guests: count('guests'), support: count('support'), team: count('team') }
+}
+
+/** The Better Auth member row distinguishes an empty inbox from a workspace the user cannot read. */
+function workspaceMembershipQuery(organizationId: string, userId: string): BatchQuery {
+  return { query: 'SELECT id FROM member WHERE userId = ? AND organizationId = ?', params: [userId, organizationId] }
+}
+
+function requireInboxMembership(result: D1Result | undefined) {
+  if (!result?.results[0]) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
+}
+
+export async function readWorkspaceInbox(db: DbClient, organizationId: string, opts: ListGuestThreadsOptions, now = new Date()) {
+  const [membership, list, counts] = await executeBatch(db, [
+    workspaceMembershipQuery(organizationId, opts.userId),
+    conversationListQuery(organizationId, opts, now),
+    unreadConversationsQuery(organizationId, opts, now),
+  ], { operation: 'Read workspace inbox' })
+  requireInboxMembership(membership)
+  return {
+    threads: await presentConversationList(db, list!.results as ListRow[], opts, now),
+    unread: presentUnreadCounts(counts!.results as UnreadCountRow[]),
+  }
+}
+
+export async function countUnreadConversations(db: DbClient, organizationId: string, opts: ListGuestThreadsOptions): Promise<UnreadCounts> {
+  const [membership, counts] = await executeBatch(db, [
+    workspaceMembershipQuery(organizationId, opts.userId),
+    unreadConversationsQuery(organizationId, opts, new Date()),
+  ], { operation: 'Count workspace unread conversations' })
+  requireInboxMembership(membership)
+  return presentUnreadCounts(counts!.results as UnreadCountRow[])
 }
 
 /** Unread conversations a guest has with every business, in their own inbox's Current mailbox. */
 export async function countUnreadAsGuest(db: DbClient, userId: string): Promise<number> {
-  const scope = await inboxScope(null, { userId, buyerAudience: true, mailbox: 'current' }, new Date().toISOString())
+  const scope = inboxScope(null, { userId, buyerAudience: true, mailbox: 'current' }, new Date().toISOString())
   const unread = unreadSql('gt', userId)
   const row = await queryFirst<{ count: number }>(db, `SELECT COUNT(*) AS count FROM ${scope.from} WHERE ${scope.where} AND ${unread.sql}`, [...scope.params, ...unread.params])
   if (!row) throw new Error('Unread conversations as a guest could not be counted')
@@ -312,7 +355,7 @@ export async function countUnreadAsGuest(db: DbClient, userId: string): Promise<
  * count the inbox's filter menu shows.
  */
 export async function unreadBadge(db: DbClient, userId: string): Promise<number> {
-  const guest = await inboxScope(null, { userId, buyerAudience: true, mailbox: 'current' }, new Date().toISOString())
+  const guest = inboxScope(null, { userId, buyerAudience: true, mailbox: 'current' }, new Date().toISOString())
   const current = mailboxWhere('current', new Date().toISOString())
   const memberAccess = participantGuard('gt', userId, 'member')
   const unread = unreadSql('gt', userId)

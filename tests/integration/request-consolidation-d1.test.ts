@@ -9,15 +9,12 @@ import { archiveConversation, countUnreadConversations, listConversations } from
 import { getConversationDetails } from '../../server/domain/guest-threads/inbox.ts'
 import { appendMessage, markConversationRead, markConversationUnread, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { CapacityUnavailableError, claimSessionCapacity } from '../../server/utils/availability.ts'
-import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 const ORG = 'org-proof'
 const LOCATION = 'location-proof'
 const ACTOR = 'user-proof'
 const NOW = '2026-09-11T00:00:00.000Z'
-/** The owner, as every dashboard and MCP read is scoped: through their membership. */
-const OWNER = memberAccessPrincipal({ userId: ACTOR, organizationId: ORG, role: 'owner' }, { env: {} as CloudflareEnv })
 /**
  * A thread carries the conversation; a booking holds the seats.
  *
@@ -92,9 +89,9 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     assert.equal(record?.party_size, 1)
     assert.equal(record?.starts_at, at(8, 7))
 
-    const inbox = await listConversations(db, ORG, { userId: ACTOR, principal: OWNER, locationId: LOCATION, type: 'booking', q: 'guest' })
+    const inbox = await listConversations(db, ORG, { userId: ACTOR, locationId: LOCATION, type: 'booking', q: 'guest' })
     assert.deepEqual(inbox.map(item => item.id), [winner])
-    assert.deepEqual(await listConversations(db, ORG, { userId: ACTOR, principal: OWNER, locationId: LOCATION, type: 'booking', q: 'nobody' }), [])
+    assert.deepEqual(await listConversations(db, ORG, { userId: ACTOR, locationId: LOCATION, type: 'booking', q: 'nobody' }), [])
 
     // Cancelling is idempotent: the same operation key twice writes one message.
     // A booking arrives confirmed and is complete once its end passes, so
@@ -135,7 +132,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     const newest = await db.prepare('SELECT id, body FROM messages WHERE conversation_id = ? ORDER BY sequence DESC LIMIT 1').bind(tokenThread).first()
     assert.deepEqual(newest, { id: question.id, body: question.body })
     assert.equal(await db.prepare("SELECT count(*) FROM messages WHERE conversation_id=? AND event_name='booking.cancel'").bind(tokenThread).first('count(*)'), 1)
-    assert.equal((await listConversations(db, ORG, { principal: OWNER, userId: ACTOR, unreadOnly: true, conversationIds: [tokenThread] }))[0]?.id, tokenThread)
+    assert.equal((await listConversations(db, ORG, { userId: ACTOR, unreadOnly: true, conversationIds: [tokenThread] }))[0]?.id, tokenThread)
 
     // An audit entry belongs to the organization it describes and goes with it.
     await db.batch([
@@ -220,7 +217,7 @@ test('archive and unarchive file a conversation for one person without touching 
         SELECT id, organization_id, '${ACTOR}', 'member', CASE WHEN id = 'ended-archived' THEN '1999-12-31T00:00:00.000Z' END FROM conversations`,
     ].map(statement => db.prepare(statement)))
 
-    const ids = async (mailbox: 'current' | 'past', unreadOnly = false) => (await listConversations(db, ORG, { userId: ACTOR, principal: OWNER, mailbox, unreadOnly })).map(row => row.id)
+    const ids = async (mailbox: 'current' | 'past', unreadOnly = false) => (await listConversations(db, ORG, { userId: ACTOR, mailbox, unreadOnly })).map(row => row.id)
     // What the conversation's sheet offers: Archive, or Move to messages.
     const filing = async (id: string) => {
       const details = await getConversationDetails(db, (await resolveConversationAccess(db, ACTOR, id)).conversation, ACTOR, 'member')
@@ -230,7 +227,7 @@ test('archive and unarchive file a conversation for one person without touching 
     const archivedAt = async (id: string) => (await db.prepare('SELECT archived_at FROM conversation_participants WHERE conversation_id = ? AND user_id = ?').bind(id, ACTOR).first<{ archived_at: string | null }>())?.archived_at ?? null
     const activity = (id: string) => db.prepare('SELECT last_message_at FROM conversations WHERE id = ?').bind(id).first('last_message_at')
     const recordRow = (id: string) => db.prepare('SELECT * FROM bookings WHERE id = ?').bind(`row-${id}`).first()
-    const counts = () => countUnreadConversations(db, ORG, { userId: ACTOR, principal: OWNER })
+    const counts = () => countUnreadConversations(db, ORG, { userId: ACTOR })
     const file = (conversationId: string, archived: boolean, organizationId = ORG) => archiveConversation(db, { organizationId, conversationId, userId: ACTOR, archived })
 
     // Ordered by conversation activity. An ended visit with recent activity stays Current, as Airbnb keeps an ended, read trip;
