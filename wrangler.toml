@@ -224,6 +224,9 @@ routes = [
   { pattern = "*-staging.krabiclaw.com/*", zone_name = "krabiclaw.com" }
 ]
 
+[env.staging.placement]
+mode = "off"
+
 # Top-level [triggers] crons are inherited by named environments unless
 # overridden. Scheduled tasks never run against staging's copy of production
 # data: scanning a growing, never-cleaned non-production database every few
