@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:7f23f4985e971a90c4298b3e06458136bc75f5b79235b84e2531b1225c0113df",
-  "documentationFingerprint": "sha256:9c30b2f851a4aad04a43beb5984f9a70f1d3f6a8b65458ede31adcea59cc3a99",
+  "fingerprint": "sha256:e858f7bf557a3625395c1fc9174d974f15408fd9eafe94ba65d71ebaec786193",
+  "documentationFingerprint": "sha256:0ed95f4dd4018be2f5a21ea3f233a3d61703c383dfbad2251a95394f02c9bdd0",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -67440,6 +67440,10 @@
             },
             "type": "array"
           },
+          "has_unread": {
+            "description": "Your Current mailbox holds an unread conversation, whatever this page's filters.",
+            "type": "boolean"
+          },
           "page_info": {
             "properties": {
               "has_more": {
@@ -67457,34 +67461,11 @@
               "next_cursor"
             ],
             "type": "object"
-          },
-          "unread": {
-            "properties": {
-              "all": {
-                "type": "integer"
-              },
-              "guests": {
-                "type": "integer"
-              },
-              "support": {
-                "type": "integer"
-              },
-              "team": {
-                "type": "integer"
-              }
-            },
-            "required": [
-              "all",
-              "guests",
-              "support",
-              "team"
-            ],
-            "type": "object"
           }
         },
         "required": [
           "conversations",
-          "unread",
+          "has_unread",
           "page_info"
         ],
         "type": "object"
@@ -128041,7 +128022,7 @@
         "get_product_booking": "sha256:dc627db96028c7e276e50d86819579fe2e1ec552cda94ea7e3b75edab8ceae15",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
-        "list_conversations": "sha256:24cf21b535c6689cb04bc7188bec604110c207a960c8ba5e69e9505150dceca7",
+        "list_conversations": "sha256:563552eb6b0af82a762e138edf26711d2560e62fdb2cee2a757e19106704fbad",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "mark_conversation_read": "sha256:4284ca380f9c4245e346ef2952bbb3d0e49719491d6a3ada129bf55a681672a4",
@@ -128171,7 +128152,7 @@
         "get_organization_analytics": "sha256:4fcc7f6cef537aa552200cc74b666d866684657015427e256651d7791140b814",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_conversations": "sha256:24cf21b535c6689cb04bc7188bec604110c207a960c8ba5e69e9505150dceca7",
+        "list_conversations": "sha256:563552eb6b0af82a762e138edf26711d2560e62fdb2cee2a757e19106704fbad",
         "list_product_booking_sessions": "sha256:06526c6170e88700736a723c638488475c76c1db82bcc7082ab478e28ce83a51",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "publish_post": "sha256:752fb1e9c0267e6ba03088081fa8a0e5c5f8034640f03df3c52078a8df8f95d4",

@@ -536,9 +536,6 @@ export async function assertConversationAccess(db: DbClient, principal: MemberAc
   return row
 }
 
-/** The unread conversations a person sees, per list kind: the filter counts, the nav count and the badge. */
-export interface UnreadCounts { all: number; guests: number; support: number; team: number }
-
 /** An Airbnb Support case: Airbnb's agents wrote and no guest did. */
 export const SUPPORT_CONVERSATION_SQL = (alias: string) => `(${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM messages support_message WHERE support_message.conversation_id = ${alias}.id AND support_message.author_kind = 'krabiclaw' AND support_message.event_name = '${MIRRORED_EVENT}')
   AND NOT EXISTS (SELECT 1 FROM messages guest_message WHERE guest_message.conversation_id = ${alias}.id AND guest_message.author_kind = 'guest'))`

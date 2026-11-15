@@ -122,7 +122,7 @@ test('the author can schedule and cancel a private reply from Messages', async (
     const chatReads: string[] = []
     const trackChatRead = (request: Request) => {
       const { pathname, search } = new URL(request.url())
-      if (request.method() === 'GET' && (pathname === '/api/messages' || pathname === '/api/messages/unread-count' || pathname === `/api/messages/${threadId}`)) chatReads.push(pathname + search)
+      if (request.method() === 'GET' && (pathname === '/api/messages' || pathname === `/api/messages/${threadId}`)) chatReads.push(pathname + search)
     }
     page.on('request', trackChatRead)
     try {

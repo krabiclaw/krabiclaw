@@ -5,7 +5,7 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { threadPayloadForGuest, requestInsertQueries, cancelBookingRequest, getGuestRequest, getThreadOperationalRecord } from '../../server/domain/requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
-import { archiveConversation, countUnreadConversations, listConversations } from '../../server/domain/guest-threads/repository.ts'
+import { archiveConversation, listConversations, readWorkspaceInbox } from '../../server/domain/guest-threads/repository.ts'
 import { getConversationDetails } from '../../server/domain/guest-threads/inbox.ts'
 import { appendMessage, markConversationRead, markConversationUnread, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { CapacityUnavailableError, claimSessionCapacity } from '../../server/utils/availability.ts'
@@ -227,7 +227,13 @@ test('archive and unarchive file a conversation for one person without touching 
     const archivedAt = async (id: string) => (await db.prepare('SELECT archived_at FROM conversation_participants WHERE conversation_id = ? AND user_id = ?').bind(id, ACTOR).first<{ archived_at: string | null }>())?.archived_at ?? null
     const activity = (id: string) => db.prepare('SELECT last_message_at FROM conversations WHERE id = ?').bind(id).first('last_message_at')
     const recordRow = (id: string) => db.prepare('SELECT * FROM bookings WHERE id = ?').bind(`row-${id}`).first()
-    const counts = () => countUnreadConversations(db, ORG, { userId: ACTOR })
+    // The Current mailbox's unread rows, and the dot that says whether there are any.
+    const counts = async () => {
+      const inbox = await readWorkspaceInbox(db, ORG, { userId: ACTOR, mailbox: 'current' })
+      const unread = inbox.threads.filter(row => row.unread).length
+      assert.equal(inbox.has_unread, unread > 0)
+      return unread
+    }
     const file = (conversationId: string, archived: boolean, organizationId = ORG) => archiveConversation(db, { organizationId, conversationId, userId: ACTOR, archived })
 
     // Ordered by conversation activity. An ended visit with recent activity stays Current, as Airbnb keeps an ended, read trip;
@@ -244,13 +250,13 @@ test('archive and unarchive file a conversation for one person without touching 
     }
     assert.deepEqual(await ids('current'), CURRENT)
     assert.deepEqual([await ids('current', true), await ids('past', true)], [['ended', 'future'], []])
-    assert.deepEqual(await counts(), { all: 2, guests: 2, support: 0, team: 0 })
+    assert.deepEqual(await counts(), 2)
 
     // Marked read and unread from the list, without opening it: the list and its counts read the same state back.
     await markConversationRead(db, { organizationId: ORG, conversationId: 'ended', userId: ACTOR })
-    assert.deepEqual([await ids('current', true), await counts()], [['future'], { all: 1, guests: 1, support: 0, team: 0 }])
+    assert.deepEqual([await ids('current', true), await counts()], [['future'], 1])
     await markConversationUnread(db, { organizationId: ORG, conversationId: 'ended', userId: ACTOR })
-    assert.deepEqual([await ids('current', true), await counts()], [['ended', 'future'], { all: 2, guests: 2, support: 0, team: 0 }])
+    assert.deepEqual([await ids('current', true), await counts()], [['ended', 'future'], 2])
     // Unread twice is still one unread conversation; one nobody else wrote in cannot be marked either way.
     await markConversationUnread(db, { organizationId: ORG, conversationId: 'ended', userId: ACTOR })
     assert.deepEqual(await ids('current', true), ['ended', 'future'])
@@ -269,7 +275,7 @@ test('archive and unarchive file a conversation for one person without touching 
     assert.equal((await ids('current')).includes('future'), false)
     assert.equal((await ids('past')).includes('future'), true)
     assert.deepEqual(await filing('future'), { archive: false, unarchive: true })
-    assert.deepEqual(await counts(), { all: 1, guests: 1, support: 0, team: 0 }, 'an archived conversation leaves the Current count')
+    assert.deepEqual(await counts(), 1, 'an archived conversation leaves the Current count')
 
     // Move to messages: back in Current, in its original place behind the conversation with newer activity.
     assert.deepEqual(await Promise.all([file('future', false), file('future', false)]), [{ archived: false }, { archived: false }])
@@ -278,7 +284,7 @@ test('archive and unarchive file a conversation for one person without touching 
     assert.deepEqual(await recordRow('future'), bookingBefore)
     assert.deepEqual(await ids('current'), CURRENT)
     assert.deepEqual(await filing('future'), { archive: true, unarchive: false })
-    assert.deepEqual(await counts(), { all: 2, guests: 2, support: 0, team: 0 })
+    assert.deepEqual(await counts(), 2)
 
     // Ongoing: being served, still archivable, and movable back before it ends.
     await file('ongoing', true)

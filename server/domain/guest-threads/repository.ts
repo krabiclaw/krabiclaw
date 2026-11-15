@@ -3,7 +3,7 @@ import { sessionPrepTaskQueries } from '~/server/domain/tasks'
 import { BOOKING_ENDS_SQL, BOOKING_RECORDS_SQL, bookingDay, parseGuestRequest, stayRequestPayBySql, stayRequestRespondBySql } from '~/server/domain/requests'
 import {
   MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SUPPORT_CONVERSATION_SQL,
-  archiveQuery, conversationAccessDenied, participantGuard, guestVisibleSql, listUnreadIds, messageHasContentSql, unreadSql, type ConversationGuard, type UnreadCounts,
+  archiveQuery, conversationAccessDenied, participantGuard, guestVisibleSql, listUnreadIds, messageHasContentSql, unreadSql, type ConversationGuard,
 } from '~/server/domain/conversations'
 import { messagePreview } from './attachments'
 import { conversationGuestName } from './inbox'
@@ -161,6 +161,16 @@ type ListRow = {
   record_title: string | null
   latest_message_id: string | null
   unread: number
+  latest_author_kind: string | null
+  latest_author_user_id: string | null
+  latest_actor_name: string | null
+  latest_event_name: string | null
+  latest_body: string | null
+  latest_provider_inserted_at: string | null
+  latest_occurred_at: string | null
+  latest_photos: number
+  /** A team conversation's members, in seat order, as JSON. */
+  team_people: string | null
 }
 
 /**
@@ -177,7 +187,7 @@ export async function listConversations(
   now = new Date(),
 ): Promise<InboxRow[]> {
   const { query, params } = conversationListQuery(organizationId, opts, now)
-  return presentConversationList(db, await queryAll<ListRow>(db, query, params), opts, now)
+  return presentConversationList(await queryAll<ListRow>(db, query, params), opts, now)
 }
 
 function conversationListQuery(organizationId: string | null, opts: ListGuestThreadsOptions, now: Date): BatchQuery {
@@ -185,7 +195,9 @@ function conversationListQuery(organizationId: string | null, opts: ListGuestThr
   const visible = opts.buyerAudience ? ` AND ${guestVisibleSql('e', 'gt.user_id = me.user_id')}` : ''
   const unread = unreadSql('gt', opts.userId)
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 200))
+  // Each row arrives with its last message and, for the team's, its members: one statement, one round trip.
   return { query: `
+    WITH listed AS (
     SELECT gt.*, ${REPLY_CHANNEL_SQL} AS reply_channel, ${SUPPORT_CONVERSATION_SQL('gt')} AS support,
       o.name AS organization_name, ${threadLocationTitleSql(opts.buyerAudience)} AS location_title, COALESCE(bl.timezone, o.timezone) AS time_zone,
       op.unit AS record_unit, op.starts_at AS record_starts_at, op.stored_ends_at AS record_stored_ends_at, op.timezone AS record_timezone,
@@ -199,26 +211,38 @@ function conversationListQuery(organizationId: string | null, opts: ListGuestThr
     WHERE ${scope.where}${opts.unreadOnly ? ` AND ${unread.sql}` : ''}
     ORDER BY gt.last_message_at DESC, gt.id
     LIMIT ? OFFSET ?
+    )
+    SELECT listed.*, e.author_kind AS latest_author_kind, e.author_user_id AS latest_author_user_id, u.name AS latest_actor_name,
+      e.event_name AS latest_event_name, e.body AS latest_body,
+      json_extract(e.payload_json, '$.provider_inserted_at') AS latest_provider_inserted_at, e.occurred_at AS latest_occurred_at,
+      (SELECT COUNT(*) FROM media_placements mp WHERE mp.owner_type = 'message' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active') AS latest_photos,
+      CASE WHEN listed.kind = 'team' THEN (SELECT json_group_array(json_object('user_id', person.user_id, 'name', person.name))
+        FROM (SELECT p.user_id, pu.name FROM conversation_participants p
+          JOIN member m ON m.organizationId = p.organization_id AND m.userId = p.user_id
+          JOIN user pu ON pu.id = p.user_id
+          WHERE p.role = 'member' AND p.conversation_id = listed.id ORDER BY p.created_at, p.user_id) person) END AS team_people
+    FROM listed
+    LEFT JOIN messages e ON e.id = listed.latest_message_id
+    LEFT JOIN user u ON u.id = e.author_user_id
+    ORDER BY listed.last_message_at DESC, listed.id
   `, params: [...unread.params, ...scope.params, ...(opts.unreadOnly ? unread.params : []), limit, opts.offset ?? 0] }
 }
 
-async function presentConversationList(db: DbClient, rows: ListRow[], opts: ListGuestThreadsOptions, now: Date): Promise<InboxRow[]> {
-  const teamIds = rows.filter(row => row.kind === 'team').map(row => row.id)
-  const [latest, people] = await Promise.all([
-    latestMessages(db, rows.flatMap(row => row.latest_message_id ? [row.latest_message_id] : [])),
-    teamIds.length ? queryAll<{ conversation_id: string; user_id: string; name: string }>(db, `SELECT p.conversation_id, p.user_id, u.name FROM conversation_participants p
-      JOIN member m ON m.organizationId = p.organization_id AND m.userId = p.user_id
-      JOIN user u ON u.id = p.user_id WHERE p.role = 'member' AND p.conversation_id IN (SELECT value FROM json_each(?)) ORDER BY p.created_at, p.user_id`, [d1JsonStringSet(teamIds)]) : [],
-  ])
+function presentConversationList(rows: ListRow[], opts: ListGuestThreadsOptions, now: Date): InboxRow[] {
   return rows.map(row => {
-    const message = row.latest_message_id ? latest.get(row.latest_message_id) : undefined
-    if (row.latest_message_id && !message) throw new Error(`The latest message of conversation ${row.id} could not be read`)
+    if (row.latest_message_id && (row.latest_author_kind === null || row.latest_occurred_at === null)) throw new Error(`The latest message of conversation ${row.id} could not be read`)
+    const message: LatestMessage | undefined = row.latest_author_kind !== null && row.latest_occurred_at !== null ? {
+      authorKind: row.latest_author_kind, actorUserId: row.latest_author_user_id, actorName: row.latest_actor_name, eventName: row.latest_event_name,
+      text: row.latest_body, photos: row.latest_photos,
+      sentAt: row.latest_provider_inserted_at ? providerInstant(row.latest_provider_inserted_at) : row.latest_occurred_at,
+    } : undefined
     const when = row.record_unit === 'nights' && row.record_starts_at && row.record_stored_ends_at && row.record_timezone
       ? stayWhen(bookingDay(row.record_starts_at, row.record_timezone), bookingDay(row.record_stored_ends_at, row.record_timezone), now, row.time_zone)
       : row.record_starts_at ? `${calendarDate(localDateKey(row.record_starts_at, row.time_zone))}, ${clockTime(row.record_starts_at, row.time_zone)}` : null
     const time = listTime(message ? message.sentAt : row.created_at, row.time_zone, now)
     if (row.kind === 'team') {
-      const others = people.filter(person => person.conversation_id === row.id && person.user_id !== opts.userId).map(person => person.name)
+      if (row.team_people === null) throw new Error(`The members of team conversation ${row.id} could not be read`)
+      const others = (JSON.parse(row.team_people) as { user_id: string; name: string }[]).filter(person => person.user_id !== opts.userId).map(person => person.name)
       const title = row.name ?? row.record_title ?? (others.length ? others.join(', ') : 'You')
       return {
         id: row.id, ...opts.includeSortKey && { last_message_at: row.last_message_at }, kind: 'team', title, avatar_initial: initial(title), channel: 'direct',
@@ -253,23 +277,6 @@ async function presentConversationList(db: DbClient, rows: ListRow[], opts: List
 
 type LatestMessage = { authorKind: string; actorUserId: string | null; actorName: string | null; eventName: string | null; text: string | null; photos: number; sentAt: string }
 
-/** The last message of each listed conversation: who sent it, its words and when. */
-async function latestMessages(db: DbClient, ids: string[]): Promise<Map<string, LatestMessage>> {
-  if (!ids.length) return new Map()
-  const rows = await queryAll<{ id: string; author_kind: string; author_user_id: string | null; actor_name: string | null; event_name: string | null; body: string | null; provider_inserted_at: string | null; occurred_at: string; photos: number }>(db, `
-    SELECT e.id, e.author_kind, e.author_user_id, u.name AS actor_name, e.event_name, e.body,
-      json_extract(e.payload_json, '$.provider_inserted_at') AS provider_inserted_at, e.occurred_at,
-      (SELECT COUNT(*) FROM media_placements mp WHERE mp.owner_type = 'message' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active') AS photos
-    FROM messages e LEFT JOIN user u ON u.id = e.author_user_id
-    WHERE e.id IN (SELECT value FROM json_each(?))`, [d1JsonStringSet(ids)])
-  return new Map(rows.map(row => [row.id, {
-    authorKind: row.author_kind, actorUserId: row.author_user_id, actorName: row.actor_name, eventName: row.event_name,
-    text: row.body,
-    photos: row.photos,
-    sentAt: row.provider_inserted_at ? providerInstant(row.provider_inserted_at) : row.occurred_at,
-  }]))
-}
-
 /** "You", or the sender's first name, before the preview. */
 function previewFrom(message: LatestMessage, context: { guestName: string; viewerId: string; primaryGuestId: string | null; buyer: boolean; business: string }): string {
   // The booking's own opening message is the guest's, as the conversation draws it.
@@ -287,26 +294,21 @@ function previewFrom(message: LatestMessage, context: { guestName: string; viewe
   return message.authorKind === 'krabiclaw' ? 'KrabiClaw' : 'You'
 }
 
-type UnreadCountRow = { list_kind: 'guests' | 'support' | 'team'; count: number }
-
 /**
- * Unread conversations in the Current mailbox per list kind, for the filter
- * menu (All, Guests, Airbnb Support, Team) and the nav count: the list's own
- * scope and the one unread statement, so a count never disagrees with a row.
+ * Whether the reader's whole Current mailbox holds an unread conversation, for
+ * the nav's dot: the list's access scope and the one unread statement, without
+ * the page's filters.
  */
-function unreadConversationsQuery(organizationId: string, opts: ListGuestThreadsOptions, now: Date): BatchQuery {
-  const scope = inboxScope(organizationId, { ...opts, conversationIds: undefined, kind: null, q: null, mailbox: 'current', unreadOnly: false }, now.toISOString())
+function hasUnreadQuery(organizationId: string | null, opts: ListGuestThreadsOptions, now: Date): BatchQuery {
+  const scope = inboxScope(organizationId, { userId: opts.userId, buyerAudience: opts.buyerAudience, mailbox: 'current' }, now.toISOString())
   const unread = unreadSql('gt', opts.userId)
-  return { query: `
-    SELECT CASE WHEN gt.kind = 'team' THEN 'team' WHEN ${SUPPORT_CONVERSATION_SQL('gt')} THEN 'support' ELSE 'guests' END AS list_kind, COUNT(*) AS count
-      FROM ${scope.from}
-     WHERE ${scope.where} AND ${unread.sql}
-     GROUP BY 1`, params: [...scope.params, ...unread.params] }
+  return { query: `SELECT EXISTS (SELECT 1 FROM ${scope.from} WHERE ${scope.where} AND ${unread.sql}) AS has_unread`, params: [...scope.params, ...unread.params] }
 }
 
-function presentUnreadCounts(rows: UnreadCountRow[]): UnreadCounts {
-  const count = (kind: UnreadCountRow['list_kind']) => Number(rows.find(row => row.list_kind === kind)?.count ?? 0)
-  return { all: count('guests') + count('support') + count('team'), guests: count('guests'), support: count('support'), team: count('team') }
+function presentHasUnread(result: D1Result | undefined): boolean {
+  const row = result?.results[0] as { has_unread: number } | undefined
+  if (!row) throw new Error('Unread conversations could not be read')
+  return row.has_unread === 1
 }
 
 /** The Better Auth member row distinguishes an empty inbox from a workspace the user cannot read. */
@@ -319,40 +321,29 @@ function requireInboxMembership(result: D1Result | undefined) {
 }
 
 export async function readWorkspaceInbox(db: DbClient, organizationId: string, opts: ListGuestThreadsOptions, now = new Date()) {
-  const [membership, list, counts] = await executeBatch(db, [
+  const [membership, list, unread] = await executeBatch(db, [
     workspaceMembershipQuery(organizationId, opts.userId),
     conversationListQuery(organizationId, opts, now),
-    unreadConversationsQuery(organizationId, opts, now),
+    hasUnreadQuery(organizationId, opts, now),
   ], { operation: 'Read workspace inbox' })
   requireInboxMembership(membership)
-  return {
-    threads: await presentConversationList(db, list!.results as ListRow[], opts, now),
-    unread: presentUnreadCounts(counts!.results as UnreadCountRow[]),
-  }
+  return { threads: presentConversationList(list!.results as ListRow[], opts, now), has_unread: presentHasUnread(unread) }
 }
 
-export async function countUnreadConversations(db: DbClient, organizationId: string, opts: ListGuestThreadsOptions): Promise<UnreadCounts> {
-  const [membership, counts] = await executeBatch(db, [
-    workspaceMembershipQuery(organizationId, opts.userId),
-    unreadConversationsQuery(organizationId, opts, new Date()),
-  ], { operation: 'Count workspace unread conversations' })
-  requireInboxMembership(membership)
-  return presentUnreadCounts(counts!.results as UnreadCountRow[])
-}
-
-/** Unread conversations a guest has with every business, in their own inbox's Current mailbox. */
-export async function countUnreadAsGuest(db: DbClient, userId: string): Promise<number> {
-  const scope = inboxScope(null, { userId, buyerAudience: true, mailbox: 'current' }, new Date().toISOString())
-  const unread = unreadSql('gt', userId)
-  const row = await queryFirst<{ count: number }>(db, `SELECT COUNT(*) AS count FROM ${scope.from} WHERE ${scope.where} AND ${unread.sql}`, [...scope.params, ...unread.params])
-  if (!row) throw new Error('Unread conversations as a guest could not be counted')
-  return Number(row.count)
+/** A guest's own inbox: their conversations with every business, and whether its Current mailbox holds an unread one. */
+export async function readGuestInbox(db: DbClient, opts: ListGuestThreadsOptions, now = new Date()) {
+  const guest = { ...opts, buyerAudience: true }
+  const [list, unread] = await executeBatch(db, [
+    conversationListQuery(null, guest, now),
+    hasUnreadQuery(null, { userId: opts.userId, buyerAudience: true }, now),
+  ], { operation: 'Read guest inbox' })
+  return { threads: presentConversationList(list!.results as ListRow[], guest, now), has_unread: presentHasUnread(unread) }
 }
 
 /**
  * The app icon's number: the unread conversations a person sees in every
- * organization they belong to, and their own as a guest. Each is the same
- * count the inbox's filter menu shows.
+ * organization they belong to, and their own as a guest. It is sent with a
+ * notification and is not read by any page.
  */
 export async function unreadBadge(db: DbClient, userId: string): Promise<number> {
   const guest = inboxScope(null, { userId, buyerAudience: true, mailbox: 'current' }, new Date().toISOString())

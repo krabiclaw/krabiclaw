@@ -234,10 +234,20 @@ test('listing messaging grants and verified trip invites use the live conversati
       await cohostPage.evaluate(() => window.dispatchEvent(new Event('test:open-dashboard-socket')))
       const incoming = 'This reply arrived while the transcript was loading.'
       await expectStatus(await page.request.post(path, { headers, data: { body: incoming, idempotency_key: crypto.randomUUID() } }), 200)
-      await received
+      // The event carries the end of this reader's transcript through the written message.
+      const created: unknown = JSON.parse(String((await received).payload))
+      expect(isDashboardInvalidation(created) && created.type === 'MESSAGE_CREATE' ? created.tail?.entries.at(-1) : null)
+        .toMatchObject({ type: 'message', body: incoming, side: 'business' })
       releaseSnapshot.resolve(undefined)
       await expect(cohostPage.getByText(incoming, { exact: true })).toBeVisible()
     } finally { releaseSnapshot.resolve(undefined) }
+
+    // On a settled transcript the written message is drawn from its event; the transcript is not read again.
+    const settledReads = transcriptReads
+    const live = 'This reply arrived on the open transcript.'
+    await expectStatus(await page.request.post(path, { headers, data: { body: live, idempotency_key: crypto.randomUUID() } }), 200)
+    await expect(cohostPage.getByText(live, { exact: true })).toBeVisible()
+    expect(transcriptReads).toBe(settledReads)
 
     const invitation = await page.request.post(`${path}/invite`, { headers, data: { email: travelerEmail } })
     await expectStatus(invitation, 201)
