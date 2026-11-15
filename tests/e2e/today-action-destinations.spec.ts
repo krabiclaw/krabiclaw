@@ -7,6 +7,7 @@ import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { articleSocialPostPath, blogCreatePath, insightsPath } from '../../server/utils/dashboard-links'
 import { addLocalDays, localDateAt } from '../../utils/timezone'
+import type { InsightsPage } from '../../shared/insights'
 
 const orgSlug = 'ember-slice-demo'
 let organizationId: string
@@ -596,7 +597,7 @@ test('Insights reads a linked report period and preserves range changes in its U
   await page.getByRole('button', { name: 'Apply', exact: true }).click()
   const preset = await rangeReport
   expect(preset.status(), await preset.text()).toBe(200)
-  const period = (await preset.json() as { period: { start_date: string; end_date: string } }).period
+  const period = (await preset.json() as InsightsPage).filters.range
   expect(period).toMatchObject({ start_date: updatedRange.start_date, end_date: updatedRange.end_date })
   await expect(datePill.locator('time').first()).toHaveAttribute('datetime', updatedRange.start_date)
   await expect(datePill.locator('time').last()).toHaveAttribute('datetime', updatedRange.end_date)

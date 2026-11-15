@@ -49,7 +49,7 @@
 
 <script setup lang="ts">
 import { createReusableTemplate } from '@vueuse/core'
-import { INSIGHTS_PAGES, insightsIndexSchema, pageShown, pageTitle, sectionTitle, type InsightsIndex, type InsightsPageId } from '~/shared/insights'
+import { insightsIndexSchema, type InsightsIndex, type InsightsPageId } from '~/shared/insights'
 import { insightsListKey } from '~/composables/useInsightsRead'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
@@ -69,16 +69,7 @@ const listOpen = ref(false)
 provide(insightsListKey, () => { listOpen.value = true })
 
 const current = computed(() => route.params.section && route.params.page ? `${String(route.params.section)}/${String(route.params.page)}` : null)
-const sections = computed(() => {
-  const index = data.value
-  if (!index) return []
-  const pages = INSIGHTS_PAGES.filter(page => index.pages.includes(page.id) && pageShown(page, index.kinds))
-  return [...new Set(pages.map(page => page.section))].map(section => ({
-    id: section,
-    title: sectionTitle(section, index.kinds, 'all'),
-    pages: pages.filter(page => page.section === section).map(page => ({ id: page.id, title: pageTitle(page.id, index.kinds.filter(kind => !page.kinds || (page.kinds as readonly string[]).includes(kind)), 'all') })),
-  }))
-})
+const sections = computed(() => data.value?.sections ?? [])
 
 /** A page keeps the date range; the offering chosen and the number shown belong to the page left. */
 function pageLink(id: InsightsPageId) {

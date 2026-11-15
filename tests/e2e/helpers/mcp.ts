@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { expect, type APIRequestContext, type APIResponse } from '@playwright/test'
 import { loginAs } from './auth'
 import { seededTenant } from '../seed/manifest'
+import type { InsightsPage } from '../../../shared/insights'
 
 // The Streamable HTTP transport requires clients to accept both
 // application/json and text/event-stream (see the Accept header below), and
@@ -200,20 +201,23 @@ export async function publishOwnHostProfile(request: APIRequestContext, baseURL:
   return { memberId, restore }
 }
 
-/** One headline number of an Insights page, read through the MCP Insights tool as the assistant reads it. */
+/** One counted headline number of an Insights page, read through the MCP Insights tool as the assistant reads it: the sum of the days its chart draws. */
 export async function insightsMetric(request: APIRequestContext, baseURL: string, organizationId: string, page: string, key: string): Promise<number> {
   const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_organization_analytics', args: { organization_id: organizationId, page } })
   expect(response.status()).toBe(200)
-  const metric = mcpData<{ metrics: Array<{ key: string; value: number | null }> }>(await response.json()).metrics.find(candidate => candidate.key === key)
-  expect(metric, `${page} shows ${key}`).toBeDefined()
-  return metric!.value!
+  const chart = mcpData<InsightsPage>(await response.json()).series.charts[key]
+  expect(chart, `${page} charts ${key}`).toBeDefined()
+  return chart!.points.reduce((total, point) => total + point.value!, 0)
 }
 
-/** One value of a row of an Insights page's list (0 for a row it does not list), read through the MCP Insights tool. */
+/** One count in a row of an Insights page's list (0 for a row it does not list), read through the MCP Insights tool as the page shows it. */
 export async function insightsRowValue(request: APIRequestContext, baseURL: string, organizationId: string, page: string, label: string, column: number): Promise<number> {
   const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_organization_analytics', args: { organization_id: organizationId, page } })
   expect(response.status()).toBe(200)
-  const list = mcpData<{ list: { kind: string; rows?: Array<{ label: string; values: Array<number | null> }> } }>(await response.json()).list
-  expect(list.kind).toBe('rows')
-  return list.rows!.find(row => row.label === label)?.values[column] ?? 0
+  const list = mcpData<InsightsPage>(await response.json()).list
+  expect(list?.kind).toBe('rows')
+  const cell = list?.kind === 'rows' ? list.rows.find(row => row.label === label)?.cells[column] : undefined
+  if (cell === undefined) return 0
+  expect(cell).toMatch(/^\d{1,3}(,\d{3})*$/)
+  return Number(cell.replaceAll(',', ''))
 }

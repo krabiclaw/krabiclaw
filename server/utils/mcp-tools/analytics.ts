@@ -18,7 +18,7 @@ const nullableString = { type: ['string', 'null'] } as const
 export const ANALYTICS_TOOLS: McpToolDefinition[] = [
   organizationTool({
     name: 'get_organization_analytics',
-    description: 'Read one Insights page, as the dashboard shows it: its headline numbers, each one by day, and its list. Pages: rating and reviews, occupancy or bookings, cancellations, length of stay, party size, nightly rate or average value, income by channel, booking conversion (with website clicks to book, call or order), lead time, returning guests, page views, top pages and sources. Money is in minor units of the page currency.',
+    description: 'Read one Insights page, as the dashboard shows it: its headline numbers, each one by day, and its list, every number written as the page shows it. Pages: rating and reviews, occupancy or bookings, cancellations, length of stay, party size, nightly rate or average value, income by channel, booking conversion (with website clicks to book, call or order), lead time, returning guests, page views, top pages and sources.',
     domain: 'analytics',
     minimumRole: 'admin',
     required: ['page'],
@@ -147,15 +147,15 @@ export async function handleAnalyticsTools(ctx: McpExecutorContext): Promise<unk
     }
   }
   if (ctx.toolName !== 'get_organization_analytics') return NOT_HANDLED
-  const organization = await queryFirst<{ timezone: string; default_currency: string }>(ctx.organization.db, 'SELECT timezone, default_currency FROM organization WHERE id = ?', [ctx.organization.organizationId])
+  const organization = await queryFirst<{ slug: string; timezone: string; default_currency: string }>(ctx.organization.db, 'SELECT slug, timezone, default_currency FROM organization WHERE id = ?', [ctx.organization.organizationId])
   if (!organization) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
   // The tool's minimum role reads analytics: every page, every visit.
   return await readInsightsPage(ctx.organization.db, {
-    organizationId: ctx.organization.organizationId, timezone: organization.timezone, defaultCurrency: organization.default_currency, userId: '', analytics: true,
+    organizationId: ctx.organization.organizationId, slug: organization.slug, timezone: organization.timezone, defaultCurrency: organization.default_currency, userId: '', analytics: true,
   }, String(ctx.args.page ?? ''), {
     kind: optionalString(ctx.args, 'kind') ?? undefined,
     location_id: optionalString(ctx.args, 'location_id') ?? undefined,
     start_date: optionalString(ctx.args, 'start_date') ?? undefined,
     end_date: optionalString(ctx.args, 'end_date') ?? undefined,
-  })
+  }, ctx.organization.env)
 }
