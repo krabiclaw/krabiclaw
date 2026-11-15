@@ -28,7 +28,7 @@ interface DeliveryList {
 }
 
 /** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
+type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; assignees: TaskPerson[]; resolved_at: string }
 
 const baseURL = testBaseUrl()
 // Contact threads run on the seeded experience business; table bookings on the

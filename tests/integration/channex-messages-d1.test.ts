@@ -17,8 +17,7 @@ import { createDeliveryReceipt, listThreadDeliveries, recordDeliveryOutcome } fr
 import { getGuestRequest } from '../../server/domain/requests.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { guestThreadListPage, parseGuestThreadListQuery } from '../../server/utils/dashboard-guest-threads.ts'
-import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
-import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
+import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
 import { receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
 import { InboundEmailRejection, parseReplyToAddress } from '../../server/utils/reply-address.ts'
@@ -489,9 +488,6 @@ test('a reply is sent with the message id Channex returns, and any Channex error
   let releaseRetry: (() => void) | undefined
   globalThis.fetch = provider.fetch as typeof fetch
   try {
-    const membership = await resolveMembership(env, { organizationId: ORG, userId: OWNER })
-    assert.ok(membership)
-    const principal = memberAccessPrincipal(membership, { env })
     const result = await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal(result.status, 'mirrored')
     if (result.status !== 'mirrored') throw new Error('Expected mapped inquiry')
@@ -522,10 +518,6 @@ test('a reply is sent with the message id Channex returns, and any Channex error
     }
     const refusedEntry = await db.prepare('SELECT id FROM messages WHERE dedupe_key = ?').bind(`guest-thread-operation:${result.conversation_id}:refused`).first<{ id: string }>()
     assert.ok(refusedEntry)
-    const refusedProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
-    assert.deepEqual(refusedProgress?.verification, { status: 'failed', basis: 'provider_acceptance', receipts: [{
-      id: `guest-thread-channex:${result.conversation_id}:refused`, channel: 'airbnb', provider: 'channex', status: 'failed', provider_message_id: null,
-    }] })
     assert.equal((await listThreadDeliveries(db, result.conversation_id)).filter(delivery => delivery.status === 'failed').length, 3)
 
     // Sending the failed reply again under its key sends it once, even when two retries race.
@@ -561,9 +553,6 @@ test('a reply is sent with the message id Channex returns, and any Channex error
     assert.equal(provider.sends - sendsBefore, 1, 'a revoked cohost cannot replay the delivered message')
     assert.deepEqual(await db.prepare('SELECT status, provider_message_id, error FROM guest_thread_deliveries WHERE message_id = ?').bind(refusedEntry.id).first(),
       { status: 'accepted', provider_message_id: `accepted-${provider.sends}`, error: null })
-    const recoveredProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
-    assert.deepEqual([recoveredProgress?.verification.status, recoveredProgress?.verification.receipts.map(receipt => [receipt.status, receipt.provider_message_id])],
-      ['verified', [['accepted', `accepted-${provider.sends}`]]])
   } finally { releaseRetry?.(); globalThis.fetch = realFetch; await runtime.dispose() }
 })
 

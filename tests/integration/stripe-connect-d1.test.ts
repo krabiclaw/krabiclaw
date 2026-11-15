@@ -21,11 +21,8 @@ import { processStripeWebhookEvent } from '../../server/utils/stripe-webhook-eve
 import { createProduct, getProduct, updateProduct } from '../../server/utils/product-management.ts'
 import { setProductBookingConfig } from '../../server/utils/availability.ts'
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
-import { acceptOpportunity, listOpportunities } from '../../server/domain/opportunities.ts'
-import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
-import { getTask, taskViewer } from '../../server/domain/tasks.ts'
+import { listOpportunities } from '../../server/domain/opportunities.ts'
 import bookingConfigRoute from '../../server/api/editor/organizations/[organization_id]/products/[product_id]/booking.put.ts'
-import { readBusinessRecommendations } from '../../server/domain/business-progress.ts'
 
 async function withD1(run: (db: D1Database) => Promise<void>) {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -132,7 +129,7 @@ test('Connect callback URLs are built only from the configured platform origin a
   assert.throws(() => buildAppPayoutsOnboardingUrls('http://krabiclaw.com'), /HTTPS/)
 })
 
-test('Stripe onboarding recommendations follow real account readiness and clear when paid booking is enabled', async t => {
+test('Today suggests Stripe setup until the account is ready, and a price for each experience booked here', async t => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'payouts-app-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
@@ -163,9 +160,15 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
     const membership = await resolveMembership(env, { organizationId: 'org', userId: 'owner' })
     assert.ok(membership)
     const principal = memberAccessPrincipal(membership, { env })
-    const recommendations = async () => (await readBusinessRecommendations(db, principal)).recommendations
-    assert.deepEqual((await recommendations()).filter(item => item.operation === 'payments.connect').map(item => item.subjectId), ['org'])
-    assert.equal((await recommendations()).some(item => item.operation === 'product.payment'), false)
+    // What Today suggests the owner, by id: before Stripe, the payment setup.
+    const suggested = async () => (await listOpportunities(db, principal)).opportunities.map(item => item.id)
+    assert.deepEqual(await suggested(), ['payments.connect:org'])
+    // An experience with no price cannot be booked until it has one; one booked on another site needs none.
+    const unpriced = await createProduct(db, { organizationId: 'org', actor: { actorId: 'owner' }, env, product: { kind: 'experience', name: 'Unpriced Walk' } })
+    await createProduct(db, { organizationId: 'org', actor: { actorId: 'owner' }, env, product: { kind: 'experience', name: 'Partner Tour', order_url: 'https://partner.example/tour' } })
+    assert.deepEqual(await suggested(), ['payments.connect:org', `product.readiness:${unpriced.id}`])
+    await updateProduct(db, { organizationId: 'org', actor: { actorId: 'owner' }, env, productId: unpriced.id, patch: { active: false, updated_at: unpriced.updated_at } })
+    assert.deepEqual(await suggested(), ['payments.connect:org'], 'an inactive experience needs no price')
     const app = new H3()
     app.post('/api/dashboard/connect', connectStartRoute)
     app.post('/api/dashboard/connect/status', connectStatusRoute)
@@ -251,43 +254,19 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
       const pending = await call('/status', app_)
       assert.equal(pending.status, 200)
       assert.equal((pending.body.account as { status: string }).status, 'pending_review')
-      const waiting = await recommendations()
-      assert.equal(waiting.some(item => item.operation === 'payments.connect' || item.operation === 'product.payment'), false, 'Stripe review is not another owner setup task')
+      assert.deepEqual(await suggested(), [], 'Stripe review is not another owner setup task')
       account.configuration.merchant.capabilities.card_payments.status = 'active'
       const ready = await call('/status', app_)
       assert.equal(ready.status, 200)
       assert.equal((ready.body.account as { status: string }).status, 'ready')
-      const enabledPayments = await recommendations()
-      assert.equal(enabledPayments.some(item => item.operation === 'payments.connect'), false)
-      assert.deepEqual(enabledPayments.filter(item => item.operation === 'product.payment').map(item => item.subjectId), [paid.id], 'only the actually priced experience should require advance payment')
-      const editor = `/dashboard/cliff/products/${paid.id}`
-      const { opportunities } = await listOpportunities(db, principal)
-      const payment = opportunities.find(item => item.path === `${editor}/booking/payment`)
-      assert.ok(payment)
-      const accepted = await acceptOpportunity(db, principal, payment.id, {})
-      const viewer = await taskViewer(principal)
-      const task = await getTask(db, viewer, accepted.id)
-      assert.deepEqual(task.action, { type: 'open', label: 'Open payment settings', path: payment.path })
-      assert.equal(task.can.complete, false)
+      // Payments are ready: only the experience with a price above zero is offered taking payment at booking.
+      assert.deepEqual(await suggested(), [], 'ready payments leave nothing to set up')
       const save = await app.request(Object.assign(new Request(`https://proof.example/api/editor/organizations/org/products/${paid.id}/booking`, {
         method: 'PUT', headers: { 'content-type': 'application/json', ...app_ }, body: JSON.stringify({ online_payment_required: true }),
       }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
       assert.equal(save.status, 200, await save.text())
-      assert.equal((await getTask(db, viewer, accepted.id)).status, 'done')
 
       assert.equal((await getProduct(db, 'org', paid.id)).booking?.online_payment_required, true, 'ordinary catalog read observes the saved payment setting')
-      assert.equal((await recommendations()).some(item => item.operation === 'product.payment'), false, 'actual booking configuration clears payment work on the next read without a day boundary')
-
-      const catalogCards = async () => (await listOpportunities(db, principal)).opportunities
-        .filter(item => item.product_id === paid.id && item.status_line === 'Catalog').map(item => item.path)
-      // Every offering has its host; the card asks for the host's public profile.
-      assert.deepEqual(await catalogCards(), ['/dashboard/cliff/team/m-owner/profile'])
-      await writeMemberScheduling({ env, organizationId: 'org', userId: 'owner' }, 'm-owner', { updated_at: null, public_name: 'Wheel class host', public_approved: true })
-      assert.deepEqual(await catalogCards(), [`${editor}/locations`])
-      await updateProduct(db, { organizationId: 'org', productId: paid.id, actor: { actorId: 'owner' }, env,
-        patch: { order_url: 'https://example.com/book/wheel-class' } })
-      assert.deepEqual(await catalogCards(), [])
-
     } finally { fetchMock.mock.restore() }
   } finally {
     await runtime.dispose()

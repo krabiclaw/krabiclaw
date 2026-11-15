@@ -41,7 +41,7 @@ function nightCalendarPath(from: string, to: string, productId?: string) {
 }
 
 /** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { reservations: { title: string | null; cards: TodayReservation[] }; tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
+type BusinessToday = { reservations: { title: string | null; cards: TodayReservation[] }; tasks: TaskSection[]; opportunities: OpportunityView[]; assignees: TaskPerson[]; resolved_at: string }
 
 function localDay(offset: number): string {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
@@ -3779,10 +3779,10 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
       let releaseQuote!: () => void
       const heldQuote = new Promise<void>(resolve => { releaseQuote = resolve })
       const quoteForTwo = (url: URL) => url.pathname.endsWith('/quote') && url.searchParams.get('adults') === '2'
+      // The browser makes the held request itself: route.fetch() would resolve the tenant's *.localhost host from Node, which CI cannot.
       await guest.route(quoteForTwo, async route => {
-        const upstream = await route.fetch()
         await heldQuote
-        await route.fulfill({ response: upstream })
+        await route.continue()
       })
       try {
         const updated = guest.waitForResponse(response => quoteForTwo(new URL(response.url())))
@@ -4866,7 +4866,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expectStatus(todayResponse, 200)
       const today = await todayResponse.json() as BusinessToday
       const arrivalPath = `/dashboard/${slug}/bookings/${stays[0]!.booking_id}`
-      expect(today).toMatchObject({ tasks: [], opportunities: [], opportunity_issues: [], assignees: [] })
+      expect(today).toMatchObject({ tasks: [], opportunities: [], assignees: [] })
       const upcomingResponse = await cleaner.request.get(api('today'), { params: { range: 'upcoming' } })
       await expectStatus(upcomingResponse, 200)
       const upcoming = await upcomingResponse.json() as BusinessToday

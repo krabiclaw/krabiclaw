@@ -1,428 +1,8 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:e858f7bf557a3625395c1fc9174d974f15408fd9eafe94ba65d71ebaec786193",
-  "documentationFingerprint": "sha256:0ed95f4dd4018be2f5a21ea3f233a3d61703c383dfbad2251a95394f02c9bdd0",
+  "fingerprint": "sha256:fa8873a98da500e6a27ea417c20a0761eae4723042ae2757b380ce33c29716c7",
+  "documentationFingerprint": "sha256:a267f74ccba9a41cc88d6936c8a7126d20eda26c3aca8195fe8a8b2115b87587",
   "tools": [
-    {
-      "name": "accept_opportunity",
-      "title": "Accept opportunity",
-      "description": "Take on an opportunity: it becomes a task, given to you and due today unless you say otherwise. Refused when what it was based on has changed; read list_opportunities again.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "assigned_member_id": {
-            "description": "A Better Auth member id from list_tasks assignees; null to unassign.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "due_at": {
-            "format": "date-time",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "opportunity_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "opportunity_id"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "task": {
-            "properties": {
-              "action": {
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "assignee": {
-                "anyOf": [
-                  {
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "initial": {
-                        "type": "string"
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "type": {
-                        "enum": [
-                          "member"
-                        ],
-                        "type": "string"
-                      },
-                      "you": {
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "id",
-                      "name",
-                      "initial",
-                      "you"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "avatar": {
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "booking_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "can": {
-                "properties": {
-                  "assign": {
-                    "type": "boolean"
-                  },
-                  "complete": {
-                    "type": "boolean"
-                  },
-                  "edit": {
-                    "type": "boolean"
-                  },
-                  "reopen": {
-                    "type": "boolean"
-                  },
-                  "skip": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "complete",
-                  "skip",
-                  "reopen",
-                  "assign",
-                  "edit"
-                ],
-                "type": "object"
-              },
-              "conversation_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "detail": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "due_at": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "error": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "face": {
-                "enum": [
-                  "photo",
-                  "compact"
-                ],
-                "type": "string"
-              },
-              "id": {
-                "type": "string"
-              },
-              "image_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "kind": {
-                "enum": [
-                  "turnover",
-                  "message_delivery",
-                  "booking_review",
-                  "booking_change",
-                  "opportunity",
-                  "custom",
-                  "stay_ready",
-                  "consultation_prep",
-                  "consultation_follow_up"
-                ],
-                "type": "string"
-              },
-              "location_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "note": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "notes": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "outcome": {
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "path": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "person": {
-                "anyOf": [
-                  {
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "initial": {
-                        "type": "string"
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "type": {
-                        "enum": [
-                          "member"
-                        ],
-                        "type": "string"
-                      },
-                      "you": {
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "id",
-                      "name",
-                      "initial",
-                      "you"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "product_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "product_session_id": {
-                "type": "string"
-              },
-              "reservation": {
-                "properties": {
-                  "conversation": {
-                    "anyOf": [
-                      {
-                        "properties": {
-                          "description": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "label": {
-                            "type": "string"
-                          },
-                          "to": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "label",
-                          "description",
-                          "to"
-                        ],
-                        "type": "object"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "date_label": {
-                    "type": "string"
-                  },
-                  "guest_image_url": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "headline": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "status_label": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "date_label",
-                  "headline",
-                  "name",
-                  "status_label",
-                  "guest_image_url",
-                  "conversation"
-                ],
-                "type": "object"
-              },
-              "sheet": {
-                "type": "object"
-              },
-              "starts_at": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "status": {
-                "enum": [
-                  "open",
-                  "done",
-                  "skipped",
-                  "cancelled"
-                ],
-                "type": "string"
-              },
-              "status_line": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "tag": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "timezone": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              },
-              "version": {
-                "type": "integer"
-              },
-              "when": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "kind",
-              "status",
-              "version",
-              "face",
-              "tag",
-              "image_url",
-              "avatar",
-              "status_line",
-              "title",
-              "when",
-              "detail",
-              "error",
-              "note",
-              "person",
-              "assignee",
-              "sheet",
-              "starts_at",
-              "due_at",
-              "timezone",
-              "notes",
-              "outcome",
-              "action",
-              "path",
-              "product_id",
-              "location_id",
-              "booking_id",
-              "conversation_id",
-              "can"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "task"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false,
-        "title": "Accept opportunity"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "tasks",
-      "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
     {
       "name": "add_organization_language",
       "title": "Add organization language",
@@ -13830,7 +13410,6 @@
                   "message_delivery",
                   "booking_review",
                   "booking_change",
-                  "opportunity",
                   "custom",
                   "stay_ready",
                   "consultation_prep",
@@ -37837,7 +37416,6 @@
                   "message_delivery",
                   "booking_review",
                   "booking_change",
-                  "opportunity",
                   "custom",
                   "stay_ready",
                   "consultation_prep",
@@ -38072,80 +37650,6 @@
         "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Create task"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "tasks",
-      "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "defer_opportunity",
-      "title": "Defer opportunity",
-      "description": "Set an opportunity aside until a time; it returns then if it still applies.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "opportunity_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "until": {
-            "description": "An instant with Z or a numeric offset.",
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": [
-          "opportunity_id",
-          "until"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "opportunity": {
-            "properties": {
-              "available_at": {
-                "type": "string"
-              },
-              "id": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "available_at"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "opportunity"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": false,
-        "title": "Defer opportunity"
       },
       "securitySchemes": [
         {
@@ -43238,79 +42742,6 @@
         }
       ],
       "domain": "locales",
-      "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "dismiss_opportunity",
-      "title": "Dismiss opportunity",
-      "description": "Decline an opportunity, optionally saying why. It returns only when its evidence changes.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "note": {
-            "maxLength": 2000,
-            "minLength": 1,
-            "type": "string"
-          },
-          "opportunity_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "opportunity_id"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "opportunity": {
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "status": {
-                "const": "dismissed"
-              }
-            },
-            "required": [
-              "id",
-              "status"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "opportunity"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": false,
-        "title": "Dismiss opportunity"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "tasks",
       "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -68974,7 +68405,7 @@
     {
       "name": "list_opportunities",
       "title": "List opportunities",
-      "description": "List and save current opportunities such as drafts to finish, posts to share, calendar gaps and preparation to send a booked guest or client. Reports evidence it could not read. Use a returned ID to accept, dismiss or defer an opportunity.",
+      "description": "List what Today suggests: setup the business has not finished (connecting payments, adding a first offering, a price for each experience without one); and a welcome for each booked guest or client who has not heard from the business since booking. Each one goes away when that setup is done or the business messages the guest.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -68996,17 +68427,11 @@
         "$defs": {},
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "issues": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
           "opportunities": {
             "items": {
               "properties": {
                 "conversation_id": {
-                  "description": "The guest conversation a message opportunity is sent in.",
+                  "description": "The guest conversation a welcome is sent in; null for a setup item.",
                   "type": [
                     "string",
                     "null"
@@ -69068,8 +68493,7 @@
           }
         },
         "required": [
-          "opportunities",
-          "issues"
+          "opportunities"
         ],
         "type": "object"
       },
@@ -69077,7 +68501,7 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "title": "List opportunities"
       },
       "securitySchemes": [
@@ -71611,7 +71035,7 @@
     {
       "name": "list_tasks",
       "title": "List tasks",
-      "description": "Read Today or Upcoming as stored tasks: turnovers, booking decisions, scheduled messages that did not send, accepted opportunities and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them and the turnovers at homes they look after. assignees lists who a manager can give work to.",
+      "description": "Read Today or Upcoming as stored tasks: turnovers, booking decisions, scheduled messages that did not send and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them and the turnovers at homes they look after. assignees lists who a manager can give work to.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -71625,7 +71049,6 @@
               "message_delivery",
               "booking_review",
               "booking_change",
-              "opportunity",
               "custom",
               "stay_ready",
               "consultation_prep",
@@ -71846,7 +71269,6 @@
                           "message_delivery",
                           "booking_review",
                           "booking_change",
-                          "opportunity",
                           "custom",
                           "stay_ready",
                           "consultation_prep",
@@ -102913,7 +102335,6 @@
                   "message_delivery",
                   "booking_review",
                   "booking_change",
-                  "opportunity",
                   "custom",
                   "stay_ready",
                   "consultation_prep",
@@ -127527,7 +126948,7 @@
             "type": "string"
           },
           "title": {
-            "description": "Only for a task someone added or an accepted opportunity.",
+            "description": "Only for a task someone added.",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
@@ -127677,7 +127098,6 @@
                   "message_delivery",
                   "booking_review",
                   "booking_change",
-                  "opportunity",
                   "custom",
                   "stay_ready",
                   "consultation_prep",

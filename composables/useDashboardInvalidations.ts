@@ -20,6 +20,9 @@ export interface DashboardInvalidationConnection {
   /** Heads being read before their conversation opens; an opening conversation takes its read from here. */
   conversationReads: Map<string, Promise<ConversationPage | undefined>>
   recentInbox: { snapshot?: { key: string; page: ThreadListPage; expiresAt: number } }
+  /** Today or Upcoming as last read, for a return within the live connection; the same rules as the inbox's.
+   * `invalidations` counts the events that drop it, so a read an event overtook is not kept. */
+  recentToday: { snapshot?: { key: string; page: unknown; expiresAt: number }; invalidations: number }
   connect: () => void
   waitForFirstOpen: (signal: AbortSignal) => Promise<void>
 }
@@ -34,12 +37,13 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
   const recentConversations = new Map<string, ConversationPage>()
   const conversationReads = new Map<string, Promise<ConversationPage | undefined>>()
   const recentInbox: DashboardInvalidationConnection['recentInbox'] = {}
+  const recentToday: DashboardInvalidationConnection['recentToday'] = { invalidations: 0 }
   // `nuxt dev` cannot carry this socket: its dev server answers the upgrade
   // with a plain 200 (docs/local-development.md). Realtime runs under
   // `yarn dev:worker`, staging and production; here the dashboard stays on its
   // reads instead of retrying a connection that cannot open and reporting it.
   if (import.meta.dev) {
-    return { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), reconnectEpoch: ref(0), accessEnded: ref(0), recentConversations, conversationReads, recentInbox, connect: () => {}, waitForFirstOpen: async () => {} }
+    return { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), reconnectEpoch: ref(0), accessEnded: ref(0), recentConversations, conversationReads, recentInbox, recentToday, connect: () => {}, waitForFirstOpen: async () => {} }
   }
 
   const status = ref<DashboardInvalidationStatus>('closed')
@@ -150,6 +154,12 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
         || ((parsed.type === 'MESSAGE_CREATE' || parsed.type === 'MESSAGE_UPDATE') && !parsed.scheduled)) {
         recentInbox.snapshot = undefined
       }
+      // The events Today re-reads on.
+      if (parsed.type === 'business.changed' || parsed.type === 'stay.changed' || parsed.type === 'nights.changed' || parsed.type === 'access.changed'
+        || ((parsed.type === 'MESSAGE_CREATE' || parsed.type === 'MESSAGE_UPDATE') && !parsed.team)) {
+        recentToday.snapshot = undefined
+        recentToday.invalidations++
+      }
       if (parsed.type === 'CONVERSATION_LEAVE' && parsed.user_id === reader.value) {
         recentConversations.delete(parsed.conversation_id)
       } else if (parsed.type === 'access.changed') {
@@ -234,10 +244,12 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     if (value === 'open') return
     recentConversations.clear()
     recentInbox.snapshot = undefined
+    recentToday.snapshot = undefined
   }, { flush: 'sync' })
   watch(reader, (next, previous) => {
     recentConversations.clear()
     recentInbox.snapshot = undefined
+    recentToday.snapshot = undefined
     // Learning the identity of the session already used in the handshake does not change it.
     if (previous !== undefined && next !== undefined && next !== previous) resetConnection()
   }, { flush: 'sync' })
@@ -260,7 +272,7 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     status.value = 'closed'
   })
 
-  return { status, event, connectionEpoch, reconnectEpoch, accessEnded, recentConversations, conversationReads, recentInbox, connect, waitForFirstOpen }
+  return { status, event, connectionEpoch, reconnectEpoch, accessEnded, recentConversations, conversationReads, recentInbox, recentToday, connect, waitForFirstOpen }
 }
 
 export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>, personal: Readonly<Ref<boolean>>, reader: Readonly<Ref<string | undefined>>, sessionPending: Readonly<Ref<boolean>>): DashboardInvalidationConnection {

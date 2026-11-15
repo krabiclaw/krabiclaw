@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { assertResponsibleMember } from '~/server/utils/member-access'
-import { opportunityDoneQuery, sessionPrepTaskQueries } from '~/server/domain/tasks'
+import { sessionPrepTaskQueries } from '~/server/domain/tasks'
 import { publishAccessInvalidation, publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { assertPublishedHost } from '~/server/utils/public-provider'
 import { creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
@@ -362,7 +362,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   }, ...(unit === 'slot' && reassigned ? sessionPrepTaskQueries({
     query: 'SELECT id FROM product_sessions WHERE organization_id = ? AND product_id = ?',
     params: [input.organizationId, input.productId],
-  }, now) : []), ...(unit === 'slot' && patch.online_payment_required === true ? [opportunityDoneQuery(input.organizationId, ['product.payment'], input.productId, now)] : [])] }
+  }, now) : [])] }
 }
 
 export function bookingConfigurationWriteError(error: unknown): unknown {
@@ -1649,7 +1649,7 @@ export async function claimSessionCapacity(db: DbClient, input: {
   return { bookingId }
 }
 
-export async function getSessionAvailability(db: DbClient, env: CloudflareEnv, organizationId: string, productId: string, sessionId: string): Promise<SessionAvailability> {
+async function getSessionAvailability(db: DbClient, env: CloudflareEnv, organizationId: string, productId: string, sessionId: string): Promise<SessionAvailability> {
   const session = await queryFirst<ProductSession>(db, 'SELECT * FROM product_sessions WHERE organization_id=? AND product_id=? AND id=?', [organizationId, productId, sessionId])
   if (!session) throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found for this offering' })
   const sessions = await listSessions(db, { env, organizationId, productId, sessionIds: [sessionId], fromInstant: session.starts_at, toInstant: session.ends_at, statuses: ['scheduled', 'cancelled'] })

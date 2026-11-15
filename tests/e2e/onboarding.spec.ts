@@ -253,7 +253,8 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await expect(website.frameLocator('iframe').locator('body')).toContainText(name)
   const suggestions = page.getByTestId('today-opportunities')
   await expect(suggestions.getByRole('link', { name: /Set up payments/ })).toHaveAttribute('href', /\/payments\/payout-method$/)
-  await suggestions.getByRole('link', { name: /Connect a custom domain/ }).click()
+  // The domain page offers the plan that includes a custom domain.
+  await page.goto(`/dashboard/${created!.slug}/website/preferences/domains`)
   await expect(page.getByRole('link', { name: 'View plans' })).toHaveAttribute('href', /\/billing\/upgrade\?plan=growth$/)
   await expect(page.getByRole('button', { name: 'Connect domain' })).toHaveCount(0)
   await expect(page.getByText('Private', { exact: true })).toBeVisible()
@@ -446,7 +447,6 @@ for (const setup of [
         const exit = page.getByRole('button', { name: 'Save & exit', exact: true })
         const section = page.getByRole('textbox', { name: 'Section name', exact: true })
         const dish = page.getByRole('textbox', { name: 'Dish name', exact: true })
-        const resume = page.getByRole('link', { name: 'Continue your menu setup', exact: true })
         await page.goto(guide.href)
         await section.fill('Lunch menu')
         await exit.click()
@@ -460,9 +460,7 @@ for (const setup of [
         await exit.click()
         await expect(page).toHaveURL(`${baseURL}${caller}`)
 
-        await page.goto(`/dashboard/${org}`)
-        await resume.click()
-        await expect(page).toHaveURL(url => url.searchParams.get('location_id') === mainLocation)
+        await page.goto(guide.href)
         await dish.fill('Tamarind prawns')
         const next = page.getByRole('button', { name: 'Next', exact: true })
         await next.click()
@@ -477,9 +475,7 @@ for (const setup of [
         await page.getByText('Lunch menu', { exact: true }).click()
         await expect(page.getByText('Tamarind prawns', { exact: true })).toBeVisible()
 
-        await page.goto(`/dashboard/${org}`)
-        await resume.click()
-        await expect(page).toHaveURL(url => url.searchParams.get('location_id') === branchLocation)
+        await page.goto(branchGuide.href)
         await expect(dish).toBeVisible()
       }
       if (setup.vertical === 'experience') {

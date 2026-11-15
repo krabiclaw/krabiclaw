@@ -9,10 +9,8 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
-import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayGapCandidates, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
-import { readBusinessProgressReference } from '../../server/utils/business-outcomes.ts'
-import { dismissOpportunity, listOpportunities } from '../../server/domain/opportunities.ts'
-import { getTask, listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
+import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
+import { closeTask, listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { H3Event } from 'h3'
@@ -1319,84 +1317,6 @@ test('the multi-calendar reads every home the caller looks after, each night as 
   }
 })
 
-test('gap recommendations follow live listing state, effective night rules and actual stay claims', { timeout: 120_000 }, async t => {
-  const { runtime, db, env } = await boot()
-  try {
-    const cabin = await home(db, env, { name: 'Gap cabin', location: 'cabin-site' })
-    await updateStayHome(env, db, manager, cabin.id, { min_nights: 21, assigned_member_id: `m-${OWNER}` })
-    const first = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'gap-before', check_in_date: '2027-05-01', check_out_date: '2027-05-03', ...guest })
-    const second = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'gap-after', check_in_date: '2027-05-04', check_out_date: '2027-05-06', ...guest })
-    await setStayNights(db, env, manager, { product_id: cabin.id, from: '2027-05-03', to: '2027-05-04', min_stay_arrival: 1 })
-    const window = { from: '2027-05-01', to: '2027-05-07' }
-    const read = () => readStayGapCandidates(db, manager, window)
-    assert.deepEqual(await read(), [], 'a configured draft home is not promoted')
-
-    await writeMemberScheduling({ env, userId: OWNER, organizationId: ORG }, `m-${OWNER}`, { updated_at: null, public_name: 'Cabin host', public_approved: true })
-    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
-    const gap = { productId: cabin.id, name: 'Gap cabin', locationId: 'cabin-site', from: '2027-05-03', to: '2027-05-04', nights: 1, bookable: true, restriction: null }
-    assert.deepEqual(await read(), [gap], 'the saved one-night override applies despite the 21-night home default')
-    const quoted = await quoteStay(db, ORG, await readStayHome(db, manager, cabin.id), { check_in_date: gap.from, check_out_date: gap.to, adults: 1 })
-    assert.equal(quoted.nights, 1)
-    assert.equal(quoted.total_minor, 15_000)
-
-    await setStayNights(db, env, manager, { product_id: cabin.id, from: gap.from, to: gap.to, min_stay_arrival: 2 })
-    assert.deepEqual(await read(), [{ ...gap, bookable: false, restriction: 'Stays arriving on 2027-05-03 are at least 2 nights' }])
-    await setStayNights(db, env, manager, { product_id: cabin.id, from: gap.from, to: gap.to, min_stay_arrival: 1 })
-    const filled = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'gap-filled', check_in_date: gap.from, check_out_date: gap.to, ...guest })
-    assert.deepEqual(await read(), [], 'a real stay clears the gap on the next read')
-    await cancelStay(db, env, manager, filled.id, { version: filled.version, reason: 'Guest cancelled' })
-    assert.deepEqual(await read(), [gap], 'cancellation frees the same bounded gap')
-
-    // Base-price eligibility is the quote's own rule, even with priced overrides.
-    await setStayNights(db, env, manager, { product_id: cabin.id, from: gap.from, to: gap.to, price_minor: 15_000 })
-    const offering = await getProduct(db, ORG, cabin.id)
-    const variant = offering.variants[0]!
-    const base = variant.prices[0]!
-    await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { variants: [{ id: variant.id, prices: [{ id: base.id, active: false }] }] } }), { status: 409, data: { code: 'STAY_BOOKING_INCOMPLETE', field: 'variants.prices', missing: ['variants.prices'] } })
-    assert.deepEqual(await read(), [gap], 'The canonical product writer prevents removing the active nightly price from a published home')
-
-    await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'gap-third-boundary', check_in_date: '2027-05-08', check_out_date: '2027-05-10', ...guest })
-    const membership = await resolveMembership(env, { organizationId: ORG, userId: OWNER })
-    assert.ok(membership)
-    const principal = memberAccessPrincipal(membership, { env })
-    for (const [from, to] of [['invalid', gap.to], ['2027-02-30', gap.to], [gap.from, gap.from], [gap.to, gap.from], ['2027-05-03', '2027-08-03'], ['0000-01-01', '0000-01-02'], ['9999-12-30', '9999-12-31']]) {
-      await assert.rejects(readBusinessProgressReference(db, principal, { operation: 'stay.gap', subject_id: JSON.stringify([cabin.id, from, to]) }), { status: 404, data: { code: 'PROGRESS_SUBJECT_NOT_FOUND', field: 'subject_id' } })
-    }
-    // The gap opportunities Today offers the owner, by the subject each one records.
-    const gapOpportunities = async () => {
-      const listed = (await listOpportunities(db, principal)).opportunities
-      const recorded = new Map((await db.prepare('SELECT id, operation, subject_id FROM opportunities WHERE organization_id = ?').bind(ORG).all<{ id: string; operation: string; subject_id: string }>()).results.map(row => [row.id, row]))
-      return listed.flatMap(item => recorded.get(item.id)!.operation === 'stay.gap' ? [{ id: item.id, subjectId: recorded.get(item.id)!.subject_id }] : [])
-    }
-    t.mock.timers.enable({ apis: ['Date'], now: new Date('2027-05-03T12:00:00.000Z') })
-    const [firstGap, ...otherGaps] = await gapOpportunities()
-    assert.ok(firstGap)
-    assert.deepEqual([firstGap.subjectId, otherGaps], [JSON.stringify([cabin.id, gap.from, gap.to]), []])
-    assert.deepEqual(await dismissOpportunity(db, principal, firstGap.id, {}), { id: firstGap.id, status: 'dismissed' })
-    assert.deepEqual(await gapOpportunities(), [], 'a dismissed gap stays dismissed while its evidence is unchanged')
-    t.mock.timers.tick(2 * 86_400_000)
-    assert.deepEqual((await gapOpportunities()).map(item => item.subjectId), [JSON.stringify([cabin.id, '2027-05-06', '2027-05-08'])], 'A prior interval’s dismissal never suppresses this home’s next gap')
-    t.mock.timers.reset()
-
-    // The organization is still on May 3 in Denver; this home's day is May 4.
-    await updateLocation(db, ORG, 'cabin-site', { timezone: 'Asia/Bangkok' }, OWNER, env)
-    t.mock.timers.enable({ apis: ['Date'], now: new Date('2027-05-03T20:00:00.000Z') })
-    assert.deepEqual(await read(), [], 'An interval that passed locally is not promoted')
-    await assert.rejects(quoteStay(db, ORG, await readStayHome(db, manager, cabin.id), { check_in_date: gap.from, check_out_date: gap.to, adults: 1 }), { data: { code: 'STAY_CHECK_IN_PAST', field: 'check_in_date', today: '2027-05-04' } })
-    t.mock.timers.reset()
-
-    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: false, actor: { actorId: OWNER } })
-    assert.deepEqual(await read(), [], 'withdrawing the listing clears its growth recommendation')
-    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
-    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { active: false } })
-    assert.deepEqual(await read(), [], 'an inactive home is not promoted even when its publication remains saved')
-    assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, ...window })).stays.map(stay => stay.id), [first.id, second.id], 'listing eligibility does not delete existing stays')
-  } finally {
-    t.mock.timers.reset()
-    await runtime.dispose()
-  }
-})
-
 test('unknown home clocks preserve turnover dates without inventing task instants', { timeout: 120_000 }, async t => {
   const { runtime, db, env } = await boot()
   try {
@@ -1408,12 +1328,7 @@ test('unknown home clocks preserve turnover dates without inventing task instant
     const membership = await resolveMembership(env, { organizationId: ORG, userId: CLEANER })
     const viewer = await taskViewer(memberAccessPrincipal(membership!, { env }))
     const before = new Date('2026-11-02T18:00:00.000Z')
-    // An earlier deployed Worker can still write an old reply task during the rollout.
-    await db.prepare(`INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, assigned_member_id, timezone, status, dedupe_key, created_at, updated_at)
-      VALUES ('retired-reply', ?, 'guest_reply', 'conversation', ?, ?, 'UTC', 'open', 'retired-reply', ?, ?)`)
-      .bind(ORG, first.conversation_id, `m-${CLEANER}`, before.toISOString(), before.toISOString()).run()
     assert.deepEqual((await listTasks(db, viewer, parseTaskListQuery({}), before)).sections, [])
-    await assert.rejects(getTask(db, viewer, 'retired-reply', before), { status: 404 })
     const upcoming = await listTasks(db, viewer, parseTaskListQuery({ range: 'upcoming' }), before)
     assert.deepEqual(upcoming.sections.map(section => [section.id, section.tasks.map(task => task.booking_id)]), [['2026-11-03', [first.id]], ['2026-11-05', [next.id]]])
     assert.equal(upcoming.sections[0]!.title, 'Tomorrow')
@@ -1425,6 +1340,13 @@ test('unknown home clocks preserve turnover dates without inventing task instant
     assert.equal(tasks[0]!.booking_id, first.id)
     assert.equal(tasks[0]!.when, 'Time not set')
     assert.deepEqual(tasks[0]!.sheet, { heading: 'Turnover', title: 'Cabin', date: 'Tue, Nov 3', checkout: { label: 'Checkout', time: 'Time not set', guest: 'Ana' }, checkin: { label: 'Check-in', time: 'Time not set', guest: 'Ana · 2 guests' } })
+    assert.equal(tasks[0]!.detail, 'Ana out · Ana in')
+    // The cleaner closes it: the list reads the closed card exactly as the close returned it, with who closed it and what they found.
+    const closed = await closeTask(db, viewer, tasks[0]!.id, { status: 'done', note: 'Towels restocked', photos: [], env })
+    assert.deepEqual([closed.status, closed.note, closed.person?.name, closed.outcome?.closed_by, closed.outcome?.photos], ['done', '“Towels restocked”', 'You', 'You', []])
+    const done = (await listTasks(db, viewer, parseTaskListQuery({}), new Date())).sections
+    assert.deepEqual(done.map(section => [section.id, section.tasks.map(task => task.id)]), [['done', [closed.id]]])
+    assert.deepEqual(done[0]!.tasks[0], closed)
   } finally {
     t.mock.timers.reset()
     await runtime.dispose()

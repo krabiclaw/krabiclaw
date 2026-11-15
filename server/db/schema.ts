@@ -1,5 +1,4 @@
 import type { OrganizationSettings } from '../../shared/organization-settings'
-import { BUSINESS_PROGRESS_OPERATIONS } from '../../shared/business-outcomes'
 import { INTEGRATION_PROVIDERS, NONPROFIT_STATUS_CANONICAL } from '../../shared/organization-settings'
 import type { MediaCategory } from '~/shared/media-placement-contract'
 import { sql } from "drizzle-orm"
@@ -311,79 +310,22 @@ export const jwks = sqliteTable("jwks", {
 	expiresAt: integer({ mode: "timestamp" }),
 });
 
-// Authored organization intent. These are not generated tasks or assertions
-// that a business result occurred. Archiving retains intent and its audit trail.
-export const organization_goals = sqliteTable('organization_goals', {
-  id: text().primaryKey(),
-  organization_id: text().notNull().references(() => organization.id, { onDelete: 'cascade' }),
-  intent: text().notNull(),
-  constraints: text(),
-  target_at: text(),
-  strategy_json: text(),
-  status: text({ enum: ['active', 'archived'] }).notNull(),
-  created_by_user_id: text().references(() => user.id, { onDelete: 'set null' }),
-  updated_by_user_id: text().references(() => user.id, { onDelete: 'set null' }),
-  created_at: text().notNull(),
-  updated_at: text().notNull(),
-}, table => [
-  unique('organization_goals_scope_unique').on(table.organization_id, table.id),
-  index('organization_goals_status_idx').on(table.organization_id, table.status, table.updated_at),
-  check('organization_goals_text_check', sql`length(trim(intent)) BETWEEN 1 AND 2000 AND (constraints IS NULL OR length(trim(constraints)) BETWEEN 1 AND 2000)`),
-  check('organization_goals_status_check', sql`status IN ('active', 'archived')`),
-  check('organization_goals_instants_check', sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (target_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', target_at, '+0 days') IS target_at)`),
-]);
-
-// Something the business could do, as the opportunity selector found it at one
-// evidence revision (server/domain/opportunities.ts). New evidence is a new
-// row; a row whose evidence is gone stays as it was. Accepting creates its one task
-// (tasks.opportunity_id); dismissing records the owner's decision. Tasks
-// reference this table, so its value sets (operation, status) are enforced by
-// the domain, not by a CHECK a new value would have to rebuild. A decision
-// (accepted, dismissed) carries when and by whom.
-export const opportunities = sqliteTable('opportunities', {
-  id: text().primaryKey(),
-  organization_id: text().notNull().references(() => organization.id, { onDelete: 'cascade' }),
-  operation: text({ enum: BUSINESS_PROGRESS_OPERATIONS }).notNull(),
-  subject_id: text().notNull(),
-  evidence_revision: text().notNull(),
-  goal_id: text(),
-  goal_revision: text(),
-  status: text({ enum: ['open', 'accepted', 'dismissed'] }).notNull(),
-  available_at: text(),
-  decision_note: text(),
-  decided_at: text(),
-  decided_by_user_id: text().references(() => user.id, { onDelete: 'set null' }),
-  created_at: text().notNull(),
-  updated_at: text().notNull(),
-}, table => [
-  unique('opportunities_scope_unique').on(table.organization_id, table.id),
-  foreignKey({ columns: [table.organization_id, table.goal_id], foreignColumns: [organization_goals.organization_id, organization_goals.id], name: 'opportunities_goal_scope_fk' }).onDelete('cascade'),
-  uniqueIndex('opportunities_reference_unique').on(table.organization_id, table.operation, table.subject_id, table.evidence_revision).where(sql`${table.goal_id} IS NULL`),
-  uniqueIndex('opportunities_goal_reference_unique').on(table.organization_id, table.operation, table.subject_id, table.evidence_revision, table.goal_id).where(sql`${table.goal_id} IS NOT NULL`),
-  index('opportunities_status_idx').on(table.organization_id, table.status, table.available_at),
-  check('opportunities_reference_check', sql`length(trim(subject_id)) > 0 AND length(evidence_revision) = 64 AND evidence_revision NOT GLOB '*[^a-f0-9]*' AND ((goal_id IS NULL AND goal_revision IS NULL) OR (goal_id IS NOT NULL AND length(trim(goal_id)) > 0 AND goal_revision IS NOT NULL))`),
-  check('opportunities_decision_check', sql`(status IN ('accepted', 'dismissed')) = (decided_at IS NOT NULL) AND (decided_at IS NOT NULL OR decided_by_user_id IS NULL) AND (decision_note IS NULL OR length(trim(decision_note)) BETWEEN 1 AND 2000)`),
-  check('opportunities_instants_check', sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (goal_revision IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', goal_revision, '+0 days') IS goal_revision) AND (available_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', available_at, '+0 days') IS available_at) AND (decided_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', decided_at, '+0 days') IS decided_at)`),
-]);
-
 // Work someone has to do (server/domain/tasks.ts). Every task but a custom
 // one is opened and closed by the batch that changes its subject: a stay's
 // turnover, a failed scheduled message, a
-// booking awaiting approval, a change that needs the business, an accepted
-// opportunity. Kinds other than custom
-// and opportunity take their words from the subject, so title is NULL there.
+// booking awaiting approval, a change that needs the business. Kinds other
+// than custom take their words from the subject, so title is NULL there.
 // assigned_member_id is a Better Auth member.id; like every responsibility it
 // is cleared by reconcileResponsibilities when the member leaves.
 // Photos are media_placements(owner_type 'task', slot 'attachments').
 export const tasks = sqliteTable('tasks', {
   id: text().primaryKey(),
   organization_id: text().notNull().references(() => organization.id, { onDelete: 'cascade' }),
-  kind: text({ enum: ['turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up'] }).notNull(),
-  subject_type: text({ enum: ['conversation', 'scheduled_guest_message', 'booking', 'product_session', 'article', 'post', 'product'] }),
+  kind: text({ enum: ['turnover', 'message_delivery', 'booking_review', 'booking_change', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up'] }).notNull(),
+  subject_type: text({ enum: ['scheduled_guest_message', 'booking', 'product_session'] }),
   subject_id: text(),
   product_id: text(),
   location_id: text(),
-  opportunity_id: text(),
   title: text(),
   notes: text(),
   assigned_member_id: text(),
@@ -402,17 +344,14 @@ export const tasks = sqliteTable('tasks', {
 }, table => [
   foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [products.organization_id, products.id], name: 'tasks_product_scope_fk' }).onDelete('cascade'),
   foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: 'tasks_location_scope_fk' }).onDelete('cascade'),
-  foreignKey({ columns: [table.organization_id, table.opportunity_id], foreignColumns: [opportunities.organization_id, opportunities.id], name: 'tasks_opportunity_scope_fk' }).onDelete('no action'),
-  uniqueIndex('tasks_opportunity_unique').on(table.opportunity_id).where(sql`opportunity_id IS NOT NULL`),
   index('tasks_status_due_idx').on(table.organization_id, table.status, table.due_at),
   index('tasks_member_status_due_idx').on(table.organization_id, table.assigned_member_id, table.status, table.due_at),
   index('tasks_subject_idx').on(table.subject_type, table.subject_id),
-  check('tasks_kind_check', sql`kind IN ('turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up')
+  check('tasks_kind_check', sql`kind IN ('turnover', 'message_delivery', 'booking_review', 'booking_change', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up')
     AND (subject_type IS NULL) = (subject_id IS NULL)
-    AND (subject_type IS NULL OR subject_type IN ('conversation', 'scheduled_guest_message', 'booking', 'product_session', 'article', 'post', 'product'))
-    AND (kind <> 'custom' OR subject_type IS NULL)
-    AND ((kind = 'opportunity') = (opportunity_id IS NOT NULL))`),
-  check('tasks_text_check', sql`(title IS NULL OR length(trim(title)) BETWEEN 1 AND 200) AND (kind NOT IN ('custom', 'opportunity') OR title IS NOT NULL)
+    AND (subject_type IS NULL OR subject_type IN ('scheduled_guest_message', 'booking', 'product_session'))
+    AND (kind <> 'custom' OR subject_type IS NULL)`),
+  check('tasks_text_check', sql`(title IS NULL OR length(trim(title)) BETWEEN 1 AND 200) AND (kind <> 'custom' OR title IS NOT NULL)
     AND (notes IS NULL OR length(trim(notes)) BETWEEN 1 AND 5000) AND (outcome_note IS NULL OR length(trim(outcome_note)) BETWEEN 1 AND 5000)
     AND length(trim(dedupe_key)) > 0 AND timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
   check('tasks_window_check', sql`starts_at IS NULL OR due_at IS NULL OR starts_at <= due_at`),

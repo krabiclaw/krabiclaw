@@ -1,5 +1,5 @@
 import type { DbClient } from '~/server/db'
-import { readMediaPlacements } from '~/server/utils/media-asset-manager'
+import { readMediaPlacements, type StoredMediaPlacementItem } from '~/server/utils/media-asset-manager'
 import { mediaStillUrl, resolveOwnerPicture, type MediaPlacementOwnerType } from '~/shared/media-placement-contract'
 
 /**
@@ -34,11 +34,14 @@ export async function loadOwnerPictures(
     options.organizationFallback === false ? null : readMediaPlacements(db, { organizationId, ownerType: 'organization', ownerIds: [organizationId] }),
   ])
   const organizationMedia = organizationPlacements?.get(organizationId) ?? []
-  return new Map(ids.map((id) => {
-    const picture = resolveOwnerPicture(ownerType, ownerPlacements.get(id) ?? [], organizationMedia)
-    const imageUrl = mediaStillUrl(picture)
-    return [id, picture && imageUrl ? { imageUrl, alt: picture.alt_text ?? '' } : null]
-  }))
+  return new Map(ids.map(id => [id, ownerPicture(ownerType, ownerPlacements.get(id) ?? [], organizationMedia)]))
+}
+
+/** The picture `resolveOwnerPicture` picks from placements already read. */
+export function ownerPicture(ownerType: MediaPlacementOwnerType, ownerMedia: StoredMediaPlacementItem[], organizationMedia: StoredMediaPlacementItem[]): HeroImage | null {
+  const picture = resolveOwnerPicture(ownerType, ownerMedia, organizationMedia)
+  const imageUrl = mediaStillUrl(picture)
+  return picture && imageUrl ? { imageUrl, alt: picture.alt_text ?? '' } : null
 }
 
 /** An organization's brand mark: its `logo`, or none. */
