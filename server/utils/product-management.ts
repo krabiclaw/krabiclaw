@@ -4,7 +4,7 @@ import { assertResponsibleMember, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, r
 import { assertPublishedHost } from '~/server/utils/public-provider'
 import type { PaymentBasis, ProductBookingSetupInput } from '~/server/utils/availability'
 import { HTTPError } from 'nitro'
-import { AVAILABILITY_PAGE_DAYS, BOOKING_HORIZON_DAYS, MAX_STAY_NIGHTS, parseStayCalendarRules } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, parseStayCalendarRules } from '~/shared/bookings'
 import { d1JsonArray, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
@@ -2210,7 +2210,7 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
     }
     missing.push(...setup.missing)
   }
-  const { bookingScheduleScopes, listBookableSessions, resolveBookingSession, sessionAllocationPredicate } = await import('~/server/utils/availability')
+  const { bookingScheduleScopes, firstBookableOpening, sessionAllocationPredicate } = await import('~/server/utils/availability')
   const scheduled = options.scheduledScopes ?? (await bookingScheduleScopes(db, organizationId, [product.id])).get(product.id)
   if (!options.requireAllocation && !options.prepareAllocation) {
     if (!scopes.some(scope => scheduled?.has(scope))) missing.push('booking.schedule')
@@ -2220,23 +2220,13 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
   let allocation: BatchQuery | undefined
   if (product.booking?.duration_minutes && scopes.length && (scheduled?.size || options.prepareAllocation)) {
     const now = new Date().toISOString()
-    const start = Date.parse(now)
-    const end = start + BOOKING_HORIZON_DAYS * 86_400_000
-    const partySize = product.booking.party_size_min ?? 1
-    const scope = options.prepareAllocation ? 'publication' : 'bookable'
-    for (let from = start; from < end; from += AVAILABILITY_PAGE_DAYS * 86_400_000) {
-      const sessions = await listBookableSessions(db, {
-        env, organizationId, productId: product.id, locationId: options.locationId, now,
-        fromInstant: new Date(from).toISOString(), toInstant: new Date(Math.min(end, from + AVAILABILITY_PAGE_DAYS * 86_400_000)).toISOString(),
-      }, scope)
-      const candidate = sessions.find(session => scopes.includes(session.location_id) && (session.remaining === null || session.remaining >= partySize))
-      if (!candidate) continue
-      const resolved = await resolveBookingSession(db, { env, organizationId, productId: product.id, sessionId: candidate.id, locationId: candidate.location_id, actorId: 'system', now }, scope)
+    const first = await firstBookableOpening(db, env, { organizationId, productId: product.id, locationId: options.locationId, now, scope: options.prepareAllocation ? 'publication' : 'bookable' },
+      { match: session => scopes.includes(session.location_id) })
+    if (first) {
       allocation = await sessionAllocationPredicate(db, {
-        env, organizationId, productId: product.id, sessionId: candidate.id, partySize, now,
-        requireActive: Boolean(requireActive), resolved, preview: true,
+        env, organizationId, productId: product.id, sessionId: first.session.id, partySize: first.partySize, now,
+        requireActive: Boolean(requireActive), resolved: first.resolve('system'), preview: true,
       })
-      break
     }
   }
   if (allocation) {

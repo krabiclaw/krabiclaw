@@ -64,6 +64,7 @@ export function isPlaceDay(item: unknown): item is PlaceDay {
     && (item.held === null || isRecord(item.held) && ['booked', 'hours', 'inactive', 'unscheduled'].includes(String(item.held.kind)) && typeof item.held.text === 'string')
     && typeof item.booked === 'number' && Number.isInteger(item.booked) && item.booked >= 0
     && (item.free === null || typeof item.free === 'number' && Number.isInteger(item.free) && item.free >= 0)
+    && (item.places_left === null || typeof item.places_left === 'number' && Number.isInteger(item.places_left) && item.places_left >= 0)
 }
 
 /** A night a guest or another calendar holds: a stay, a checkout hold or a linked-calendar night. A selection never writes one. */

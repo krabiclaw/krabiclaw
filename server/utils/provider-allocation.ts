@@ -30,7 +30,7 @@ export function providerUnavailableSql(s: string, replacingBooking = 'NULL', con
   )) OR (EXISTS(SELECT 1 FROM product_booking_configs c WHERE c.organization_id=${s}.organization_id AND c.product_id=${s}.product_id AND c.scheduling_mode='provider') AND ${member} IS NULL) OR ${providerConflictSql(s, replacingBooking, convertingPayment, member)})`
 }
 
-export function providerConflictSql(s: string, replacingBooking: string, convertingPayment: string, member: string): string {
+function providerConflictSql(s: string, replacingBooking: string, convertingPayment: string, member: string): string {
   const entry = "'$.\"' || ms.member_id || '\"'"
   return `(${member} IS NOT NULL AND (
     NOT EXISTS (SELECT 1 FROM member_scheduling ms JOIN member m ON m.id=ms.member_id AND m.organizationId=ms.organization_id

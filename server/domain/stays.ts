@@ -449,6 +449,26 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 }
 
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
+  const homes = await stayHomeRows(db, organizationId, productId, scope)
+  const productIds = homes.map(home => home.product_id)
+  if (!productIds.length) return []
+  const [photos, photoRooms, accessibility] = await Promise.all([
+    readProductPhotos(db, { organizationId, productIds }),
+    readStayPhotoRooms(db, organizationId, productIds),
+    readStayHomeAccessibility(db, organizationId, productIds),
+  ])
+  return homes.map(home => ({
+    ...home,
+    photos: (photos.get(home.product_id) ?? []).map(stayPhoto),
+    photo_rooms: photoRooms.get(home.product_id) ?? [],
+    accessibility: accessibility.get(home.product_id)!,
+  }))
+}
+
+/** A home's settings and nightly offer, without its photos, rooms and accessibility: what its calendar reads. */
+type StayHomeCore = Omit<StayHome, 'photos' | 'photo_rooms' | 'accessibility'>
+
+async function stayHomeRows(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHomeCore[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT p.id AS product_id, (SELECT json_group_array(v.id) FROM product_variants v WHERE v.organization_id = c.organization_id AND v.product_id = c.product_id) AS variant_ids, p.updated_at, p.name, c.internal_name, p.description, p.details_json, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
            b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, b.calendar_rules, ${stayWeekendPriceSql('c')} AS weekend_price_minor, c.property_type_group, c.property_type,
@@ -474,12 +494,6 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       JOIN product_stay_configs c ON c.organization_id = v.organization_id AND c.product_id = v.product_id
      WHERE pr.organization_id = ? ${productId ? 'AND v.product_id = ?' : ''} AND v.active = 1 AND pr.stay_date IS NULL AND pr.weekend = 0
      ORDER BY v.sort_order, v.id`, [organizationId, ...(productId ? [productId] : [])])
-  const productIds = rows.map(row => String(row.product_id))
-  const [photos, photoRooms, accessibility] = await Promise.all([
-    readProductPhotos(db, { organizationId, productIds }),
-    readStayPhotoRooms(db, organizationId, productIds),
-    readStayHomeAccessibility(db, organizationId, productIds),
-  ])
   return rows.map((row) => {
     if (typeof row.internal_name !== 'string' || !row.internal_name.trim()) throw new Error(`Home ${row.product_id} has no internal name`)
     const variants = JSON.parse(String(row.variant_ids)) as string[]
@@ -521,9 +535,6 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       },
       airbnb_listing_id: row.airbnb_listing_id === null ? null : String(row.airbnb_listing_id),
       airbnb_editor_url: row.airbnb_listing_id === null ? null : airbnbEditorUrl(String(row.airbnb_listing_id), 'details'),
-      photos: (photos.get(String(row.product_id)) ?? []).map(stayPhoto),
-      photo_rooms: photoRooms.get(String(row.product_id)) ?? [],
-      accessibility: accessibility.get(String(row.product_id))!,
     }
   })
 }
@@ -1310,20 +1321,30 @@ const LAPSED_HOLD_CLAIM_SQL = `stay_nights.hold_id IS NOT NULL AND NOT EXISTS (S
   WHERE h.id = stay_nights.hold_id AND h.status = 'active' AND h.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
 
 /** Every night of [from, to) at one home, read for whoever already has the home. */
-async function homeNights(db: DbClient, organizationId: string, home: StayHome, from: string, to: string): Promise<StayNight[]> {
+async function homeNights(db: DbClient, organizationId: string, home: StayHomeCore, from: string, to: string): Promise<StayNight[]> {
   return (await homesNights(db, organizationId, [home], from, to))[0]!
 }
 
-/** Every night of [from, to) at each of these homes, in their order: four queries for any number of homes. */
-async function homesNights(db: DbClient, organizationId: string, homes: readonly StayHome[], from: string, to: string): Promise<StayNight[][]> {
+/** Every night of [from, to) at each of these homes, in their order, with what their channel last took. */
+async function homesNights(db: DbClient, organizationId: string, homes: readonly StayHomeCore[], from: string, to: string): Promise<StayNight[][]> {
   const ids = d1JsonStringSet(homes.map(home => home.product_id))
-  const [overrides, claims, pushes, movedAway, overbooked] = await Promise.all([
+  const [nights, pushes] = await Promise.all([
+    homesOpenNights(db, organizationId, homes, from, to),
+    queryAll<{ product_id: string; date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null }>(db, 'SELECT product_id, date, state, detail FROM channel_night_pushes WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) AND date >= ? AND date < ?', [organizationId, ids, from, to]),
+  ])
+  const pushByNight = new Map(pushes.map(row => [`${row.product_id} ${row.date}`, { state: row.state, detail: row.detail }]))
+  return nights.map((home, index) => home.map(night => ({ ...night, channel: pushByNight.get(`${homes[index]!.product_id} ${night.date}`) ?? null })))
+}
+
+/** Every night of [from, to) at each of these homes, as a guest or a calendar export reads them: four queries for any number of homes. */
+async function homesOpenNights(db: DbClient, organizationId: string, homes: readonly StayHomeCore[], from: string, to: string): Promise<Array<Array<Omit<StayNight, 'channel'>>>> {
+  const ids = d1JsonStringSet(homes.map(home => home.product_id))
+  const [overrides, claims, movedAway, overbooked] = await Promise.all([
     queryAll<Record<string, unknown>>(db, `SELECT n.*, ${STAY_NIGHT_PRICE_SQL} AS price_minor FROM product_nights n WHERE n.organization_id = ? AND n.product_id IN (SELECT value FROM json_each(?)) AND n.date >= ? AND n.date < ?`, [organizationId, ids, from, to]),
     queryAll<{ product_id: string; date: string; booking_id: string | null; held_until: string | null; calendar: StayCalendarChannel | null }>(db, `SELECT stay_nights.product_id, stay_nights.date, stay_nights.booking_id, h.expires_at AS held_until, k.channel AS calendar FROM stay_nights
       LEFT JOIN payment_checkout_holds h ON h.id = stay_nights.hold_id
       LEFT JOIN stay_calendar_links k ON k.id = stay_nights.calendar_link_id
       WHERE stay_nights.organization_id = ? AND stay_nights.product_id IN (SELECT value FROM json_each(?)) AND stay_nights.date >= ? AND stay_nights.date < ? AND NOT (${LAPSED_HOLD_CLAIM_SQL})`, [organizationId, ids, from, to]),
-    queryAll<{ product_id: string; date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null }>(db, 'SELECT product_id, date, state, detail FROM channel_night_pushes WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) AND date >= ? AND date < ?', [organizationId, ids, from, to]),
     // A reservation stays on the listing it was booked on after its guest moved: the channel still holds those nights, the nights it claims at the home it moved to.
     queryAll<{ id: string; booked_product_id: string; date: string }>(db, `SELECT s.id, s.booked_product_id, n.date FROM bookings s JOIN stay_nights n ON n.organization_id = s.organization_id AND n.booking_id = s.id
       WHERE s.organization_id = ? AND s.booked_product_id IN (SELECT value FROM json_each(?)) AND s.status <> 'cancelled' AND n.date >= ? AND n.date < ?`, [organizationId, ids, from, to]),
@@ -1351,9 +1372,8 @@ async function homesNights(db: DbClient, organizationId: string, homes: readonly
       }
     }
   }
-  const pushByNight = new Map(pushes.map(row => [`${row.product_id} ${row.date}`, { state: row.state, detail: row.detail }]))
   return homes.map((home) => {
-    const nights: StayNight[] = []
+    const nights: Array<Omit<StayNight, 'channel'>> = []
     for (let offset = 0; offset < days(from, to); offset++) {
       const night = addDays(from, offset)
       const key = `${home.product_id} ${night}`
@@ -1374,7 +1394,6 @@ async function homesNights(db: DbClient, organizationId: string, homes: readonly
         source: row ? row.source as 'host' | 'import' : null,
         held_until: heldUntil,
         calendar: claim?.calendar ?? null,
-        channel: pushByNight.get(key) ?? null,
       })
     }
     return nights
@@ -2862,7 +2881,7 @@ export interface PublicStayCalendar {
   nights: PublicStayNight[]
 }
 
-function publicNight(night: StayNight, today: string, lastDeparture: string): PublicStayNight {
+function publicNight(night: Omit<StayNight, 'channel'>, today: string, lastDeparture: string): PublicStayNight {
   return {
     date: night.date,
     available: night.available && night.price_minor !== null && night.date >= today && night.date < lastDeparture,
@@ -2875,14 +2894,15 @@ function publicNight(night: StayNight, today: string, lastDeparture: string): Pu
 }
 
 /** The bookable nights of [from, to), plus `to` so the guest can select that departure. No claims are shown. */
-export async function readPublicStayCalendar(db: DbClient, organizationId: string, slug: string, input: { from: unknown; to: unknown }): Promise<PublicStayCalendar> {
-  const home = await readPublicStayHome(db, organizationId, slug)
+export async function readPublicStayCalendar(db: DbClient, organizationId: string, productId: string, input: { from: unknown; to: unknown }): Promise<PublicStayCalendar> {
+  const [home] = await stayHomeRows(db, organizationId, productId, { sql: PUBLIC_STAY_SQL, params: [] })
+  if (!home) fail(404, 'STAY_NOT_FOUND', 'That place to stay is not open for booking', 'slug')
   const { from, to } = range(input, AVAILABILITY_PAGE_DAYS)
   const today = homeToday(home.timezone)
   const lastDeparture = addDays(today, STAY_CALENDAR_DAYS)
   const start = from < today ? today : from
   const departure = to > lastDeparture ? lastDeparture : to
-  const nights = start > departure ? [] : await homeNights(db, organizationId, home, start, addDays(departure, 1))
+  const nights = start > departure ? [] : (await homesOpenNights(db, organizationId, [home], start, addDays(departure, 1)))[0]!
   return {
     home: { currency: home.currency, timezone: home.timezone, today, check_in_time: home.check_in_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, base_price_minor: home.base_price_minor },
     nights: nights.map(night => publicNight(night, today, lastDeparture)),
@@ -3586,11 +3606,11 @@ export async function stayCalendarExport(db: DbClient, token: string): Promise<s
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) fail(404, 'STAY_CALENDAR_NOT_FOUND', 'This calendar address does not exist', 'token')
   const row = await queryFirst<StayCalendarLinkRow>(db, `SELECT ${CALENDAR_LINK_COLUMNS} FROM stay_calendar_links WHERE export_token = ?`, [token])
   if (!row) fail(404, 'STAY_CALENDAR_NOT_FOUND', 'This calendar address does not exist', 'token')
-  const [home] = await stayHomesWhere(db, row.organization_id, row.product_id, { sql: '1 = 1', params: [] })
+  const [home] = await stayHomeRows(db, row.organization_id, row.product_id, { sql: '1 = 1', params: [] })
   if (!home) fail(404, 'STAY_CALENDAR_NOT_FOUND', 'This calendar address does not exist', 'token')
   const today = homeToday(home.timezone)
-  const nights = await homeNights(db, row.organization_id, home, today, addDays(today, STAY_CALENDAR_DAYS))
-  const taken = nights.filter(night => !night.available && night.calendar !== row.channel).map(night => night.date)
+  const [nights] = await homesOpenNights(db, row.organization_id, [home], today, addDays(today, STAY_CALENDAR_DAYS))
+  const taken = nights!.filter(night => !night.available && night.calendar !== row.channel).map(night => night.date)
   const compact = (day: string) => day.replaceAll('-', '')
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
   return [

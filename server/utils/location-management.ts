@@ -408,13 +408,15 @@ export async function updateLocation(
   /** The member making the change, or null for KrabiClaw's own (recorded as a system event). */
   userId: string | null,
   env: CloudflareEnv,
-  writeGuard?: BatchQuery,
+  /** Statements that run first in the same batch: a caller's guard, or the rest of an import this write is part of. */
+  writeGuard?: BatchQuery | BatchQuery[],
   options: { allowHomeActivation?: boolean } = {},
 ) {
   const existing = await loadLocation(db, organizationId, locationIdOrSlug);
   if (!existing) {
     return { status: 404, data: { error: "Location not found.", code: 'LOCATION_NOT_FOUND', field: 'location_id' } };
   }
+  const preceding = writeGuard === undefined ? [] : Array.isArray(writeGuard) ? writeGuard : [writeGuard];
   const locationId = existing.id;
   if (input.slug !== undefined && input.slug !== existing.slug) {
     return { status: 400, data: { error: 'A location keeps its saved slug', code: 'INVALID_LOCATION_FIELD', field: 'slug' } };
@@ -577,7 +579,7 @@ export async function updateLocation(
     if (!equal) changedFields.push(field);
   }
   if (!changedFields.length) {
-    if (writeGuard) await executeBatch(db, [writeGuard]);
+    if (preceding.length) await executeBatch(db, preceding);
     await reportBillingUsage(env, db, organizationId, { committed: true });
     if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId });
     await purgePublicResourceCacheNow(env, organizationId);
@@ -619,8 +621,8 @@ export async function updateLocation(
     }));
     // An inactive location takes its homes off the live count. Making it
     // active again is guarded by the same home-activation boundary.
-    const results = await executeWithinCapacity(env, db, organizationId, [...(writeGuard ? [writeGuard] : []), ...statements], { action: 'make it active', allowHomeActivation: options.allowHomeActivation });
-    const changed = (results[writeGuard ? 2 : 1]?.meta?.changes ?? 0) === 1;
+    const results = await executeWithinCapacity(env, db, organizationId, [...preceding, ...statements], { action: 'make it active', allowHomeActivation: options.allowHomeActivation });
+    const changed = (results[preceding.length + 1]?.meta?.changes ?? 0) === 1;
     // The saved privacy mode must be visible even if readback or card work fails.
     if (changed) await purgePublicResourceCacheNow(env, organizationId);
     return changed;

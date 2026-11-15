@@ -13,8 +13,8 @@ import {
   claimSessionCapacity,
   bookingWindow,
   listBookableSessions,
+  getScheduleSession,
   listScheduleSessions,
-  listSessions,
   resolveBookingSession,
   sessionMoveQuery,
   updateSession,
@@ -74,6 +74,13 @@ async function boot() {
   const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
     STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
   return { runtime, db, env }
+}
+
+/** A saved session with its places left, as the operator's session read returns it. */
+async function savedPlaces(db: D1Database, env: CloudflareEnv, sessionId: string) {
+  const productId = await db.prepare('SELECT product_id FROM product_sessions WHERE id = ?').bind(sessionId).first<string>('product_id')
+  assert(productId)
+  return getScheduleSession(db, env, { organizationId: ORG, productId, sessionId })
 }
 
 function addRule(db: D1Database, id: string, over: Partial<{ weekday: number; start_time: string; timezone: string; location_id: string | null }> = {}) {
@@ -256,10 +263,10 @@ test('a table is seated through its location\'s current hours and closing preser
         reviews: [review(racing ? 'stale-review' : 'current-review')],
       })
     })
-    assert.equal((await syncPlaceToLocation(db, 'test-key', ORG, LOCATION, 'place-id', 'import', mapsSession)).reviewsUpserted, 1)
+    assert.equal((await syncPlaceToLocation(db, 'test-key', ORG, LOCATION, 'place-id', 'import', mapsSession, { env, actorId: ACTOR })).reviewsUpserted, 1)
     assert.deepEqual(await offered(wednesday), evening('20:30'))
     racing = true
-    await assert.rejects(syncPlaceToLocation(db, 'test-key', ORG, LOCATION, 'place-id', 'import'), { statusCode: 409 })
+    await assert.rejects(syncPlaceToLocation(db, 'test-key', ORG, LOCATION, 'place-id', 'import', undefined, { env, actorId: ACTOR }), { statusCode: 409 })
     assert.deepEqual((await db.prepare('SELECT author_name FROM reviews WHERE organization_id = ? AND location_id = ?').bind(ORG, LOCATION).all()).results, [{ author_name: 'current-review' }])
     assert.deepEqual(await db.prepare('SELECT rating FROM business_locations WHERE id = ?').bind(LOCATION).first(), { rating: 5 })
     assert.deepEqual(await offered(tuesday), [])
@@ -294,8 +301,10 @@ test('calendar reads preserve cancelled and moved occurrences and assigned sessi
     assert.equal(visible.find(row => row.id === moved.id)?.starts_at, newStart)
     assert.equal(visible.find(row => row.id === moved.id)?.capacity, 4)
 
-    const readScope: Parameters<typeof listSessions>[1] = { ...range, statuses: ['scheduled', 'cancelled'] }
-    const sessionsBeforeRemoval = await listSessions(db, readScope)
+    // The saved occurrences, as the operator's schedule lists them.
+    const savedOccurrences = async () => (await listScheduleSessions(db, { ...range, statuses: ['scheduled', 'cancelled'] })).filter(session => session.created_at !== null)
+      .map(({ id, location_id, starts_at, ends_at, capacity, status }) => ({ id, location_id, starts_at, ends_at, capacity, status }))
+    const sessionsBeforeRemoval = await savedOccurrences()
     assert.equal(sessionsBeforeRemoval.length, 2)
     assert(sessionsBeforeRemoval.every(session => session.location_id === LOCATION))
     const assignedLocations = await listDashboardLocations(db, ORG, ACTOR, true)
@@ -309,14 +318,14 @@ test('calendar reads preserve cancelled and moved occurrences and assigned sessi
     const productAfterRemoval = await getProduct(db, ORG, PRODUCT)
     assert.deepEqual(productAfterRemoval.locations, [])
     assert.equal(productAfterRemoval.booking?.assigned_member_id, member.id)
-    assert.deepEqual(await listSessions(db, readScope), sessionsBeforeRemoval, 'removing the Product location preserves each saved occurrence')
+    assert.deepEqual(await savedOccurrences(), sessionsBeforeRemoval, 'removing the Product location preserves each saved occurrence')
     assert.deepEqual(await listDashboardLocations(db, ORG, ACTOR, true), [retainedLocation], 'the assigned host retains the exact historical session location')
 
     // A bookable offering always has the member who handles it: clearing the host is refused, and nothing changes.
     await assert.rejects(setProductBookingConfig(db, { organizationId: ORG, productId: PRODUCT, actorId: ACTOR, env, patch: { assigned_member_id: null } }),
       (error: unknown) => { const failure = error as { status: number; data: unknown }; assert.equal(failure.status, 422); assert.deepEqual(failure.data, { code: 'ASSIGNEE_REQUIRED', field: 'assigned_member_id' }); return true })
     assert.equal((await getProduct(db, ORG, PRODUCT)).booking?.assigned_member_id, member.id)
-    assert.deepEqual((await listSessions(db, readScope)).map(session => session.id), sessionsBeforeRemoval.map(session => session.id))
+    assert.deepEqual((await savedOccurrences()).map(session => session.id), sessionsBeforeRemoval.map(session => session.id))
 
     // A booking-only replacement owns real child writes and must advance the
     // Product CAS token even when its descriptive fields are unchanged.
@@ -440,9 +449,9 @@ test('concurrent claims cannot exceed capacity, and variants share one pool', { 
     await setBookingStatus(db, { organizationId: ORG, bookingId: one, status: 'cancelled', reason: 'guest cancelled' })
     const afterCancel = await db.prepare("SELECT SUM(party_size) n FROM bookings WHERE product_session_id = 'sess-1' AND status = 'confirmed'").first<number>('n')
     assert.equal(afterCancel, 5, 'cancellation released exactly three seats')
-    const [session] = await listSessions(db, { env, organizationId: ORG, productId: PRODUCT, fromInstant: '2099-01-01T00:00:00.000Z', toInstant: '2099-02-01T00:00:00.000Z' })
-    assert.equal(session?.remaining, 3)
-    assert.equal(session?.is_full, false)
+    const session = await savedPlaces(db, env, 'sess-1')
+    assert.equal(session.remaining, 3)
+    assert.equal(session.is_full, false)
   } finally { await runtime.dispose() }
 })
 
@@ -690,10 +699,9 @@ test('one provider\'s online offerings exclude overlapping pending requests and 
     const record = await getThreadOperationalRecord(db, winner.requestId)
     assert.equal(record?.status, 'pending')
     assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings').first('n'), 1)
-    const listed = await listSessions(db, { env, organizationId: ORG, fromInstant: '2098-11-02T00:00:00.000Z', toInstant: '2098-11-03T00:00:00.000Z' })
-    assert.equal(listed.find(session => session.id === inputs[1 - index]!.sessionId)?.is_full, true)
-    assert.equal(listed.find(session => session.id === 'session-adjacent')?.remaining, 1)
-    assert.equal(listed.find(session => session.id === 'session-independent')?.remaining, 1)
+    assert.equal((await savedPlaces(db, env, inputs[1 - index]!.sessionId)).is_full, true)
+    assert.equal((await savedPlaces(db, env, 'session-adjacent')).remaining, 1)
+    assert.equal((await savedPlaces(db, env, 'session-independent')).remaining, 1)
     const confirm = { threadId: winner.requestId, organizationId: ORG, action: 'confirm', actorUserId: ACTOR, idempotencyKey: 'confirm-once', env: { ...env, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only' } }
     assert.equal((await executeGuestThreadOperation(db, confirm)).ok, true)
     assert.equal((await executeGuestThreadOperation(db, confirm)).ok, true)
@@ -732,9 +740,8 @@ test('one provider\'s online offerings exclude overlapping pending requests and 
     assert.equal((await executeGuestThreadOperation(db, reject)).ok, true)
     assert.equal((await executeGuestThreadOperation(db, reject)).ok, true)
     assert.equal((await getThreadOperationalRecord(db, loser.requestId))?.status, 'cancelled')
-    const after = await listSessions(db, { env, organizationId: ORG, fromInstant: '2098-11-02T00:00:00.000Z', toInstant: '2098-11-03T00:00:00.000Z' })
-    assert.equal(after.find(session => session.id === 'session-one')?.remaining, 1)
-    assert.equal(after.find(session => session.id === 'session-two')?.remaining, 1)
+    assert.equal((await savedPlaces(db, env, 'session-one')).remaining, 1)
+    assert.equal((await savedPlaces(db, env, 'session-two')).remaining, 1)
     assert.equal(await db.prepare("SELECT COUNT(*) n FROM messages WHERE event_name = 'booking.confirm'").first('n'), 1)
     assert.equal(await db.prepare("SELECT COUNT(*) n FROM messages WHERE event_name = 'booking.reject'").first('n'), 1)
     // A delivered receipt proves that an earlier operation finished, not that
@@ -780,7 +787,7 @@ test('provider allocation shares a class Session, excludes distinct overlapping 
   const attendee=await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env,organizationId:ORG,productId:winner!.product_id,sessionId:winner!.product_session_id,productVariantId:variant,partySize:1})
   assert.equal(await db.prepare('SELECT c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id WHERE b.id=?').bind(attendee.bookingId).first('assigned_member_id'),'provider-one','a second attendee shares the offering\'s provider')
   assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings').first('n'),2)
-  assert.equal((await listSessions(db,{env,organizationId:ORG,fromInstant:`${day}T00:00:00.000Z`,toInstant:`${day}T23:59:59.999Z`})).find(s=>s.id===winner!.product_session_id)?.remaining,1,'remaining capacity is attendee based')
+  assert.equal((await savedPlaces(db,env,winner!.product_session_id)).remaining,1,'remaining capacity is attendee based')
   assert.deepEqual(await publicProductHosts(db,ORG,winner!.product_id),[{name:'Approved public name',photo_url:null,bio:'Approved public bio'}])
   for(const sessionId of ['missing-session',winner!.product_session_id==='group-session'?'other-session':'group-session']) {
    await assert.rejects(()=>publicProductHosts(db,ORG,winner!.product_id,sessionId),{statusCode:404},'an explicitly selected missing or foreign-product Session cannot substitute the offering provider')
@@ -846,14 +853,13 @@ test('new legal consultations require an eligible named attorney while experienc
     const scope = { organizationId: ORG, productId: consultation, actorId: ACTOR, env, policyJson: OPEN_TERMS_JSON }
     const attorneyRequired = (error: unknown) => { const failure = error as { status: number; data: unknown }; assert.equal(failure.status, 409); assert.deepEqual(failure.data, { code: 'ATTORNEY_REQUIRED', field: 'scheduling_mode' }); return true }
     await assert.rejects(setProductBookingConfig(db, { ...scope, patch: { duration_minutes: 30 } }), attorneyRequired)
-    await assert.rejects(listSessions(db, { env, organizationId: ORG, productId: consultation, fromInstant: startsAt, toInstant: `${day}T23:59:59.999Z` }), attorneyRequired)
+    await assert.rejects(listScheduleSessions(db, { env, organizationId: ORG, productId: consultation, fromInstant: startsAt, toInstant: `${day}T23:59:59.999Z` }), attorneyRequired)
     await assert.rejects(claimSessionCapacity(db, { websiteSource: null, ...scope, sessionId: 'consultation-morgan', productVariantId: 'consultation-variant', partySize: 1 }), attorneyRequired)
     assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings WHERE product_id=? AND id<>?').bind(consultation, 'historical-consultation').first('n'), 0)
     assert.deepEqual(await publicProductHosts(db, ORG, consultation, 'consultation-historical'), [], 'a saved consultation with no current attorney has no public host')
 
     await setProductBookingConfig(db, { ...scope, patch: { scheduling_mode: 'provider', assigned_member_id: 'morgan' } })
-    const available = await listSessions(db, { env, organizationId: ORG, productId: consultation, fromInstant: startsAt, toInstant: `${day}T23:59:59.999Z` })
-    assert.equal(available.find(session => session.id === 'consultation-morgan')?.is_full, false)
+    assert.equal((await savedPlaces(db, env, 'consultation-morgan')).is_full, false)
     const booked = await claimSessionCapacity(db, { websiteSource: null, ...scope, sessionId: 'consultation-morgan', productVariantId: 'consultation-variant', partySize: 1 })
     assert.equal(await db.prepare('SELECT c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id WHERE b.id=?').bind(booked.bookingId).first('assigned_member_id'), 'morgan')
     assert.deepEqual(await publicProductHosts(db, ORG, consultation, 'consultation-morgan'), [{ name: 'Attorney Morgan', photo_url: null, bio: null }])
@@ -885,7 +891,7 @@ test('new legal consultations require an eligible named attorney while experienc
     assert.deepEqual(await db.prepare('SELECT * FROM bookings WHERE id=?').bind(booked.bookingId).first(), bookedBeforeDeparture, 'membership removal retains every booked attorney fact')
     assert.deepEqual(await db.prepare("SELECT * FROM product_sessions WHERE id='consultation-morgan'").first(), sessionBeforeDeparture, 'membership removal retains the booked session')
     const attorneyDeparted = (error: unknown) => { const failure = error as { status: number; data: unknown }; assert.equal(failure.status, 409); assert.deepEqual(failure.data, { code: 'ATTORNEY_REQUIRED', field: 'host' }); return true }
-    await assert.rejects(listSessions(db, { env, organizationId: ORG, productId: consultation, fromInstant: startsAt, toInstant: `${day}T23:59:59.999Z` }), attorneyDeparted)
+    await assert.rejects(listScheduleSessions(db, { env, organizationId: ORG, productId: consultation, fromInstant: startsAt, toInstant: `${day}T23:59:59.999Z` }), attorneyDeparted)
     await assert.rejects(claimSessionCapacity(db, { websiteSource: null, ...scope, sessionId: 'consultation-morgan', productVariantId: 'consultation-variant', partySize: 1 }), attorneyDeparted)
   } finally { await runtime.dispose() }
 })
