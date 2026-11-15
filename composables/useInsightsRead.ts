@@ -1,4 +1,8 @@
+import type { InjectionKey } from 'vue'
 import { businessChanged } from '~/composables/useDashboardInvalidations'
+
+/** Opens the list of Insights pages beside a page on a narrow screen. */
+export const insightsListKey: InjectionKey<() => void> = Symbol('insights-list')
 
 /** An Insights read held on the live connection for 30 seconds, dropped by any event that changes bookings, nights, reviews or access. */
 export function useInsightsRead() {

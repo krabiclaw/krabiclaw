@@ -5,7 +5,6 @@
         <p class="font-medium text-highlighted">{{ dateLabel(selectedDate) }}</p>
         <p class="mt-1 text-muted">{{ selectedSummary }}</p>
       </template>
-      <p v-else class="text-muted">Explore a day to see its activity.</p>
     </div>
     <svg v-if="dates.length" viewBox="0 0 800 260" class="w-full overflow-visible" role="group" :aria-label="label" @mouseleave="selectedIndex = null">
       <g v-for="step in [0, 1, 2, 3, 4]" :key="step">

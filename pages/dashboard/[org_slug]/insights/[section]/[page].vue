@@ -1,77 +1,92 @@
 <template>
   <!--
-    One Insights page, as Airbnb's Performance page: the filters, two or three
-    headline numbers that each switch the chart, the chart of the chosen number
-    over time, and the list underneath. Filters and the chosen number are in
-    the URL, so Back returns to the number and range that were shown.
+    One Insights page, beside the list, as Airbnb's Performance page: its
+    title, two chips (what is shown and when), two or three headline numbers
+    that each switch the chart, the chart of the chosen number over time, and
+    the list underneath. Filters and the chosen number are in the URL, so Back
+    returns to the number and range that were shown.
   -->
-  <DashboardLeafPanel :id="`insights-${pageId.replace('/', '-')}`" :title="view?.title ?? fallbackTitle" :lead="view?.subtitle ?? undefined" :footer="false">
-    <div class="space-y-8 pb-12">
+  <div :id="`insights-${pageId.replace('/', '-')}`" class="space-y-8 px-4 pb-12 pt-6 sm:px-8">
+    <div class="space-y-4">
+      <div class="flex items-center gap-3">
+        <UButton class="md:hidden" icon="i-lucide-menu" color="neutral" variant="ghost" aria-label="Insights pages" @click="openList()" />
+        <h1 class="text-2xl font-semibold text-highlighted">{{ view?.title ?? fallbackTitle }}</h1>
+      </div>
+      <p v-if="view?.subtitle" class="text-sm text-muted">{{ view.subtitle }}</p>
       <div class="flex flex-wrap items-center gap-2">
-        <DashboardFilterPills v-if="kindItems.length" id="insights-kind" v-model="kindFilter" label="What is booked" :items="kindItems" />
-        <DashboardFilterPills v-if="locationItems.length" id="insights-location" v-model="locationFilter" label="Location" :items="locationItems" />
+        <UPopover v-if="kindItems.length > 1 || locationItems.length > 1" :content="{ align: 'start', side: 'bottom', sideOffset: 8 }">
+          <button type="button" class="inline-flex h-9 items-center rounded-full border border-default bg-default px-3.5 text-xs font-medium text-highlighted shadow-xs hover:border-accented" data-testid="insights-offering-pill">
+            {{ selectionLabel }}
+          </button>
+          <template #content>
+            <div class="w-72 space-y-4 p-4 text-sm">
+              <URadioGroup v-if="kindItems.length > 1" v-model="kindFilter" legend="What" :items="kindItems" />
+              <URadioGroup v-if="locationItems.length > 1" v-model="locationFilter" legend="Location" :items="locationItems" />
+            </div>
+          </template>
+        </UPopover>
         <DateRangeFilterPill :start-date="period?.start_date ?? ''" :end-date="period?.end_date ?? ''" :default-days="30" @update:range="setRange" />
       </div>
       <p v-if="menuNote" class="text-sm text-muted">Your menu is not booked, so its dishes count only under Page views and Top pages.</p>
-
-      <UAlert v-if="error" color="error" variant="soft" :title="`${fallbackTitle} could not be loaded`" :description="getErrorMessage(error, 'Insights request failed')" />
-      <UAlert v-else-if="view?.unavailable" color="neutral" variant="soft" :description="view.unavailable.message" :actions="[{ label: view.unavailable.action, to: view.unavailable.to }]" />
-      <template v-else-if="view">
-        <p v-if="view.note" class="text-sm text-muted">{{ view.note }}</p>
-        <dl class="flex flex-wrap gap-x-10 gap-y-5" data-testid="insights-metrics">
-          <div v-for="metric in view.metrics" :key="metric.key" class="min-w-32">
-            <dd class="text-3xl font-semibold tabular-nums text-highlighted" :data-testid="`insights-metric-${metric.key}`">{{ metric.display }}</dd>
-            <dt class="text-sm">
-              <NuxtLink v-if="metric.daily" :to="{ query: { ...route.query, metric: metric.key } }" class="underline underline-offset-4" :class="metric.key === selected?.key ? 'font-semibold text-highlighted' : 'text-muted'" :aria-current="metric.key === selected?.key ? 'true' : undefined" :data-testid="`insights-metric-link-${metric.key}`">{{ metric.label }}</NuxtLink>
-              <span v-else class="text-muted">{{ metric.label }}</span>
-            </dt>
-          </div>
-        </dl>
-
-        <section v-if="selected" class="space-y-5 rounded-2xl bg-muted p-6" data-testid="insights-chart">
-          <h2 class="text-xl font-semibold text-highlighted">{{ selected.label }}</h2>
-          <UFormField label="Compare" class="max-w-xs">
-            <USelect :model-value="'over_time'" :items="[{ label: 'Over time', value: 'over_time' }]" class="w-full" />
-          </UFormField>
-          <AnalyticsTrendChart :label="`${selected.label} over time`" :dates="view.dates" :series="[{ label: selected.label, values: selected.daily!, color: 'var(--ui-text-highlighted)' }]" :format="selected.format" />
-        </section>
-
-        <section v-if="view.reviews" class="divide-y divide-default" data-testid="insights-reviews">
-          <article v-for="review in view.reviews" :id="`review-${review.id}`" :key="review.id" class="py-4" :class="focusedReview === review.id ? 'rounded-lg bg-elevated px-3' : ''" :data-testid="`insights-review-${review.id}`">
-            <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span class="font-medium text-highlighted">{{ review.author }}</span>
-              <span class="text-sm text-highlighted" :aria-label="`${review.rating} out of 5`">{{ '★'.repeat(review.rating) }}</span>
-              <UBadge v-if="review.status !== 'approved'" color="neutral" variant="soft" size="xs" :label="REVIEW_STATUS[review.status]" />
-              <span class="text-xs text-muted">{{ [review.subject, formatDate(review.date)].filter(Boolean).join(' · ') }}</span>
-            </div>
-            <p v-if="review.categories.length" class="mt-1 text-xs text-muted">{{ review.categories.map(category => `${category.label} ${category.rating}`).join(' · ') }}</p>
-            <p v-if="review.title" class="mt-2 font-medium text-highlighted">{{ review.title }}</p>
-            <p v-if="review.content" class="mt-1 text-sm text-muted">{{ review.content }}</p>
-            <div v-if="review.private_feedback" class="mt-2 rounded-md bg-muted px-3 py-2">
-              <p class="text-xs font-medium text-highlighted">Private feedback</p>
-              <p class="mt-1 whitespace-pre-line text-sm text-muted">{{ review.private_feedback }}</p>
-            </div>
-          </article>
-          <p v-if="!view.reviews.length" class="py-4 text-sm text-muted">Once a guest reviews a visit in this range, the review will appear here.</p>
-        </section>
-        <table v-else-if="view.table" class="w-full text-left text-sm" data-testid="insights-list">
-          <thead class="border-b border-default text-xs text-muted">
-            <tr>
-              <th scope="col" class="pb-2.5 font-medium">{{ view.table.heading }}</th>
-              <th v-for="column in view.table.columns" :key="column" scope="col" class="pb-2.5 pl-4 text-right font-medium">{{ column }}</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-default">
-            <tr v-for="row in view.table.rows" :key="row.key">
-              <td class="max-w-0 py-2.5 pr-4 break-words text-highlighted">{{ row.label }}</td>
-              <td v-for="(cell, index) in row.cells" :key="index" class="py-2.5 pl-4 text-right tabular-nums">{{ cell }}</td>
-            </tr>
-            <tr v-if="!view.table.rows.length"><td :colspan="view.table.columns.length + 1" class="py-4 text-muted">Nothing in this range matches these filters.</td></tr>
-          </tbody>
-        </table>
-      </template>
     </div>
-  </DashboardLeafPanel>
+
+    <UAlert v-if="error" color="error" variant="soft" :title="`${fallbackTitle} could not be loaded`" :description="getErrorMessage(error, 'Insights request failed')" />
+    <UAlert v-else-if="view?.unavailable" color="neutral" variant="soft" :description="view.unavailable.message" :actions="[{ label: view.unavailable.action, to: view.unavailable.to }]" />
+    <template v-else-if="view">
+      <p v-if="view.note" class="text-sm text-muted">{{ view.note }}</p>
+      <dl class="flex flex-wrap gap-x-10 gap-y-5" data-testid="insights-metrics">
+        <div v-for="metric in view.metrics" :key="metric.key" class="flex min-w-32 flex-col-reverse">
+          <dt class="text-sm">
+            <NuxtLink v-if="metric.daily" :to="{ query: { ...route.query, metric: metric.key } }" class="underline underline-offset-4" :class="metric.key === selected?.key ? 'font-semibold text-highlighted' : 'text-muted'" :aria-current="metric.key === selected?.key ? 'true' : undefined" :data-testid="`insights-metric-link-${metric.key}`">{{ metric.label }}</NuxtLink>
+            <span v-else class="text-muted">{{ metric.label }}</span>
+          </dt>
+          <dd class="text-3xl font-semibold tabular-nums text-highlighted" :data-testid="`insights-metric-${metric.key}`">{{ metric.display }}</dd>
+        </div>
+      </dl>
+
+      <section v-if="selected" class="space-y-5 rounded-2xl bg-muted p-6" data-testid="insights-chart">
+        <h2 class="text-xl font-semibold text-highlighted">{{ selected.label }}</h2>
+        <UFormField label="Compare" class="max-w-xs">
+          <USelect :model-value="'over_time'" :items="[{ label: 'Over time', value: 'over_time' }]" class="w-full" />
+        </UFormField>
+        <AnalyticsTrendChart :label="`${selected.label} over time`" :dates="view.dates" :series="[{ label: selected.label, values: selected.daily!, color: 'var(--ui-text-highlighted)' }]" :format="selected.format" />
+      </section>
+
+      <section v-if="view.reviews" class="divide-y divide-default" data-testid="insights-reviews">
+        <article v-for="review in view.reviews" :id="`review-${review.id}`" :key="review.id" class="py-4" :class="focusedReview === review.id ? 'rounded-lg bg-elevated px-3' : ''" :data-testid="`insights-review-${review.id}`">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span class="font-medium text-highlighted">{{ review.author }}</span>
+            <span class="text-sm text-highlighted" :aria-label="`${review.rating} out of 5`">{{ '★'.repeat(review.rating) }}</span>
+            <UBadge v-if="review.status !== 'approved'" color="neutral" variant="soft" size="xs" :label="REVIEW_STATUS[review.status]" />
+            <span class="text-xs text-muted">{{ [review.subject, formatDate(review.date)].filter(Boolean).join(' · ') }}</span>
+          </div>
+          <p v-if="review.categories.length" class="mt-1 text-xs text-muted">{{ review.categories.map(category => `${category.label} ${category.rating}`).join(' · ') }}</p>
+          <p v-if="review.title" class="mt-2 font-medium text-highlighted">{{ review.title }}</p>
+          <p v-if="review.content" class="mt-1 text-sm text-muted">{{ review.content }}</p>
+          <div v-if="review.private_feedback" class="mt-2 rounded-md bg-muted px-3 py-2">
+            <p class="text-xs font-medium text-highlighted">Private feedback</p>
+            <p class="mt-1 whitespace-pre-line text-sm text-muted">{{ review.private_feedback }}</p>
+          </div>
+        </article>
+        <p v-if="!view.reviews.length" class="py-4 text-sm text-muted">Once a guest reviews a visit in this range, the review will appear here.</p>
+      </section>
+      <table v-else-if="view.table" class="w-full text-left text-sm" data-testid="insights-list">
+        <thead class="border-b border-default text-xs text-muted">
+          <tr>
+            <th scope="col" class="pb-2.5 font-medium">{{ view.table.heading }}</th>
+            <th v-for="column in view.table.columns" :key="column" scope="col" class="pb-2.5 pl-4 text-right font-medium">{{ column }}</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-default">
+          <tr v-for="row in view.table.rows" :key="row.key">
+            <td class="max-w-0 py-2.5 pr-4 break-words text-highlighted">{{ row.label }}</td>
+            <td v-for="(cell, index) in row.cells" :key="index" class="py-2.5 pl-4 text-right tabular-nums">{{ cell }}</td>
+          </tr>
+          <tr v-if="!view.table.rows.length"><td :colspan="view.table.columns.length + 1" class="py-4 text-muted">Nothing in this range matches these filters.</td></tr>
+        </tbody>
+      </table>
+    </template>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -82,6 +97,7 @@ import { formatCalendarDate, localDateAt } from '~/utils/timezone'
 import { INSIGHTS_KINDS, INSIGHTS_KIND_LABELS, insightsPage, insightsPageSchema, pageShown, pageTitle, type InsightsFormat, type InsightsIndex, type InsightsKind, type InsightsPage, type InsightsReview } from '~/shared/insights'
 import { instagramInsightsSchema, type InstagramInsights } from '~/shared/instagram-insights'
 import { googleAdsInsightsSchema, type GoogleAdsInsights } from '~/shared/google-ads-insights'
+import { insightsListKey } from '~/composables/useInsightsRead'
 
 definePageMeta({ layout: 'dashboard' })
 
@@ -94,7 +110,11 @@ const pageId = computed(() => `${String(route.params.section)}/${String(route.pa
 const definition = computed(() => insightsPage(pageId.value))
 if (!definition.value) throw createError({ statusCode: 404, statusMessage: 'Insights page not found', fatal: true })
 const index = useNuxtData<InsightsIndex>(`insights-index:${orgSlug.value}`).data
-const booked = computed<InsightsKind[]>(() => index.value?.kinds ?? [])
+// The kinds this page reads: the business's bookings of the kinds the page is about.
+const booked = computed<InsightsKind[]>(() => (index.value?.kinds ?? []).filter(kind => !definition.value!.kinds || (definition.value!.kinds as readonly string[]).includes(kind)))
+const openList = inject(insightsListKey, () => {})
+// A page about kinds the business does not book is not one of its pages.
+if (index.value && !pageShown(definition.value!, index.value.kinds)) throw createError({ statusCode: 404, statusMessage: 'Insights page not found', fatal: true })
 
 // The filters this page reads, from the URL; the rest are not offered.
 const queryText = (name: string) => typeof route.query[name] === 'string' && route.query[name] ? route.query[name] as string : undefined
@@ -198,18 +218,18 @@ const period = computed(() => {
   return 'period' in read.page ? { start_date: read.page.period.startDate, end_date: read.page.period.endDate } : null
 })
 
-// Filters are links in history: Back returns to the filters before.
+// One chip names what is shown and opens the choice of kind and location; filters are links in history.
 const kindItems = computed(() => definition.value!.filters === 'range' || booked.value.length < 2 ? []
-  : [{ value: 'all', label: 'All' }, ...INSIGHTS_KINDS.filter(kind => booked.value.includes(kind)).map(kind => ({ value: kind, label: INSIGHTS_KIND_LABELS[kind] }))])
+  : [{ value: 'all', label: 'All offerings' }, ...INSIGHTS_KINDS.filter(kind => booked.value.includes(kind)).map(kind => ({ value: kind, label: INSIGHTS_KIND_LABELS[kind] }))])
 const locationItems = computed(() => definition.value!.filters !== 'kind_location' || (index.value?.locations.length ?? 0) < 2 ? []
   : [{ value: 'all', label: 'All locations' }, ...index.value!.locations.map(location => ({ value: location.id, label: location.title }))])
+const selectionLabel = computed(() => [
+  kindItems.value.find(item => item.value === kindFilter.value)?.label ?? 'All offerings',
+  locationFilter.value === 'all' ? null : locationItems.value.find(item => item.value === locationFilter.value)?.label,
+].filter(Boolean).join(' · '))
 const kindFilter = computed({
   get: () => filters.value.kind ?? 'all',
-  // A page this kind does not show gives way to Quality, the first page every kind has.
-  set: (kind: string) => {
-    const query = { ...route.query, kind: kind === 'all' ? undefined : kind, metric: undefined }
-    void router.push(pageShown(definition.value!, booked.value, kind as InsightsKind | 'all') ? { query } : { path: `/dashboard/${orgSlug.value}/insights/quality/overall-rating`, query })
-  },
+  set: (kind: string) => void router.push({ query: { ...route.query, kind: kind === 'all' ? undefined : kind, metric: undefined } }),
 })
 const locationFilter = computed({
   get: () => filters.value.location_id ?? 'all',
