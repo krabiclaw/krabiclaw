@@ -10,12 +10,12 @@
 
     <div class="min-h-0 flex-1 overflow-y-auto" :class="dashboardGutterClass">
       <UAlert
-        v-if="threadsError || nextPageError"
+        v-if="threadsError || nextPageError || readAheadError"
         color="error"
         variant="soft"
         class="mb-3"
         title="Messages could not be loaded"
-        :description="getErrorMessage(threadsError || nextPageError, 'Guest thread request failed')"
+        :description="getErrorMessage(threadsError || nextPageError || readAheadError, 'Guest thread request failed')"
       />
 
       <!-- Reordering animates. New previews and access removals take effect immediately. -->
@@ -37,8 +37,8 @@
           <NuxtLink
             :to="{ path: threadRoute(thread), query: route.query }"
             :data-thread-row="thread.id"
-            @pointerenter="void prefetch(thread.id)"
-            @focus="void prefetch(thread.id)"
+            @pointerenter="readAhead(thread.id)"
+            @focus="readAhead(thread.id)"
             :aria-current="thread.id === openThreadId ? 'page' : undefined"
             class="relative flex items-start gap-4 rounded-xl py-4 pl-7 pr-3 transition duration-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             :class="thread.id === openThreadId ? 'bg-elevated' : 'hover:bg-elevated/60'"
@@ -253,8 +253,12 @@ const page = computed(() => rowsKey.value === listKey.value ? data.value ?? null
 const threads = computed(() => page.value?.threads ?? [])
 // The first rows are the likeliest to be opened; any other row is read when the pointer or focus reaches it.
 const prefetch = useConversationPrefetch(props.personalScope)
+const readAheadError = ref<unknown>(null)
+function readAhead(conversationId: string) {
+  prefetch(conversationId)?.then(() => { readAheadError.value = null }, error => { readAheadError.value = error })
+}
 watch([threads, realtime.status], ([rows]) => {
-  for (const thread of rows.slice(0, 5)) if (thread.id !== openThreadId.value) void prefetch(thread.id)
+  for (const thread of rows.slice(0, 5)) if (thread.id !== openThreadId.value) readAhead(thread.id)
 }, { immediate: true })
 
 async function loadMore() {

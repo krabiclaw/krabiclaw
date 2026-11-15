@@ -539,6 +539,9 @@ function appendWrittenTail(tail: ConversationEntriesPage, written: MessageIdenti
   if (!anchor) return false
   const from = anchor.id === arrived.id ? head.entries.length : head.entries.findIndex(entry => entry.id === anchor.id)
   if (from < 0) return false
+  // A newer business message takes the delivery receipt from an earlier one; one kept above the tail needs the full read.
+  if (arrived.side === 'business' && head.entries.slice(0, from).some(entry => entry.type === 'message' && entry.side === 'business'
+    && entry.receipt !== null && entry.receipt !== 'Not delivered')) return false
   const at = tail.entries.findIndex(entry => entry.id === anchor.id)
   const day = anchor.id === arrived.id && tail.entries[at - 1]?.type === 'day' ? at - 1 : at
   data.value = {
