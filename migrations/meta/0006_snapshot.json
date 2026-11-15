@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0e40a656-7689-4971-82ef-26c36c29c764",
+  "id": "8bf83510-ab07-4d19-8af8-89221b26ace9",
   "prevId": "2b3bbda1-eef5-40a2-89e7-d7d2e01caed7",
   "tables": {
     "account": {
@@ -767,11 +767,11 @@
         },
         "analytics_summaries_day_metrics_check": {
           "name": "analytics_summaries_day_metrics_check",
-          "value": "kind != 'organization_day' OR key = ''"
+          "value": "kind != 'organization_day' OR (key = ''\n    AND json_type(payload_json, '$.unique_sessions') IS 'integer' AND (payload_json ->> '$.unique_sessions') >= 0\n    AND json_type(payload_json, '$.unique_visitors') IS 'integer' AND (payload_json ->> '$.unique_visitors') >= 0\n    AND json_type(payload_json, '$.returning_visitors') IS 'integer' AND (payload_json ->> '$.returning_visitors') >= 0\n    AND json_type(payload_json, '$.avg_session_duration') IN ('integer', 'real') AND (payload_json ->> '$.avg_session_duration') >= 0\n    AND json_type(payload_json, '$.pages_per_session') IN ('integer', 'real') AND (payload_json ->> '$.pages_per_session') >= 0\n    AND json_type(payload_json, '$.avg_session_duration') IS NOT NULL AND json_type(payload_json, '$.pages_per_session') IS NOT NULL)"
         },
         "analytics_summaries_dimension_key_check": {
           "name": "analytics_summaries_dimension_key_check",
-          "value": "kind != 'dimension_day' OR (json_valid(key) AND json_type(key) IS 'array' AND json_array_length(key) = 3\n    AND json_type(key, '$[0]') IS 'text' AND (key ->> '$[0]') IN ('country', 'city', 'device', 'referrer', 'visit_source', 'product')\n    AND json_type(key, '$[1]') IS 'text' AND json_type(key, '$[2]') IS 'text')"
+          "value": "kind != 'dimension_day' OR (json_valid(key) AND json_type(key) IS 'array' AND json_array_length(key) = 3\n    AND json_type(key, '$[0]') IS 'text' AND (key ->> '$[0]') IN ('country', 'city', 'device', 'referrer')\n    AND json_type(key, '$[1]') IS 'text' AND json_type(key, '$[2]') IS 'text')"
         }
       }
     },
@@ -1342,13 +1342,6 @@
         },
         "booked_product_id": {
           "name": "booked_product_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "website_source": {
-          "name": "website_source",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -3370,14 +3363,6 @@
           ],
           "isUnique": true,
           "where": "row_role IN ('root','representation') AND slug IS NOT NULL"
-        },
-        "content_documents_links_org_unique": {
-          "name": "content_documents_links_org_unique",
-          "columns": [
-            "organization_id"
-          ],
-          "isUnique": true,
-          "where": "row_role = 'root' AND kind = 'page' AND json_extract(metadata_json, '$.recipe') = 'links'"
         },
         "content_documents_org_kind_status_idx": {
           "name": "content_documents_org_kind_status_idx",
