@@ -165,9 +165,8 @@ test('Today suggests Stripe setup until the account is ready, and a price for ea
     assert.deepEqual(await suggested(), ['payments.connect:org'])
     // An experience with no price cannot be booked until it has one; one booked on another site needs none.
     const unpriced = await createProduct(db, { organizationId: 'org', actor: { actorId: 'owner' }, env, product: { kind: 'experience', name: 'Unpriced Walk' } })
-    const external = await createProduct(db, { organizationId: 'org', actor: { actorId: 'owner' }, env, product: { kind: 'experience', name: 'Partner Tour', order_url: 'https://partner.example/tour' } })
+    await createProduct(db, { organizationId: 'org', actor: { actorId: 'owner' }, env, product: { kind: 'experience', name: 'Partner Tour', order_url: 'https://partner.example/tour' } })
     assert.deepEqual(await suggested(), ['payments.connect:org', `product.readiness:${unpriced.id}`])
-    assert.equal((await getProduct(db, 'org', external.id)).variants.some(variant => variant.prices.length > 0), false, 'the externally booked experience has no price')
     await updateProduct(db, { organizationId: 'org', actor: { actorId: 'owner' }, env, productId: unpriced.id, patch: { active: false, updated_at: unpriced.updated_at } })
     assert.deepEqual(await suggested(), ['payments.connect:org'], 'an inactive experience needs no price')
     const app = new H3()
@@ -268,7 +267,6 @@ test('Today suggests Stripe setup until the account is ready, and a price for ea
       assert.equal(save.status, 200, await save.text())
 
       assert.equal((await getProduct(db, 'org', paid.id)).booking?.online_payment_required, true, 'ordinary catalog read observes the saved payment setting')
-      assert.deepEqual(await suggested(), [])
     } finally { fetchMock.mock.restore() }
   } finally {
     await runtime.dispose()

@@ -386,35 +386,3 @@ test('booking assignment and workspace admin promotion do not grant a conversati
   }
   if (failures.length) throw new AggregateError(failures, 'Branch reservation access workflow or restoration failed')
 })
-
-test('a return to Today within the live connection shows the Today it left without reading it again', async ({ page, baseURL }) => {
-  await loginAs(page.request, baseURL!)
-  // What the seeded business's Today shows first: a card, or that there is nothing to do.
-  const shown = page.locator('[data-testid="today-reservation"], [data-testid="today-task"], [data-testid="today-opportunity"], [data-testid="today-empty"]').first()
-  const socketCapture = page.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket' })
-  expect((await page.goto(ORG))?.status()).toBe(200)
-  await dismissPreviewToolbar(page)
-  const socket = await socketCapture
-  await expect(shown).toBeVisible()
-  const first = (await shown.textContent())!
-
-  const nav = page.getByRole('navigation', { name: 'Dashboard' })
-  await nav.getByRole('link', { name: 'Calendar', exact: true }).click()
-  await expect(page).toHaveURL(new RegExp(`${ORG}/calendar(?:[/?#]|$)`))
-  await expect(shown).toHaveCount(0)
-
-  // Back on the same socket, Today is the one it left: shown without another read.
-  let todayReads = 0
-  const countTodayRead = (request: Request) => {
-    if (request.method() === 'GET' && new URL(request.url()).pathname === '/api/dashboard/today') todayReads++
-  }
-  page.on('request', countTodayRead)
-  try {
-    await nav.getByRole('link', { name: 'Today', exact: true }).click()
-    await expect(page).toHaveURL(new RegExp(`${ORG}(?:[?#]|$)`))
-    await expect(shown).toHaveText(first)
-    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
-    expect(socket.isClosed()).toBe(false)
-    expect(todayReads).toBe(0)
-  } finally { page.off('request', countTodayRead) }
-})

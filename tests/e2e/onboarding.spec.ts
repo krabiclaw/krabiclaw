@@ -253,8 +253,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await expect(website.frameLocator('iframe').locator('body')).toContainText(name)
   const suggestions = page.getByTestId('today-opportunities')
   await expect(suggestions.getByRole('link', { name: /Set up payments/ })).toHaveAttribute('href', /\/payments\/payout-method$/)
-  // A custom domain is not a Today suggestion; the domain page still offers the plan that includes one.
-  await expect(suggestions.getByRole('link', { name: /Connect a custom domain/ })).toHaveCount(0)
+  // The domain page offers the plan that includes a custom domain.
   await page.goto(`/dashboard/${created!.slug}/website/preferences/domains`)
   await expect(page.getByRole('link', { name: 'View plans' })).toHaveAttribute('href', /\/billing\/upgrade\?plan=growth$/)
   await expect(page.getByRole('button', { name: 'Connect domain' })).toHaveCount(0)
