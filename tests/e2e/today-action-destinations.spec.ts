@@ -601,4 +601,13 @@ test('Insights reads a linked report period and preserves range changes in its U
   await expect(datePill.locator('time').first()).toHaveAttribute('datetime', updatedRange.start_date)
   await expect(datePill.locator('time').last()).toHaveAttribute('datetime', updatedRange.end_date)
   await expect(page).toHaveURL(insightsPath(orgSlug, 'conversion/page-views', { start_date: period.start_date, end_date: period.end_date }))
+
+  // Choosing a headline number puts it in the URL and the chart follows it.
+  expect((await page.goto(insightsPath(orgSlug, 'conversion/booking-conversion', updatedRange)))?.status()).toBe(200)
+  const headline = page.locator('[data-testid^="insights-metric-link-"]').nth(1)
+  const key = (await headline.getAttribute('data-testid'))!.replace('insights-metric-link-', '')
+  const label = (await headline.textContent())!.trim()
+  await headline.click()
+  await expect(page).toHaveURL(new RegExp(`[?&]metric=${key}(?:&|$)`))
+  await expect(page.getByTestId('insights-chart').getByRole('heading', { level: 2 })).toHaveText(label)
 })
