@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:bc8d8bfeab24676ca78cd598dc757baf32a541132f8877bf311e6b1a7db01339",
-  "documentationFingerprint": "sha256:e3e6c239d7951744387f79451eb5ac2f7d3b70c7d85aace51f8b5e647f8c7d4b",
+  "fingerprint": "sha256:557c7b9e55c9cf0c2a23663071504fd7892637c30c47f16744564ba1435b342e",
+  "documentationFingerprint": "sha256:8960cf83e70ab8defb7b36bbc3cbd7c0657716f39fbd95995c4bdf238867eb3a",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -20047,7 +20047,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Create Google Ads search campaign"
@@ -21014,7 +21014,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Create Meta Ads campaign"
@@ -88489,7 +88489,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": false,

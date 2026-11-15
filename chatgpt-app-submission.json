@@ -4,7 +4,7 @@
   "app_info": {
     "display_name": "KrabiClaw",
     "subtitle": "Manage your business website",
-    "description": "Create and manage your KrabiClaw business website from ChatGPT. Save a private website draft, publish it once its required details are complete, and add locations. Edit products, prices, announcements, articles, translations and media. Read customer inquiries, manage bookings and legal consultations, and propose changes for guest acceptance. Read guest conversations and reply to guests now or at a time you schedule, by email, Airbnb or their KrabiClaw inbox; set up automatic messages that are sent to every guest at the homes you choose. Read and send internal team messages with the current business members, optionally about an accessible stay or location. Manage stays, nightly availability and prices: add stays you took directly, change or cancel stays kept in KrabiClaw, and move a guest to another of your homes, including an Airbnb reservation, which messages the guest the new address when the stay has a guest conversation. Connected homes update Airbnb through Channex and apply existing automatic guest-message schedules. Adding, changing, moving or cancelling a stay opens, moves or cancels its cleaning job, and a legal practice’s booking changes open or cancel the attorney’s preparation and follow-up jobs; jobs are posted to the team as automatic team messages. Read, add, assign, complete or skip tasks, and accept, defer or dismiss suggested opportunities. Read payment reports, transactions and payouts. Read Google Analytics and Search Console reports for the connected accounts. Read Google Ads campaigns, create paused Search campaigns, pause or enable campaigns and change daily budgets in the connected account; enabled campaigns can spend its advertising budget. Invite new members by email, which sends an invitation to an address outside the business. Publishing a website emails KrabiClaw operators; live content and uploaded media can be public, and booking actions may email guests. Payment setup, online payment collection, refund preparation and refund execution require the authenticated KrabiClaw dashboard. Publish to connected Facebook, Instagram or Discord destinations, and delete posts from Facebook or Discord, only when requested. A KrabiClaw account is required, with access to each business you manage.",
+    "description": "Create and manage your KrabiClaw business website from ChatGPT. Save a private website draft, publish it once its required details are complete, and add locations. Edit products, prices, announcements, articles, translations and media. Read customer inquiries, manage bookings and legal consultations, and propose changes for guest acceptance. Read guest conversations and reply to guests now or at a time you schedule, by email, Airbnb or their KrabiClaw inbox; set up automatic messages that are sent to every guest at the homes you choose. Read and send internal team messages with the current business members, optionally about an accessible stay or location. Manage stays, nightly availability and prices: add stays you took directly, change or cancel stays kept in KrabiClaw, and move a guest to another of your homes, including an Airbnb reservation, which messages the guest the new address when the stay has a guest conversation. Connected homes update Airbnb through Channex and apply existing automatic guest-message schedules. Adding, changing, moving or cancelling a stay opens, moves or cancels its cleaning job, and a legal practice’s booking changes open or cancel the attorney’s preparation and follow-up jobs; jobs are posted to the team as automatic team messages. Read, add, assign, complete or skip tasks, and accept, defer or dismiss suggested opportunities. Read payment reports, transactions and payouts. Read Google Analytics and Search Console reports for the connected accounts. Read Google Ads and Meta Ads campaigns and reports, create paused Google Search and Meta campaigns, pause or enable campaigns and change daily budgets in the connected ad accounts; enabled campaigns can spend the account’s advertising budget. Invite new members by email, which sends an invitation to an address outside the business. Publishing a website emails KrabiClaw operators; live content and uploaded media can be public, and booking actions may email guests. Payment setup, online payment collection, refund preparation and refund execution require the authenticated KrabiClaw dashboard. Publish to connected Facebook, Instagram or Discord destinations, and delete posts from Facebook or Discord, only when requested. A KrabiClaw account is required, with access to each business you manage.",
     "category": "BUSINESS"
   },
   "tools": {
@@ -192,11 +192,11 @@
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": true,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Creates a new paused campaign, new unshared budget, ad group, keywords and ad, and records its result.",
-        "destructive_justification": "Adds new paused advertising resources without replacing existing campaigns or serving ads.",
+        "destructive_justification": "Creates a campaign and budget in the connected Google Ads account and submits ad copy to Google’s ad review, which cannot be recalled; the campaign is created paused and spends nothing until enabled.",
         "open_world_justification": "Submits ad copy and an arbitrary destination URL to Google’s ad-review system, which also reviews paused ads."
       }
     },
@@ -252,11 +252,11 @@
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": true,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Creates a new paused campaign in the connected Meta Ad Account and records its result.",
-        "destructive_justification": "Adds new paused advertising resources without replacing existing campaigns or serving ads.",
+        "destructive_justification": "Creates a campaign in the connected Meta Ad Account, which cannot be recalled from Meta once submitted; the campaign is created paused and spends nothing until enabled.",
         "open_world_justification": "Submits campaign details to Meta's ad platform in PAUSED status."
       }
     },
@@ -1428,11 +1428,11 @@
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Adds an idempotent offline payment or negative offline-refund record and computes the stay paid status; no funds move.",
-        "destructive_justification": "Adds a ledger entry while retaining earlier payment records; negative values are records, not refund transactions.",
+        "destructive_justification": "Adds a ledger entry and overwrites the stay’s paid amount and payment status; earlier payment records are retained, and negative values are records, not refund transactions.",
         "open_world_justification": "Acts only on this business’s private record of offline payments and refreshes its open dashboards; no money moves."
       }
     },
