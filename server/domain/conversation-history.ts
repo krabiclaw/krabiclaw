@@ -14,10 +14,11 @@ import { firstName, providerInstant } from './guest-threads/presentation'
 import { conversationHistorySql, conversationMessage, groupConversationEntries, projectConversationHistory, type ConversationHistory, type HistoryRow } from './conversation-history-data'
 import { readConversationEnrichment, threadDeliveriesQuery } from './guest-threads/deliveries'
 import { parseGuestRequest, participantLabel } from './requests'
+import { jobBookingIdSql } from './tasks'
 
 type TranscriptViewer = { conversationId: string; userId: string; organizationId?: string }
 type MessageContext = Pick<ConversationHistory, 'photos' | 'deliveriesByMessage'>
-type HistoryContext = { organization_name: string; timezone: string; booking_type: 'booking' | 'stay' | null; support: number; airbnb: number; roster: string | null }
+type HistoryContext = { organization_name: string; timezone: string; booking_type: 'booking' | 'stay' | null; support: number; airbnb: number; roster: string | null; job: string | null; review: number | null }
 
 function presentMessage(message: Pick<MessageRow, 'id' | 'sequence' | 'event_name'>, context: MessageContext, input: {
   author: string; viewerRole: ConversationViewerRole; guestName: string; authorUserId: string | null
@@ -162,12 +163,21 @@ export async function loadConversationPage(
         ${head ? `CASE WHEN c.viewer_role = 'guest' AND b.owner = 'app' AND b.user_id = ? AND c.user_id = ?
           THEN CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END END` : 'NULL'} AS booking_type,
         ${head ? `(SELECT json_group_array(json_object('id', p.id, 'name', p.name, 'image', p.image, 'role', p.role))
-          FROM (${conversationParticipantsSql('c', 'c.viewer_role')}) p)` : 'NULL'} AS roster
+          FROM (${conversationParticipantsSql('c', 'c.viewer_role')}) p)` : 'NULL'} AS roster,
+        -- The job this conversation is about that the viewer closes here: in its team conversation, or in the guest's when it is theirs or nobody's.
+        ${head ? `CASE WHEN c.viewer_role = 'member' AND c.booking_id IS NOT NULL THEN (SELECT json_object('task_id', t.id, 'version', t.version) FROM tasks t
+          WHERE t.organization_id = c.organization_id AND t.status = 'open' AND t.kind IN ('turnover', 'stay_ready', 'consultation_follow_up', 'consultation_prep')
+            AND (${jobBookingIdSql('t')}) = c.booking_id
+            AND (c.kind = 'team' OR EXISTS (SELECT 1 FROM member vm WHERE vm.organizationId = c.organization_id AND vm.userId = ?
+              AND (vm.id = t.assigned_member_id OR (t.assigned_member_id IS NULL AND vm.role IN ('owner', 'admin')))))
+          ORDER BY t.created_at, t.id LIMIT 1) END` : 'NULL'} AS job,
+        ${head ? `CASE WHEN c.viewer_role = 'member' AND c.kind = 'booking' THEN COALESCE(b.status = 'pending', 0) OR EXISTS (SELECT 1 FROM tasks ch
+          WHERE ch.organization_id = c.organization_id AND ch.kind = 'booking_change' AND ch.status = 'open' AND ch.subject_id = c.booking_id) END` : 'NULL'} AS review
       FROM authorized c
       JOIN organization o ON o.id = c.organization_id
       LEFT JOIN business_locations l ON l.id = c.location_id AND l.organization_id = c.organization_id
       LEFT JOIN bookings b ON c.kind = 'booking' AND b.id = c.booking_id AND b.organization_id = c.organization_id`,
-    params: [...(access.params ?? []), ...(head ? [userId, userId, userId, userId] : [])],
+    params: [...(access.params ?? []), ...(head ? [userId, userId, userId, userId, userId] : [])],
   }, {
     query: `WITH authorized AS MATERIALIZED (${access.query}), ${historyQuery.query.slice('WITH '.length)}`,
     params: [...(access.params ?? []), ...(historyQuery.params ?? [])],
@@ -206,5 +216,6 @@ export async function loadConversationPage(
     },
     ...result, viewer_role: role,
     capabilities: { ...groupCapabilities, can_invite_guest: bookingHost && conversation.blocked_at === null },
+    work: context.job ? { type: 'done' as const, ...JSON.parse(context.job) as { task_id: string; version: number } } : context.review ? { type: 'review' as const } : null,
   }
 }

@@ -1823,7 +1823,7 @@ export async function notifyAirbnbInquiry(env: NotificationEnv, db: DbClient, in
     channelHome(db, thread),
     inquiryRecord(db, thread, input.inquiry),
     buildOwnerThreadInboxUrl(env, db, { organizationId: thread.organization_id, threadId: thread.id }),
-    listMessagePhotos(db, 'message', [asked.id]).then(found => found.get(asked.id) ?? []),
+    listMessagePhotos(db, [asked.id]).then(found => found.get(asked.id) ?? []),
   ])
   const message = inquiryReceivedMessage({
     guestName: input.inquiry.guestName, message: asked.body.trim(), record, replyUrl,
@@ -2037,7 +2037,7 @@ export async function notifyGuestCancellation(env: NotificationEnv, db: DbClient
 /**
  * Tell the people a task is now theirs, or that its window starts today, by
  * their own Email, WhatsApp and Push for the Tasks category, each send
- * recorded on the task. The task opens on Today.
+ * recorded on the task. The alert opens the booking or conversation the work is about.
  */
 async function notifyTaskPeople(env: NotificationEnv, db: DbClient, input: { organizationId: string; taskId: string; recipientUserIds: string[]; actorUserId: string | null } & ({ kind: 'assigned'; eventKey: string } | { kind: 'starting'; day: string })): Promise<void> {
   const recipientIds = new Set(input.recipientUserIds)
@@ -2047,7 +2047,6 @@ async function notifyTaskPeople(env: NotificationEnv, db: DbClient, input: { org
   if (!organization) throw new Error(`Task ${input.taskId} names a missing organization`)
   const actor = input.actorUserId ? await queryFirst<{ name: string }>(db, 'SELECT name FROM user WHERE id = ?', [input.actorUserId]) : null
   const members = await queryAll<{ id: string; userId: string }>(db, 'SELECT id, userId FROM member WHERE organizationId = ?', [input.organizationId])
-  const taskUrl = await dashboardPathUrl(env, db, input.organizationId, `?task=${encodeURIComponent(input.taskId)}`)
   const organizationLogoUrl = await organizationLogo(db, input.organizationId)
   const recipients = (await resolveOwnerRecipients(env, db, {
     organizationId: input.organizationId, category: 'tasks', emailPurpose: 'transactional',
@@ -2055,6 +2054,7 @@ async function notifyTaskPeople(env: NotificationEnv, db: DbClient, input: { org
   })).filter(recipient => recipientIds.has(recipient.userId))
   const results = await Promise.allSettled([...recipientIds].map(async (userId) => {
     const task = await describeTaskForAlert(db, input.organizationId, input.taskId, userId)
+    const taskUrl = await dashboardPathUrl(env, db, input.organizationId, task.page)
     const message = { ...taskAlertMessage({ kind: input.kind, actorName: actor?.name ?? null, task, organizationName: organization.name, taskUrl }), organizationLogoUrl }
     const recipient = recipients.find(item => item.userId === userId)
     if (!recipient) return

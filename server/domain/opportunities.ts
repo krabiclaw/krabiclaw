@@ -68,7 +68,7 @@ export async function listOpportunities(db: DbClient, principal: MemberAccessPri
             AND (pr.valid_from_at IS NULL OR pr.valid_from_at <= ?) AND (pr.valid_until_at IS NULL OR pr.valid_until_at > ?)
             ${locationId ? 'AND (pr.location_id IS NULL OR pr.location_id = ?)' : ''})
       ORDER BY p.created_at, p.id`, params: [organizationId, ...(locationId ? [locationId] : []), at, at, ...(locationId ? [locationId] : [])] },
-    bookingWelcomesQuery(organizationId, { now, locationId }),
+    bookingWelcomesQuery({ sql: '?', params: [organizationId] }, { now, locationId }),
   ])
   const organization = facts!.results[0] as OrganizationFacts | undefined
   if (!organization) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
@@ -87,16 +87,19 @@ export async function listOpportunities(db: DbClient, principal: MemberAccessPri
     offer(`product.readiness:${product.id}`, 'Catalog', `Set a booking price for “${product.name}”`, 'This offering needs a price before guests can book it on your site.', `${productEditorPath(slug, product.id)}/price`, 'i-lucide-list-checks', product.id)
   }
 
-  for (const welcome of bookingWelcomes(welcomeRows!.results as WelcomeRow[], now)) {
-    items.push({
-      id: `booking.welcome:${welcome.requestId}`, status_line: 'Messages',
-      title: welcome.kind === 'stay' ? 'Share info about your place' : 'Share how to prepare',
-      detail: `Help ${welcome.guestFirstName ?? `your ${welcome.kind === 'stay' ? 'guest' : resolveBookingPresentation(welcome.productKind, organization.vertical).counterpartyNoun}`} get ready`,
-      icon: 'i-lucide-messages-square', path: guestConversationPath(slug, welcome.requestId),
-      product_id: welcome.productId, location_id: welcome.locationId, conversation_id: welcome.requestId, message: welcome.message,
-    })
-  }
+  items.push(...bookingWelcomeViews(welcomeRows!.results, { now, slug, vertical: organization.vertical }))
   return { opportunities: items }
+}
+
+/** The welcomes due now among `bookingWelcomesQuery`'s rows, as suggestions: "Share info about your place", "Help Eva get ready". */
+export function bookingWelcomeViews(rows: unknown[], input: { now: Date; slug: string; vertical: string | null }): OpportunityView[] {
+  return bookingWelcomes(rows as WelcomeRow[], input.now).map(welcome => ({
+    id: `booking.welcome:${welcome.requestId}`, status_line: 'Messages',
+    title: welcome.kind === 'stay' ? 'Share info about your place' : 'Share how to prepare',
+    detail: `Help ${welcome.guestFirstName ?? `your ${welcome.kind === 'stay' ? 'guest' : resolveBookingPresentation(welcome.productKind, input.vertical).counterpartyNoun}`} get ready`,
+    icon: 'i-lucide-messages-square', path: guestConversationPath(input.slug, welcome.requestId),
+    product_id: welcome.productId, location_id: welcome.locationId, conversation_id: welcome.requestId, message: welcome.message,
+  }))
 }
 
 /**
@@ -168,7 +171,7 @@ function welcomeMessage(row: WelcomeRow): string | null {
  * conversation named: any record whose offering has host-authored preparation.
  * `bookingWelcomes` keeps the ones still upcoming.
  */
-function bookingWelcomesQuery(organizationId: string, input: { now: Date; requestId?: string; locationId?: string }): BatchQuery {
+export function bookingWelcomesQuery(organization: { sql: string; params?: unknown[] }, input: { now: Date; requestId?: string; locationId?: string }): BatchQuery {
   const until = new Date(input.now.getTime() + UPCOMING_RESERVATION_DAYS * 86_400_000).toISOString()
   // A stay is kept through its home's last local day of the window, which can end up to a day after `until`.
   const stayUntil = new Date(input.now.getTime() + (UPCOMING_RESERVATION_DAYS + 2) * 86_400_000).toISOString()
@@ -182,7 +185,7 @@ function bookingWelcomesQuery(organizationId: string, input: { now: Date; reques
     JOIN conversations r ON r.booking_id = br.id AND r.kind = 'booking' AND r.organization_id = br.organization_id
     JOIN products p ON p.id = br.product_id AND p.organization_id = br.organization_id
     LEFT JOIN product_stay_configs c ON br.unit = 'nights' AND c.organization_id = br.organization_id AND c.product_id = br.product_id
-    WHERE br.organization_id = ? AND br.status = 'confirmed' AND br.starts_at >= ? AND br.starts_at <= CASE WHEN br.unit = 'nights' THEN ? ELSE ? END
+    WHERE br.organization_id = ${organization.sql} AND br.status = 'confirmed' AND br.starts_at >= ? AND br.starts_at <= CASE WHEN br.unit = 'nights' THEN ? ELSE ? END
       AND (json_extract(p.details_json, '$.preparation') IS NOT NULL OR json_array_length(p.details_json, '$.what_to_bring') > 0
         OR COALESCE(c.directions, c.wifi_network, c.wifi_password, c.house_manual) IS NOT NULL)
       AND r.blocked_at IS NULL
@@ -190,7 +193,7 @@ function bookingWelcomesQuery(organizationId: string, input: { now: Date; reques
       AND NOT EXISTS (SELECT 1 FROM messages e WHERE e.conversation_id = r.id AND e.author_kind = 'member' AND e.occurred_at >= br.created_at)
       ${only('r.id', input.requestId)} ${only('br.location_id', input.locationId)}
     ORDER BY br.starts_at, br.id`,
-    params: [organizationId, new Date(input.now.getTime() - 2 * 86_400_000).toISOString(), stayUntil, until, ...[input.requestId, input.locationId].filter((value): value is string => value !== undefined)],
+    params: [...organization.params ?? [], new Date(input.now.getTime() - 2 * 86_400_000).toISOString(), stayUntil, until, ...[input.requestId, input.locationId].filter((value): value is string => value !== undefined)],
   }
 }
 

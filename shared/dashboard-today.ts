@@ -1,11 +1,8 @@
 import { z } from 'zod'
 import type { AgendaItem } from '~/server/utils/dashboard-agenda'
-import type { OpportunityView } from '~/server/domain/opportunities'
-import { formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
-import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
-import { getVerticalCopy } from '~/utils/vertical-copy'
+import { formatTimestamp, localDateAt } from '~/utils/timezone'
 
-/** One of the visits a guest account has booked, as the account's Today lists it. The business's Today is tasks (server/domain/tasks.ts). */
+/** One of the visits a guest account has booked, as the account's Today lists it. The business's Today is `TodayItem`. */
 export const todayCardSchema = z.object({
   id: z.string(), to: z.string(), eyebrow: z.string(), headline: z.string(), description: z.string().nullable(),
   image_url: z.string().nullable(), image_icon: z.string(),
@@ -33,68 +30,43 @@ export function agendaToTodayCard(item: AgendaItem, input: { resolved_at: string
 /** How far ahead the business's Upcoming reads its reservations, and so how far ahead a booked client is offered a welcome. */
 export const UPCOMING_RESERVATION_DAYS = 30
 
+/** Who and how many, as a card names them: "Eva’s group of 4", "Ana", "a group of 2". */
+export function guestGroup(name: string | null, party: number): string {
+  const first = name?.trim().split(/\s+/)[0] || null
+  if (!first) return party === 1 ? 'a guest' : `a group of ${party}`
+  return party > 1 ? `${first}’s group of ${party}` : first
+}
+
 /**
- * One booked visit on the business's Today or Upcoming, as Airbnb's
- * reservation card draws it: when, the guest's portrait, their party, what they
- * booked, and the suggestion for it. Every string is formatted here so web and
- * the app compose nothing. It is read from the canonical agenda.
+ * One card on the business's Today or Upcoming, in Airbnb's order: when, once;
+ * the picture of what was booked; one sentence with who and how many; where,
+ * with the money for an owner or admin; then the two-line action. The card
+ * opens the conversation about that booking or job. Every string is formatted
+ * on the server; web and the app draw it as it comes.
  */
-export interface TodayReservation {
-  /** The agenda item: `booking:<request>`, `stay:<stay>:<arrival|departure|current>`. */
+export interface TodayItem {
+  /** `booking:<id>`, `arrival:<id>`, `departure:<id>`, `class:<session>`, `task:<id>`. */
   id: string
-  kind: 'booking' | 'stay'
-  /** The booking's own screen. */
-  to: string
-  conversation_id: string | null
-  booking_id: string | null
-  product_id: string | null
-  location_id: string | null
-  starts_at: string
-  timezone: string
-  /** "3:00 PM" today; "Oct 26 – 29" for a stay; "Thu, Nov 12 · 3:00 PM" for a visit. */
-  date_label: string
-  guest_image_url: string | null
-  /** "Eva’s group of 4 checks in", "Bruno’s group of 3", "Ana’s consultation". */
+  /** "3:00 PM" today; "Oct 26 – 29" for a stay on Upcoming; "Thu, Nov 20 · 10:30 AM" for a visit on Upcoming. */
+  when: string
+  /** The home's or offering's own picture; a table's location. */
+  image_url: string | null
+  /** "Eva’s group of 4 checks in", "Pottery wheel class for 6", "Clean up after Parity’s group of 2". */
   headline: string
-  /** The home, offering or location booked. */
-  name: string | null
-  /** "Pending confirmation", "Currently hosting", "Overbooked · Next guests arrive the same day". */
-  status_label: string | null
-  /** Whether the team left its private note on the booking: "1 note". */
-  note_label: string | null
-  /** The welcome this booking's guest is due, shown at the bottom of its card. */
-  suggestion: OpportunityView | null
+  /** "Ao Nang Pool Villa · $1,240 paid", "Family law · Online · free". */
+  line: string | null
+  /** "Share info about your place" / "Help Eva get ready". */
+  action: { title: string; detail: string }
+  /** The conversation about it, or its record when the viewer has no seat in one. */
+  to: string
+  /** The welcome the conversation opens with, for the owner to review and send. */
+  draft: string | null
 }
 
-/** A business's booking on its Today ("today") or Upcoming ("upcoming"). */
-export function agendaToTodayReservation(item: AgendaItem, input: { range: 'today' | 'upcoming'; vertical: string | null; notes: number }): Omit<TodayReservation, 'suggestion'> {
-  if (item.kind !== 'booking' && item.kind !== 'stay') throw new Error('Reservation cards require a booking or stay')
-  const timed = item.starts_at.includes('T')
-  const time = timed ? formatTimestamp(item.starts_at, 'en', item.timezone, { hour: 'numeric', minute: '2-digit' }) : 'Time not set'
-  const checkIn = timed ? localDateAt(new Date(item.starts_at), item.timezone) : item.starts_at
-  const stayRange = () => {
-    if (item.check_out_date === null) throw new Error(`Stay ${item.booking_id} has no checkout date`)
-    return formatCalendarRange(item.stay_moment === 'current' ? checkIn : item.day_key, item.check_out_date, 'en-US')
-  }
-  const date_label = item.kind === 'stay' && (input.range === 'upcoming' || item.stay_moment === 'current') ? stayRange()
-    : input.range === 'today' ? time : `${formatTimestamp(item.starts_at, 'en', item.timezone, { weekday: 'short', month: 'short', day: 'numeric' })} · ${time}`
-  const party = item.party_size ?? 0
-  const guest = item.guest_first_name ?? (item.kind === 'stay' && item.stay_channel ? `Name not provided by ${STAY_CHANNEL_LABELS[item.stay_channel]}` : item.title)
-  const group = item.guest_first_name && party > 1 ? `${guest}’s group of ${party}` : item.kind === 'stay' ? guest : `${guest}’s ${getVerticalCopy(input.vertical, 'en').reservationWord}`
-  const moment = input.range === 'today' && item.kind === 'stay' ? item.stay_moment : null
-  const headline = moment === 'arrival' ? `${group} checks in` : moment === 'departure' || moment === 'turnover' ? `${group} checks out` : group
-  const status_label = [item.overbooked ? 'Overbooked' : null, item.status === 'pending' ? 'Pending confirmation' : null,
-    moment === 'current' ? 'Currently hosting' : null, moment === 'turnover' ? 'Next guests arrive the same day' : null].filter(Boolean).join(' · ') || null
-  return {
-    id: item.id, kind: item.kind, to: item.to, conversation_id: item.conversation_id, booking_id: item.booking_id, product_id: item.product_id, location_id: item.location_id,
-    starts_at: item.starts_at, timezone: item.timezone, date_label, guest_image_url: item.guest_image_url, headline,
-    name: item.name, status_label, note_label: input.notes > 0 ? `${input.notes} ${input.notes === 1 ? 'note' : 'notes'}` : null,
-  }
-}
-
-/** "You have 2 reservations", "You have 13 upcoming consultations", in the business's own word for a booking. */
-export function todayReservationsTitle(count: number, range: 'today' | 'upcoming', vertical: string | null): string | null {
-  if (count === 0) return null
-  const word = getVerticalCopy(vertical, 'en').reservationWord
-  return `You have ${count} ${range === 'upcoming' ? 'upcoming ' : ''}${word}${count === 1 ? '' : 's'}`
+/** GET /api/dashboard/today: one list for the person looking, in the order the day happens. */
+export interface BusinessToday {
+  /** "You have 2 reservations and 1 request"; "Nothing needs you today". */
+  title: string
+  cards: TodayItem[]
+  resolved_at: string
 }

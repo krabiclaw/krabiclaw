@@ -74,6 +74,8 @@ export interface ConversationPage extends Omit<ConversationEntriesPage, 'convers
     can_invite_guest: boolean
     can_leave: boolean
   }
+  /** What the viewer does here: Done for the job this conversation is about, or Review a request or change waiting on them. */
+  work: { type: 'done'; task_id: string; version: number } | { type: 'review' } | null
 }
 
 export interface ConversationDetails {

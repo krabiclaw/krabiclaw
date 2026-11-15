@@ -3,7 +3,7 @@ import { isOrganizationWideRole } from '~/server/utils/member-access'
 import { jobThreadParticipantsKey, postAutomaticTeamMessage, reseatAutomaticThread } from '~/server/domain/team-messages'
 import { JOB_TASK_SQL, SUPPORTED_TASK_KINDS, isJobTask, jobBookingIdSql, jobEndKeys, jobKey, jobSubject, taskViewForUser, type JobSubject, type TaskRow, type TaskView } from '~/server/domain/tasks'
 import { notifyTaskStarting, taskStartingSent } from '~/server/utils/notifications'
-import { addLocalDays, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
+import { addLocalDays, formatTimestamp, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
 /*
@@ -52,9 +52,7 @@ function rosterFor(task: TaskRow, members: Member[]): Roster | null {
 }
 
 function lines(view: TaskView): string {
-  const side = (part: TaskView['sheet']['checkout']) => part ? `${part.label} ${part.time}${part.guest ? ` · ${part.guest}` : ''}` : null
-  return [`${view.sheet.heading}: ${view.sheet.title}`, view.sheet.date, side(view.sheet.checkout), side(view.sheet.checkin),
-    view.sheet.checkout ? null : view.detail, view.notes].filter((line): line is string => Boolean(line)).join('\n')
+  return [`${view.sheet.heading}: ${view.sheet.title}`, view.sheet.date, view.when, view.detail, view.notes].filter((line): line is string => Boolean(line)).join('\n')
 }
 
 /** The reminders a job gets, each at its instant, as [key suffix, instant, valid until]. */
@@ -215,7 +213,7 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
         const when = view.when ? `, ${view.when}` : ''
         const body = reminder.kind === 'evening' ? `Tomorrow: ${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${when}.`
           : reminder.kind === 'morning' ? `Today: ${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${when}.`
-            : `${view.sheet.title} is not marked done and the next guests arrive${view.sheet.checkin ? ` at ${view.sheet.checkin.time}` : ' in two hours'}.`
+            : `${view.sheet.title} is not marked done and the next guests arrive at ${formatTimestamp(task.due_at!, 'en', task.timezone, { hour: 'numeric', minute: '2-digit' })}.`
         await post(subject, roster.seats, reminder.key, body, reminder.kind === 'warning' ? roster.hosts : roster.cleaners, heldIn!)
       }
     } catch (error) {

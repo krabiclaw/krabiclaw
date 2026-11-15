@@ -422,7 +422,6 @@
             data-testid="confirm-status-toggle"
             @click="toggleStatusFromModal"
           />
-          <UButton v-if="publishingFromToday" label="Preview" color="neutral" variant="ghost" block :to="todayPath" />
           <UButton
             label="Cancel"
             color="neutral"
@@ -646,8 +645,6 @@ const form = reactive<OrganizationSettingsForm>({
 
 const statusModalOpen = ref(false)
 const togglingStatus = ref(false)
-const publishingFromToday = computed(() => route.query.publish === '1')
-const todayPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.org_slug))}`)
 const isPublished = computed(() => form.status === 'active')
 const statusLabel = computed(() => {
   if (form.status === 'active') return 'Published'
@@ -674,7 +671,6 @@ async function toggleStatusFromModal() {
     await patchSettings({ status: nextStatus })
     form.status = nextStatus
     statusModalOpen.value = false
-    if (nextStatus === 'active' && publishingFromToday.value) await navigateTo(todayPath.value)
   } catch (error) {
     editorError.value = getErrorMessage(error, 'Failed to update website status')
   } finally {
@@ -903,7 +899,7 @@ const navigationGroups = computed(() => {
 
 const autoOpenDestination = computed(() => {
   if (surface.value === 'settings') {
-    return publishingFromToday.value ? { path: pagesPath.value, query: { publish: '1' } } : pagesPath.value
+    return pagesPath.value
   }
   return navigationGroups.value[0]?.items.find(item => item.to)?.to ?? null
 })
@@ -1021,9 +1017,6 @@ watch(settingsResource, (resource) => {
   if (!resource) return
   fillForm(resource.settings.settings)
   originalSignature.value = editorSignature(detailKey.value)
-}, { immediate: true })
-watch([() => loadedSettings.value?.status, publishingFromToday], ([status, requested]) => {
-  if (props.surface === 'settings' && status === 'inactive' && requested) statusModalOpen.value = true
 }, { immediate: true })
 watch(detailKey, () => resetDraft())
 

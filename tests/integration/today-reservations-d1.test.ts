@@ -16,12 +16,12 @@ import { resolveOrganizationMembership } from '../../server/utils/member-access.
 import { handleTaskTools } from '../../server/utils/mcp-tools/tasks.ts'
 import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
-import type { TodayReservation } from '../../shared/dashboard-today.ts'
+import type { BusinessToday, TodayItem } from '../../shared/dashboard-today.ts'
 import type { OpportunityView } from '../../server/domain/opportunities.ts'
 import todayRoute from '../../server/api/dashboard/today.get.ts'
 
-// Today's reservation cards are the business's own bookings, read from the
-// canonical agenda, with a welcome suggestion at the foot of the card of each
+// Today's cards are the business's own bookings, read from the stored booked
+// records in one round trip, with the welcome as the card's action for each
 // upcoming booking whose client has not heard from the business and whose host
 // wrote preparation for it. Every booking here is made through the operation
 // a guest or the business makes it with; nothing a card shows is inserted.
@@ -31,7 +31,7 @@ const ZONE = 'America/Los_Angeles'
 const PASSWORD = 'TodayReservationsProof123!'
 const ORGS = { law: 'service', studio: 'experience', inn: 'lodging', bistro: 'restaurant' } as const
 type Org = keyof typeof ORGS
-type Today = { reservations: { title: string | null; cards: TodayReservation[] }; opportunities: OpportunityView[]; tasks: Array<{ tasks: Array<{ stayId: string | null; reservation?: unknown }> }> }
+type Today = BusinessToday
 
 async function boot() {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -95,7 +95,7 @@ async function offering(db: D1Database, env: CloudflareEnv, org: Org, input: { k
 
 const operator = (key: string) => ({ userId: OWNER, idempotencyKey: key, source: 'operator', externalReference: null, guestAcknowledgement: false })
 
-test('Today shows every booking type as a reservation card for its own business, with the welcome suggestion only where it applies', { timeout: 180_000 }, async () => {
+test('Today shows every booking type as one card for its own business, with the welcome as its action only where it applies', { timeout: 180_000 }, async () => {
   const { runtime, db, env, event, today } = await boot()
   try {
     const localToday = localDateAt(new Date(), ZONE)
@@ -117,7 +117,7 @@ test('Today shows every booking type as a reservation card for its own business,
 
     // An experience with only something to bring.
     const pottery = await offering(db, env, 'studio', { kind: 'experience', name: 'Wheel Throwing Class', day: inTwoDays, details: { what_to_bring: ['Clothes that can get muddy'] } })
-    const brunoClass = await book('studio', pottery.product.slug, pottery.session.id, 'Bruno Silva', 3, 'bruno-class')
+    await book('studio', pottery.product.slug, pottery.session.id, 'Bruno Silva', 3, 'bruno-class')
 
     // A home whose arrival guide has directions and wifi.
     const manager: StayAccess = { organizationId: 'inn', actorId: OWNER, manage: true }
@@ -142,41 +142,49 @@ test('Today shows every booking type as a reservation card for its own business,
     assert.equal(table.status, 201, JSON.stringify(table.body))
 
     const law = await today('law', 'upcoming'), studio = await today('studio', 'upcoming'), inn = await today('inn', 'upcoming'), bistro = await today('bistro', 'upcoming')
-    const shape = (card: TodayReservation) => ({ kind: card.kind, requestId: card.conversation_id, headline: card.headline, resourceName: card.name, suggestion: card.suggestion?.title ?? null })
+    const shape = (card: TodayItem) => ({ id: card.id, headline: card.headline, line: card.line, action: card.action, to: card.to })
+    const visit = (instant: string) => `${new Intl.DateTimeFormat('en', { timeZone: ZONE, weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(instant))} · ${new Intl.DateTimeFormat('en', { timeZone: ZONE, hour: 'numeric', minute: '2-digit' }).format(new Date(instant))}`
+    const record = async (conversationId: string) => String(await db.prepare('SELECT booking_id FROM conversations WHERE id = ?').bind(conversationId).first('booking_id'))
 
-    // Each business sees its own bookings and nothing of another's.
-    assert.deepEqual(law.reservations.cards.map(shape), [
-      { kind: 'booking', requestId: evaConsultation, headline: 'Eva’s consultation', resourceName: 'Estate Planning Consultation', suggestion: 'Share how to prepare' },
-      { kind: 'booking', requestId: ianConsultation, headline: 'Ian’s consultation', resourceName: 'Initial Case Review', suggestion: null },
+    // Each business sees its own bookings and nothing of another's, in the business's own word.
+    assert.deepEqual(law.cards.map(shape), [
+      { id: `booking:${await record(evaConsultation)}`, headline: 'Eva’s consultation', line: 'Estate Planning Consultation · law office', action: { title: 'Share how to prepare', detail: 'Help Eva get ready' }, to: `/dashboard/law/messages/${evaConsultation}` },
+      { id: `booking:${await record(ianConsultation)}`, headline: 'Ian’s consultation', line: 'Initial Case Review · law office', action: { title: 'Say hello to your guests', detail: 'See if they have any questions' }, to: `/dashboard/law/messages/${ianConsultation}` },
     ])
-    assert.equal(law.reservations.title, 'You have 2 upcoming consultations')
-    assert.deepEqual(studio.reservations.cards.map(shape), [
-      { kind: 'booking', requestId: brunoClass, headline: 'Bruno’s group of 3', resourceName: 'Wheel Throwing Class', suggestion: 'Share how to prepare' },
+    assert.deepEqual([law.title, law.cards[0]!.when], ['You have 2 upcoming consultations', visit(estate.startsAt)])
+    // A class is one card for everyone booked into it.
+    assert.deepEqual(studio.cards.map(shape), [
+      { id: `class:${pottery.session.id}`, headline: 'Wheel Throwing Class for 3', line: 'studio office', action: { title: 'Message the class', detail: '1 group is coming' },
+        to: `/dashboard/studio/calendar/sessions/${pottery.session.id}?date=${inTwoDays}&product_id=${pottery.product.id}` },
     ])
-    assert.deepEqual(inn.reservations.cards.map(shape), [
-      { kind: 'stay', requestId: stay.conversation_id, headline: 'Diana’s group of 2', resourceName: 'Seaview Cottage', suggestion: 'Share info about your place' },
+    assert.equal(studio.title, 'You have 1 upcoming class')
+    // The owner looks after the home, so the clean after Diana's stay is theirs too, on its own day.
+    const turnover = String(await db.prepare("SELECT id FROM tasks WHERE kind = 'turnover' AND subject_id = ?").bind(stay.id).first('id'))
+    assert.deepEqual(inn.cards.map(shape), [
+      { id: `booking:${stay.id}`, headline: 'Diana’s group of 2', line: 'Seaview Cottage · no payment recorded', action: { title: 'Share info about your place', detail: 'Help Diana get ready' }, to: `/dashboard/inn/messages/${stay.conversation_id}` },
+      { id: `task:${turnover}`, headline: 'Clean up after Diana’s group of 2', line: 'Seaview Cottage', action: { title: 'Tap Done when it’s finished', detail: 'In Diana’s conversation' }, to: `/dashboard/inn/messages/${stay.conversation_id}` },
     ])
-    assert.equal(inn.reservations.cards[0]!.booking_id, stay.id)
-    // A restaurant has no host-written preparation, so its reservation has no suggestion.
-    assert.deepEqual(bistro.reservations.cards.map(shape), [
-      { kind: 'booking', requestId: table.body.conversation_id, headline: 'Nora’s group of 4', resourceName: 'bistro office', suggestion: null },
+    assert.equal(inn.title, 'You have 1 upcoming reservation and 1 upcoming home to clean')
+    assert.equal(inn.cards[0]!.when, `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).formatRange(new Date(`${inTwoDays}T00:00:00Z`), new Date(`${addLocalDays(inTwoDays, 3)}T00:00:00Z`)).replace(/[\u2009\u202f]/g, ' ')}`)
+    // A restaurant has no host-written preparation, so its reservation has no welcome.
+    assert.deepEqual(bistro.cards.map(shape), [
+      { id: `booking:${table.body.booking_id}`, headline: 'Nora’s group of 4', line: 'bistro office', action: { title: 'Say hello to your guests', detail: 'See if they have any questions' }, to: `/dashboard/bistro/messages/${table.body.conversation_id}` },
     ])
-    assert.equal(bistro.reservations.title, 'You have 1 upcoming reservation')
+    assert.equal(bistro.title, 'You have 1 upcoming reservation')
     // Upcoming bookings are not today's.
-    for (const org of Object.keys(ORGS) as Org[]) assert.deepEqual((await today(org, 'today')).reservations, { title: null, cards: [] })
-    // A booking's welcome is on its card, not among Today's setup.
-    assert.equal((await today('law', 'today')).opportunities.some(opportunity => opportunity.conversation_id !== null), false)
+    for (const org of Object.keys(ORGS) as Org[]) {
+      const { title, cards } = await today(org, 'today')
+      assert.deepEqual({ title, cards }, { title: 'Nothing needs you today', cards: [] })
+    }
 
-    // The message is written from the offering's and the home's own fields.
-    const consultationMessage = law.reservations.cards[0]!.suggestion!.message!
+    // The message is written from the offering's and the home's own fields, and the conversation opens with it.
+    const consultationMessage = law.cards[0]!.draft!
     assert.match(consultationMessage, /^Hi Eva,\n\nLooking forward to seeing you for Estate Planning Consultation on .+\.\n\n/)
     assert.ok(consultationMessage.endsWith(`Before you arrive:\n${preparation}\n\nWhat to bring:\n- Photo ID\n- Current will`), consultationMessage)
-    assert.ok(studio.reservations.cards[0]!.suggestion!.message!.endsWith('What to bring:\n- Clothes that can get muddy'))
-    const stayMessage = inn.reservations.cards[0]!.suggestion!.message!
+    const stayMessage = inn.cards[0]!.draft!
     assert.match(stayMessage, /^Hi Diana,\n\nLooking forward to hosting you at Seaview Cottage from .+\.\n\n/)
     assert.ok(stayMessage.endsWith(`Directions:\n${directions}\n\nWifi details:\nWifi network: Seaview\nWifi password: saltwater`), stayMessage)
-    assert.equal(law.reservations.cards[0]!.suggestion!.path, `/dashboard/law/messages/${evaConsultation}`)
-    assert.equal(law.reservations.cards[0]!.suggestion!.id, `booking.welcome:${evaConsultation}`)
+    assert.equal(law.cards[1]!.draft, null)
 
     // MCP's list_opportunities lists the same welcome, with the same message.
     const membership = await resolveOrganizationMembership(env, { organizationId: 'law', userId: OWNER })
@@ -186,14 +194,14 @@ test('Today shows every booking type as a reservation card for its own business,
       .filter(opportunity => opportunity.conversation_id !== null).map(opportunity => [opportunity.id, opportunity.conversation_id, opportunity.message])
     assert.deepEqual(await welcomes(), [[`booking.welcome:${evaConsultation}`, evaConsultation, consultationMessage]])
 
-    // The host's message takes the suggestion off the card; the card stays.
+    // The host's message takes the welcome off the card; the card stays.
     const replied = await sendGuestThreadReply(db, { threadId: evaConsultation, organizationId: 'law', body: consultationMessage,
       actorUserId: OWNER, idempotencyKey: 'eva-welcome', env })
     assert.equal(replied.ok, true, JSON.stringify(replied))
     const after = await today('law', 'upcoming')
-    assert.deepEqual(after.reservations.cards.map(shape), [
-      { kind: 'booking', requestId: evaConsultation, headline: 'Eva’s consultation', resourceName: 'Estate Planning Consultation', suggestion: null },
-      { kind: 'booking', requestId: ianConsultation, headline: 'Ian’s consultation', resourceName: 'Initial Case Review', suggestion: null },
+    assert.deepEqual(after.cards.map(card => [card.headline, card.action.title, card.draft]), [
+      ['Eva’s consultation', 'Say hello to your guests', null],
+      ['Ian’s consultation', 'Say hello to your guests', null],
     ])
     assert.deepEqual(await welcomes(), [])
     // The sent message is the conversation's, read back from the ledger.

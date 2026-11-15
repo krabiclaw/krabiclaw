@@ -292,7 +292,7 @@ async function renderMemberReply(env: ReplyEmailEnv, db: DbClient, organizationI
   const [guest, organizationLogoUrl, photoRows, manageUrl] = await Promise.all([
     guestPresentation(db, { organizationId, organizationName, locale }),
     organizationLogo(db, organizationId),
-    photoCount ? listMessagePhotos(db, 'message', [entry.id]) : null,
+    photoCount ? listMessagePhotos(db, [entry.id]) : null,
     buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: entry.conversation_id }),
   ])
   const photos = photoRows?.get(entry.id) ?? []

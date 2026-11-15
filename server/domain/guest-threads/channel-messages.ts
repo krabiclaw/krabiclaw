@@ -253,7 +253,7 @@ async function mirrorMessage(db: DbClient, env: ChannelEnv, mapping: ChannelThre
  * photos already placed. A file that is not a photo is not kept.
  */
 async function mirrorMessagePhotos(db: DbClient, env: ChannelEnv, organizationId: string, entryId: string, links: string[]): Promise<void> {
-  if (!links.length || (await listMessagePhotos(db, 'message', [entryId])).has(entryId)) return
+  if (!links.length || (await listMessagePhotos(db, [entryId])).has(entryId)) return
   const files: MessagePhoto[] = []
   for (const link of links) {
     const response = await fetch(link)

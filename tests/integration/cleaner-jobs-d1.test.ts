@@ -105,7 +105,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     const [job] = await automatic(thread.id)
     assert.equal(job!.key, jobKey(turnover))
     assert.match(job!.body, /^Turnover: Cabin\n/)
-    assert.match(job!.body, /Checkout 10:00 AM · Dee\nCheck-in 3:00 PM · Lee · 1 guest/)
+    assert.match(job!.body, /\n10:00 AM – 3:00 PM\nDee checks out at 10:00 AM\.$/)
     const messages = (await conversationPageFor(db, cleaner, thread.id)).entries.filter(entry => entry.type === 'message').reverse()
     assert.deepEqual([messages[0]!.automatic, messages[0]!.author_user_id], [true, null])
     // The hosts read along, and it is unread for them too until they do.
@@ -145,11 +145,11 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.deepEqual(cookThreads[0]!.participants.map(person => person.id).sort(), ['admin', 'cook', 'owner'])
     assert.equal((await automatic(cookThreads[0]!.id)).find(message => message.key === jobKey(turnover))?.body.split('\n')[0], 'Turnover: Cabin')
 
-    // Done: the cook's note is their own message in the conversation, and nobody is alerted.
-    const closed = await closeTask(db, await taskViewer(principal('cook', 'member')), turnover.id, { status: 'done', note: 'All clean, towels restocked', photos: [], env })
+    // Done, in one tap: "Done" is the cook's own message in the conversation, and nobody is alerted.
+    const closed = await closeTask(db, await taskViewer(principal('cook', 'member')), turnover.id, { status: 'done', env })
     assert.equal(closed.status, 'done')
     const cookMessages = (await conversationPageFor(db, cook, cookThreads[0]!.id)).entries.filter(entry => entry.type === 'message').reverse()
-    assert.deepEqual([cookMessages[0]!.author_user_id, cookMessages[0]!.automatic, cookMessages[0]!.body, cookMessages[0]!.deliveries], ['cook', false, 'All clean, towels restocked', []])
+    assert.deepEqual([cookMessages[0]!.author_user_id, cookMessages[0]!.automatic, cookMessages[0]!.body, cookMessages[0]!.deliveries], ['cook', false, 'Done', []])
     assert.equal((await taskRow(`turnover:${dee.id}`))!.status, 'done')
     // The cook's own message reads the conversation through for them and is unread for the hosts; the cleaner, no longer seated with it, never sees it.
     assert.equal(await isUnread(db, owner, cookThreads[0]!.id), true)
@@ -294,8 +294,8 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
       .bind(newThread, `job:${prep!.id}:*`).first<string>('id')
     assert.ok((await messages(newThread)).some(message => message.id === reassignedPost && message.automatic && message.body?.includes('Replacement')))
     const viewer = await taskViewer(attorney)
-    const outcome = 'Private completion note for the current client'
-    assert.equal((await closeTask(db, viewer, prep!.id, { status: 'done', note: outcome, photos: [], env })).status, 'done')
+    const outcome = 'Done'
+    assert.equal((await closeTask(db, viewer, prep!.id, { status: 'done', env })).status, 'done')
     assert.ok((await messages(newThread)).some(message => message.body === outcome))
     assert.ok((await messages(oldThread)).every(message => message.body !== outcome))
   } finally { await runtime.dispose() }

@@ -414,7 +414,8 @@ type MediaPlacementRow = MediaAsset & {
  * its rows.
  */
 export function mediaPlacementsQuery(input: {
-  organizationId: string
+  /** The organization, or a SQL term for it a batch statement reads (BATCH_VIEWER.organization). */
+  organizationId: string | { sql: string }
   ownerType: MediaPlacementOwnerType
   owners: string[] | { sql: string; params?: unknown[] }
   slot?: string
@@ -427,13 +428,13 @@ export function mediaPlacementsQuery(input: {
            ma.*
       FROM media_placements mp
       JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id
-     WHERE mp.organization_id = ? AND mp.owner_type = ?
+     WHERE mp.organization_id = ${typeof input.organizationId === 'string' ? '?' : input.organizationId.sql} AND mp.owner_type = ?
        AND mp.owner_id IN (${owners.sql})
        ${input.slot ? 'AND mp.slot = ?' : ''}
        AND (mp.status = 'active' ${input.includePendingSocialCard ? "OR (mp.slot = 'social_card' AND mp.status = 'pending')" : ''}) AND ma.status = 'active'
      ORDER BY mp.owner_id, mp.slot, mp.sort_order
   `,
-    params: [input.organizationId, input.ownerType, ...(owners.params ?? []), ...(input.slot ? [input.slot] : [])],
+    params: [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.ownerType, ...(owners.params ?? []), ...(input.slot ? [input.slot] : [])],
   }
 }
 
@@ -608,8 +609,8 @@ export async function listMediaAssets(
   const conditions = [`ma.organization_id = ?`, `ma.status = 'active'`, `ma.generation_key IS NULL`]
   const params: SqlBindValue[] = [organizationId]
   // A photo sent in a conversation is the conversation's, not the website's.
-  if (opts.ownerType !== 'message' && opts.ownerType !== 'task') {
-    conditions.push(`NOT EXISTS (SELECT 1 FROM media_placements sent WHERE sent.asset_id = ma.id AND sent.organization_id = ma.organization_id AND sent.owner_type IN ('message', 'task'))`)
+  if (opts.ownerType !== 'message') {
+    conditions.push(`NOT EXISTS (SELECT 1 FROM media_placements sent WHERE sent.asset_id = ma.id AND sent.organization_id = ma.organization_id AND sent.owner_type = 'message')`)
   }
   if (opts.kind) { conditions.push(`ma.kind = ?`); params.push(opts.kind) }
   if (opts.search) { conditions.push(`ma.file_name LIKE ? ESCAPE '\\'`); params.push(`%${opts.search.replace(/[\\%_]/g, '\\$&')}%`) }

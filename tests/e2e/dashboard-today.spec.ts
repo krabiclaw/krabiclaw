@@ -5,8 +5,6 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { bookTable, openSeating, seededTables } from './helpers/tables'
 import { seededSiteHeaders } from './test-env'
 import { seededTenant } from './seed/manifest'
-import type { TaskPerson, TaskSection, TaskView } from '../../server/domain/tasks'
-import type { OpportunityView } from '../../server/domain/opportunities'
 import type { AgendaPayload } from '../../server/utils/dashboard-agenda'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 import type { InboxListPage } from '../../server/domain/guest-threads/types'
@@ -14,9 +12,6 @@ import type { ConversationPage } from '../../shared/messages-contract'
 import { isDashboardInvalidation } from '../../shared/dashboard-invalidations'
 
 const ORG = '/dashboard/ember-slice-demo'
-
-/** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; assignees: TaskPerson[]; resolved_at: string }
 
 test('the author can schedule and cancel a private reply from Messages', async ({ page, request, browser, baseURL }, testInfo) => {
   test.setTimeout(120_000)
@@ -213,17 +208,7 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
   const actor = members.find(member => member.userId === 'user-e2e-demo-role-owner')
   expect(actor).toBeTruthy()
   const memberContext = await browser.newContext()
-  const taskRoot = `/api/organizations/${organizationId}/tasks`
-  let workId: string | null = null
   try {
-    const work = await page.request.post(taskRoot, { data: { title: 'Review the dining room checklist', idempotency_key: crypto.randomUUID() } })
-    expect(work.status(), await work.text()).toBe(201)
-    workId = (await work.json() as { task: TaskView }).task.id
-    const ownerResponse = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
-    expect(ownerResponse.status(), await ownerResponse.text()).toBe(200)
-    const ownerFeed = await ownerResponse.json() as BusinessToday
-    expect(ownerFeed.tasks.flatMap(section => section.tasks)).toContainEqual(expect.objectContaining({ id: workId, status: 'open', assignee: null }))
-    expect(ownerFeed.assignees.map(person => person.id)).toContain(actor!.id)
     const changed = await page.request.post('/api/auth/organization/update-member-role', {
       headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor!.id, role: 'member' },
     })
@@ -231,7 +216,7 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
     await loginAs(memberContext.request, baseURL!, actor!.userId)
     const memberFeed = await memberContext.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
     expect(memberFeed.status(), await memberFeed.text()).toBe(200)
-    expect(await memberFeed.json()).toEqual({ website: null, reservations: { title: null, cards: [] }, tasks: [], opportunities: [], assignees: [], resolved_at: expect.any(String) })
+    expect(await memberFeed.json()).toEqual({ title: 'Nothing needs you today', cards: [], resolved_at: expect.any(String) })
     const denied = await memberContext.request.get('/api/dashboard/analytics', { params: { org: 'ember-slice-demo' } })
     // Organization-wide surfaces deliberately conceal denied scope with 404.
     expect(denied.status()).toBe(404)
@@ -245,14 +230,7 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
       expect(read.status()).toBe(200)
       expect((await read.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.id === actor!.id)?.role).toBe(actor!.role)
     } finally {
-      try {
-        if (workId) {
-          const complete = await page.request.post(`${taskRoot}/${workId}/complete`, { data: {} })
-          expect(complete.status(), await complete.text()).toBe(200)
-        }
-      } finally {
-        try { await memberContext.close() } finally { await release() }
-      }
+      try { await memberContext.close() } finally { await release() }
     }
   }
 })
