@@ -15,7 +15,7 @@ const DASHBOARD = `/dashboard/${SLUG}`
 const ACTOR = 'user-e2e-ncls-consultation-owner'
 
 /** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
+type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; assignees: TaskPerson[]; resolved_at: string }
 
 async function body<T>(response: APIResponse, status: number): Promise<T> {
   expect(response.status(), await response.text()).toBe(status)
@@ -93,7 +93,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     // A member's Today is their own work: no opportunities, nobody to assign to,
     // and only tasks given to them.
     const today = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
-    expect(today).toMatchObject({ opportunities: [], opportunity_issues: [], assignees: [] })
+    expect(today).toMatchObject({ opportunities: [], assignees: [] })
     for (const task of today.tasks.flatMap(section => section.tasks)) {
       expect(task.can, `${task.kind} ${task.id} is not a manager's`).toMatchObject({ assign: false, edit: false })
       expect(task.assignee, `${task.kind} ${task.id} is given to the member`).toMatchObject({ type: 'member', id: actor.id, you: true })

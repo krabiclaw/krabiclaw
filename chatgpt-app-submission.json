@@ -4,22 +4,10 @@
   "app_info": {
     "display_name": "KrabiClaw",
     "subtitle": "Manage your business website",
-    "description": "Create and manage your KrabiClaw business website from ChatGPT. Save a private website draft, publish it once its required details are complete, and add locations. Edit products, prices, announcements, articles, translations and media. Read customer inquiries, manage bookings and legal consultations, and propose changes for guest acceptance. Read guest conversations and reply to guests now or at a time you schedule, by email, Airbnb or their KrabiClaw inbox; set up automatic messages that are sent to every guest at the homes you choose. Read and send internal team messages with the current business members, optionally about an accessible stay or location. Manage stays, nightly availability and prices: add stays you took directly, change or cancel stays kept in KrabiClaw, and move a guest to another of your homes, including an Airbnb reservation, which messages the guest the new address when the stay has a guest conversation. Connected homes update Airbnb through Channex and apply existing automatic guest-message schedules. Adding, changing, moving or cancelling a stay opens, moves or cancels its cleaning job, and a legal practice’s booking changes open or cancel the attorney’s preparation and follow-up jobs; jobs are posted to the team as automatic team messages. Read, add, assign, complete or skip tasks, and accept, defer or dismiss suggested opportunities. Read payment reports, transactions and payouts. Read Google Analytics and Search Console reports for the connected accounts. Read Google Ads and Meta Ads campaigns and reports, create paused Google Search and Meta campaigns, pause or enable campaigns and change daily budgets in the connected ad accounts; enabled campaigns can spend the account’s advertising budget. Invite new members by email, which sends an invitation to an address outside the business. Publishing a website emails KrabiClaw operators; live content and uploaded media can be public, and booking actions may email guests. Payment setup, online payment collection, refund preparation and refund execution require the authenticated KrabiClaw dashboard. Publish to connected Facebook, Instagram or Discord destinations, and delete posts from Facebook or Discord, only when requested. A KrabiClaw account is required, with access to each business you manage.",
+    "description": "Create and manage your KrabiClaw business website from ChatGPT. Save a private website draft, publish it once its required details are complete, and add locations. Edit products, prices, announcements, articles, translations and media. Read customer inquiries, manage bookings and legal consultations, and propose changes for guest acceptance. Read guest conversations and reply to guests now or at a time you schedule, by email, Airbnb or their KrabiClaw inbox; set up automatic messages that are sent to every guest at the homes you choose. Read and send internal team messages with the current business members, optionally about an accessible stay or location. Manage stays, nightly availability and prices: add stays you took directly, change or cancel stays kept in KrabiClaw, and move a guest to another of your homes, including an Airbnb reservation, which messages the guest the new address when the stay has a guest conversation. Connected homes update Airbnb through Channex and apply existing automatic guest-message schedules. Adding, changing, moving or cancelling a stay opens, moves or cancels its cleaning job, and a legal practice’s booking changes open or cancel the attorney’s preparation and follow-up jobs; jobs are posted to the team as automatic team messages. Read, add, assign, complete or skip tasks, and read what Today suggests: unfinished setup and a welcome for each booked guest. Read payment reports, transactions and payouts. Read Google Analytics and Search Console reports for the connected accounts. Read Google Ads and Meta Ads campaigns and reports, create paused Google Search and Meta campaigns, pause or enable campaigns and change daily budgets in the connected ad accounts; enabled campaigns can spend the account’s advertising budget. Invite new members by email, which sends an invitation to an address outside the business. Publishing a website emails KrabiClaw operators; live content and uploaded media can be public, and booking actions may email guests. Payment setup, online payment collection, refund preparation and refund execution require the authenticated KrabiClaw dashboard. Publish to connected Facebook, Instagram or Discord destinations, and delete posts from Facebook or Discord, only when requested. A KrabiClaw account is required, with access to each business you manage.",
     "category": "BUSINESS"
   },
   "tools": {
-    "accept_opportunity": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Records the decision and creates the opportunity's task.",
-        "destructive_justification": "Changes an open opportunity to accepted, creates its task, and can send assignment notifications that cannot be recalled.",
-        "open_world_justification": "Assignment can send configured email, WhatsApp or push notifications to workspace assignees through external delivery services."
-      }
-    },
     "add_organization_language": {
       "annotations": {
         "readOnlyHint": false,
@@ -344,18 +332,6 @@
         "open_world_justification": "Sends configured email, WhatsApp or push notifications to workspace assignees through external delivery services."
       }
     },
-    "defer_opportunity": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Records when an opportunity should come back.",
-        "destructive_justification": "Hides the opportunity until the chosen time.",
-        "open_world_justification": "Writes only to the selected private workspace."
-      }
-    },
     "delete_article_category": {
       "annotations": {
         "readOnlyHint": false,
@@ -558,18 +534,6 @@
         "read_only_justification": "Disables an existing secondary language while preserving its authored translations; source language is refused.",
         "destructive_justification": "Withdraws existing public localized routes.",
         "open_world_justification": "Changes guest access to website translations."
-      }
-    },
-    "dismiss_opportunity": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Records the owner's decision to decline an opportunity.",
-        "destructive_justification": "Hides the opportunity until its evidence changes.",
-        "open_world_justification": "Writes only to the selected private workspace."
       }
     },
     "get_blog_post": {
@@ -1066,14 +1030,14 @@
     },
     "list_opportunities": {
       "annotations": {
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "openWorldHint": false,
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Records opportunities backed by current business evidence.",
-        "destructive_justification": "Adds evidence records without deleting opportunities or changing accepted, dismissed or deferred decisions.",
-        "open_world_justification": "Reads only workspace data and the business's configured provider accounts."
+        "read_only_justification": "Reads only the selected workspace's stored setup and bookings.",
+        "destructive_justification": "Does not create, change or delete anything.",
+        "open_world_justification": "Reads only the selected private workspace."
       }
     },
     "list_organization_locales": {

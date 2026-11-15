@@ -1,7 +1,6 @@
 import { computed, inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type InjectionKey, type Ref } from 'vue'
 import { isDashboardInvalidation, type DashboardInvalidation } from '~/shared/dashboard-invalidations'
 import type { ConversationPage } from '~/shared/messages-contract'
-import type { ThreadListPage } from '~/lib/components/workspace/messages/guest-thread-client'
 
 export type DashboardInvalidationStatus = 'closed' | 'connecting' | 'open' | 'failed'
 
@@ -16,16 +15,61 @@ export interface DashboardInvalidationConnection {
   /** Last successful reconnect in the current workspace or account scope. */
   reconnectEpoch: Ref<number>
   accessEnded: Ref<number>
-  recentConversations: Map<string, ConversationPage>
   /** Heads being read before their conversation opens; an opening conversation takes its read from here. */
   conversationReads: Map<string, Promise<ConversationPage | undefined>>
-  recentInbox: { snapshot?: { key: string; page: ThreadListPage; expiresAt: number } }
-  /** Insights reads by page and filters, for a return within the live connection; the same rules as the inbox's.
-   * `invalidations` counts the events that drop them, so a read an event overtook is not kept. */
-  recentInsights: { reads: Map<string, { page: unknown; expiresAt: number; epoch: number }>; invalidations: number }
+  held: HeldReads
   connect: () => void
   waitForFirstOpen: (signal: AbortSignal) => Promise<void>
 }
+
+export interface HeldRead {
+  key: string
+  value?: unknown
+  expiresAt?: number
+  /** The events that make the read stale; `value` is what it holds, if anything yet. */
+  dropsOn: (event: DashboardInvalidation, value: unknown) => boolean
+}
+
+/** The events Today and Insights re-read on: bookings, nights, reviews and messages change with them. */
+export const businessChanged = (event: DashboardInvalidation) => event.type === 'business.changed' || event.type === 'stay.changed'
+  || event.type === 'nights.changed' || event.type === 'access.changed' || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.team)
+
+/**
+ * Reads a return within the live connection shows again instead of repeating
+ * them: held under a key (screen, reader, workspace and the filters that
+ * identify the read) while the socket stays open for the same reader, until
+ * they expire or an event they declare drops them. A read an event, a closed
+ * socket or another reader overtook is not held. Taking a read removes it;
+ * `limit` keeps only the newest held reads of the key's screen.
+ */
+function heldReads(status: Readonly<Ref<DashboardInvalidationStatus>>, reads: Map<string, HeldRead>) {
+  const live = (read?: HeldRead) => read && 'value' in read && (read.expiresAt === undefined || read.expiresAt > Date.now()) ? read : undefined
+  const screen = (key: string) => key.slice(0, key.indexOf(':'))
+  return {
+    get: (key: string) => live(reads.get(key))?.value,
+    take(key: string) {
+      const read = live(reads.get(key))
+      reads.delete(key)
+      return read
+    },
+    begin(key: string, dropsOn: HeldRead['dropsOn']): HeldRead {
+      const read = { ...reads.get(key), key, dropsOn }
+      if (status.value === 'open') reads.set(key, read)
+      return read
+    },
+    hold(read: HeldRead, value: unknown, expiresAt?: number, limit?: number) {
+      if (reads.get(read.key) !== read || (expiresAt !== undefined && expiresAt <= Date.now())) return
+      Object.assign(read, { value, expiresAt })
+      reads.delete(read.key)
+      reads.set(read.key, read)
+      if (!limit) return
+      const same = [...reads.values()].filter(other => 'value' in other && screen(other.key) === screen(read.key))
+      for (const other of same.slice(0, Math.max(0, same.length - limit))) reads.delete(other.key)
+    },
+  }
+}
+
+export type HeldReads = ReturnType<typeof heldReads>
 
 const dashboardInvalidationKey: InjectionKey<DashboardInvalidationConnection> = Symbol('dashboard-invalidations')
 const CONNECT_TIMEOUT_MS = 8_000
@@ -34,19 +78,18 @@ const HEARTBEAT_INTERVAL_MS = 20_000
 const HEARTBEAT_TIMEOUT_MS = 8_000
 
 function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationId: Readonly<Ref<string | null | undefined>>, reader: Readonly<Ref<string | undefined>>): DashboardInvalidationConnection {
-  const recentConversations = new Map<string, ConversationPage>()
   const conversationReads = new Map<string, Promise<ConversationPage | undefined>>()
-  const recentInbox: DashboardInvalidationConnection['recentInbox'] = {}
-  const recentInsights: DashboardInvalidationConnection['recentInsights'] = { reads: new Map(), invalidations: 0 }
+  const reads = new Map<string, HeldRead>()
+  const status = ref<DashboardInvalidationStatus>('closed')
+  const held = heldReads(status, reads)
   // `nuxt dev` cannot carry this socket: its dev server answers the upgrade
   // with a plain 200 (docs/local-development.md). Realtime runs under
   // `yarn dev:worker`, staging and production; here the dashboard stays on its
   // reads instead of retrying a connection that cannot open and reporting it.
   if (import.meta.dev) {
-    return { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), reconnectEpoch: ref(0), accessEnded: ref(0), recentConversations, conversationReads, recentInbox, recentInsights, connect: () => {}, waitForFirstOpen: async () => {} }
+    return { status, event: shallowRef(null), connectionEpoch: ref(0), reconnectEpoch: ref(0), accessEnded: ref(0), conversationReads, held, connect: () => {}, waitForFirstOpen: async () => {} }
   }
 
-  const status = ref<DashboardInvalidationStatus>('closed')
   const event = shallowRef<DashboardInvalidation | null>(null)
   const connectionEpoch = ref(0)
   const reconnectEpoch = ref(0)
@@ -149,26 +192,7 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
         if (first) seenEventIds.delete(first)
       }
       if (parsed.type === 'access.changed') receivedAccessChange = true
-      if (parsed.type === 'access.changed'
-        || ((parsed.type === 'MESSAGE_ACK' || parsed.type === 'CONVERSATION_LEAVE') && parsed.user_id === reader.value)
-        || ((parsed.type === 'MESSAGE_CREATE' || parsed.type === 'MESSAGE_UPDATE') && !parsed.scheduled)) {
-        recentInbox.snapshot = undefined
-      }
-      // The events Insights re-reads on: bookings, nights and reviews change with them.
-      if (parsed.type === 'business.changed' || parsed.type === 'stay.changed' || parsed.type === 'nights.changed' || parsed.type === 'access.changed'
-        || ((parsed.type === 'MESSAGE_CREATE' || parsed.type === 'MESSAGE_UPDATE') && !parsed.team)) {
-        recentInsights.reads.clear()
-        recentInsights.invalidations++
-      }
-      if (parsed.type === 'CONVERSATION_LEAVE' && parsed.user_id === reader.value) {
-        recentConversations.delete(parsed.conversation_id)
-      } else if (parsed.type === 'access.changed') {
-        for (const [id, page] of recentConversations) {
-          if (page.conversation.organization_id === parsed.organization_id) recentConversations.delete(id)
-        }
-      } else if ((parsed.type === 'MESSAGE_CREATE' || parsed.type === 'MESSAGE_UPDATE') && !parsed.scheduled) {
-        recentConversations.delete(parsed.conversation_id)
-      }
+      for (const [key, read] of reads) if (read.dropsOn(parsed, read.value)) reads.delete(key)
       event.value = parsed
     })
 
@@ -241,15 +265,10 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
 
   watch(path, resetConnection, { flush: 'sync' })
   watch(status, value => {
-    if (value === 'open') return
-    recentConversations.clear()
-    recentInbox.snapshot = undefined
-    recentInsights.reads.clear()
+    if (value !== 'open') reads.clear()
   }, { flush: 'sync' })
   watch(reader, (next, previous) => {
-    recentConversations.clear()
-    recentInbox.snapshot = undefined
-    recentInsights.reads.clear()
+    reads.clear()
     // Learning the identity of the session already used in the handshake does not change it.
     if (previous !== undefined && next !== undefined && next !== previous) resetConnection()
   }, { flush: 'sync' })
@@ -272,7 +291,7 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     status.value = 'closed'
   })
 
-  return { status, event, connectionEpoch, reconnectEpoch, accessEnded, recentConversations, conversationReads, recentInbox, recentInsights, connect, waitForFirstOpen }
+  return { status, event, connectionEpoch, reconnectEpoch, accessEnded, conversationReads, held, connect, waitForFirstOpen }
 }
 
 export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>, personal: Readonly<Ref<boolean>>, reader: Readonly<Ref<string | undefined>>, sessionPending: Readonly<Ref<boolean>>): DashboardInvalidationConnection {

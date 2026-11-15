@@ -1,13 +1,14 @@
 import { authClient } from '~/lib/auth-client'
 import { isConversationEntriesPage, isConversationPage } from '~/lib/components/workspace/messages/guest-thread-client'
 import type { ConversationEntriesPage, ConversationPage } from '~/shared/messages-contract'
+import type { HeldRead, HeldReads } from '~/composables/useDashboardInvalidations'
 
-/** The live session keeps the five most recently read conversation heads. */
-function holdRecentConversation(recent: Map<string, ConversationPage>, page: ConversationPage) {
-  recent.delete(page.conversation.id)
-  recent.set(page.conversation.id, page)
-  const oldest = recent.keys().next().value
-  if (recent.size > 5 && oldest) recent.delete(oldest)
+/** The live session holds the five most recently read conversation heads, until the conversation, or access to its workspace, changes. */
+function beginConversation(held: HeldReads, id: string, reader: string | undefined) {
+  return held.begin(`conversation:${id}`, (event, page) =>
+    (event.type === 'CONVERSATION_LEAVE' && event.user_id === reader && event.conversation_id === id)
+    || (event.type === 'access.changed' && (!isConversationPage(page) || page.conversation.organization_id === event.organization_id))
+    || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.scheduled && event.conversation_id === id))
 }
 
 /**
@@ -39,6 +40,7 @@ export function useConversationPrefetch(personalScope = false) {
   onBeforeUnmount(() => end())
 
   async function read(conversationId: string, signal: AbortSignal): Promise<ConversationPage | undefined> {
+    const reading = beginConversation(realtime.held, conversationId, userId.value)
     let page: ConversationPage
     try {
       page = await applicationFetch<ConversationPage>(`/api/messages/${encodeURIComponent(conversationId)}`, { signal, validate: isConversationPage })
@@ -52,13 +54,13 @@ export function useConversationPrefetch(personalScope = false) {
     reads.delete(conversationId)
     realtime.conversationReads.delete(conversationId)
     if (page.conversation.id !== conversationId || (!personalScope && page.conversation.organization_id !== organizationId.value)) return undefined
-    holdRecentConversation(realtime.recentConversations, page)
+    realtime.held.hold(reading, page, undefined, 5)
     return page
   }
 
   return function prefetch(conversationId: string): Promise<ConversationPage | undefined> | undefined {
     if (!userId.value || realtime.status.value !== 'open' || (!personalScope && !organizationId.value)
-      || realtime.recentConversations.has(conversationId) || reads.has(conversationId)) return undefined
+      || realtime.held.get(`conversation:${conversationId}`) || reads.has(conversationId)) return undefined
     const controller = new AbortController()
     reads.set(conversationId, controller)
     const reading = read(conversationId, controller.signal)
@@ -80,11 +82,11 @@ export function useConversation(threadId: Ref<string> | ComputedRef<string>, per
     query: { before }, signal, validate: isConversationEntriesPage,
   })
   let readConnectionEpoch = 0
-  let readUserId: string | undefined
+  let holding: HeldRead | undefined
   const request = useAsyncData(key, (_app, { signal }) => {
     if (!personalScope && !organizationId.value) throw createError({ statusCode: 400, statusMessage: 'Conversation requires a workspace' })
     readConnectionEpoch = realtime.connectionEpoch.value
-    readUserId = userId.value
+    holding = beginConversation(realtime.held, threadId.value, userId.value)
     // A head the list is already reading is this conversation's read; a failed or ended one is read here.
     const reading = realtime.conversationReads.get(threadId.value)
     const open = () => applicationFetch<ConversationPage>(path.value, { signal, validate: isConversationPage })
@@ -92,22 +94,19 @@ export function useConversation(threadId: Ref<string> | ComputedRef<string>, per
   }, { server: !personalScope })
 
   if (import.meta.client) {
-    const recent = realtime.recentConversations
-    const held = userId.value && realtime.status.value === 'open' ? recent.get(threadId.value) : undefined
+    const held = userId.value ? realtime.held.get(`conversation:${threadId.value}`) : undefined
     // Seed the existing request state while its fresh, authorized read runs.
-    if (held && request.pending.value && !request.data.value) request.data.value = held
+    if (isConversationPage(held) && request.pending.value && !request.data.value) request.data.value = held
     watch([request.status, request.data], ([status, page]) => {
-      if (status !== 'success' || !page || !readUserId || userId.value !== readUserId
-        || realtime.status.value !== 'open' || readConnectionEpoch !== realtime.connectionEpoch.value) return
-      const id = page.conversation.id
-      if (id !== threadId.value || (!personalScope && page.conversation.organization_id !== organizationId.value)) return
-      holdRecentConversation(recent, page)
+      if (status !== 'success' || !page || !holding || !userId.value || page.conversation.id !== threadId.value
+        || (!personalScope && page.conversation.organization_id !== organizationId.value)) return
+      realtime.held.hold(holding, page, undefined, 5)
     }, { immediate: true })
   }
 
   watch(request.error, error => {
     if (error?.statusCode === 401 || error?.statusCode === 403 || error?.statusCode === 404) {
-      realtime.recentConversations.delete(threadId.value)
+      realtime.held.take(`conversation:${threadId.value}`)
       request.data.value = undefined
     }
   }, { flush: 'sync' })

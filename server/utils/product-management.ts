@@ -1,7 +1,7 @@
 import { isStayAmenityCodes, NEW_HOME_CANCELLATION_POLICIES, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { assertResponsibleMember, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
-import { assertPublishedHost, hasPublishedHost } from '~/server/utils/public-provider'
+import { assertPublishedHost } from '~/server/utils/public-provider'
 import type { PaymentBasis, ProductBookingSetupInput } from '~/server/utils/availability'
 import { HTTPError } from 'nitro'
 import { AVAILABILITY_PAGE_DAYS, BOOKING_HORIZON_DAYS, MAX_STAY_NIGHTS, parseStayCalendarRules } from '~/shared/bookings'
@@ -2252,14 +2252,6 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
   // guarded batch. Ordinary publication still evaluates the current flags.
   if (!allocation || (!options.prepareAllocation && !(await queryFirst<{ ready: number }>(db, `SELECT (${allocation.query}) AS ready`, allocation.params))?.ready)) missing.push('booking.schedule')
   return { ready: missing.length === 0, missing, allocation }
-}
-
-/** The next publication blocker for an active experience. */
-export async function experiencePublicationBlocker(db: DbClient, organizationId: string, product: Product, env: CloudflareEnv): Promise<string | undefined> {
-  if (product.kind !== 'experience' || !product.active || product.order_url) return
-  const published = product.publications.some(publication => publication.organization_id === organizationId && publication.published)
-  if (!published && product.booking && !await hasPublishedHost(db, organizationId, product.booking)) return 'host'
-  return (await productBookingReadiness(db, organizationId, product, { requireAllocation: !published, env })).missing[0]
 }
 
 export async function setProductPublication(db: DbClient, input: {

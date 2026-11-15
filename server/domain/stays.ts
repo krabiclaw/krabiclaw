@@ -330,7 +330,7 @@ export interface StayNight {
 
 const MAX_LIST_DAYS = 400
 /** Every home's nights at once: three months, a window a multi-calendar pages through. */
-export const MAX_HOMES_CALENDAR_DAYS = 92
+const MAX_HOMES_CALENDAR_DAYS = 92
 const MAX_CALENDAR_BYTES = 2_000_000
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -1282,7 +1282,7 @@ export async function getStay<A extends StayAccess>(db: DbClient, access: A, sta
 }
 
 /** The price of an inventory date is the dated price of its home's variant. */
-export const STAY_NIGHT_PRICE_SQL = `(SELECT pr.unit_amount FROM product_variants v JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
+const STAY_NIGHT_PRICE_SQL = `(SELECT pr.unit_amount FROM product_variants v JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
   WHERE v.organization_id = n.organization_id AND v.product_id = n.product_id AND pr.stay_date = n.date)`
 
 /** Every night of [from, to) at one home: whether it is free, its price and rules, and the stay holding it. */
@@ -1303,47 +1303,6 @@ export async function readStayCalendars<A extends StayAccess>(db: DbClient, acce
   const [homes, stays] = await Promise.all([stayHomes(db, access, null), staysOverlapping(db, access, { from, to })])
   const nights = homes.length ? await homesNights(db, access.organizationId, homes, from, to) : []
   return { from, to, homes: homes.map((home, index) => ({ home, nights: nights[index]! })), stays }
-}
-
-export interface StayGapCandidate {
-  productId: string
-  name: string
-  locationId: string
-  from: string
-  /** Exclusive: the next recorded stay arrives on this date. */
-  to: string
-  nights: number
-  bookable: boolean
-  restriction: string | null
-}
-
-/** Bounded gaps between actual stays, using the same nightly policy as a quote. */
-export async function readStayGapCandidates(db: DbClient, access: StayAccess, input: { from: unknown; to: unknown }): Promise<StayGapCandidate[]> {
-  const calendar = await readStayCalendars(db, access, input)
-  const gaps: StayGapCandidate[] = []
-  for (const { home, nights } of calendar.homes) {
-    if (!home.live) continue
-    for (let index = 0; index < nights.length;) {
-      if (!nights[index]!.available) { index++; continue }
-      const start = index
-      while (index < nights.length && nights[index]!.available) index++
-      const before = nights[start - 1], departure = nights[index]
-      if (!before?.booking_id || !departure?.booking_id) continue
-      const stayed = nights.slice(start, index)
-      if ([...stayed, departure].some(night => night.channel?.state === 'pending' || night.channel?.state === 'needs_review')) continue
-      if (stayed[0]!.date < homeToday(home.timezone)) continue
-      let restriction: string | null = null
-      try {
-        await quoteStay(db, access.organizationId, home, { check_in_date: stayed[0]!.date, check_out_date: departure.date, adults: 1 })
-      } catch (error) {
-        if (!(error instanceof HTTPError) || error.statusCode < 400 || error.statusCode >= 500) throw error
-        restriction = error.message
-      }
-      gaps.push({ productId: home.product_id, name: home.name, locationId: home.location_id,
-        from: stayed[0]!.date, to: departure.date, nights: stayed.length, bookable: restriction === null, restriction })
-    }
-  }
-  return gaps.sort((a, b) => a.from.localeCompare(b.from) || a.productId.localeCompare(b.productId))
 }
 
 /** A hold's claim counts while its hold is active and unexpired; this selects the claims that no longer do. */

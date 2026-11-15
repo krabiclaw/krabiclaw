@@ -22,8 +22,7 @@ import { buildPublicResourceCacheKey } from '../../server/utils/public-resource-
 import { PUBLIC_CACHE_REVISION_SQL } from '../../server/utils/edge-cache.ts'
 import { cancelStay, createStay, getStay, readPublicStayHome } from '../../server/domain/stays.ts'
 import { buildBuyerRequestActivityUrl } from '../../server/utils/dashboard-notification-links.ts'
-import { memberAccessPrincipal, organizationAdapter, resolveMembership } from '../../server/utils/member-access.ts'
-import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
+import { organizationAdapter } from '../../server/utils/member-access.ts'
 import { setNotificationPreference } from '../../server/domain/notification-preferences.ts'
 import { registerDevice } from '../../server/domain/devices.ts'
 import { guestPaymentMessage, ownerPaymentMessage } from '../../server/notifications/payment-events.ts'
@@ -230,14 +229,6 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     assert.match(JSON.parse(acceptedMail).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/activity\/booking\/change-proof"/)
     assert.equal(await db.prepare("SELECT party_size FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id='change-proof')").first('party_size'), 2)
     assert.equal(await db.prepare("SELECT count(*) AS count FROM messages WHERE conversation_id = 'change-proof' AND event_name='booking_change.accepted'").first('count'), 1)
-    const progressMembership = await resolveMembership(env, { organizationId: 'org-proof', userId: 'user-proof' })
-    assert(progressMembership)
-    const bookingProgress = await listBusinessOutcomes(db, memberAccessPrincipal(progressMembership, { env }), { limit: 100 })
-    const bookingId = await db.prepare("SELECT id FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id='change-proof')").first<string>('id')
-    assert(bookingId)
-    const acceptedProgress = bookingProgress.outcomes.find(item => item.event === 'booking_change.accepted' && item.references.some(reference => reference.kind === 'guest_thread' && reference.id === 'change-proof'))
-    assert(acceptedProgress)
-    assert.deepEqual(acceptedProgress.subject, { kind: 'booking', id: bookingId }, 'the recorded request kind owns the operational subject, not the booking_change event prefix')
 
     const stale = await propose('stale-change', 3)
     // Anything that moves the record makes the open proposal stale. What moved

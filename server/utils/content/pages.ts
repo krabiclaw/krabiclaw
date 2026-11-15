@@ -445,28 +445,7 @@ export async function listPageTasks(db: DbClient, organizationId: string, opts: 
   const pages = await listTenantPages(db, organizationId, opts)
   const tasks: PageTask[] = []
 
-  // 1. Check stored tasks from tasks table for this organization
-  const storedTasks = await queryAll<{ id: string; title: string | null; notes: string | null; subject_id: string | null }>(db,
-    `SELECT id, title, notes, subject_id FROM tasks WHERE organization_id = ? AND status = 'open' AND (subject_type IN ('article', 'post') OR kind = 'opportunity') LIMIT 10`,
-    [organizationId]
-  )
-  for (const st of storedTasks) {
-    const matched = pages.find(p => p.id === st.subject_id || p.page_id === st.subject_id)
-    if (matched) {
-      tasks.push({
-        id: st.id,
-        page_id: matched.id,
-        title: matched.title,
-        headline: st.title || `Update: ${matched.title}`,
-        reason: st.notes || `Review and update ${matched.title} on your website storefront.`,
-        action_label: 'Edit page',
-        to: `/dashboard/[orgSlug]/website/pages/${matched.id}`,
-        image_url: matched.image_url,
-      })
-    }
-  }
-
-  // 2. Domain readiness checks: missing content or missing cover photos
+  // Pages that are empty, or a main page without a photo.
   for (const page of pages) {
     if (page.section_count === 0) {
       tasks.push({
