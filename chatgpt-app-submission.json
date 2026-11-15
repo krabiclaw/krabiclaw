@@ -8,18 +8,6 @@
     "category": "BUSINESS"
   },
   "tools": {
-    "accept_opportunity": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Records the decision and creates the opportunity's task.",
-        "destructive_justification": "Changes an open opportunity to accepted, creates its task, and can send assignment notifications that cannot be recalled.",
-        "open_world_justification": "Assignment can send configured email, WhatsApp or push notifications to workspace assignees through external delivery services."
-      }
-    },
     "add_organization_language": {
       "annotations": {
         "readOnlyHint": false,
@@ -344,18 +332,6 @@
         "open_world_justification": "Sends configured email, WhatsApp or push notifications to workspace assignees through external delivery services."
       }
     },
-    "defer_opportunity": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Records when an opportunity should come back.",
-        "destructive_justification": "Hides the opportunity until the chosen time.",
-        "open_world_justification": "Writes only to the selected private workspace."
-      }
-    },
     "delete_article_category": {
       "annotations": {
         "readOnlyHint": false,
@@ -558,18 +534,6 @@
         "read_only_justification": "Disables an existing secondary language while preserving its authored translations; source language is refused.",
         "destructive_justification": "Withdraws existing public localized routes.",
         "open_world_justification": "Changes guest access to website translations."
-      }
-    },
-    "dismiss_opportunity": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Records the owner's decision to decline an opportunity.",
-        "destructive_justification": "Hides the opportunity until its evidence changes.",
-        "open_world_justification": "Writes only to the selected private workspace."
       }
     },
     "get_blog_post": {

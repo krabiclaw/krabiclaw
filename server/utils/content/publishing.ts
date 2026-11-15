@@ -800,7 +800,7 @@ export async function updateBlogLifecycle(
     beforeState: { status: source.status, updated_at: source.updated_at },
     afterState: { status: 'published', published_at: source.published_at ?? committedAt, updated_at: committedAt },
     metadata: { evidence_basis: 'persisted_change', public_visibility: 'unverified' }, onlyIfPreviousChangedOneRow: true }),
-  opportunityDoneQuery(organizationId, ['article.publish', 'article.update'], source.id, committedAt),
+  opportunityDoneQuery(organizationId, ['article.publish'], source.id, committedAt),
   publicResourceCacheInvalidationQuery(organizationId, 'article-publication')])
   if (Number(result?.meta.changes ?? 0) !== 1) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Article was updated by another writer' })

@@ -2,9 +2,6 @@
   <article class="tc" :class="[`is-${face}`, { 'is-closed': task && task.status !== 'open', 'is-reservation': reservation }]" :data-testid="booking ? 'today-reservation' : opportunity ? 'today-opportunity' : 'today-task'" :data-task-id="task?.id" :data-task-kind="task?.kind" :data-opportunity-id="opportunity?.id" :data-reservation-kind="booking?.kind">
     <NuxtLink v-if="destination" :to="destination" class="tc-target" :aria-label="title" />
     <button v-else type="button" class="tc-target" :aria-label="title" @click="emit('open')" />
-    <button v-if="opportunity" type="button" class="tc-dismiss" aria-label="Dismiss suggestion" :disabled="busy" data-testid="today-opportunity-dismiss" @click="emit('dismiss')">
-      <UIcon name="i-lucide-x" class="size-4" />
-    </button>
     <div v-if="reservation" class="tc-reservation-main">
       <span class="block text-sm font-semibold">{{ reservation.date_label }}</span>
       <UAvatar :src="guestAvatarSrc" alt="" icon="i-lucide-user" class="mx-auto mt-7 size-24 sm:size-28" :ui="{ icon: 'size-12' }" />
@@ -19,9 +16,6 @@
         <span class="min-w-0 flex-1"><span class="block font-semibold">{{ booking.suggestion.title }}</span><span class="block text-sm text-muted">{{ booking.suggestion.detail }}</span></span>
         <UIcon :name="booking.suggestion.icon" class="size-6 shrink-0" />
       </NuxtLink>
-      <button type="button" class="tc-suggest-dismiss" aria-label="Dismiss suggestion" :disabled="busy" data-testid="today-reservation-suggestion-dismiss" @click="emit('dismiss')">
-        <UIcon name="i-lucide-x" class="size-4" />
-      </button>
     </div>
     <div v-else-if="task && face === 'photo' && mediaSrc" type="button" class="tc-media">
       <img :src="mediaSrc" alt="" class="size-full object-cover">
@@ -60,8 +54,8 @@ import { cfImageVariant } from '~/utils/cf-image'
 import { isOfferingSetupPath, withOfferingReturnTo } from '~/shared/offering-setup'
 
 /** A task, an opportunity, or a booking with the suggestion at its foot. */
-const props = defineProps<{ task?: TaskView; opportunity?: OpportunityView; booking?: TodayReservation; busy?: boolean }>()
-const emit = defineEmits<{ open: []; dismiss: [] }>()
+const props = defineProps<{ task?: TaskView; opportunity?: OpportunityView; booking?: TodayReservation }>()
+const emit = defineEmits<{ open: [] }>()
 
 const face = computed(() => props.task?.face ?? 'compact')
 const route = useRoute()
@@ -90,8 +84,6 @@ const avatarClass = computed(() => props.task?.avatar ? '' : 'sq')
 .tc-body { display: flex; flex: 1 0 auto; flex-direction: column; padding: 16px 20px; }
 .tc-target { position: absolute; inset: 0; z-index: 1; border-radius: inherit; cursor: pointer; }
 .tc-target:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: -3px; }
-.tc-dismiss { position: absolute; top: 8px; right: 8px; z-index: 2; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--ui-bg); }
-.tc:has(.tc-dismiss) .tc-main { padding-inline-end: 26px; }
 .tc-row { display: flex; gap: 14px; align-items: flex-start; width: 100%; text-align: left; }
 .tc-main { display: flex; flex: 1; min-width: 0; flex-direction: column; }
 .tc-av { display: flex; flex: none; align-items: center; justify-content: center; width: 48px; height: 48px; overflow: hidden; border-radius: 50%; background: var(--ui-bg); color: var(--ui-text-highlighted); font-size: 18px; font-weight: 600; }
@@ -112,5 +104,4 @@ const avatarClass = computed(() => props.task?.avatar ? '' : 'sq')
 .tc-suggest { position: relative; z-index: 2; display: flex; align-items: center; border-top: 1px solid var(--ui-border); background: var(--ui-bg-elevated); }
 .tc-suggest-link { display: flex; flex: 1; min-width: 0; align-items: center; gap: 16px; padding: 18px 8px 18px 24px; text-align: left; }
 .tc-suggest-link:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: -3px; }
-.tc-suggest-dismiss { display: grid; flex: none; place-items: center; width: 40px; height: 40px; margin-right: 12px; border-radius: 50%; }
 </style>

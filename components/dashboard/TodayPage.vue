@@ -32,7 +32,6 @@
 
       <!-- The business's stored tasks and opportunities. -->
       <template v-else-if="business">
-        <UAlert v-if="business.opportunity_issues.length" class="mb-6" color="warning" variant="soft" title="Some performance data could not be loaded" :description="business.opportunity_issues.join(' ')" />
         <section v-if="business.website" class="mb-6 overflow-hidden rounded-3xl border border-default" data-testid="today-website">
           <div class="relative aspect-video overflow-hidden bg-elevated">
             <iframe :src="business.website.preview_url" :title="business.website.preview_label" class="absolute left-0 top-0 h-[200%] w-[200%] origin-top-left scale-50 border-0" referrerpolicy="no-referrer" loading="lazy" />
@@ -61,7 +60,7 @@
           <h2 class="wtitle" data-testid="today-reservations-title">{{ business.reservations.title }}</h2>
           <ul class="wgrid" role="list" data-testid="today-reservations">
             <li v-for="card in business.reservations.cards" :key="card.id">
-              <TaskCard :booking="card" :busy="card.suggestion ? opportunityBusy[card.suggestion.id] !== undefined : false" @dismiss="card.suggestion && dismiss(card.suggestion)" />
+              <TaskCard :booking="card" />
             </li>
           </ul>
         </template>
@@ -78,7 +77,7 @@
           <template v-else>
             <ul class="wgrid" role="list" data-testid="today-opportunities">
               <li v-for="opportunity in business.opportunities" :key="opportunity.id">
-                <TaskCard :opportunity="opportunity" :busy="opportunityBusy[opportunity.id] !== undefined" @dismiss="dismiss(opportunity)" />
+                <TaskCard :opportunity="opportunity" />
               </li>
             </ul>
           </template>
@@ -119,7 +118,6 @@ interface BusinessToday {
   reservations: { title: string | null; cards: TodayReservation[] }
   tasks: TaskSection[]
   opportunities: OpportunityView[]
-  opportunity_issues: string[]
   assignees: TaskPerson[]
   resolved_at: string
 }
@@ -184,10 +182,26 @@ const isBusinessToday = (value: unknown): value is BusinessToday => isRecord(val
 const isFeed = (value: unknown): value is TodayFeedPayload => todayFeedSchema.safeParse(value).success
 const isAgenda = (value: unknown): value is AgendaPayload => isRecord(value) && Array.isArray(value.items)
 
-const { data, pending, error: loadError, refresh } = await useAsyncData(
-  () => `today-${orgSlug.value}-${range.value}-${taskKind.value ?? 'all'}`,
+// A return within the live connection shows the Today it left, as the Messages inbox does: kept for
+// 30 seconds while the socket stays open, dropped by any event Today re-reads on.
+const todayKey = () => `today-${orgSlug.value}-${range.value}-${taskKind.value ?? 'all'}`
+let readConnectionEpoch: number | null = null
+let reuseExpiresAt: number | null = null
+const { data, pending, status: loadStatus, error: loadError, refresh } = await useAsyncData(
+  todayKey,
   async (): Promise<{ business: BusinessToday | null; visits: TodayCard[] }> => {
-    if (!props.personalScope) return { business: await dashboardApi<BusinessToday>('/api/dashboard/today', { query: { range: range.value, kind: taskKind.value }, validate: isBusinessToday }), visits: [] }
+    if (!props.personalScope) {
+      const held = realtime.recentToday.snapshot
+      realtime.recentToday.snapshot = undefined
+      if (held?.key === todayKey() && held.expiresAt > Date.now() && realtime.status.value === 'open' && isBusinessToday(held.page)) {
+        readConnectionEpoch = realtime.connectionEpoch.value
+        reuseExpiresAt = held.expiresAt
+        return { business: held.page, visits: [] }
+      }
+      readConnectionEpoch = realtime.connectionEpoch.value
+      reuseExpiresAt = null
+      return { business: await dashboardApi<BusinessToday>('/api/dashboard/today', { query: { range: range.value, kind: taskKind.value }, validate: isBusinessToday }), visits: [] }
+    }
     if (range.value === 'today') return { business: null, visits: (await applicationFetch<TodayFeedPayload>('/api/account/today', { validate: isFeed })).cards }
     // A guest's upcoming visits: the next year of their own agenda, after today.
     const now = new Date()
@@ -198,6 +212,13 @@ const { data, pending, error: loadError, refresh } = await useAsyncData(
   },
 )
 const business = computed(() => data.value?.business ?? null)
+onScopeDispose(() => {
+  const current = business.value
+  if (props.personalScope || !current || loadStatus.value !== 'success' || realtime.status.value !== 'open' || readConnectionEpoch !== realtime.connectionEpoch.value) return
+  // Reusing a snapshot does not extend its life.
+  const expiresAt = reuseExpiresAt ?? Date.now() + 30_000
+  if (expiresAt > Date.now()) realtime.recentToday.snapshot = { key: todayKey(), page: current, expiresAt }
+})
 const parts = computed(() => {
   const sections = business.value?.tasks ?? []
   const open = sections.filter(section => section.id === 'open'), rest = sections.filter(section => section.id !== 'open')
@@ -229,24 +250,6 @@ watch(sheetOpen, (isOpen) => {
 async function taskChanged() { await refresh() }
 
 const actionError = ref<unknown>(null)
-const opportunityBusy = ref<Record<string, 'later'>>({})
-const tasksApi = computed(() => `/api/organizations/${encodeURIComponent(organizationId ?? '')}`)
-
-async function act<T extends Record<string, string>>(busy: Ref<T>, id: string, state: T[string], request: () => Promise<unknown>) {
-  busy.value = { ...busy.value, [id]: state }
-  actionError.value = null
-  try {
-    await request()
-    await refresh()
-  } catch (cause) {
-    actionError.value = cause
-  } finally {
-    const { [id]: _done, ...rest } = busy.value
-    busy.value = rest as T
-  }
-}
-const isOpportunityResult = (value: unknown): value is { opportunity: { id: string } } => isRecord(value) && isRecord(value.opportunity) && typeof value.opportunity.id === 'string'
-const dismiss = (opportunity: OpportunityView) => act(opportunityBusy, opportunity.id, 'later', () => applicationFetch(`${tasksApi.value}/opportunities/${encodeURIComponent(opportunity.id)}/dismiss`, { method: 'POST', validate: isOpportunityResult, body: {} }))
 
 watch(realtime.event, (event) => {
   if (!event) return

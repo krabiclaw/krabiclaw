@@ -12,8 +12,9 @@ import { createProductBooking } from '../../server/domain/product-bookings.ts'
 import { createTables } from './support/table-product.ts'
 import { createStay, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
-import { listOpportunities } from '../../server/domain/opportunities.ts'
-import { memberAccessPrincipal, resolveOrganizationMembership } from '../../server/utils/member-access.ts'
+import { resolveOrganizationMembership } from '../../server/utils/member-access.ts'
+import { handleTaskTools } from '../../server/utils/mcp-tools/tasks.ts'
+import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
 import type { TodayReservation } from '../../shared/dashboard-today.ts'
 import type { OpportunityView } from '../../server/domain/opportunities.ts'
@@ -163,7 +164,7 @@ test('Today shows every booking type as a reservation card for its own business,
     assert.equal(bistro.reservations.title, 'You have 1 upcoming reservation')
     // Upcoming bookings are not today's.
     for (const org of Object.keys(ORGS) as Org[]) assert.deepEqual((await today(org, 'today')).reservations, { title: null, cards: [] })
-    // A booking's suggestion is on its card, not among Today's other opportunities.
+    // A booking's welcome is on its card, not among Today's setup.
     assert.equal((await today('law', 'today')).opportunities.some(opportunity => opportunity.conversation_id !== null), false)
 
     // The message is written from the offering's and the home's own fields.
@@ -175,13 +176,15 @@ test('Today shows every booking type as a reservation card for its own business,
     assert.match(stayMessage, /^Hi Diana,\n\nLooking forward to hosting you at Seaview Cottage from .+\.\n\n/)
     assert.ok(stayMessage.endsWith(`Directions:\n${directions}\n\nWifi details:\nWifi network: Seaview\nWifi password: saltwater`), stayMessage)
     assert.equal(law.reservations.cards[0]!.suggestion!.path, `/dashboard/law/messages/${evaConsultation}`)
+    assert.equal(law.reservations.cards[0]!.suggestion!.id, `booking.welcome:${evaConsultation}`)
 
-    // MCP's list_opportunities reads the same stored opportunity.
+    // MCP's list_opportunities lists the same welcome, with the same message.
     const membership = await resolveOrganizationMembership(env, { organizationId: 'law', userId: OWNER })
     assert.ok(membership)
-    const lawPrincipal = memberAccessPrincipal(membership, { env })
-    const listed = (await listOpportunities(db, lawPrincipal)).opportunities.filter(opportunity => opportunity.conversation_id !== null)
-    assert.deepEqual(listed.map(opportunity => [opportunity.id, opportunity.conversation_id, opportunity.message]), [[law.reservations.cards[0]!.suggestion!.id, evaConsultation, consultationMessage]])
+    const organization: McpExecutorContext['organization'] = { env, db, membership, organizationId: 'law', userId: OWNER, role: 'owner', isPlatformAdmin: false, scopes: [] }
+    const welcomes = async () => ((await handleTaskTools({ toolName: 'list_opportunities', organization, args: {} })) as { opportunities: OpportunityView[] }).opportunities
+      .filter(opportunity => opportunity.conversation_id !== null).map(opportunity => [opportunity.id, opportunity.conversation_id, opportunity.message])
+    assert.deepEqual(await welcomes(), [[`booking.welcome:${evaConsultation}`, evaConsultation, consultationMessage]])
 
     // The host's message takes the suggestion off the card; the card stays.
     const replied = await sendGuestThreadReply(db, { threadId: evaConsultation, organizationId: 'law', body: consultationMessage,
@@ -192,7 +195,7 @@ test('Today shows every booking type as a reservation card for its own business,
       { kind: 'booking', requestId: evaConsultation, headline: 'Eva’s consultation', resourceName: 'Estate Planning Consultation', suggestion: null },
       { kind: 'booking', requestId: ianConsultation, headline: 'Ian’s consultation', resourceName: 'Initial Case Review', suggestion: null },
     ])
-    assert.equal((await listOpportunities(db, lawPrincipal)).opportunities.some(opportunity => opportunity.conversation_id === evaConsultation), false)
+    assert.deepEqual(await welcomes(), [])
     // The sent message is the conversation's, read back from the ledger.
     assert.equal(await db.prepare("SELECT body FROM messages WHERE conversation_id = ? AND author_kind = 'member'").bind(evaConsultation).first('body'), consultationMessage)
   } finally {

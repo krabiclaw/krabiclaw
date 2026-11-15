@@ -32,8 +32,8 @@ export const BUSINESS_OUTCOME_EVENTS = [
 ] as const
 export type BusinessOutcomeEvent = typeof BUSINESS_OUTCOME_EVENTS[number]
 export const BUSINESS_PROGRESS_OPERATIONS = [
-  'article.create', 'article.update', 'article.publish', 'article.distribute',
-  'post.create', 'post.publish', 'social.connect', 'google_ads.connect', 'payments.connect', 'domain.connect', 'product.create', 'product.payment', 'product.readiness', 'stay.gap', 'guest_thread.reply', 'booking.welcome',
+  'article.create', 'article.publish', 'article.distribute',
+  'post.create', 'post.publish', 'social.connect', 'google_ads.connect', 'payments.connect', 'domain.connect', 'product.create', 'product.payment', 'product.readiness', 'stay.gap', 'booking.welcome',
 ] as const
 export type BusinessProgressOperation = typeof BUSINESS_PROGRESS_OPERATIONS[number]
 
@@ -190,13 +190,6 @@ export type BusinessProgressEvidence = {
     kind: 'booking_welcome'
     record: { kind: 'booking' | 'stay'; id: string; status: string; startsAt: string }
     message: string
-  } | {
-    kind: 'guest_thread'
-    blockedAt: string | null
-    latestGuestEntryId: string | null
-    latestReplyEntryId: string | null
-    latestMemberEntryId: string | null
-    commitment: { kind: 'booking' | 'stay'; id: string; status: string; startsAt: string; endsAt: string } | null
   }
 
 export interface RecommendationPublication {

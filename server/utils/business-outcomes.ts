@@ -1,7 +1,7 @@
 import { submittedReviewRequestSql } from '~/server/utils/review-requests'
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { BOOKING_RECORDS_SQL, bookedRecordWindow, getGuestRequest, getThreadOperationalRecord } from '~/server/domain/requests'
+import { BOOKING_RECORDS_SQL, bookedRecordWindow } from '~/server/domain/requests'
 import { isDeliverySent } from '~/server/domain/guest-threads/deliveries'
 import type { GuestThreadDeliveryRow } from '~/server/domain/guest-threads/types'
 import { assertOrganizationWideAccess, type MemberAccessPrincipal } from '~/server/utils/member-access'
@@ -511,7 +511,7 @@ export async function readBusinessProgressReference(
     ])
     return result({ kind: 'stay_home', updatedAt: product.updated_at, configurationUpdatedAt: configuration.updated_at }, { product, configuration, overrides, claims, pushes, gap })
   }
-  if (input.operation === 'article.update' || input.operation === 'article.publish' || input.operation === 'article.distribute') {
+  if (input.operation === 'article.publish' || input.operation === 'article.distribute') {
     const document = await queryFirst<{ id: string; status: string | null; updated_at: string } & Record<string, unknown>>(db, `
       SELECT id, title, slug, summary, status, visibility, published_at, seo_keywords, metadata_json, updated_at
       FROM content_documents WHERE id = ? AND organization_id = ? AND kind = 'article' AND row_role = 'root'
@@ -539,20 +539,5 @@ export async function readBusinessProgressReference(
     if (!welcome) throw missing()
     return result({ kind: 'booking_welcome', record: { kind: welcome.kind, id: welcome.recordId, status: welcome.status, startsAt: welcome.startsAt }, message: welcome.message })
   }
-  const request = await getGuestRequest(db, input.subject_id, principal.organizationId)
-  if (!request) throw missing()
-  const [commitment, latestGuest, latestReply, latestMember] = await Promise.all([
-    getThreadOperationalRecord(db, request.id),
-    queryFirst<{ id: string }>(db, `SELECT id FROM messages WHERE conversation_id = ? AND author_kind = 'guest' ORDER BY sequence DESC LIMIT 1`, [request.id]),
-    queryFirst<{ id: string }>(db, "SELECT id FROM messages WHERE conversation_id = ? AND author_kind = 'member' AND event_name = 'thread.member_reply' ORDER BY sequence DESC LIMIT 1", [request.id]),
-    queryFirst<{ id: string }>(db, "SELECT id FROM messages WHERE conversation_id = ? AND author_kind = 'member' ORDER BY sequence DESC LIMIT 1", [request.id]),
-  ])
-  const deliveries = latestReply ? await queryAll<GuestThreadDeliveryRow>(db, "SELECT * FROM guest_thread_deliveries WHERE message_id = ? AND purpose = 'member_reply' ORDER BY id", [latestReply.id]) : []
-  const evidence = {
-    kind: 'guest_thread' as const, blockedAt: request.blocked_at,
-    latestGuestEntryId: latestGuest?.id ?? null, latestReplyEntryId: latestReply?.id ?? null,
-    latestMemberEntryId: latestMember?.id ?? null,
-    commitment: commitment ? { kind: commitment.unit === 'nights' ? 'stay' as const : 'booking' as const, id: commitment.id, status: commitment.status, startsAt: commitment.starts_at, endsAt: commitment.ends_at } : null,
-  }
-  return { ...input, evidence_revision: await creationRequestHash({ operation: input.operation, evidence, commitment, deliveries }), evidence: progressWire(evidence) }
+  throw missing()
 }

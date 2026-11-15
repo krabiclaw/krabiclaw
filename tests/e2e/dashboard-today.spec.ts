@@ -7,7 +7,6 @@ import { seededSiteHeaders } from './test-env'
 import { seededTenant } from './seed/manifest'
 import type { TaskPerson, TaskSection, TaskView } from '../../server/domain/tasks'
 import type { OpportunityView } from '../../server/domain/opportunities'
-import type { BusinessGoal } from '../../shared/business-progress'
 import type { AgendaPayload } from '../../server/utils/dashboard-agenda'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 import type { InboxListPage } from '../../server/domain/guest-threads/types'
@@ -233,13 +232,6 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
     const memberFeed = await memberContext.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
     expect(memberFeed.status(), await memberFeed.text()).toBe(200)
     expect(await memberFeed.json()).toEqual({ website: null, reservations: { title: null, cards: [] }, tasks: [], opportunities: [], opportunity_issues: [], assignees: [], resolved_at: expect.any(String) })
-    // Opportunities are the owner's decisions; the member cannot read or take one.
-    const memberOpportunities = await memberContext.request.get(`/api/organizations/${organizationId}/opportunities`)
-    expect(memberOpportunities.status(), await memberOpportunities.text()).toBe(403)
-    if (ownerFeed.opportunities.length) {
-      const taken = await memberContext.request.post(`/api/organizations/${organizationId}/opportunities/${ownerFeed.opportunities[0]!.id}/accept`, { data: {} })
-      expect(taken.status(), await taken.text()).toBe(403)
-    }
     const denied = await memberContext.request.get('/api/dashboard/analytics', { params: { org: 'ember-slice-demo' } })
     // Organization-wide surfaces deliberately conceal denied scope with 404.
     expect(denied.status()).toBe(404)
@@ -395,142 +387,53 @@ test('booking assignment and workspace admin promotion do not grant a conversati
   if (failures.length) throw new AggregateError(failures, 'Branch reservation access workflow or restoration failed')
 })
 
-test('opportunities follow explicit strategy, the owner’s decisions and actual publication', async ({ page, baseURL }, testInfo) => {
-  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Priorities, drafts and decisions use disposable local data only')
-  test.setTimeout(180_000)
+test('a return to Today within the live connection shows the Today it left without reading it again', async ({ page, baseURL }, testInfo) => {
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'The task shown uses disposable local data only')
   const organizationId = seededTenant('restaurant').organizationId
   const release = await acquireTenantMutationLock(testInfo, organizationId)
-  const marker = `Lanternfish${Date.now()}`
-  const editor = `/api/editor/organizations/${organizationId}/blog`
-  const tasksApi = `/api/organizations/${organizationId}`
-  let goal: { id: string; updated_at: string } | null = null
-  let postId: string | null = null
-  let categoryId: string | null = null
-  const readToday = async () => {
-    const response = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
-    expect(response.status(), await response.text()).toBe(200)
-    return response.json() as Promise<BusinessToday>
-  }
-  const readGoals = async () => {
-    const response = await page.request.get(`${tasksApi}/progress`, { params: { limit: 1 } })
-    expect(response.status(), await response.text()).toBe(200)
-    return (await response.json() as { goals: BusinessGoal[] }).goals
-  }
-  const listOpportunities = async () => {
-    const response = await page.request.get(`${tasksApi}/opportunities`)
-    expect(response.status(), await response.text()).toBe(200)
-    return (await response.json() as { opportunities: OpportunityView[]; issues: string[] }).opportunities
-  }
+  const taskRoot = `/api/organizations/${organizationId}/tasks`
+  const title = `Warm Today return ${Date.now()}`
+  let workId: string | null = null
   try {
     await loginAs(page.request, baseURL!)
-    const category = await page.request.post(`${editor}/categories`, { data: { name: marker, collection: 'blog' } })
-    expect(category.status(), await category.text()).toBe(201)
-    categoryId = (await category.json() as { category: { id: string } }).category.id
-    const title = `${marker} supper club announcement`
-    const created = await page.request.post(`${editor}/posts`, { data: { idempotency_key: crypto.randomUUID(), title, category_id: categoryId,
-      excerpt: 'Our monthly supper club returns.', content_blocks: [{ type: 'markdown', data: { markdown: 'Our monthly supper club returns.', editor_mode: 'rich' } }] } })
-    expect(created.status(), await created.text()).toBe(200)
-    const article = (await created.json() as { post: { id: string; updated_at: string } }).post
-    postId = article.id
-    const blogPath = `${ORG}/website/blog/${postId}`
-    // The opportunity for this draft, found by where it is done; Today and the opportunities route agree on it.
-    const draftOpportunity = async () => {
-      const today = (await readToday()).opportunities.filter(value => value.path === blogPath)
-      const listed = (await listOpportunities()).filter(value => value.path === blogPath)
-      expect(today).toEqual(listed)
-      expect(today.length, 'one opportunity per draft').toBeLessThanOrEqual(1)
-      return today[0]
+    const work = await page.request.post(taskRoot, { data: { title, idempotency_key: crypto.randomUUID() } })
+    expect(work.status(), await work.text()).toBe(201)
+    workId = (await work.json() as { task: TaskView }).task.id
+    const card = page.getByTestId('today-section-open').getByText(title, { exact: true })
+
+    const socketCapture = page.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket' })
+    const firstRead = page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/dashboard/today')
+    expect((await page.goto(ORG))?.status()).toBe(200)
+    await dismissPreviewToolbar(page)
+    const socket = await socketCapture
+    expect((await firstRead).status()).toBe(200)
+    await expect(card).toBeVisible()
+
+    const nav = page.getByRole('navigation', { name: 'Dashboard' })
+    await nav.getByRole('link', { name: 'Calendar', exact: true }).click()
+    await expect(page).toHaveURL(new RegExp(`${ORG}/calendar(?:[/?#]|$)`))
+    await expect(card).toHaveCount(0)
+
+    // Back on the same socket, Today is the one it left: shown without another read.
+    let todayReads = 0
+    const countTodayRead = (request: Request) => {
+      if (request.method() === 'GET' && new URL(request.url()).pathname === '/api/dashboard/today') todayReads++
     }
-
-    const beforeGoal = await draftOpportunity()
-    expect(beforeGoal, 'A real draft is useful marketing before the owner saves a matching priority').toMatchObject({ status_line: 'Website', title: `Publish “${title}”`, icon: 'i-lucide-file-pen-line' })
-    expect(beforeGoal!.detail).not.toContain('Your strategy')
-
-    // The owner chooses channels explicitly; unrelated intent wording is not a relevance algorithm.
-    const intent = `Help prospective guests choose us ${marker}`
-    const goalRequest = { idempotency_key: crypto.randomUUID(), intent, strategy: { channels: ['blog', 'social'], payments: false, availability: false } }
-    const saved = await page.request.post(`${tasksApi}/goals`, { data: goalRequest })
-    expect(saved.status(), await saved.text()).toBe(201)
-    goal = (await saved.json() as { goal: { id: string; updated_at: string } }).goal
-    expect((await readGoals()).find(value => value.id === goal!.id)?.strategy).toMatchObject({ channels: ['blog', 'social'] })
-    // The strategy is now the opportunity's reason, recorded as a new opportunity for the new goal.
-    const withGoal = await draftOpportunity()
-    expect(withGoal).toMatchObject({ status_line: 'Website', title: `Publish “${title}”`, detail: expect.stringContaining(`Your strategy: ${intent}`) })
-    expect(withGoal!.id).not.toBe(beforeGoal!.id)
-
-    // Later: set aside until tomorrow; it leaves Today while it waits.
-    const until = new Date(Date.now() + 86_400_000).toISOString()
-    const deferred = await page.request.post(`${tasksApi}/opportunities/${withGoal!.id}/defer`, { data: { until } })
-    expect(deferred.status(), await deferred.text()).toBe(200)
-    expect(await deferred.json()).toEqual({ opportunity: { id: withGoal!.id, available_at: until } })
-    expect(await draftOpportunity()).toBeUndefined()
-    const pastDeferral = await page.request.post(`${tasksApi}/opportunities/${withGoal!.id}/defer`, { data: { until: new Date(Date.now() - 60_000).toISOString() } })
-    expect(pastDeferral.status(), await pastDeferral.text()).toBe(422)
-    // Deciding wrote nothing to the draft.
-    const unchanged = await page.request.get(`${editor}/${postId}`)
-    expect(unchanged.status(), await unchanged.text()).toBe(200)
-    expect((await unchanged.json() as { post: { status: string; updated_at: string } }).post).toMatchObject({ status: 'draft', updated_at: article.updated_at })
-
-    // A separate writer changes the draft: the changed evidence is a new opportunity, which the deferral of the old evidence does not hide.
-    const edit = async (expectedUpdatedAt: string, excerpt: string) => {
-      const edited = await page.request.patch(`${editor}/${postId}`, { data: { updated_at: expectedUpdatedAt, excerpt } })
-      expect(edited.status(), await edited.text()).toBe(200)
-      return (await edited.json() as { post: { updated_at: string } }).post
-    }
-    const firstEdit = await edit(article.updated_at, 'Our supper club returns with a seasonal dinner menu.')
-    const afterEdit = await draftOpportunity()
-    expect(afterEdit).toMatchObject({ title: `Publish “${title}”`, detail: expect.stringContaining(`Your strategy: ${intent}`) })
-    expect(afterEdit!.id).not.toBe(withGoal!.id)
-
-    // Dismiss: gone while the evidence is unchanged, and a decided opportunity cannot be decided again.
-    const dismissed = await page.request.post(`${tasksApi}/opportunities/${afterEdit!.id}/dismiss`, { data: { note: 'Not this week.' } })
-    expect(dismissed.status(), await dismissed.text()).toBe(200)
-    expect(await dismissed.json()).toEqual({ opportunity: { id: afterEdit!.id, status: 'dismissed' } })
-    expect(await draftOpportunity()).toBeUndefined()
-    const redecided = await page.request.post(`${tasksApi}/opportunities/${afterEdit!.id}/accept`, { data: {} })
-    expect(redecided.status(), await redecided.text()).toBe(409)
-    expect(await redecided.json()).toMatchObject({ data: { code: 'OPPORTUNITY_DECIDED' } })
-
-    // New evidence again: accept it, and it is the owner's task due today.
-    const editedArticle = await edit(firstEdit.updated_at, 'Our supper club returns with a seasonal dinner menu and live music.')
-    const toAccept = await draftOpportunity()
-    expect(toAccept!.id).not.toBe(afterEdit!.id)
-    const accepted = await page.request.post(`${tasksApi}/opportunities/${toAccept!.id}/accept`, { data: {} })
-    expect(accepted.status(), await accepted.text()).toBe(201)
-    const { task: acceptedTask } = await accepted.json() as { task: TaskView }
-    expect(await draftOpportunity()).toBeUndefined()
-    const taskRead = await page.request.get(`${tasksApi}/tasks/${acceptedTask.id}`)
-    expect(taskRead.status(), await taskRead.text()).toBe(200)
-    const { task } = await taskRead.json() as { task: TaskView }
-    expect(task).toMatchObject({
-      id: acceptedTask.id, kind: 'opportunity', status: 'open', status_line: 'Accepted opportunity', title: `Publish “${title}”`,
-      assignee: { type: 'member', name: 'You', you: true }, due_at: expect.any(String), action: { type: 'complete', label: 'Done' },
-      can: { complete: true, skip: true, reopen: false, assign: true, edit: true },
-    })
-    expect(task.dismiss).toEqual({ label: 'Skip' })
-    expect((await readToday()).tasks.find(section => section.id === 'open')?.tasks.map(task => task.id)).toContain(acceptedTask.id)
-
-    // Publishing from another surface is the work the task asked for: it is done, and the next growth opportunity is offered.
-    const published = await page.request.post(`${editor}/${postId}/publish`, { data: { updated_at: editedArticle.updated_at } })
-    expect(published.status(), await published.text()).toBe(200)
-    const readBack = await page.request.get(`${editor}/${postId}`)
-    expect(readBack.status(), await readBack.text()).toBe(200)
-    expect((await readBack.json() as { post: { status: string } }).post.status).toBe('published')
-    const after = await readToday()
-    expect(after.tasks.find(section => section.id === 'done')?.tasks.find(task => task.id === acceptedTask.id)).toMatchObject({
-      status: 'done', outcome: { note: null, photos: [], closed_at: expect.any(String), closed_by: null }, can: { complete: false, skip: false, reopen: false }, dismiss: null,
-    })
-    expect(await draftOpportunity()).toBeUndefined()
-    const next = after.opportunities.find(value => ['Website', 'Social'].includes(value.status_line) && !value.title.startsWith('Publish “'))
-    expect(next, 'Publication makes the next useful growth action available').toBeDefined()
+    page.on('request', countTodayRead)
+    try {
+      await nav.getByRole('link', { name: 'Today', exact: true }).click()
+      await expect(page).toHaveURL(new RegExp(`${ORG}(?:[?#]|$)`))
+      await expect(card).toBeVisible()
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+      expect(socket.isClosed()).toBe(false)
+      expect(todayReads).toBe(0)
+    } finally { page.off('request', countTodayRead) }
   } finally {
     try {
-      if (goal) {
-        const current = (await readGoals()).find(priority => priority.id === goal!.id)
-        if (current && current.status === 'active') expect((await page.request.patch(`/api/organizations/${organizationId}/goals/${goal.id}`, { data: { updated_at: current.updated_at, status: 'archived' } })).status()).toBe(200)
+      if (workId) {
+        const complete = await page.request.post(`${taskRoot}/${workId}/complete`, { data: {} })
+        expect(complete.status(), await complete.text()).toBe(200)
       }
-      if (postId) expect((await page.request.delete(`${editor}/${postId}`)).status()).toBe(200)
-      if (categoryId) expect((await page.request.delete(`${editor}/categories/${categoryId}`)).status()).toBe(200)
     } finally { await release() }
   }
 })

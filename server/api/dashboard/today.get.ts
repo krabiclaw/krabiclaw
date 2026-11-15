@@ -4,7 +4,7 @@ import { jsonResponse } from '~/server/utils/api-response'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { isOrganizationWideRole, memberAccessPrincipal } from '~/server/utils/member-access'
 import { listTaskAssignees, listTasks, parseTaskListQuery, taskViewer } from '~/server/domain/tasks'
-import { listOpportunities } from '~/server/domain/opportunities'
+import { listBookingWelcomes, listOpportunities, type OpportunityView } from '~/server/domain/opportunities'
 import { listTodayReservations } from '~/server/utils/dashboard-agenda'
 import { todayReservationsTitle } from '~/shared/dashboard-today'
 import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
@@ -14,9 +14,9 @@ import { isDemoOrganization } from '~/shared/demo'
 
 /**
  * Today and Upcoming: the business's reservations, read from the agenda, with
- * the suggestion for each at the bottom of its card; the stored tasks the
- * caller may see; and, for a manager on Today, the other opportunities open
- * now. The web dashboard and the app render this as it comes.
+ * the welcome a booked guest is due at the bottom of its card; the stored tasks
+ * the caller may see; and, for a manager on Today, the setup the business has
+ * not finished. Every part is a read of stored rows. The web dashboard and the app render this as it comes.
  */
 export default defineHandler(async (event) => {
   const { db, env, organization } = await getDashboardMemberContext(event, {})
@@ -24,15 +24,15 @@ export default defineHandler(async (event) => {
   const viewer = await taskViewer(principal)
   const query = parseTaskListQuery(getQuery(event), { range: 'today', assignee: 'all' })
   const now = new Date()
-  const [list, assignees, opportunities, reservations] = await Promise.all([
+  const [list, assignees, opportunities, suggestions, reservations] = await Promise.all([
     listTasks(db, viewer, query, now),
     listTaskAssignees(db, viewer),
-    viewer.manage ? listOpportunities(db, principal, { now, locationId: query.location_id }) : null,
+    viewer.manage && query.range === 'today' ? listOpportunities(db, principal, { now, locationId: query.location_id }) : null,
+    viewer.manage ? listBookingWelcomes(db, principal, { now, locationId: query.location_id }) : new Map<string, OpportunityView>(),
     // A task filter shows those tasks alone.
     query.kind ? [] : listTodayReservations(db, organization.id, { range: query.range, vertical: organization.vertical, organizationSlug: organization.slug,
       principal: { env, membership: organization }, locationId: query.location_id }, now),
   ])
-  const suggestions = new Map((opportunities?.opportunities ?? []).flatMap(opportunity => opportunity.conversation_id ? [[opportunity.conversation_id, opportunity]] : []))
   const cards = reservations.map(card => ({ ...card, suggestion: card.conversation_id ? suggestions.get(card.conversation_id) ?? null : null }))
   let website = null
   const privateSite = organization.status === 'inactive'
@@ -58,14 +58,14 @@ export default defineHandler(async (event) => {
       }
     }
   }
-  const standaloneOpportunities = (opportunities?.opportunities ?? []).filter(opportunity => opportunity.conversation_id === null)
   const today = {
     website,
     reservations: { title: todayReservationsTitle(cards.length, query.range, organization.vertical), cards },
     tasks: list.sections,
-    // A booking's suggestion is on its card; the rest are Today's.
-    opportunities: query.range === 'today' ? standaloneOpportunities.slice(0, privateSite ? 3 : undefined) : [],
-    opportunity_issues: query.range === 'today' ? opportunities?.issues ?? [] : [],
+    // A booking's welcome is on its card; the business's unfinished setup is Today's.
+    opportunities: opportunities?.opportunities.slice(0, privateSite ? 3 : undefined) ?? [],
+    // Nothing on Today reads a provider any more; iOS 1.7 still decodes this list.
+    opportunity_issues: [],
     assignees, resolved_at: list.resolved_at,
   }
   return jsonResponse(finalizeRequestMetrics(event, 'dashboard-today', today), { headers: { 'cache-control': 'private, no-store' } })

@@ -176,19 +176,18 @@ async function boot() {
       headers: { authorization: `Bearer ${tokens.get(user)}`, ...(body ? { 'content-type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
-    /** Today as the dashboard reads it: each task as kind and conversation, each opportunity as the operation it records. */
+    /** Today as the dashboard reads it: each task as kind and conversation, each opportunity by its id. */
     const today = async () => {
       const response = await request('today')
       const body = await response.text()
       assert.equal(response.status, 200, body)
       const feed = JSON.parse(body) as { tasks: TaskSection[]; opportunities: OpportunityView[] }
-      const operations = new Map((await db.prepare('SELECT id, operation FROM opportunities WHERE organization_id = ?').bind(ORG).all<{ id: string; operation: string }>()).results.map(row => [row.id, row.operation]))
       const change = feed.tasks.flatMap(section => section.tasks).find(task => task.kind === 'booking_change')
       return {
         tasks: feed.tasks.flatMap(section => section.tasks.map(task => [task.kind, task.conversation_id])),
         changePath: change?.action?.type === 'open' ? change.action.path : undefined,
         changeStatusLine: change?.status_line,
-        opportunities: feed.opportunities.map(opportunity => operations.get(opportunity.id)),
+        opportunities: feed.opportunities.map(opportunity => opportunity.id),
       }
     }
     const reservation = async (bookingId: string, user = OWNER) => {
@@ -254,7 +253,7 @@ test('a guest change request lands once in the stay conversation, survives a rel
     }])
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-13', adults: 2, total_minor: 45_000, version: 1 })
     // The guest's change creates a booking task.
-    const expectedToday = { tasks: [['booking_change', stay.conversation_id]], opportunities: ['post.create', 'social.connect', 'article.create'] }
+    const expectedToday = { tasks: [['booking_change', stay.conversation_id]], opportunities: ['social.connect:org'] }
     assert.deepEqual(await today(), { ...expectedToday, changePath: `/dashboard/org/bookings/${stay.id}`, changeStatusLine: 'Change requested · Cabin' })
 
     // Assignment allows the turnover to be read. Even with a thread seat, it gives no decision permission.

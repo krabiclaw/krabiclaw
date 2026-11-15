@@ -153,18 +153,22 @@ never changes it.
 
 ### Today and Upcoming
 
-Business Today and Upcoming show two stored things
+Business Today and Upcoming show the business's reservations, its stored tasks
+and, for a manager, suggestions read from its own rows
 (`project/tasks-and-opportunities.md` in the design system):
 
 - **Tasks** (`tasks`, `server/domain/tasks.ts`): work someone has to do, with
   an assignee, a window, and who closed it and when. A turnover and a failed
-  scheduled delivery follow their source records. A person closes an accepted
-  opportunity or a task they add.
-- **Opportunities** (`opportunities`, `server/domain/opportunities.ts`): what
-  `readBusinessRecommendations` finds the business could do, recorded against
-  its evidence revision. Owners and admins see suggestions in the same card
-  layout as tasks. A card opens the editor or record that owns the work. The
-  top-right dismiss control records a decision about the current evidence.
+  scheduled delivery follow their source records. A person closes a task they
+  add.
+- **Suggestions** (`server/domain/opportunities.ts`): on Today, the setup the
+  business has not finished (Stripe payments, a custom domain while the site
+  is private, social publishing, Google Ads for a goal that chose it, a first
+  offering, an experience's booking price, taking payment for a priced
+  offering); on a reservation card, the welcome a booked guest who has not
+  heard from the business is due. Each is read from stored rows on every read
+  and goes away when the write that finishes it lands; nothing is recorded or
+  dismissed. A card opens the editor or record that owns the work.
 
 `GET /api/dashboard/today` returns task sections, opportunities, assignees
 and the resolved time. The server supplies each card's content and destination. On unfiltered Today,
@@ -176,15 +180,10 @@ and the first catalog item for its business type take priority when they apply.
 The task sheet holds assignment and completion controls for work that a person
 tracks there. Guest messages enter Messages and update its unread count. A
 payment card opens that offering's Payment settings. Saving the payment
-requirement completes its accepted task in the booking configuration batch.
-
-Each active experience can show one catalog suggestion for its current
-publication blocker. The server uses the catalog’s published-host and booking
-readiness checks. The card opens the editor for the current blocker and
-advances or clears as the catalog state changes.
+requirement in the booking configuration clears its suggestion.
 
 Owner Today shows failed deliveries, turnovers and booking decisions before
-opportunities and Done. A member sees the work in their scope and Done.
+suggestions and Done. A member sees the work in their scope and Done.
 The shared header holds Today/Upcoming, a round +
 for the permitted Add task and Add stay actions, and a task kind filter.
 `TodayTaskSheet` uses Airbnb's Checkout | Check-in split, followed by Assigned

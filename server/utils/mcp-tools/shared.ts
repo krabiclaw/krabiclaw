@@ -921,9 +921,6 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   skip_task: D,
   // Records what the selector found against its evidence as open rows; existing rows are left as they are, so a repeat records nothing new.
   list_opportunities: { ...W, idempotentHint: true },
-  accept_opportunity: { ...D, openWorldHint: true },
-  dismiss_opportunity: D,
-  defer_opportunity: D,
 } as const satisfies Record<string, McpToolAnnotations>
 
 export function buildToolAnnotationsByName() {

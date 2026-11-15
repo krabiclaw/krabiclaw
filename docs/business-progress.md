@@ -1,9 +1,9 @@
 # Business progress foundation
 
 This contract records owner intent and useful work. The dashboard's Today and
-Upcoming views read stored tasks and opportunities (`server/domain/tasks.ts`,
-`server/domain/opportunities.ts`; see Today and Upcoming in `DESIGN.md`). The
-opportunities come from `readBusinessRecommendations`. Booky
+Upcoming views read stored tasks (`server/domain/tasks.ts`) and, for a manager,
+the setup the business has not finished and the welcome each booked guest is due
+(`server/domain/opportunities.ts`; see Today and Upcoming in `DESIGN.md`). Booky
 Boo can consume the same domain operations when its presentation reaches
 parity; none of these records require lodging.
 
@@ -24,19 +24,22 @@ authenticated actor in the same D1 batch as the change. Equivalent saves preserv
 the document revision and produce no additional article outcome. Historical
 actor attribution is reported only when it was recorded.
 
-`opportunities` records each thing the selector found at its evidence revision
-and the business's decision about it: accepted (with its one task), dismissed
-(with the owner's note) or deferred (`available_at`). New evidence is a new
-opportunity. Listing shows opportunities backed by current evidence and keeps
-earlier decisions. `tasks` is work someone has to do, with an assignee, a window
-and who closed it; completing, skipping and
-accepting are audit entries here, so they count as business activity.
+Today's suggestions are read from the business's own rows each time Today is
+read: setup not yet finished (Stripe payments, a custom domain while the site is
+private, a social account or the plan for social publishing, Google Ads for a
+goal that chose it, a first offering, a booking price for an experience, taking
+payment for a priced offering) and a booked guest who has not heard from the
+business since booking. Each goes away when the write that finishes it lands.
+Nothing is recorded about them and they cannot be accepted or dismissed. The
+`opportunities` table holds the decisions made under the earlier selector and is
+no longer written. `tasks` is work someone has to do, with an assignee, a window
+and who closed it; completing and skipping are audit entries here, so they count
+as business activity.
 
 Article activity is recorded by ordinary CMS/MCP writes; reply evidence comes
 from the existing conversation activity and delivery receipts. Goals and
 decisions are collected only through explicit submissions to their APIs:
-Today's priority disclosure creates and archives goals, and an opportunity's
-Accept and Not now record the decision against the evidence it was found on. No
+Today's priority disclosure creates and archives goals. No
 recommendation impression, exposure, usefulness, effort saved or achieved
 business goal is established by these records.
 
@@ -53,68 +56,24 @@ functions enforce the same access rules as the HTTP routes.
 | `POST /goals` | Create with `idempotencyKey`, `intent`, optional `constraints`, `targetAt` and `strategy`. Returns `{goal}` and 201, including an identical retry. Reusing the key for another request returns 409. |
 | `PATCH /goals/:goalId` | Edit authored fields or `status`, supplying the current `revision`. Returns `{goal}`. A stale edit returns 409. |
 | `GET /progress?limit=50&offset=0` | Read goals and a page of canonical outcomes. Limit is 1–100. |
-| `GET /progress/reference?operation=article.update&subjectId=...` | Read `{reference}` for an explicit operation and canonical subject ID. Returns 404 for an absent or foreign subject. |
-| `GET /opportunities`, `POST /opportunities/:id/accept`, `/dismiss`, `/defer` | Read open opportunities and decide one; see `server/domain/opportunities.ts`. Accept returns the new `{task}`. |
+| `GET /progress/reference?operation=article.publish&subjectId=...` | Read `{reference}` for an explicit operation and canonical subject ID. Returns 404 for an absent or foreign subject. |
 | `GET /tasks`, `POST /tasks`, `PATCH /tasks/:id`, `POST /tasks/:id/complete`, `/skip`, `/reopen`, `/read` | Stored work; see `server/domain/tasks.ts`. |
 
-The experimental `POST /api/organizations/:organizationId/recommendations/preview`
-endpoint has been removed and returns 404. `readBusinessRecommendations` reads
-current canonical facts on each request. It uses explicit strategy, vertical,
-content already in progress, native performance, connected provider evidence
-and current availability. A business without an authored strategy still has
-ordinary marketing opportunities. No model call or game economy is introduced.
+Reference operations name canonical capabilities: `article.publish`,
+`article.create`, `post.create`, `post.publish`, `article.distribute`,
+`social.connect`, `google_ads.connect`, `payments.connect`, `domain.connect`,
+`product.create`, `product.payment`, `product.readiness`, `stay.gap` and
+`booking.welcome`. Organization-level setup operations reference the exact
+organization, content operations reference their article or post, and product
+operations reference their exact product. References authorize the source and
+derive their evidence revision from its real state.
 
-Feedback operations name canonical capabilities: `article.update`,
-`article.publish`, `article.create`, `post.create`, `post.publish`,
-`article.distribute`, `social.connect`, `google_ads.connect`, `payments.connect`, `product.payment`,
-`stay.gap` and `guest_thread.reply`. Organization-level creation/setup operations
-reference the exact organization, existing content operations reference their
-article/post, and product payment operations reference their exact product. Availability work
-references its recorded session, location/slot, or home/date interval. Echo the
-opaque `subjectId` returned by the server with each opportunity; it names that
-source opportunity, never a fabricated future article or post. References authorize
-the source and derive their evidence revision from its real state.
-
-Google Ads setup reuses the existing Integrations flow. Its opportunity operation
-is needed because selecting an unconnected Ads strategy previously produced no
-related action; a social or payment opportunity cannot describe a Google Ads connection.
-
-Recommendations are continuously eligible, not a daily assignment batch. A
-publication can remove its publishing action and make distribution available
-in the same session; a successful reply removes the waiting response action.
-A draft change is progress, not proof of publication or goal achievement.
-Social distribution requires a real matching provider publication; a website
-post alone does not establish an external send. Payment setup uses Stripe's
-actual readiness. Calendar recommendations use effective nightly policy,
-including overrides, and disappear when that interval is no longer applicable.
-There is no midnight completion reset.
-
-Today displays provider/analytics failures through `recommendationIssues`,
-while retaining baseline opportunities with an honest evidence limit. Missing
-measurement is never replaced with measured zero demand or full capacity.
 Successful editor and MCP writes publish a content-free `business.changed`
-invalidation after their normal cache refresh. Existing conversation events
-cannot signal an article or post completion; without this signal the open
-dashboard can keep recommending work already published in another window.
-Open dashboards reread their
-authorized scope; payments and connection status also reconcile on return/focus
-and the existing visible-page timer.
+invalidation after their normal cache refresh; open dashboards re-read Today.
 
 All dates and revisions use UTC ISO instants with milliseconds. `null` means an
 optional authored value is absent. Actor identity comes from the authenticated
 session, never the request body.
-
-## Evidence and decisions
-
-An opportunity is recorded against the `evidenceRevision` of its reference
-(`GET /progress/reference`). Article evidence includes current document content,
-categories and attributed activity. Conversation evidence includes the latest
-actual guest activity and member reply, canonical commitment state and reply
-receipts. A decision applies to that revision only: when the evidence changes,
-the selector records a new opportunity and stops listing the old one. A partial
-read reports the unavailable evidence alongside any current opportunities.
-Accepting re-reads the selector and is refused with 409 when the evidence has
-moved on. Guest replies and their delivery evidence stay in the conversation.
 
 ## What progress proves
 

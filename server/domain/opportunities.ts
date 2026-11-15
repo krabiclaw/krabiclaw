@@ -1,33 +1,33 @@
 import { HTTPError } from 'nitro'
-import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertRoleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
-import { organizationEventQuery } from '~/server/utils/organization-events'
-import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
-import { readBusinessRecommendations, readRecommendationReference, type BusinessRecommendation } from '~/server/domain/business-progress'
-import { getTask, opportunityTaskInsert, readTaskAssignee, taskViewer, type TaskRow, type TaskView } from '~/server/domain/tasks'
+import { queryAll, queryFirst, type DbClient } from '~/server/db'
+import { assertRoleAllows, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { readBookingWelcomes } from '~/server/utils/business-outcomes'
+import { listIntegrations } from '~/server/utils/organization-integrations'
+import { getOrganizationEntitlements } from '~/server/utils/billing-access'
+import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
+import { listProducts, listOrganizationProducts, resolveVariantPrice } from '~/server/utils/product-management'
+import { firstExperienceSetupProgress } from '~/server/utils/experience-setup'
+import { firstMenuSetupLocation } from '~/server/utils/first-menu-setup'
+import { firstPracticeAreaSetupIncomplete } from '~/server/utils/practice-area-setup'
+import { firstExperienceSetupPath, firstHomeSetupPath, firstMenuSectionSetupPath, firstPracticeAreaPath, guestConversationPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
+import { businessGoalStrategySchema, type BusinessGoalStrategy } from '~/shared/business-progress'
 import type { BusinessProgressOperation } from '~/shared/business-outcomes'
-import { isValidInstant, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
-import type { CloudflareEnv } from '~/server/utils/auth'
+import type { CurrencyCode } from '~/shared/currencies'
+import { resolveBookingPresentation } from '~/utils/booking-presentation'
 
 /*
-  Something the business could do. The selector (readBusinessRecommendations)
-  finds them from the business's own records each time they are read; this
-  records each one against its evidence revision, so the owner's decision
-  about it is the business's and lasts until the evidence changes. Accepting
-  makes it a task; dismissing records why; deferring hides it until a time.
+  What Today suggests, read from what the business has already stored. Setup the
+  business has not finished (payments, a domain, a social account, Google Ads, a
+  first offering, a price, taking payment) is read from its own rows, and a booked
+  guest who has not heard from the business since booking is read from the
+  booking and its conversation. Nothing here is recorded or recomputed: each one
+  goes away when the write that finishes it lands.
 */
 
-type OpportunityStatus = 'open' | 'accepted' | 'dismissed'
-interface OpportunityRow {
-  id: string; organization_id: string; operation: BusinessProgressOperation; subject_id: string; evidence_revision: string
-  goal_id: string | null; goal_revision: string | null; status: OpportunityStatus; available_at: string | null
-  decision_note: string | null; decided_at: string | null; decided_by_user_id: string | null; created_at: string; updated_at: string
-}
-
-/** An opportunity as the insight face of the `.tc` card draws it. */
+/** A suggestion as the insight face of the `.tc` card draws it. */
 export interface OpportunityView {
   id: string
-  /** What part of the business, and where: "Calendar · 45B", "Website". */
+  /** What part of the business: "Payments", "Catalog". */
   status_line: string
   title: string
   detail: string
@@ -36,168 +36,156 @@ export interface OpportunityView {
   path: string
   product_id: string | null
   location_id: string | null
-  /** The guest conversation a message opportunity is sent in; null for every other opportunity. */
+  /** The guest conversation a welcome is sent in; null for every setup item. */
   conversation_id: string | null
-  /** The message it pre-writes from the business's own records, for the owner to review and send. */
+  /** The welcome it pre-writes from the business's own records, for the owner to review and send. */
   message: string | null
 }
 
-const AREA: Record<BusinessProgressOperation, string> = {
-  'article.create': 'Website', 'article.update': 'Website', 'article.publish': 'Website', 'article.distribute': 'Social',
-  'post.create': 'Social', 'post.publish': 'Social', 'social.connect': 'Social', 'google_ads.connect': 'Marketing',
-  'payments.connect': 'Payments', 'domain.connect': 'Website', 'product.create': 'Catalog', 'product.payment': 'Payments', 'product.readiness': 'Catalog', 'stay.gap': 'Calendar', 'guest_thread.reply': 'Messages', 'booking.welcome': 'Messages',
+const AREA: Partial<Record<BusinessProgressOperation, string>> = {
+  'social.connect': 'Social', 'google_ads.connect': 'Marketing', 'payments.connect': 'Payments', 'domain.connect': 'Website',
+  'product.create': 'Catalog', 'product.payment': 'Payments', 'product.readiness': 'Catalog', 'booking.welcome': 'Messages',
 }
 
-function fail(statusCode: number, code: string, message: string, field?: string): never {
-  throw new HTTPError({ statusCode, message, data: { code, ...(field ? { field } : {}) } })
-}
-
-const keyOf = (value: { operation: string; subjectId: string; evidenceRevision: string; goalId: string | null }) => JSON.stringify([value.operation, value.subjectId, value.evidenceRevision, value.goalId])
-const rowKey = (row: OpportunityRow) => keyOf({ operation: row.operation, subjectId: row.subject_id, evidenceRevision: row.evidence_revision, goalId: row.goal_id })
-const recommendationKey = (item: BusinessRecommendation) => keyOf({ operation: item.operation, subjectId: item.subjectId, evidenceRevision: item.reference.evidence_revision, goalId: item.goal?.id ?? null })
+const SOCIAL_PROVIDERS = ['instagram', 'facebook', 'discord']
 
 async function authorize(principal: MemberAccessPrincipal) {
-  // Opportunities are the owner's decisions about the business; a member is given the tasks they become.
+  // Suggestions are the owner's decisions about the business; a member is given the tasks they lead to.
   await assertRoleAllows({ ...principal, permissions: { task: ['assign'] } })
 }
 
-/** Record only the observed evidence. A refresh cannot retire rows it did not observe. */
-async function refreshOpportunities(db: DbClient, principal: MemberAccessPrincipal, input: { now: Date; locationId?: string }) {
-  const plan = await readBusinessRecommendations(db, principal, { now: input.now, locationId: input.locationId })
-  if (plan.recommendations.length === 0) return { plan, rows: [], changed: false }
-  const now = input.now.toISOString(), organizationId = principal.organizationId
-  const results = await executeBatch(db, plan.recommendations.map(item => ({
-    query: `INSERT INTO opportunities (id, organization_id, operation, subject_id, evidence_revision, goal_id, goal_revision, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?) ON CONFLICT DO NOTHING`,
-    params: [crypto.randomUUID(), organizationId, item.operation, item.subjectId, item.reference.evidence_revision, item.goal?.id ?? null, item.goal?.updated_at ?? null, now, now],
-  })), { operation: 'Record opportunities' })
-  const rows = await queryAll<OpportunityRow>(db, `SELECT opportunities.* FROM json_each(?) current
-    JOIN opportunities ON organization_id = ? AND status = 'open'
-      AND operation = json_extract(current.value, '$[0]') AND subject_id = json_extract(current.value, '$[1]')
-      AND evidence_revision = json_extract(current.value, '$[2]') AND goal_id IS json_extract(current.value, '$[3]')`,
-  [JSON.stringify(plan.recommendations.map(item => [item.operation, item.subjectId, item.reference.evidence_revision, item.goal?.id ?? null])), organizationId])
-  return { plan, rows, changed: results.some(result => (result.meta.changes ?? 0) > 0) }
-}
-
-function view(row: OpportunityRow, item: BusinessRecommendation, homes: Map<string, string>): OpportunityView {
-  return { id: row.id, status_line: [AREA[item.operation], item.productId ? homes.get(item.productId) ?? null : null].filter(Boolean).join(' · '), title: item.headline, detail: item.reason, icon: item.icon, path: item.to, product_id: item.productId, location_id: item.locationId, conversation_id: item.requestId, message: item.message }
-}
-
-/** The open opportunities available now, in the selector's order. */
-export async function listOpportunities(db: DbClient, principal: MemberAccessPrincipal, input: { now?: Date; locationId?: string } = {}): Promise<{ opportunities: OpportunityView[]; issues: string[] }> {
+/** The setup the business has not finished, from its own rows, in the order it matters. */
+export async function listOpportunities(db: DbClient, principal: MemberAccessPrincipal, input: { now?: Date; locationId?: string } = {}): Promise<{ opportunities: OpportunityView[] }> {
   await authorize(principal)
-  const now = input.now ?? new Date()
-  const { plan, rows, changed } = await refreshOpportunities(db, principal, { now, locationId: input.locationId })
-  if (changed) await publishBusinessInvalidation(principal.env as CloudflareEnv, principal.organizationId)
-  const byKey = new Map(rows.filter(row => row.available_at === null || row.available_at <= now.toISOString()).map(row => [rowKey(row), row]))
-  const productIds = [...new Set(plan.recommendations.flatMap(item => item.productId && (item.operation === 'stay.gap' || item.operation === 'booking.welcome') ? [item.productId] : []))]
-  const homes = new Map((await queryAll<{ id: string; name: string }>(db, 'SELECT id, name FROM products WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))',
-    [principal.organizationId, JSON.stringify(productIds)])).map(product => [product.id, product.name]))
-  return {
-    opportunities: plan.recommendations.flatMap(item => {
-      const row = byKey.get(recommendationKey(item))
-      return row ? [view(row, item, homes)] : []
-    }),
-    issues: plan.issues,
+  const now = input.now ?? new Date(), organizationId = principal.organizationId
+  const [canWrite, canOperate, canManagePayments, canUpdateBilling, canCreateProducts] = await Promise.all([
+    roleAllows({ ...principal, permissions: { content: ['update'] } }), roleAllows({ ...principal, permissions: { operations: ['update'] } }),
+    roleAllows({ ...principal, permissions: { payments: ['integration'] } }), roleAllows({ ...principal, permissions: { billing: ['update'] } }),
+    roleAllows({ ...principal, permissions: { products: ['create'] } }),
+  ])
+  const [organization, goals, integrations, draft, products, customDomain, entitlements] = await Promise.all([
+    queryFirst<{ slug: string; vertical: string; status: string; default_currency: CurrencyCode }>(db, 'SELECT slug, vertical, status, default_currency FROM organization WHERE id = ?', [organizationId]),
+    queryAll<{ strategy_json: string }>(db, "SELECT strategy_json FROM organization_goals WHERE organization_id = ? AND status = 'active' AND strategy_json IS NOT NULL ORDER BY updated_at DESC, id DESC", [organizationId]),
+    listIntegrations(db, organizationId),
+    input.locationId ? null : queryFirst<{ payload_json: string }>(db, "SELECT payload_json FROM onboarding_drafts WHERE organization_id = ? AND status = 'committed' LIMIT 1", [organizationId]),
+    queryAll<{ id: string; name: string; kind: string; online_payment_required: number | null }>(db, `SELECT p.id, p.name, p.kind, c.online_payment_required FROM products p
+      LEFT JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
+      WHERE p.organization_id = ? AND p.active = 1 ${input.locationId ? 'AND EXISTS (SELECT 1 FROM product_locations l WHERE l.organization_id = p.organization_id AND l.product_id = p.id AND l.location_id = ?)' : ''}
+      ORDER BY p.created_at, p.id`, [organizationId, ...(input.locationId ? [input.locationId] : [])]),
+    queryFirst(db, "SELECT id FROM organization_domains WHERE organization_id = ? AND type = 'custom' AND status <> 'deleted' LIMIT 1", [organizationId]),
+    getOrganizationEntitlements(principal.env, organizationId),
+  ])
+  if (!organization) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
+  const strategies = goals.map(goal => businessGoalStrategySchema.parse(JSON.parse(goal.strategy_json)))
+  const strategyFor = (channel: BusinessGoalStrategy['channels'][number] | 'payments') => strategies.some(strategy => channel === 'payments' ? strategy.payments === true : strategy.channels.includes(channel))
+  const base = `/dashboard/${encodeURIComponent(organization.slug)}`
+  const setupDraft = organization.status !== 'suspended' ? draft : null
+  // A business that has not gone live sees only what it needs to go live.
+  const firstRun = organization.status === 'inactive' && setupDraft !== null
+  const items: Array<OpportunityView & { rank: number }> = []
+  const offer = (operation: BusinessProgressOperation, subjectId: string, title: string, detail: string, path: string, rank: number, icon: string, productId: string | null = null) =>
+    items.push({ id: `${operation}:${subjectId}`, status_line: AREA[operation]!, title, detail, icon, path, product_id: productId, location_id: input.locationId ?? null, conversation_id: null, message: null, rank })
+
+  if (!firstRun && canOperate && strategyFor('google_ads') && !integrations.some(integration => integration.provider === 'google_ads')) {
+    offer('google_ads.connect', organizationId, 'Connect Google Ads to your marketing goal', 'Connect the existing Google Ads integration to measure which articles your ads bring customers to.', `${base}/integrations`, 100, 'i-logos-google-ads')
   }
-}
-
-async function openOpportunity(db: DbClient, principal: MemberAccessPrincipal, id: string): Promise<OpportunityRow> {
-  const row = await queryFirst<OpportunityRow>(db, 'SELECT * FROM opportunities WHERE organization_id = ? AND id = ?', [principal.organizationId, id])
-  if (!row) fail(404, 'OPPORTUNITY_NOT_FOUND', 'Opportunity not found')
-  if (row.status !== 'open') fail(409, 'OPPORTUNITY_DECIDED', `This opportunity is already ${row.status}`, 'status')
-  return row
-}
-
-function eventQuery(principal: MemberAccessPrincipal, row: OpportunityRow, eventType: 'opportunity.accepted' | 'opportunity.dismissed' | 'opportunity.deferred', after: unknown): BatchQuery {
-  return organizationEventQuery({ organizationId: principal.organizationId, actorId: principal.userId, eventType, entityType: 'opportunity', entityId: row.id,
-    metadata: { operation: row.operation, subjectId: row.subject_id, evidenceRevision: row.evidence_revision }, afterState: after, onlyIfPreviousChangedOneRow: true })
-}
-
-const SUBJECT: Partial<Record<BusinessProgressOperation, TaskRow['subject_type']>> = {
-  'article.update': 'article', 'article.publish': 'article', 'article.distribute': 'article', 'post.publish': 'post', 'product.payment': 'product', 'stay.gap': 'product', 'booking.welcome': 'conversation',
-}
-
-/**
- * Accept: the opportunity becomes one task, assigned and due as asked — the
- * caller and the end of today when the request says nothing. Refused when the
- * evidence moved on since it was shown.
- */
-export async function acceptOpportunity(db: DbClient, principal: MemberAccessPrincipal, id: string, body: Record<string, unknown>): Promise<TaskView> {
-  await authorize(principal)
-  const row = await openOpportunity(db, principal, id)
-  const plan = await readBusinessRecommendations(db, principal)
-  const item = plan.recommendations.find(candidate => recommendationKey(candidate) === rowKey(row))
-  if (!item) {
-    const social = plan.socialEvidenceUnavailable && (row.operation === 'post.create' || row.operation === 'post.publish' || row.operation === 'social.connect' || row.operation === 'article.distribute')
-    const marketing = plan.marketingEvidenceUnavailable && row.operation === 'article.distribute'
-    if (social || marketing) {
-      // Re-read the target when its revision can still be proved independently of the failed provider.
-      const current = row.operation === 'social.connect' || (await readRecommendationReference(db, principal, { operation: row.operation, subjectId: row.subject_id }))?.evidence_revision === row.evidence_revision
-      if (current) throw new HTTPError({ statusCode: 503, message: 'Could not verify what this opportunity was based on. Reload Today and try again.',
-        data: { code: 'OPPORTUNITY_EVIDENCE_UNAVAILABLE', field: 'opportunity_id', operation_completed: false, issues: plan.issues } })
+  if (!firstRun && canWrite) {
+    if (entitlements.managed_service !== true) {
+      offer('social.connect', organizationId, 'Enable social publishing', 'Your social marketing strategy can use connected publishing when its plan requirement is met. You can prepare content now.', `${base}/billing`, 55, 'i-lucide-link')
+    } else if (!integrations.some(integration => SOCIAL_PROVIDERS.includes(integration.provider))) {
+      offer('social.connect', organizationId, 'Connect your social account', 'Connect the account where customers follow you, so posts can be published and their outcomes tracked here.', `${base}/integrations`, 55, 'i-lucide-link')
     }
-    fail(409, 'OPPORTUNITY_CHANGED', 'What this opportunity was based on has changed. Reload Today to see what is current.', 'opportunity_id')
   }
-  const viewer = await taskViewer(principal)
-  const assigned = body.assigned_member_id === undefined
-    ? viewer.memberId
-    : await readTaskAssignee(db, principal.organizationId, body)
-  const place = item.locationId ? await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM business_locations WHERE organization_id = ? AND id = ?', [principal.organizationId, item.locationId]) : null
-  const organization = await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM organization WHERE id = ?', [principal.organizationId])
-  if (!organization) throw new Error(`Organization ${principal.organizationId} is missing`)
-  const timezone = place?.timezone ?? organization.timezone
-  if (body.due_at !== undefined && body.due_at !== null && !isValidInstant(body.due_at)) fail(422, 'INVALID_TASK_FIELD', 'due_at must be an instant with a timezone offset', 'due_at')
-  const now = new Date()
-  const dueAt = body.due_at === undefined ? localDateTimeToInstant(localDateAt(now, timezone), '23:59', timezone, 'compatible').toISOString() : body.due_at === null ? null : new Date(body.due_at as string).toISOString()
-  const subjectType = SUBJECT[row.operation] ?? null
-  const subjectId = subjectType === null ? null : row.operation === 'stay.gap' ? item.productId : row.subject_id
-  const taskId = crypto.randomUUID()
-  const results = await executeBatch(db, [
-    { query: `UPDATE opportunities SET status = 'accepted', decided_at = ?, decided_by_user_id = ?, updated_at = ? WHERE organization_id = ? AND id = ? AND status = 'open'
-      AND (operation <> 'product.payment' OR EXISTS (SELECT 1 FROM product_booking_configs c
-        WHERE c.organization_id = opportunities.organization_id AND c.product_id = opportunities.subject_id AND c.online_payment_required = 0))`,
-      params: [now.toISOString(), principal.userId, now.toISOString(), principal.organizationId, id] },
-    opportunityTaskInsert({ organizationId: principal.organizationId, opportunityId: id, title: item.headline, subject: subjectType && subjectId ? { type: subjectType, id: subjectId } : null,
-      productId: item.productId, locationId: item.locationId, assignedMemberId: assigned, dueAt, timezone, userId: principal.userId, now: now.toISOString(), taskId }),
-    eventQuery(principal, row, 'opportunity.accepted', { taskId, assigned_member_id: assigned, due_at: dueAt }),
-  ], { operation: 'Accept opportunity' })
-  if (results[0]?.meta.changes !== 1) fail(409, 'OPPORTUNITY_DECIDED', 'This opportunity was decided while you were looking at it', 'status')
-  const recipients = assigned === viewer.memberId || !assigned ? []
-    : (await queryAll<{ userId: string }>(db, 'SELECT userId FROM member WHERE organizationId = ? AND id = ?', [principal.organizationId, assigned])).map(member => member.userId)
-  if (recipients.length) {
-    const { notifyTaskAssigned } = await import('~/server/utils/notifications')
-    await notifyTaskAssigned(principal.env as CloudflareEnv, db, { organizationId: principal.organizationId, taskId, actorUserId: principal.userId, recipientUserIds: recipients })
+  if (firstRun && !customDomain && (entitlements.custom_domains === true || canUpdateBilling)) {
+    offer('domain.connect', organizationId, 'Connect a custom domain', 'Use your own website address.', `${base}/website/preferences/domains`, 120, 'i-lucide-globe')
   }
-  await publishBusinessInvalidation(principal.env as CloudflareEnv, principal.organizationId)
-  return getTask(db, viewer, taskId)
+  if (setupDraft && canCreateProducts) {
+    const firstProduct = {
+      lodging: ['stay', 'Add your first home', 'Start your listing.'],
+      experience: ['experience', 'Add your first experience', 'Give guests something to book.'],
+      restaurant: ['dish', 'Add your first dish', 'Start your menu.'],
+      service: ['service', 'Add your first practice area', 'Start with the name clients will see.'],
+    } as const
+    const nextProduct = firstProduct[organization.vertical as keyof typeof firstProduct]
+    const experienceSetup = organization.vertical === 'experience' ? await firstExperienceSetupProgress(db, organizationId) : null
+    if (experienceSetup && !experienceSetup.complete) {
+      offer('product.create', organizationId, 'Continue experience setup', 'Finish setting up your first session.', firstExperienceSetupPath(organization.slug), 110, 'i-lucide-list-checks')
+    } else if (nextProduct) {
+      const [kind, title, detail] = nextProduct
+      const areas = kind === 'service' ? await listOrganizationProducts(db, { organizationId, kind, window: { limit: 2, offset: 0 } }) : []
+      const existing = kind === 'service' ? areas.length : products.filter(product => product.kind === kind).length
+      const menuLocation = kind === 'dish' ? await firstMenuSetupLocation(db, organizationId, setupDraft.payload_json, !firstRun || existing > 0) : null
+      if (menuLocation) {
+        offer('product.create', organizationId, menuLocation.started ? 'Continue your menu setup' : 'Set up your menu', menuLocation.started ? 'Pick up where you left off.' : detail,
+          firstMenuSectionSetupPath(organization.slug, menuLocation.id), 110, 'i-lucide-list-checks')
+      } else if (areas.length === 1) {
+        const area = areas[0]!
+        if (area.page?.path && !area.order_url && await firstPracticeAreaSetupIncomplete({ db, env: principal.env, organizationId, orgSlug: organization.slug, actorId: principal.userId, principal }, area.id)) {
+          offer('product.create', organizationId, 'Continue consultation setup', area.name, `${firstPracticeAreaPath(organization.slug)}/${encodeURIComponent(area.id)}`, 110, 'i-lucide-list-checks')
+        }
+      } else if (!existing && firstRun) {
+        const to = kind === 'stay' ? firstHomeSetupPath(organization.slug) : kind === 'experience' ? firstExperienceSetupPath(organization.slug)
+          : kind === 'service' ? firstPracticeAreaPath(organization.slug) : `${productEditorPath(organization.slug, 'new')}?kind=${kind}`
+        offer('product.create', organizationId, title, detail, to, 110, 'i-lucide-list-checks')
+      }
+    }
+  }
+  // Offerings booked by the session or consultation: one without a price cannot be booked, and one with a price can take payment.
+  const booked = canOperate && (organization.vertical === 'experience' || organization.vertical === 'service')
+    ? (await listProducts(db, organizationId)).filter(product => product.active && product.kind === organization.vertical && products.some(row => row.id === product.id))
+    : []
+  // The offering's one-time prices where it is booked: none means it cannot be booked; a free one can be.
+  const prices = (product: typeof booked[number]) => {
+    const locations = input.locationId ? [input.locationId] : [null, ...product.locations.map(location => location.location_id)]
+    return product.variants.filter(variant => variant.active).flatMap(variant => locations.flatMap((locationId) => {
+      const price = resolveVariantPrice(variant, { currency: organization.default_currency, location_id: locationId, at: now.toISOString(), billing: { type: 'one_time' } })
+      return price ? [price.unit_amount] : []
+    }))
+  }
+  const priced = (product: typeof booked[number]) => prices(product).some(amount => amount > 0)
+  // A consultation may have no price; an experience without one cannot be booked.
+  if (!firstRun && organization.vertical === 'experience') for (const product of booked.filter(product => !prices(product).length)) {
+    offer('product.readiness', product.id, `Set a booking price for “${product.name}”`, 'This offering needs a price before guests can book it on your site.', `${productEditorPath(organization.slug, product.id)}/price`, 95, 'i-lucide-list-checks', product.id)
+  }
+  const bookingPayments = canOperate && (strategyFor('payments') || organization.vertical === 'experience' && entitlements.payments === true)
+  const unpaid = bookingPayments ? booked.filter(product => products.find(row => row.id === product.id)?.online_payment_required === 0 && priced(product)) : []
+  if (unpaid.length || firstRun && canManagePayments) {
+    const setup = await readStripeCheckoutSetup(db, organizationId, principal.env)
+    const waiting = setup.connected?.status === 'pending_review'
+    const needsConnect = setup.missing.some(field => ['payments.account', 'payments.account_ready', 'payments.account_mode'].includes(field))
+    if (firstRun && canManagePayments && needsConnect && !waiting) {
+      offer('payments.connect', organizationId, setup.connected ? 'Finish setting up payments' : 'Set up payments', 'Connect with Stripe.', `${base}/payments/payout-method`, 130, 'i-lucide-credit-card')
+    } else if (canManagePayments && unpaid.length && setup.missing.length && !waiting) {
+      offer('payments.connect', organizationId, setup.connected ? 'Finish your payment setup' : organization.vertical === 'service' ? 'Set up payments for your consultations' : 'Set up payments for your experiences',
+        'Complete the existing Stripe setup before requiring payment at booking. A subscription alone does not activate payment acceptance.', `${base}/payments/payout-method`, 100, 'i-lucide-credit-card')
+    }
+    if (!setup.missing.length) for (const product of unpaid) {
+      offer('product.payment', product.id, `Take payment when ${organization.vertical === 'service' ? 'clients' : 'guests'} book “${product.name}”`,
+        `Payments are ready, but this offering does not require advance payment. Enable it for a priced offering to collect before ${organization.vertical === 'service' ? 'confirming a consultation' : 'reserving places'}.`,
+        productPaymentPath(organization.slug, product.id), 100, 'i-lucide-credit-card', product.id)
+    }
+  }
+  return { opportunities: items.sort((a, b) => b.rank - a.rank || a.id.localeCompare(b.id)).map(({ rank: _rank, ...item }) => item) }
 }
 
-export async function dismissOpportunity(db: DbClient, principal: MemberAccessPrincipal, id: string, body: Record<string, unknown>): Promise<{ id: string; status: 'dismissed' }> {
-  await authorize(principal)
-  const row = await openOpportunity(db, principal, id)
-  const note = body.note === undefined || body.note === null ? null : typeof body.note === 'string' && body.note.trim() && body.note.trim().length <= 2000 ? body.note.trim() : fail(422, 'INVALID_OPPORTUNITY_FIELD', 'note must be 1 to 2000 characters', 'note')
-  const now = new Date().toISOString()
-  const results = await executeBatch(db, [
-    { query: `UPDATE opportunities SET status = 'dismissed', decision_note = ?, decided_at = ?, decided_by_user_id = ?, updated_at = ? WHERE organization_id = ? AND id = ? AND status = 'open'`,
-      params: [note, now, principal.userId, now, principal.organizationId, id] },
-    eventQuery(principal, row, 'opportunity.dismissed', { note }),
-  ], { operation: 'Dismiss opportunity' })
-  if (results[0]?.meta.changes !== 1) fail(409, 'OPPORTUNITY_DECIDED', 'This opportunity was decided while you were looking at it', 'status')
-  await publishBusinessInvalidation(principal.env as CloudflareEnv, principal.organizationId)
-  return { id, status: 'dismissed' }
+/** The welcome each booked guest who has not heard from the business since booking is due, by conversation. */
+export async function listBookingWelcomes(db: DbClient, principal: MemberAccessPrincipal, input: { now: Date; locationId?: string }): Promise<Map<string, OpportunityView>> {
+  if (!await roleAllows({ ...principal, permissions: { operations: ['reply'] } })) return new Map()
+  const organization = await queryFirst<{ slug: string; vertical: string }>(db, 'SELECT slug, vertical FROM organization WHERE id = ?', [principal.organizationId])
+  if (!organization) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
+  const welcomes = await readBookingWelcomes(db, principal.organizationId, { now: input.now, locationId: input.locationId })
+  return new Map(welcomes.map(welcome => [welcome.requestId, {
+    id: `booking.welcome:${welcome.requestId}`, status_line: AREA['booking.welcome']!,
+    title: welcome.kind === 'stay' ? 'Share info about your place' : 'Share how to prepare',
+    detail: `Help ${welcome.guestFirstName ?? `your ${welcome.kind === 'stay' ? 'guest' : resolveBookingPresentation(welcome.productKind, organization.vertical).counterpartyNoun}`} get ready`,
+    icon: 'i-lucide-messages-square', path: guestConversationPath(organization.slug, welcome.requestId),
+    product_id: welcome.productId, location_id: welcome.locationId, conversation_id: welcome.requestId, message: welcome.message,
+  }]))
 }
 
-export async function deferOpportunity(db: DbClient, principal: MemberAccessPrincipal, id: string, body: Record<string, unknown>): Promise<{ id: string; available_at: string }> {
-  await authorize(principal)
-  const row = await openOpportunity(db, principal, id)
-  if (!isValidInstant(body.until) || Date.parse(body.until as string) <= Date.now()) fail(422, 'INVALID_OPPORTUNITY_FIELD', 'until must be a future instant with a timezone offset', 'until')
-  const until = new Date(body.until as string).toISOString(), now = new Date().toISOString()
-  const results = await executeBatch(db, [
-    { query: `UPDATE opportunities SET available_at = ?, updated_at = ? WHERE organization_id = ? AND id = ? AND status = 'open'`, params: [until, now, principal.organizationId, id] },
-    eventQuery(principal, row, 'opportunity.deferred', { available_at: until }),
-  ], { operation: 'Defer opportunity' })
-  if (results[0]?.meta.changes !== 1) fail(409, 'OPPORTUNITY_DECIDED', 'This opportunity was decided while you were looking at it', 'status')
-  await publishBusinessInvalidation(principal.env as CloudflareEnv, principal.organizationId)
-  return { id, available_at: until }
+/** Everything Today suggests to a manager: the unfinished setup, then each booked guest's welcome. MCP and the opportunities route read this. */
+export async function listSuggestions(db: DbClient, principal: MemberAccessPrincipal, input: { now?: Date; locationId?: string } = {}): Promise<{ opportunities: OpportunityView[] }> {
+  const now = input.now ?? new Date()
+  const [setup, welcomes] = await Promise.all([listOpportunities(db, principal, { now, locationId: input.locationId }), listBookingWelcomes(db, principal, { now, locationId: input.locationId })])
+  return { opportunities: [...setup.opportunities, ...welcomes.values()] }
 }

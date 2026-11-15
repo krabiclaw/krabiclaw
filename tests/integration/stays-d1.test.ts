@@ -11,7 +11,6 @@ import * as schema from '../../server/db/schema.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
 import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayGapCandidates, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { readBusinessProgressReference } from '../../server/utils/business-outcomes.ts'
-import { dismissOpportunity, listOpportunities } from '../../server/domain/opportunities.ts'
 import { getTask, listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
@@ -1319,7 +1318,7 @@ test('the multi-calendar reads every home the caller looks after, each night as 
   }
 })
 
-test('gap recommendations follow live listing state, effective night rules and actual stay claims', { timeout: 120_000 }, async t => {
+test('gap candidates follow live listing state, effective night rules and actual stay claims', { timeout: 120_000 }, async t => {
   const { runtime, db, env } = await boot()
   try {
     const cabin = await home(db, env, { name: 'Gap cabin', location: 'cabin-site' })
@@ -1362,22 +1361,6 @@ test('gap recommendations follow live listing state, effective night rules and a
     for (const [from, to] of [['invalid', gap.to], ['2027-02-30', gap.to], [gap.from, gap.from], [gap.to, gap.from], ['2027-05-03', '2027-08-03'], ['0000-01-01', '0000-01-02'], ['9999-12-30', '9999-12-31']]) {
       await assert.rejects(readBusinessProgressReference(db, principal, { operation: 'stay.gap', subject_id: JSON.stringify([cabin.id, from, to]) }), { status: 404, data: { code: 'PROGRESS_SUBJECT_NOT_FOUND', field: 'subject_id' } })
     }
-    // The gap opportunities Today offers the owner, by the subject each one records.
-    const gapOpportunities = async () => {
-      const listed = (await listOpportunities(db, principal)).opportunities
-      const recorded = new Map((await db.prepare('SELECT id, operation, subject_id FROM opportunities WHERE organization_id = ?').bind(ORG).all<{ id: string; operation: string; subject_id: string }>()).results.map(row => [row.id, row]))
-      return listed.flatMap(item => recorded.get(item.id)!.operation === 'stay.gap' ? [{ id: item.id, subjectId: recorded.get(item.id)!.subject_id }] : [])
-    }
-    t.mock.timers.enable({ apis: ['Date'], now: new Date('2027-05-03T12:00:00.000Z') })
-    const [firstGap, ...otherGaps] = await gapOpportunities()
-    assert.ok(firstGap)
-    assert.deepEqual([firstGap.subjectId, otherGaps], [JSON.stringify([cabin.id, gap.from, gap.to]), []])
-    assert.deepEqual(await dismissOpportunity(db, principal, firstGap.id, {}), { id: firstGap.id, status: 'dismissed' })
-    assert.deepEqual(await gapOpportunities(), [], 'a dismissed gap stays dismissed while its evidence is unchanged')
-    t.mock.timers.tick(2 * 86_400_000)
-    assert.deepEqual((await gapOpportunities()).map(item => item.subjectId), [JSON.stringify([cabin.id, '2027-05-06', '2027-05-08'])], 'A prior interval’s dismissal never suppresses this home’s next gap')
-    t.mock.timers.reset()
-
     // The organization is still on May 3 in Denver; this home's day is May 4.
     await updateLocation(db, ORG, 'cabin-site', { timezone: 'Asia/Bangkok' }, OWNER, env)
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2027-05-03T20:00:00.000Z') })

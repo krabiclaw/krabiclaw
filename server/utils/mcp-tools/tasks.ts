@@ -1,6 +1,6 @@
 import { memberAccessPrincipal } from '~/server/utils/member-access'
 import { closeTask, createTask, listTaskAssignees, listTasks, parseTaskListQuery, taskViewer, updateTask, TASK_KINDS } from '~/server/domain/tasks'
-import { acceptOpportunity, deferOpportunity, dismissOpportunity, listOpportunities } from '~/server/domain/opportunities'
+import { listSuggestions } from '~/server/domain/opportunities'
 import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
 import { HTTPError } from 'nitro'
 import { chatgptFileInput, organizationTool, type McpToolDefinition } from './shared'
@@ -33,7 +33,7 @@ export const TASK_VIEW_SCHEMA = { type: 'object', properties: {
 const task = TASK_VIEW_SCHEMA
 const taskResult = { type: 'object', properties: { task }, required: ['task'] }
 const opportunity = { type: 'object', properties: { id: text, status_line: text, title: text, detail: text, icon: text, path: text, product_id: nullableText, location_id: nullableText,
-  conversation_id: { type: ['string', 'null'], description: 'The guest conversation a message opportunity is sent in.' },
+  conversation_id: { type: ['string', 'null'], description: 'The guest conversation a welcome is sent in; null for a setup item.' },
   message: { type: ['string', 'null'], description: 'The message it pre-writes from the business’s own records. Review it, then send it with send_message in conversation_id’s conversation; nothing is sent until then.' } },
   required: ['id', 'status_line', 'title', 'detail', 'icon', 'path', 'product_id', 'location_id', 'conversation_id', 'message'] }
 const assignee = {
@@ -61,21 +61,9 @@ export const TASK_TOOLS: McpToolDefinition[] = [
     inputSchema: { task_id: { ...text, minLength: 1 }, note: { ...text, maxLength: 5000 } }, required: ['task_id'],
     outputSchema: taskResult,
   }),
-  organizationTool({ name: 'list_opportunities', domain: 'tasks', minimumRole: 'admin', description: 'List and save current opportunities such as drafts to finish, posts to share, calendar gaps and preparation to send a booked guest or client. Reports evidence it could not read. Use a returned ID to accept, dismiss or defer an opportunity.',
+  organizationTool({ name: 'list_opportunities', domain: 'tasks', minimumRole: 'admin', description: 'List what Today suggests: setup the business has not finished, such as connecting payments, a domain, a social account or Google Ads, adding a first offering or a price, or taking payment at booking; and a welcome for each booked guest or client who has not heard from the business since booking. Each one goes away when that setup is done or the business messages the guest.',
     inputSchema: { location_id: { ...text, minLength: 1 } },
-    outputSchema: { type: 'object', properties: { opportunities: { type: 'array', items: opportunity }, issues: { type: 'array', items: text } }, required: ['opportunities', 'issues'] },
-  }),
-  organizationTool({ name: 'accept_opportunity', domain: 'tasks', minimumRole: 'admin', description: 'Take on an opportunity: it becomes a task, given to you and due today unless you say otherwise. Refused when what it was based on has changed; read list_opportunities again.',
-    inputSchema: { opportunity_id: { ...text, minLength: 1 }, ...assignee, due_at: { type: ['string', 'null'], format: 'date-time' } }, required: ['opportunity_id'],
-    outputSchema: taskResult,
-  }),
-  organizationTool({ name: 'dismiss_opportunity', domain: 'tasks', minimumRole: 'admin', description: 'Decline an opportunity, optionally saying why. It returns only when its evidence changes.',
-    inputSchema: { opportunity_id: { ...text, minLength: 1 }, note: { ...text, minLength: 1, maxLength: 2000 } }, required: ['opportunity_id'],
-    outputSchema: { type: 'object', properties: { opportunity: { type: 'object', properties: { id: text, status: { const: 'dismissed' } }, required: ['id', 'status'] } }, required: ['opportunity'] },
-  }),
-  organizationTool({ name: 'defer_opportunity', domain: 'tasks', minimumRole: 'admin', description: 'Set an opportunity aside until a time; it returns then if it still applies.',
-    inputSchema: { opportunity_id: { ...text, minLength: 1 }, until: instant }, required: ['opportunity_id', 'until'],
-    outputSchema: { type: 'object', properties: { opportunity: { type: 'object', properties: { id: text, available_at: text }, required: ['id', 'available_at'] } }, required: ['opportunity'] },
+    outputSchema: { type: 'object', properties: { opportunities: { type: 'array', items: opportunity } }, required: ['opportunities'] },
   }),
 ]
 
@@ -107,10 +95,7 @@ export async function handleTaskTools(ctx: McpExecutorContext): Promise<unknown>
       })() : []
       return { task: await closeTask(db, await taskViewer(principal), requiredString(args, 'task_id'), { status: toolName === 'complete_task' ? 'done' : 'skipped', note: args.note, photos, env }) }
     }
-    case 'list_opportunities': return await listOpportunities(db, principal, { locationId: optionalString(args, 'location_id') ?? undefined })
-    case 'accept_opportunity': return { task: await acceptOpportunity(db, principal, requiredString(args, 'opportunity_id'), args) }
-    case 'dismiss_opportunity': return { opportunity: await dismissOpportunity(db, principal, requiredString(args, 'opportunity_id'), { note: args.note }) }
-    case 'defer_opportunity': return { opportunity: await deferOpportunity(db, principal, requiredString(args, 'opportunity_id'), { until: args.until }) }
+    case 'list_opportunities': return await listSuggestions(db, principal, { locationId: optionalString(args, 'location_id') ?? undefined })
     default: return NOT_HANDLED
   }
 }
