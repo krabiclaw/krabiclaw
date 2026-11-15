@@ -399,7 +399,12 @@ test('a Today read that a change overtook is read again on return', async ({ pag
   const answered = Promise.withResolvers<undefined>()
   try {
     await loginAs(page.request, baseURL!)
-    // The first read is answered before the change and delivered after it has reached the open socket.
+    // Start away from Today, so Today's first read is the browser's own while the page sets up.
+    const socketCapture = page.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket' })
+    expect((await page.goto(`${ORG}/calendar`))?.status()).toBe(200)
+    await dismissPreviewToolbar(page)
+    const socket = await socketCapture
+    // That read is answered before the change and delivered after the change has reached the socket.
     await page.route(todayRead, async (route) => {
       await page.unroute(todayRead)
       const response = await route.fetch()
@@ -407,23 +412,20 @@ test('a Today read that a change overtook is read again on return', async ({ pag
       await held.promise
       await route.fulfill({ response })
     })
-    const socketCapture = page.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket' })
-    const firstRead = page.waitForResponse(response => response.request().method() === 'GET' && todayRead(new URL(response.url())))
-    void page.goto(ORG)
-    const socket = await socketCapture
-    const changed = socket.waitForEvent('framereceived', { predicate: frame => typeof frame.payload === 'string' && frame.payload.includes('"business.changed"') })
+    const nav = page.getByRole('navigation', { name: 'Dashboard' })
+    await nav.getByRole('link', { name: 'Today', exact: true }).click()
     await answered.promise
+    const changed = socket.waitForEvent('framereceived', { predicate: frame => typeof frame.payload === 'string' && frame.payload.includes('"business.changed"') })
     const work = await page.request.post(taskRoot, { data: { title, idempotency_key: crypto.randomUUID() } })
     expect(work.status(), await work.text()).toBe(201)
     workId = (await work.json() as { task: TaskView }).task.id
     await changed
     held.resolve(undefined)
-    expect((await firstRead).status()).toBe(200)
-    await dismissPreviewToolbar(page)
+    await expect(page).toHaveURL(new RegExp(`${ORG}(?:[?#]|$)`))
 
-    const nav = page.getByRole('navigation', { name: 'Dashboard' })
     await nav.getByRole('link', { name: 'Calendar', exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`${ORG}/calendar(?:[/?#]|$)`))
+    // The page it left was read before the change, so the return reads Today again.
     const returnRead = page.waitForResponse(response => response.request().method() === 'GET' && todayRead(new URL(response.url())))
     await nav.getByRole('link', { name: 'Today', exact: true }).click()
     expect((await returnRead).status()).toBe(200)
