@@ -20,7 +20,7 @@ CREATE TABLE `__new_analytics_summaries` (
       AND json_type(payload_json, '$.page_views') IS 'integer' AND (payload_json ->> '$.page_views') >= 0)),
 	CONSTRAINT "analytics_summaries_day_metrics_check" CHECK(kind != 'organization_day' OR key = ''),
 	CONSTRAINT "analytics_summaries_dimension_key_check" CHECK(kind != 'dimension_day' OR (json_valid(key) AND json_type(key) IS 'array' AND json_array_length(key) = 3
-    AND json_type(key, '$[0]') IS 'text' AND (key ->> '$[0]') IN ('country', 'city', 'device', 'referrer', 'visit_source', 'product')
+    AND json_type(key, '$[0]') IS 'text' AND (key ->> '$[0]') IN ('country', 'city', 'device', 'referrer', 'visit_source', 'product', 'interaction')
     AND json_type(key, '$[1]') IS 'text' AND json_type(key, '$[2]') IS 'text'))
 );
 --> statement-breakpoint

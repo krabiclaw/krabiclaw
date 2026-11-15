@@ -199,3 +199,12 @@ export async function publishOwnHostProfile(request: APIRequestContext, baseURL:
   }
   return { memberId, restore }
 }
+
+/** One headline number of an Insights page, read through the MCP Insights tool as the assistant reads it. */
+export async function insightsMetric(request: APIRequestContext, baseURL: string, organizationId: string, page: string, key: string): Promise<number> {
+  const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_organization_analytics', args: { organization_id: organizationId, page } })
+  expect(response.status()).toBe(200)
+  const metric = mcpData<{ metrics: Array<{ key: string; value: number | null }> }>(await response.json()).metrics.find(candidate => candidate.key === key)
+  expect(metric, `${page} shows ${key}`).toBeDefined()
+  return metric!.value!
+}

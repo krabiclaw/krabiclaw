@@ -41,8 +41,8 @@ export default defineHandler(async (event) => {
   const pageEventId = body.page_event_id === undefined ? null : body.page_event_id
   if (pageEventId !== null && !isCanonicalEventId(pageEventId)) return jsonResponse({ error: 'page_event_id must be a UUID' }, { status: 400 })
   if (!VALID_EVENTS.has(eventName)) return jsonResponse({ error: 'Invalid event_name' }, { status: 400 })
-  const organization = await queryFirst<{ id: string; vertical: string | null }>(db,
-    `SELECT id, vertical FROM organization WHERE id = ? AND status = 'active' AND onboarding_status = 'active' LIMIT 1`, [organizationId])
+  const organization = await queryFirst<{ id: string; vertical: string | null; timezone: string }>(db,
+    `SELECT id, vertical, timezone FROM organization WHERE id = ? AND status = 'active' AND onboarding_status = 'active' LIMIT 1`, [organizationId])
   if (!organization || !normalizeVertical(organization.vertical)) return jsonResponse({ error: 'Organization not found' }, { status: 404 })
 
   const ipHash = await hashClientIp(getClientIp(event))
@@ -200,7 +200,7 @@ export default defineHandler(async (event) => {
     organizationId: organization.id, eventName: eventName as OrganizationConversionEventName,
     stage, locationId, entityType, entityId, pageType, pagePath, ctaDestination, metadata, surface: 'website',
     id: eventId, originEventId: pageEventId, variantId,
-    occurredAt: boundedOccurrence(body.occurred_at, new Date().toISOString()),
+    occurredAt: boundedOccurrence(body.occurred_at, new Date().toISOString()), timezone: organization.timezone,
   })
   return jsonResponse({ success: true, id: result.id, recorded: result.created }, { status: result.created ? 201 : 200 })
 })

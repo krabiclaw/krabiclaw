@@ -2,10 +2,12 @@
 
 One tenant-scoped event contract measures every pageview, interaction and
 business outcome, whatever the theme or entry surface. The native D1 store
-(`analytics_events`, `analytics_summaries`) is canonical. The MCP tool
-`query_organization_analytics` reads the events (`server/utils/analytics-query.ts`).
-Insights and MCP `get_organization_analytics` read the day counts the visit
-write keeps beside them (docs/operations/analytics.md). Google Analytics 4 is an optional destination for the
+(`analytics_events`, `analytics_summaries`) is canonical. Insights and MCP
+`get_organization_analytics` read the day counts the visit write and the
+click write keep beside the events (docs/operations/analytics.md): a click to
+book, call or order adds one to its event's `interaction` day count on the
+organization's local day, in the same batch as the event and only when the
+event is new. Google Analytics 4 is an optional destination for the
 same facts; native records never depend on it, on consent to it, or on its
 delivery succeeding. No surface collects credentials, card data, tokens,
 free-text form content or error messages, and none accepts arbitrary SQL.
@@ -122,47 +124,13 @@ visit's page, locale and attribution. Otherwise the context stays unknown; no
 session is fabricated. Stripe outcomes carry context through the checkout,
 subscription and invoice relationships.
 
-## Querying: `query_organization_analytics`
-
-Modes: `events` (event history), `sessions` (derived last-touch view),
-`breakdown` (grouped metrics). Inputs: `start_date`/`end_date` in the
-organization's timezone, string-equality `filters` over the documented fields,
-`attribution_basis` (`observed` | `event_snapshot` | `session_last_touch`),
-`sort`, `limit` (1–200), `cursor`, `dimensions`, `metrics`, `outcome_event`.
-Response: `rows`, `next_cursor`, the resolved `query` (including the `as_of`
-boundary), `totals` with units (monetary totals by currency, never summed across
-currencies), and `coverage`. Cursors are HMAC-signed and bound to the
-organization, exact query, sort and `as_of`; tampered, foreign or mismatched
-cursors are rejected. Distinct counts (`sessions`, `visitors`, `entities`) are
-exact at the requested grain.
-
-`session_conversion_rate` and `converting_sessions` require `outcome_event`.
-The eligible population is the sessions with a pageview in the group; the
-converting sessions are those same sessions that completed the outcome in the
-range, so the rate cannot exceed 100%. Filters and dimensions that only outcome
-events carry, and a `kind`/`event_name` other than `pageview`, are rejected
-for these metrics.
-
-`attribution_basis=session_last_touch` reads a session's last touch as of the
-cursor's `as_of` boundary, not as it is now: a session no event has touched
-since the boundary is read from its record, otherwise it is rebuilt from the
-pageviews received by then (a session with no touch by then is Direct). A
-touch that arrives between two pages therefore never moves earlier events
-between groups.
-
-## Retention and coverage
+## Retention
 
 Native analytics facts are not aged out. Pageviews, interactions, outcomes and
-sessions stay in D1 for the life of the organization, so `mode=events` reads
-everything KrabiClaw has collected for it, and no scheduled task deletes
+sessions stay in D1 for the life of the organization, and no scheduled task deletes
 `analytics_events` or session summaries. Data is deleted when the organization
 itself is deleted (its rows cascade), never because it is old. Rejecting Google Analytics consent stops the GA copy and nothing
 native.
-
-`coverage` reports the oldest native pageview and outcome/interaction, the
-instrumentation dates (`observed_attribution_recorded_from` and the like), and
-per range the events recorded before a fact existed, which list it under
-`missing` instead of reading as zero.
 
 ## Google Analytics pageviews
 
@@ -181,13 +149,6 @@ that event, organization, session, and claim. `dispatched` means Zaraz accepted
 the call, not confirmation from Google. Rejected/absent consent and missing
 destinations record their own status; a failed handoff records `failed`.
 Historical rows without an audit remain unknown.
-
-`query_organization_analytics` accepts `filters.campaign_prefix` in events,
-sessions, and breakdown modes. It is a literal, case-sensitive prefix under the
-selected attribution basis: a run ID matches its sub-campaigns in one query,
-and `%`/`_` have no wildcard meaning. CMS session and visitor totals count
-distinct identifiers on pageviews in the selected range, including historical
-events recorded before session summaries existed.
 
 ## Attribution
 

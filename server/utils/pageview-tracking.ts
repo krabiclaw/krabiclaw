@@ -1,7 +1,6 @@
 import { getCookie, setCookie } from 'nitro/h3'
 import type { H3Event } from 'nitro'
-import type { AppDb } from '~/server/db'
-import { executeBatch, queryAll, queryFirst } from '~/server/db'
+import { executeBatch, queryAll, queryFirst, type AppDb, type BatchQuery } from '~/server/db'
 import { resolvePublishedTenantPageIdentity as resolveCanonicalTenantPageIdentity } from '~/server/utils/content/pages'
 import { attributionChannel, observeAttribution, resolveAttributionTouch, type AttributionParams, type ObservedAttribution } from '~/utils/analytics-attribution'
 import { localDateAt } from '~/utils/timezone'
@@ -242,6 +241,25 @@ export interface TenantPageviewInput {
   now: string
 }
 
+type DayCountKind = 'organization_day' | 'page_day' | 'dimension_day'
+const ONE = { sql: '1', params: [] as unknown[] }
+
+/**
+ * Adds to one of the day counts Insights reads (its `page_views`), on the organization's local
+ * `date`. It fires exactly when the statement before it changed one row, so a chain of counts
+ * behind an event insert runs whole after a new event and not at all after a duplicate.
+ */
+export function dayCountQuery(scope: { organizationId: string; date: string; now: string }, kind: DayCountKind, key: string, views = ONE): BatchQuery {
+  return {
+    query: `INSERT INTO analytics_summaries (id, kind, organization_id, date, key, payload_json, created_at, updated_at)
+      SELECT ?, ?, ?, ?, ?, json_object('page_views', ${views.sql}), ?, ? WHERE changes() = 1
+      ON CONFLICT(organization_id, kind, date, key) DO UPDATE SET updated_at = excluded.updated_at,
+        payload_json = json_set(analytics_summaries.payload_json, '$.page_views',
+          (analytics_summaries.payload_json ->> '$.page_views') + (excluded.payload_json ->> '$.page_views'))`,
+    params: [crypto.randomUUID(), kind, scope.organizationId, scope.date, key, ...views.params, scope.now, scope.now],
+  }
+}
+
 /**
  * Records one pageview and folds it into its session, atomically.
  *
@@ -268,17 +286,7 @@ export async function recordTenantPageview(db: AppDb, input: TenantPageviewInput
     gclid: null, gbraid: null, wbraid: null, fbclid: null, msclkid: null,
   }
   const date = localDateAt(new Date(occurredAt), input.timezone)
-  // Every count below fires exactly when the statement before it changed one row, so the chain
-  // runs whole after a new event and not at all after a duplicate.
-  const count = (kind: 'organization_day' | 'page_day' | 'dimension_day', key: string, views: { sql: string; params: unknown[] }) => ({
-    query: `INSERT INTO analytics_summaries (id, kind, organization_id, date, key, payload_json, created_at, updated_at)
-      SELECT ?, ?, ?, ?, ?, json_object('page_views', ${views.sql}), ?, ? WHERE changes() = 1
-      ON CONFLICT(organization_id, kind, date, key) DO UPDATE SET updated_at = excluded.updated_at,
-        payload_json = json_set(analytics_summaries.payload_json, '$.page_views',
-          (analytics_summaries.payload_json ->> '$.page_views') + (excluded.payload_json ->> '$.page_views'))`,
-    params: [crypto.randomUUID(), kind, input.organizationId, date, key, ...views.params, input.now, input.now],
-  })
-  const one = { sql: '1', params: [] }
+  const count = (kind: DayCountKind, key: string, views = ONE) => dayCountQuery({ organizationId: input.organizationId, date, now: input.now }, kind, key, views)
   await executeBatch(db, [
     {
       query: `INSERT OR IGNORE INTO analytics_events (
@@ -293,9 +301,9 @@ export async function recordTenantPageview(db: AppDb, input: TenantPageviewInput
           user_agent: input.userAgent, ip_hash: input.ipHash, country: input.country, region: input.region, city: input.city }), occurredAt,
       ],
     },
-    count('organization_day', '', one),
-    count('page_day', input.pagePath, one),
-    ...(input.productId ? [count('dimension_day', JSON.stringify(['product', input.productId, '']), one)] : []),
+    count('organization_day', ''),
+    count('page_day', input.pagePath),
+    ...(input.productId ? [count('dimension_day', JSON.stringify(['product', input.productId, '']))] : []),
     // A visit is a session's first page view; it arrived from its own touch or directly. Any later
     // page view of the session adds nothing here and keeps the chain going.
     count('dimension_day', JSON.stringify(['visit_source', attributionChannel(initial.source, initial.medium), '']), {

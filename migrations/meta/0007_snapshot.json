@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2781d688-a6d6-481d-b5d8-267909a34082",
+  "id": "4545a019-1453-4d72-b0f6-65781e0e9a39",
   "prevId": "8bf83510-ab07-4d19-8af8-89221b26ace9",
   "tables": {
     "account": {
@@ -771,7 +771,7 @@
         },
         "analytics_summaries_dimension_key_check": {
           "name": "analytics_summaries_dimension_key_check",
-          "value": "kind != 'dimension_day' OR (json_valid(key) AND json_type(key) IS 'array' AND json_array_length(key) = 3\n    AND json_type(key, '$[0]') IS 'text' AND (key ->> '$[0]') IN ('country', 'city', 'device', 'referrer', 'visit_source', 'product')\n    AND json_type(key, '$[1]') IS 'text' AND json_type(key, '$[2]') IS 'text')"
+          "value": "kind != 'dimension_day' OR (json_valid(key) AND json_type(key) IS 'array' AND json_array_length(key) = 3\n    AND json_type(key, '$[0]') IS 'text' AND (key ->> '$[0]') IN ('country', 'city', 'device', 'referrer', 'visit_source', 'product', 'interaction')\n    AND json_type(key, '$[1]') IS 'text' AND json_type(key, '$[2]') IS 'text')"
         }
       }
     },

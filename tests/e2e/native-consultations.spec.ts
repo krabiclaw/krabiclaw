@@ -1,7 +1,7 @@
 import { expect, request as playwrightRequest, test, type APIRequestContext } from '@playwright/test'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { openTenantPage, waitForNuxtHydration } from './helpers'
-import { mcpData, mcpRequest } from './helpers/mcp'
+import { insightsMetric, mcpData, mcpRequest } from './helpers/mcp'
 import { seededTenant } from './seed/manifest'
 import { seededSiteHeaders } from './test-env'
 import type { Product } from '../../server/types/products'
@@ -562,25 +562,18 @@ test('native online review uses canonical Products, holds capacity, and releases
       await expect(page.getByRole('button', { name: 'Request appointment', exact: true })).toHaveCount(0)
     }
     await waitForNuxtHydration(page)
+    const bookClicksBefore = await insightsMetric(page.request, baseURL!, org, 'conversion/booking-conversion', 'clicked_to_book')
     const recordedHandoff = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events' && response.request().postDataJSON()?.event_name === 'product_order_external_click')
     const externalTab = page.waitForEvent('popup')
     await page.locator(`a[href="${externalUrl}"]:visible`).click()
     const recordedHandoffResponse = await recordedHandoff
     expect(recordedHandoffResponse.status()).toBe(201)
-    const recordedEventId = (await recordedHandoffResponse.json() as { id: string }).id
+    expect(await recordedHandoffResponse.json()).toEqual({ success: true, id: expect.any(String), recorded: true })
     const destination = await externalTab
     await expect(destination).toHaveURL(externalUrl)
     await destination.close()
-    const events = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: { organization_id: org, mode: 'events', filters: { event_name: 'product_order_external_click', entity_id: products[0]!.id } } })
-    const recordedEvents = mcpData<{ rows: Array<Record<string, unknown>> }>(await events.json()).rows
-    expect(recordedEvents).toHaveLength(1)
-    expect(recordedEvents[0]).toMatchObject({
-      event_id: recordedEventId, kind: 'interaction', event_name: 'product_order_external_click', stage: 'external_handoff', surface: 'website',
-      location_id: null, subject: { type: 'product', id: products[0]!.id },
-    })
-    expect(recordedEvents[0]).not.toHaveProperty('actor')
-    expect(recordedEvents[0]).not.toHaveProperty('properties')
-    expect(recordedEvents[0]).not.toHaveProperty('metadata')
+    // Insights counts the practice area's external link as one click to book.
+    expect(await insightsMetric(page.request, baseURL!, org, 'conversion/booking-conversion', 'clicked_to_book')).toBe(bookClicksBefore + 1)
     const restoreCalendar = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { held_online: nativeConfigBeforeHandoff.held_online } })
     expect(restoreCalendar.status(), await restoreCalendar.text()).toBe(200)
     const restoreNative = await page.request.patch(`${editor}/products/${products[0]!.id}`, { data: { order_url: null } })
@@ -744,17 +737,18 @@ test('native online review uses canonical Products, holds capacity, and releases
         await expect(externalAction).toHaveAttribute('href', modeShell.consultation!.external_url!)
         // Leaving for the practice's own scheduler is the consultation click KrabiClaw records.
         await waitForNuxtHydration(page)
+        const handoffClicksBefore = await insightsMetric(page.request, baseURL!, org, 'conversion/booking-conversion', 'clicked_to_book')
         const handoffResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events' && response.request().postDataJSON()?.event_name === 'consultation_cta_click')
         const schedulerTab = page.waitForEvent('popup')
         await externalAction.click()
         const handoff = await handoffResponse
         expect(handoff.status()).toBe(201)
         expect(handoff.request().postDataJSON()).not.toHaveProperty('page_id')
-        const handoffId = (await handoff.json() as { id: string }).id
+        expect(handoff.request().postDataJSON()).toMatchObject({ stage: 'external_booking_handoff' })
+        expect(await handoff.json()).toEqual({ success: true, id: expect.any(String), recorded: true })
         await (await schedulerTab).close()
-        const handoffEvents = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: { organization_id: org, mode: 'events', filters: { event_name: 'consultation_cta_click', stage: 'external_booking_handoff', page_type: 'schedule_hero' } } })
-        // Preserve source-page attribution while the external handoff has no native subject.
-        expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await handoffEvents.json()).rows).toContainEqual(expect.objectContaining({ event_id: handoffId, stage: 'external_booking_handoff', subject: null, page: expect.objectContaining({ page_type: 'schedule_hero', path: '/schedule', page_id: authoredSchedule.page_id }) }))
+        // Insights counts the consultation button's handoff as one click to book.
+        expect(await insightsMetric(page.request, baseURL!, org, 'conversion/booking-conversion', 'clicked_to_book')).toBe(handoffClicksBefore + 1)
       } else if (mode === 'native_disabled') {
         const contactAction = scheduleHero.locator('[data-parity-section="page-hero"]').getByRole('link', { name: 'Contact', exact: true })
         await expect(contactAction).toHaveCount(1)

@@ -18,6 +18,21 @@ export const INSIGHTS_KIND_LABELS: Record<InsightsKind, string> = {
   stay: 'Places to stay', experience: 'Experiences', service: 'Consultations', table: 'Tables',
 }
 
+/**
+ * The website clicks Booking conversion counts beside views and bookings under All, by the
+ * conversion events that record them, for the verticals whose sites have them (`null`: every site
+ * lists a phone). An offering's external link is a click to order at a restaurant and to book
+ * anywhere else; a consultation button is a click to book.
+ */
+export const INSIGHTS_CLICKS = [
+  { key: 'clicked_to_book', label: 'Clicked to book', events: ['consultation_cta_click', 'product_order_external_click'], verticals: ['service', 'experience'] },
+  { key: 'clicked_to_call', label: 'Clicked to call', events: ['phone_click'], verticals: null },
+  { key: 'clicked_to_order', label: 'Clicked to order', events: ['product_order_external_click'], verticals: ['restaurant'] },
+] as const satisfies ReadonlyArray<{ key: string; label: string; events: readonly string[]; verticals: readonly string[] | null }>
+export const isInsightsClick = (event: string) => INSIGHTS_CLICKS.some(click => (click.events as readonly string[]).includes(event))
+/** A click's day count: the dimension day [interaction, event name, '']. */
+export const clickKey = (event: string) => JSON.stringify(['interaction', event, ''])
+
 /** Which filters a page reads; the rest are not offered on it. */
 type PageFilters = 'kind_location' | 'kind' | 'range'
 

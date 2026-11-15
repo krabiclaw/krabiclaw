@@ -7,7 +7,7 @@ import { ATTRIBUTION_CHANNELS } from '~/utils/analytics-attribution'
 import { addLocalDays, localDateAt } from '~/utils/timezone'
 import { REVIEW_CATEGORIES, reviewSubject } from '~/shared/review-questions'
 import {
-  INSIGHTS_KINDS, INSIGHTS_PAGES, bookerWord, insightsIndexSchema, insightsPage, insightsPageSchema, offeringsWord, pageKinds, pageTitle, sectionTitle,
+  INSIGHTS_CLICKS, INSIGHTS_KINDS, INSIGHTS_PAGES, clickKey, bookerWord, insightsIndexSchema, insightsPage, insightsPageSchema, offeringsWord, pageKinds, pageTitle, sectionTitle,
   type InsightsFormat, type InsightsIndex, type InsightsKind, type InsightsKindFilter, type InsightsPage, type InsightsPageDefinition, type InsightsStoredPageId,
 } from '~/shared/insights'
 
@@ -443,7 +443,7 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
 
   'conversion/booking-conversion': async (context) => {
     const kinds = pageKinds(context.definition, context.kind)
-    const [views, rows, start] = await batch(context, [
+    const [views, rows, start, clicked] = await batch(context, [
       // An offering's views are counted on its own page; a dish is not an offering here.
       { query: `SELECT s.date, (s.key ->> '$[1]') AS product_id, p.name AS product_name, CAST(s.payload_json ->> '$.page_views' AS INTEGER) AS views
           FROM analytics_summaries s JOIN products p ON p.organization_id = s.organization_id AND p.id = (s.key ->> '$[1]')
@@ -451,7 +451,15 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
       params: [context.reader.organizationId, context.range.startDate, context.range.endDate, JSON.stringify(kinds)] },
       bookingsQuery(context, 'received', 'AND b.website_source IS NOT NULL'),
       recordedSinceQuery(context),
+      // The clicks counted on their own write (server/utils/organization-conversions.ts), beside the business's vertical.
+      { query: `SELECT o.vertical, s.date, s.key, CAST(s.payload_json ->> '$.page_views' AS INTEGER) AS clicks FROM organization o
+          LEFT JOIN analytics_summaries s ON s.organization_id = o.id AND s.kind = 'dimension_day' AND s.date BETWEEN ? AND ? AND s.key IN (SELECT value FROM json_each(?))
+          WHERE o.id = ?`,
+      params: [context.range.startDate, context.range.endDate, JSON.stringify([...new Set(INSIGHTS_CLICKS.flatMap(click => click.events.map(clickKey)))]), context.reader.organizationId] },
     ])
+    const vertical = String(clicked![0]!.vertical)
+    // Clicks are not about one kind of booking: they are counted under All.
+    const clicks = context.kind === 'all' ? INSIGHTS_CLICKS.filter(click => !click.verticals || (click.verticals as readonly string[]).includes(vertical)) : []
     const viewed = views!.map(row => ({ date: String(row.date), product_id: String(row.product_id), product_name: String(row.product_name), views: num(row.views), bookings: 0 }))
     const made = rows!.map(bookingRow).map(row => ({ date: receivedDay(context)(row), product_id: row.product_id, product_name: row.product_name, views: 0, bookings: 1 }))
     const all = [...viewed, ...made]
@@ -464,6 +472,11 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
         { key: 'conversion', label: 'Booking conversion', format: 'percent', value: percent(sum(all, 'bookings'), sum(all, 'views')), daily: day.each(all, row => row.date, group => percent(sum(group, 'bookings'), sum(group, 'views'))) },
         { key: 'views', label: `${offering} page views`, format: 'count', value: sum(all, 'views'), daily: day.sum(all, row => row.date, row => row.views) },
         { key: 'bookings', label: 'Bookings', format: 'count', value: sum(all, 'bookings'), daily: day.sum(all, row => row.date, row => row.bookings) },
+        ...clicks.map((click): Metric => {
+          const keys = click.events.map(clickKey)
+          const daily = day.sum(clicked!.filter(row => keys.includes(String(row.key))), row => String(row.date), row => num(row.clicks))
+          return { key: click.key, label: click.label, format: 'count', value: daily.reduce((total, count) => total + count, 0), daily }
+        }),
       ],
       list: { kind: 'rows', heading: offeringsWord(context.booked, context.kind), columns: [{ label: 'Booking conversion', format: 'percent' }, { label: 'Page views', format: 'count' }, { label: 'Bookings', format: 'count' }],
         rows: byOffering(all, group => [percent(sum(group, 'bookings'), sum(group, 'views')), sum(group, 'views'), sum(group, 'bookings')]) },

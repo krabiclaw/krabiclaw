@@ -6,6 +6,7 @@ import { H3Event } from 'h3'
 import * as schema from '../../server/db/schema.ts'
 import { recordTenantPageview } from '../../server/utils/pageview-tracking.ts'
 import { createProductBooking } from '../../server/domain/product-bookings.ts'
+import { recordOrganizationConversionEvent } from '../../server/utils/organization-conversions.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { listBookableSessions } from '../../server/utils/availability.ts'
 import { createStay, setStayNights } from '../../server/domain/stays.ts'
@@ -120,8 +121,19 @@ test('Insights reads a restaurant from visit to payment: sources, bookings, valu
     assert.deepEqual(metrics(income), { income: 210500, direct: 210500, refunded: 3500 })
     assert.deepEqual(rows(income), [['Direct', 210500]])
 
+    // The ad visitor calls the beach twice and follows a dish's order link once: each click's own write counts it.
+    const click = (id: string, eventName: 'phone_click' | 'product_order_external_click') => recordOrganizationConversionEvent(db, ad, {
+      organizationId: 'org-tables', eventName, stage: 'external_handoff', surface: 'website', id, timezone: TZ,
+      ...(eventName === 'product_order_external_click' ? { entityType: 'product', entityId: tables['loc-beach']!.id } : {}) })
+    await click('55555551-5555-4555-8555-555555555555', 'phone_click')
+    await click('55555552-5555-4555-8555-555555555555', 'phone_click')
+    await click('55555553-5555-4555-8555-555555555555', 'product_order_external_click')
     const conversion = await read('conversion/booking-conversion')
-    assert.deepEqual(metrics(conversion), { conversion: 100, views: 2, bookings: 2 })
+    assert.deepEqual(metrics(conversion), { conversion: 100, views: 2, bookings: 2, clicked_to_call: 2, clicked_to_order: 1 })
+    assert.deepEqual(conversion.metrics.slice(3).map(metric => metric.label), ['Clicked to call', 'Clicked to order'])
+    assert.equal(conversion.series.values.clicked_to_call![conversion.series.dates.indexOf(today)], 2)
+    // A restaurant's site has no click to book; clicks are not about one kind, so a kind's page has none.
+    assert.deepEqual(metrics(await read('conversion/booking-conversion', { kind: 'table' })), { conversion: 100, views: 2, bookings: 2 })
     assert.equal(conversion.metrics[1]!.label, 'Table page views')
     assert.equal(conversion.recorded_since, '2000-01-01')
     const lead = await read('conversion/lead-time')
@@ -203,5 +215,7 @@ test('Insights reads a home: occupancy, length of stay and nightly rate, and who
     const sources = await read('conversion/sources')
     assert.deepEqual(rows(sources), [['Not recorded', 0, 1], ['Added by you', 0, 1]])
     assert.equal((await read('conversion/returning')).title, 'Returning guests')
+    // A home's site lists a phone but has no consultation button or order link: only calls are counted beside its bookings.
+    assert.deepEqual(metrics(await read('conversion/booking-conversion')), { conversion: null, views: 0, bookings: 1, clicked_to_call: 0 })
   } finally { await runtime.dispose() }
 })

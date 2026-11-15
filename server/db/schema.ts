@@ -2874,10 +2874,12 @@ export const analytics_summaries = sqliteTable("analytics_summaries", {
   // A dimension day is [dimension, value, ''] with its count: `visit_source` (a
   // visit's attribution channel, counted on a session's first page view) and
   // `product` (views of an offering's page) are kept current by the visit
-  // write. Rows of country, city, device and referrer are earlier nightly
-  // summaries nothing reads or writes any more.
+  // write; `interaction` (a click to book, call or order, by event name) by
+  // the click's own write (server/utils/organization-conversions.ts). Rows of
+  // country, city, device and referrer are earlier nightly summaries nothing
+  // reads or writes any more.
   check("analytics_summaries_dimension_key_check", sql`kind != 'dimension_day' OR (json_valid(key) AND json_type(key) IS 'array' AND json_array_length(key) = 3
-    AND json_type(key, '$[0]') IS 'text' AND (key ->> '$[0]') IN ('country', 'city', 'device', 'referrer', 'visit_source', 'product')
+    AND json_type(key, '$[0]') IS 'text' AND (key ->> '$[0]') IN ('country', 'city', 'device', 'referrer', 'visit_source', 'product', 'interaction')
     AND json_type(key, '$[1]') IS 'text' AND json_type(key, '$[2]') IS 'text')`),
   uniqueIndex("analytics_summaries_grain_unique").on(table.organization_id, table.kind, table.date, table.key),
   index("analytics_summaries_session_started_idx").on(table.organization_id, sql`(payload_json ->> '$.started_at')`).where(sql`kind = 'session'`),

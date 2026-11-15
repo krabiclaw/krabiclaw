@@ -24,7 +24,11 @@ Every number is read from the stored records it is about, in one D1 batch:
   that were paid. Income by channel adds a channel reservation's amount.
 - Conversion: the bookings made in the range (received live; a channel's
   imported history has no time it was made). Booking conversion is an
-  offering's website bookings over its page views. Lead time and returning
+  offering's website bookings over its page views; beside them it counts the
+  website's clicks to book (a consultation button, or an offering's external
+  booking link), to call (a location's own number) and, at a restaurant, to
+  order (an offering's external order link). A site without such a click does
+  not show its number, and the clicks are counted under All. Lead time and returning
   guests read website bookings only: Channex does not send the time a guest
   booked on a channel (its revision's `inserted_at` is when Channex received
   it, https://docs.channex.io/api-v.1-documentation/bookings-collection), and a
@@ -42,6 +46,13 @@ of the visit, for the day, the page, the offering whose page it is and, on a
 session's first page view, the channel it arrived from. A duplicate event adds
 nothing. Visits are counted from the organization's `analytics_data_start_at`,
 and a page whose range starts before it says so.
+
+Clicks are counted the same way by the click's own write
+(`recordOrganizationConversionEvent` in `server/utils/organization-conversions.ts`):
+a new click to book, call or order adds one to its event's `interaction` day on
+the organization's local day of the click; a duplicate adds nothing. Clicks
+recorded before this count existed (it shipped with the Insights pages) stay in
+`analytics_events` and are not counted.
 
 Insights → Instagram and → Google Ads are read live from the provider when the
 page opens (`GET /api/dashboard/instagram-insights`,

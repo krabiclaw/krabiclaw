@@ -1376,18 +1376,6 @@
         "open_world_justification": "Queries performance only within the business configured Meta Ad Account."
       }
     },
-    "query_organization_analytics": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Runs a filtered read of the selected organization’s saved analytics events and sessions.",
-        "destructive_justification": "Does not modify analytics events, sessions or aggregate reports.",
-        "open_world_justification": "Queries only analytics retained for the selected business, not other websites."
-      }
-    },
     "query_search_console": {
       "annotations": {
         "readOnlyHint": true,

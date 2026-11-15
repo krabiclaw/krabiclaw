@@ -10,7 +10,7 @@ export function localDateBounds(date: string, timeZone: string) {
   }
 }
 
-export function enumerateLocalDates(startDate: string, endDate: string): string[] {
+function enumerateLocalDates(startDate: string, endDate: string): string[] {
   const dates: string[] = []
   for (let date = startDate; date <= endDate; date = addLocalDays(date, 1)) dates.push(date)
   return dates

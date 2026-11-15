@@ -1,11 +1,13 @@
 import { parseCookies } from 'better-auth/cookies'
 import type { DbClient } from '~/server/db'
-import { execute, queryFirst } from '~/server/db'
+import { executeBatch, queryFirst } from '~/server/db'
 import { getClientIp } from '~/server/utils/hourly-rate-limit'
 import { deliverForVisitor, type MeasurementProtocolEnv } from '~/server/utils/ga4-delivery'
 import { deliverMetaCapiForEvent } from '~/server/utils/meta-capi-delivery'
 import { projectConversionToGa4 } from '~/utils/ga4-projection'
-import { SESSION_COOKIE, VISITOR_COOKIE, hashIp, isCanonicalEventId } from '~/server/utils/pageview-tracking'
+import { SESSION_COOKIE, VISITOR_COOKIE, dayCountQuery, hashIp, isCanonicalEventId } from '~/server/utils/pageview-tracking'
+import { clickKey, isInsightsClick } from '~/shared/insights'
+import { localDateAt } from '~/utils/timezone'
 import { attributionChannel, type AttributionChannel, type AttributionTouch, type ObservedAttribution } from '~/utils/analytics-attribution'
 import {
   CONVERSION_EVENT_CATALOG,
@@ -66,6 +68,13 @@ export interface OrganizationConversionInput {
   attribution?: { touch: AttributionTouch; attributedAt: string } | null
   /** Overrides the event time; defaults to now. Provider events carry their own occurrence time. */
   occurredAt?: string
+  /** The organization's time zone, required for a click Insights counts: it is counted on its local day there. */
+  timezone?: string
+}
+
+function requiredTimezone(input: OrganizationConversionInput): string {
+  if (!input.timezone) throw new Error(`${input.eventName} is counted on the organization's local day and needs its time zone`)
+  return input.timezone
 }
 
 interface PageContext {
@@ -244,12 +253,17 @@ export async function recordOrganizationConversionEvent(db: DbClient, origin: { 
     product_id: input.productId ?? (input.entityType === 'product' ? input.entityId : null) ?? null, variant_id: input.variantId ?? null,
     value: input.value ?? null, metadata: input.metadata ?? null,
     ip_hash: ipHash, user_agent: (origin?.headers.get('user-agent') || '').slice(0, 1024) || null })
-  const inserted = await execute(db, `INSERT OR IGNORE INTO analytics_events (
+  // A click Insights counts adds one to its day, on the organization's local day of the click,
+  // in the same batch and only when the event is new: a duplicate adds nothing.
+  const dayCount = isInsightsClick(input.eventName)
+    ? [dayCountQuery({ organizationId: input.organizationId, date: localDateAt(new Date(now), requiredTimezone(input)), now }, 'dimension_day', clickKey(input.eventName))]
+    : []
+  const [inserted] = await executeBatch(db, [{ query: `INSERT OR IGNORE INTO analytics_events (
     id, kind, organization_id, session_id, visitor_id, location_id, page_path, payload_json, created_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, params: [
     id, rule.kind, input.organizationId, browser?.sessionId ?? null, browser?.visitorId ?? null, input.locationId ?? origin_?.page.location_id ?? null, origin_?.page.path ?? input.pagePath ?? null, payload, now,
-  ])
-  if (Number(inserted.meta?.changes ?? 0) === 1) return { id, created: true }
+  ] }, ...dayCount])
+  if (Number(inserted?.meta?.changes ?? 0) === 1) return { id, created: true }
 
   // An interaction with a supplied identity that already exists is the same interaction delivered
   // again. The identity must be this organization's own: another tenant's event is never returned.

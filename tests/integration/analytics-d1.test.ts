@@ -4,7 +4,6 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { recordTenantPageview, updateTenantPageviewDuration, type TenantPageviewInput } from '../../server/utils/pageview-tracking.ts'
-import { queryOrganizationAnalytics } from '../../server/utils/analytics-query.ts'
 
 async function database(name: string) {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -76,42 +75,5 @@ test('the visit write keeps sessions and adds each new visit to its local day co
     // Countries, cities, devices and referrers are kept on each event and counted nowhere else.
     assert.equal(await db.prepare("SELECT count(*) FROM analytics_summaries WHERE kind = 'dimension_day' AND (key ->> '$[0]') IN ('country', 'city', 'device', 'referrer')").first('count(*)'), 0)
     assert.equal(await db.prepare("SELECT json_extract(payload_json, '$.country') AS country FROM analytics_events WHERE id = 'event-first'").first('country'), 'th')
-  } finally { await runtime.dispose() }
-})
-
-test('distinct-entity counts never synthesize entities for absent references', { timeout: 60_000 }, async () => {
-  const { runtime, db } = await database('analytics-entity-proof')
-  try {
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, analytics_data_start_at, default_currency, timezone)
-      VALUES ('org-entity', 'Entity Proof', 'entity-proof', 'entity-proof', '{}', '2026-09-04T17:00:00.000Z', 'USD', 'Asia/Bangkok')`).run()
-
-    // 50 checkout_start events: 49 without entity reference, 1 referencing a product. 39 distinct sessions.
-    const insert = "INSERT INTO analytics_events (id, kind, organization_id, session_id, visitor_id, payload_json, created_at) VALUES (?, 'conversion', 'org-entity', ?, 'visitor', ?, '2026-09-05T12:00:00.000Z')"
-    for (let i = 1; i <= 49; i++) {
-      const payload = JSON.stringify({ event_name: 'checkout_start', stage: 'started', entity_type: null, entity_id: null, attribution: null, attributed_at: null })
-      await db.prepare(insert).bind(`checkout-${i}`, `session-${(i % 39) + 1}`, payload).run()
-    }
-    await db.prepare(insert).bind('checkout-50', 'session-1', JSON.stringify({ event_name: 'checkout_start', stage: 'started', entity_type: 'product', entity_id: 'prod-single', attribution: null, attributed_at: null })).run()
-    const breakdown = async (eventName: string) => {
-      const query = await queryOrganizationAnalytics(db, { organizationId: 'org-entity', mode: 'breakdown', startDate: '2026-09-05', endDate: '2026-09-05',
-        filters: { event_name: eventName }, dimensions: ['event_name'], metrics: ['events', 'entities', 'sessions'] })
-      assert.equal(query.rows.length, 1)
-      return query.rows[0]?.metrics as { events: number; entities: number; sessions: number }
-    }
-    assert.deepEqual(await breakdown('checkout_start'), { events: 50, entities: 1, sessions: 39 })
-
-    // Events with no entity references keep their count and yield 0 distinct entities.
-    await db.prepare("DELETE FROM analytics_events WHERE id = 'checkout-50'").run()
-    await db.prepare(insert).bind('checkout-50', 'session-1', JSON.stringify({ event_name: 'checkout_start', stage: 'started', entity_type: null, entity_id: null, attribution: null, attributed_at: null })).run()
-    assert.deepEqual(await breakdown('checkout_start'), { events: 50, entities: 0, sessions: 39 })
-
-    // Different entity types sharing the same entity_id count as distinct entities.
-    await db.prepare('DELETE FROM analytics_events').run()
-    for (const [id, type] of [['order-event', 'order'], ['product-event', 'product']]) {
-      await db.prepare(insert).bind(id, 'session-1', JSON.stringify({ event_name: 'purchase', stage: 'occurred', entity_type: type, entity_id: 'shared-id', value: { basis: 'purchase', currency: 'USD', amount_minor: 1000, collected_minor: 1000 }, attribution: { source: 'google', medium: 'cpc' }, attributed_at: '2026-09-05T12:00:00.000Z' })).run()
-    }
-    assert.deepEqual(await breakdown('purchase'), { events: 2, entities: 2, sessions: 1 })
-    // The daily summaries are no longer a mode of the query.
-    await assert.rejects(queryOrganizationAnalytics(db, { organizationId: 'org-entity', mode: 'daily_summaries' as never, startDate: '2026-09-05', endDate: '2026-09-05' }), /mode must be one of: events, sessions, breakdown/)
   } finally { await runtime.dispose() }
 })

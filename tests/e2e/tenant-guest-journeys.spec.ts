@@ -608,20 +608,10 @@ for (const seeded of [
       await expect(page.getByText(detail, { exact: true })).toBeVisible()
       await expect(page.locator(`a[href="${externalUrl}"]:visible`)).toHaveCount(0)
       await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `${target.base}${publicPath}`)
+      // A paused offering's page is still viewed: its product view is recorded as a new event.
       const pausedViewResponse = await pausedView
       expect(pausedViewResponse.status()).toBe(201)
-      const pausedViewId = (await pausedViewResponse.json()).id
-      const events = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: {
-        organization_id: target.org, mode: 'events', filters: { event_name: 'product_view', entity_id: product.id },
-      } })
-      const eventRows = mcpData<{ rows: Array<Record<string, unknown>> }>(await events.json()).rows
-      expect(eventRows).toContainEqual(expect.objectContaining({
-        event_id: pausedViewId, subject: { type: 'product', id: product.id },
-      }))
-      const pausedEvent = eventRows.find(row => row.event_id === pausedViewId)
-      expect(pausedEvent).not.toHaveProperty('actor')
-      expect(pausedEvent).not.toHaveProperty('properties')
-      expect(pausedEvent).not.toHaveProperty('metadata')
+      expect(await pausedViewResponse.json()).toEqual({ success: true, id: expect.any(String), recorded: true })
     } finally {
       try {
         expect((await page.request.delete(`${editor}/${product.id}`)).status()).toBe(200)

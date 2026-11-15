@@ -3,7 +3,7 @@ import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { seededTenant } from './seed/manifest'
 import { seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
 import { authRequestHeaders, loginAs } from './helpers/auth'
-import { mcpData, mcpRequest } from './helpers/mcp'
+import { insightsMetric, mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { dialsSameNumber } from '../../utils/phone'
 
@@ -180,6 +180,8 @@ test('a tap on the practice’s phone number is a call to its office; a number i
   const legal = seededTenant('legal')
   const office = legal.locations.raleigh!
   // The office's own page writes its number; the header shows only the first office's.
+  await loginAs(request, baseURL!, 'user-e2e-ncls-owner')
+  const callsBefore = await insightsMetric(request, baseURL!, legal.organizationId, 'conversion/booking-conversion', 'clicked_to_call')
   const rendered = await openTenantPage(page, `${seededSiteURL('legal')}/locations/${office.slug}`, seededSiteHeaders('legal'))
   expect(rendered?.status()).toBe(200)
   await waitForNuxtHydration(page)
@@ -190,17 +192,15 @@ test('a tap on the practice’s phone number is a call to its office; a number i
   await link.click()
   const call = await recorded
   expect(call.status(), await call.text()).toBe(201)
-  const callId = (await call.json() as { id: string }).id
+  expect(await call.json()).toEqual({ success: true, id: expect.any(String), recorded: true })
   // The same visitor reporting someone else's number records nothing.
   const other = await page.evaluate(async location => (await fetch('/api/public/conversion-events', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ event_name: 'phone_click', stage: 'external_handoff', phone: '+19195550199', page_path: `/locations/${location}` }),
   })).json(), office.slug)
   expect(other).toEqual({ ok: true, ignored: true })
-  await loginAs(request, baseURL!, 'user-e2e-ncls-owner')
-  const events = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: { organization_id: legal.organizationId, mode: 'events', filters: { event_name: 'phone_click', location_id: office.id } } })
-  expect(events.status()).toBe(200)
-  expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await events.json()).rows).toContainEqual(expect.objectContaining({ event_id: callId, stage: 'external_handoff', location_id: office.id, page: expect.objectContaining({ path: `/locations/${office.slug}` }) }))
+  // Insights counts the office's call, and only that one, beside the practice's bookings.
+  expect(await insightsMetric(request, baseURL!, legal.organizationId, 'conversion/booking-conversion', 'clicked_to_call')).toBe(callsBefore + 1)
 })
 
 // Published content owns discoverability on every customer site, independently of page recipes.
