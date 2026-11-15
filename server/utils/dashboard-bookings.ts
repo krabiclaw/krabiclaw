@@ -149,7 +149,7 @@ async function dashboardPlacesCalendar(event: H3Event, window: BookingWindow) {
   const membership = membershipBySlugQuery(slug, userId)
   const [memberResult, records, ...places] = await executeBatch(env.DB, [
     membership,
-    withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, window)),
+    withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, { ...window, cancelled: window.includeCancelled })),
     ...placesCalendarQueries(organization, userId, days),
   ], { operation: 'Read host calendar' })
   const member = memberResult?.results[0] as { organization_id: string; member_id: string; role: string } | undefined

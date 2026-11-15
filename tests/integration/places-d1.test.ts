@@ -136,11 +136,17 @@ test('the places calendar reads each location, experience and consultation with 
       await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, variant_id, price_id, session_id, payment_id, quantity, amount, currency, starts_at, ends_at, expires_at, created_at)
         SELECT ?, organization_id, product_id, 'class-seat', 'price', id, ?, ?, 100, 'USD', starts_at, ends_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?), ? FROM product_sessions WHERE id = 'class-3'`).bind(`hold-${id}`, `pay-${id}`, quantity, expires, NOW).run()
     }
-    const guest = (await readPublicProductAvailability(db, ORG, 'class', env, { location_id: 'brooklyn', from: FROM, to: TO })).sessions as Array<{ starts_at: string; timezone: string; remaining: number | null; is_full: boolean }>
-    const host = (await readPlacesCalendar(db, owner, { from: FROM, to: TO }, { kind: 'offering', id: 'class' })).places[0]!.days
-    const guestPlacesLeft = (date: string) => guest.filter(session => !session.is_full && localDateAt(new Date(session.starts_at), session.timezone) === date).reduce((sum, session) => sum + session.remaining!, 0)
-    assert.deepEqual(host.map(day => day.places_left), [0, 4, 1, 3, 4, 0, 0])
-    assert.deepEqual(host.map(day => day.places_left), host.map(day => guestPlacesLeft(day.date)))
+    const placesLeft = async () => {
+      const guest = (await readPublicProductAvailability(db, ORG, 'class', env, { location_id: 'brooklyn', from: FROM, to: TO })).sessions as Array<{ starts_at: string; timezone: string; remaining: number | null; is_full: boolean }>
+      const host = (await readPlacesCalendar(db, owner, { from: FROM, to: TO }, { kind: 'offering', id: 'class' })).places[0]!.days
+      const guestPlacesLeft = (date: string) => guest.filter(session => !session.is_full && localDateAt(new Date(session.starts_at), session.timezone) === date).reduce((sum, session) => sum + session.remaining!, 0)
+      assert.deepEqual(host.map(day => day.places_left), host.map(day => guestPlacesLeft(day.date)))
+      return host.map(day => day.places_left)
+    }
+    assert.deepEqual(await placesLeft(), [0, 4, 1, 3, 4, 0, 0])
+    // Wednesday's one place is fewer than a party of two, the smallest the class takes: neither side offers it.
+    await db.prepare("UPDATE product_booking_configs SET party_size_min = 2 WHERE product_id = 'class'").run()
+    assert.deepEqual(await placesLeft(), [0, 4, 0, 3, 4, 0, 0])
 
     // A member sees only what they are assigned, and cannot manage.
     const assigned = await readPlacesCalendar(db, staff, { from: FROM, to: TO })

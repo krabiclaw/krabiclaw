@@ -1158,7 +1158,8 @@ async function slotPlaces(schedule: SlotSchedule, openings: ScheduledOpening[], 
     const location = session.location_id === null ? null : locations.get(session.location_id)
     const closed = providerBlocks(session) || (session.location_id !== null && (!location || !locationAllowsBooking(session, location)))
     const remaining = closed ? 0 : session.capacity === null ? null : session.capacity - claimed
-    return { ...session, claimed, remaining, is_full: remaining !== null && remaining <= 0 }
+    // Full is too few places for the smallest party the offering takes, as the booking page and the host Calendar both read it.
+    return { ...session, claimed, remaining, is_full: remaining !== null && remaining < (config.party_size_min ?? 1) }
   }
   return {
     sessions: openings.map(({ session }) => place(session)),
