@@ -47,7 +47,7 @@
                 <p v-if="message.unshown_files" class="mx-1 mt-0.5 flex items-center gap-1.5 text-xs text-muted">
                   <UIcon name="i-lucide-paperclip" class="size-3.5 shrink-0" />{{ message.unshown_files === 1 ? 'Sent a file that can’t be shown here' : `Sent ${message.unshown_files} files that can’t be shown here` }}
                 </p>
-                <p v-if="message.receipt" class="mt-0.5 text-xs" :class="message.receipt === 'Not delivered' ? 'text-error' : 'text-muted'">
+                <p v-if="message.receipt && (message.receipt === 'Not delivered' || message.id === newestBusinessId)" class="mt-0.5 text-xs" :class="message.receipt === 'Not delivered' ? 'text-error' : 'text-muted'">
                   {{ message.receipt }}<template v-if="message.retryable"> · <button type="button" class="underline underline-offset-2 disabled:opacity-50" :disabled="retrying" @click="retry(message.id)">Try again</button></template>
                 </p>
                 <UButton v-if="thread.kind === 'team' && !message.automatic && !item.mine" color="neutral" variant="link" size="xs" class="mt-1 p-0 text-muted" @click="reportError = null; reporting = message">Report</UButton>
@@ -264,7 +264,8 @@ type Row =
 const attempt = ref<{ key: string; body: string; photos: MessagePhotoDraft[] } | null>(null)
 const sending = ref(false)
 let settledReply: MessageIdentity | undefined
-const deferredCreates: MessageIdentity[] = []
+// Written messages wait here while the head loads or a reply sends, then join it in order.
+const deferredCreates: { message: MessageIdentity; tail?: ConversationEntriesPage }[] = []
 let reconcileRequested = false
 let rebuildRequested = false
 let reconciling = false
@@ -282,7 +283,8 @@ async function drainThreadChanges() {
   try {
     while (!pending.value && !sending.value) {
       const creates = deferredCreates.splice(0)
-      const hasUnseenCreate = creates.some(message => {
+      const hasUnseenCreate = creates.some(({ message, tail }) => {
+        if (tail && appendWrittenTail(tail, message)) return false
         const matches = (entry: ConversationEntry) => entry.type !== 'day' && entry.id === message.id && entry.sequence === message.sequence
         return !entries.value.some(matches) && !older.value.some(page => page.entries.some(matches))
       })
@@ -519,15 +521,19 @@ function resetTranscriptState() {
   suggestions.value = []
 }
 
+// The business sees a delivery receipt under its newest message only.
+const newestBusinessId = computed(() => entries.value.findLast(entry => entry.type === 'message' && entry.side === 'business')?.id)
+
 /**
- * A written message arrives with the end of this reader's transcript. It joins
- * the head when the head already ends at the message before it; any other
- * head is read again.
+ * A written message arrives with the end of this reader's transcript and joins
+ * the head where the head ends at the message before it. An activity entry can
+ * change the conversation's header, and a message written beside this reader's
+ * own reply lands above it; those are read with the head.
  */
 function appendWrittenTail(tail: ConversationEntriesPage, written: MessageIdentity): boolean {
   if (!isConversationEntriesPage(tail)) throw new Error('A written message arrived with an invalid transcript tail')
   const head = data.value
-  if (!head || pending.value || sending.value || reconciling || tail.conversation_id !== props.threadId) return false
+  if (!head || tail.conversation_id !== props.threadId) return false
   const messages = tail.entries.filter(entry => entry.type !== 'day')
   const arrived = messages.at(-1)
   if (arrived?.type !== 'message' || arrived.id !== written.id || arrived.sequence !== written.sequence) return false
@@ -539,9 +545,6 @@ function appendWrittenTail(tail: ConversationEntriesPage, written: MessageIdenti
   if (!anchor) return false
   const from = anchor.id === arrived.id ? head.entries.length : head.entries.findIndex(entry => entry.id === anchor.id)
   if (from < 0) return false
-  // A newer business message takes the delivery receipt from an earlier one; one kept above the tail needs the full read.
-  if (arrived.side === 'business' && head.entries.slice(0, from).some(entry => entry.type === 'message' && entry.side === 'business'
-    && entry.receipt !== null && entry.receipt !== 'Not delivered')) return false
   const at = tail.entries.findIndex(entry => entry.id === anchor.id)
   const day = anchor.id === arrived.id && tail.entries[at - 1]?.type === 'day' ? at - 1 : at
   data.value = {
@@ -565,8 +568,7 @@ watch(realtime.event, event => {
   }
   if ((event.type !== 'MESSAGE_CREATE' && event.type !== 'MESSAGE_UPDATE') || event.scheduled || event.conversation_id !== props.threadId) return
   if (event.type === 'MESSAGE_CREATE' && event.message) {
-    if (event.tail && appendWrittenTail(event.tail, event.message)) return
-    deferredCreates.push(event.message)
+    deferredCreates.push({ message: event.message, tail: event.tail })
     void drainThreadChanges()
     return
   }
