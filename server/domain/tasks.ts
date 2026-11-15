@@ -744,6 +744,8 @@ export interface OpenWorkRow {
   id: string; kind: TaskKind; version: number; subject_type: TaskRow['subject_type']; subject_id: string | null
   product_id: string | null; location_id: string | null; title: string | null; timezone: string; starts_at: string | null; due_at: string | null
   assigned_member_id: string | null; assignee_name: string | null; assigned_to_viewer: number
+  /** Who added a task by hand; 1 when it was the viewer. */
+  creator_name: string | null; created_by_viewer: number
   booking_id: string | null; booking_starts_at: string | null; booking_ends_at: string | null; booking_timezone: string | null; booking_unit: 'slot' | 'nights' | null
   party_size: number | null; guest_name: string | null; product_kind: ProductKind | null; product_name: string | null; location_title: string | null
   guest_conversation_id: string | null; viewer_seated: number
@@ -756,10 +758,10 @@ export interface OpenWorkRow {
 /**
  * The viewer's open work that Today shows beside its bookings, as one statement:
  * jobs (a turnover, a home to get ready, a follow-up, a consultation's prep),
- * a message that did not send and a change waiting on the business, starting
- * or due on or before `to` (a turnover with no time by its checkout; a message
- * or a change whenever its booking is). A
- * booking's review is its pending booking. A task someone added is not here.
+ * a message that did not send, a change waiting on the business and a task
+ * someone added, starting or due on or before `to` (a turnover with no time by
+ * its checkout; a message, a change or an undated task whenever). A booking's
+ * review is its pending booking.
  */
 export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
   const wideTo = `${addLocalDays(to, 1)}T23:59:59.999Z`
@@ -776,12 +778,13 @@ export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
       FROM (SELECT t.id, t.organization_id, t.kind, t.version, t.subject_type, t.subject_id, t.product_id, t.location_id, t.title, t.timezone, t.starts_at, t.due_at, t.assigned_member_id,
           (SELECT u.name FROM member am JOIN user u ON u.id = am.userId WHERE am.id = t.assigned_member_id AND am.organizationId = t.organization_id) AS assignee_name,
           t.assigned_member_id IS NOT NULL AND t.assigned_member_id = ${viewer.member} AS assigned_to_viewer,
+          (SELECT u.name FROM user u WHERE u.id = t.created_by_user_id) AS creator_name, COALESCE(t.created_by_user_id = ${viewer.user}, 0) AS created_by_viewer,
           CASE t.kind WHEN 'message_delivery' THEN (SELECT g.booking_id FROM scheduled_guest_messages g WHERE g.organization_id = t.organization_id AND g.id = t.subject_id)
             WHEN 'booking_change' THEN t.subject_id ELSE ${jobBookingIdSql('t')} END AS booking_id,
           CASE t.kind WHEN 'message_delivery' THEN (SELECT g.template_title FROM scheduled_guest_messages g WHERE g.organization_id = t.organization_id AND g.id = t.subject_id) END AS message_title
         FROM tasks t
         WHERE t.organization_id = ${viewer.organization} AND t.status = 'open'
-          AND t.kind IN ('turnover', 'stay_ready', 'consultation_follow_up', 'consultation_prep', 'message_delivery', 'booking_change')
+          AND t.kind IN ('turnover', 'stay_ready', 'consultation_follow_up', 'consultation_prep', 'message_delivery', 'booking_change', 'custom')
           AND ${taskScopeSql('t', () => viewer)}) x
       LEFT JOIN bookings b ON b.organization_id = x.organization_id AND b.id = x.booking_id
       LEFT JOIN products p ON p.organization_id = b.organization_id AND p.id = b.product_id
@@ -794,12 +797,21 @@ export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
   }
 }
 
+/** The members a manager can give work to, as a statement for the caller's batch; `organization` is a bound id or a SQL term (NULL reads nothing). */
+export function taskAssigneesQuery(organization: { sql: string; params?: unknown[] }): BatchQuery {
+  return { query: `SELECT m.id, m.userId, u.name FROM member m JOIN user u ON u.id = m.userId WHERE m.organizationId = ${organization.sql} ORDER BY u.name, m.id`, params: organization.params ?? [] }
+}
+
+/** `taskAssigneesQuery`'s rows as people, the viewer as "You". */
+export function taskAssignees(rows: unknown[], userId: string): TaskPerson[] {
+  return (rows as Array<{ id: string; userId: string; name: string }>).map(member => ({ type: 'member' as const, id: member.id, name: member.userId === userId ? 'You' : member.name, initial: member.name.trim().charAt(0).toUpperCase(), you: member.userId === userId }))
+}
+
 /** The members a manager can give work to; empty for anyone who cannot assign. */
 export async function listTaskAssignees(db: DbClient, viewer: TaskViewer): Promise<TaskPerson[]> {
   if (!viewer.manage) return []
-  const organizationId = viewer.principal.organizationId
-  const members = await queryAll<{ id: string; userId: string; name: string }>(db, 'SELECT m.id, m.userId, u.name FROM member m JOIN user u ON u.id = m.userId WHERE m.organizationId = ? ORDER BY u.name, m.id', [organizationId])
-  return members.map(member => ({ type: 'member' as const, id: member.id, name: member.userId === viewer.principal.userId ? 'You' : member.name, initial: member.name.trim().charAt(0).toUpperCase(), you: member.userId === viewer.principal.userId }))
+  const query = taskAssigneesQuery({ sql: '?', params: [viewer.principal.organizationId] })
+  return taskAssignees(await queryAll(db, query.query, query.params), viewer.principal.userId)
 }
 
 /** A task as an alert to one of its people tells it: the member projection, with no guest's full name or contact. */

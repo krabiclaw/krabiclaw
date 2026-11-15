@@ -689,9 +689,13 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const ownerToday = await page.request.get(api('today'))
     await expectStatus(ownerToday, 200)
     const ownerTodayBody = await ownerToday.json() as BusinessToday
-    expect([ownerTodayBody.title, ownerTodayBody.cards]).toEqual(['You have 1 reservation', [{
-      id: `arrival:${stay.booking_id}`, when: '3:30 PM', image_url: null, headline: `${guestName}’s group of 3 checks in`, line: 'Cliff Cabin · no payment recorded',
-      action: { title: 'Say hello to your guests', detail: 'See if they have any questions' }, to: `/dashboard/${slug}/messages/${stay.conversation_id}`, draft: null,
+    // A business that cannot take payment yet also has that step, after the day's cards.
+    expect([ownerTodayBody.title, ownerTodayBody.cards]).toEqual(['You have 1 reservation and 1 thing to set up', [{
+      id: `arrival:${stay.booking_id}`, when: '3:30 PM', image_url: null, icon: 'i-lucide-house', headline: `${guestName}’s group of 3 checks in`, line: 'Cliff Cabin · no payment recorded',
+      action: { title: 'Say hello to your guests', detail: 'See if they have any questions' }, to: `/dashboard/${slug}/messages/${stay.conversation_id}`, draft: null, done: null,
+    }, {
+      id: `payments.connect:${organizationId}`, when: null, image_url: null, icon: 'i-lucide-credit-card', headline: 'Set up payments', line: null,
+      action: { title: 'Connect with Stripe', detail: 'Payments' }, to: `/dashboard/${slug}/payments/payout-method`, draft: null, done: null,
     }]])
     const memberAgenda = await memberContext.request.get(api(`agenda?from=${localDay(0)}&to=${localDay(3)}`))
     await expectStatus(memberAgenda, 200)
@@ -781,7 +785,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const checkout = (options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en', { timeZone: stay.timezone, ...options }).format(new Date(stay.ends_at))
     const clean = upcomingBody.cards.find(card => card.headline === `Clean up after ${guestName}’s group of 3`)
     expect([upcomingBody.title, upcomingBody.cards.length]).toEqual(['You have 1 upcoming home to clean', 1])
-    expect(clean).toEqual({ id: expect.stringMatching(/^task:/), when: `${checkout({ weekday: 'short', month: 'short', day: 'numeric' })} · ${checkout({ hour: 'numeric', minute: '2-digit' })}`, image_url: null,
+    expect(clean).toEqual({ id: expect.stringMatching(/^task:/), when: `${checkout({ weekday: 'short', month: 'short', day: 'numeric' })} · ${checkout({ hour: 'numeric', minute: '2-digit' })}`, image_url: null, icon: 'i-lucide-house', done: null,
       headline: `Clean up after ${guestName}’s group of 3`, line: 'Cliff Cabin', action: { title: 'Message the host', detail: 'Ask anything before the day' }, to: `/dashboard/${slug}/messages/${jobThreadId}`, draft: null })
     expect(leaks(upcomingBody)).toEqual([])
     // The conversation has Done: one tap closes the job, and "Done" is the member's own message in it.
@@ -843,7 +847,8 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   const checkOut = localDay(2)
   await page.goto(`/dashboard/${slug}`)
   await waitForNuxtHydration(page)
-  await page.getByRole('link', { name: 'Add stay', exact: true }).click()
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Add stay', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'New stay', exact: true })).toBeVisible()
   await page.getByRole('combobox', { name: 'Home', exact: true }).click()
   await page.getByRole('option', { name: 'Cliff Cabin', exact: true }).click()

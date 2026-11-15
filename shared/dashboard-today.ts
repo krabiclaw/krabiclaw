@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { AgendaItem } from '~/server/utils/dashboard-agenda'
 import { formatTimestamp, localDateAt } from '~/utils/timezone'
+import type { TaskPerson } from '~/server/domain/tasks'
 
 /** One of the visits a guest account has booked, as the account's Today lists it. The business's Today is `TodayItem`. */
 export const todayCardSchema = z.object({
@@ -47,20 +48,24 @@ export function guestGroup(name: string | null, party: number): string {
 export interface TodayItem {
   /** `booking:<id>`, `arrival:<id>`, `departure:<id>`, `class:<session>`, `task:<id>`. */
   id: string
-  /** "3:00 PM" today; "Oct 26 – 29" for a stay on Upcoming; "Thu, Nov 20 · 10:30 AM" for a visit on Upcoming. */
-  when: string
+  /** "3:00 PM" today; "Oct 26 – 29" for a stay on Upcoming; "Thu, Nov 20 · 10:30 AM" for a visit on Upcoming; none for setup or an undated task. */
+  when: string | null
   /** The home's or offering's own picture; a table's location. */
   image_url: string | null
+  /** The small round tile drawn instead when there is no picture. */
+  icon: string
   /** "Eva’s group of 4 checks in", "Pottery wheel class for 6", "Clean up after Parity’s group of 2". */
   headline: string
   /** "Ao Nang Pool Villa · $1,240 paid", "Family law · Online · free". */
   line: string | null
   /** "Share info about your place" / "Help Eva get ready". */
   action: { title: string; detail: string }
-  /** The conversation about it, or its record when the viewer has no seat in one. */
-  to: string
+  /** The conversation about it, its record when the viewer has no seat in one, or the editor that finishes a setup step; none for a task someone added. */
+  to: string | null
   /** The welcome the conversation opens with, for the owner to review and send. */
   draft: string | null
+  /** A task someone added closes from its card: POST `{}` to this path. */
+  done: { path: string } | null
 }
 
 /** GET /api/dashboard/today: one list for the person looking, in the order the day happens. */
@@ -68,5 +73,7 @@ export interface BusinessToday {
   /** "You have 2 reservations and 1 request"; "Nothing needs you today". */
   title: string
   cards: TodayItem[]
+  /** Who an owner or admin can give a task to; empty for a member. */
+  assignees: TaskPerson[]
   resolved_at: string
 }

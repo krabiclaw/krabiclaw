@@ -91,7 +91,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     const when = (options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en', { timeZone: session.timezone, ...options }).format(new Date(session.starts_at))
     const today = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
     expect([today.title, today.cards]).toEqual(['You have 1 request', [{
-      id: `booking:${bookingId}`, when: `${when({ weekday: 'short', month: 'short', day: 'numeric' })} · ${when({ hour: 'numeric', minute: '2-digit' })}`, image_url: null,
+      id: `booking:${bookingId}`, when: `${when({ weekday: 'short', month: 'short', day: 'numeric' })} · ${when({ hour: 'numeric', minute: '2-digit' })}`, image_url: null, icon: 'i-lucide-scale', done: null,
       headline: `${guestFirstName} wants to book`, line: `${product.name} · Online`, action: { title: 'Review the request', detail: 'Accept or decline' }, to: `${DASHBOARD}/messages/${requestId}`, draft: null,
     }]])
     // The consultation is the Calendar's: it is on its day there.

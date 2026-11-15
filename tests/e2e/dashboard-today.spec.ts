@@ -10,6 +10,7 @@ import type { DashboardBookingDetails } from '../../server/utils/dashboard-booki
 import type { InboxListPage } from '../../server/domain/guest-threads/types'
 import type { ConversationPage } from '../../shared/messages-contract'
 import { isDashboardInvalidation } from '../../shared/dashboard-invalidations'
+import type { BusinessToday } from '../../shared/dashboard-today'
 
 const ORG = '/dashboard/ember-slice-demo'
 
@@ -208,7 +209,20 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
   const actor = members.find(member => member.userId === 'user-e2e-demo-role-owner')
   expect(actor).toBeTruthy()
   const memberContext = await browser.newContext()
+  const taskRoot = `/api/organizations/${organizationId}/tasks`
+  let workId: string | null = null
   try {
+    // A task the owner adds is a card on their Today: its title, who added it, and Mark as done.
+    const work = await page.request.post(taskRoot, { data: { title: 'Review the dining room checklist', idempotency_key: crypto.randomUUID() } })
+    expect(work.status(), await work.text()).toBe(201)
+    workId = (await work.json() as { task: { id: string } }).task.id
+    const ownerResponse = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
+    expect(ownerResponse.status(), await ownerResponse.text()).toBe(200)
+    const ownerFeed = await ownerResponse.json() as BusinessToday
+    expect(ownerFeed.cards.find(card => card.id === `task:${workId}`)).toEqual({ id: `task:${workId}`, when: null, image_url: null, icon: 'i-lucide-list-checks',
+      headline: 'Review the dining room checklist', line: 'Added by you', action: { title: 'Mark as done', detail: 'One tap when it’s finished' }, to: null, draft: null,
+      done: { path: `${taskRoot}/${workId}/complete` } })
+    expect(ownerFeed.assignees.map(person => person.id)).toContain(actor!.id)
     const changed = await page.request.post('/api/auth/organization/update-member-role', {
       headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor!.id, role: 'member' },
     })
@@ -216,7 +230,14 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
     await loginAs(memberContext.request, baseURL!, actor!.userId)
     const memberFeed = await memberContext.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
     expect(memberFeed.status(), await memberFeed.text()).toBe(200)
-    expect(await memberFeed.json()).toEqual({ title: 'Nothing needs you today', cards: [], resolved_at: expect.any(String) })
+    expect(await memberFeed.json()).toEqual({ title: 'Nothing needs you today', cards: [], assignees: [], resolved_at: expect.any(String) })
+    // One tap closes it, and it leaves the owner's Today.
+    const complete = await page.request.post(`${taskRoot}/${workId}/complete`, { data: {} })
+    expect(complete.status(), await complete.text()).toBe(200)
+    expect((await complete.json() as { task: { status: string } }).task.status).toBe('done')
+    workId = null
+    const after = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
+    expect((await after.json() as BusinessToday).cards.some(card => card.id.startsWith('task:') && card.headline === 'Review the dining room checklist')).toBe(false)
     const denied = await memberContext.request.get('/api/dashboard/analytics', { params: { org: 'ember-slice-demo' } })
     // Organization-wide surfaces deliberately conceal denied scope with 404.
     expect(denied.status()).toBe(404)
@@ -230,7 +251,14 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
       expect(read.status()).toBe(200)
       expect((await read.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.id === actor!.id)?.role).toBe(actor!.role)
     } finally {
-      try { await memberContext.close() } finally { await release() }
+      try {
+        if (workId) {
+          const complete = await page.request.post(`${taskRoot}/${workId}/complete`, { data: {} })
+          expect(complete.status(), await complete.text()).toBe(200)
+        }
+      } finally {
+        try { await memberContext.close() } finally { await release() }
+      }
     }
   }
 })

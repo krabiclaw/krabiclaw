@@ -171,10 +171,13 @@ test('Today shows every booking type as one card for its own business, with the 
       { id: `booking:${table.body.booking_id}`, headline: 'Nora’s group of 4', line: 'bistro office', action: { title: 'Say hello to your guests', detail: 'See if they have any questions' }, to: `/dashboard/bistro/messages/${table.body.conversation_id}` },
     ])
     assert.equal(bistro.title, 'You have 1 upcoming reservation')
-    // Upcoming bookings are not today's.
+    // Upcoming bookings are not today's: Today holds only the setup a business that cannot take payment has left.
     for (const org of Object.keys(ORGS) as Org[]) {
       const { title, cards } = await today(org, 'today')
-      assert.deepEqual({ title, cards }, { title: 'Nothing needs you today', cards: [] })
+      // The bistro's tables are not a menu: it still has its first dish to add.
+      const dish = org === 'bistro' ? [['product.create:bistro', 'Add your first dish', 'Start your menu', '/dashboard/bistro/products/new?kind=dish']] : []
+      assert.deepEqual({ title, cards: cards.map(card => [card.id, card.headline, card.action.title, card.to]) },
+        { title: `You have ${1 + dish.length} ${dish.length ? 'things' : 'thing'} to set up`, cards: [[`payments.connect:${org}`, 'Set up payments', 'Connect with Stripe', `/dashboard/${org}/payments/payout-method`], ...dish] })
     }
 
     // The message is written from the offering's and the home's own fields, and the conversation opens with it.

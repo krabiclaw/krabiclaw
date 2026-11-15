@@ -246,7 +246,8 @@ test('a guest change request lands once in the stay conversation, survives a rel
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-13', adults: 2, total_minor: 45_000, version: 1 })
     // The guest's change creates a booking task.
     const changeTask = await db.prepare('SELECT id FROM tasks WHERE dedupe_key = ?').bind(`booking_change:${request!.id}`).first<string>('id')
-    assert.deepEqual(await today(), [[`task:${changeTask}`, 'Lee’s group of 2 asked to change their stay', 'Review the change', `/dashboard/org/messages/${stay.conversation_id}`]])
+    const setup = ['payments.connect:org', 'Set up payments', 'Connect with Stripe', '/dashboard/org/payments/payout-method']
+    assert.deepEqual(await today(), [[`task:${changeTask}`, 'Lee’s group of 2 asked to change their stay', 'Review the change', `/dashboard/org/messages/${stay.conversation_id}`], setup])
 
     // Assignment allows the turnover to be read. Even with a thread seat, it gives no decision permission.
     await db.prepare("UPDATE product_booking_configs SET assigned_member_id = 'assigned-member-membership' WHERE organization_id = ?").bind(ORG).run()
@@ -283,13 +284,13 @@ test('a guest change request lands once in the stay conversation, survives a rel
       'the conversation remains unread after a booking decision')
     assert.deepEqual((await reservation(stay.id)).booking.pending_changes, [])
     // An answered change is not Today's work any more.
-    assert.deepEqual(await today(), [])
+    assert.deepEqual(await today(), [setup])
 
     // Answering again, or the feed seeing it resolved, changes nothing and sends nothing to Channex.
     assert.equal((await answer(stay.id, request!.id, 'accept_change')).status, 204)
     assert.deepEqual(await runAlterationRequestFeed(db, env), { recorded: 0, reconciled: 0 })
     assert.equal(channex.resolutions.length, 1)
-    assert.deepEqual(await today(), [])
+    assert.deepEqual(await today(), [setup])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

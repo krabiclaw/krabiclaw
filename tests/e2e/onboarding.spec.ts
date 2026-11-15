@@ -253,8 +253,11 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   const context = await (await page.request.get('/api/dashboard/context', { params: { org: created!.slug } })).json() as { organization: { subdomain: string | null } }
   expect(context.organization.subdomain).toBe(subdomain)
 
-  // A new business has nothing booked: Today says so, and the site stays private until it is published.
-  await expect(page.getByTestId('today-title')).toHaveText('Nothing needs you today')
+  // A new business has nothing booked and cannot take payment yet: Today is its setup, and the site stays private until it is published.
+  await expect(page.getByTestId('today-title')).toContainText('to set up')
+  const payments = page.locator(`[data-item-id="payments.connect:${organizationId}"]`)
+  await expect(payments).toContainText('Set up payments')
+  await expect(payments.getByRole('link').first()).toHaveAttribute('href', /\/payments\/payout-method$/)
   const stillPrivate = await readLocalTenant(request, subdomain, '/')
   expect(stillPrivate.status()).toBe(404)
   expect(await stillPrivate.text()).not.toContain(name)

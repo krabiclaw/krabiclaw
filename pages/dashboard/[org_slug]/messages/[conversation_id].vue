@@ -1,14 +1,14 @@
 <template>
   <DashboardIndexPanel id="organization-messages-thread" :title="conversation?.title ?? 'Conversation'" fill>
     <template v-if="conversation" #center>
-      <div class="flex min-w-0 items-center gap-4" :data-thread-id="conversation.id">
+      <div class="flex min-w-0 items-center gap-4 overflow-hidden" :data-thread-id="conversation.id">
         <InboxAvatar :name="conversation.title" :initial="conversation.title.slice(0, 1)" :support="conversation.kind === 'support'" />
         <p class="truncate text-2xl font-semibold text-highlighted">{{ conversation.title }}</p>
       </div>
     </template>
     <template v-if="conversation" #right>
       <UButton v-if="data?.work?.type === 'done'" label="Done" color="neutral" class="rounded-full" :loading="closing" data-testid="conversation-job-done" @click="done" />
-      <UButton v-if="bookingTo" :to="bookingTo" :label="data?.work?.type === 'review' ? 'Review' : 'Show booking'" color="neutral" :variant="data?.work?.type === 'review' ? 'solid' : 'soft'" class="rounded-full" />
+      <UButton v-if="bookingTo" :to="bookingTo" :label="data?.work?.type === 'review' ? 'Review' : 'Show booking'" :icon="data?.work?.type === 'review' ? undefined : 'i-lucide-calendar-days'" color="neutral" :variant="data?.work?.type === 'review' ? 'solid' : 'soft'" class="rounded-full" :ui="data?.work?.type === 'review' ? undefined : { label: 'max-sm:sr-only' }" />
       <UButton icon="i-lucide-info" color="neutral" variant="ghost" aria-label="In this conversation" @click="sheetOpen = true" />
     </template>
 

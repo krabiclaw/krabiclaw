@@ -2,8 +2,8 @@ import { HTTPError } from 'nitro'
 import { executeBatch, type DbClient } from '~/server/db'
 import { assertRoleAllows, BATCH_VIEWER, membershipBySlugQuery, withViewer } from '~/server/utils/member-access'
 import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
-import { openWorkQuery, type OpenWorkRow } from '~/server/domain/tasks'
-import { bookingWelcomesQuery, bookingWelcomeViews } from '~/server/domain/opportunities'
+import { openWorkQuery, taskAssignees, taskAssigneesQuery, type OpenWorkRow } from '~/server/domain/tasks'
+import { bookingWelcomesQuery, bookingWelcomeViews, setupQueries, setupViews } from '~/server/domain/opportunities'
 import { bookingDay } from '~/server/domain/requests'
 import { groupMediaPlacements, mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
 import { ownerPicture } from '~/server/notifications/hero'
@@ -30,7 +30,12 @@ const NOUNS = {
   reservation: ['reservation', 'reservations'], consultation: ['consultation', 'consultations'], class: ['class', 'classes'],
   clean: ['home to clean', 'homes to clean'], follow_up: ['follow-up', 'follow-ups'], request: ['request', 'requests'],
   change: ['change request', 'change requests'], message: ['message that didn’t send', 'messages that didn’t send'],
+  task: ['task', 'tasks'], setup: ['thing to set up', 'things to set up'],
 } as const
+
+/** The tile a card shows when what it is about has no picture of its own. */
+const ICONS: Record<string, string> = { stay: 'i-lucide-house', experience: 'i-lucide-ticket', service: 'i-lucide-scale', table: 'i-lucide-utensils', dish: 'i-lucide-utensils' }
+const iconOf = (kind: string | null) => (kind && ICONS[kind]) ?? 'i-lucide-calendar-check'
 type Noun = keyof typeof NOUNS
 
 /** A card as it is built: what it counts as, where it sorts, the bookings it stands for and the local day it is on. */
@@ -44,7 +49,9 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   const membership = membershipBySlugQuery(input.slug, input.userId)
   const org = BATCH_VIEWER.organization
   const window = `(starts_at <= ? AND ends_at >= ?${range === 'today' ? " OR status = 'pending'" : ''})`
-  const [viewerResult, recordResult, workResult, productResult, locationResult, welcomeResult] = await executeBatch(db, [
+  // What only an owner or admin reads: a member's statements name no organization and read nothing.
+  const managed = { sql: `CASE WHEN ${BATCH_VIEWER.organizationWide} = 1 THEN ${org} END` }
+  const [viewerResult, recordResult, workResult, productResult, locationResult, welcomeResult, factResult, unpricedResult, assigneeResult] = await executeBatch(db, [
     membership,
     withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, { from, to, pending: range === 'today' })),
     withViewer(membership, openWorkQuery(BATCH_VIEWER, to)),
@@ -53,8 +60,10 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
         UNION SELECT product_id FROM tasks WHERE organization_id = ${org} AND status = 'open' AND product_id IS NOT NULL`, params: [wideTo, wideFrom] } })),
     withViewer(membership, mediaPlacementsQuery({ organizationId: { sql: org }, ownerType: 'business_location', owners: {
       sql: `SELECT location_id FROM bookings WHERE organization_id = ${org} AND location_id IS NOT NULL AND status <> 'cancelled' AND ${window}`, params: [wideTo, wideFrom] } })),
-    // A welcome is an owner's or admin's to send; a member's statement names no organization and reads nothing.
-    withViewer(membership, bookingWelcomesQuery({ sql: `CASE WHEN ${BATCH_VIEWER.organizationWide} = 1 THEN ${org} END` }, { now })),
+    withViewer(membership, bookingWelcomesQuery(managed, { now })),
+    // The setup the business has not finished is Today's, after the day's cards.
+    ...setupQueries(range === 'today' ? managed : { sql: 'NULL' }, { now }).map(query => withViewer(membership, query)),
+    withViewer(membership, taskAssigneesQuery(managed)),
   ], { operation: 'Read Today' })
   const viewer = viewerResult!.results[0] as { organization_id: string; slug: string; vertical: string | null; role: string; organization_wide: number } | undefined
   if (!viewer) throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
@@ -78,7 +87,12 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   const cards: Card[] = []
   const byBooking = new Map<string, Card>()
   const byClass = new Map<string, { card: Card; party: number; groups: number; paid: number; total: number | null; currency: string | null }>()
-  const add = (card: Card) => { cards.push(card); for (const id of card.bookings) byBooking.set(id, card); return card }
+  const add = (input: Omit<Card, 'done'> & { done?: Card['done'] }) => {
+    const card: Card = { done: null, ...input }
+    cards.push(card)
+    for (const id of card.bookings) byBooking.set(id, card)
+    return card
+  }
 
   for (const record of (recordResult!.results as BookedRecordInRange[])) {
     const zone = record.timezone
@@ -97,7 +111,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
       ? { title: 'Open the reservation', detail: record.owner === 'channel' ? `No guest name came from ${STAY_CHANNEL_LABELS[record.channel]}` : 'No guest name was recorded' }
       : opens ? { title: 'Say hello to your guests', detail: 'See if they have any questions' } : { title: 'Open the reservation', detail: `See what ${guest} booked` }
     const action = welcome && opens ? { title: welcome.title, detail: welcome.detail } : named
-    const base = { image_url: image, line, to, draft: welcome && opens ? welcome.message : null, bookings: [record.id], day: start }
+    const base = { image_url: image, icon: iconOf(record.product_kind), line, to, draft: welcome && opens ? welcome.message : null, bookings: [record.id], day: start }
     if (record.status === 'pending') {
       // A request waits for a decision whenever it is for; Today shows it until it is answered.
       if (range === 'today') add({ ...base, id: `booking:${record.id}`, noun: 'request', order: [1, record.starts_at], draft: null,
@@ -154,6 +168,18 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     const guest = first(work.guest_name)
     const group = work.party_size === null ? 'a guest' : guestGroup(work.guest_name, work.party_size)
     const to = work.booking_id ? recordPath(work.booking_id, work.guest_conversation_id, work.viewer_seated) : null
+    if (work.kind === 'custom') {
+      // A task someone added: the viewer's, or nobody's for an owner or admin; closed in one tap from its card.
+      if (!(work.assigned_to_viewer || (work.assigned_member_id === null && manage))) continue
+      if (day === null ? range !== 'today' : range === 'today' ? day > today(work.timezone) : !shows(day, work.timezone)) continue
+      if (!work.title) throw new Error(`Task ${work.id} has no title`)
+      add({ id: `task:${work.id}`, noun: 'task', order: [1, at ?? ''], bookings: [], day: day ?? today(work.timezone),
+        when: at ? visitWhen(at, work.timezone) : null, image_url: picture('product', work.product_id), icon: 'i-lucide-list-checks', headline: work.title,
+        line: work.created_by_viewer ? 'Added by you' : work.creator_name ? `Added by ${first(work.creator_name)}` : null,
+        action: { title: 'Mark as done', detail: 'One tap when it’s finished' }, to: null, draft: null,
+        done: { path: `/api/organizations/${encodeURIComponent(viewer.organization_id)}/tasks/${encodeURIComponent(work.id)}/complete` } })
+      continue
+    }
     if (!job) {
       // A message that did not send and a change waiting on the business are today's work.
       if (range !== 'today' || !work.booking_id || !to || !work.booking_starts_at || !work.booking_ends_at) continue
@@ -163,11 +189,11 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
       const image = work.product_kind === 'table' ? picture('business_location', work.location_id) : picture('product', work.product_id)
       if (work.kind === 'message_delivery') {
         if (!work.message_title) throw new Error(`Delivery task ${work.id} has no scheduled message`)
-        add({ id: `task:${work.id}`, noun: 'message', order: [1, work.booking_starts_at], bookings: [], day: today(work.timezone), when: bookedWhen, image_url: image, line: place, to, draft: null,
+        add({ id: `task:${work.id}`, noun: 'message', order: [1, work.booking_starts_at], bookings: [], day: today(work.timezone), when: bookedWhen, image_url: image, icon: iconOf(work.product_kind), line: place, to, draft: null,
           headline: `${work.message_title} to ${guest ?? 'the guest'} didn’t send`, action: { title: 'Send it yourself', detail: opens ? `Open ${guest ?? 'the guest'}’s conversation` : 'Open the reservation' } })
       } else {
         const Group = group.charAt(0).toUpperCase() + group.slice(1)
-        add({ id: `task:${work.id}`, noun: 'change', order: [1, work.booking_starts_at], bookings: [], day: today(work.timezone), when: bookedWhen, image_url: image, line: place, to, draft: null,
+        add({ id: `task:${work.id}`, noun: 'change', order: [1, work.booking_starts_at], bookings: [], day: today(work.timezone), when: bookedWhen, image_url: image, icon: iconOf(work.product_kind), line: place, to, draft: null,
           headline: `${Group} asked to change their ${work.booking_unit === 'nights' ? 'stay' : 'booking'}`, action: { title: 'Review the change', detail: 'Accept or decline' } })
       }
       continue
@@ -193,7 +219,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     add({
       id: `task:${work.id}`, noun: work.kind === 'consultation_follow_up' ? 'follow_up' : 'clean', order: [0, at ?? work.booking_ends_at ?? ''], bookings: [], day,
       when: at ? visitWhen(at, work.timezone) : range === 'today' ? 'Today' : formatTimestamp(`${day}T12:00:00.000Z`, 'en', 'UTC', { weekday: 'short', month: 'short', day: 'numeric' }),
-      image_url: picture('product', work.product_id), headline: headline.charAt(0).toUpperCase() + headline.slice(1),
+      image_url: picture('product', work.product_id), icon: iconOf(work.product_kind), headline: headline.charAt(0).toUpperCase() + headline.slice(1),
       line: work.booking_unit === 'nights' ? work.product_name : work.location_id === null ? 'Online' : work.location_title,
       action: team ? { title: 'Message the host', detail: range === 'today' ? 'Send photos when you’re done' : 'Ask anything before the day' }
         : { title: 'Tap Done when it’s finished', detail: guest && work.viewer_seated ? `In ${guest}’s conversation` : 'On the reservation' },
@@ -201,8 +227,17 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     })
   }
 
+  // The business's unfinished setup, after the day's cards: each opens the editor or settings that finishes it.
+  for (const [index, step] of (setupViews(factResult!.results, unpricedResult!.results)?.opportunities ?? []).entries()) {
+    add({ id: step.id, noun: 'setup', order: [2, String(index).padStart(4, '0')], bookings: [], day: '', when: null, image_url: null, icon: step.icon,
+      headline: step.title, line: null, action: { title: step.detail.replace(/\.$/, ''), detail: step.status_line }, to: step.path, draft: null })
+  }
+
   cards.sort((a, b) => a.order[0] - b.order[0] || a.order[1].localeCompare(b.order[1]) || a.id.localeCompare(b.id))
-  return { title: heading(cards, range), cards: cards.map(({ noun: _noun, order: _order, bookings: _bookings, day: _day, ...card }) => card), resolved_at: now.toISOString() }
+  return {
+    title: heading(cards, range), cards: cards.map(({ noun: _noun, order: _order, bookings: _bookings, day: _day, ...card }) => card),
+    assignees: taskAssignees(assigneeResult!.results, input.userId), resolved_at: now.toISOString(),
+  }
 }
 
 /** "You have 2 reservations and 1 request", "You have 2 upcoming reservations", "Nothing needs you today". */

@@ -163,7 +163,10 @@ from stored booking, task and payment rows in one D1 round trip
 What appears: the bookings the viewer hosts (an owner or admin hosts every
 one; a member, the slot bookings of the offerings they are named on); the jobs
 given to them, or for an owner or admin a job nobody has; a request waiting
-for a decision; a message that did not send; a change waiting on the business.
+for a decision; a message that did not send; a change waiting on the business;
+a task someone added; and, for an owner or admin on Today, the setup the
+business has not finished (payments, a first offering, a price), after the
+day's cards.
 A job is the action of its booking's card on the same day ("Casey is
 cleaning"), otherwise its own card. A follow-up is Today's work on the day it
 is due. There are three roles and no cleaner or attorney role: assignment
@@ -176,13 +179,18 @@ sentence with who and how many ("Eva’s group of 4 checks in", "Pottery wheel
 class for 6", "Clean up after Parity’s group of 2"); one line of where, with
 the money for owners and admins; then the two-line action. The heading uses
 the business's word ("You have 2 reservations and 1 request"); empty, "Nothing
-needs you today".
+needs you today". On desktop the cards sit in a centered grid, each at most
+380px wide; on a phone, one column. A card with no picture shows a small round
+tile with its icon instead, so it stays short.
 
 A card opens the conversation about it: the guest's for a booking, the team's
 for a job. A job's conversation has Done, one tap; a request's or change's has
-Review. Photos and notes are messages in that conversation. A member without a
+Review. Photos and notes are messages in that conversation. A task someone
+added has no conversation: its picture is the home or offering it is about,
+its line who added it, and "Mark as done" closes it in one tap. A setup card
+opens the editor or settings that finishes it. A member without a
 seat in the guest's conversation opens the booking instead. The header holds
-Today/Upcoming and, for stays, Add stay. Returning within the live session
+Today/Upcoming and a round + for Add task and, for stays, Add stay. Returning within the live session
 shows the held read.
 
 Personal-account Today/Upcoming project the buyer's own agenda with
