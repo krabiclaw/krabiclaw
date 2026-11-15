@@ -1341,6 +1341,11 @@ test('unknown home clocks preserve turnover dates without inventing task instant
     assert.equal(tasks[0]!.when, 'Time not set')
     assert.deepEqual(tasks[0]!.sheet, { heading: 'Turnover', title: 'Cabin', date: 'Tue, Nov 3', checkout: { label: 'Checkout', time: 'Time not set', guest: 'Ana' }, checkin: { label: 'Check-in', time: 'Time not set', guest: 'Ana · 2 guests' } })
     assert.equal(tasks[0]!.detail, 'Ana out · Ana in')
+    // A later stay without its party (a channel reservation the provider sent without one) does not stop the next arrival from being read.
+    const later = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'unknown-later', check_in_date: '2026-11-07', check_out_date: '2026-11-09', ...guest })
+    await db.prepare('UPDATE bookings SET adults = NULL, children = NULL WHERE id = ?').bind(later.id).run()
+    const withLater = (await listTasks(db, viewer, parseTaskListQuery({}), new Date('2026-11-03T18:00:00.000Z'))).sections.flatMap(section => section.tasks)
+    assert.deepEqual(withLater.map(task => [task.booking_id, task.detail]), [[first.id, 'Ana out · Ana in']])
     // The cleaner closes it: the list reads the closed card exactly as the close returned it, with who closed it and what they found.
     const closed = await closeTask(db, viewer, tasks[0]!.id, { status: 'done', note: 'Towels restocked', photos: [], env })
     assert.deepEqual([closed.status, closed.note, closed.person?.name, closed.outcome?.closed_by, closed.outcome?.photos], ['done', '“Towels restocked”', 'You', 'You', []])

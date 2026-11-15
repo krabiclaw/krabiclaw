@@ -177,8 +177,7 @@ links to its public address. Before publishing, a workspace sees its first
 three suggestions.
 The task sheet holds assignment and completion controls for work that a person
 tracks there. Guest messages enter Messages and update its unread count. A
-payment card opens that offering's Payment settings. Saving the payment
-requirement in the booking configuration clears its suggestion.
+price suggestion opens that experience's price editor; saving a price clears it.
 
 Owner Today shows failed deliveries, turnovers and booking decisions before
 suggestions and Done. A member sees the work in their scope and Done.

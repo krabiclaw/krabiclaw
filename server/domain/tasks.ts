@@ -460,8 +460,12 @@ function taskContext(organizationId: string, rows: TaskRow[], results: Array<{ r
       const left = task.subject_id ? stay(task.subject_id) : null
       if (!left) return null
       const from = addLocalDays(left.check_out_date, -1)
-      return arrivalRows.filter(row => row.task_id === task.id && row.starts_at >= from).map(({ task_id: _task, ...row }) => stayFacts(row))
-        .filter(row => row.check_in_date >= left.check_out_date).sort((a, b) => a.check_in_date.localeCompare(b.check_in_date) || a.id.localeCompare(b.id))[0] ?? null
+      // The next arrival is chosen by its day; only that stay has to carry its party.
+      const next = arrivalRows.filter(row => row.task_id === task.id && row.starts_at >= from)
+        .map(({ task_id: _task, ...row }) => ({ row, checkIn: bookingDay(row.starts_at, row.timezone) }))
+        .filter(({ checkIn }) => checkIn >= left.check_out_date)
+        .sort((a, b) => a.checkIn.localeCompare(b.checkIn) || a.row.id.localeCompare(b.row.id))[0]
+      return next ? stayFacts(next.row) : null
     },
     requests: new Map(requests.map(request => [request.id, request])),
     messages: new Map(messages.map(message => [message.id, { title: message.template_title, status: message.status, conversation_id: message.conversation_id, booking_id: message.booking_id }])),
