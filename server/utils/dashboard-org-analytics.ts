@@ -1,9 +1,8 @@
 import { HTTPError } from 'nitro'
 import type { H3Event } from 'nitro/h3'
-import { cloudflareEnv } from '~/server/utils/api-response'
 import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { assertRoleAllows } from '~/server/utils/member-access'
-import { getAnalyticsReport } from '~/server/utils/analytics-report'
+import { getDashboardAnalyticsReport } from '~/server/utils/analytics-report'
 import { AnalyticsQueryError, queryOrganizationAnalytics, type AnalyticsQueryInput } from '~/server/utils/analytics-query'
 import { queryAll, type DbClient } from '~/server/db'
 
@@ -67,24 +66,15 @@ export async function loadDashboardOrganizationAnalytics(
   event: H3Event,
   query: { startDate?: string; endDate?: string },
 ): Promise<OrganizationAnalyticsReport> {
-  const env = cloudflareEnv(event)
-  const db = env.DB
-  if (!db) throw new HTTPError({ statusCode: 500, statusMessage: 'Database not available' })
-  const session = await getAuthSession(event, env)
-  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, statusMessage: 'Authentication required' })
-
-  const context = await getDashboardContext(event, {})
-  const organization = context.organization
-  if (!organization) throw new HTTPError({ statusCode: 403, statusMessage: 'Organization access required' })
-
+  const { db, organization } = await getDashboardContext(event, {})
   await assertRoleAllows({ organizationId: organization.id, role: organization.role, permissions: { analytics: ['read'] } })
 
   const [report, reviews] = await Promise.all([
-    getAnalyticsReport(db, {
+    getDashboardAnalyticsReport(db, {
       organizationId: organization.id,
-      startDate: query.startDate,
-      endDate: query.endDate,
-    }),
+      timezone: organization.timezone,
+      analyticsDataStartAt: organization.analytics_data_start_at,
+    }, query),
     loadReviewsSummary(db, [organization.id]),
   ])
 
@@ -96,14 +86,7 @@ export async function loadDashboardOrganizationAnalytics(
  * resolves the organization; the query itself is the same function the MCP tool calls.
  */
 export async function loadDashboardOrganizationAnalyticsQuery(event: H3Event, request: Omit<AnalyticsQueryInput, 'organizationId' | 'cursorSecret' | 'now'>) {
-  const env = cloudflareEnv(event)
-  const db = env.DB
-  if (!db) throw new HTTPError({ statusCode: 500, statusMessage: 'Database not available' })
-  const session = await getAuthSession(event, env)
-  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, statusMessage: 'Authentication required' })
-  const context = await getDashboardContext(event, {})
-  const organization = context.organization
-  if (!organization) throw new HTTPError({ statusCode: 403, statusMessage: 'Organization access required' })
+  const { db, env, organization } = await getDashboardContext(event, {})
   await assertRoleAllows({ organizationId: organization.id, role: organization.role, permissions: { analytics: ['read'] } })
   try {
     return await queryOrganizationAnalytics(db, { ...request, organizationId: organization.id, cursorSecret: env.BETTER_AUTH_SECRET })

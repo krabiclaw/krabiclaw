@@ -393,12 +393,13 @@ import MetricChartCard from '~/components/dashboard/insights/MetricChartCard.vue
 import BreakdownTable from '~/components/dashboard/insights/BreakdownTable.vue'
 
 import { formatCalendarDate } from '~/utils/timezone'
-import { organizationAnalyticsSchema, type AnalyticsReport, type OrganizationAnalyticsReport } from '~/shared/analytics-report'
+import { organizationAnalyticsSchema, type DashboardAnalyticsReport, type OrganizationAnalyticsReport } from '~/shared/analytics-report'
 import { instagramInsightsSchema, type InstagramInsights } from '~/shared/instagram-insights'
 import { googleAdsInsightsSchema, type GoogleAdsInsights } from '~/shared/google-ads-insights'
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 import { reviewFeedbackSchema, type ReviewFeedback } from '~/shared/review-feedback'
 import { authClient } from '~/lib/auth-client'
+import type { organizationRoles } from '~/utils/organization-access'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
 const dashboardApi = useDashboardApi()
@@ -406,18 +407,11 @@ const route = useRoute()
 const scope = useDashboardRouteScope()
 const dashboardOrganization = useDashboardOrganization()
 
-// Permissions
-const { data: analyticsPermission } = await useAsyncData(
-  () => `insights-analytics-permission:${dashboardOrganization.organizationId.value ?? ''}`,
-  async () => {
-    const organizationId = dashboardOrganization.organizationId.value
-    if (!organizationId) throw createError({ statusCode: 404, statusMessage: 'Organization not found' })
-    const permission = await authClient.organization.hasPermission({ organizationId, permissions: { analytics: ['read'] } })
-    if (permission.error) throw new Error(permission.error.message || 'Your permissions could not be checked.')
-    return permission.data!.success
-  },
-)
-const canReadAnalytics = computed(() => analyticsPermission.value === true)
+// Permissions: Better Auth evaluates the member's role in memory, as the analytics endpoint does.
+const canReadAnalytics = computed(() => {
+  const role = dashboardOrganization.organization.value?.role as keyof typeof organizationRoles | undefined
+  return Boolean(role && authClient.organization.checkRolePermission({ role, permissions: { analytics: ['read'] } }))
+})
 
 // Tabs
 const TAB_VALUES = ['views', 'instagram', 'ads', 'reviews'] as const
@@ -484,7 +478,7 @@ const { data: insightsResource, error: resourceError, refresh } = await useAsync
     },
   }),
 )
-const analytics = computed<AnalyticsReport | null>(() => insightsResource.value?.report ?? null)
+const analytics = computed<DashboardAnalyticsReport | null>(() => insightsResource.value?.report ?? null)
 const loadError = computed(() => resourceError.value?.message ?? null)
 
 // Fetch Instagram
@@ -544,7 +538,7 @@ watch([feedback, focusedReview], ([loaded, reviewId]) => {
 const reviews = computed(() => insightsResource.value?.reviews)
 
 // Multi-Vertical Funnel Mapping
-type FunnelCounts = Omit<AnalyticsReport['funnel'], 'by_source' | 'by_location'>
+type FunnelCounts = Omit<DashboardAnalyticsReport['funnel'], 'by_source' | 'by_location'>
 const FUNNEL_KEYS = ['visits', 'viewed', 'intent', 'submitted', 'confirmed', 'paid'] as const
 const FUNNEL_WORDS = {
   service: { long: ['Visits', 'Viewed a practice area', 'Clicked Book a consultation or called', 'Requested a consultation', 'Scheduled', 'Paid'], short: ['Visits', 'Viewed', 'Clicked or called', 'Requested', 'Scheduled', 'Paid'], confirmedNoun: 'consultation' },

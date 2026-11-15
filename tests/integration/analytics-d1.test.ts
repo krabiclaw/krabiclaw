@@ -4,7 +4,8 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { recordTenantPageview, updateTenantPageviewDuration, type TenantPageviewInput } from '../../server/utils/pageview-tracking.ts'
-import { aggregateOrganizationAnalyticsDate, getAnalyticsReport } from '../../server/utils/analytics-report.ts'
+import { aggregateOrganizationAnalyticsDate, getAnalyticsReport, getDashboardAnalyticsReport, resolveOrganizationAnalyticsContext } from '../../server/utils/analytics-report.ts'
+import { dashboardAnalyticsReportSchema } from '../../shared/analytics-report.ts'
 import { queryOrganizationAnalytics } from '../../server/utils/analytics-query.ts'
 
 test('analytics preserves duplicate, attribution, summary semantics on D1', { timeout: 60_000 }, async () => {
@@ -53,6 +54,11 @@ test('analytics preserves duplicate, attribution, summary semantics on D1', { ti
     assert.equal(before.metrics.page_views, 4)
     assert.equal(before.metrics.unique_sessions, 2)
     assert.equal(before.countries[0]?.country_code, 'TH')
+    // The dashboard reads the same report without the conversion detail only MCP returns.
+    assert.deepEqual(await getDashboardAnalyticsReport(db, await resolveOrganizationAnalyticsContext(db, 'org-proof'), period), dashboardAnalyticsReportSchema.parse(before))
+    // A closed day the daily aggregation has not summarized is read live, as today and yesterday are.
+    const later = await getAnalyticsReport(db, { ...period, now: new Date('2026-09-20T12:00:00Z') })
+    assert.deepEqual([later.metrics, later.daily_data, later.top_pages, later.countries], [before.metrics, before.daily_data, before.top_pages, before.countries])
     for (const date of ['2026-09-05', '2026-09-06']) await aggregateOrganizationAnalyticsDate(db, 'org-proof', date)
     assert.equal(await db.prepare(`SELECT json_extract(payload_json, '$.returning_visitors') returning_count
       FROM analytics_summaries WHERE organization_id = 'org-proof' AND kind = 'organization_day' AND date = '2026-09-06'`).first('returning_count'), 1)
