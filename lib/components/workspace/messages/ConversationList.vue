@@ -228,13 +228,15 @@ const { data, pending, status, error: threadsError, refresh, clear } = await use
   nextPageError.value = null
   const scope = listKey.value
   if (readConnectionEpoch === null) {
+    // The inbox key holds only the window this list stored, every loaded page included.
     const held = realtime.held.take(`inbox:${scope}`)
-    if (held && isThreadListResponse(held.value)) {
+    if (held) {
+      const window = held.value as ThreadListPage
       readConnectionEpoch = realtime.connectionEpoch.value
       reuseExpiresAt = held.expiresAt
-      loadedPages = 1 + held.value.pagination.offset / held.value.pagination.limit
+      loadedPages = 1 + window.pagination.offset / window.pagination.limit
       rowsKey.value = scope
-      return held.value
+      return window
     }
     await realtime.waitForFirstOpen(signal)
   }
