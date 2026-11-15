@@ -668,7 +668,9 @@ test('a responsible home member reads its stays as turnovers on every surface un
     for (const product of [undefined, productId]) {
       const calendar = await memberContext.request.get(api(nightCalendarPath(localDay(0), localDay(3), product)))
       await expectStatus(calendar, 200)
-      expect((await calendar.json() as { bookings: unknown[] }).bookings).toEqual([{ ...turnoverFields, booking_id: stay.booking_id, unit: 'nights' }])
+      // The calendar draws a stay's guest, party, days and status; a member reads the first name and no channel.
+      const { product_id, status, guest_name, adults, children, check_in_date, check_out_date } = turnoverFields
+      expect((await calendar.json() as { bookings: unknown[] }).bookings).toEqual([{ unit: 'nights', booking_id: stay.booking_id, product_id, status, guest_name, adults, children, check_in_date, check_out_date }])
     }
     // The same projection through MCP, whose output schemas validate it.
     const turnover = { ...turnoverFields, id: stay.booking_id }

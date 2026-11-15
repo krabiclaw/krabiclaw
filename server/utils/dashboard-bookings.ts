@@ -10,7 +10,7 @@ import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/
 import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
-import { getStay, listStays, readStayCalendar, readStayCalendars, stayAccessFor, type StayHome } from '~/server/domain/stays'
+import { getStay, listStays, stayAccessFor, stayCalendarOf, stayCalendarQueries, type StayHome } from '~/server/domain/stays'
 import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
 import { loadDashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
@@ -160,20 +160,33 @@ async function dashboardPlacesCalendar(event: H3Event, window: BookingWindow) {
   return { from: window.from, to: window.to, bookings: timedBookings(records!.results as BookedRecordInRange[], window), homes: [], places: calendar.places, manage: calendar.manage }
 }
 
+/**
+ * The host Calendar's homes: one D1 round trip after the session, as its
+ * places are. The membership leads the batch; homes, prices, stays and nights
+ * follow, each reading the homes the viewer may see.
+ */
+async function dashboardHomesCalendar(event: H3Event, window: BookingWindow) {
+  const env = cloudflareEnv(event)
+  const session = await getAuthSession(event, env)
+  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
+  const slug = dashboardOrgQueryParam(event)
+  if (!slug) throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
+  const userId = session.user.id
+  const membership = membershipBySlugQuery(slug, userId)
+  const [memberResult, ...rest] = await executeBatch(env.DB, [membership, ...stayCalendarQueries(membership, { from: window.from, to: window.to, productId: window.productId ?? null })], { operation: 'Read homes calendar' })
+  const member = memberResult?.results[0] as { organization_id: string; member_id: string; role: string } | undefined
+  if (!member) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
+  const access = await stayAccessFor(joinedMemberPrincipal({ organizationId: member.organization_id, memberId: member.member_id, role: member.role, userId }, { env, event }))
+  const calendar = stayCalendarOf(rest, access.manage, window)
+  if (window.productId && !calendar.homes.length) throw new HTTPError({ statusCode: 404, message: 'That place to stay is not in this organization', data: { code: 'HOME_NOT_FOUND' } })
+  return { from: window.from, to: window.to, bookings: calendar.stays, homes: calendar.homes, places: [], manage: access.manage }
+}
+
 export async function dashboardBookingCalendar(event: H3Event, query: BookingListQuery) {
   const window = bookingListWindow(query)
   if (window.unit === 'slot') return dashboardPlacesCalendar(event, window)
-  const context = await dashboardBookingsContext(event)
-  const { db, access } = context
-  const { unit, from, to, productId } = window
-  const nights = async () => {
-    if (!productId) return readStayCalendars(db, access, { from, to })
-    const { home, nights, stays } = await readStayCalendar(db, access, { productId, from, to })
-    return { homes: [{ home, nights }], stays }
-  }
-  const [timed, nightCalendar] = await Promise.all([
-    unit === 'nights' ? [] : listTimedBookings(context, window),
-    nights(),
-  ])
-  return { from, to, bookings: [...timed, ...nightCalendar.stays.map(nightBooking)], homes: nightCalendar.homes, places: [], manage: access.manage }
+  if (window.unit === 'nights') return dashboardHomesCalendar(event, window)
+  // Without a unit: the homes calendar, and the timed bookings beside its stays.
+  const [homes, timed] = await Promise.all([dashboardHomesCalendar(event, window), dashboardBookingsContext(event).then(context => listTimedBookings(context, window))])
+  return { ...homes, bookings: [...timed, ...homes.bookings] }
 }
