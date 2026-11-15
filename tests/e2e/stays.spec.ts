@@ -3779,10 +3779,10 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
       let releaseQuote!: () => void
       const heldQuote = new Promise<void>(resolve => { releaseQuote = resolve })
       const quoteForTwo = (url: URL) => url.pathname.endsWith('/quote') && url.searchParams.get('adults') === '2'
+      // The browser makes the held request itself: route.fetch() would resolve the tenant's *.localhost host from Node, which CI cannot.
       await guest.route(quoteForTwo, async route => {
-        const upstream = await route.fetch()
         await heldQuote
-        await route.fulfill({ response: upstream })
+        await route.continue()
       })
       try {
         const updated = guest.waitForResponse(response => quoteForTwo(new URL(response.url())))
