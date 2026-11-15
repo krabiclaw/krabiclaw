@@ -664,13 +664,14 @@ test('a responsible home member reads its stays as turnovers on every surface un
     })
     const memberList = await memberContext.request.get(api(`bookings?unit=nights&from=${localDay(0)}&to=${localDay(3)}`))
     await expectStatus(memberList, 200)
-    expect(await memberList.json()).toEqual({ bookings: [{ ...turnoverFields, booking_id: stay.booking_id, unit: 'nights', name: 'Cliff Cabin' }], manage: false })
+    // The bookings list, the host Calendar and the calendar tool draw a member's stay as its days, status, party and the guest's first name.
+    const { product_id, status, guest_name, adults, children, check_in_date, check_out_date } = turnoverFields
+    const calendarRow = { unit: 'nights', booking_id: stay.booking_id, product_id, status, guest_name, adults, children, check_in_date, check_out_date }
+    expect(await memberList.json()).toEqual({ bookings: [{ ...calendarRow, name: 'Cliff Cabin' }], manage: false })
     for (const product of [undefined, productId]) {
       const calendar = await memberContext.request.get(api(nightCalendarPath(localDay(0), localDay(3), product)))
       await expectStatus(calendar, 200)
-      // The calendar draws a stay's guest, party, days and status; a member reads the first name and no channel.
-      const { product_id, status, guest_name, adults, children, check_in_date, check_out_date } = turnoverFields
-      expect((await calendar.json() as { bookings: unknown[] }).bookings).toEqual([{ unit: 'nights', booking_id: stay.booking_id, product_id, status, guest_name, adults, children, check_in_date, check_out_date }])
+      expect((await calendar.json() as { bookings: unknown[] }).bookings).toEqual([calendarRow])
     }
     // The same projection through MCP, whose output schemas validate it.
     const turnover = { ...turnoverFields, id: stay.booking_id }
@@ -681,7 +682,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     expect(memberBookings.error).toBeNull()
     expect((memberBookings.data as { bookings: Array<Record<string, unknown>> }).bookings).toEqual([expect.objectContaining({ booking_id: stay.booking_id, unit: 'nights', guest: { name: guestName }, starts_at: stay.starts_at, ends_at: stay.ends_at })])
     const memberCalendar = await memberCall<{ stays: unknown[] }>('get_stay_calendar', { product_id: productId, from: localDay(0), to: localDay(3) })
-    expect(memberCalendar.data!.stays).toEqual([turnover])
+    expect(memberCalendar.data!.stays).toEqual([calendarRow])
     // The stay arrives today and checks out in two days. The member hosts no stay, so their Today holds nothing;
     // the owner's holds the arrival, with what was paid. The member's clean is checked once its conversation exists, below.
     const today = await memberContext.request.get(api('today'))
@@ -2400,7 +2401,7 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   // Author the home, upload media, exercise its editors, and finish independent readbacks.
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
-  const { request, headers, slug, organizationId, location, call, api, productId } = await createStayHome(page, baseURL!)
+  const { request, headers, slug, organizationId, call, api, productId } = await createStayHome(page, baseURL!)
   const { previewLink, previewModal, preview } = previewLocators(page)
   const checkIn = localDay(0)
   const checkOut = localDay(2)
@@ -2500,7 +2501,7 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
     .toEqual(uploadedPhotos.map((photo, position) => ({ id: photo.id, position })))
   const projectedCalendar = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
   expect(projectedCalendar.error).toBeNull()
-  expect(projectedCalendar.data!.home).toEqual({ product_id: productId, name: 'Cliff Cabin', internal_name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null, check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4, min_nights: 2, calendar_rules: null, channel: null })
+  expect(projectedCalendar.data!.home).toEqual({ product_id: productId, name: 'Cliff Cabin', internal_name: 'Cliff Cabin', timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, min_nights: 2, calendar_rules: null, address: null, cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm' })
   await previewLink.click()
   await expect(previewModal).toBeVisible()
   await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
@@ -4523,7 +4524,8 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const guideRead = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
       expect(guideRead.error).toBeNull()
       expect(validateCalendar(guideRead.data), JSON.stringify(validateCalendar.errors)).toBe(true)
-      expect(guideRead.data!.home).toEqual({ product_id: assignedHome.product_id, name: 'Assigned Cabin', internal_name: 'Assigned Cabin', location_id: assignedHome.location_id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: 320_000, base_price_tax_behavior: 'unspecified', check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 5, min_nights: 1, calendar_rules: null, channel: null })
+      expect(guideRead.data!.home).toEqual({ product_id: assignedHome.product_id, name: 'Assigned Cabin', internal_name: 'Assigned Cabin', timezone: TIME_ZONE, currency: 'THB', base_price_minor: 320_000, min_nights: 1, calendar_rules: null,
+        address: { address: '1 Test Road', city: 'Krabi', country: 'TH', state: null, zip_code: null }, cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm' })
       const guideSaved = await call<{ product_id: string; guide: { directions: string }; channel_push: unknown; airbnb_unsynced: unknown[] }>('update_stay_arrival_guide', { product_id: assignedHome.product_id, directions: guide.directions })
       expect(guideSaved.error).toBeNull()
       expect(validateArrival(guideSaved.data), JSON.stringify(validateArrival.errors)).toBe(true)

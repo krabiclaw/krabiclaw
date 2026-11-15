@@ -9,7 +9,7 @@ import * as schema from '../../server/db/schema.ts'
 import { ChannexError } from '../../server/integrations/channex/client.ts'
 import { listingCalendar, listingMinimumNights } from '../../server/integrations/channex/airbnb-listing.ts'
 import { AirbnbConnection, type ImportContentReport } from '../../server/integrations/channex/airbnb-connection.ts'
-import { createStay, createStayHome, deliverPendingChannelNights, readStayCalendar, readStayHome, setStayNights, stayHomeInput, updateStayHome } from '../../server/domain/stays.ts'
+import { createStay, createStayHome, deliverPendingChannelNights, readHomeCalendar, readStayHome, setStayNights, stayHomeInput, updateStayHome } from '../../server/domain/stays.ts'
 import { deleteMediaAsset, getMediaAsset } from '../../server/utils/media-asset-manager.ts'
 import { getProduct } from '../../server/utils/product-management.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
@@ -555,7 +555,7 @@ test('actual dated, weekday and weekend rules survive default edits, protected r
     assert.deepEqual((channex.settings.find(settings => settings.availability_settings)!.availability_settings as { availability_settings: { seasonal_min_nights: unknown } }).availability_settings.seasonal_min_nights, seasonal)
     await connection.refreshContent(productId)
     await updateStayHome(env, db, manager, productId, { min_nights: 10, base_price_minor: 21000 })
-    const changed = await readStayCalendar(db, manager, { productId, from: monday, to: addDays(tuesday, 1) })
+    const changed = await readHomeCalendar(db, manager, { productId, from: monday, to: addDays(tuesday, 1) })
     assert.deepEqual(changed.nights.map(night => [night.date, night.min_stay_arrival, night.price_minor]), [[monday, 2, 21000], [tuesday, 10, 21000]])
     const authoredRules = { day_of_week_min_nights: [3, -1, -1, -1, -1, -1, -1], weekend_price_minor: 25000 }
     await updateStayHome(env, db, manager, productId, { calendar_rules: authoredRules })
@@ -614,8 +614,8 @@ test('actual dated, weekday and weekend rules survive default edits, protected r
     assert.equal(channex.restrictions[weekend]!.rate, '250.00')
     const openedMonday = Array.from({ length: 7 }, (_, offset) => addDays(opened, offset)).find(date => new Date(`${date}T00:00:00Z`).getUTCDay() === 1)!
     assert.equal(channex.restrictions[openedMonday], undefined, 'weekday minima are left to the verified native rate-plan template')
-    assert.deepEqual((await readStayCalendar(db, manager, { productId, from: openedMonday, to: addDays(openedMonday, 1) })).nights.map(night => [night.min_stay_arrival, night.price_minor]), [[3, 21000]])
-    const visible = await readStayCalendar(db, manager, { productId, from: weekend, to: addDays(weekend, 1) })
+    assert.deepEqual((await readHomeCalendar(db, manager, { productId, from: openedMonday, to: addDays(openedMonday, 1) })).nights.map(night => [night.min_stay_arrival, night.price_minor]), [[3, 21000]])
+    const visible = await readHomeCalendar(db, manager, { productId, from: weekend, to: addDays(weekend, 1) })
     assert.deepEqual(visible.nights.map(night => [night.price_minor, night.min_stay_arrival]), [[25000, 10]])
   } finally {
     context.mock.timers.reset()
@@ -700,7 +700,7 @@ test('a connected home can resend its full calendar without tearing down its map
     assertFull(pausedStart)
     assert.equal(channex.restrictions[addDays(today(), 21)]!.rate, '255.00')
     assert.deepEqual(await db.prepare('SELECT state, COUNT(*) AS nights FROM channel_night_pushes WHERE product_id = ? GROUP BY state').bind(productId).all().then(result => result.results), [{ state: 'pushed', nights: 500 }])
-    assert.deepEqual((await readStayCalendar(db, manager, { productId, from: addDays(today(), 20), to: addDays(today(), 22) })).nights.map(night => [night.date, night.price_minor, night.channel]),
+    assert.deepEqual((await readHomeCalendar(db, manager, { productId, from: addDays(today(), 20), to: addDays(today(), 22) })).nights.map(night => [night.date, night.price_minor, night.channel]),
       [[addDays(today(), 20), 24500, { state: 'pushed', detail: null }], [addDays(today(), 21), 25500, { state: 'pushed', detail: null }]])
     assert.deepEqual(await db.prepare("SELECT state, json_extract(sent_json, '$.rate') AS rate FROM channel_night_pushes WHERE product_id = ? AND date = ?").bind(productId, addDays(today(), 21)).first(),
       { state: 'pushed', rate: '255.00' })
@@ -1162,7 +1162,7 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     assert.deepEqual(await runCron(), { stepped: 1, done: 1, failed: 0 })
     assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: productId, last_error_code: null })
     assert.deepEqual(channex.seen.slice(confirmedRefreshStart).filter(request => request.method === 'POST' && ['/restrictions', '/availability'].includes(request.path)), [{ method: 'POST', path: '/restrictions' }])
-    assert.deepEqual((await readStayCalendar(db, manager, { productId, from: queuedDate, to: addDays(queuedDate, 1) })).nights.map(night => [night.price_minor, night.channel]), [[25000, { state: 'pushed', detail: null }]])
+    assert.deepEqual((await readHomeCalendar(db, manager, { productId, from: queuedDate, to: addDays(queuedDate, 1) })).nights.map(night => [night.price_minor, night.channel]), [[25000, { state: 'pushed', detail: null }]])
     // An authored canonical change survives the next source refresh and the full sync restores Airbnb to it.
     await updateStayHome(env, db, manager, productId, { min_nights: 9, description: 'Host words stay.' })
     channex.availabilityRules.default_min_nights = 11
@@ -1468,7 +1468,7 @@ for (const authored of [false, true]) {
       assert.deepEqual((await db.prepare('SELECT n.date, n.min_stay_arrival, pr.unit_amount AS price_minor FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? AND n.date IN (?, ?) ORDER BY n.date').bind(productId, explicit, inherited).all()).results,
         [{ date: explicit, min_stay_arrival: 2, price_minor: 18950 }, { date: inherited, min_stay_arrival: null, price_minor: null }])
       await updateStayHome(env, db, manager, productId, { min_nights: 11, base_price_minor: 23000 })
-      const calendar = await readStayCalendar(db, manager, { productId, from: explicit, to: addDays(inherited, 1) })
+      const calendar = await readHomeCalendar(db, manager, { productId, from: explicit, to: addDays(inherited, 1) })
       assert.deepEqual(calendar.nights.map(night => [night.date, night.min_stay_arrival, night.price_minor]), [[explicit, 2, 18950], [inherited, 11, 23000]])
     } finally {
       globalThis.fetch = realFetch
@@ -1511,7 +1511,7 @@ test('a source-owned legacy default becomes inheritance after a refused canonica
     assert(refreshed.content.kept_host_edits.includes('min_nights'))
     assert.deepEqual((await db.prepare('SELECT n.date, n.min_stay_arrival, pr.unit_amount AS price_minor FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? AND n.date IN (?, ?) ORDER BY n.date').bind(productId, explicit, inherited).all()).results,
       [{ date: explicit, min_stay_arrival: 2, price_minor: null }, { date: inherited, min_stay_arrival: null, price_minor: null }])
-    const calendar = await readStayCalendar(db, manager, { productId, from: explicit, to: addDays(inherited, 1) })
+    const calendar = await readHomeCalendar(db, manager, { productId, from: explicit, to: addDays(inherited, 1) })
     assert.deepEqual(calendar.nights.map(night => [night.date, night.min_stay_arrival, night.price_minor]), [[explicit, 2, 20000], [inherited, 9, 20000]])
     const source = await listingCalendar(env, channex.channelId, LISTING, TZ)
     assert.deepEqual(source.filter(night => [explicit, inherited].includes(night.date)).map(night => [night.date, night.minStay, night.rate]), [[explicit, 2, '200'], [inherited, 9, '200']])
@@ -1856,9 +1856,9 @@ test('a provider home syncs with zero beds and unknown arrival times and policie
       { start: null, end: null, checkout: null, beds: 0, policy: null, longTerm: null })
     assert.equal(saved.description, 'A cabin on the cliff.')
     assert.equal(channex.properties[0]?.property_type, 'hotel')
-    const calendar = await readStayCalendar(db, manager, { productId: home.product_id, from: today(), to: addDays(today(), 2) })
-    assert.equal(calendar.home.check_in_time, null)
-    assert.equal(calendar.home.check_out_time, null)
+    const imported = await readStayHome(db, manager, home.product_id)
+    assert.equal(imported.check_in_time, null)
+    assert.equal(imported.check_out_time, null)
     assert.equal((await connection.listings())[0]?.import.status, 'imported')
     const mapping = await db.prepare("SELECT enabled, import_stage FROM product_channel_mappings WHERE product_id = ?").bind(home.product_id).first()
     assert.deepEqual(mapping, { enabled: 1, import_stage: 'complete' })

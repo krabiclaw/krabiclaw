@@ -1,16 +1,16 @@
 import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
-import { d1JsonStringSet, executeBatch, queryAll, queryFirst } from '~/server/db'
+import { executeBatch, queryFirst } from '~/server/db'
 import { dashboardOrgQueryParam, getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { assignedMemberSql, BATCH_VIEWER, joinedMemberPrincipal, memberAccessPrincipal, membershipBySlugQuery, withViewer } from '~/server/utils/member-access'
-import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
+import { bookedRecordsInRange, businessWideViewer, type BookedRecordInRange } from '~/server/domain/product-bookings'
 import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
-import { getStay, listStays, stayAccessFor, stayCalendarOf, stayCalendarQueries, type StayHome } from '~/server/domain/stays'
+import { calendarStays, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, type StayHome } from '~/server/domain/stays'
 import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
 import { loadDashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
@@ -106,29 +106,18 @@ function timedBookings(records: BookedRecordInRange[], { productId, from, to }: 
   })
 }
 
-async function listTimedBookings({ db, organization, userId }: DashboardBookingsContext, window: BookingWindow) {
-  const [records] = await executeBatch(db, [withViewer(membershipBySlugQuery(organization.slug, userId), bookedRecordsInRange(BATCH_VIEWER, { ...window, cancelled: window.includeCancelled }))], { operation: 'Read timed bookings' })
-  return timedBookings(records!.results as BookedRecordInRange[], window)
+/** The booked records of the window the caller may see, in one statement: a member's are those of the offerings and homes they are named on. */
+async function readBookedRecords({ db, access, organization, userId }: DashboardBookingsContext, window: BookingWindow) {
+  const [records] = await executeBatch(db, [withViewer(businessWideViewer(membershipBySlugQuery(organization.slug, userId)), bookedRecordsInRange(BATCH_VIEWER, { ...window, cancelled: window.includeCancelled }))], { operation: 'Read booked records' })
+  return (records!.results as BookedRecordInRange[]).filter(record => access.manage || record.assigned_member_id === organization.memberId)
 }
 
 export async function dashboardBookingList(event: H3Event, query: BookingListQuery) {
   const window = bookingListWindow(query)
   const context = await dashboardBookingsContext(event)
-  const [timed, stays] = await Promise.all([
-    window.unit === 'nights' ? [] : listTimedBookings(context, window),
-    window.unit === 'slot' ? [] : listStays(context.db, context.access, window),
-  ])
-  const homeIds = [...new Set(stays.map(stay => stay.product_id))]
-  const homes = homeIds.length ? await queryAll<{ product_id: string; internal_name: string }>(context.db,
-    'SELECT product_id, internal_name FROM product_stay_configs WHERE organization_id=? AND product_id IN (SELECT value FROM json_each(?))',
-    [context.organization.id, d1JsonStringSet(homeIds)]) : []
-  const names = new Map(homes.map(home => [home.product_id, home.internal_name]))
-  const nights = stays.map(stay => {
-    const name = names.get(stay.product_id)
-    if (!name) throw new Error('Booking home has no internal name')
-    return { ...nightBooking(stay), name }
-  })
-  return { bookings: [...timed, ...nights], manage: context.access.manage }
+  const records = await readBookedRecords(context, window)
+  const stays = window.unit === 'slot' ? [] : calendarStays(records, context.access.manage, window, record => !window.productId || record.product_id === window.productId)
+  return { bookings: [...(window.unit === 'nights' ? [] : timedBookings(records, window)), ...stays], manage: context.access.manage }
 }
 
 /**
@@ -187,6 +176,6 @@ export async function dashboardBookingCalendar(event: H3Event, query: BookingLis
   if (window.unit === 'slot') return dashboardPlacesCalendar(event, window)
   if (window.unit === 'nights') return dashboardHomesCalendar(event, window)
   // Without a unit: the homes calendar, and the timed bookings beside its stays.
-  const [homes, timed] = await Promise.all([dashboardHomesCalendar(event, window), dashboardBookingsContext(event).then(context => listTimedBookings(context, window))])
+  const [homes, timed] = await Promise.all([dashboardHomesCalendar(event, window), dashboardBookingsContext(event).then(async context => timedBookings(await readBookedRecords(context, window), window))])
   return { ...homes, bookings: [...timed, ...homes.bookings] }
 }
