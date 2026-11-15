@@ -6,11 +6,11 @@
       :class="isCustomRange ? 'ring-1 ring-primary border-primary' : ''"
       data-testid="insights-date-range-pill"
     >
-      <span>{{ displayStart }}</span>
+      <time :datetime="startDate || undefined">{{ displayStart }}</time>
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" class="size-2.5 stroke-current stroke-[3]" fill="none" aria-hidden="true">
         <path d="M28 16H2M17 4l11.3 11.3a1 1 0 0 1 0 1.4L17 28" />
       </svg>
-      <span>{{ displayEnd }}</span>
+      <time :datetime="endDate || undefined">{{ displayEnd }}</time>
       <span v-if="isCustomRange" class="size-1.5 rounded-full bg-primary" title="Custom filter active" />
     </button>
 

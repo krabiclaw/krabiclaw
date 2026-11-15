@@ -382,9 +382,11 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
   'rates/nightly-rate': async (context) => {
     const [rows] = await batch(context, [bookingsQuery(context, 'starts', "AND b.status = 'confirmed'")])
     const stays = rows!.map(bookingRow).filter(inRange(context))
+    // A stay always carries its total (bookings_money_check); one without is not priced at zero.
+    for (const row of stays) if (row.total_minor === null) throw new Error(`Stay ${row.id} has no stored total`)
     const currency = singleCurrency(stays.map(row => row.currency), context.reader.defaultCurrency)
     const day = days(context.dates)
-    const income = (group: BookingRow[]) => group.reduce((sum, row) => sum + (row.total_minor ?? 0), 0)
+    const income = (group: BookingRow[]) => group.reduce((sum, row) => sum + row.total_minor!, 0)
     const nightly = (group: BookingRow[]) => average(income(group), group.reduce((sum, row) => sum + nightsOf(row), 0), 0)
     return {
       currency,
@@ -398,9 +400,12 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
   },
 
   'rates/average-value': async (context) => {
-    const [rows, payments, offline] = await batch(context, [bookingsQuery(context, 'starts'), ...paymentQueries(context)])
+    const [rows, allPayments, allOffline] = await batch(context, [bookingsQuery(context, 'starts'), ...paymentQueries(context)])
     const bookings = rows!.map(bookingRow).filter(inRange(context))
-    const currency = singleCurrency([...payments!, ...offline!].map(row => row.currency), context.reader.defaultCurrency)
+    // The padded read reaches past the range; only the range's bookings' money counts.
+    const ids = new Set(bookings.map(row => row.id))
+    const payments = allPayments!.filter(row => ids.has(String(row.booking_id))), offline = allOffline!.filter(row => ids.has(String(row.booking_id)))
+    const currency = singleCurrency([...payments, ...offline].map(row => row.currency), context.reader.defaultCurrency)
     // Received for a booking: captured on the site less its refunds, plus what was recorded by hand (a refund recorded negative).
     const received = new Map<string, number>()
     for (const row of payments!) received.set(String(row.booking_id), (received.get(String(row.booking_id)) ?? 0) + num(row.captured_amount) - num(row.refunded_amount))
@@ -420,10 +425,13 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
   },
 
   'rates/income-by-channel': async (context) => {
-    const [rows, payments, offline] = await batch(context, [bookingsQuery(context, 'starts'), ...paymentQueries(context)])
+    const [rows, allPayments, allOffline] = await batch(context, [bookingsQuery(context, 'starts'), ...paymentQueries(context)])
     const bookings = rows!.map(bookingRow).filter(inRange(context))
+    // The padded read reaches past the range; only the range's bookings' money counts.
+    const ids = new Set(bookings.map(row => row.id))
+    const payments = allPayments!.filter(row => ids.has(String(row.booking_id))), offline = allOffline!.filter(row => ids.has(String(row.booking_id)))
     const channelStays = bookings.filter(row => row.owner === 'channel' && row.status === 'confirmed' && row.total_minor !== null)
-    const currency = singleCurrency([...payments!, ...offline!, ...channelStays].map(row => row.currency), context.reader.defaultCurrency)
+    const currency = singleCurrency([...payments, ...offline, ...channelStays].map(row => row.currency), context.reader.defaultCurrency)
     const startOf = new Map(bookings.map(row => [row.id, startDay(row)]))
     // Each amount is dated by the start of the booking it was for.
     const amounts = [

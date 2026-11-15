@@ -582,12 +582,11 @@ test('Insights reads a linked report period and preserves range changes in its U
   const isReport = (response: import('@playwright/test').Response) => new URL(response.url()).pathname === '/api/dashboard/insights/conversion/page-views'
   expect((await page.goto(linkedPath))?.status()).toBe(200)
   await waitForNuxtHydration(page)
-  const first = await page.request.get('/api/dashboard/insights/conversion/page-views', { params: { org: orgSlug, ...range } })
-  expect(first.status(), await first.text()).toBe(200)
-  expect((await first.json()).period).toMatchObject({ start_date: range.start_date, end_date: range.end_date })
   await expect(page.getByTestId('insights-chart').getByRole('heading', { name: 'Page views' })).toBeVisible()
   const datePill = page.getByTestId('insights-date-range-pill')
-  await expect(datePill).toBeVisible()
+  // The period the page itself read, as it shows it.
+  await expect(datePill.locator('time').first()).toHaveAttribute('datetime', range.start_date)
+  await expect(datePill.locator('time').last()).toHaveAttribute('datetime', range.end_date)
 
   const updatedRange = { start_date: addLocalDays(today, -6), end_date: today }
   const rangeReport = page.waitForResponse(isReport)
@@ -598,6 +597,8 @@ test('Insights reads a linked report period and preserves range changes in its U
   const preset = await rangeReport
   expect(preset.status(), await preset.text()).toBe(200)
   const period = (await preset.json() as { period: { start_date: string; end_date: string } }).period
-  expect(period.start_date).toBe(updatedRange.start_date)
+  expect(period).toMatchObject({ start_date: updatedRange.start_date, end_date: updatedRange.end_date })
+  await expect(datePill.locator('time').first()).toHaveAttribute('datetime', updatedRange.start_date)
+  await expect(datePill.locator('time').last()).toHaveAttribute('datetime', updatedRange.end_date)
   await expect(page).toHaveURL(insightsPath(orgSlug, 'conversion/page-views', { start_date: period.start_date, end_date: period.end_date }))
 })

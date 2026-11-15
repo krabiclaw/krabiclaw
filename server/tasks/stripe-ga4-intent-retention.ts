@@ -26,9 +26,11 @@ export default defineScheduledTask({
     // were deleted.
     // A retention pass that did not run is a retention pass that did not run, and
     // the scheduler is the only thing positioned to notice.
-    await expireStripeGa4Intents(env.DB)
     // The MCP tool audit's 180-day retention rides here, the daily retention pass on the same cron.
-    const mcpToolCallEventsCleaned = await cleanupMcpToolCallEvents(env.DB)
-    return { result: { expiredStripeGa4Intents: true, mcpToolCallEventsCleaned } }
+    // Each runs whether or not the other fails, and the scheduler is told of either failure.
+    const [ga4, mcp] = await Promise.allSettled([expireStripeGa4Intents(env.DB), cleanupMcpToolCallEvents(env.DB)])
+    const failures = [ga4, mcp].flatMap(outcome => outcome.status === 'rejected' ? [outcome.reason] : [])
+    if (failures.length) throw new AggregateError(failures, `${failures.length} retention passes failed`)
+    return { result: { expiredStripeGa4Intents: true, mcpToolCallEventsCleaned: (mcp as PromiseFulfilledResult<number>).value } }
   },
 })
