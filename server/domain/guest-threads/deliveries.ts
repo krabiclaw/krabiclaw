@@ -460,7 +460,7 @@ export async function listThreadDeliveries(db: DbClient, threadId: string): Prom
 
 /** Enrich a page of messages in one D1 call after the page reveals its IDs. */
 export async function readConversationEnrichment(db: DbClient, messageIds: string[], authorIds: string[], receipts: BatchQuery | null = null) {
-  const photoQuery = messageIds.length ? messagePhotosQuery('message', messageIds) : null
+  const photoQuery = messageIds.length ? messagePhotosQuery(messageIds) : null
   const authorQuery = authorIds.length ? {
     query: 'SELECT id, name FROM user WHERE id IN (SELECT value FROM json_each(?))',
     params: [d1JsonStringSet(authorIds)],

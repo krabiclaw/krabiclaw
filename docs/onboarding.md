@@ -175,8 +175,7 @@ Generated placeholder rows are no longer part of onboarding or site creation. Te
 ## After website setup
 
 Brand, hours, contact, catalog, connections and team are available in their
-dashboard editors. The website preview is available on Today once the site is
-created.
+dashboard editors. The website is published from its status card in Website.
 
 ### Location-level (once per location, including the first)
 

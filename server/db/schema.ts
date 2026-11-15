@@ -317,7 +317,6 @@ export const jwks = sqliteTable("jwks", {
 // than custom take their words from the subject, so title is NULL there.
 // assigned_member_id is a Better Auth member.id; like every responsibility it
 // is cleared by reconcileResponsibilities when the member leaves.
-// Photos are media_placements(owner_type 'task', slot 'attachments').
 export const tasks = sqliteTable('tasks', {
   id: text().primaryKey(),
   organization_id: text().notNull().references(() => organization.id, { onDelete: 'cascade' }),
@@ -333,7 +332,6 @@ export const tasks = sqliteTable('tasks', {
   due_at: text(),
   timezone: text().notNull(),
   status: text({ enum: ['open', 'done', 'skipped', 'cancelled'] }).notNull(),
-  outcome_note: text(),
   closed_at: text(),
   closed_by_user_id: text().references(() => user.id, { onDelete: 'set null' }),
   dedupe_key: text().notNull().unique(),
@@ -352,7 +350,7 @@ export const tasks = sqliteTable('tasks', {
     AND (subject_type IS NULL OR subject_type IN ('scheduled_guest_message', 'booking', 'product_session'))
     AND (kind <> 'custom' OR subject_type IS NULL)`),
   check('tasks_text_check', sql`(title IS NULL OR length(trim(title)) BETWEEN 1 AND 200) AND (kind <> 'custom' OR title IS NOT NULL)
-    AND (notes IS NULL OR length(trim(notes)) BETWEEN 1 AND 5000) AND (outcome_note IS NULL OR length(trim(outcome_note)) BETWEEN 1 AND 5000)
+    AND (notes IS NULL OR length(trim(notes)) BETWEEN 1 AND 5000)
     AND length(trim(dedupe_key)) > 0 AND timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
   check('tasks_window_check', sql`starts_at IS NULL OR due_at IS NULL OR starts_at <= due_at`),
   check('tasks_status_check', sql`status IN ('open', 'done', 'skipped', 'cancelled') AND (status = 'open') = (closed_at IS NULL) AND (status <> 'open' OR closed_by_user_id IS NULL) AND version >= 1`),
@@ -417,7 +415,7 @@ export const media_placements = sqliteTable("media_placements", {
 		foreignColumns: [media_assets.organization_id, media_assets.id],
 		name: "media_placements_asset_scope_fk",
 	}).onDelete("cascade"),
-	check("media_placements_owner_type_check", sql`owner_type IN ('organization', 'business_location', 'product', 'collection', 'content_document', 'content_block', 'review', 'review_request', 'message', 'task', 'stay_photo_room', 'stay_home_accessibility', 'stay_room_accessibility')`),
+	check("media_placements_owner_type_check", sql`owner_type IN ('organization', 'business_location', 'product', 'collection', 'content_document', 'content_block', 'review', 'review_request', 'message', 'stay_photo_room', 'stay_home_accessibility', 'stay_room_accessibility')`),
 	check("media_placements_sort_order_check", sql`sort_order >= 0`),
 	unique("media_placements_org_owner_slot_asset_unique").on(table.owner_type, table.owner_id, table.slot, table.asset_id),
 	unique("media_placements_org_owner_slot_order_unique").on(table.owner_type, table.owner_id, table.slot, table.sort_order),

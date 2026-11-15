@@ -10,8 +10,7 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { bookTable, openSeating, tableSeatings } from './helpers/tables'
 import { seededTenant } from './seed/manifest'
 import { devLoginHeaders, seededSiteHeaders, testBaseUrl } from './test-env'
-import type { TaskPerson, TaskSection } from '../../server/domain/tasks'
-import type { OpportunityView } from '../../server/domain/opportunities'
+import type { BusinessToday } from '../../shared/dashboard-today'
 import type { ConversationDetails, ConversationEntry, ConversationHeader, ConversationPage } from '../../shared/messages-contract'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
@@ -27,8 +26,6 @@ interface DeliveryList {
   deliveries: DeliveryView[]
 }
 
-/** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; assignees: TaskPerson[]; resolved_at: string }
 
 const baseURL = testBaseUrl()
 // Contact threads run on the seeded experience business; table bookings on the
@@ -579,12 +576,13 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   await dismissPreviewToolbar(page)
 
   await page.goto(`${baseURL}/dashboard/${demoSlug()}`)
-  // A table is held by the member its tables name: today's is theirs to prepare for on Today.
+  // Today's table is a card on the owner's Today; its prep is the host's own, not a second card.
   const todayResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug() } })
   await expectStatus(todayResponse, 200)
   const todayFeed = await todayResponse.json() as BusinessToday
-  const prep = todayFeed.tasks.flatMap(section => section.tasks).filter(task => task.kind === 'consultation_prep' && task.product_session_id === todaySeating!.id)
-  expect(prep).toMatchObject([{ booking_id: null, status: 'open', path: expect.stringContaining(`/calendar?date=${localToday.date}`) }])
+  const todayCard = todayFeed.cards.find(card => card.id === `booking:${bookingIds[0]}`)
+  expect(todayCard).toMatchObject({ headline: `${guestName.split(' ')[0]}’s group of 2` })
+  expect(todayFeed.cards.filter(card => card.headline.startsWith('Prepare'))).toEqual([])
   const agendaResponse = await page.request.get('/api/dashboard/agenda', { params: { org: demoSlug(), from: localToday.date, to: localDateAt(new Date(now + 5 * 86_400_000), timezone) } })
   await expectStatus(agendaResponse, 200)
   const agenda = await agendaResponse.json() as { items: Array<{ id: string; to: string; starts_at: string; ends_at: string }> }
@@ -592,16 +590,13 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   expect(reservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/${bookingIds[0]}`)
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
-  const prepCalendar = await page.goto(`${baseURL}${prep[0]!.path}`)
-  expect(prepCalendar?.status()).toBe(200)
-  await expect(page.getByRole('heading', { name: 'Calendar', exact: true })).toBeVisible()
-  await expect(page.getByText('The calendar could not be loaded')).toHaveCount(0)
+  const opened = await page.goto(`${baseURL}${todayCard!.to}`)
+  expect(opened?.status()).toBe(200)
 
   const upcomingResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug(), range: 'upcoming' } })
   await expectStatus(upcomingResponse, 200)
   const upcomingFeed = await upcomingResponse.json() as BusinessToday
-  expect(upcomingFeed.tasks.flatMap(section => section.tasks).filter(task => task.kind === 'consultation_prep' && task.product_session_id === futureSeating.id))
-    .toMatchObject([{ booking_id: null, status: 'open' }])
+  expect(upcomingFeed.cards.find(card => card.id === `booking:${upcomingBookingId}`)).toMatchObject({ headline: 'Priya’s group of 2' })
   const upcomingReservation = agenda.items.find(item => item.id === `booking:${requestIds[1]}`)
   expect(upcomingReservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/${upcomingBookingId}`)
   expect(localDateAt(new Date(upcomingReservation!.starts_at), timezone) > localToday.date).toBe(true)

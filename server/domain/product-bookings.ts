@@ -7,7 +7,8 @@ import { notifyBookingCreated, raiseSettledFailures } from '~/server/utils/notif
 import { measurementOutcome, readPageEventId, readWebsiteSource, recordOrganizationConversionEvent } from '~/server/utils/organization-conversions'
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import { toE164 } from '~/utils/phone'
-import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { addLocalDays } from '~/utils/timezone'
+import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { bookingPolicy, formatBookingPolicySummary } from '~/server/utils/booking-policy-summary'
 import { readTimedBookingPrice } from '~/server/domain/bookings'
 import { isCurrencyCode } from '~/shared/currencies'
@@ -35,7 +36,7 @@ import { accountActivityPath } from '~/shared/account-activity'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
 import { formAnswerSnapshotsSchema, formAnswersFingerprint } from '~/shared/form-questions'
 import type { ProductKind } from '~/shared/product-details'
-import type { MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assignedMemberSql, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
 
 export interface BookingCreationContext {
   organizationId: string
@@ -596,4 +597,67 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
   // The held nights close on the home's channel now, not when the payment lands.
   await pushStayHoldNights(db, env, organizationId, home.product_id, stay.check_in_date, stay.check_out_date)
   return { body: { success: true, status: 'checkout', replayed: Boolean(retrying), ...checkout }, status: retrying ? 200 : 201 }
+}
+
+/** One booked record as `bookedRecordsInRange` reads it, with what was paid and whether the viewer has a seat in its guest conversation. */
+export interface BookedRecordInRange {
+  id: string
+  status: 'pending' | 'confirmed'
+  unit: 'slot' | 'nights'
+  product_id: string
+  product_kind: ProductKind
+  /** A home's own name (internal), an offering's name. */
+  product_name: string
+  product_session_id: string | null
+  location_id: string | null
+  location_title: string | null
+  starts_at: string
+  ends_at: string
+  timezone: string
+  party_size: number
+  guest_name: string | null
+  owner: 'app' | 'channel'
+  channel: 'airbnb' | 'vrbo' | 'booking_com' | 'direct'
+  total_minor: number | null
+  currency: string | null
+  /** Recorded payments and captured online payments, net of refunds, in the booking's currency. */
+  paid_minor: number
+  /** The offering's responsible member. */
+  assigned_member_id: string | null
+  conversation_id: string | null
+  /** 1 when the viewer sits in the booking's guest conversation and so can open it. */
+  viewer_seated: number
+}
+
+/**
+ * The booked records a viewer hosts that overlap local days `from`..`to`, as
+ * one statement for the caller's batch: an owner or admin hosts every one, a
+ * member the slot bookings of the offerings they are named on. Instants are
+ * read a day wider either side, because each record's day is its own zone's;
+ * the caller keeps the days it shows. `pending` adds every request still
+ * waiting for a decision that has not ended. Today reads it; Agenda and the
+ * host Calendar read the same rows.
+ */
+export function bookedRecordsInRange(viewer: ViewerTerms, range: { from: string; to: string; pending?: boolean }): BatchQuery {
+  const wideFrom = `${addLocalDays(range.from, -1)}T00:00:00.000Z`, wideTo = `${addLocalDays(range.to, 1)}T23:59:59.999Z`
+  return {
+    query: `SELECT b.id, b.status, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit, b.product_id, p.kind AS product_kind,
+        COALESCE(sc.internal_name, p.name) AS product_name, b.product_session_id, COALESCE(b.location_id, sc.location_id) AS location_id, l.title AS location_title,
+        b.starts_at, b.ends_at, b.timezone, b.party_size, json_extract(r.payload_json, '$.guest.name') AS guest_name, b.owner, b.channel, b.total_minor, b.currency,
+        (SELECT COALESCE(SUM(o.amount_minor), 0) FROM offline_payments o WHERE o.organization_id = b.organization_id AND o.booking_id = b.id)
+          + (SELECT COALESCE(SUM(pay.captured_amount - pay.refunded_amount), 0) FROM payments pay WHERE pay.organization_id = b.organization_id AND pay.subject_type = 'booking' AND pay.subject_id = b.id) AS paid_minor,
+        c.assigned_member_id, r.id AS conversation_id,
+        EXISTS (SELECT 1 FROM conversation_participants seat WHERE seat.conversation_id = r.id AND seat.user_id = ${viewer.user} AND seat.role = 'member') AS viewer_seated
+      FROM bookings b
+      JOIN products p ON p.organization_id = b.organization_id AND p.id = b.product_id
+      LEFT JOIN product_booking_configs c ON c.organization_id = b.organization_id AND c.product_id = b.product_id
+      LEFT JOIN product_stay_configs sc ON b.product_session_id IS NULL AND sc.organization_id = b.organization_id AND sc.product_id = b.product_id
+      LEFT JOIN business_locations l ON l.organization_id = b.organization_id AND l.id = COALESCE(b.location_id, sc.location_id)
+      LEFT JOIN conversations r ON r.organization_id = b.organization_id AND r.booking_id = b.id AND r.kind = 'booking'
+     WHERE b.organization_id = ${viewer.organization} AND b.status <> 'cancelled'
+       AND ((b.starts_at <= ? AND b.ends_at >= ?)${range.pending ? " OR (b.status = 'pending' AND b.ends_at >= ?)" : ''})
+       AND (${viewer.organizationWide} = 1 OR (b.product_session_id IS NOT NULL AND ${assignedMemberSql('c', viewer.user)}))
+     ORDER BY b.starts_at, b.id`,
+    params: [wideTo, wideFrom, ...(range.pending ? [wideFrom] : [])],
+  }
 }

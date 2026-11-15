@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:82a149715e88af3717ed2b1ab818987628b7727486364da6f1f6c4eb3c8c1954",
-  "documentationFingerprint": "sha256:b3003517127814e883877971bd3c42a9cd9be9e8997b46e2f007a9acb6abbc60",
+  "fingerprint": "sha256:7a77eab050ce79cdbc47bda9bae71094ff42ea6c5228fec2a2d3f8fd70066d0d",
+  "documentationFingerprint": "sha256:0e923fb123bdbfe6002aa37bb8ce34e999eff9b7d6e24011f950b1ca87396874",
   "tools": [
     {
       "name": "add_organization_language",
@@ -13230,36 +13230,10 @@
     {
       "name": "complete_task",
       "title": "Complete task",
-      "description": "Mark a task done, with what you found and an optional photo. Fix failed scheduled messages from their conversation.",
+      "description": "Mark a task done. Say what you found, with photos, in its conversation with send_message. Fix failed scheduled messages from their conversation.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "file": {
-            "description": "Optional photo of the finished work.",
-            "properties": {
-              "download_url": {
-                "type": "string"
-              },
-              "file_id": {
-                "type": "string"
-              },
-              "file_name": {
-                "type": "string"
-              },
-              "mime_type": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "download_url",
-              "file_id"
-            ],
-            "type": "object"
-          },
-          "note": {
-            "maxLength": 5000,
-            "type": "string"
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
@@ -13325,12 +13299,6 @@
                   }
                 ]
               },
-              "avatar": {
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
               "booking_id": {
                 "type": [
                   "string",
@@ -13388,13 +13356,6 @@
                   "null"
                 ]
               },
-              "face": {
-                "enum": [
-                  "photo",
-                  "compact"
-                ],
-                "type": "string"
-              },
               "id": {
                 "type": "string"
               },
@@ -13423,21 +13384,9 @@
                   "null"
                 ]
               },
-              "note": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "notes": {
                 "type": [
                   "string",
-                  "null"
-                ]
-              },
-              "outcome": {
-                "type": [
-                  "object",
                   "null"
                 ]
               },
@@ -13493,67 +13442,26 @@
               "product_session_id": {
                 "type": "string"
               },
-              "reservation": {
+              "sheet": {
                 "properties": {
-                  "conversation": {
-                    "anyOf": [
-                      {
-                        "properties": {
-                          "description": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "label": {
-                            "type": "string"
-                          },
-                          "to": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "label",
-                          "description",
-                          "to"
-                        ],
-                        "type": "object"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "date_label": {
-                    "type": "string"
-                  },
-                  "guest_image_url": {
+                  "date": {
                     "type": [
                       "string",
                       "null"
                     ]
                   },
-                  "headline": {
+                  "heading": {
                     "type": "string"
                   },
-                  "name": {
-                    "type": "string"
-                  },
-                  "status_label": {
+                  "title": {
                     "type": "string"
                   }
                 },
                 "required": [
-                  "date_label",
-                  "headline",
-                  "name",
-                  "status_label",
-                  "guest_image_url",
-                  "conversation"
+                  "heading",
+                  "title",
+                  "date"
                 ],
-                "type": "object"
-              },
-              "sheet": {
                 "type": "object"
               },
               "starts_at": {
@@ -13572,12 +13480,6 @@
                 "type": "string"
               },
               "status_line": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "tag": {
                 "type": [
                   "string",
                   "null"
@@ -13604,16 +13506,12 @@
               "kind",
               "status",
               "version",
-              "face",
-              "tag",
               "image_url",
-              "avatar",
               "status_line",
               "title",
               "when",
               "detail",
               "error",
-              "note",
               "person",
               "assignee",
               "sheet",
@@ -13621,7 +13519,6 @@
               "due_at",
               "timezone",
               "notes",
-              "outcome",
               "action",
               "path",
               "product_id",
@@ -13655,9 +13552,7 @@
       "domain": "tasks",
       "minimumRole": "member",
       "requiredEntitlement": null,
-      "fileParams": [
-        "file"
-      ],
+      "fileParams": [],
       "uiResourceUri": null
     },
     {
@@ -37331,12 +37226,6 @@
                   }
                 ]
               },
-              "avatar": {
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
               "booking_id": {
                 "type": [
                   "string",
@@ -37394,13 +37283,6 @@
                   "null"
                 ]
               },
-              "face": {
-                "enum": [
-                  "photo",
-                  "compact"
-                ],
-                "type": "string"
-              },
               "id": {
                 "type": "string"
               },
@@ -37429,21 +37311,9 @@
                   "null"
                 ]
               },
-              "note": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "notes": {
                 "type": [
                   "string",
-                  "null"
-                ]
-              },
-              "outcome": {
-                "type": [
-                  "object",
                   "null"
                 ]
               },
@@ -37499,67 +37369,26 @@
               "product_session_id": {
                 "type": "string"
               },
-              "reservation": {
+              "sheet": {
                 "properties": {
-                  "conversation": {
-                    "anyOf": [
-                      {
-                        "properties": {
-                          "description": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "label": {
-                            "type": "string"
-                          },
-                          "to": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "label",
-                          "description",
-                          "to"
-                        ],
-                        "type": "object"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "date_label": {
-                    "type": "string"
-                  },
-                  "guest_image_url": {
+                  "date": {
                     "type": [
                       "string",
                       "null"
                     ]
                   },
-                  "headline": {
+                  "heading": {
                     "type": "string"
                   },
-                  "name": {
-                    "type": "string"
-                  },
-                  "status_label": {
+                  "title": {
                     "type": "string"
                   }
                 },
                 "required": [
-                  "date_label",
-                  "headline",
-                  "name",
-                  "status_label",
-                  "guest_image_url",
-                  "conversation"
+                  "heading",
+                  "title",
+                  "date"
                 ],
-                "type": "object"
-              },
-              "sheet": {
                 "type": "object"
               },
               "starts_at": {
@@ -37578,12 +37407,6 @@
                 "type": "string"
               },
               "status_line": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "tag": {
                 "type": [
                   "string",
                   "null"
@@ -37610,16 +37433,12 @@
               "kind",
               "status",
               "version",
-              "face",
-              "tag",
               "image_url",
-              "avatar",
               "status_line",
               "title",
               "when",
               "detail",
               "error",
-              "note",
               "person",
               "assignee",
               "sheet",
@@ -37627,7 +37446,6 @@
               "due_at",
               "timezone",
               "notes",
-              "outcome",
               "action",
               "path",
               "product_id",
@@ -70523,12 +70341,6 @@
                           }
                         ]
                       },
-                      "avatar": {
-                        "type": [
-                          "object",
-                          "null"
-                        ]
-                      },
                       "booking_id": {
                         "type": [
                           "string",
@@ -70586,13 +70398,6 @@
                           "null"
                         ]
                       },
-                      "face": {
-                        "enum": [
-                          "photo",
-                          "compact"
-                        ],
-                        "type": "string"
-                      },
                       "id": {
                         "type": "string"
                       },
@@ -70621,21 +70426,9 @@
                           "null"
                         ]
                       },
-                      "note": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
                       "notes": {
                         "type": [
                           "string",
-                          "null"
-                        ]
-                      },
-                      "outcome": {
-                        "type": [
-                          "object",
                           "null"
                         ]
                       },
@@ -70691,67 +70484,26 @@
                       "product_session_id": {
                         "type": "string"
                       },
-                      "reservation": {
+                      "sheet": {
                         "properties": {
-                          "conversation": {
-                            "anyOf": [
-                              {
-                                "properties": {
-                                  "description": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "label": {
-                                    "type": "string"
-                                  },
-                                  "to": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "label",
-                                  "description",
-                                  "to"
-                                ],
-                                "type": "object"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "date_label": {
-                            "type": "string"
-                          },
-                          "guest_image_url": {
+                          "date": {
                             "type": [
                               "string",
                               "null"
                             ]
                           },
-                          "headline": {
+                          "heading": {
                             "type": "string"
                           },
-                          "name": {
-                            "type": "string"
-                          },
-                          "status_label": {
+                          "title": {
                             "type": "string"
                           }
                         },
                         "required": [
-                          "date_label",
-                          "headline",
-                          "name",
-                          "status_label",
-                          "guest_image_url",
-                          "conversation"
+                          "heading",
+                          "title",
+                          "date"
                         ],
-                        "type": "object"
-                      },
-                      "sheet": {
                         "type": "object"
                       },
                       "starts_at": {
@@ -70770,12 +70522,6 @@
                         "type": "string"
                       },
                       "status_line": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "tag": {
                         "type": [
                           "string",
                           "null"
@@ -70802,16 +70548,12 @@
                       "kind",
                       "status",
                       "version",
-                      "face",
-                      "tag",
                       "image_url",
-                      "avatar",
                       "status_line",
                       "title",
                       "when",
                       "detail",
                       "error",
-                      "note",
                       "person",
                       "assignee",
                       "sheet",
@@ -70819,7 +70561,6 @@
                       "due_at",
                       "timezone",
                       "notes",
-                      "outcome",
                       "action",
                       "path",
                       "product_id",
@@ -101091,14 +100832,10 @@
     {
       "name": "skip_task",
       "title": "Skip task",
-      "description": "Skip or dismiss a task, optionally saying why.",
+      "description": "Skip or dismiss a task. Say why in its conversation with send_message.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "note": {
-            "maxLength": 5000,
-            "type": "string"
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
@@ -101164,12 +100901,6 @@
                   }
                 ]
               },
-              "avatar": {
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
               "booking_id": {
                 "type": [
                   "string",
@@ -101227,13 +100958,6 @@
                   "null"
                 ]
               },
-              "face": {
-                "enum": [
-                  "photo",
-                  "compact"
-                ],
-                "type": "string"
-              },
               "id": {
                 "type": "string"
               },
@@ -101262,21 +100986,9 @@
                   "null"
                 ]
               },
-              "note": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "notes": {
                 "type": [
                   "string",
-                  "null"
-                ]
-              },
-              "outcome": {
-                "type": [
-                  "object",
                   "null"
                 ]
               },
@@ -101332,67 +101044,26 @@
               "product_session_id": {
                 "type": "string"
               },
-              "reservation": {
+              "sheet": {
                 "properties": {
-                  "conversation": {
-                    "anyOf": [
-                      {
-                        "properties": {
-                          "description": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "label": {
-                            "type": "string"
-                          },
-                          "to": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "label",
-                          "description",
-                          "to"
-                        ],
-                        "type": "object"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "date_label": {
-                    "type": "string"
-                  },
-                  "guest_image_url": {
+                  "date": {
                     "type": [
                       "string",
                       "null"
                     ]
                   },
-                  "headline": {
+                  "heading": {
                     "type": "string"
                   },
-                  "name": {
-                    "type": "string"
-                  },
-                  "status_label": {
+                  "title": {
                     "type": "string"
                   }
                 },
                 "required": [
-                  "date_label",
-                  "headline",
-                  "name",
-                  "status_label",
-                  "guest_image_url",
-                  "conversation"
+                  "heading",
+                  "title",
+                  "date"
                 ],
-                "type": "object"
-              },
-              "sheet": {
                 "type": "object"
               },
               "starts_at": {
@@ -101411,12 +101082,6 @@
                 "type": "string"
               },
               "status_line": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "tag": {
                 "type": [
                   "string",
                   "null"
@@ -101443,16 +101108,12 @@
               "kind",
               "status",
               "version",
-              "face",
-              "tag",
               "image_url",
-              "avatar",
               "status_line",
               "title",
               "when",
               "detail",
               "error",
-              "note",
               "person",
               "assignee",
               "sheet",
@@ -101460,7 +101121,6 @@
               "due_at",
               "timezone",
               "notes",
-              "outcome",
               "action",
               "path",
               "product_id",
@@ -125927,12 +125587,6 @@
                   }
                 ]
               },
-              "avatar": {
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
               "booking_id": {
                 "type": [
                   "string",
@@ -125990,13 +125644,6 @@
                   "null"
                 ]
               },
-              "face": {
-                "enum": [
-                  "photo",
-                  "compact"
-                ],
-                "type": "string"
-              },
               "id": {
                 "type": "string"
               },
@@ -126025,21 +125672,9 @@
                   "null"
                 ]
               },
-              "note": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "notes": {
                 "type": [
                   "string",
-                  "null"
-                ]
-              },
-              "outcome": {
-                "type": [
-                  "object",
                   "null"
                 ]
               },
@@ -126095,67 +125730,26 @@
               "product_session_id": {
                 "type": "string"
               },
-              "reservation": {
+              "sheet": {
                 "properties": {
-                  "conversation": {
-                    "anyOf": [
-                      {
-                        "properties": {
-                          "description": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "label": {
-                            "type": "string"
-                          },
-                          "to": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "label",
-                          "description",
-                          "to"
-                        ],
-                        "type": "object"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "date_label": {
-                    "type": "string"
-                  },
-                  "guest_image_url": {
+                  "date": {
                     "type": [
                       "string",
                       "null"
                     ]
                   },
-                  "headline": {
+                  "heading": {
                     "type": "string"
                   },
-                  "name": {
-                    "type": "string"
-                  },
-                  "status_label": {
+                  "title": {
                     "type": "string"
                   }
                 },
                 "required": [
-                  "date_label",
-                  "headline",
-                  "name",
-                  "status_label",
-                  "guest_image_url",
-                  "conversation"
+                  "heading",
+                  "title",
+                  "date"
                 ],
-                "type": "object"
-              },
-              "sheet": {
                 "type": "object"
               },
               "starts_at": {
@@ -126174,12 +125768,6 @@
                 "type": "string"
               },
               "status_line": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "tag": {
                 "type": [
                   "string",
                   "null"
@@ -126206,16 +125794,12 @@
               "kind",
               "status",
               "version",
-              "face",
-              "tag",
               "image_url",
-              "avatar",
               "status_line",
               "title",
               "when",
               "detail",
               "error",
-              "note",
               "person",
               "assignee",
               "sheet",
@@ -126223,7 +125807,6 @@
               "due_at",
               "timezone",
               "notes",
-              "outcome",
               "action",
               "path",
               "product_id",

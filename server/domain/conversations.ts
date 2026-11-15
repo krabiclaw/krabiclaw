@@ -366,7 +366,7 @@ export async function appendMessage(db: DbClient, input: MessageInput, additions
           ON CONFLICT(id) DO NOTHING`,
         params: [receipt.id, receipt.channel, receipt.provider, receipt.purpose, now, now, id],
       }] : [],
-      ...send && media ? media.messagePhotoPlacements(send.organizationId, 'message', id, assetIds, now) : [],
+      ...send && media ? media.messagePhotoPlacements(send.organizationId, id, assetIds, now) : [],
       ...extra,
       { query: 'SELECT * FROM messages WHERE dedupe_key = ?', params: [dedupeKey] },
     ], { operation: 'Write message' })

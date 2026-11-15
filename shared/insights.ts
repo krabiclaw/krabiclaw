@@ -82,16 +82,15 @@ export function pageKinds(page: InsightsPageDefinition, kind: InsightsKindFilter
 }
 
 /**
- * Whether a page belongs to a business booking `booked`, under the kind filter.
- * All shows the numbers every kind shares and hides a page that describes only
- * some of them; a kind shows its own pages. A business that books nothing has
- * only its reviews, its website and its marketing.
+ * Whether a page belongs to a business booking `booked`: a page about one kind
+ * (occupancy is homes') is listed whenever the business books that kind, and
+ * reads that kind alone. A business that books nothing has only its reviews,
+ * its website and its marketing.
  */
-export function pageShown(page: InsightsPageDefinition, booked: readonly InsightsKind[], kind: InsightsKindFilter): boolean {
+export function pageShown(page: InsightsPageDefinition, booked: readonly InsightsKind[]): boolean {
   if (page.kinds === null) return true
   const kinds: readonly InsightsKind[] = page.kinds
-  if (kind !== 'all') return booked.includes(kind) && kinds.includes(kind)
-  return booked.length > 0 && booked.every(candidate => kinds.includes(candidate))
+  return booked.some(candidate => kinds.includes(candidate))
 }
 
 /** The kinds a filter covers for wording: the chosen one, or every kind booked. */

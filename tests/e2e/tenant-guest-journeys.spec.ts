@@ -9,6 +9,7 @@ import { seededTables } from './helpers/tables'
 import type { Product, PublicProduct } from '../../server/types/products'
 import type { ConversationPage } from '../../shared/messages-contract'
 import type { TaskSection } from '../../server/domain/tasks'
+import type { BusinessToday } from '../../shared/dashboard-today'
 
 type DeliveryRow = { conversation_id: string; channel: 'email' | 'whatsapp'; purpose: string; status: string }
 type NotificationState = { deliveries: DeliveryRow[] }
@@ -331,8 +332,8 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect(entries.filter(entry => entry.type === 'event' && / canceled the booking$/.test(entry.text))).toHaveLength(1)
     const todayAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(todayAfter.status(), await todayAfter.text()).toBe(200)
-    const todayAfterPayload = await todayAfter.json() as { tasks: TaskSection[] }
-    expect(todayAfterPayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id && task.status === 'open')).toEqual([])
+    const todayAfterPayload = await todayAfter.json() as BusinessToday
+    expect(todayAfterPayload.cards.filter(card => card.to.endsWith(`/messages/${body.conversation_id}`))).toEqual([])
     const scheduleAfter = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
     expect(scheduleAfter.status(), await scheduleAfter.text()).toBe(200)
     expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.conversation_id}`)).toBe(false)

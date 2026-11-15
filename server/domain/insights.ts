@@ -138,7 +138,8 @@ export async function readInsightsPage(db: DbClient, reader: InsightsReader, pag
   const read = await PAGE_READS[id](context)
   return insightsPageSchema.parse({
     page: id,
-    title: pageTitle(id, context.booked, kind),
+    // A page is titled in the words of the kinds it is about: Bookings of experiences are Bookings beside homes.
+    title: pageTitle(id, context.booked.filter(booked => !definition.kinds || (definition.kinds as readonly string[]).includes(booked)), kind),
     section: sectionTitle(definition.section, context.booked, kind),
     subtitle: read.subtitle ?? null,
     period: { start_date: range.startDate, end_date: range.endDate, timezone: reader.timezone },
@@ -301,7 +302,7 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
     const bookings = rows!.map(bookingRow).filter(inRange(context))
     const day = days(context.dates)
     const confirmed = (group: BookingRow[]) => group.filter(row => row.status === 'confirmed').length
-    const title = pageTitle('rates/bookings', context.booked, context.kind)
+    const title = pageTitle('rates/bookings', context.booked.filter(booked => booked !== 'stay'), context.kind)
     return {
       metrics: [
         { key: 'confirmed', label: title, format: 'count', value: confirmed(bookings), daily: day.each(bookings, startDay, confirmed) },

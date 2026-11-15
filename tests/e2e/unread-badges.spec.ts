@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Request } from '@playwright/test'
 import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import type { InboxRow } from '../../server/domain/guest-threads/types'
-import type { TaskSection } from '../../server/domain/tasks'
+import type { BusinessToday } from '../../shared/dashboard-today'
 import { openTenantPage } from './helpers'
 import { acceptOrganizationInvitation, authRequestHeaders, loginAs, sendOrganizationInvitation } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
@@ -217,8 +217,8 @@ test('a new booking, its cancellation and a guest message are unread until read,
     for (const range of ['today', 'upcoming']) {
       const feed = await owner.get('/api/dashboard/today', { params: { org: restaurant.slug, range } })
       expect(feed.status(), await feed.text()).toBe(200)
-      const { tasks } = await feed.json() as { tasks: TaskSection[] }
-      expect(tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === threadId)).toEqual([])
+      const { cards } = await feed.json() as BusinessToday
+      expect(cards.filter(card => card.to.endsWith(`/messages/${threadId}`))).toEqual([])
     }
     const dashboardNav = page.getByTestId('dashboard-top-nav')
     const calendar = dashboardNav.getByRole('link', { name: 'Calendar', exact: true })
