@@ -779,8 +779,8 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   update_home_accessibility: { ...D, openWorldHint: true },
   delete_home_room: { ...D, openWorldHint: true },
   assign_home_photos_to_room: { ...D, openWorldHint: true },
-  // Creation also plans guest sends and updates connected availability.
-  record_stay_payment: { ...W, idempotentHint: true },
+  // Overwrites the stay's paid amount and payment status.
+  record_stay_payment: { ...D, idempotentHint: true },
   delete_stay_payment: D,
   // A percent price change compounds when repeated, so the tool is not idempotent.
   set_stay_nights: { ...D, openWorldHint: true, idempotentHint: false },
@@ -905,11 +905,12 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   list_google_ads_campaigns: R,
   get_google_ads_campaign: R,
   query_google_ads_report: R,
-  create_google_ads_search_campaign: { ...W, openWorldHint: true },
+  // Ad copy sent to the provider's ad review cannot be recalled.
+  create_google_ads_search_campaign: { ...D, openWorldHint: true },
   update_google_ads_campaign: { ...D, openWorldHint: true },
   list_meta_ads_campaigns: R,
   query_meta_ads_report: R,
-  create_meta_ads_campaign: { ...W, openWorldHint: true },
+  create_meta_ads_campaign: { ...D, openWorldHint: true },
   update_meta_ads_campaign: { ...D, openWorldHint: true },
   list_tasks: R,
   // Tells the assignee by their own notification settings.
