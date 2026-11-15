@@ -1,15 +1,16 @@
 import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
-import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery } from '~/server/db'
+import { d1JsonStringSet, executeBatch, queryAll, queryFirst } from '~/server/db'
 import { dashboardOrgQueryParam, getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
-import { assignedMemberSql, joinedMemberPrincipal, memberAccessPrincipal } from '~/server/utils/member-access'
+import { assignedMemberSql, BATCH_VIEWER, joinedMemberPrincipal, memberAccessPrincipal, membershipBySlugQuery, withViewer } from '~/server/utils/member-access'
+import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
 import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
-import { getStay, listStays, readStayCalendar, readStayCalendars, stayAccessFor, type StayAccess, type StayHome } from '~/server/domain/stays'
+import { getStay, listStays, readStayCalendar, readStayCalendars, stayAccessFor, type StayHome } from '~/server/domain/stays'
 import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
 import { loadDashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
@@ -95,33 +96,19 @@ function bookingListWindow(query: BookingListQuery) {
 type BookingWindow = ReturnType<typeof bookingListWindow>
 type DashboardBookingsContext = Awaited<ReturnType<typeof dashboardBookingsContext>>
 
-type TimedBookingRow = { booking_id: string; unit: 'slot'; product_id: string; product_kind: 'table' | 'service' | 'experience'; name: string; location_title: string | null; guest_name: string | null; status: string; starts_at: string; ends_at: string; timezone: string }
-
-/** The timed bookings that can start on a day of the window, each saying whether the reader is assigned to it. */
-function timedBookingsQuery(organization: BatchQuery, userId: string, { productId, from, to, includeCancelled }: BookingWindow): BatchQuery {
-  return { query: `
-    SELECT b.id AS booking_id, b.unit, b.product_id, b.product_kind, b.product_name AS name, l.title AS location_title,
-           json_extract(c.payload_json, '$.guest.name') AS guest_name, b.status, b.starts_at, b.ends_at, b.timezone, ${assignedMemberSql('b')} AS assigned
-      FROM ${BOOKING_RECORDS_SQL} b JOIN conversations c ON c.booking_id=b.id AND c.organization_id=b.organization_id AND c.kind='booking'
-      LEFT JOIN business_locations l ON l.id=b.location_id AND l.organization_id=b.organization_id
-      WHERE b.organization_id = ${organization.query} AND b.unit = 'slot' AND b.starts_at >= ? AND b.starts_at < ?
-        AND (? IS NULL OR b.product_id = ?)
-        ${includeCancelled ? '' : "AND b.status <> 'cancelled'"}
-      ORDER BY b.starts_at, b.id`,
-  params: [userId, ...organization.params!, addLocalDays(from, -1), addLocalDays(to, 1), productId ?? null, productId ?? null] }
-}
-
-/** The rows the reader may see whose local day is in the window. */
-function timedBookingsOf(rows: Array<TimedBookingRow & { assigned: number }>, access: StayAccess, { from, to }: BookingWindow): TimedBookingRow[] {
-  return rows.flatMap(({ assigned, ...row }) => {
-    const day = localDateAt(new Date(row.starts_at), row.timezone)
-    return day >= from && day < to && (access.manage || assigned) ? [row] : []
+/** A visit's booking as the bookings list and the host Calendar show it, from the one read of booked records. */
+function timedBookings(records: BookedRecordInRange[], { productId, from, to }: BookingWindow) {
+  return records.flatMap((record) => {
+    const day = localDateAt(new Date(record.starts_at), record.timezone)
+    if (record.unit !== 'slot' || day < from || day >= to || (productId && record.product_id !== productId)) return []
+    const { id, unit, product_id, product_kind, product_name, location_title, guest_name, status, starts_at, ends_at, timezone } = record
+    return [{ booking_id: id, unit, product_id, product_kind, name: product_name, location_title, guest_name, status, starts_at, ends_at, timezone }]
   })
 }
 
-async function listTimedBookings({ db, access, organization, userId }: DashboardBookingsContext, window: BookingWindow) {
-  const query = timedBookingsQuery({ query: '?', params: [organization.id] }, userId, window)
-  return timedBookingsOf(await queryAll<TimedBookingRow & { assigned: number }>(db, query.query, query.params), access, window)
+async function listTimedBookings({ db, organization, userId }: DashboardBookingsContext, window: BookingWindow) {
+  const [records] = await executeBatch(db, [withViewer(membershipBySlugQuery(organization.slug, userId), bookedRecordsInRange(BATCH_VIEWER, { ...window, cancelled: window.includeCancelled }))], { operation: 'Read timed bookings' })
+  return timedBookings(records!.results as BookedRecordInRange[], window)
 }
 
 export async function dashboardBookingList(event: H3Event, query: BookingListQuery) {
@@ -159,17 +146,18 @@ async function dashboardPlacesCalendar(event: H3Event, window: BookingWindow) {
   const userId = session.user.id
   const organization = { query: '(SELECT id FROM organization WHERE slug = ?)', params: [slug] }
   const days = placesWindow(window)
-  const [membership, timed, ...places] = await executeBatch(env.DB, [
-    { query: 'SELECT o.id AS organizationId, m.id AS memberId, m.role FROM organization o JOIN member m ON m.organizationId = o.id AND m.userId = ? WHERE o.slug = ?', params: [userId, slug] },
-    timedBookingsQuery(organization, userId, window),
+  const membership = membershipBySlugQuery(slug, userId)
+  const [memberResult, records, ...places] = await executeBatch(env.DB, [
+    membership,
+    withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, window)),
     ...placesCalendarQueries(organization, userId, days),
   ], { operation: 'Read host calendar' })
-  const member = membership?.results[0] as { organizationId: string; memberId: string; role: string } | undefined
+  const member = memberResult?.results[0] as { organization_id: string; member_id: string; role: string } | undefined
   if (!member) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
-  const principal = joinedMemberPrincipal({ ...member, userId }, { env, event })
-  const access = await stayAccessFor(principal)
+  const principal = joinedMemberPrincipal({ organizationId: member.organization_id, memberId: member.member_id, role: member.role, userId }, { env, event })
+  await stayAccessFor(principal)
   const calendar = await placesCalendarOf(principal, days, places)
-  return { from: window.from, to: window.to, bookings: timedBookingsOf(timed!.results as Array<TimedBookingRow & { assigned: number }>, access, window), homes: [], places: calendar.places, manage: calendar.manage }
+  return { from: window.from, to: window.to, bookings: timedBookings(records!.results as BookedRecordInRange[], window), homes: [], places: calendar.places, manage: calendar.manage }
 }
 
 export async function dashboardBookingCalendar(event: H3Event, query: BookingListQuery) {
