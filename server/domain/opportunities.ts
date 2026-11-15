@@ -61,22 +61,36 @@ async function authorize(principal: MemberAccessPrincipal) {
   await assertRoleAllows({ ...principal, permissions: { task: ['assign'] } })
 }
 
-/** Record only the observed evidence. A refresh cannot retire rows it did not observe. */
+/**
+ * Record only the observed evidence, in one batch with the rows it reads back and the homes their
+ * status lines name. A refresh cannot retire rows it did not observe.
+ */
 async function refreshOpportunities(db: DbClient, principal: MemberAccessPrincipal, input: { now: Date; locationId?: string }) {
   const plan = await readBusinessRecommendations(db, principal, { now: input.now, locationId: input.locationId })
-  if (plan.recommendations.length === 0) return { plan, rows: [], changed: false }
+  if (plan.recommendations.length === 0) return { plan, rows: [], homes: new Map<string, string>(), changed: false }
   const now = input.now.toISOString(), organizationId = principal.organizationId
-  const results = await executeBatch(db, plan.recommendations.map(item => ({
-    query: `INSERT INTO opportunities (id, organization_id, operation, subject_id, evidence_revision, goal_id, goal_revision, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?) ON CONFLICT DO NOTHING`,
-    params: [crypto.randomUUID(), organizationId, item.operation, item.subjectId, item.reference.evidence_revision, item.goal?.id ?? null, item.goal?.updated_at ?? null, now, now],
-  })), { operation: 'Record opportunities' })
-  const rows = await queryAll<OpportunityRow>(db, `SELECT opportunities.* FROM json_each(?) current
-    JOIN opportunities ON organization_id = ? AND status = 'open'
-      AND operation = json_extract(current.value, '$[0]') AND subject_id = json_extract(current.value, '$[1]')
-      AND evidence_revision = json_extract(current.value, '$[2]') AND goal_id IS json_extract(current.value, '$[3]')`,
-  [JSON.stringify(plan.recommendations.map(item => [item.operation, item.subjectId, item.reference.evidence_revision, item.goal?.id ?? null])), organizationId])
-  return { plan, rows, changed: results.some(result => (result.meta.changes ?? 0) > 0) }
+  const productIds = [...new Set(plan.recommendations.flatMap(item => item.productId && (item.operation === 'stay.gap' || item.operation === 'booking.welcome') ? [item.productId] : []))]
+  const results = await executeBatch(db, [
+    ...plan.recommendations.map(item => ({
+      query: `INSERT INTO opportunities (id, organization_id, operation, subject_id, evidence_revision, goal_id, goal_revision, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?) ON CONFLICT DO NOTHING`,
+      params: [crypto.randomUUID(), organizationId, item.operation, item.subjectId, item.reference.evidence_revision, item.goal?.id ?? null, item.goal?.updated_at ?? null, now, now],
+    })),
+    {
+      query: `SELECT opportunities.* FROM json_each(?) current
+        JOIN opportunities ON organization_id = ? AND status = 'open'
+          AND operation = json_extract(current.value, '$[0]') AND subject_id = json_extract(current.value, '$[1]')
+          AND evidence_revision = json_extract(current.value, '$[2]') AND goal_id IS json_extract(current.value, '$[3]')`,
+      params: [JSON.stringify(plan.recommendations.map(item => [item.operation, item.subjectId, item.reference.evidence_revision, item.goal?.id ?? null])), organizationId],
+    },
+    { query: 'SELECT id, name FROM products WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', params: [organizationId, JSON.stringify(productIds)] },
+  ], { operation: 'Record opportunities' })
+  const writes = results.slice(0, plan.recommendations.length)
+  const [rows, homes] = results.slice(plan.recommendations.length) as [D1Result<OpportunityRow>, D1Result<{ id: string; name: string }>]
+  return {
+    plan, rows: rows.results, homes: new Map(homes.results.map(product => [product.id, product.name])),
+    changed: writes.some(result => (result.meta.changes ?? 0) > 0),
+  }
 }
 
 function view(row: OpportunityRow, item: BusinessRecommendation, homes: Map<string, string>): OpportunityView {
@@ -87,12 +101,9 @@ function view(row: OpportunityRow, item: BusinessRecommendation, homes: Map<stri
 export async function listOpportunities(db: DbClient, principal: MemberAccessPrincipal, input: { now?: Date; locationId?: string } = {}): Promise<{ opportunities: OpportunityView[]; issues: string[] }> {
   await authorize(principal)
   const now = input.now ?? new Date()
-  const { plan, rows, changed } = await refreshOpportunities(db, principal, { now, locationId: input.locationId })
+  const { plan, rows, homes, changed } = await refreshOpportunities(db, principal, { now, locationId: input.locationId })
   if (changed) await publishBusinessInvalidation(principal.env as CloudflareEnv, principal.organizationId)
   const byKey = new Map(rows.filter(row => row.available_at === null || row.available_at <= now.toISOString()).map(row => [rowKey(row), row]))
-  const productIds = [...new Set(plan.recommendations.flatMap(item => item.productId && (item.operation === 'stay.gap' || item.operation === 'booking.welcome') ? [item.productId] : []))]
-  const homes = new Map((await queryAll<{ id: string; name: string }>(db, 'SELECT id, name FROM products WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))',
-    [principal.organizationId, JSON.stringify(productIds)])).map(product => [product.id, product.name]))
   return {
     opportunities: plan.recommendations.flatMap(item => {
       const row = byKey.get(recommendationKey(item))

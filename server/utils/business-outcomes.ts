@@ -262,26 +262,35 @@ async function recommendationPublications(db: DbClient, organizationId: string, 
 }
 
 /** Existing post CTA URLs associate a prepared social post with its article; only provider receipts prove distribution. */
-export async function readArticleDistribution(db: DbClient, principal: MemberAccessPrincipal, articleId: string): Promise<ArticleDistribution> {
+export async function readArticleDistributions(db: DbClient, principal: MemberAccessPrincipal, articleIds: readonly string[]): Promise<ArticleDistribution[]> {
   await assertOrganizationWideAccess(db, principal)
-  const article = await queryFirst<{ slug: string | null; metadata_json: string }>(db,
-    "SELECT slug, metadata_json FROM content_documents WHERE id = ? AND organization_id = ? AND kind = 'article' AND row_role = 'root'", [articleId, principal.organizationId])
-  if (!article) throw new HTTPError({ statusCode: 404, message: 'Article not found' })
-  const origin = await resolvePublicTenantOrigin(db, principal.env, principal.organizationId)
-  if (!origin || !article.slug) return { url: null, posts: [] }
-  const metadata = JSON.parse(article.metadata_json) as { collection?: unknown }
-  const url = new URL(tenantBlogPostPath(article.slug, articleCollectionOf(metadata.collection)), origin).toString()
-  const candidates = await queryAll<{ id: string; status: string | null; updatedAt: string; targetUrl: string }>(db,
-    `SELECT id, status, updated_at AS updatedAt, json_extract(metadata_json, '$.call_to_action.url') AS targetUrl
-      FROM content_documents WHERE organization_id = ? AND kind = 'social_post' AND row_role = 'root'
-      AND json_type(metadata_json, '$.call_to_action.url') = 'text' ORDER BY id`, [principal.organizationId])
-  const articleUrl = new URL(url)
-  const posts = candidates.filter(post => {
-    const target = new URL(post.targetUrl)
-    return target.origin === articleUrl.origin && target.pathname === articleUrl.pathname
-  }).map(({ targetUrl: _targetUrl, ...post }) => post)
-  const publications = await recommendationPublications(db, principal.organizationId, posts.map(post => post.id))
-  return { url, posts: posts.map(post => ({ ...post, publications: publications.filter(publication => publication.postId === post.id) })) }
+  if (!articleIds.length) return []
+  const [articles, origin, candidates] = await Promise.all([
+    queryAll<{ id: string; slug: string | null; metadata_json: string }>(db,
+      "SELECT id, slug, metadata_json FROM content_documents WHERE id IN (SELECT value FROM json_each(?)) AND organization_id = ? AND kind = 'article' AND row_role = 'root'",
+      [d1JsonStringSet([...articleIds]), principal.organizationId]),
+    resolvePublicTenantOrigin(db, principal.env, principal.organizationId),
+    queryAll<{ id: string; status: string | null; updatedAt: string; targetUrl: string }>(db,
+      `SELECT id, status, updated_at AS updatedAt, json_extract(metadata_json, '$.call_to_action.url') AS targetUrl
+        FROM content_documents WHERE organization_id = ? AND kind = 'social_post' AND row_role = 'root'
+        AND json_type(metadata_json, '$.call_to_action.url') = 'text' ORDER BY id`, [principal.organizationId]),
+  ])
+  const linked = articleIds.map((articleId) => {
+    const article = articles.find(row => row.id === articleId)
+    if (!article) throw new HTTPError({ statusCode: 404, message: 'Article not found' })
+    if (!origin || !article.slug) return { url: null, posts: [] }
+    const metadata = JSON.parse(article.metadata_json) as { collection?: unknown }
+    const url = new URL(tenantBlogPostPath(article.slug, articleCollectionOf(metadata.collection)), origin)
+    return {
+      url: url.toString(),
+      posts: candidates.filter(post => {
+        const target = new URL(post.targetUrl)
+        return target.origin === url.origin && target.pathname === url.pathname
+      }).map(({ targetUrl: _targetUrl, ...post }) => post),
+    }
+  })
+  const publications = await recommendationPublications(db, principal.organizationId, linked.flatMap(distribution => distribution.posts.map(post => post.id)))
+  return linked.map(({ url, posts }) => ({ url, posts: posts.map(post => ({ ...post, publications: publications.filter(publication => publication.postId === post.id) })) }))
 }
 
 /** A correction/deferral is about explicit current evidence, never a permanent suppression of a resource. */
@@ -530,7 +539,7 @@ export async function readBusinessProgressReference(
     const evidence = {
       kind: 'article' as const, status: document.status, updatedAt: document.updated_at, activityEntryId: activity?.id ?? null,
       media: media.map(item => ({ placementId: item.placement_id, assetId: item.asset_id, assetUpdatedAt: item.updated_at })),
-      ...(input.operation === 'article.distribute' ? { distribution: await readArticleDistribution(db, principal, document.id) } : {}),
+      ...(input.operation === 'article.distribute' ? { distribution: (await readArticleDistributions(db, principal, [document.id]))[0]! } : {}),
     }
     return { ...input, evidence_revision: await creationRequestHash({ operation: input.operation, document, blocks, categories, media, activityEntryId: evidence.activityEntryId, ...(evidence.distribution ? { distribution: evidence.distribution } : {}) }), evidence: progressWire(evidence) }
   }

@@ -313,22 +313,22 @@ export async function queryOrganizationAnalytics(db: DbClient, input: AnalyticsQ
   const asOf = cursor?.asOf ?? now.toISOString()
   resolved.as_of = asOf
 
-  const coverage = await coverageFor(db, input.organizationId, { start, end, now, analyticsDataStartAt: context.analyticsDataStartAt, filters, basis })
+  const coverageRead = coverageFor(db, input.organizationId, { start, end, now, analyticsDataStartAt: context.analyticsDataStartAt, filters, basis })
   const issue = async (key: unknown[] | null) => key ? await encodeCursor(input.cursorSecret, { v: 1, org: input.organizationId, q: queryHash, asOf, key }) : null
 
   if (input.mode === 'daily_summaries') {
-    const result = await summariesMode(db, input, { start, end, asOf, limit, filters, cursorKey: cursor?.key ?? null, resolved }, summaryFilters!, { startDate: range.startDate, endDate: range.endDate })
+    const [coverage, result] = await Promise.all([coverageRead, summariesMode(db, input, { start, end, asOf, limit, filters, cursorKey: cursor?.key ?? null, resolved }, summaryFilters!, { startDate: range.startDate, endDate: range.endDate })])
     return { mode: 'daily_summaries', rows: result.rows, next_cursor: await issue(result.nextKey), query: resolved, totals: result.totals, coverage: { ...coverage, summary_source: result.source } }
   }
   if (input.mode === 'events') {
-    const result = await eventsMode(db, input, { start, end, asOf, limit, basis, filters, cursorKey: cursor?.key ?? null, resolved })
+    const [coverage, result] = await Promise.all([coverageRead, eventsMode(db, input, { start, end, asOf, limit, basis, filters, cursorKey: cursor?.key ?? null, resolved })])
     return { mode: 'events', rows: result.rows, next_cursor: await issue(result.nextKey), query: resolved, totals: result.totals, coverage }
   }
   if (input.mode === 'sessions') {
-    const result = await sessionsMode(db, input, { start, end, asOf, limit, filters, cursorKey: cursor?.key ?? null, resolved })
+    const [coverage, result] = await Promise.all([coverageRead, sessionsMode(db, input, { start, end, asOf, limit, filters, cursorKey: cursor?.key ?? null, resolved })])
     return { mode: 'sessions', rows: result.rows, next_cursor: await issue(result.nextKey), query: resolved, totals: result.totals, coverage }
   }
-  const result = await breakdownMode(db, input, { start, end, asOf, limit, basis, filters, cursorKey: cursor?.key ?? null, resolved, outcomeEvent })
+  const [coverage, result] = await Promise.all([coverageRead, breakdownMode(db, input, { start, end, asOf, limit, basis, filters, cursorKey: cursor?.key ?? null, resolved, outcomeEvent })])
   return { mode: 'breakdown', rows: result.rows, next_cursor: await issue(result.nextKey), query: resolved, totals: result.totals, coverage }
 }
 
@@ -624,19 +624,19 @@ async function breakdownMode(db: DbClient, input: AnalyticsQueryInput, ctx: Mode
 // ---------------------------------------------------------------------------------------------
 
 async function coverageFor(db: DbClient, organizationId: string, ctx: { start: string; end: string; now: Date; analyticsDataStartAt: string | null; filters: ResolvedFilters; basis: AttributionBasis }): Promise<Record<string, unknown>> {
-  const first = await queryFirst<Record<string, unknown>>(db, `SELECT
+  const [first, missing] = await Promise.all([queryFirst<Record<string, unknown>>(db, `SELECT
       MIN(CASE WHEN json_type(payload_json, '$.observed') IS NOT NULL THEN created_at END) AS observed_from,
       MIN(CASE WHEN json_type(payload_json, '$.source_path') IS NOT NULL THEN created_at END) AS page_identity_from,
       MIN(CASE WHEN json_type(payload_json, '$.attribution_basis') IS NOT NULL THEN created_at END) AS snapshot_from,
       MIN(CASE WHEN kind = 'pageview' THEN created_at END) AS oldest_pageview,
       MIN(CASE WHEN kind IN ('conversion', 'interaction') THEN created_at END) AS oldest_outcome
-    FROM analytics_events WHERE organization_id = ?`, [organizationId])
-  const missing = await queryFirst<Record<string, unknown>>(db, `SELECT COUNT(*) AS total,
+    FROM analytics_events WHERE organization_id = ?`, [organizationId]),
+  queryFirst<Record<string, unknown>>(db, `SELECT COUNT(*) AS total,
       COALESCE(SUM(json_type(e.payload_json, '$.observed') IS NULL), 0) AS observed,
       COALESCE(SUM(json_type(e.payload_json, '$.attribution_basis') IS NULL), 0) AS snapshot,
       COALESCE(SUM(e.kind = 'pageview' AND json_type(e.payload_json, '$.source_path') IS NULL), 0) AS page_identity,
       COALESCE(SUM(e.kind = 'pageview'), 0) AS pageviews
-    FROM analytics_events e WHERE e.organization_id = ? AND e.created_at >= ? AND e.created_at < ?`, [organizationId, ctx.start, ctx.end])
+    FROM analytics_events e WHERE e.organization_id = ? AND e.created_at >= ? AND e.created_at < ?`, [organizationId, ctx.start, ctx.end])])
   return {
     // Native events are never expired: the history is everything KrabiClaw has collected for the organization.
     event_history: {

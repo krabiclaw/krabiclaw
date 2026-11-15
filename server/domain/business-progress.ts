@@ -2,7 +2,7 @@ import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryAllPages, queryFirst, type DbClient } from '~/server/db'
 import { assertOrganizationWideAccess, assertRoleAllows, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
-import { listBusinessOutcomes, readArticleDistribution, readBookingWelcomes, readBusinessProgressReference } from '~/server/utils/business-outcomes'
+import { listBusinessOutcomes, readArticleDistributions, readBookingWelcomes, readBusinessProgressReference } from '~/server/utils/business-outcomes'
 import type { BusinessProgressOperation, BusinessProgressReference } from '~/shared/business-outcomes'
 import { businessGoalStrategySchema, createBusinessGoalSchema, updateBusinessGoalSchema, type BusinessGoal, type BusinessGoalStrategy } from '~/shared/business-progress'
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
@@ -13,13 +13,14 @@ import { listBookableSessions } from '~/server/utils/availability'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
-import { hasOrganizationEntitlement } from '~/server/utils/billing'
+import { getOrganizationEntitlements } from '~/server/utils/billing-access'
 import { readIntegration } from '~/server/utils/organization-integrations'
+import type { OrganizationIntegration } from '~/shared/organization-settings'
 import { linkedAccountAccessToken } from '~/server/utils/auth'
 import { getGoogleAdsReport } from '~/server/utils/google-ads'
 import { querySearchAnalytics } from '~/server/utils/google-search-console'
 import { getSocialConnections } from '~/server/utils/social-publication'
-import { experiencePublicationBlocker, getProduct, listOrganizationProducts, resolveVariantPrice } from '~/server/utils/product-management'
+import { experiencePublicationBlocker, listOrganizationProducts, listProducts, resolveVariantPrice } from '~/server/utils/product-management'
 import type { CurrencyCode } from '~/shared/currencies'
 import { errorChainForTelemetry } from '~/shared/error-telemetry'
 import { firstExperienceSetupProgress } from '~/server/utils/experience-setup'
@@ -157,7 +158,7 @@ interface RecommendationProduct { id: string; name: string; slug: string; kind: 
 
 /** Live provider reports have no persisted counterpart. Cache only this performance window;
  * source completion, authorization and eligibility are read again on every request. */
-async function marketingPages(db: DbClient, principal: MemberAccessPrincipal, organization: { timezone: string; analytics_data_start_at: string | null }, now: Date, useAds: boolean) {
+async function marketingPages(db: DbClient, principal: MemberAccessPrincipal, organization: { timezone: string; analytics_data_start_at: string | null }, now: Date, ads: OrganizationIntegration | null, useAds: boolean) {
   const issues: string[] = [], pages: MarketingPage[] = []
   const endDate = localDateAt(now, organization.timezone), startDate = addLocalDays(endDate, -27)
   let nativeSessions: number | null = null
@@ -185,7 +186,7 @@ async function marketingPages(db: DbClient, principal: MemberAccessPrincipal, or
   }
   for (const provider of ['google_ads', 'google_search_console'] as const) {
     if (provider === 'google_ads' && !useAds) continue
-    const integration = await readIntegration(db, principal.organizationId, provider)
+    const integration = provider === 'google_ads' ? ads : await readIntegration(db, principal.organizationId, provider)
     if (!integration) continue
     const kv = principal.env.ORGANIZATION_CACHE
     if (!kv) throw new Error('ORGANIZATION_CACHE is required for marketing performance reports')
@@ -223,18 +224,18 @@ async function marketingPages(db: DbClient, principal: MemberAccessPrincipal, or
 export async function readBusinessRecommendations(db: DbClient, principal: MemberAccessPrincipal, input: { now?: Date; locationId?: string } = {}) {
   await authorize(db, principal)
   const now = input.now ?? new Date(), organizationId = principal.organizationId
-  const organization = await queryFirst<{ slug: string; name: string; vertical: string; status: string; timezone: string; default_currency: CurrencyCode; analytics_data_start_at: string | null }>(db,
-    'SELECT slug,name,vertical,status,timezone,default_currency,analytics_data_start_at FROM organization WHERE id=?', [organizationId])
-  if (!organization) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
-  if (input.locationId && !await queryFirst(db, 'SELECT id FROM business_locations WHERE id=? AND organization_id=?', [input.locationId, organizationId])) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
-  const goals = (await queryAllPages<GoalRow>(db, "SELECT id, intent, constraints, target_at, status, strategy_json, created_by_user_id, updated_by_user_id, created_at, updated_at FROM organization_goals WHERE organization_id = ? AND status = 'active' ORDER BY updated_at DESC, id DESC", [organizationId])).map(goalOf)
-  const structured = goals.filter(goal => goal.strategy !== null)
-  // Explicit strategies prioritize their channels. They do not turn a payments goal
-  // into a marketing dead end or require a goal before a business can grow.
-  const enabled = (channel: BusinessGoalStrategy['channels'][number]) => channel !== 'google_ads' || structured.some(goal => goal.strategy!.channels.includes(channel))
-  const goalFor = (channel: BusinessGoalStrategy['channels'][number] | 'payments' | 'availability') => structured.find(goal =>
-    channel === 'payments' || channel === 'availability' ? goal.strategy![channel] === true : goal.strategy!.channels.includes(channel)) ?? null
-  const [documents, products, canWrite, canPublish, canOperate] = await Promise.all([
+  // Permissions are evaluated in memory; every read below that does not depend on another is read at once.
+  const [canWrite, canPublish, canOperate, canManagePayments, canUpdateBilling, canCreateProducts, canUpdateProducts, canReply] = await Promise.all([
+    roleAllows({ ...principal, permissions: { content: ['update'] } }), roleAllows({ ...principal, permissions: { content: ['publish'] } }),
+    roleAllows({ ...principal, permissions: { operations: ['update'] } }), roleAllows({ ...principal, permissions: { payments: ['integration'] } }),
+    roleAllows({ ...principal, permissions: { billing: ['update'] } }), roleAllows({ ...principal, permissions: { products: ['create'] } }),
+    roleAllows({ ...principal, permissions: { products: ['update'] } }), roleAllows({ ...principal, permissions: { operations: ['reply'] } }),
+  ])
+  const [organization, location, goalRows, documents, products, adsIntegration, receipts, unusedPhoto, committedDraft, welcomes] = await Promise.all([
+    queryFirst<{ slug: string; name: string; vertical: string; status: string; timezone: string; default_currency: CurrencyCode; analytics_data_start_at: string | null }>(db,
+      'SELECT slug,name,vertical,status,timezone,default_currency,analytics_data_start_at FROM organization WHERE id=?', [organizationId]),
+    input.locationId ? queryFirst(db, 'SELECT id FROM business_locations WHERE id=? AND organization_id=?', [input.locationId, organizationId]) : null,
+    queryAllPages<GoalRow>(db, "SELECT id, intent, constraints, target_at, status, strategy_json, created_by_user_id, updated_by_user_id, created_at, updated_at FROM organization_goals WHERE organization_id = ? AND status = 'active' ORDER BY updated_at DESC, id DESC", [organizationId]),
     queryAll<RecommendationDocument>(db, `SELECT id,kind,title,slug,status,location_id,updated_at,published_at FROM content_documents
       WHERE organization_id=? AND row_role='root' AND (kind='social_post' OR (kind='article' AND metadata_json->>'$.collection'='blog'))
         ${input.locationId ? 'AND location_id=?' : ''} ORDER BY created_at,id`, [organizationId, ...(input.locationId ? [input.locationId] : [])]),
@@ -242,18 +243,59 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       LEFT JOIN product_booking_configs c ON c.organization_id=p.organization_id AND c.product_id=p.id
       WHERE p.organization_id=? AND p.active=1 ${input.locationId ? 'AND EXISTS(SELECT 1 FROM product_locations l WHERE l.organization_id=p.organization_id AND l.product_id=p.id AND l.location_id=?)' : ''}
       ORDER BY p.created_at,p.id`, [organizationId, ...(input.locationId ? [input.locationId] : [])]),
-    roleAllows({ ...principal, permissions: { content: ['update'] } }), roleAllows({ ...principal, permissions: { content: ['publish'] } }),
-    roleAllows({ ...principal, permissions: { operations: ['update'] } }),
+    readIntegration(db, organizationId, 'google_ads'),
+    canWrite ? queryAll<{ post_id: string }>(db, 'SELECT post_id FROM post_publications WHERE organization_id=?', [organizationId]) : [],
+    canWrite ? queryFirst<{ id: string }>(db, `SELECT a.id FROM media_assets a WHERE a.organization_id=? AND a.kind='image' AND a.status='active' AND a.source<>'generated'
+      AND NOT EXISTS(SELECT 1 FROM media_placements branding WHERE branding.asset_id=a.id AND branding.organization_id=a.organization_id AND branding.slot IN ('logo','favicon','social_card'))
+      AND NOT EXISTS(SELECT 1 FROM media_placements m JOIN content_documents d ON d.id=m.owner_id AND d.organization_id=m.organization_id
+        WHERE m.asset_id=a.id AND m.organization_id=a.organization_id AND d.kind='social_post') ORDER BY a.created_at DESC,a.id LIMIT 1`, [organizationId]) : null,
+    input.locationId ? null : queryFirst<{ payload_json: string }>(db, "SELECT payload_json FROM onboarding_drafts WHERE organization_id=? AND status='committed' LIMIT 1", [organizationId]),
+    // A booked client who has not heard from the business since booking is sent the host's own preparation.
+    canReply ? readBookingWelcomes(db, organizationId, { now, locationId: input.locationId }) : [],
   ])
+  if (!organization) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
+  if (input.locationId && !location) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
+  const goals = goalRows.map(goalOf)
+  const structured = goals.filter(goal => goal.strategy !== null)
+  // Explicit strategies prioritize their channels. They do not turn a payments goal
+  // into a marketing dead end or require a goal before a business can grow.
+  const enabled = (channel: BusinessGoalStrategy['channels'][number]) => channel !== 'google_ads' || structured.some(goal => goal.strategy!.channels.includes(channel))
+  const goalFor = (channel: BusinessGoalStrategy['channels'][number] | 'payments' | 'availability') => structured.find(goal =>
+    channel === 'payments' || channel === 'availability' ? goal.strategy![channel] === true : goal.strategy!.channels.includes(channel)) ?? null
+  const setupDraft = organization.status !== 'suspended' && committedDraft
+  const firstRun = organization.status === 'inactive' && setupDraft
+  const paymentGoal = goalFor('payments')
+  const base = `/dashboard/${encodeURIComponent(organization.slug)}`
+  const socialEnabled = canWrite && enabled('social')
+  const entitlementsNeeded = socialEnabled || firstRun || (canOperate && !paymentGoal && organization.vertical === 'experience')
   const recommendationSessions = async (kind: 'experience' | 'service' | 'table', days: number) =>
     (await Promise.all(products.filter(product => product.kind === kind && product.online_payment_required !== null).map(product =>
       listBookableSessions(db, { env: principal.env, organizationId, productId: product.id, locationId: input.locationId,
         fromInstant: now.toISOString(), toInstant: new Date(now.getTime() + days * 86_400_000).toISOString() }),
     ))).flat().sort((a, b) => a.starts_at.localeCompare(b.starts_at))
-  const marketing = await marketingPages(db, principal, organization, now, enabled('google_ads') || Boolean(await readIntegration(db, organizationId, 'google_ads')))
+  const offeringsNeeded = canOperate && (organization.vertical === 'experience' && canUpdateProducts
+    || (paymentGoal || organization.vertical === 'experience') && products.some(product => product.online_payment_required === 0))
+  const offeringsRead = offeringsNeeded ? listProducts(db, organizationId).then(all => new Map(all.map(product => [product.id, product]))) : null
+  const [marketing, social, entitlements, offerings, experienceBlockers, gaps, sessions, customDomain] = await Promise.all([
+    marketingPages(db, principal, organization, now, adsIntegration, enabled('google_ads') || Boolean(adsIntegration)),
+    socialEnabled ? getSocialConnections(principal.env, organizationId, { dashboardBase: base }).then(connections => ({ connections, error: null }), (error: unknown) => ({ connections: null, error })) : null,
+    entitlementsNeeded ? getOrganizationEntitlements(principal.env, organizationId) : null,
+    offeringsRead,
+    organization.vertical === 'experience' && canUpdateProducts && offeringsRead
+      ? offeringsRead.then(all => Promise.all(products.filter(product => product.kind === 'experience').map(async (candidate) => {
+        const product = all.get(candidate.id)!
+        return { product, blocker: await experiencePublicationBlocker(db, organizationId, product, principal.env as CloudflareEnv) }
+      })))
+      : [],
+    canOperate && organization.vertical === 'lodging'
+      ? stayAccessFor(principal).then(access => readStayGapCandidates(db, access, { from: addLocalDays(localDateAt(now, organization.timezone), -1), to: addLocalDays(localDateAt(now, organization.timezone), 31) }))
+      : [],
+    !canOperate ? [] : organization.vertical === 'experience' || organization.vertical === 'service' ? recommendationSessions(organization.vertical, 7)
+      : organization.vertical === 'restaurant' ? recommendationSessions('table', 1) : [],
+    firstRun ? queryFirst(db, "SELECT id FROM organization_domains WHERE organization_id=? AND type='custom' AND status<>'deleted' LIMIT 1", [organizationId]) : null,
+  ])
   const issues = marketing.issues
   const marketingEvidenceUnavailable = issues.length > 0
-  const base = `/dashboard/${encodeURIComponent(organization.slug)}`
   const context = marketing.nativeSessions === null ? marketing.nativeUnavailable ? 'Website traffic measurement is currently unavailable.' : 'Website traffic measurement has not started.'
     : `${marketing.nativeSessions} recorded website sessions in the current 28-day window; this does not include off-platform customers.`
   const articles = documents.filter(document => document.kind === 'article'), drafts = articles.filter(document => document.status === 'draft')
@@ -291,16 +333,14 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       blogCreatePath(organization.slug), 40, { goal: goalFor('blog') ?? goalFor('google_ads'), productId: leading?.id ?? null, icon: 'i-lucide-file-plus' })
   }
   const adsGoal = goalFor('google_ads')
-  if (adsGoal && canOperate && !await readIntegration(db, organizationId, 'google_ads')) offer('google_ads.connect', organizationId,
+  if (adsGoal && canOperate && !adsIntegration) offer('google_ads.connect', organizationId,
     'Connect Google Ads to your marketing goal', 'Connect the existing Google Ads integration to measure which articles your ads bring customers to.',
     `${base}/integrations`, 100, { goal: adsGoal, icon: 'i-logos-google-ads' })
   let canPreparePost = false
   let socialEvidenceUnavailable = false
-  if (canWrite && enabled('social')) {
-    let connections: Awaited<ReturnType<typeof getSocialConnections>> | null = null
-    try {
-      connections = await getSocialConnections(principal.env, organizationId, { dashboardBase: base })
-    } catch (error) {
+  if (social) {
+    const { connections, error } = social
+    if (error) {
       socialEvidenceUnavailable = true
       issues.push(`Social connection status could not be read: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -312,8 +352,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       }
     }
     const connectedChannel = (['instagram', 'facebook', 'discord'] as const).find(channel => connections?.channels.some(connection => connection.channel === channel && connection.connected && connection.problems.length === 0)) ?? null
-    const entitled = await hasOrganizationEntitlement(principal.env, organizationId, 'managed_service')
-    const receipts = await queryAll<{ post_id: string }>(db, 'SELECT post_id FROM post_publications WHERE organization_id=?', [organizationId])
+    const entitled = entitlements!.managed_service === true
     const draftPosts = posts.filter(post => (post.status === 'draft' || connectedChannel && entitled) && !receipts.some(receipt => receipt.post_id === post.id))
     for (const post of draftPosts) offer('post.publish', post.id, post.title ? `Finish sharing “${post.title}”` : 'Finish your photo or social post',
       `${post.status === 'published' ? 'The website post is published; no completed social publication is recorded.' : 'Continue the post already in progress.'}${!connectedChannel && !socialEvidenceUnavailable ? ' Connect a social account to publish it there.' : ''}`,
@@ -322,8 +361,10 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       !entitled ? 'Your social marketing strategy can use connected publishing when its plan requirement is met. You can prepare content now.' : 'Connect the account where customers follow you, so posts can be published and their outcomes tracked here.',
       !entitled ? `${base}/billing` : `${base}/integrations`, 55, { goal: goalFor('social'), icon: 'i-lucide-link' })
     if (connectedChannel && entitled && canPublish) {
-      for (const article of published.slice(0, 10)) {
-        const distribution = await readArticleDistribution(db, principal, article.id)
+      const sharing = published.slice(0, 10)
+      const distributions = await readArticleDistributions(db, principal, sharing.map(article => article.id))
+      for (const [index, article] of sharing.entries()) {
+        const distribution = distributions[index]!
         if (!distribution.url) {
           issues.push(`“${article.title ?? 'Your article'}” has no public website URL. Set up its website domain before sharing it.`)
           continue
@@ -338,10 +379,6 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
           { goal: goalFor('social'), locationId: article.location_id, recency: article.published_at ?? article.updated_at, icon: 'i-lucide-share-2' })
       }
     }
-    const unusedPhoto = await queryFirst<{ id: string }>(db, `SELECT a.id FROM media_assets a WHERE a.organization_id=? AND a.kind='image' AND a.status='active' AND a.source<>'generated'
-      AND NOT EXISTS(SELECT 1 FROM media_placements branding WHERE branding.asset_id=a.id AND branding.organization_id=a.organization_id AND branding.slot IN ('logo','favicon','social_card'))
-      AND NOT EXISTS(SELECT 1 FROM media_placements m JOIN content_documents d ON d.id=m.owner_id AND d.organization_id=m.organization_id
-        WHERE m.asset_id=a.id AND m.organization_id=a.organization_id AND d.kind='social_post') ORDER BY a.created_at DESC,a.id LIMIT 1`, [organizationId])
     if (!draftPosts.length && (!socialEvidenceUnavailable || connectedChannel || !entitled || posts.length === 0)) {
       canPreparePost = Boolean(unusedPhoto || !posts.length)
       if (canPreparePost) offer('post.create', organizationId,
@@ -353,20 +390,11 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
         postEditorPath(organization.slug, 'new', input.locationId), 30, { goal: goalFor('social'), icon: 'i-lucide-camera' })
     }
   }
-  const setupDraft = !input.locationId && organization.status !== 'suspended' && await queryFirst<{ payload_json: string }>(db,
-    "SELECT payload_json FROM onboarding_drafts WHERE organization_id=? AND status='committed' LIMIT 1", [organizationId])
-  const firstRun = organization.status === 'inactive' && setupDraft
-  const canManagePayments = await roleAllows({ ...principal, permissions: { payments: ['integration'] } })
   if (firstRun) {
-    const [domain, canConnectDomain, canUpdateBilling] = await Promise.all([
-      queryFirst(db, "SELECT id FROM organization_domains WHERE organization_id=? AND type='custom' AND status<>'deleted' LIMIT 1", [organizationId]),
-      hasOrganizationEntitlement(principal.env, organizationId, 'custom_domains'),
-      roleAllows({ ...principal, permissions: { billing: ['update'] } }),
-    ])
-    if (!domain && (canConnectDomain || canUpdateBilling)) offer('domain.connect', organizationId,
+    if (!customDomain && (entitlements!.custom_domains === true || canUpdateBilling)) offer('domain.connect', organizationId,
       'Connect a custom domain', 'Use your own website address.', `${base}/website/preferences/domains`, 120, { icon: 'i-lucide-globe' })
   }
-  if (setupDraft && await roleAllows({ ...principal, permissions: { products: ['create'] } })) {
+  if (setupDraft && canCreateProducts) {
     const firstProduct = {
       lodging: ['stay', 'Add your first home', 'Start your listing.'],
       experience: ['experience', 'Add your first experience', 'Give guests something to book.'],
@@ -408,12 +436,11 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       }
     }
   }
-  const paymentGoal = goalFor('payments')
-  const canRecommendBookingPayments = canOperate && (paymentGoal || organization.vertical === 'experience' && await hasOrganizationEntitlement(principal.env, organizationId, 'payments'))
+  const canRecommendBookingPayments = canOperate && (paymentGoal || organization.vertical === 'experience' && entitlements!.payments === true)
   if (canRecommendBookingPayments || firstRun && canManagePayments) {
     const unpaid: RecommendationProduct[] = []
     for (const product of canRecommendBookingPayments ? products.filter(product => product.online_payment_required === 0) : []) {
-      const offering = await getProduct(db, organizationId, product.id)
+      const offering = offerings!.get(product.id)!
       const locations = input.locationId ? [input.locationId] : [null, ...offering.locations.map(location => location.location_id)]
       if (offering.variants.some(variant => variant.active && locations.some(locationId => {
         const price = resolveVariantPrice(variant, { currency: organization.default_currency, location_id: locationId, at: now.toISOString(), billing: { type: 'one_time' } })
@@ -436,10 +463,8 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
         productPaymentPath(organization.slug, product.id), 100, { productId: product.id, goal: paymentGoal, icon: 'i-lucide-credit-card' })
     }
   }
-  if (organization.vertical === 'experience' && await roleAllows({ ...principal, permissions: { products: ['update'] } })) {
-    for (const candidate of products.filter(product => product.kind === 'experience')) {
-      const product = await getProduct(db, organizationId, candidate.id)
-      const blocker = await experiencePublicationBlocker(db, organizationId, product, principal.env as CloudflareEnv)
+  if (organization.vertical === 'experience' && canUpdateProducts) {
+    for (const { product, blocker } of experienceBlockers) {
       if (!blocker) continue
       const editor = productEditorPath(organization.slug, product.id)
       const booking = product.booking
@@ -463,15 +488,12 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     }
   }
   if (canOperate && organization.vertical === 'lodging') {
-    const today = localDateAt(now, organization.timezone)
-    const gaps = await readStayGapCandidates(db, await stayAccessFor(principal), { from: addLocalDays(today, -1), to: addLocalDays(today, 31) })
     for (const gap of gaps.filter(gap => !input.locationId || gap.locationId === input.locationId)) offer('stay.gap', JSON.stringify([gap.productId, gap.from, gap.to]),
       `${formatCalendarRange(gap.from, gap.to, 'en-US')} is open`,
       `${nightsBetween(gap.nights)} between stays.${gap.bookable ? ' Your rules allow this length; promote it if it fits.' : ` ${gap.restriction}`}`,
       `${base}/calendar?${new URLSearchParams({ product_id: gap.productId, date: gap.from, month: gap.from.slice(0, 7) })}`, 95,
       { goal: goalFor('availability'), locationId: gap.locationId, productId: gap.productId, recency: gap.from, icon: 'i-lucide-calendar-range' })
   } else if (canOperate && (organization.vertical === 'experience' || organization.vertical === 'service')) {
-    const sessions = await recommendationSessions(organization.vertical, 7)
     const open = sessions.find(session => session.remaining !== null && session.remaining > 0 && !session.is_full)
     const product = open && products.find(product => product.id === open.product_id)
     if (open && product && canWrite && enabled('social') && canPreparePost) offer('post.create', JSON.stringify(['session', product.id, open.id]),
@@ -480,7 +502,6 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       postEditorPath(organization.slug, 'new', input.locationId), 85, { productId: product.id, goal: goalFor('social'), locationId: open.location_id, recency: open.starts_at, icon: 'i-lucide-ticket' })
   } else if (canOperate && organization.vertical === 'restaurant') {
     // Each location's tables, today in the location's own calendar: the first seating with room left.
-    const sessions = await recommendationSessions('table', 1)
     const offered = new Set<string>()
     for (const session of sessions) {
       if (!session.location_id || offered.has(session.location_id) || localDateAt(new Date(session.starts_at), session.timezone) !== localDateAt(now, session.timezone)) continue
@@ -491,14 +512,11 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
         postEditorPath(organization.slug, 'new', session.location_id), 85, { productId: session.product_id, goal: goalFor('social'), locationId: session.location_id, recency: session.starts_at, icon: 'i-lucide-camera' })
     }
   }
-  // A booked client who has not heard from the business since booking is sent the host's own preparation.
-  if (await roleAllows({ ...principal, permissions: { operations: ['reply'] } })) {
-    for (const welcome of await readBookingWelcomes(db, organizationId, { now, locationId: input.locationId })) {
-      offer('booking.welcome', welcome.requestId, welcome.kind === 'stay' ? 'Share info about your place' : 'Share how to prepare',
-        `Help ${welcome.guestFirstName ?? `your ${welcome.kind === 'stay' ? 'guest' : resolveBookingPresentation(welcome.productKind, organization.vertical).counterpartyNoun}`} get ready`,
-        guestConversationPath(organization.slug, welcome.requestId), 90,
-        { productId: welcome.productId, locationId: welcome.locationId, requestId: welcome.requestId, message: welcome.message, recency: welcome.startsAt, icon: 'i-lucide-messages-square' })
-    }
+  for (const welcome of welcomes) {
+    offer('booking.welcome', welcome.requestId, welcome.kind === 'stay' ? 'Share info about your place' : 'Share how to prepare',
+      `Help ${welcome.guestFirstName ?? `your ${welcome.kind === 'stay' ? 'guest' : resolveBookingPresentation(welcome.productKind, organization.vertical).counterpartyNoun}`} get ready`,
+      guestConversationPath(organization.slug, welcome.requestId), 90,
+      { productId: welcome.productId, locationId: welcome.locationId, requestId: welcome.requestId, message: welcome.message, recency: welcome.startsAt, icon: 'i-lucide-messages-square' })
   }
   const unique = new Map<string, Candidate>()
   for (const candidate of candidates) {
