@@ -14,7 +14,6 @@ import type { GuestThreadEntryAttachmentViewModel } from './types'
 export const MAX_MESSAGE_PHOTOS = 10
 
 /** A message in any conversation, or a task someone closed with photos. */
-export type MessageOwnerType = 'message' | 'task'
 
 /** The rules every message photo meets, however it arrived: count, size and real image type. */
 export function assertMessagePhotos(photos: MessagePhoto[]): Array<MessagePhoto & { contentType: string }> {
@@ -92,10 +91,10 @@ export async function attachGuestPhotos(
   uploader: Uploader = { source: 'external', userId: null },
 ): Promise<void> {
   if (!photos.length) return
-  if ((await listMessagePhotos(db, 'message', [entryId])).has(entryId)) return
+  if ((await listMessagePhotos(db, [entryId])).has(entryId)) return
   const assetIds = await uploadMessagePhotos(db, env, organizationId, photos, uploader)
   try {
-    await executeBatch(db, messagePhotoPlacements(organizationId, 'message', entryId, assetIds, new Date().toISOString()), { operation: 'guest message photos' })
+    await executeBatch(db, messagePhotoPlacements(organizationId, entryId, assetIds, new Date().toISOString()), { operation: 'guest message photos' })
   } catch (error) {
     let saved: {asset_id:string}[]
     try {
@@ -146,10 +145,10 @@ export async function uploadMessagePhotos(
 }
 
 /** The placements that put the photos on their message, for the batch that writes it. */
-export function messagePhotoPlacements(organizationId: string, ownerType: MessageOwnerType, messageId: string, assetIds: string[], createdAt: string): BatchQuery[] {
+export function messagePhotoPlacements(organizationId: string, messageId: string, assetIds: string[], createdAt: string): BatchQuery[] {
   return assetIds.map((assetId, sortOrder) => buildMediaPlacementInsertQuery({
     organizationId,
-    ownerType,
+    ownerType: 'message',
     ownerId: messageId,
     slot: 'attachments',
     assetId,
@@ -203,8 +202,8 @@ export function messagePhotoRowsSql(scope: string, from = '', columns = '', orde
   `
 }
 
-export function messagePhotosQuery(ownerType: MessageOwnerType, messageIds: string[]): BatchQuery {
-  return { query: messagePhotoRowsSql('mp.owner_type = ? AND mp.owner_id IN (SELECT value FROM json_each(?))'), params: [ownerType, d1JsonStringSet(messageIds)] }
+export function messagePhotosQuery(messageIds: string[]): BatchQuery {
+  return { query: messagePhotoRowsSql("mp.owner_type = 'message' AND mp.owner_id IN (SELECT value FROM json_each(?))"), params: [d1JsonStringSet(messageIds)] }
 }
 
 export function groupMessagePhotos(rows: MessagePhotoRow[]): Map<string, GuestThreadEntryAttachmentViewModel[]> {
@@ -218,8 +217,8 @@ export function groupMessagePhotos(rows: MessagePhotoRow[]): Map<string, GuestTh
 }
 
 /** Each message's photos, in the order they were sent. */
-export async function listMessagePhotos(db: DbClient, ownerType: MessageOwnerType, messageIds: string[]) {
+export async function listMessagePhotos(db: DbClient, messageIds: string[]) {
   if (!messageIds.length) return groupMessagePhotos([])
-  const { query, params } = messagePhotosQuery(ownerType, messageIds)
+  const { query, params } = messagePhotosQuery(messageIds)
   return groupMessagePhotos(await queryAll<MessagePhotoRow>(db, query, params))
 }

@@ -2,6 +2,8 @@
   <!-- Airbnb's "In this conversation": who is in it, its photos, then what can be done to it. -->
   <UModal v-model:open="open" title="In this conversation" :ui="{ content: 'max-w-lg rounded-2xl', title: 'text-2xl font-semibold' }">
     <template #body>
+      <!-- A phone's header has room for the title, Done and this sheet: the booking is opened from here. -->
+      <UButton v-if="bookingTo" :to="bookingTo" label="Show booking" icon="i-lucide-calendar-days" color="neutral" variant="outline" block class="mb-4 sm:hidden" />
       <UForm v-if="page.capabilities.can_manage_participants" :state="{ name }" class="mb-3 flex items-end gap-2" @submit="operate({ action: 'rename', name: name.trim() || null })">
         <UFormField label="Conversation name" class="flex-1">
           <UInput v-model="name" :maxlength="100" class="w-full" />
@@ -110,7 +112,7 @@ import { isConversationOperation, isThreadDetails, type ThreadDetails } from './
 import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'
 import ReportDialog from './ReportDialog.vue'
 
-const props = defineProps<{ page: ConversationPage; history: ReturnType<typeof useConversation>; onLeft: () => Promise<void> }>()
+const props = defineProps<{ page: ConversationPage; history: ReturnType<typeof useConversation>; onLeft: () => Promise<void>; bookingTo?: string | null }>()
 const emit = defineEmits<{ moved: [transition: 'archive' | 'unarchive' | 'report' | 'block' | 'unblock']; participantsChanged: [] }>()
 const threadId = computed(() => props.page.conversation.id)
 const open = defineModel<boolean>('open', { required: true })

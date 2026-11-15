@@ -64,6 +64,13 @@
       "when": 1794733451287,
       "tag": "0008_insights_counters_and_booking_source",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794740017877,
+      "tag": "0009_drop_task_outcome_note_and_photos",
+      "breakpoints": true
     }
   ]
 }

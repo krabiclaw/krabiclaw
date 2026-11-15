@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro';
 
-import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { getOrgAdapter, hasPermission } from 'better-auth/plugins'
 import { parsePhoneOrThrow } from '~/utils/phone'
 import { oncePerRequest } from '~/server/utils/request-scope'
@@ -439,6 +439,36 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, d
 }
 
 /** One predicate for a resource's assigned member; user is bound once. */
+/**
+ * The viewer as SQL terms a statement reads: an organization, a user, their
+ * member row and whether they are an owner or admin (isOrganizationWideRole).
+ * BATCH_VIEWER reads them from the `viewer` row `withViewer` puts in front of a
+ * statement, so a batch resolves the membership and its data in one round trip.
+ */
+export interface ViewerTerms { organization: string; user: string; member: string; organizationWide: string }
+export const BATCH_VIEWER: ViewerTerms = {
+  organization: '(SELECT organization_id FROM viewer)', user: '(SELECT user_id FROM viewer)',
+  member: '(SELECT member_id FROM viewer)', organizationWide: '(SELECT organization_wide FROM viewer)',
+}
+
+/** The caller's Better Auth member row in the organization a route names by slug, with the organization's own columns a page needs. No row: not a member. */
+export function membershipBySlugQuery(slug: string, userId: string): BatchQuery {
+  return {
+    query: `SELECT o.id AS organization_id, o.slug, o.vertical, m.id AS member_id, m.userId AS user_id, m.role, m.role IN ('owner', 'admin') AS organization_wide
+      FROM organization o JOIN member m ON m.organizationId = o.id AND m.userId = ? WHERE o.slug = ?`,
+    params: [userId, slug],
+  }
+}
+
+/** A statement that reads BATCH_VIEWER, with the membership row it reads in front. */
+export function withViewer(membership: BatchQuery, statement: BatchQuery): BatchQuery {
+  const query = statement.query.trimStart()
+  return {
+    query: /^WITH\s/i.test(query) ? `WITH viewer AS (${membership.query}), ${query.slice(5)}` : `WITH viewer AS (${membership.query}) ${query}`,
+    params: [...membership.params ?? [], ...statement.params ?? []],
+  }
+}
+
 export function assignedMemberSql(alias: string, userSql = '?'): string {
   return `EXISTS (SELECT 1 FROM member assigned
     WHERE assigned.id = ${alias}.assigned_member_id AND assigned.organizationId = ${alias}.organization_id AND assigned.userId = ${userSql})`

@@ -176,5 +176,10 @@
     "oldest": 1,
     "read_through": 8
   },
-  "viewer_role": "member"
+  "viewer_role": "member",
+  "work": {
+    "task_id": "00000000-0000-4000-8000-000000000012",
+    "type": "done",
+    "version": 1
+  }
 }

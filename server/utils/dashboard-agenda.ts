@@ -11,7 +11,6 @@ import { postEditorPath } from '~/server/utils/dashboard-links'
 import type { Stay } from '~/server/domain/stays'
 import { STAY_CHANNEL_LABELS, stayGuestFirstName } from '~/shared/bookings'
 import { getVerticalCopy } from '~/utils/vertical-copy'
-import { agendaToTodayReservation, UPCOMING_RESERVATION_DAYS, type TodayReservation } from '~/shared/dashboard-today'
 
 export const AGENDA_KINDS = ['booking', 'post', 'stay'] as const
 export type AgendaKind = typeof AGENDA_KINDS[number]
@@ -411,32 +410,4 @@ export async function listTodayAgenda(
 
 export function todayKeyForTimeZone(now: Date, timeZone: string): string {
   return localDateAt(now, timeZone)
-}
-
-/**
- * The business's reservations as its Today and Upcoming list them, from the
- * same agenda Calendar reads. Today is what happens today in each booking's own
- * zone, with the guests currently staying; Upcoming is what comes after today
- * within UPCOMING_RESERVATION_DAYS, a stay once, at its arrival.
- */
-export async function listTodayReservations(
-  db: DbClient,
-  organizationId: string,
-  input: { range: 'today' | 'upcoming'; vertical: string | null; organizationSlug: string; principal: AgendaPrincipal; locationId?: string },
-  now = new Date(),
-): Promise<Array<Omit<TodayReservation, 'suggestion'>>> {
-  const scope = { organizationId }
-  const items = input.range === 'today'
-    ? (await listTodayAgenda(db, scope, input, now)).items
-    : (await listAgenda(db, scope, { from: now.toISOString().slice(0, 10), to: addLocalDays(now.toISOString().slice(0, 10), UPCOMING_RESERVATION_DAYS + 1),
-        kinds: ['booking', 'stay'], organizationSlug: input.organizationSlug, principal: input.principal, locationId: input.locationId })).items
-      .filter((item) => {
-        const today = localDateAt(now, item.timezone)
-        return item.day_key > today && item.day_key <= addLocalDays(today, UPCOMING_RESERVATION_DAYS) && (item.kind !== 'stay' || item.stay_moment === 'arrival')
-      })
-  const requestIds = [...new Set(items.flatMap(item => item.conversation_id ? [item.conversation_id] : []))]
-  // The team's note is the booking's one private note.
-  const notes = new Map((requestIds.length ? await queryAll<{ conversation_id: string }>(db, `SELECT c.id AS conversation_id FROM conversations c JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id
-    WHERE c.id IN (SELECT value FROM json_each(?)) AND b.private_notes IS NOT NULL`, [d1JsonStringSet(requestIds)]) : []).map(row => [row.conversation_id, 1]))
-  return items.map(item => agendaToTodayReservation(item, { range: input.range, vertical: input.vertical, notes: item.conversation_id ? notes.get(item.conversation_id) ?? 0 : 0 }))
 }

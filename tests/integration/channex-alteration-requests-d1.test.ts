@@ -15,8 +15,7 @@ import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import todayRoute from '../../server/api/dashboard/today.get.ts'
 import bookingDetailsRoute from '../../server/api/dashboard/bookings/[booking_id].get.ts'
 import bookingActionRoute from '../../server/api/dashboard/bookings/[booking_id]/[action].post.ts'
-import type { TaskSection } from '../../server/domain/tasks.ts'
-import type { OpportunityView } from '../../server/domain/opportunities.ts'
+import type { BusinessToday } from '../../shared/dashboard-today.ts'
 
 // An Airbnb guest's change request, from Channex's live feed to the stay's
 // conversation and back: recorded once and alerted, answered through
@@ -176,19 +175,12 @@ async function boot() {
       headers: { authorization: `Bearer ${tokens.get(user)}`, ...(body ? { 'content-type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
-    /** Today as the dashboard reads it: each task as kind and conversation, each opportunity by its id. */
+    /** Today as the dashboard reads it: each card by its id, what it says to do and what it opens. */
     const today = async () => {
       const response = await request('today')
       const body = await response.text()
       assert.equal(response.status, 200, body)
-      const feed = JSON.parse(body) as { tasks: TaskSection[]; opportunities: OpportunityView[] }
-      const change = feed.tasks.flatMap(section => section.tasks).find(task => task.kind === 'booking_change')
-      return {
-        tasks: feed.tasks.flatMap(section => section.tasks.map(task => [task.kind, task.conversation_id])),
-        changePath: change?.action?.type === 'open' ? change.action.path : undefined,
-        changeStatusLine: change?.status_line,
-        opportunities: feed.opportunities.map(opportunity => opportunity.id),
-      }
+      return (JSON.parse(body) as BusinessToday).cards.map(card => [card.id, card.headline, card.action.title, card.to])
     }
     const reservation = async (bookingId: string, user = OWNER) => {
       const response = await request(`bookings/${bookingId}`, user)
@@ -253,8 +245,9 @@ test('a guest change request lands once in the stay conversation, survives a rel
     }])
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-13', adults: 2, total_minor: 45_000, version: 1 })
     // The guest's change creates a booking task.
-    const expectedToday = { tasks: [['booking_change', stay.conversation_id]], opportunities: ['payments.connect:org'] }
-    assert.deepEqual(await today(), { ...expectedToday, changePath: `/dashboard/org/bookings/${stay.id}`, changeStatusLine: 'Change requested · Cabin' })
+    const changeTask = await db.prepare('SELECT id FROM tasks WHERE dedupe_key = ?').bind(`booking_change:${request!.id}`).first<string>('id')
+    const setup = ['payments.connect:org', 'Set up payments', 'Connect with Stripe', '/dashboard/org/payments/payout-method']
+    assert.deepEqual(await today(), [[`task:${changeTask}`, 'Lee’s group of 2 asked to change their stay', 'Review the change', `/dashboard/org/messages/${stay.conversation_id}`], setup])
 
     // Assignment allows the turnover to be read. Even with a thread seat, it gives no decision permission.
     await db.prepare("UPDATE product_booking_configs SET assigned_member_id = 'assigned-member-membership' WHERE organization_id = ?").bind(ORG).run()
@@ -290,16 +283,14 @@ test('a guest change request lands once in the stay conversation, survives a rel
     assert((await listConversations(db, ORG, { userId: OWNER, unreadOnly: true })).some(row => row.id === stay.conversation_id),
       'the conversation remains unread after a booking decision')
     assert.deepEqual((await reservation(stay.id)).booking.pending_changes, [])
-    // Today shows the completed booking change.
-    const { changeStatusLine, ...afterToday } = await today()
-    assert.match(changeStatusLine ?? '', /^Done at /)
-    assert.deepEqual(afterToday, { ...expectedToday, changePath: undefined })
+    // An answered change is not Today's work any more.
+    assert.deepEqual(await today(), [setup])
 
     // Answering again, or the feed seeing it resolved, changes nothing and sends nothing to Channex.
     assert.equal((await answer(stay.id, request!.id, 'accept_change')).status, 204)
     assert.deepEqual(await runAlterationRequestFeed(db, env), { recorded: 0, reconciled: 0 })
     assert.equal(channex.resolutions.length, 1)
-    assert.deepEqual((await today()).tasks, expectedToday.tasks)
+    assert.deepEqual(await today(), [setup])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
