@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:557c7b9e55c9cf0c2a23663071504fd7892637c30c47f16744564ba1435b342e",
-  "documentationFingerprint": "sha256:8960cf83e70ab8defb7b36bbc3cbd7c0657716f39fbd95995c4bdf238867eb3a",
+  "fingerprint": "sha256:e858f7bf557a3625395c1fc9174d974f15408fd9eafe94ba65d71ebaec786193",
+  "documentationFingerprint": "sha256:0ed95f4dd4018be2f5a21ea3f233a3d61703c383dfbad2251a95394f02c9bdd0",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -98022,7 +98022,7 @@
     {
       "name": "request_product_booking_change",
       "title": "Request product booking change",
-      "description": "Propose a different session or party size to the guest, or apply the move now when allowed. Legal consultation time changes require client acceptance. Give product_id for a table move to a different offering, or to move a stay to another home. For a stay, apply must be true; the guest receives the new arrival instructions.",
+      "description": "Propose a different session or party size to the guest, or apply the move now when allowed. A proposal emails the guest a link to accept or decline and the booking stays as it is until they accept; send no separate message about it. Legal consultation time changes require client acceptance. Give product_id for a table move to a different offering, or to move a stay to another home. For a stay, apply must be true; the guest receives the new arrival instructions.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -128028,7 +128028,7 @@
         "mark_conversation_read": "sha256:4284ca380f9c4245e346ef2952bbb3d0e49719491d6a3ada129bf55a681672a4",
         "mark_conversation_unread": "sha256:93abd5acbb4e271d1a1bf843bc1c9a3ef04a44e20b3252461c089d612ab69161",
         "reject_product_booking": "sha256:3b265f1588dfdd8d008d243b0a93e298afb2bc7ac7ff265afe72de2aebfd475f",
-        "request_product_booking_change": "sha256:38fb4dac33da0ac9401338b2c2e1886e3f9122857c614f32b468d2d02d1c5879",
+        "request_product_booking_change": "sha256:b57021c68ec60a45aa274dd1a4ad59658afb99c4b8127c2c8ba20e2c347da5dd",
         "send_message": "sha256:4cac8008e1434c5ec878d41deec75950ca99aad5e6f94092a3e5fdf0731a85ec",
         "start_conversation": "sha256:a39d46341c069673d967628f78638bb7ddbcf94a8689796860962531e8d2192d",
         "update_conversation_group": "sha256:9e592077c678b7f3e11eb78535391b0d8ae3cff57f58e5ba78923e20710142c5"
