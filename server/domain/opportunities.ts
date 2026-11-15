@@ -170,6 +170,8 @@ function welcomeMessage(row: WelcomeRow): string | null {
  */
 function bookingWelcomesQuery(organizationId: string, input: { now: Date; requestId?: string; locationId?: string }): BatchQuery {
   const until = new Date(input.now.getTime() + UPCOMING_RESERVATION_DAYS * 86_400_000).toISOString()
+  // A stay is kept through its home's last local day of the window, which can end up to a day after `until`.
+  const stayUntil = new Date(input.now.getTime() + (UPCOMING_RESERVATION_DAYS + 2) * 86_400_000).toISOString()
   const only = (column: string, value: string | undefined) => value === undefined ? '' : `AND ${column} = ?`
   return {
     query: `
@@ -180,7 +182,7 @@ function bookingWelcomesQuery(organizationId: string, input: { now: Date; reques
     JOIN conversations r ON r.booking_id = br.id AND r.kind = 'booking' AND r.organization_id = br.organization_id
     JOIN products p ON p.id = br.product_id AND p.organization_id = br.organization_id
     LEFT JOIN product_stay_configs c ON br.unit = 'nights' AND c.organization_id = br.organization_id AND c.product_id = br.product_id
-    WHERE br.organization_id = ? AND br.status = 'confirmed' AND br.starts_at BETWEEN ? AND ?
+    WHERE br.organization_id = ? AND br.status = 'confirmed' AND br.starts_at >= ? AND br.starts_at <= CASE WHEN br.unit = 'nights' THEN ? ELSE ? END
       AND (json_extract(p.details_json, '$.preparation') IS NOT NULL OR json_array_length(p.details_json, '$.what_to_bring') > 0
         OR COALESCE(c.directions, c.wifi_network, c.wifi_password, c.house_manual) IS NOT NULL)
       AND r.blocked_at IS NULL
@@ -188,7 +190,7 @@ function bookingWelcomesQuery(organizationId: string, input: { now: Date; reques
       AND NOT EXISTS (SELECT 1 FROM messages e WHERE e.conversation_id = r.id AND e.author_kind = 'member' AND e.occurred_at >= br.created_at)
       ${only('r.id', input.requestId)} ${only('br.location_id', input.locationId)}
     ORDER BY br.starts_at, br.id`,
-    params: [organizationId, new Date(input.now.getTime() - 2 * 86_400_000).toISOString(), until, ...[input.requestId, input.locationId].filter((value): value is string => value !== undefined)],
+    params: [organizationId, new Date(input.now.getTime() - 2 * 86_400_000).toISOString(), stayUntil, until, ...[input.requestId, input.locationId].filter((value): value is string => value !== undefined)],
   }
 }
 

@@ -417,13 +417,14 @@ function taskContextQueries(organizationId: string, listed: { sql: string; param
       FROM products p LEFT JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
       WHERE p.organization_id = ${org} AND p.id IN (${productIds})`),
     { query: `WITH listed AS (${listed.sql}), scope(organization_id) AS (SELECT ?) ${pictures.query}`, params: [...listed.params, organizationId, ...pictures.params!] },
-    // Each turnover's candidate next guests: confirmed stays at its home from around its checkout on; `arrival` picks the first.
-    query(`SELECT l.id AS task_id, ${STAY_FACTS} FROM listed l
-      JOIN bookings so ON so.organization_id = l.organization_id AND so.id = l.subject_id AND so.product_session_id IS NULL
-      JOIN bookings s ON s.organization_id = l.organization_id AND s.product_id = l.product_id AND s.product_session_id IS NULL
-        AND s.status = 'confirmed' AND s.id <> so.id AND s.starts_at >= date(so.ends_at, '-3 days')
+    // The confirmed stays at the listed turnovers' homes from around the earliest checkout on, each once; `arrival` picks each turnover's next.
+    query(`SELECT ${STAY_FACTS} FROM bookings s
       JOIN conversations r ON r.organization_id = s.organization_id AND r.booking_id = s.id AND r.kind = 'booking'
-      WHERE l.kind = 'turnover' AND l.product_id IS NOT NULL`),
+      WHERE s.organization_id = ${org} AND s.product_session_id IS NULL AND s.status = 'confirmed'
+        AND s.product_id IN (SELECT product_id FROM listed WHERE kind = 'turnover' AND product_id IS NOT NULL)
+        AND s.starts_at >= (SELECT MIN(date(so.ends_at, '-3 days')) FROM listed l
+          JOIN bookings so ON so.organization_id = l.organization_id AND so.id = l.subject_id AND so.product_session_id IS NULL WHERE l.kind = 'turnover')
+      ORDER BY s.product_id, s.starts_at, s.id`),
   ]
 }
 
@@ -433,10 +434,12 @@ function taskContext(organizationId: string, rows: TaskRow[], results: Array<{ r
       Array<{ slug: string; vertical: string }>, Array<{ id: string; userId: string; name: string }>, Array<{ id: string; title: string }>, MessagePhotoRow[],
       Array<{ id: string; template_title: string; status: string; conversation_id: string | null; booking_id: string }>,
       Array<{ id: string; booking_id: string | null }>, BookedRow[], StayRow[], Array<{ id: string; guest_name: string | null; participant: string | null }>,
-      Array<{ id: string; name: string | null; kind: ProductKind }>, unknown[], Array<StayRow & { task_id: string }>,
+      Array<{ id: string; name: string | null; kind: ProductKind }>, unknown[], StayRow[],
     ]
   const organization = organizations[0]
   if (!organization) throw new Error(`Organization ${organizationId} is missing`)
+  const arrivalsByHome = new Map<string, StayRow[]>()
+  for (const row of arrivalRows) arrivalsByHome.set(row.product_id, [...arrivalsByHome.get(row.product_id) ?? [], row])
   const placements = groupMediaPlacements(pictures)
   const offerings = new Map(products.map(product => [product.id, product]))
   const stays = new Map(stayRows.map(stay => [stay.id, stay]))
@@ -461,8 +464,8 @@ function taskContext(organizationId: string, rows: TaskRow[], results: Array<{ r
       if (!left) return null
       const from = addLocalDays(left.check_out_date, -1)
       // The next arrival is chosen by its day; only that stay has to carry its party.
-      const next = arrivalRows.filter(row => row.task_id === task.id && row.starts_at >= from)
-        .map(({ task_id: _task, ...row }) => ({ row, checkIn: bookingDay(row.starts_at, row.timezone) }))
+      const next = (arrivalsByHome.get(task.product_id ?? '') ?? []).filter(row => row.id !== left.id && row.starts_at >= from)
+        .map(row => ({ row, checkIn: bookingDay(row.starts_at, row.timezone) }))
         .filter(({ checkIn }) => checkIn >= left.check_out_date)
         .sort((a, b) => a.checkIn.localeCompare(b.checkIn) || a.row.id.localeCompare(b.row.id))[0]
       return next ? stayFacts(next.row) : null
