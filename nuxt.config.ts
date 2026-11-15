@@ -453,8 +453,6 @@ export default defineNuxtConfig({
     '/auth/**':      { headers: { 'cache-control': 'no-store' } },
     '/signup':       { headers: { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" } },
     '/login':        { headers: { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" } },
-    '/links':        { headers: { 'cache-control': 'private, no-store' } },
-
   },
 
   // Nitro configuration for Cloudflare deployment
