@@ -45,9 +45,6 @@
 
       <section v-if="selected" class="space-y-5 rounded-2xl bg-muted p-6" data-testid="insights-chart">
         <h2 class="text-xl font-semibold text-highlighted">{{ selected.label }}</h2>
-        <UFormField label="Compare" class="max-w-xs">
-          <USelect :model-value="'over_time'" :items="[{ label: 'Over time', value: 'over_time' }]" class="w-full" />
-        </UFormField>
         <AnalyticsTrendChart :label="`${selected.label} over time`" :dates="page.series.dates" :chart="page.series.charts[selected.key]!" />
       </section>
 
