@@ -148,7 +148,6 @@ const kindLabels: Record<TaskKind, string> = {
   message_delivery: 'Message delivery',
   booking_review: 'Booking reviews',
   booking_change: 'Booking changes',
-  opportunity: 'Accepted opportunities',
   custom: 'Custom tasks',
   stay_ready: 'Homes to get ready',
   consultation_prep: 'Consultation preparation',

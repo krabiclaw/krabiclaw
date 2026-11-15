@@ -35,8 +35,7 @@ import { createBlogPost, getBlogPost } from '../../server/utils/content/publishi
 import { fetchTransformedImageAsDataUri } from '../../server/utils/og-image/fetch-image.ts'
 import { renderOgImagePng } from '../../server/utils/og-image/render.ts'
 import { PostValidationError, POST_TITLE_MAX } from '../../shared/posts.ts'
-import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
-import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
+import { resolveMembership } from '../../server/utils/member-access.ts'
 
 /**
  * Publication, channel management and erasure against real local D1, with Meta and
@@ -405,7 +404,7 @@ test('publication: one result and one external post per target; a failure is the
       assert(ajv.validate(POSTS_TOOLS.find(tool => tool.name === toolName)!.outputSchema, output), `${toolName} output: ${ajv.errorsText()}`)
       return output as { post?: { id: string; publications: unknown[] }; posts?: Array<{ id: string; publications: unknown[] }>; replayed?: boolean }
     }
-    const progress = () => listBusinessOutcomes(db, memberAccessPrincipal(membership, { env }), { limit: 100 })
+    const publicationState = async (id: string | undefined) => await db.prepare('SELECT state FROM post_publications WHERE id = ?').bind(id).first<string>('state')
     await asset('a1', 'image/jpeg')
     await asset('a2', 'image/jpeg')
     await asset('a3', 'image/png')
@@ -518,20 +517,6 @@ test('publication: one result and one external post per target; a failure is the
       assert.equal(event.metadata.post_id, first.post.id)
       assert.equal(event.metadata.channel, row.channel)
     }
-    const receiptIds = new Set(initiators.results.map(row => row.id))
-    const firstProgress = await progress()
-    const publicationFacts = firstProgress.outcomes.filter(fact => fact.source.table === 'post_publications' && receiptIds.has(fact.source.id))
-    assert.equal(publicationFacts.length, 2)
-    assert.deepEqual(publicationFacts.map(fact => fact.source.id).sort(), [...receiptIds].sort())
-    for (const fact of publicationFacts) {
-      assert.equal(fact.event, 'post.publication')
-      assert.equal(fact.subject.kind, 'post_publication')
-      assert.equal(fact.subject.id, fact.source.id)
-      assert.deepEqual(fact.actor, { kind: 'member', user_id: 'publisher' })
-      assert.equal(fact.state, 'published')
-      assert.equal(fact.verification.status, 'verified')
-    }
-    assert.equal(firstProgress.outcomes.some(fact => String(fact.event) === 'post.publication_started'), false, 'the start is provenance for the provider receipt, not another completed publication')
 
     // A repeat reads the receipts: nothing is sent again and the publication date stays.
     const requestCount = meta.requests.length
@@ -579,9 +564,7 @@ test('publication: one result and one external post per target; a failure is the
     meta.fault('reject', request => request.path.endsWith(`${PAGE}/photos`))
     const rejected = await publishPost(env, 'org-a', third.post.id, { expectedUpdatedAt: third.post.updated_at, targets: [targets.facebook()] }, 'owner')
     assert.deepEqual([rejected.ok, rejected.outcomes[0]!.status, rejected.outcomes[0]!.code], [false, 'failed', 'provider_rejected'])
-    const failedFact = (await progress()).outcomes.find(fact => fact.source.table === 'post_publications' && fact.source.id === rejected.outcomes[0]!.publication_id)
-    assert.equal(failedFact?.state, 'failed')
-    assert.equal(failedFact?.verification.status, 'failed')
+    assert.equal(await publicationState(rejected.outcomes[0]!.publication_id), 'failed')
     const retried = await publishPost(env, 'org-a', third.post.id, { expectedUpdatedAt: third.post.updated_at, targets: [targets.facebook()] }, 'publisher')
     assert.equal(retried.outcomes[0]!.status, 'published')
     await publishedOnMeta(third.post.id, 'facebook')
@@ -589,9 +572,7 @@ test('publication: one result and one external post per target; a failure is the
     const retryInitiator = await db.prepare(`SELECT a.actor_user_id FROM post_publications p JOIN activity_entries a ON a.id = p.initiating_activity_id
       WHERE p.post_id = ? AND p.channel = 'facebook'`).bind(third.post.id).first<{ actor_user_id: string }>()
     assert.equal(retryInitiator?.actor_user_id, 'publisher')
-    const retriedFact = (await progress()).outcomes.find(fact => fact.source.table === 'post_publications' && fact.source.id === retried.outcomes[0]!.publication_id)
-    assert.deepEqual(retriedFact?.actor, { kind: 'member', user_id: 'publisher' })
-    assert.equal(retriedFact?.verification.status, 'verified')
+    assert.equal(await publicationState(retried.outcomes[0]!.publication_id), 'published')
     const attempts = await db.prepare(`SELECT actor_user_id, payload_json FROM activity_entries WHERE event_name = 'post.publication_started'
       AND json_extract(payload_json, '$.metadata.post_id') = ?`).bind(third.post.id).all<{ actor_user_id: string; payload_json: string }>()
     assert.equal(attempts.results.length, 2)
@@ -602,9 +583,7 @@ test('publication: one result and one external post per target; a failure is the
     meta.fault('dropped', request => request.path.endsWith(`${PAGE}/feed`))
     const lost = await publishPost(env, 'org-a', fourth.post.id, { expectedUpdatedAt: fourth.post.updated_at, targets: [targets.facebook()] }, 'owner')
     assert.deepEqual([lost.ok, lost.outcomes[0]!.status, lost.outcomes[0]!.code], [false, 'failed', 'provider_unreachable'])
-    const lostFact = (await progress()).outcomes.find(fact => fact.source.table === 'post_publications' && fact.source.id === lost.outcomes[0]!.publication_id)
-    assert.equal(lostFact?.state, 'failed')
-    assert.equal(lostFact?.verification.status, 'failed')
+    assert.equal(await publicationState(lost.outcomes[0]!.publication_id), 'failed')
     const pinned = (await getPost(db, env, 'org-a', fourth.post.id))!
     const receipt = pinned.publications[0]!
     assert.deepEqual((await mcp('get_post', { post_id: pinned.id })).post?.publications, [receipt])

@@ -248,7 +248,7 @@ test('publication attribution retains historical receipts as unknown and referen
   } finally { database.close() }
 })
 
-test('a v23 replacement maps every recommendation feedback row into the business\'s opportunities, an accepted one with its task, and retires the stored conversation state', async () => {
+test('a v23 replacement maps every recommendation feedback row through v24\'s opportunities, which the current schema retires, and retires the stored conversation state', async () => {
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
   const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v23-transfer-'))
   const v23 = JSON.parse(readFileSync('migrations-history/v23/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
@@ -282,17 +282,9 @@ test('a v23 replacement maps every recommendation feedback row into the business
     assert.deepEqual(manifest.transforms.filter((transform: { name: string }) => transform.name === 'recommendation_feedback_to_opportunities'), [{ name: 'recommendation_feedback_to_opportunities', changes: 5 }])
     const target = new Database(targetPath, { readonly: true })
     try {
-      assert.deepEqual(target.prepare('SELECT id,operation,status,available_at,decision_note,decided_at,decided_by_user_id FROM opportunities ORDER BY id').all(), [
-        { id: 'accepted', operation: 'article.publish', status: 'accepted', available_at: null, decision_note: null, decided_at: '2026-11-01T10:00:00.000Z', decided_by_user_id: 'owner' },
-        { id: 'corrected', operation: 'post.create', status: 'dismissed', available_at: null, decision_note: 'Our photos are on the website already', decided_at: '2026-11-01T10:00:00.000Z', decided_by_user_id: 'owner' },
-        { id: 'deferred', operation: 'payments.connect', status: 'open', available_at: '2026-11-20T09:00:00.000Z', decision_note: null, decided_at: null, decided_by_user_id: null },
-        { id: 'dismissed', operation: 'social.connect', status: 'dismissed', available_at: null, decision_note: 'We do not use social media', decided_at: '2026-11-01T10:00:00.000Z', decided_by_user_id: 'owner' },
-        { id: 'later', operation: 'article.create', status: 'accepted', available_at: null, decision_note: null, decided_at: '2026-11-02T10:00:00.000Z', decided_by_user_id: 'owner' },
-      ])
-      assert.deepEqual(target.prepare('SELECT opportunity_id,kind,subject_type,subject_id,title,assigned_member_id,timezone,status,dedupe_key FROM tasks ORDER BY opportunity_id').all(), [
-        { opportunity_id: 'accepted', kind: 'opportunity', subject_type: 'article', subject_id: 'draft-article', title: 'Publish the blog draft', assigned_member_id: 'owner-member', timezone: 'America/Denver', status: 'open', dedupe_key: 'opportunity:accepted' },
-        { opportunity_id: 'later', kind: 'opportunity', subject_type: null, subject_id: null, title: 'Write a blog article', assigned_member_id: 'owner-member', timezone: 'America/Denver', status: 'open', dedupe_key: 'opportunity:later' },
-      ])
+      // The decisions reach v24 as opportunities with their tasks; the current schema retires both.
+      assert.deepEqual(target.prepare("SELECT name FROM sqlite_schema WHERE name IN ('opportunities', 'organization_goals')").all(), [])
+      assert.deepEqual(target.prepare('SELECT id FROM tasks').all(), [])
       assert.equal(target.prepare("SELECT name FROM sqlite_schema WHERE name = 'recommendation_feedback'").get(), undefined)
       // The stored guess about the conversation is not carried; the conversation itself is.
       assert.deepEqual(target.prepare("SELECT id, kind, organization_id FROM conversations").all(), [{ id: 'conversation', kind: 'contact', organization_id: 'owner-business' }])
@@ -350,7 +342,7 @@ test('a v25 replacement names business scheduling with no default to fall back o
       assert.deepEqual(target.prepare("SELECT name FROM sqlite_schema WHERE name IN ('inventory_items', 'inventory_levels')").all(), [])
       assert.deepEqual(target.prepare("SELECT name FROM sqlite_schema WHERE name IN ('payment_attempts', 'payment_claims')").all(), [])
       assert.deepEqual(target.prepare("SELECT id, idempotency_key, checkout_expires_at, return_token FROM payments WHERE id = 'test-payment'").all(), [{ id: 'test-payment', idempotency_key: 'checkout:host:hosted', checkout_expires_at: '2026-10-06T01:18:32.658Z', return_token: 'token' }])
-      assert.deepEqual(target.prepare('SELECT id, status FROM opportunities').all(), [{ id: 'current', status: 'open' }])
+      assert.deepEqual(target.prepare("SELECT name FROM sqlite_schema WHERE name IN ('opportunities', 'organization_goals')").all(), [])
       assert.deepEqual(target.prepare("SELECT starts_at, ends_at, capacity FROM product_sessions WHERE product_id = 'table-dining-room' AND starts_at LIKE '2026-11-12%' AND status = 'scheduled' ORDER BY starts_at").all(), [
         { starts_at: '2026-11-12T18:45:00.000Z', ends_at: '2026-11-12T20:15:00.000Z', capacity: 12 },
       ])

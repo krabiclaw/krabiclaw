@@ -18,7 +18,7 @@ import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import connectStartRoute from '../../server/api/dashboard/connect/index.post.ts'
 import connectStatusRoute from '../../server/api/dashboard/connect/status.post.ts'
 import { processStripeWebhookEvent } from '../../server/utils/stripe-webhook-events.ts'
-import { createProduct, getProduct } from '../../server/utils/product-management.ts'
+import { createProduct, getProduct, updateProduct } from '../../server/utils/product-management.ts'
 import { setProductBookingConfig } from '../../server/utils/availability.ts'
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { listOpportunities } from '../../server/domain/opportunities.ts'
@@ -129,7 +129,7 @@ test('Connect callback URLs are built only from the configured platform origin a
   assert.throws(() => buildAppPayoutsOnboardingUrls('http://krabiclaw.com'), /HTTPS/)
 })
 
-test('Stripe onboarding recommendations follow real account readiness and clear when paid booking is enabled', async t => {
+test('Today suggests Stripe setup until the account is ready, and a price for each experience booked here', async t => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'payouts-app-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
@@ -162,7 +162,14 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
     const principal = memberAccessPrincipal(membership, { env })
     // What Today suggests the owner, by id: before Stripe, the payment setup.
     const suggested = async () => (await listOpportunities(db, principal)).opportunities.map(item => item.id)
-    assert.deepEqual(await suggested(), ['payments.connect:org', 'google_ads.connect:org', 'social.connect:org'])
+    assert.deepEqual(await suggested(), ['payments.connect:org'])
+    // An experience with no price cannot be booked until it has one; one booked on another site needs none.
+    const unpriced = await createProduct(db, { organizationId: 'org', actor: { actorId: 'owner' }, env, product: { kind: 'experience', name: 'Unpriced Walk' } })
+    const external = await createProduct(db, { organizationId: 'org', actor: { actorId: 'owner' }, env, product: { kind: 'experience', name: 'Partner Tour', order_url: 'https://partner.example/tour' } })
+    assert.deepEqual(await suggested(), ['payments.connect:org', `product.readiness:${unpriced.id}`])
+    assert.equal((await getProduct(db, 'org', external.id)).variants.some(variant => variant.prices.length > 0), false, 'the externally booked experience has no price')
+    await updateProduct(db, { organizationId: 'org', actor: { actorId: 'owner' }, env, productId: unpriced.id, patch: { active: false, updated_at: unpriced.updated_at } })
+    assert.deepEqual(await suggested(), ['payments.connect:org'], 'an inactive experience needs no price')
     const app = new H3()
     app.post('/api/dashboard/connect', connectStartRoute)
     app.post('/api/dashboard/connect/status', connectStatusRoute)
@@ -248,22 +255,20 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
       const pending = await call('/status', app_)
       assert.equal(pending.status, 200)
       assert.equal((pending.body.account as { status: string }).status, 'pending_review')
-      assert.deepEqual(await suggested(), ['google_ads.connect:org', 'social.connect:org'], 'Stripe review is not another owner setup task')
+      assert.deepEqual(await suggested(), [], 'Stripe review is not another owner setup task')
       account.configuration.merchant.capabilities.card_payments.status = 'active'
       const ready = await call('/status', app_)
       assert.equal(ready.status, 200)
       assert.equal((ready.body.account as { status: string }).status, 'ready')
       // Payments are ready: only the experience with a price above zero is offered taking payment at booking.
-      assert.deepEqual(await suggested(), ['google_ads.connect:org', `product.payment:${paid.id}`, 'social.connect:org'])
-      const payment = (await listOpportunities(db, principal)).opportunities.find(item => item.id === `product.payment:${paid.id}`)!
-      assert.deepEqual([payment.title, payment.path, payment.product_id], ['Take payment when guests book “Wheel Class”', `/dashboard/cliff/products/${paid.id}/booking/payment`, paid.id])
+      assert.deepEqual(await suggested(), [], 'ready payments leave nothing to set up')
       const save = await app.request(Object.assign(new Request(`https://proof.example/api/editor/organizations/org/products/${paid.id}/booking`, {
         method: 'PUT', headers: { 'content-type': 'application/json', ...app_ }, body: JSON.stringify({ online_payment_required: true }),
       }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
       assert.equal(save.status, 200, await save.text())
 
       assert.equal((await getProduct(db, 'org', paid.id)).booking?.online_payment_required, true, 'ordinary catalog read observes the saved payment setting')
-      assert.deepEqual(await suggested(), ['google_ads.connect:org', 'social.connect:org'], 'the saved booking configuration clears the payment suggestion on the next read')
+      assert.deepEqual(await suggested(), [])
     } finally { fetchMock.mock.restore() }
   } finally {
     await runtime.dispose()

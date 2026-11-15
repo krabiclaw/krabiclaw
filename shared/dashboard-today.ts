@@ -62,7 +62,7 @@ export interface TodayReservation {
   status_label: string | null
   /** Whether the team left its private note on the booking: "1 note". */
   note_label: string | null
-  /** The opportunity for this booking, shown at the bottom of its card. */
+  /** The welcome this booking's guest is due, shown at the bottom of its card. */
   suggestion: OpportunityView | null
 }
 

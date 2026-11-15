@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:789722085de986777de5755b5e76032a4d0b26a9fa98e5cb0cea1aa8e9956488",
-  "documentationFingerprint": "sha256:cbfe2e8fd5d7f021751813c70ac58fa80ed689ededff84acbdb2b5cc6b76b636",
+  "fingerprint": "sha256:fa8873a98da500e6a27ea417c20a0761eae4723042ae2757b380ce33c29716c7",
+  "documentationFingerprint": "sha256:a267f74ccba9a41cc88d6936c8a7126d20eda26c3aca8195fe8a8b2115b87587",
   "tools": [
     {
       "name": "add_organization_language",
@@ -13410,7 +13410,6 @@
                   "message_delivery",
                   "booking_review",
                   "booking_change",
-                  "opportunity",
                   "custom",
                   "stay_ready",
                   "consultation_prep",
@@ -37417,7 +37416,6 @@
                   "message_delivery",
                   "booking_review",
                   "booking_change",
-                  "opportunity",
                   "custom",
                   "stay_ready",
                   "consultation_prep",
@@ -68407,7 +68405,7 @@
     {
       "name": "list_opportunities",
       "title": "List opportunities",
-      "description": "List what Today suggests: setup the business has not finished, such as connecting payments, a domain, a social account or Google Ads, adding a first offering or a price, or taking payment at booking; and a welcome for each booked guest or client who has not heard from the business since booking. Each one goes away when that setup is done or the business messages the guest.",
+      "description": "List what Today suggests: setup the business has not finished (connecting payments, adding a first offering, a price for each experience without one); and a welcome for each booked guest or client who has not heard from the business since booking. Each one goes away when that setup is done or the business messages the guest.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -71037,7 +71035,7 @@
     {
       "name": "list_tasks",
       "title": "List tasks",
-      "description": "Read Today or Upcoming as stored tasks: turnovers, booking decisions, scheduled messages that did not send, accepted opportunities and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them and the turnovers at homes they look after. assignees lists who a manager can give work to.",
+      "description": "Read Today or Upcoming as stored tasks: turnovers, booking decisions, scheduled messages that did not send and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them and the turnovers at homes they look after. assignees lists who a manager can give work to.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -71051,7 +71049,6 @@
               "message_delivery",
               "booking_review",
               "booking_change",
-              "opportunity",
               "custom",
               "stay_ready",
               "consultation_prep",
@@ -71272,7 +71269,6 @@
                           "message_delivery",
                           "booking_review",
                           "booking_change",
-                          "opportunity",
                           "custom",
                           "stay_ready",
                           "consultation_prep",
@@ -102339,7 +102335,6 @@
                   "message_delivery",
                   "booking_review",
                   "booking_change",
-                  "opportunity",
                   "custom",
                   "stay_ready",
                   "consultation_prep",
@@ -126953,7 +126948,7 @@
             "type": "string"
           },
           "title": {
-            "description": "Only for a task someone added or an accepted opportunity.",
+            "description": "Only for a task someone added.",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
@@ -127103,7 +127098,6 @@
                   "message_delivery",
                   "booking_review",
                   "booking_change",
-                  "opportunity",
                   "custom",
                   "stay_ready",
                   "consultation_prep",

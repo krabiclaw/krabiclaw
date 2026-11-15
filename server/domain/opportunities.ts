@@ -1,9 +1,8 @@
 import { HTTPError } from 'nitro'
-import { d1JsonStringSet, executeBatch, type BatchQuery, type DbClient } from '~/server/db'
+import { executeBatch, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
-import { getOrganizationEntitlements } from '~/server/utils/billing-access'
 import { BOOKING_RECORDS_SQL, bookedRecordWindow } from '~/server/domain/requests'
-import { firstExperienceSetupPath, firstHomeSetupPath, firstPracticeAreaPath, guestConversationPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
+import { firstExperienceSetupPath, firstHomeSetupPath, firstPracticeAreaPath, guestConversationPath, productEditorPath } from '~/server/utils/dashboard-links'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
 import { PRODUCT_DETAIL_FIELDS, type ProductKind } from '~/shared/product-details'
@@ -13,8 +12,7 @@ import { UPCOMING_RESERVATION_DAYS } from '~/shared/dashboard-today'
 
 /*
   What Today suggests, read from what the business has already stored: setup it
-  has not finished (payments, a domain, a first offering, Google Ads, a price,
-  taking payment, a social account), and the welcome each booked guest who has
+  has not finished (payments, a first offering, a price), and the welcome each booked guest who has
   not heard from the business since booking is due. Nothing here is recorded:
   each one goes away when the write that finishes it lands.
 */
@@ -44,81 +42,49 @@ const FIRST_OFFERING = {
   restaurant: { kind: 'dish', title: 'Add your first dish', detail: 'Start your menu.', path: (slug: string) => `${productEditorPath(slug, 'new')}?kind=dish` },
   service: { kind: 'service', title: 'Add your first practice area', detail: 'Start with the name clients will see.', path: firstPracticeAreaPath },
 } as const
+const FIRST_KINDS = JSON.stringify(Object.fromEntries(Object.entries(FIRST_OFFERING).map(([vertical, offering]) => [vertical, offering.kind])))
 
-const SOCIAL_PROVIDERS = d1JsonStringSet(['instagram', 'facebook', 'discord'])
-
-interface OrganizationFacts {
-  slug: string; vertical: string; status: string; stripe_status: string | null; payments_ready: number | null
-  google_ads: number; social: number; custom_domain: number; has_offering: number
-}
-/** An experience or consultation, with its highest current one-time price: null has none, 0 is free. */
-interface BookedOffering { id: string; name: string; online_payment_required: number | null; top_price: number | null }
+interface OrganizationFacts { slug: string; vertical: string; stripe_status: string | null; payments_ready: number | null; has_offering: number }
 
 /**
- * Today's suggestions for the business: its unfinished setup in a fixed order,
- * then each booked guest's welcome. Read in one D1 batch beside the plan.
+ * Today's suggestions for the business: its unfinished setup (payments, a
+ * first offering, a price for each experience without one), then each booked
+ * guest's welcome. One D1 batch.
  */
 export async function listOpportunities(db: DbClient, principal: MemberAccessPrincipal, input: { now?: Date; locationId?: string } = {}): Promise<{ opportunities: OpportunityView[] }> {
   // Suggestions are the owner's decisions about the business; a member is given the tasks they lead to.
   await assertRoleAllows({ ...principal, permissions: { task: ['assign'] } })
   const now = input.now ?? new Date(), at = now.toISOString(), organizationId = principal.organizationId, locationId = input.locationId
-  const firstKinds = JSON.stringify(Object.fromEntries(Object.entries(FIRST_OFFERING).map(([vertical, offering]) => [vertical, offering.kind])))
-  const [[facts, booked, welcomeRows], entitlements] = await Promise.all([
-    executeBatch(db, [
-      { query: `SELECT o.slug, o.vertical, o.status, s.status AS stripe_status, s.status = 'ready' AND s.card_payments_status = 'active' AS payments_ready,
-          EXISTS (SELECT 1 FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'google_ads' AND i.status IS NOT 'setting_up') AS google_ads,
-          EXISTS (SELECT 1 FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider IN (SELECT value FROM json_each(?)) AND i.status IS NOT 'setting_up') AS social,
-          EXISTS (SELECT 1 FROM organization_domains d WHERE d.organization_id = o.id AND d.type = 'custom' AND d.status <> 'deleted') AS custom_domain,
-          EXISTS (SELECT 1 FROM products p WHERE p.organization_id = o.id AND p.active = 1 AND p.kind = json_extract(?, '$.' || o.vertical)) AS has_offering
-        FROM organization o LEFT JOIN stripe_connected_accounts s ON s.organization_id = o.id WHERE o.id = ?`, params: [SOCIAL_PROVIDERS, firstKinds, organizationId] },
-      { query: `SELECT p.id, p.name, c.online_payment_required,
-          (SELECT MAX(pr.unit_amount) FROM product_variants v JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
-            WHERE v.organization_id = p.organization_id AND v.product_id = p.id AND v.active = 1 AND pr.active = 1 AND pr.type = 'one_time'
-              AND (pr.valid_from_at IS NULL OR pr.valid_from_at <= ?) AND (pr.valid_until_at IS NULL OR pr.valid_until_at > ?)
-              ${locationId ? 'AND (pr.location_id IS NULL OR pr.location_id = ?)' : ''}) AS top_price
-        FROM products p JOIN organization o ON o.id = p.organization_id AND o.vertical = p.kind
-        LEFT JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
-        WHERE p.organization_id = ? AND p.active = 1 AND p.kind IN ('experience', 'service')
-          ${locationId ? 'AND EXISTS (SELECT 1 FROM product_locations l WHERE l.organization_id = p.organization_id AND l.product_id = p.id AND l.location_id = ?)' : ''}
-        ORDER BY p.created_at, p.id`, params: [at, at, ...(locationId ? [locationId] : []), organizationId, ...(locationId ? [locationId] : [])] },
-      bookingWelcomesQuery(organizationId, { now, locationId }),
-    ]),
-    getOrganizationEntitlements(principal.env, organizationId, now),
+  const [facts, unpriced, welcomeRows] = await executeBatch(db, [
+    { query: `SELECT o.slug, o.vertical, s.status AS stripe_status, s.status = 'ready' AND s.card_payments_status = 'active' AS payments_ready,
+        EXISTS (SELECT 1 FROM products p WHERE p.organization_id = o.id AND p.active = 1 AND p.kind = json_extract(?, '$.' || o.vertical)) AS has_offering
+      FROM organization o LEFT JOIN stripe_connected_accounts s ON s.organization_id = o.id WHERE o.id = ?`, params: [FIRST_KINDS, organizationId] },
+    // An experience without a current one-time price cannot be booked here; one booked on another site (order_url) needs none.
+    { query: `SELECT p.id, p.name FROM products p JOIN organization o ON o.id = p.organization_id AND o.vertical = 'experience'
+      WHERE p.organization_id = ? AND p.active = 1 AND p.kind = 'experience' AND p.order_url IS NULL
+        ${locationId ? 'AND EXISTS (SELECT 1 FROM product_locations l WHERE l.organization_id = p.organization_id AND l.product_id = p.id AND l.location_id = ?)' : ''}
+        AND NOT EXISTS (SELECT 1 FROM product_variants v JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
+          WHERE v.organization_id = p.organization_id AND v.product_id = p.id AND v.active = 1 AND pr.active = 1 AND pr.type = 'one_time'
+            AND (pr.valid_from_at IS NULL OR pr.valid_from_at <= ?) AND (pr.valid_until_at IS NULL OR pr.valid_until_at > ?)
+            ${locationId ? 'AND (pr.location_id IS NULL OR pr.location_id = ?)' : ''})
+      ORDER BY p.created_at, p.id`, params: [organizationId, ...(locationId ? [locationId] : []), at, at, ...(locationId ? [locationId] : [])] },
+    bookingWelcomesQuery(organizationId, { now, locationId }),
   ])
   const organization = facts!.results[0] as OrganizationFacts | undefined
   if (!organization) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
-  const slug = organization.slug, base = `/dashboard/${encodeURIComponent(slug)}`
-  const offerings = booked!.results as BookedOffering[]
+  const slug = organization.slug
   const items: OpportunityView[] = []
-  const offer = (operation: string, subjectId: string, statusLine: string, title: string, detail: string, path: string, icon: string, productId: string | null = null) =>
-    items.push({ id: `${operation}:${subjectId}`, status_line: statusLine, title, detail, icon, path, product_id: productId, location_id: locationId ?? null, conversation_id: null, message: null })
+  const offer = (id: string, statusLine: string, title: string, detail: string, path: string, icon: string, productId: string | null = null) =>
+    items.push({ id, status_line: statusLine, title, detail, icon, path, product_id: productId, location_id: locationId ?? null, conversation_id: null, message: null })
 
   // Stripe is reviewing an account that is waiting on it; there is nothing for the owner to do yet.
   if (!organization.payments_ready && organization.stripe_status !== 'pending_review') {
-    offer('payments.connect', organizationId, 'Payments', organization.stripe_status ? 'Finish setting up payments' : 'Set up payments', 'Connect with Stripe.', `${base}/payments/payout-method`, 'i-lucide-credit-card')
-  }
-  if (organization.status === 'inactive' && !organization.custom_domain) {
-    offer('domain.connect', organizationId, 'Website', 'Connect a custom domain', 'Use your own website address.', `${base}/website/preferences/domains`, 'i-lucide-globe')
+    offer(`payments.connect:${organizationId}`, 'Payments', organization.stripe_status ? 'Finish setting up payments' : 'Set up payments', 'Connect with Stripe.', `/dashboard/${encodeURIComponent(slug)}/payments/payout-method`, 'i-lucide-credit-card')
   }
   const first = FIRST_OFFERING[organization.vertical as keyof typeof FIRST_OFFERING]
-  if (first && !organization.has_offering) offer('product.create', organizationId, 'Catalog', first.title, first.detail, first.path(slug), 'i-lucide-list-checks')
-  if (!organization.google_ads) {
-    offer('google_ads.connect', organizationId, 'Marketing', 'Connect Google Ads', 'Connect the existing Google Ads integration to measure which articles your ads bring customers to.', `${base}/integrations`, 'i-logos-google-ads')
-  }
-  // An experience without a price cannot be booked; a consultation may be free.
-  if (organization.vertical === 'experience') for (const product of offerings.filter(product => product.top_price === null)) {
-    offer('product.readiness', product.id, 'Catalog', `Set a booking price for “${product.name}”`, 'This offering needs a price before guests can book it on your site.', `${productEditorPath(slug, product.id)}/price`, 'i-lucide-list-checks', product.id)
-  }
-  if (organization.payments_ready) for (const product of offerings.filter(product => product.online_payment_required === 0 && (product.top_price ?? 0) > 0)) {
-    const service = organization.vertical === 'service'
-    offer('product.payment', product.id, 'Payments', `Take payment when ${service ? 'clients' : 'guests'} book “${product.name}”`,
-      `Payments are ready, but this offering does not require advance payment. Enable it for a priced offering to collect before ${service ? 'confirming a consultation' : 'reserving places'}.`,
-      productPaymentPath(slug, product.id), 'i-lucide-credit-card', product.id)
-  }
-  if (entitlements.managed_service !== true) {
-    offer('social.connect', organizationId, 'Social', 'Enable social publishing', 'Connected social publishing needs a plan that includes it. You can prepare content now.', `${base}/billing`, 'i-lucide-link')
-  } else if (!organization.social) {
-    offer('social.connect', organizationId, 'Social', 'Connect your social account', 'Connect the account where customers follow you, so posts can be published and their outcomes tracked here.', `${base}/integrations`, 'i-lucide-link')
+  if (first && !organization.has_offering) offer(`product.create:${organizationId}`, 'Catalog', first.title, first.detail, first.path(slug), 'i-lucide-list-checks')
+  for (const product of unpriced!.results as Array<{ id: string; name: string }>) {
+    offer(`product.readiness:${product.id}`, 'Catalog', `Set a booking price for “${product.name}”`, 'This offering needs a price before guests can book it on your site.', `${productEditorPath(slug, product.id)}/price`, 'i-lucide-list-checks', product.id)
   }
 
   for (const welcome of bookingWelcomes(welcomeRows!.results as WelcomeRow[], now)) {
@@ -141,7 +107,7 @@ export async function listOpportunities(db: DbClient, principal: MemberAccessPri
  * here; every confirmed stay is already sent them the day before arrival. A
  * table has preparation only when its host wrote some.
  */
-export interface BookingWelcome {
+interface BookingWelcome {
   requestId: string
   /** A stay at a home, or any other booking. */
   kind: 'booking' | 'stay'
@@ -159,7 +125,7 @@ export interface BookingWelcome {
   message: string
 }
 
-export interface WelcomeRow {
+interface WelcomeRow {
   unit: 'slot' | 'nights'; product_kind: ProductKind; record_id: string; request_id: string; status: string; starts_at: string; ends_at: string
   timezone: string; product_id: string; product_name: string; location_id: string | null; guest_name: string | null
   details_json: string | null; directions: string | null; wifi_network: string | null; wifi_password: string | null; house_manual: string | null
@@ -202,7 +168,7 @@ function welcomeMessage(row: WelcomeRow): string | null {
  * conversation named: any record whose offering has host-authored preparation.
  * `bookingWelcomes` keeps the ones still upcoming.
  */
-export function bookingWelcomesQuery(organizationId: string, input: { now: Date; requestId?: string; locationId?: string }): BatchQuery {
+function bookingWelcomesQuery(organizationId: string, input: { now: Date; requestId?: string; locationId?: string }): BatchQuery {
   const until = new Date(input.now.getTime() + UPCOMING_RESERVATION_DAYS * 86_400_000).toISOString()
   const only = (column: string, value: string | undefined) => value === undefined ? '' : `AND ${column} = ?`
   return {
@@ -227,7 +193,7 @@ export function bookingWelcomesQuery(organizationId: string, input: { now: Date;
 }
 
 /** The welcomes due now among `bookingWelcomesQuery`'s rows. */
-export function bookingWelcomes(rows: WelcomeRow[], now: Date): BookingWelcome[] {
+function bookingWelcomes(rows: WelcomeRow[], now: Date): BookingWelcome[] {
   const instant = now.toISOString()
   return rows.flatMap((row) => {
     // A stay is upcoming in its home's own calendar until its guests arrive; anything else until it starts.

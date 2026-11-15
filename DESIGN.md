@@ -163,9 +163,8 @@ and, for a manager, suggestions read from its own rows
   add.
 - **Suggestions** (`server/domain/opportunities.ts`): on Today, the setup the
   business has not finished, in this order (a Stripe account that is not
-  ready, a custom domain while the site is private, a first offering of the
-  business's kind, Google Ads, an experience's price, taking payment for a
-  priced experience or consultation, social publishing); on a reservation card, the welcome a booked guest who has not
+  ready, a first offering of the business's kind, a price for each experience
+  without one); on a reservation card, the welcome a booked guest who has not
   heard from the business is due. Each is read from stored rows on every read
   and goes away when the write that finishes it lands; nothing is recorded or
   dismissed. A card opens the editor or record that owns the work.
