@@ -50,20 +50,19 @@ test('analytics preserves duplicate, attribution, summary semantics on D1', { ti
       error.statusCode === 422 && error.data?.code === 'NO_NATIVE_COVERAGE')
     assert.equal((await getAnalyticsReport(db, { ...period, startDate: '2026-09-01' })).period.native_coverage, 'partial')
     assert.equal((await getAnalyticsReport(db, period)).period.native_coverage, 'full')
+    // Traffic is the stored daily summaries: a day the daily aggregation has not summarized reads as none.
+    const unsummarized = await getAnalyticsReport(db, period)
+    assert.deepEqual([unsummarized.metrics.page_views, unsummarized.metrics.unique_sessions, unsummarized.countries], [0, 0, []])
+    for (const date of ['2026-09-05', '2026-09-06']) await aggregateOrganizationAnalyticsDate(db, 'org-proof', date)
+    assert.equal(await db.prepare(`SELECT json_extract(payload_json, '$.returning_visitors') returning_count
+      FROM analytics_summaries WHERE organization_id = 'org-proof' AND kind = 'organization_day' AND date = '2026-09-06'`).first('returning_count'), 1)
     const before = await getAnalyticsReport(db, period)
     assert.equal(before.metrics.page_views, 4)
     assert.equal(before.metrics.unique_sessions, 2)
     assert.equal(before.countries[0]?.country_code, 'TH')
-    // The dashboard reads the same report without the conversion detail only MCP returns.
+    // The dashboard reads the same summaries without what MCP reads from the events.
     assert.deepEqual(await getDashboardAnalyticsReport(db, await resolveOrganizationAnalyticsContext(db, 'org-proof'), period), dashboardAnalyticsReportSchema.parse(before))
-    // A closed day the daily aggregation has not summarized is read live, as today and yesterday are.
-    const later = await getAnalyticsReport(db, { ...period, now: new Date('2026-09-20T12:00:00Z') })
-    assert.deepEqual([later.metrics, later.daily_data, later.top_pages, later.countries], [before.metrics, before.daily_data, before.top_pages, before.countries])
-    for (const date of ['2026-09-05', '2026-09-06']) await aggregateOrganizationAnalyticsDate(db, 'org-proof', date)
-    assert.equal(await db.prepare(`SELECT json_extract(payload_json, '$.returning_visitors') returning_count
-      FROM analytics_summaries WHERE organization_id = 'org-proof' AND kind = 'organization_day' AND date = '2026-09-06'`).first('returning_count'), 1)
-    const after = await getAnalyticsReport(db, period)
-    assert.deepEqual(after, before)
+    assert.deepEqual(await getAnalyticsReport(db, { ...period, now: new Date('2026-09-20T12:00:00Z') }), { ...before, signup_cohort: { ...before.signup_cohort, observed_through: '2026-09-06T17:00:00.000Z' } })
     await aggregateOrganizationAnalyticsDate(db, 'org-proof', '2026-09-05')
     assert.deepEqual(await getAnalyticsReport(db, period), before)
     assert.equal(await db.prepare("SELECT count(*) FROM analytics_summaries WHERE kind = 'session'").first('count(*)'), 2)
@@ -84,9 +83,12 @@ test('analytics preserves duplicate, attribution, summary semantics on D1', { ti
     // Historical collector rows have session/visitor IDs but predate session summaries.
     await db.prepare(`INSERT INTO analytics_events (id, kind, organization_id, session_id, visitor_id, page_path, payload_json, created_at)
       VALUES ('historical-view', 'pageview', 'org-proof', 'historical-session', 'historical-visitor', '/menu', '{}', '2026-09-05T03:00:00.000Z')`).run()
+    assert.equal((await getAnalyticsReport(db, period)).metrics.unique_sessions, 2, 'a summarized day changes only when it is summarized again')
+    await aggregateOrganizationAnalyticsDate(db, 'org-proof', '2026-09-05')
     const historical = await getAnalyticsReport(db, period)
     assert.equal(historical.metrics.unique_sessions, 3)
-    assert.equal(historical.metrics.unique_visitors, 2)
+    // Each day's visitors, added: the returning visitor is counted on both days.
+    assert.equal(historical.metrics.unique_visitors, 3)
     assert.equal(historical.attribution.find(row => row.source === 'Attribution not recorded')?.sessions, 1)
   } finally { await runtime.dispose() }
 })

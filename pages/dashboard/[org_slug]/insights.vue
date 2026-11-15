@@ -48,52 +48,13 @@
       </p>
 
       <!-- ========================================== -->
-      <!-- TAB 1: VIEWS & CONVERSION FUNNEL          -->
+      <!-- TAB 1: VIEWS                              -->
       <!-- ========================================== -->
       <div v-if="tab === 'views' && analytics && !loadError" class="space-y-8">
         <!-- 1. Top-Level Metric Strip -->
         <MetricHeaderStrip :items="metricCards" />
 
-        <!-- 2. Performance Acquisition Funnel -->
-        <section class="rounded-2xl border border-default bg-default p-6 shadow-2xs" data-testid="insights-funnel">
-          <header class="mb-4">
-            <h2 class="text-base font-semibold text-highlighted">Funnel</h2>
-            <p class="mt-1 text-xs text-muted">
-              Each percentage is of the step before it. Visits are distinct sessions; confirmed is a request whose {{ funnelWords.confirmedNoun }} stands confirmed.
-            </p>
-          </header>
-
-          <div class="space-y-4">
-            <DashboardAnalyticsRow
-              v-for="step in funnelSteps"
-              :key="step.key"
-              :label="step.label"
-              :value="step.value"
-              :percent="step.percent"
-              :data-testid="`insights-funnel-${step.key}`"
-            />
-          </div>
-
-          <div v-for="breakdown in funnelBreakdowns" :key="breakdown.title" class="mt-6 border-t border-default pt-4 overflow-x-auto">
-            <h3 class="text-xs font-semibold text-muted uppercase tracking-wider mb-3">By {{ breakdown.title.toLowerCase() }}</h3>
-            <table class="w-full text-left text-sm" :data-testid="breakdown.testId">
-              <thead class="text-xs text-muted border-b border-default">
-                <tr>
-                  <th scope="col" class="pb-2.5 font-medium">{{ breakdown.title }}</th>
-                  <th v-for="column in funnelWords.short" :key="column" scope="col" class="pb-2.5 pl-4 text-right font-medium">{{ column }}</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-default">
-                <tr v-for="row in breakdown.rows" :key="row.label" class="hover:bg-muted/30">
-                  <td class="py-2.5 pr-4 font-medium text-highlighted">{{ row.label }}</td>
-                  <td v-for="(cell, index) in row.cells" :key="index" class="py-2.5 pl-4 text-right tabular-nums">{{ cell }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <!-- 3. Traffic Trend Chart Card -->
+        <!-- 2. Traffic Trend Chart Card -->
         <MetricChartCard
           title="Traffic trend"
           description="Daily pageviews and sessions over the selected period"
@@ -104,7 +65,7 @@
           learn-more-label="Learn more about website analytics"
         />
 
-        <!-- 4. Top Landing Pages -->
+        <!-- 3. Top Landing Pages -->
         <BreakdownTable
           title="Top pages"
           label-heading="Page path"
@@ -113,42 +74,7 @@
           empty-message="No page data recorded yet."
         />
 
-        <!-- 5. Attribution Sources & Campaigns -->
-        <BreakdownTable
-          title="Traffic sources & campaigns"
-          label-heading="Source / medium"
-          value-heading="Sessions"
-          :items="attributionItems"
-          empty-message="No attribution data recorded yet."
-        />
-
-        <!-- 6. Signup Funnel & Cohort -->
-        <section v-if="analytics.signup_cohort.signups" class="rounded-2xl border border-default bg-default p-6 shadow-2xs">
-          <header class="mb-4">
-            <h2 class="text-base font-semibold text-highlighted">Signup funnel</h2>
-            <p class="mt-1 text-xs text-muted">Progress of people who signed up in this period through their organizations.</p>
-          </header>
-          <div class="grid grid-cols-3 gap-4" aria-label="Signup conversion funnel">
-            <div
-              v-for="stage in [
-                { label: 'Signups', count: analytics.signup_cohort.signups },
-                { label: 'Onboarded', count: analytics.signup_cohort.onboarded_signups },
-                { label: 'Paid', count: analytics.signup_cohort.first_paid_signups },
-              ]"
-              :key="stage.label"
-              class="space-y-2 rounded-xl bg-muted/30 p-3"
-            >
-              <p class="text-xs font-medium text-muted uppercase">{{ stage.label }}</p>
-              <p class="text-2xl font-semibold tabular-nums text-highlighted">{{ formatCount(stage.count) }}</p>
-              <div class="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-                <div class="h-full rounded-full bg-primary" :style="{ width: `${stage.count / analytics.signup_cohort.signups * 100}%` }" />
-              </div>
-              <p class="text-xs tabular-nums text-muted">{{ Math.round(stage.count / analytics.signup_cohort.signups * 100) }}%</p>
-            </div>
-          </div>
-        </section>
-
-        <!-- 7. Geographic & Device Demographics Grid -->
+        <!-- 4. Geographic & Device Demographics Grid -->
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <BreakdownTable
             title="Countries"
@@ -396,7 +322,6 @@ import { formatCalendarDate } from '~/utils/timezone'
 import { organizationAnalyticsSchema, type DashboardAnalyticsReport, type OrganizationAnalyticsReport } from '~/shared/analytics-report'
 import { instagramInsightsSchema, type InstagramInsights } from '~/shared/instagram-insights'
 import { googleAdsInsightsSchema, type GoogleAdsInsights } from '~/shared/google-ads-insights'
-import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 import { reviewFeedbackSchema, type ReviewFeedback } from '~/shared/review-feedback'
 import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
@@ -537,48 +462,6 @@ watch([feedback, focusedReview], ([loaded, reviewId]) => {
 
 const reviews = computed(() => insightsResource.value?.reviews)
 
-// Multi-Vertical Funnel Mapping
-type FunnelCounts = Omit<DashboardAnalyticsReport['funnel'], 'by_source' | 'by_location'>
-const FUNNEL_KEYS = ['visits', 'viewed', 'intent', 'submitted', 'confirmed', 'paid'] as const
-const FUNNEL_WORDS = {
-  service: { long: ['Visits', 'Viewed a practice area', 'Clicked Book a consultation or called', 'Requested a consultation', 'Scheduled', 'Paid'], short: ['Visits', 'Viewed', 'Clicked or called', 'Requested', 'Scheduled', 'Paid'], confirmedNoun: 'consultation' },
-  restaurant: { long: ['Visits', 'Viewed a dish', 'Started a reservation or called', 'Reserved', 'Seated', 'Paid'], short: ['Visits', 'Viewed', 'Started or called', 'Reserved', 'Seated', 'Paid'], confirmedNoun: 'reservation' },
-  experience: { long: ['Visits', 'Viewed', 'Started checkout or called', 'Booked', 'Confirmed', 'Paid'], short: ['Visits', 'Viewed', 'Started or called', 'Booked', 'Confirmed', 'Paid'], confirmedNoun: 'booking' },
-  lodging: { long: ['Visits', 'Viewed', 'Started checkout or called', 'Booked', 'Confirmed', 'Paid'], short: ['Visits', 'Viewed', 'Started or called', 'Booked', 'Confirmed', 'Paid'], confirmedNoun: 'stay' },
-  platform: { long: ['Visits', 'Viewed an offering', 'Showed intent', 'Submitted', 'Confirmed', 'Paid'], short: ['Visits', 'Viewed', 'Intent', 'Submitted', 'Confirmed', 'Paid'], confirmedNoun: 'booking' },
-} as const
-const dashboard = useDashboardOrganization()
-const funnelWords = computed(() => FUNNEL_WORDS[dashboard.organization.value?.vertical ?? 'platform'])
-
-const funnelCell = (counts: FunnelCounts, key: typeof FUNNEL_KEYS[number]) => {
-  if (!counts[key]) return '—'
-  if (key !== 'paid' || !counts.paid_collected.length) return formatCount(counts[key])
-  return `${formatCount(counts.paid)} · ${counts.paid_collected.map(paid => formatMoney(paid.collected_minor, paid.currency)).join(' · ')}`
-}
-
-const funnelSteps = computed(() => {
-  const funnel = analytics.value?.funnel
-  if (!funnel) return []
-  return FUNNEL_KEYS.map((key, index) => {
-    const previous = index ? funnel[FUNNEL_KEYS[index - 1]!] : 0
-    const rate = index && previous && funnel[key] ? ` · ${formatNumber(Math.round(funnel[key] / previous * 1000) / 10)}%` : ''
-    return { key, label: funnelWords.value.long[index]!, value: `${funnelCell(funnel, key)}${rate}`, percent: funnel.visits ? funnel[key] / funnel.visits * 100 : 0 }
-  })
-})
-
-const funnelBreakdowns = computed(() => {
-  const funnel = analytics.value?.funnel
-  if (!funnel) return []
-  const rows = (entries: Array<{ label: string; counts: FunnelCounts }>) => entries.map(({ label, counts }) => ({ label, cells: FUNNEL_KEYS.map(key => funnelCell(counts, key)) }))
-  const locationTitle = (id: string | null) => id ? dashboard.locations.value.find(location => location.id === id)?.title ?? 'Removed location' : 'No location'
-  return [
-    { title: 'Source', testId: 'insights-funnel-by-source', rows: rows(funnel.by_source.map(row => ({ label: row.channel, counts: row }))) },
-    ...(dashboard.locations.value.length > 1
-      ? [{ title: 'Location', testId: 'insights-funnel-by-location', rows: rows(funnel.by_location.map(row => ({ label: locationTitle(row.location_id), counts: row }))) }]
-      : []),
-  ].filter(breakdown => breakdown.rows.length)
-})
-
 // Metrics strip
 const metricCards = computed(() => {
   const metrics = analytics.value?.metrics
@@ -606,17 +489,6 @@ const topPagesItems = computed(() => {
     value: p.views,
     formattedValue: formatCount(p.views),
     percent: p.percent_of_total,
-  }))
-})
-
-const attributionItems = computed(() => {
-  const att = analytics.value?.attribution || []
-  return att.map(a => ({
-    label: `${a.source} / ${a.medium}`,
-    detail: [a.campaign, a.content].filter(Boolean).join(' · '),
-    value: a.sessions,
-    formattedValue: `${formatCount(a.sessions)} sessions · ${formatCount(a.converting_sessions)} conv.`,
-    percent: a.session_conversion_rate !== null ? Math.round(a.session_conversion_rate) : 0,
   }))
 })
 
@@ -704,10 +576,6 @@ const FEEDBACK_STATUS_LABELS = { pending: 'Awaiting review', approved: 'Publishe
 // Formatters
 function formatMicros(micros: number, currency: string): string {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 2 }).format(micros / 1_000_000)
-}
-function formatMoney(minor: number, currency: string): string {
-  if (!isCurrencyCode(currency)) throw new Error(`Unsupported currency in analytics report: ${currency}`)
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(minor / 10 ** currencyFractionDigits(currency))
 }
 function formatCount(value: number): string {
   return new Intl.NumberFormat('en-US').format(value)

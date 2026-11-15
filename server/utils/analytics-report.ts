@@ -177,7 +177,7 @@ const signupsSql = `WITH signups AS (
 const followedBy = (alias: string, eventFilter: string) => `EXISTS (SELECT 1 FROM analytics_events ${alias} WHERE ${alias}.kind = 'conversion' AND ${alias}.organization_id = ?
     AND ${eventFilter} AND (${alias}.payload_json ->> '$.metadata.originating_user_id') = signups.user_id AND ${alias}.created_at >= signups.signed_at AND ${alias}.created_at < ?)`
 
-/** The signup cohort by its signup attribution: the dashboard shows its totals. */
+/** The signup cohort by its signup attribution. */
 function signupCohortRead(organizationId: string, { start, end, observedEnd }: ConversionReportWindow) {
   return read(`${signupsSql}
       SELECT source, medium, campaign, content, COUNT(*) signups,
@@ -185,12 +185,6 @@ function signupCohortRead(organizationId: string, { start, end, observedEnd }: C
         SUM(${followedBy('p', "(p.payload_json ->> '$.event_name') = 'purchase' AND (p.payload_json ->> '$.metadata.purchase_type') = 'initial_subscription'")}) first_paid
       FROM signups GROUP BY 1,2,3,4 ORDER BY signups DESC`, [organizationId, start, end, organizationId, observedEnd, organizationId, observedEnd])
 }
-
-const signupTotals = (cohortRows: Row[]) => ({
-  signups: cohortRows.reduce((sum, row) => sum + n(row.signups), 0),
-  onboarded_signups: cohortRows.reduce((sum, row) => sum + n(row.onboarded), 0),
-  first_paid_signups: cohortRows.reduce((sum, row) => sum + n(row.first_paid), 0),
-})
 
 /** The conversion detail only the MCP report returns, in the order composeConversionDetail reads it. */
 function conversionDetailReads(organizationId: string, window: ConversionReportWindow): BatchQuery[] {
@@ -273,7 +267,9 @@ function composeConversionDetail(results: Row[][], cohortRows: Row[], window: Co
     net: netByCurrency(valueRows),
     signup_cohort: {
       observed_through: observedEnd,
-      ...signupTotals(cohortRows),
+      signups: cohortRows.reduce((sum, row) => sum + n(row.signups), 0),
+      onboarded_signups: cohortRows.reduce((sum, row) => sum + n(row.onboarded), 0),
+      first_paid_signups: cohortRows.reduce((sum, row) => sum + n(row.first_paid), 0),
       by_signup_attribution: cohortRows.map(row => ({
         source: text(row.source), medium: text(row.medium), campaign: text(row.campaign), content: text(row.content),
         signups: n(row.signups), onboarded_signups: n(row.onboarded), first_paid_signups: n(row.first_paid), revenue: cohortRevenue(row),
@@ -373,9 +369,9 @@ function netByCurrency(valueRows: Array<Record<string, unknown>>) {
 }
 
 /**
- * One read of the report: every statement in one D1 batch, and a second only for a closed day
- * the daily aggregation has not summarized. Today and yesterday are read live in the first
- * batch, since the aggregation summarizes a day only after it closes in the business's time zone.
+ * One read of the report, in one D1 batch. Traffic is the stored daily summaries of the range and
+ * of the period before it: a day the daily aggregation has not summarized (today, and yesterday
+ * until the aggregation runs) reads as no traffic. The MCP report adds what is read from the events.
  */
 async function readAnalyticsReport(db: DbClient, context: OrganizationAnalyticsContext, input: { startDate?: string; endDate?: string; now?: Date }, conversionDetail: boolean) {
   const { organizationId, timezone, analyticsDataStartAt } = context
@@ -394,82 +390,49 @@ async function readAnalyticsReport(db: DbClient, context: OrganizationAnalyticsC
     throw new HTTPError({ statusCode: 422, statusMessage: `This business's own analytics begin ${analyticsDataStartAt}; ${range.startDate} to ${range.endDate} is before them. Earlier periods are in Google Ads, Google Analytics and Search Console.`, data: { code: 'NO_NATIVE_COVERAGE' } })
   }
   const nativeCoverage = start < analyticsDataStartAt ? 'partial' as const : 'full' as const
-  const cutoffDate = localDateAt(new Date(analyticsDataStartAt), timezone)
   const previousDates = localDateBounds(range.previousStartDate, timezone).start >= analyticsDataStartAt
     ? enumerateLocalDates(range.previousStartDate, range.previousEndDate)
     : []
-  // The previous period is read only for its page views; it ends the day before the range starts.
-  const summaryDates = [...previousDates, ...range.dates]
-  // A day before the business's own analytics began that has no summary has nothing native to report.
-  const reportedDates = summaryDates.filter(date => date >= cutoffDate)
-  const liveFrom = addLocalDays(localDateAt(now, timezone), -1)
-  const liveDates = reportedDates.filter(date => date >= liveFrom)
-  const daySummaryRead = (date: string) => {
-    const bounds = localDateBounds(date, timezone)
-    return read(daySummariesSql, [organizationId, bounds.start, bounds.end])
-  }
   const window: ConversionReportWindow = { start, end, observedEnd, dates: range.dates, timezone }
-  const funnelQueries = funnelReads(organizationId, start, end)
+  const funnelQueries = conversionDetail ? funnelReads(organizationId, start, end) : []
   const detailQueries = conversionDetail ? conversionDetailReads(organizationId, window) : []
   const results = (await executeBatch(db, [
+    // The previous period is read only for its page views; it ends the day before the range starts.
     read(`SELECT kind, date, key, payload_json FROM analytics_summaries
       WHERE organization_id = ? AND kind IN ('organization_day', 'page_day', 'dimension_day') AND date BETWEEN ? AND ?
-        AND (kind = 'organization_day' OR date >= ?)`, [organizationId, summaryDates[0], range.endDate, range.startDate]),
-    read(`SELECT COUNT(DISTINCT session_id) sessions, COUNT(DISTINCT visitor_id) visitors,
-      COALESCE(ROUND(AVG(CASE WHEN duration_seconds > 0 THEN duration_seconds END)), 0) avg_duration
-      FROM (SELECT session_id, visitor_id, SUM(duration_seconds) duration_seconds FROM analytics_events
-        WHERE organization_id = ? AND kind = 'pageview' AND created_at >= ? AND created_at < ?
-        GROUP BY session_id, visitor_id)`, [organizationId, start, end]),
-    read(`SELECT COUNT(DISTINCT current.visitor_id) count FROM analytics_events current
-      WHERE current.organization_id = ? AND current.kind = 'pageview' AND current.created_at >= ? AND current.created_at < ?
-      AND EXISTS (SELECT 1 FROM analytics_events previous INDEXED BY analytics_events_org_visitor_idx WHERE previous.organization_id = current.organization_id
-        AND previous.kind = 'pageview' AND previous.visitor_id = current.visitor_id
-        AND previous.session_id <> current.session_id AND previous.created_at < ?)`, [organizationId, start, end, start]),
-    // Sessions and their converting sessions are counted over the same population: each session
-    // grouped by its current last touch, converting when it has an outcome event in the range.
-    read(`SELECT source, medium, campaign, content, COUNT(*) sessions,
-        SUM(EXISTS (SELECT 1 FROM analytics_events e WHERE e.kind = 'conversion' AND e.organization_id = facts.organization_id AND e.session_id = facts.session_id
-          AND e.created_at >= ? AND e.created_at < ? AND (e.payload_json ->> '$.event_name') IN (${OUTCOME_EVENT_SQL_LIST}))) converting,
-        COALESCE(SUM((SELECT COUNT(*) FROM analytics_events e WHERE e.kind = 'conversion' AND e.organization_id = facts.organization_id AND e.session_id = facts.session_id
-          AND e.created_at >= ? AND e.created_at < ? AND (e.payload_json ->> '$.event_name') IN (${OUTCOME_EVENT_SQL_LIST}))), 0) outcome_events
-      FROM (${sessionFactsSql('?', `SELECT DISTINCT session_id FROM analytics_events
-        WHERE organization_id = ? AND kind = 'pageview' AND created_at >= ? AND created_at < ?`)}) facts
-      GROUP BY 1,2,3,4`, [start, end, start, end, organizationId, organizationId, start, end]),
-    signupCohortRead(organizationId, window),
-    ...funnelQueries,
-    ...detailQueries,
-    ...liveDates.map(daySummaryRead),
+        AND (kind = 'organization_day' OR date >= ?)`, [organizationId, previousDates[0] ?? range.startDate, range.endDate, range.startDate]),
+    ...(conversionDetail ? [
+      // Sessions and their converting sessions are counted over the same population: each session
+      // grouped by its current last touch, converting when it has an outcome event in the range.
+      read(`SELECT source, medium, campaign, content, COUNT(*) sessions,
+          SUM(EXISTS (SELECT 1 FROM analytics_events e WHERE e.kind = 'conversion' AND e.organization_id = facts.organization_id AND e.session_id = facts.session_id
+            AND e.created_at >= ? AND e.created_at < ? AND (e.payload_json ->> '$.event_name') IN (${OUTCOME_EVENT_SQL_LIST}))) converting,
+          COALESCE(SUM((SELECT COUNT(*) FROM analytics_events e WHERE e.kind = 'conversion' AND e.organization_id = facts.organization_id AND e.session_id = facts.session_id
+            AND e.created_at >= ? AND e.created_at < ? AND (e.payload_json ->> '$.event_name') IN (${OUTCOME_EVENT_SQL_LIST}))), 0) outcome_events
+        FROM (${sessionFactsSql('?', `SELECT DISTINCT session_id FROM analytics_events
+          WHERE organization_id = ? AND kind = 'pageview' AND created_at >= ? AND created_at < ?`)}) facts
+        GROUP BY 1,2,3,4`, [start, end, start, end, organizationId, organizationId, start, end]),
+      signupCohortRead(organizationId, window),
+      ...funnelQueries,
+      ...detailQueries,
+    ] : []),
   ], { operation: 'Read analytics report' })).map(result => result.results as Row[])
-  const [summaryRows, [sessionStats], [returningStats], attributionRows, cohortRows] = results as [AnalyticsSummaryRow[], Row[], Row[], Row[], Row[]]
-  const funnelResults = results.slice(5, 5 + funnelQueries.length)
-  const detailResults = results.slice(5 + funnelQueries.length, 5 + funnelQueries.length + detailQueries.length)
-  const liveResults = results.slice(5 + funnelQueries.length + detailQueries.length)
+  const summaryRows = results[0] as unknown as AnalyticsSummaryRow[]
 
   const summarized = new Map<string, Omit<AnalyticsSummaryRow, 'date'>[]>()
   for (const row of summaryRows) summarized.set(row.date, [...summarized.get(row.date) ?? [], row])
-  const daySummaries = new Map<string, Omit<AnalyticsSummaryRow, 'date'>[]>()
-  for (const date of summaryDates) {
-    const rows = summarized.get(date)
-    if (rows?.some(row => row.kind === 'organization_day')) daySummaries.set(date, rows)
-  }
-  liveDates.forEach((date, index) => { if (!daySummaries.has(date)) daySummaries.set(date, liveResults[index] as Omit<AnalyticsSummaryRow, 'date'>[]) })
-  const unsummarized = reportedDates.filter(date => !daySummaries.has(date))
-  if (unsummarized.length) {
-    const rows = await executeBatch(db, unsummarized.map(daySummaryRead), { operation: 'Read unsummarized analytics days' })
-    unsummarized.forEach((date, index) => daySummaries.set(date, rows[index]!.results as Row[] as Omit<AnalyticsSummaryRow, 'date'>[]))
-  }
   const sliceOf = (date: string): DailySlice => {
-    const rows = daySummaries.get(date)
-    return rows
+    const rows = summarized.get(date)
+    return rows?.some(row => row.kind === 'organization_day')
       ? dailySlice(date, rows)
       : { date, pageViews: 0, sessions: 0, visitors: 0, returningVisitors: 0, avgDuration: 0, pagesPerSession: 0, pages: [], dimensions: [] }
   }
   const slices = range.dates.map(sliceOf)
-  const pageViews = slices.reduce((sum, slice) => sum + slice.pageViews, 0)
+  const total = (value: (slice: DailySlice) => number) => slices.reduce((sum, slice) => sum + value(slice), 0)
+  const pageViews = total(slice => slice.pageViews)
+  const uniqueSessions = total(slice => slice.sessions)
   const previousViews = previousDates.reduce((sum, date) => sum + sliceOf(date).pageViews, 0)
   const changePercent = previousDates.length && previousViews ? Math.round((pageViews - previousViews) / previousViews * 100) : null
-  const uniqueSessions = n(sessionStats?.sessions)
-  const funnel = composeFunnel(funnelResults, { total: uniqueSessions, bySource: attributionRows.map(row => ({ source: String(row.source), medium: String(row.medium), sessions: n(row.sessions) })) })
 
   const pageMap = new Map<string, number>()
   const dimensionMaps = new Map<string, Map<string, number>>()
@@ -490,24 +453,18 @@ async function readAnalyticsReport(db: DbClient, context: OrganizationAnalyticsC
 
   const report = {
     period: { start_date: range.startDate, end_date: range.endDate, timezone, analytics_data_start_at: analyticsDataStartAt, native_coverage: nativeCoverage },
+    // Each day's counts, added: a visitor seen on two days counts on both.
     metrics: {
       page_views: pageViews,
       unique_sessions: uniqueSessions,
-      unique_visitors: n(sessionStats?.visitors),
-      returning_visitors: n(returningStats?.count),
-      avg_session_duration: n(sessionStats?.avg_duration),
+      unique_visitors: total(slice => slice.visitors),
+      returning_visitors: total(slice => slice.returningVisitors),
+      avg_session_duration: uniqueSessions ? Math.round(total(slice => slice.avgDuration * slice.sessions) / uniqueSessions) : 0,
       pages_per_session: uniqueSessions ? Math.round(pageViews / uniqueSessions * 100) / 100 : 0,
       change_percent: changePercent,
     },
     daily_data: slices.map(slice => ({ date: slice.date, page_views: slice.pageViews, sessions: slice.sessions, avg_duration: slice.avgDuration })),
     top_pages: Array.from(pageMap, ([path, views]) => ({ path, views, percent_of_total: percent(views) })).sort((a, b) => b.views - a.views).slice(0, 10),
-    attribution: attributionRows.map(row => {
-      const sessions = n(row.sessions)
-      return { source: String(row.source), medium: String(row.medium), campaign: row.campaign ? String(row.campaign) : null, content: row.content ? String(row.content) : null,
-        sessions, outcome_events: n(row.outcome_events), converting_sessions: n(row.converting), session_conversion_rate: rate(n(row.converting), sessions) }
-    }).sort((a, b) => b.sessions - a.sessions),
-    funnel,
-    signup_cohort: signupTotals(cohortRows),
     countries: dimensionRows('country').slice(0, 12).map(row => ({ country: row.value, country_code: row.value, views: row.views, percent_of_total: percent(row.views) })),
     cities: dimensionRows('city').slice(0, 10).map(row => {
       const [region, countryCode = 'XX'] = row.subvalue.split('|')
@@ -516,9 +473,23 @@ async function readAnalyticsReport(db: DbClient, context: OrganizationAnalyticsC
     referrers: dimensionRows('referrer').slice(0, 10).map(row => ({ source: row.value, views: row.views, percent_of_total: percent(row.views) })),
     devices: dimensionRows('device').map(row => ({ type: row.value, views: row.views, percent_of_total: percent(row.views) })),
   }
+  if (!conversionDetail) return { report, detail: null }
+  const [attributionRows, cohortRows] = [results[1]!, results[2]!]
+  const funnelResults = results.slice(3, 3 + funnelQueries.length)
+  const detailResults = results.slice(3 + funnelQueries.length)
+  // The events' own sessions in the range: every one has its last touch in the attribution rows.
+  const eventSessions = attributionRows.reduce((sum, row) => sum + n(row.sessions), 0)
   return {
     report,
-    detail: conversionDetail ? composeConversionDetail(detailResults, cohortRows, window, uniqueSessions) : null,
+    detail: {
+      attribution: attributionRows.map(row => {
+        const sessions = n(row.sessions)
+        return { source: String(row.source), medium: String(row.medium), campaign: row.campaign ? String(row.campaign) : null, content: row.content ? String(row.content) : null,
+          sessions, outcome_events: n(row.outcome_events), converting_sessions: n(row.converting), session_conversion_rate: rate(n(row.converting), sessions) }
+      }).sort((a, b) => b.sessions - a.sessions),
+      funnel: composeFunnel(funnelResults, { total: eventSessions, bySource: attributionRows.map(row => ({ source: String(row.source), medium: String(row.medium), sessions: n(row.sessions) })) }),
+      ...composeConversionDetail(detailResults, cohortRows, window, eventSessions),
+    },
   }
 }
 
@@ -527,7 +498,7 @@ export async function getDashboardAnalyticsReport(db: DbClient, context: Organiz
   return dashboardAnalyticsReportSchema.parse((await readAnalyticsReport(db, context, input, false)).report)
 }
 
-/** The whole report MCP returns: the dashboard's, its conversion detail and, given env, Google Ads spend. */
+/** The whole report MCP returns: the dashboard's traffic, attribution, the site funnel, conversion detail and, given env, Google Ads spend. */
 export async function getAnalyticsReport(db: DbClient, input: {
   organizationId: string; startDate?: string; endDate?: string; now?: Date
 }, env?: CloudflareEnv): Promise<AnalyticsReport> {

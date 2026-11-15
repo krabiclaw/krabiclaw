@@ -17,11 +17,9 @@ const funnelCounts = {
   paid_collected: z.array(z.object({ currency, collected_minor: amount })),
 }
 
-const signupCounts = { signups: count, onboarded_signups: count, first_paid_signups: count }
-
 /**
- * The native D1 report the dashboard shows: traffic, its sources and the site funnel. The
- * conversion detail below it is read only for the MCP report, which returns all of it.
+ * The native D1 report the dashboard shows: traffic from the stored daily summaries. Attribution,
+ * the site funnel and the conversion detail are read from the events only for the MCP report.
  */
 export const dashboardAnalyticsReportSchema = z.object({
   // partial: the range began before the business's own analytics did, and counts from analytics_data_start_at.
@@ -32,15 +30,6 @@ export const dashboardAnalyticsReportSchema = z.object({
   }),
   daily_data: z.array(z.object({ date: text, page_views: count, sessions: count, avg_duration: z.number().nonnegative() })),
   top_pages: z.array(z.object({ path: text, views: count, percent_of_total: z.number() })),
-  // Sessions and converting sessions share the same population. Outcomes below instead
-  // use their immutable attribution snapshot; their counts have no session denominator.
-  attribution: z.array(z.object({ ...attribution, sessions: count, outcome_events: count, converting_sessions: count, session_conversion_rate: z.number().nullable() })),
-  funnel: z.object({
-    ...funnelCounts,
-    by_source: z.array(z.object({ channel: z.enum(ATTRIBUTION_CHANNELS), ...funnelCounts })),
-    by_location: z.array(z.object({ location_id: nullableText, ...funnelCounts })),
-  }),
-  signup_cohort: z.object(signupCounts),
   countries: z.array(z.object({ country: text, country_code: text, views: count, percent_of_total: z.number() })),
   cities: z.array(z.object({ city: text, region: nullableText, country_code: text, views: count })),
   referrers: z.array(z.object({ source: text, views: count, percent_of_total: z.number() })),
@@ -55,7 +44,9 @@ export const analyticsReportSchema = z.object({
   daily_data: shown.daily_data,
   daily_conversions: z.array(z.object({ date: text, events: count })),
   top_pages: shown.top_pages,
-  attribution: shown.attribution,
+  // Sessions and converting sessions share the same population. Outcomes below instead
+  // use their immutable attribution snapshot; their counts have no session denominator.
+  attribution: z.array(z.object({ ...attribution, sessions: count, outcome_events: count, converting_sessions: count, session_conversion_rate: z.number().nullable() })),
   outcome_attribution: z.array(z.object({ ...attribution, event_name: text, events: count, distinct_entities: count })),
   attributed_value: z.array(z.object({ ...observedAttribution, ...money, purchases: count })),
   conversions: z.array(z.object({
@@ -67,9 +58,13 @@ export const analyticsReportSchema = z.object({
   values: z.array(z.object({ event_name: text, basis: z.enum(['quoted', 'purchase', 'refund']), currency, events: count, value_minor: amount, collected_minor: amount.nullable() })),
   booking_value: z.array(z.object({ product_id: nullableText, product_name: nullableText, location_id: nullableText, currency: currency.nullable(), bookings: count, valued_bookings: count, quoted_value_minor: amount })),
   net: z.array(z.object(money)),
-  funnel: shown.funnel,
+  funnel: z.object({
+    ...funnelCounts,
+    by_source: z.array(z.object({ channel: z.enum(ATTRIBUTION_CHANNELS), ...funnelCounts })),
+    by_location: z.array(z.object({ location_id: nullableText, ...funnelCounts })),
+  }),
   signup_cohort: z.object({
-    observed_through: text, ...signupCounts,
+    observed_through: text, signups: count, onboarded_signups: count, first_paid_signups: count,
     by_signup_attribution: z.array(z.object({ ...observedAttribution, signups: count, onboarded_signups: count, first_paid_signups: count, revenue: z.array(z.object(money)) })),
     onboarded_businesses: count, first_paid_businesses: count,
   }),
