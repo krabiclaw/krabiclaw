@@ -387,6 +387,58 @@ test('booking assignment and workspace admin promotion do not grant a conversati
   if (failures.length) throw new AggregateError(failures, 'Branch reservation access workflow or restoration failed')
 })
 
+test('a Today read that a change overtook is read again on return', async ({ page, baseURL }, testInfo) => {
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'The tasks shown use disposable local data only')
+  const organizationId = seededTenant('restaurant').organizationId
+  const release = await acquireTenantMutationLock(testInfo, organizationId)
+  const taskRoot = `/api/organizations/${organizationId}/tasks`
+  const title = `Overtaken Today read ${Date.now()}`
+  let workId: string | null = null
+  const todayRead = (url: URL) => url.pathname === '/api/dashboard/today'
+  const held = Promise.withResolvers<undefined>()
+  const answered = Promise.withResolvers<undefined>()
+  try {
+    await loginAs(page.request, baseURL!)
+    // The first read is answered before the change and delivered after it has reached the open socket.
+    await page.route(todayRead, async (route) => {
+      await page.unroute(todayRead)
+      const response = await route.fetch()
+      answered.resolve(undefined)
+      await held.promise
+      await route.fulfill({ response })
+    })
+    const socketCapture = page.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket' })
+    const firstRead = page.waitForResponse(response => response.request().method() === 'GET' && todayRead(new URL(response.url())))
+    void page.goto(ORG)
+    const socket = await socketCapture
+    const changed = socket.waitForEvent('framereceived', { predicate: frame => typeof frame.payload === 'string' && frame.payload.includes('"business.changed"') })
+    await answered.promise
+    const work = await page.request.post(taskRoot, { data: { title, idempotency_key: crypto.randomUUID() } })
+    expect(work.status(), await work.text()).toBe(201)
+    workId = (await work.json() as { task: TaskView }).task.id
+    await changed
+    held.resolve(undefined)
+    expect((await firstRead).status()).toBe(200)
+    await dismissPreviewToolbar(page)
+
+    const nav = page.getByRole('navigation', { name: 'Dashboard' })
+    await nav.getByRole('link', { name: 'Calendar', exact: true }).click()
+    await expect(page).toHaveURL(new RegExp(`${ORG}/calendar(?:[/?#]|$)`))
+    const returnRead = page.waitForResponse(response => response.request().method() === 'GET' && todayRead(new URL(response.url())))
+    await nav.getByRole('link', { name: 'Today', exact: true }).click()
+    expect((await returnRead).status()).toBe(200)
+    await expect(page.getByTestId('today-section-open').getByText(title, { exact: true })).toBeVisible()
+  } finally {
+    held.resolve(undefined)
+    try {
+      if (workId) {
+        const complete = await page.request.post(`${taskRoot}/${workId}/complete`, { data: {} })
+        expect(complete.status(), await complete.text()).toBe(200)
+      }
+    } finally { await release() }
+  }
+})
+
 test('a return to Today within the live connection shows the Today it left without reading it again', async ({ page, baseURL }, testInfo) => {
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'The task shown uses disposable local data only')
   const organizationId = seededTenant('restaurant').organizationId

@@ -186,6 +186,7 @@ const isAgenda = (value: unknown): value is AgendaPayload => isRecord(value) && 
 // 30 seconds while the socket stays open, dropped by any event Today re-reads on.
 const todayKey = () => `today-${orgSlug.value}-${range.value}-${taskKind.value ?? 'all'}`
 let readConnectionEpoch: number | null = null
+let readInvalidations: number | null = null
 let reuseExpiresAt: number | null = null
 const { data, pending, status: loadStatus, error: loadError, refresh } = await useAsyncData(
   todayKey,
@@ -193,6 +194,7 @@ const { data, pending, status: loadStatus, error: loadError, refresh } = await u
     if (!props.personalScope) {
       const held = realtime.recentToday.snapshot
       realtime.recentToday.snapshot = undefined
+      readInvalidations = realtime.recentToday.invalidations
       if (held?.key === todayKey() && held.expiresAt > Date.now() && realtime.status.value === 'open' && isBusinessToday(held.page)) {
         readConnectionEpoch = realtime.connectionEpoch.value
         reuseExpiresAt = held.expiresAt
@@ -214,7 +216,9 @@ const { data, pending, status: loadStatus, error: loadError, refresh } = await u
 const business = computed(() => data.value?.business ?? null)
 onScopeDispose(() => {
   const current = business.value
-  if (props.personalScope || !current || loadStatus.value !== 'success' || realtime.status.value !== 'open' || readConnectionEpoch !== realtime.connectionEpoch.value) return
+  // A page read before an event that changes Today is not the Today the event left.
+  if (props.personalScope || !current || loadStatus.value !== 'success' || realtime.status.value !== 'open' || readConnectionEpoch !== realtime.connectionEpoch.value
+    || readInvalidations !== realtime.recentToday.invalidations) return
   // Reusing a snapshot does not extend its life.
   const expiresAt = reuseExpiresAt ?? Date.now() + 30_000
   if (expiresAt > Date.now()) realtime.recentToday.snapshot = { key: todayKey(), page: current, expiresAt }

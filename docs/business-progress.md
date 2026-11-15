@@ -65,8 +65,12 @@ Reference operations name canonical capabilities: `article.publish`,
 `product.create`, `product.payment`, `product.readiness`, `stay.gap` and
 `booking.welcome`. Organization-level setup operations reference the exact
 organization, content operations reference their article or post, and product
-operations reference their exact product. References authorize the source and
-derive their evidence revision from its real state.
+operations reference their exact product. The exceptions: `article.create`
+references the organization; `post.create` references the organization, or a
+session as `["session", productId, sessionId]`; `stay.gap` references the
+interval as `[productId, from, to]`; `booking.welcome` references the guest
+conversation. References authorize the source and derive their evidence
+revision from its real state.
 
 Successful editor and MCP writes publish a content-free `business.changed`
 invalidation after their normal cache refresh; open dashboards re-read Today.
