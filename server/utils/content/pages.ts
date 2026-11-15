@@ -313,7 +313,7 @@ async function resolveLocale(db: DbClient, organizationId: string, locale?: stri
 
 export async function assertTenantPagePathAvailable(
   db: DbClient,
-  input: { organizationId: string; locale: string; path: string; site: PublicSiteDefinition; excludeVariantId?: string | null; allowOwnedRedirectVariantId?: string | null; translatingLinks?: boolean },
+  input: { organizationId: string; locale: string; path: string; site: PublicSiteDefinition; excludeVariantId?: string | null; allowOwnedRedirectVariantId?: string | null },
 ) {
   const sourceLocale = await resolveLocale(db, input.organizationId)
   const path = normalizeTenantPagePath(input.path)
@@ -321,7 +321,7 @@ export async function assertTenantPagePathAvailable(
   // nothing claims the path and the site's catch-all renders it. The hand
   // lists this replaced named routes that had been deleted and reserved routes
   // that do read a document.
-  if (!(input.translatingLinks && path === '/links') && !siteAllowsPageDocumentAt(input.site, CLAIMED_PUBLIC_ROUTES, path)) {
+  if (!siteAllowsPageDocumentAt(input.site, CLAIMED_PUBLIC_ROUTES, path)) {
     conflict('This path is reserved by a platform or product route')
   }
   // A venue's location overview may carry an authored page; it needs its location.
@@ -460,7 +460,7 @@ export async function listPageTasks(db: DbClient, organizationId: string, opts: 
         headline: st.title || `Update: ${matched.title}`,
         reason: st.notes || `Review and update ${matched.title} on your website storefront.`,
         action_label: 'Edit page',
-        to: matched.recipe === 'links' ? `/dashboard/[orgSlug]/website/pages/links` : `/dashboard/[orgSlug]/website/pages/${matched.id}`,
+        to: `/dashboard/[orgSlug]/website/pages/${matched.id}`,
         image_url: matched.image_url,
       })
     }
@@ -468,7 +468,6 @@ export async function listPageTasks(db: DbClient, organizationId: string, opts: 
 
   // 2. Domain readiness checks: missing content or missing cover photos
   for (const page of pages) {
-    if (page.recipe === 'links') continue
     if (page.section_count === 0) {
       tasks.push({
         id: `task-empty-${page.id}`,

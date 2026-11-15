@@ -105,39 +105,23 @@ export interface TenantPageRow {
 }
 
 /**
- * The rows the Pages list shows, in its order: every page document, including
- * a page a product owns — Pages is where every page is edited. The links page
- * leads: it is the page a tenant shares most, it opens its own editor, and it
- * is listed before its row exists because that editor creates the row on the
- * first save. Then the front page, then the rest.
+ * Turns raw content-document pages into list rows for the CMS:
+ * the front page first, then the rest.
  */
 export function tenantPageRows(pages: readonly TenantPageListRow[]): TenantPageRow[] {
-  const links = pages.find(page => page.recipe === 'links')
-  return [
-    {
-      id: links?.id ?? 'links',
-      recipe: 'links',
-      title: 'Links page',
-      summary: '/links',
-      removable: false,
-      updatedAt: links?.updated_at ?? '',
-      sectionCount: links?.section_count ?? 0,
-      imageUrl: links?.image_url ?? null,
-    },
-    ...pages
-      .filter(page => page.recipe !== 'links')
-      .sort((left, right) => Number(right.path === '/') - Number(left.path === '/'))
-      .map(page => ({
-        id: page.id,
-        recipe: page.recipe,
-        title: page.path === '/' ? 'Home' : page.title,
-        summary: page.path === '/' ? 'Homepage' : page.path,
-        removable: page.removable,
-        updatedAt: page.updated_at,
-        sectionCount: page.section_count ?? 0,
-        imageUrl: page.image_url ?? null,
-      })),
-  ]
+  return pages
+    .slice()
+    .sort((left, right) => Number(right.path === '/') - Number(left.path === '/'))
+    .map(page => ({
+      id: page.id,
+      recipe: page.recipe,
+      title: page.path === '/' ? 'Home' : page.title,
+      summary: page.path === '/' ? 'Homepage' : page.path,
+      removable: page.removable,
+      updatedAt: page.updated_at,
+      sectionCount: page.section_count ?? 0,
+      imageUrl: page.image_url ?? null,
+    }))
 }
 
 export function isTenantPageListResponse(value: unknown): value is { pages: TenantPageListRow[]; tasks?: PageTask[] } {
