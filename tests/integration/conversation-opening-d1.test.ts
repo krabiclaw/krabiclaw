@@ -9,9 +9,17 @@ import { appendMessage, markConversationRead } from '../../server/domain/convers
 import { loadConversationPage } from '../../server/domain/conversation-history.ts'
 import { acceptConversationGuestInvite, createConversationGuestInvite } from '../../server/domain/conversation-participants.ts'
 import { conversationPageFor } from './support/conversation-page.ts'
-import { countUnreadAsGuest, listConversations } from '../../server/domain/guest-threads/repository.ts'
+import { listConversations, readGuestInbox } from '../../server/domain/guest-threads/repository.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
+
+async function guestUnread(db: Parameters<typeof readGuestInbox>[0], userId: string) {
+  const inbox = await readGuestInbox(db, { userId, mailbox: 'current' })
+  const unread = inbox.threads.filter(row => row.unread).length
+  assert.equal(inbox.has_unread, unread > 0, 'the dot is the rows marked unread')
+  return unread
+}
+
 
 // inbox-parity.md, Revision 2026-11-06: a table booking's conversation opens
 // with real messages, the booking's own sentence then the guest's note,
@@ -100,13 +108,13 @@ test('a table booking opens with its own message and the guest note, written onc
     assert.deepEqual([travelerRow?.id, travelerRow?.preview, travelerRow?.when, travelerRow?.unread], ['shared', '', null, false])
     assert.deepEqual(await list('Private booking note'), [])
     assert.deepEqual(await list(privateWords), [])
-    assert.equal(await countUnreadAsGuest(db, traveler.id), 0)
+    assert.equal(await guestUnread(db, traveler.id), 0)
     await assert.rejects(markConversationRead(db, { organizationId: ORG, conversationId: 'shared', userId: traveler.id, throughMessageId: payment.id }), { statusCode: 422 })
 
     const publicMessage = await appendMessage(db, { conversationId: 'shared', authorKind: 'guest', authorUserId: booker.id, channel: 'web', body: 'Meet at the table' })
-    assert.equal(await countUnreadAsGuest(db, traveler.id), 1)
+    assert.equal(await guestUnread(db, traveler.id), 1)
     assert.deepEqual(await markConversationRead(db, { organizationId: ORG, conversationId: 'shared', userId: traveler.id }), { read: true, last_read_message_id: publicMessage.id })
-    assert.equal(await countUnreadAsGuest(db, traveler.id), 0)
+    assert.equal(await guestUnread(db, traveler.id), 0)
     const travelerMessage = await appendMessage(db, { conversationId: 'shared', authorKind: 'guest', authorUserId: traveler.id, channel: 'web', body: 'I will be there' })
     const latestPayment = await appendMessage(db, { conversationId: 'shared', authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: 'Another private payment' })
     const first = await page(traveler.id, 1)
@@ -117,7 +125,7 @@ test('a table booking opens with its own message and the guest note, written onc
     const previous = await loadConversationPage(db, { conversationId: 'shared', userId: traveler.id }, { before: first.page.before, limit: 1 })
     assert.deepEqual(previous.entries.filter(entry => entry.type === 'message').map(entry => entry.id), [publicMessage.id])
     assert.equal(previous.page.before, null)
-    assert.equal(await countUnreadAsGuest(db, traveler.id), 0)
+    assert.equal(await guestUnread(db, traveler.id), 0)
     assert.deepEqual((await list()).map(row => [row.preview, row.preview_from, row.unread]), [['I will be there', 'You', false]])
     const original = await page(booker.id)
     assert.equal(original.conversation.booking_id, 'res-shared')

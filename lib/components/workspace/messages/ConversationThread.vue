@@ -613,7 +613,7 @@ async function readThroughNewest() {
     })
     readThrough = target
     readError.value = null
-    if (realtime.status.value !== 'open') refreshConversationUnreadCount()
+    if (realtime.status.value !== 'open') refreshConversationUnread()
   } catch (cause) { readError.value = getErrorMessage(cause, 'Message read state could not be saved') }
   finally {
     markingRead = false

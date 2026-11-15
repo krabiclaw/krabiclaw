@@ -847,9 +847,12 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     const seating = await openSeating(page.request, 2, 365 * 86_400_000)
     // The guest's own Messages count: their conversations with something from the business they have not read.
     const guestUnread = async () => {
-      const response = await page.request.get('/api/messages/unread-count')
+      const response = await page.request.get('/api/messages', { params: { mailbox: 'current', limit: 100 } })
       await expectStatus(response, 200)
-      return (await response.json() as { count: number }).count
+      const inbox = await response.json() as { threads: { unread: boolean }[]; has_unread: boolean }
+      const rows = inbox.threads.filter(thread => thread.unread).length
+      expect(inbox.has_unread).toBe(rows > 0)
+      return rows
     }
     const unreadBefore = await guestUnread()
     const booked = await bookTable(page.request, { name: 'E2E Buyer', email: 'buyer@playwright.example', phone: '+12025550123', partySize: 1, seating })

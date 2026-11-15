@@ -140,8 +140,12 @@ const listHydrated = ref(false)
 const realtime = useDashboardInvalidations()
 onMounted(() => { listHydrated.value = true })
 
-const unreadCounts = useInboxUnread(organizationId)
+const workspaceUnread = useInboxUnread(organizationId)
 const personalUnread = usePersonalInboxUnread()
+const inboxUnread = computed({
+  get: () => props.personalScope ? personalUnread.value : workspaceUnread.value,
+  set: value => { if (props.personalScope) personalUnread.value = value; else workspaceUnread.value = value },
+})
 
 const emptyTitle = computed(() => search.value || kind.value || unreadOnly.value ? 'No conversations match' : 'No conversations yet.')
 const emptyDescription = computed(() => {
@@ -381,9 +385,7 @@ let disposed = false
 let reconcileAbort: AbortController | undefined
 
 function publishUnread(value: ThreadListPage | undefined) {
-  if (props.personalScope) {
-    if (value?.count !== undefined) personalUnread.value = value.count
-  } else if (value?.unread) unreadCounts.value = value.unread
+  if (value) inboxUnread.value = value.has_unread
 }
 watch(page, value => publishUnread(value ?? undefined), { immediate: true })
 watch(listKey, () => {
@@ -465,7 +467,7 @@ async function drainChanges() {
       return
     }
     const threads = before.pagination.has_more ? rows.slice(0, before.threads.length) : rows
-    data.value = { ...before, threads, unread: changed.unread, count: changed.count }
+    data.value = { ...before, threads, has_unread: changed.has_unread }
   } catch (error) {
     if (!disposed && generationAtStart === generation && scope === listKey.value) nextPageError.value = error
   } finally {
@@ -482,8 +484,7 @@ function clearInbox() {
   fullRefresh = false
   reconcileAbort?.abort()
   pageController?.abort()
-  if (props.personalScope) personalUnread.value = null
-  else unreadCounts.value = null
+  inboxUnread.value = null
   clear()
   loadedPages = 1
 }
@@ -505,9 +506,8 @@ watch(realtime.event, event => {
         return
       }
       else {
-        if (data.value) data.value = { ...data.value, threads: data.value.threads.filter(row => row.id !== event.conversation_id), unread: undefined, count: undefined }
-        if (props.personalScope) personalUnread.value = null
-        else unreadCounts.value = null
+        if (data.value) data.value = { ...data.value, threads: data.value.threads.filter(row => row.id !== event.conversation_id) }
+        inboxUnread.value = null
       }
     }
     reconcile(event.conversation_id)

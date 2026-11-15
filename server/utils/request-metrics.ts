@@ -85,7 +85,7 @@ export function recordRequestPhase(event: HTTPEvent, phase: string, startedAt: n
 export function beginTranscriptMetrics(event: HTTPEvent) {
   if (event.req.method !== 'GET' || !event.req.url.includes('/api/messages/')) return
   const path = new URL(event.req.url).pathname.replace(/\/$/, '')
-  if (!/^\/api\/messages\/[^/]+$/.test(path) || path === '/api/messages/unread-count') return
+  if (!/^\/api\/messages\/[^/]+$/.test(path)) return
   const metrics = getRequestDataMetrics(event)
   metrics.transcript = { finishDispatch: startTranscriptPhase(event, 'middleware') }
 }

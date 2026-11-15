@@ -3,7 +3,7 @@ import { sessionPrepTaskQueries } from '~/server/domain/tasks'
 import { BOOKING_ENDS_SQL, BOOKING_RECORDS_SQL, bookingDay, parseGuestRequest, stayRequestPayBySql, stayRequestRespondBySql } from '~/server/domain/requests'
 import {
   MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SUPPORT_CONVERSATION_SQL,
-  archiveQuery, conversationAccessDenied, participantGuard, guestVisibleSql, listUnreadIds, messageHasContentSql, unreadSql, type ConversationGuard, type UnreadCounts,
+  archiveQuery, conversationAccessDenied, participantGuard, guestVisibleSql, listUnreadIds, messageHasContentSql, unreadSql, type ConversationGuard,
 } from '~/server/domain/conversations'
 import { messagePreview } from './attachments'
 import { conversationGuestName } from './inbox'
@@ -294,26 +294,21 @@ function previewFrom(message: LatestMessage, context: { guestName: string; viewe
   return message.authorKind === 'krabiclaw' ? 'KrabiClaw' : 'You'
 }
 
-type UnreadCountRow = { list_kind: 'guests' | 'support' | 'team'; count: number }
-
 /**
- * Unread conversations in the Current mailbox per list kind, for the filter
- * menu (All, Guests, Airbnb Support, Team) and the nav count: the list's own
- * scope and the one unread statement, so a count never disagrees with a row.
+ * Whether the Current mailbox holds an unread conversation, for the nav's dot:
+ * the list's own scope and the one unread statement, so the dot never
+ * disagrees with a row.
  */
-function unreadConversationsQuery(organizationId: string, opts: ListGuestThreadsOptions, now: Date): BatchQuery {
+function hasUnreadQuery(organizationId: string | null, opts: ListGuestThreadsOptions, now: Date): BatchQuery {
   const scope = inboxScope(organizationId, { ...opts, conversationIds: undefined, kind: null, q: null, mailbox: 'current', unreadOnly: false }, now.toISOString())
   const unread = unreadSql('gt', opts.userId)
-  return { query: `
-    SELECT CASE WHEN gt.kind = 'team' THEN 'team' WHEN ${SUPPORT_CONVERSATION_SQL('gt')} THEN 'support' ELSE 'guests' END AS list_kind, COUNT(*) AS count
-      FROM ${scope.from}
-     WHERE ${scope.where} AND ${unread.sql}
-     GROUP BY 1`, params: [...scope.params, ...unread.params] }
+  return { query: `SELECT EXISTS (SELECT 1 FROM ${scope.from} WHERE ${scope.where} AND ${unread.sql}) AS has_unread`, params: [...scope.params, ...unread.params] }
 }
 
-function presentUnreadCounts(rows: UnreadCountRow[]): UnreadCounts {
-  const count = (kind: UnreadCountRow['list_kind']) => Number(rows.find(row => row.list_kind === kind)?.count ?? 0)
-  return { all: count('guests') + count('support') + count('team'), guests: count('guests'), support: count('support'), team: count('team') }
+function presentHasUnread(result: D1Result | undefined): boolean {
+  const row = result?.results[0] as { has_unread: number } | undefined
+  if (!row) throw new Error('Unread conversations could not be read')
+  return row.has_unread === 1
 }
 
 /** The Better Auth member row distinguishes an empty inbox from a workspace the user cannot read. */
@@ -326,40 +321,29 @@ function requireInboxMembership(result: D1Result | undefined) {
 }
 
 export async function readWorkspaceInbox(db: DbClient, organizationId: string, opts: ListGuestThreadsOptions, now = new Date()) {
-  const [membership, list, counts] = await executeBatch(db, [
+  const [membership, list, unread] = await executeBatch(db, [
     workspaceMembershipQuery(organizationId, opts.userId),
     conversationListQuery(organizationId, opts, now),
-    unreadConversationsQuery(organizationId, opts, now),
+    hasUnreadQuery(organizationId, opts, now),
   ], { operation: 'Read workspace inbox' })
   requireInboxMembership(membership)
-  return {
-    threads: presentConversationList(list!.results as ListRow[], opts, now),
-    unread: presentUnreadCounts(counts!.results as UnreadCountRow[]),
-  }
+  return { threads: presentConversationList(list!.results as ListRow[], opts, now), has_unread: presentHasUnread(unread) }
 }
 
-export async function countUnreadConversations(db: DbClient, organizationId: string, opts: ListGuestThreadsOptions): Promise<UnreadCounts> {
-  const [membership, counts] = await executeBatch(db, [
-    workspaceMembershipQuery(organizationId, opts.userId),
-    unreadConversationsQuery(organizationId, opts, new Date()),
-  ], { operation: 'Count workspace unread conversations' })
-  requireInboxMembership(membership)
-  return presentUnreadCounts(counts!.results as UnreadCountRow[])
-}
-
-/** Unread conversations a guest has with every business, in their own inbox's Current mailbox. */
-export async function countUnreadAsGuest(db: DbClient, userId: string): Promise<number> {
-  const scope = inboxScope(null, { userId, buyerAudience: true, mailbox: 'current' }, new Date().toISOString())
-  const unread = unreadSql('gt', userId)
-  const row = await queryFirst<{ count: number }>(db, `SELECT COUNT(*) AS count FROM ${scope.from} WHERE ${scope.where} AND ${unread.sql}`, [...scope.params, ...unread.params])
-  if (!row) throw new Error('Unread conversations as a guest could not be counted')
-  return Number(row.count)
+/** A guest's own inbox: their conversations with every business, and whether its Current mailbox holds an unread one. */
+export async function readGuestInbox(db: DbClient, opts: ListGuestThreadsOptions, now = new Date()) {
+  const guest = { ...opts, buyerAudience: true }
+  const [list, unread] = await executeBatch(db, [
+    conversationListQuery(null, guest, now),
+    hasUnreadQuery(null, { userId: opts.userId, buyerAudience: true }, now),
+  ], { operation: 'Read guest inbox' })
+  return { threads: presentConversationList(list!.results as ListRow[], guest, now), has_unread: presentHasUnread(unread) }
 }
 
 /**
  * The app icon's number: the unread conversations a person sees in every
- * organization they belong to, and their own as a guest. Each is the same
- * count the inbox's filter menu shows.
+ * organization they belong to, and their own as a guest. It is sent with a
+ * notification and is not read by any page.
  */
 export async function unreadBadge(db: DbClient, userId: string): Promise<number> {
   const guest = inboxScope(null, { userId, buyerAudience: true, mailbox: 'current' }, new Date().toISOString())

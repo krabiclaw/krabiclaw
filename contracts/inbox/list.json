@@ -1,4 +1,5 @@
 {
+  "has_unread": true,
   "pagination": {
     "has_more": false,
     "limit": 100,
@@ -32,11 +33,5 @@
       "unread": true,
       "when": "Nov 20 – 23"
     }
-  ],
-  "unread": {
-    "all": 1,
-    "guests": 1,
-    "support": 0,
-    "team": 0
-  }
+  ]
 }

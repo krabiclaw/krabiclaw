@@ -92,7 +92,7 @@
         <span class="relative">
           <UIcon :name="item.icon" class="size-6 shrink-0" />
           <UIcon v-if="item.badgeUnavailable" :id="`mobile-nav-unread-${item.key}`" name="i-lucide-circle-alert" class="absolute -right-1.5 -top-1 size-3.5 text-warning" aria-hidden="true" aria-label="Unread messages could not be loaded" />
-          <span v-else-if="item.badge" :id="`mobile-nav-unread-${item.key}`" class="absolute -right-2.5 -top-1.5 h-4 min-w-4 rounded-full bg-error px-1 text-center text-xs font-semibold leading-4 text-white" aria-hidden="true" :aria-label="`${item.badge} unread`">{{ item.badge > 99 ? '99+' : item.badge }}</span>
+          <span v-else-if="item.badge" :id="`mobile-nav-unread-${item.key}`" class="absolute -right-1 -top-0.5 size-2 rounded-full bg-error" aria-hidden="true" aria-label="Unread" />
         </span>
         <span class="text-xs leading-tight font-medium" data-testid="dashboard-nav-label">{{ item.label }}</span>
       </NuxtLink>
@@ -380,9 +380,9 @@ interface DashboardMobileNavItem {
   icon: string
   to?: string
   active?: boolean
-  /** Conversations with something unread, on Messages. */
-  badge?: number
-  /** The unread counts could not be read. */
+  /** A conversation has something unread, on Messages. */
+  badge?: boolean
+  /** Unread could not be read. */
   badgeUnavailable?: boolean
 }
 
@@ -424,7 +424,7 @@ const navTargets = computed<DashboardMobileNavItem[]>(() => {
 const menuOpen = ref(false)
 
 // The conversations with something unread, on Messages. A count that could not be read is marked as such, never shown stale.
-const { unreadConversations, unavailable: unreadUnavailable } = useConversationUnreadCount(realtime)
+const { unread: unreadConversations, unavailable: unreadUnavailable } = useConversationUnread(realtime)
 const primaryNavItems = computed(() => navTargets.value.map(item => ({ ...item, active: item.key === activeTab.value, ...(item.key === 'messages' ? { badge: unreadConversations.value, badgeUnavailable: unreadUnavailable.value } : {}) })))
 // A signed-in owner always gets the header: the wordmark and the account menu
 // are user-scoped and need no organization. Only the nav links and the bottom
