@@ -70,6 +70,7 @@ async function boot() {
     for (const [id, name, kind] of [['class', 'Pizza Class', 'experience'], ['family', 'Family Law', 'service']]) {
       await db.prepare("INSERT INTO products (kind, id, organization_id, name, slug, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(kind, id, ORG, name, id, OWNER, OWNER).run()
       await db.prepare("INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES (?, ?, ?, 'Seat', ?, ?)").bind(`${id}-seat`, ORG, id, OWNER, OWNER).run()
+      await db.prepare('INSERT INTO product_publications (organization_id, product_id, published, created_by, updated_by) VALUES (?, ?, 1, ?, ?)').bind(ORG, id, OWNER, OWNER).run()
     }
     await db.prepare("INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_by, updated_by) VALUES (?, 'class', 'brooklyn', 1, 1, ?, ?)").bind(ORG, OWNER, OWNER).run()
     await db.prepare("INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('class', ?, 'slot', 120, 12, 'business', ?, ?)").bind(ORG, OWNER, OWNER).run()
@@ -130,7 +131,6 @@ test('the places calendar reads each location, experience and consultation with 
 
     // The host Calendar and the booking page read the same places left: Wednesday's booking takes three, and on
     // Thursday a guest's live checkout holds one while a lapsed checkout holds none.
-    await db.prepare('INSERT INTO product_publications (organization_id, product_id, published, created_by, updated_by) VALUES (?, ?, 1, ?, ?)').bind(ORG, 'class', OWNER, OWNER).run()
     for (const [id, quantity, expires] of [['live', 1, '+1 day'], ['lapsed', 2, '-1 minute']] as const) {
       await db.prepare("INSERT INTO payments (id, organization_id, stripe_account_id, livemode, subject_type, currency, amount, price_snapshot_json, created_at, updated_at) VALUES (?, ?, 'acct_test', 0, 'booking', 'USD', 100, '{}', ?, ?)").bind(`pay-${id}`, ORG, NOW, NOW).run()
       await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, variant_id, price_id, session_id, payment_id, quantity, amount, currency, starts_at, ends_at, expires_at, created_at)

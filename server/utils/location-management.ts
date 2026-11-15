@@ -578,8 +578,15 @@ export async function updateLocation(
       : previous === next;
     if (!equal) changedFields.push(field);
   }
+  const expectedUpdatedAt = input.updated_at ?? existing.updated_at;
+  const version = { query: 'EXISTS (SELECT 1 FROM business_locations WHERE id = ? AND organization_id = ? AND updated_at = ?)', params: [locationId, organizationId, expectedUpdatedAt] };
   if (!changedFields.length) {
-    if (preceding.length) await executeBatch(db, preceding);
+    // The caller's statements land only on the row it read, as an update would.
+    if (preceding.length) {
+      const landed = await executeBatch(db, [{ query: `SELECT CASE WHEN (${version.query}) THEN NULL ELSE json_extract('{}', 'LOCATION_VERSION_CONFLICT') END`, params: version.params }, ...preceding])
+        .then(() => true, (error: unknown) => { if (error instanceof Error && /LOCATION_VERSION_CONFLICT/.test(error.message)) return false; throw error });
+      if (!landed) return stale;
+    }
     await reportBillingUsage(env, db, organizationId, { committed: true });
     if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId });
     await purgePublicResourceCacheNow(env, organizationId);
@@ -591,8 +598,6 @@ export async function updateLocation(
   // the row it read. With the caller's updated_at in the WHERE, a row that
   // moved since matches nothing and the write is refused rather than applied
   // over someone else's.
-  const expectedUpdatedAt = input.updated_at ?? existing.updated_at;
-  const version = { query: 'EXISTS (SELECT 1 FROM business_locations WHERE id = ? AND organization_id = ? AND updated_at = ?)', params: [locationId, organizationId, expectedUpdatedAt] };
   const runUpdate = async (boundParams: Array<string | number | null>): Promise<boolean> => {
     const statements: BatchQuery[] = [publicResourceCacheInvalidationQuery(organizationId, 'location_updated', version)];
     statements.push({

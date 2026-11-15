@@ -141,7 +141,7 @@ function locationDays(row: LocationRow, window: string[], reservations: Map<stri
   })
 }
 
-function offeringDays(row: OfferingRow, window: string[], sessions: Map<string, BookableSession[]>, now: string): PlaceDay[] {
+function offeringDays(row: OfferingRow, window: string[], sessions: Map<string, BookableSession[]>, onSale: Set<string | null>, now: string): PlaceDay[] {
   const provider = row.scheduling_mode === 'provider'
   const first = stayGuestFirstName(row.provider_name)
   const hoursText = provider ? `Outside ${first ? `${first}'s` : 'the provider\'s'} hours` : 'No session on this day'
@@ -150,7 +150,7 @@ function offeringDays(row: OfferingRow, window: string[], sessions: Map<string, 
     const booked = onDay.filter(session => session.claimed > 0).length
     const writable = onDay.filter(session => session.claimed === 0)
     // What a guest can book that day, exactly as the booking page reads it.
-    const open = onDay.filter(session => session.status === 'scheduled' && !session.is_full && session.starts_at > now)
+    const open = onDay.filter(session => session.status === 'scheduled' && !session.is_full && session.starts_at > now && onSale.has(session.location_id))
     const held: PlaceHold | null = writable.length ? null
       : booked ? { kind: 'booked', text: `${booked} booked ${booked === 1 ? 'session' : 'sessions'}` }
         : { kind: provider ? 'hours' : 'unscheduled', text: hoursText }
@@ -186,7 +186,9 @@ export async function placesCalendarOf(principal: MemberAccessPrincipal, window:
   const offerings = (offeringResult!.results as OfferingRow[]).filter(row => everyOffering || row.assigned)
   if (only && !locations.length && !offerings.length) fail(404, 'Place not found')
   const now = new Date().toISOString()
-  const calendars = slotCalendars(principal.env, { ...instants(window), scope: 'editor', now }, slotResults)
+  // Only what the reader may see is computed: a hidden offering's settings never fail their calendar.
+  const visible = new Set(offerings.map(row => row.id))
+  const calendars = slotCalendars(principal.env, { ...instants(window), scope: 'editor', now }, slotResults, (productId, kind) => kind === 'table' || visible.has(productId))
   const span = dates(window.from, window.to)
   const reservations = new Map<string, Map<string, number>>()
   for (const location of locations) {
@@ -197,13 +199,13 @@ export async function placesCalendarOf(principal: MemberAccessPrincipal, window:
   const sessions = await Promise.all(offerings.map(async (row) => {
     const calendar = calendars.get(row.id)
     if (!calendar) throw new Error(`Offering ${row.id} has no slot calendar`)
-    return byLocalDate(scheduleSessions(calendar, await calendar.places(), { statuses: ['scheduled', 'cancelled'], now }), window)
+    return { onSale: calendar.onSale, days: byLocalDate(scheduleSessions(calendar, await calendar.places(), { statuses: ['scheduled', 'cancelled'], now }), window) }
   }))
   return {
     from: window.from, to: window.to, manage: manageLocations && manageOfferings,
     places: [
       ...locations.map(row => ({ place: placeOf(row), days: locationDays(row, span, reservations.get(row.id)!) })),
-      ...offerings.map((row, index) => ({ place: placeOf(row), days: offeringDays(row, span, sessions[index]!, now) })),
+      ...offerings.map((row, index) => ({ place: placeOf(row), days: offeringDays(row, span, sessions[index]!.days, sessions[index]!.onSale, now) })),
     ],
   }
 }

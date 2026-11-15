@@ -871,7 +871,7 @@ test('a v12 export transfers into the v13 baseline with one site palette and log
 test('a v15 export transfers into the v16 baseline: required clocks and currencies, online offerings held by their providers', async t => {
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
   const { workingWindows } = await import('../../server/domain/member-scheduling.ts')
-  const { drizzle } = await import('drizzle-orm/better-sqlite3')
+  const { Miniflare } = await import('miniflare')
   const { listBookableSessions } = await import('../../server/utils/availability.ts')
   const now = '2026-10-13T00:00:00.000Z'
   t.mock.timers.enable({ apis: ['Date'], now: new Date(now) })
@@ -939,9 +939,24 @@ test('a v15 export transfers into the v16 baseline: required clocks and currenci
       ])
       const before = target.prepare('SELECT * FROM product_sessions ORDER BY id').all()
       assert.equal(before.length, 4)
-      const sessions = await listBookableSessions(drizzle(target) as unknown as Parameters<typeof listBookableSessions>[0], {
+      // The application reads D1 only: the migrated database is read through a D1 holding exactly its tables and rows.
+      // Miniflare runs on the real clock; the read is told the test's time.
+      t.mock.timers.reset()
+      const runtime = new Miniflare({ workers: [{ config: { name: 'v16-read', compatibilityDate: '2024-11-01',
+        manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response() } }' } } }, env: { DB: { type: 'd1' } } } }] })
+      try {
+      const d1 = await runtime.getD1Database('DB')
+      const tables = target.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as Array<{ name: string; sql: string }>
+      const indexes = target.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL").all() as Array<{ sql: string }>
+        await d1.batch([d1.prepare('PRAGMA defer_foreign_keys = on'), ...[...tables, ...indexes].map(entry => d1.prepare(entry.sql)), ...tables.flatMap((table) => {
+          // Generated columns are computed by D1 itself.
+          const columns = (target.pragma(`table_xinfo("${table.name}")`) as Array<{ name: string; hidden: number }>).filter(column => column.hidden === 0).map(column => column.name)
+          return (target.prepare(`SELECT ${columns.map(column => `"${column}"`).join(', ')} FROM "${table.name}"`).raw().all() as unknown[][])
+            .map(values => d1.prepare(`INSERT INTO "${table.name}" (${columns.map(column => `"${column}"`).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`).bind(...values))
+        })])
+      const sessions = await listBookableSessions(d1, {
         organizationId: 'org', productId: 'consult', env: {} as Parameters<typeof listBookableSessions>[1]['env'],
-        locationId: null, fromInstant: '2026-10-13T00:01:00.000Z', toInstant: '2026-11-25T00:00:00.000Z',
+        locationId: null, fromInstant: '2026-10-13T00:01:00.000Z', toInstant: '2026-11-25T00:00:00.000Z', now,
       })
       assert(sessions.some(row => row.id === 'outside-horizon'), 'an existing occurrence beyond the old horizon keeps its ID')
       const projected = sessions.filter(row => row.created_at === null)
@@ -949,7 +964,11 @@ test('a v15 export transfers into the v16 baseline: required clocks and currenci
       assert(projected.every(row => row.timezone === 'America/New_York' && row.capacity === 1 &&
         Date.parse(row.ends_at) - Date.parse(row.starts_at) === 30 * 60_000 &&
         windows.some(window => window.start <= row.starts_at && window.end >= row.ends_at)))
-      assert.deepEqual(target.prepare('SELECT * FROM product_sessions ORDER BY id').all(), before)
+      assert.deepEqual((await d1.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results, before)
+      } finally {
+        await runtime.dispose()
+        t.mock.timers.enable({ apis: ['Date'], now: new Date(now) })
+      }
     } finally {
       target.close()
     }

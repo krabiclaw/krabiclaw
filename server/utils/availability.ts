@@ -437,12 +437,6 @@ function resolvedDuration(config: ProductBookingConfigRecord): number {
   return minutes
 }
 
-async function canScheduleSessions(db: DbClient, config: ProductBookingConfigRecord): Promise<boolean> {
-  // In provider mode the member's own hours are the schedule; without them there is nothing to hold.
-  if (config.scheduling_mode !== 'provider') return true
-  return Boolean(await queryFirst(db, 'SELECT member_id FROM member_scheduling WHERE member_id=? AND organization_id=? AND timezone IS NOT NULL', [config.assigned_member_id, config.organization_id]))
-}
-
 type InstantRange = { fromInstant: string; toInstant: string }
 type ProviderHours = { member_id: string; timezone: string; weekly_json: string; time_off_json: string }
 
@@ -795,43 +789,6 @@ export function bookingWindow(timezone: string, days = BOOKING_HORIZON_DAYS, now
   }
 }
 
-/** Read which product scopes have a schedule, without projecting an entire catalog. */
-export async function bookingScheduleScopes(db: DbClient, organizationId: string, productIds: string[]): Promise<Map<string, Set<string | null>>> {
-  if (!productIds.length) return new Map()
-  const rows = await queryAll<{ product_id: string; location_id: string | null }>(db, `
-    WITH configured AS (
-      SELECT c.* FROM product_booking_configs c WHERE c.organization_id=? AND c.duration_minutes>0
-        AND c.product_id IN (SELECT value FROM json_each(?))
-        AND (c.scheduling_mode<>'provider' OR EXISTS (
-          SELECT 1 FROM member_scheduling ms WHERE ms.organization_id=c.organization_id AND ms.member_id=c.assigned_member_id
-            AND ms.timezone IS NOT NULL AND json_array_length(ms.weekly_json)>0))
-    )
-    SELECT c.product_id, pl.location_id FROM configured c
-      JOIN product_locations pl ON pl.organization_id=c.organization_id AND pl.product_id=c.product_id
-      JOIN business_locations l ON l.id=pl.location_id AND l.organization_id=c.organization_id
-      WHERE l.status='active' AND ((
-        c.seating_interval_minutes IS NOT NULL AND (json_array_length(l.opening_hours,'$.periods')>0 OR EXISTS (
-          SELECT 1 FROM json_each(l.special_hours) WHERE json_extract(value,'$.kind')='hours'
-            AND json_extract(value,'$.date')>=date('now','-1 day') AND json_array_length(value,'$.periods')>0))
-      ) OR (c.seating_interval_minutes IS NULL AND (
-        EXISTS (SELECT 1 FROM product_availability_rules r WHERE r.organization_id=c.organization_id
-          AND r.product_id=c.product_id AND r.location_id=pl.location_id AND COALESCE(r.capacity,c.default_capacity,1)>0)
-        OR EXISTS (SELECT 1 FROM product_sessions s WHERE s.organization_id=c.organization_id AND s.product_id=c.product_id
-          AND s.location_id=pl.location_id AND s.status='scheduled' AND COALESCE(s.capacity,1)>0
-          AND s.starts_at>strftime('%Y-%m-%dT%H:%M:%fZ','now',printf('+%d minutes',COALESCE(c.advance_notice_minutes,0)))
-          AND s.starts_at<strftime('%Y-%m-%dT%H:%M:%fZ','now',printf('+%d days',?))))))
-    UNION ALL
-    SELECT c.product_id, NULL FROM configured c WHERE c.held_online=1 AND c.scheduling_mode='provider'
-  `, [organizationId, d1JsonValue(productIds), BOOKING_HORIZON_DAYS])
-  const byProduct = new Map<string, Set<string | null>>()
-  for (const row of rows) {
-    const scopes = byProduct.get(row.product_id) ?? new Set()
-    scopes.add(row.location_id)
-    byProduct.set(row.product_id, scopes)
-  }
-  return byProduct
-}
-
 interface SlotRange extends InstantRange {
   organizationId: string
   productId: string
@@ -1000,19 +957,7 @@ function fitsPublicWindow(session: SessionFacts, config: ProductBookingConfigRec
     outsideNotice(session.starts_at, config.advance_notice_minutes, Date.parse(now))
 }
 
-/**
- * The slot reader. One D1 batch reads, for the offerings and the requested
- * window only, everything their open times and places left come from: their
- * booking settings, locations and weekly times, their providers' hours, the
- * saved sessions in the window with the places bookings and unexpired holds
- * take, and the providers' other bookings and holds. Openings are computed
- * from those rules; nothing is generated ahead or written on a read. A hold
- * that lapses stops counting by the clock, with no write.
- *
- * Google is the one provider call: a provider's selected busy calendars are
- * asked once per load, only when the offering's member has selected them,
- * because Google does not tell KrabiClaw when those calendars change.
- */
+/** The one slot reader (docs/domain-model.md, "Open and blocked time"): one D1 batch for the window; openings and places computed in memory. */
 export interface SlotRead {
   /** SQL yielding the organization's id. */
   organization: BatchQuery
@@ -1033,7 +978,7 @@ export type SlotWindow = Pick<SlotRead, 'locationId' | 'fromInstant' | 'toInstan
 
 type SessionClaims = { booked: number; held: number; bookings: number; has_history: number }
 type ProviderCommitment = { member_id: string; session_id: string | null; starts_at: string; ends_at: string }
-type StoredConfig = StoredBookingConfig & { product_kind: string }
+type StoredConfig = StoredBookingConfig & { product_kind: string; product_on_sale: number }
 type Placement = { product_id: string; location_id: string; active: number; published: number }
 
 /** The statements of one slot read, in the order `slotFacts` reads them. */
@@ -1050,7 +995,9 @@ export function slotReadQueries(read: SlotRead): BatchQuery[] {
   const keyDate = `CASE WHEN s.source_occurrence_key LIKE 'hours:%' THEN substr(s.source_occurrence_key,-24,10) ELSE substr(s.source_occurrence_key,-16,10) END`
   const consuming = `FROM bookings b WHERE b.organization_id=s.organization_id AND b.product_session_id=s.id AND ${CAPACITY_CONSUMING_SQL}`
   return [{
-    query: `SELECT ${BOOKING_CONFIG_COLUMNS.map(column => `c.${column}`).join(', ')}, p.kind AS product_kind FROM product_booking_configs c
+    query: `SELECT ${BOOKING_CONFIG_COLUMNS.map(column => `c.${column}`).join(', ')}, p.kind AS product_kind,
+        p.active AND EXISTS (SELECT 1 FROM product_publications pub WHERE pub.organization_id=p.organization_id AND pub.product_id=p.id AND pub.published=1) AS product_on_sale
+      FROM product_booking_configs c
       JOIN products p ON p.id=c.product_id AND p.organization_id=c.organization_id
       WHERE c.organization_id=${org.query} AND c.product_id IN (${products.query})`,
     params: [...org.params!, ...products.params!],
@@ -1101,6 +1048,8 @@ export interface SlotCalendar {
   schedule: SlotSchedule
   /** The offered times merged with the saved sessions that edit them, for writes that persist or cancel one. */
   openings: ScheduledOpening[]
+  /** Where a guest can book it now: its active, published placements at active locations, and online (null) when its provider holds it there; none while the product is off sale. */
+  onSale: Set<string | null>
   /** The saved sessions in the window, whatever the schedule now offers. */
   stored: Array<ProductSession & SessionClaims>
   /** Places left, with the provider's busy calendars asked at most once per member per read. */
@@ -1119,7 +1068,7 @@ export interface SlotPlaces {
 }
 
 /** Read the batch's rows into each offering's calendar. Google is asked only when `places()` is. */
-export function slotCalendars(env: CloudflareEnv | null, read: SlotWindow, results: Array<{ results: unknown[] }>): Map<string, SlotCalendar> {
+export function slotCalendars(env: CloudflareEnv | null, read: SlotWindow, results: Array<{ results: unknown[] }>, include: (productId: string, kind: string) => boolean = () => true): Map<string, SlotCalendar> {
   const [configs, placements, locationRows, rules, providers, sessions, commitments] = results.map(result => result.results) as [
     StoredConfig[], Placement[], SessionLocation[], ProductAvailabilityRule[], SlotProvider[], Array<ProductSession & SessionClaims>, ProviderCommitment[],
   ]
@@ -1136,15 +1085,15 @@ export function slotCalendars(env: CloudflareEnv | null, read: SlotWindow, resul
     }
     return found!
   }
-  const stored = configs.map(row => {
-    const { product_kind: kind, ...config } = row
-    return { kind, config: bookingConfigRecord(config) }
+  const stored = configs.filter(row => include(row.product_id, row.product_kind)).map(row => {
+    const { product_kind: kind, product_on_sale: onSale, ...config } = row
+    return { kind, onSale: onSale === 1, config: bookingConfigRecord(config) }
   })
   const entries = read.prepared
-    ? [{ kind: read.prepared.kind ?? stored.find(entry => entry.config.product_id === read.prepared!.productId)?.kind, config: read.prepared.config }]
+    ? [{ kind: read.prepared.kind ?? stored.find(entry => entry.config.product_id === read.prepared!.productId)?.kind, onSale: false, config: read.prepared.config }]
     : stored
   const calendars = new Map<string, SlotCalendar>()
-  for (const { kind, config } of entries) {
+  for (const { kind, onSale, config } of entries) {
     if (kind === undefined) throw new Error('A prepared slot read names a product kind')
     requireConsultationAttorney(kind, config)
     if (config.unit !== 'slot') badRequest('Choose an offering booked by time')
@@ -1171,8 +1120,10 @@ export function slotCalendars(env: CloudflareEnv | null, read: SlotWindow, resul
     const scoped = own.filter(row => read.locationId === undefined || row.location_id === read.locationId)
     const openings = mergeOpenings(range, schedule, projectOpenings(schedule, range, read.now), scoped)
     let placed: Promise<SlotPlaces> | undefined
+    const sale = new Set<string | null>(onSale ? placements.filter(row => row.product_id === productId && row.active === 1 && row.published === 1 && allLocations.get(row.location_id)?.status === 'active').map(row => row.location_id) : [])
+    if (onSale && config.held_online && schedule.provider) sale.add(null)
     calendars.set(productId, {
-      schedule, openings, stored: own.filter(row => row.starts_at >= read.fromInstant && row.starts_at < read.toInstant),
+      schedule, openings, onSale: sale, stored: own.filter(row => row.starts_at >= read.fromInstant && row.starts_at < read.toInstant),
       places: () => placed ??= slotPlaces(schedule, openings, own, read, allLocations, commitments, busyOf),
     })
   }
@@ -1255,11 +1206,7 @@ export async function listBookableSessions(db: DbClient, input: SlotRange & { en
   return bookableSessions(calendar.schedule, (await calendar.places()).sessions, now)
 }
 
-/**
- * The operator's view of a schedule: the bookable times, and the saved
- * sessions in the range whatever their status. A saved future time the
- * schedule no longer offers reads full.
- */
+/** The operator's view: the bookable times and the saved sessions in the range; a saved future time no longer offered reads full. */
 export function scheduleSessions(calendar: SlotCalendar, places: SlotPlaces, input: { locationId?: string | null; statuses?: ProductSessionStatus[]; now: string }): BookableSession[] {
   const statuses = input.statuses ?? [...PRODUCT_SESSION_STATUSES]
   const recorded = places.recorded.filter(session => statuses.includes(session.status)
@@ -1281,33 +1228,14 @@ export async function listScheduleSessions(db: DbClient, input: SlotRange & { en
 
 /** One session: a saved one with its places left, or a time the schedule offers. */
 export async function getScheduleSession(db: DbClient, env: CloudflareEnv, input: SessionSelector): Promise<SessionAvailability> {
-  const saved = await queryFirst<{ starts_at: string }>(db, 'SELECT starts_at FROM product_sessions WHERE organization_id=? AND product_id=? AND id=?', [input.organizationId, input.productId, input.sessionId])
-  const starts = saved?.starts_at ?? projectedIdPattern.exec(input.sessionId)?.[1]
-  if (!starts) throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found for this offering' })
-  const now = input.now ?? new Date().toISOString()
-  const calendar = await readSlotCalendar(db, env, { ...input, locationId: undefined, now, scope: 'editor', fromInstant: starts, toInstant: new Date(Date.parse(starts) + 1).toISOString() })
-  const places = await calendar.places()
-  const session = places.recorded.find(row => row.id === input.sessionId) ?? bookableSessions(calendar.schedule, places.sessions, now).find(row => row.id === input.sessionId)
+  const found = await findOpening(db, env, input, input.now ?? new Date().toISOString(), 'editor')
+  const places = found && await found.calendar.places()
+  const session = places && (places.recorded.find(row => row.id === input.sessionId) ?? (found.opening && places.place(found.opening.session)))
   if (!session) throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found for this offering' })
   return session as SessionAvailability
 }
 
-/** Find a bookable time before publishing the selected draft scope. */
-export async function hasDraftBookableTime(db: DbClient, input: {
-  env: CloudflareEnv; organizationId: string; productId: string; locationId: string | null; durationMinutes?: number
-}): Promise<boolean> {
-  const config = await requireBookingConfig(db, input.organizationId, input.productId)
-  return Boolean(await firstBookableOpening(db, input.env, { ...input, now: new Date().toISOString(), scope: 'editor' }, {
-    prepared: { productId: input.productId, config: input.durationMinutes === undefined ? config : { ...config, duration_minutes: input.durationMinutes } },
-  }))
-}
-
-/**
- * The first time in the booking horizon with room for the smallest party,
- * read a page of the horizon at a time: what setup, a weekly time and
- * publishing must find before they save. `extra` are times setup is about to
- * save in the same batch.
- */
+/** The first time in the booking horizon with room for the smallest party, a page at a time; `extra` are times setup saves in the same batch. */
 export async function firstBookableOpening(db: DbClient, env: CloudflareEnv, input: {
   organizationId: string; productId: string; locationId?: string | null; now: string; scope: SlotReadScope
 }, options: { prepared?: SlotRead['prepared']; match?: (session: BookableSession) => boolean; extra?: ScheduledOpening[] } = {}) {
@@ -1317,13 +1245,15 @@ export async function firstBookableOpening(db: DbClient, env: CloudflareEnv, inp
     const fromInstant = new Date(start).toISOString(), toInstant = new Date(Math.min(until, start + page)).toISOString()
     const calendar = await readSlotCalendar(db, env, { ...input, prepared: options.prepared, fromInstant, toInstant })
     const partySize = calendar.schedule.config.party_size_min ?? 1
-    const candidates = new Map(calendar.openings.map(opening => [opening.session.starts_at, opening]))
-    for (const opening of options.extra ?? []) if (opening.session.starts_at >= fromInstant && opening.session.starts_at < toInstant) candidates.set(opening.session.starts_at, opening)
+    // One candidate per place and time: a time setup is about to save replaces the offered one it matches.
+    const key = (session: Pick<SessionFacts, 'location_id' | 'starts_at'>) => JSON.stringify([session.location_id, session.starts_at])
+    const candidates = new Map(calendar.openings.map(opening => [key(opening.session), opening]))
+    for (const opening of options.extra ?? []) if (opening.session.starts_at >= fromInstant && opening.session.starts_at < toInstant) candidates.set(key(opening.session), opening)
     const places = await calendar.places()
     const session = bookableSessions(calendar.schedule, [...candidates.values()].map(opening => places.place(opening.session)), input.now)
       .sort((left, right) => left.starts_at.localeCompare(right.starts_at))
       .find(session => (options.match?.(session) ?? true) && (session.remaining === null || session.remaining >= partySize))
-    if (session) return { session, partySize, resolve: (actorId: string | null) => prepareResolvedOpening(calendar.schedule, candidates.get(session.starts_at)!, input.now, actorId, places.availability) }
+    if (session) return { session, partySize, resolve: (actorId: string | null) => prepareResolvedOpening(calendar.schedule, candidates.get(key(session))!, input.now, actorId, places.availability) }
   }
   return null
 }
@@ -1400,12 +1330,7 @@ function refreshSavedOpening(schedule: SlotSchedule, opening: ScheduledOpening, 
   }
 }
 
-/**
- * Block or open the chosen local days of a read calendar. Blocking records
- * only the offered times the edit touches, as cancelled sessions; saved
- * sessions nobody holds are cancelled or restored. A session a guest holds is
- * never touched, and the write repeats that check.
- */
+/** Block or open the chosen local days: offered times become cancelled sessions, unheld saved ones are cancelled or restored, held ones never touched. */
 export function prepareScheduleDays(calendar: SlotCalendar, places: SlotPlaces, input: { dates: string[]; closed: boolean; actorId: string; now: string }): { queries: BatchQuery[]; count: number } {
   const { schedule } = calendar
   const dates = new Set(input.dates)
@@ -1754,20 +1679,6 @@ export async function claimSessionCapacity(db: DbClient, input: {
   return { bookingId }
 }
 
-/** The named saved sessions with their places left, in one slot read over their span. */
-async function readSessionsBack(db: DbClient, env: CloudflareEnv, organizationId: string, productId: string, ids: string[]): Promise<SessionAvailability[]> {
-  const span = await queryFirst<{ from: string; until: string }>(db, 'SELECT MIN(starts_at) AS "from", MAX(starts_at) AS until FROM product_sessions WHERE organization_id=? AND product_id=? AND id IN (SELECT value FROM json_each(?))', [organizationId, productId, JSON.stringify(ids)])
-  if (!span?.from) throw new Error('The saved sessions could not be read back')
-  const now = new Date().toISOString()
-  const calendar = await readSlotCalendar(db, env, { organizationId, productId, now, scope: 'editor', fromInstant: span.from, toInstant: new Date(Date.parse(span.until) + 1).toISOString() })
-  const sessions = (await calendar.places()).recorded
-  return ids.map((id) => {
-    const session = sessions.find(row => row.id === id)
-    if (!session) throw new Error('The saved session could not be read back')
-    return session as SessionAvailability
-  })
-}
-
 export async function createSession(db: DbClient, input: {
   env: CloudflareEnv; organizationId: string; productId: string; locationId: string; startsAt: string; endsAt: string; capacity?: number | null; actorId: string; idempotencyKey: string
 }): Promise<SessionAvailability[]> {
@@ -1782,7 +1693,7 @@ export async function createSession(db: DbClient, input: {
     if (record.requestHash !== requestHash) throw new HTTPError({ statusCode: 409, statusMessage: 'This idempotency key belongs to a different session' })
     const ids = record.metadata.session_ids
     if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string')) throw new Error('The session creation record does not identify its sessions')
-    return readSessionsBack(db, input.env, input.organizationId, input.productId, ids)
+    return Promise.all(ids.map(sessionId => getScheduleSession(db, input.env, { organizationId: input.organizationId, productId: input.productId, sessionId })))
   }
   const earlier = await replay()
   if (earlier) return earlier
@@ -1796,7 +1707,7 @@ export async function createSession(db: DbClient, input: {
   const capacity = input.capacity === undefined ? config.default_capacity : input.capacity
   if (capacity !== null && (!Number.isSafeInteger(capacity) || capacity < 0)) badRequest('capacity must be a non-negative integer or null')
   if (!locationAllowsBooking(instants, location)) badRequest('This session is outside opening hours or during a closure')
-  if (!await canScheduleSessions(db, config)) badRequest('Set working hours for the assigned member before adding bookable times')
+  if (config.scheduling_mode === 'provider' && !await readScheduleProvider(db, config)) badRequest('Set working hours for the assigned member before adding bookable times')
   const sessions = [{ id: crypto.randomUUID() }]
   try {
     await executeBatch(db, [...sessions.map(session => manualSessionQuery({ ...input, now, location }, { id: session.id, ...instants, capacity })),
@@ -1806,7 +1717,7 @@ export async function createSession(db: DbClient, input: {
     if (isUniqueDedupeConflict(error)) { const concurrent = await replay(); if (concurrent) return concurrent }
     throw error
   }
-  return readSessionsBack(db, input.env, input.organizationId, input.productId, sessions.map(session => session.id))
+  return Promise.all(sessions.map(session => getScheduleSession(db, input.env, { organizationId: input.organizationId, productId: input.productId, sessionId: session.id })))
 }
 
 export async function updateSession(db: DbClient, input: {
@@ -1845,15 +1756,9 @@ export async function updateSession(db: DbClient, input: {
   // Reducing capacity below the seats already claimed would make the session
   // silently oversold. Refuse, and let the merchant cancel bookings first.
   if (input.capacity !== undefined && input.capacity !== null) {
-    const claimed = await queryFirst<{ claimed: number }>(db, `
-      SELECT COALESCE((SELECT SUM(b.party_size) FROM bookings b WHERE b.product_session_id=s.id AND ${CAPACITY_CONSUMING_SQL}),0) + ${sessionHeldCapacitySql('s')} AS claimed FROM product_sessions s WHERE s.id=?
-    `, [input.sessionId])
-    if ((claimed?.claimed ?? 0) > input.capacity) {
-      throw new HTTPError({
-        statusCode: 409,
-        statusMessage: `This session already has ${claimed?.claimed} seats claimed; cancel bookings before reducing capacity to ${input.capacity}`,
-      })
-    }
+    const row = (await readSlotCalendar(db, input.env, { organizationId: input.organizationId, productId: session.product_id, scope: 'editor', fromInstant: session.starts_at, toInstant: new Date(Date.parse(session.starts_at) + 1).toISOString() })).stored.find(saved => saved.id === session.id)
+    const claimed = row ? row.booked + row.held : 0
+    if (claimed > input.capacity) throw new HTTPError({ statusCode: 409, statusMessage: `This session already has ${claimed} seats claimed; cancel bookings before reducing capacity to ${input.capacity}` })
   }
 
   const location = session.location_id ? await queryFirst<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, session.location_id]) : null
@@ -1903,7 +1808,7 @@ export async function updateSession(db: DbClient, input: {
     }
     throw error
   })
-  return (await readSessionsBack(db, input.env, input.organizationId, session.product_id, [session.id]))[0]!
+  return getScheduleSession(db, input.env, { organizationId: input.organizationId, productId: session.product_id, sessionId: session.id })
 }
 
 /** The local calendar date a session falls on, for grouping in a UI. */
