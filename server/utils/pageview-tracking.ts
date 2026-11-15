@@ -304,11 +304,12 @@ export async function recordTenantPageview(db: AppDb, input: TenantPageviewInput
     count('organization_day', ''),
     count('page_day', input.pagePath),
     ...(input.productId ? [count('dimension_day', JSON.stringify(['product', input.productId, '']))] : []),
-    // A visit is a session's first page view; it arrived from its own touch or directly. Any later
-    // page view of the session adds nothing here and keeps the chain going.
+    // A visit is a session's first page view; it arrived from its own touch or directly. A session
+    // with another page view stored already counted its visit, whichever of them arrived first; a
+    // click recorded before it does not.
     count('dimension_day', JSON.stringify(['visit_source', attributionChannel(initial.source, initial.medium), '']), {
-      sql: `CASE WHEN EXISTS (SELECT 1 FROM analytics_summaries s WHERE s.organization_id = ? AND s.kind = 'session' AND s.date = '' AND s.key = ?) THEN 0 ELSE 1 END`,
-      params: [input.organizationId, input.sessionId],
+      sql: `CASE WHEN EXISTS (SELECT 1 FROM analytics_events e WHERE e.organization_id = ? AND e.kind = 'pageview' AND e.session_id = ? AND e.id <> ?) THEN 0 ELSE 1 END`,
+      params: [input.organizationId, input.sessionId, input.eventId],
     }),
     {
       query: `INSERT INTO analytics_summaries (

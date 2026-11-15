@@ -97,6 +97,30 @@ test('native analytics: each producer stores its event with the context it happe
   }
 })
 
+test('a session counts one visit whether its first page view or a click arrives first', { timeout: 120_000 }, async () => {
+  const { runtime, db } = await openDb()
+  try {
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone) VALUES (?, ?, ?, ?, '{}', 'USD', 'Asia/Bangkok')`).bind(ORG, ORG, ORG, ORG).run()
+    const S1 = uuid(41), V1 = uuid(42), S2 = uuid(43), V2 = uuid(44)
+    const visits = async () => (await db.prepare(`SELECT key, CAST(payload_json ->> '$.page_views' AS INTEGER) AS visits FROM analytics_summaries
+      WHERE organization_id = ? AND kind = 'dimension_day' AND key LIKE '["visit_source"%' ORDER BY key`).bind(ORG).all()).results
+    const click = (id: number, session: string, visitor: string) => recordOrganizationConversionEvent(db,
+      { headers: new Headers({ cookie: `kc_session_id=${session}; kc_visitor_id=${visitor}`, 'user-agent': 'Desktop' }) },
+      { organizationId: ORG, eventName: 'phone_click', stage: 'external_handoff', surface: 'website', ctaDestination: 'tel', id: uuid(id), occurredAt: '2026-09-10T03:00:00.000Z', timezone: 'Asia/Bangkok' })
+    // The click arrives before the session's first page view, so the session's summary already exists.
+    assert.equal((await click(30, S1, V1)).created, true)
+    await recordTenantPageview(db, pageview({ eventId: uuid(31), sessionId: S1, visitorId: V1, now: '2026-09-10T03:01:00.000Z' }))
+    await recordTenantPageview(db, pageview({ eventId: uuid(32), sessionId: S1, visitorId: V1, pagePath: '/menu', now: '2026-09-10T03:02:00.000Z' }))
+    assert.deepEqual(await visits(), [{ key: '["visit_source","Direct",""]', visits: 1 }])
+    // Page view first, then the click: still one visit.
+    await recordTenantPageview(db, pageview({ eventId: uuid(33), sessionId: S2, visitorId: V2, now: '2026-09-10T03:03:00.000Z' }))
+    assert.equal((await click(34, S2, V2)).created, true)
+    assert.deepEqual(await visits(), [{ key: '["visit_source","Direct",""]', visits: 2 }])
+  } finally {
+    await runtime.dispose()
+  }
+})
+
 test('a click Insights counts adds one to its local day, once', { timeout: 120_000 }, async () => {
   const { runtime, db } = await openDb()
   try {
