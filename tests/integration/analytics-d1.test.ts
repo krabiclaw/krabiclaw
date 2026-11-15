@@ -4,6 +4,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { recordTenantPageview, updateTenantPageviewDuration, type TenantPageviewInput } from '../../server/utils/pageview-tracking.ts'
+import { recordOrganizationConversionEvent } from '../../server/utils/organization-conversions.ts'
 
 async function database(name: string) {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -17,7 +18,7 @@ async function database(name: string) {
   return { runtime, db }
 }
 
-test('the visit write keeps sessions and adds each new visit to its local day counts once', { timeout: 60_000 }, async () => {
+test('the visit and click writes keep sessions and add each new visit or click to its local day once', { timeout: 60_000 }, async () => {
   const { runtime, db } = await database('analytics-proof')
   try {
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, analytics_data_start_at, default_currency, timezone)
@@ -56,14 +57,21 @@ test('the visit write keeps sessions and adds each new visit to its local day co
     await recordTenantPageview(db, { ...input, now: '2026-09-05T03:00:00.000Z' })
     // A deferred delivery is counted on the day it happened.
     await recordTenantPageview(db, { ...input, eventId: 'deferred', sessionId: 'session-deferred', occurredAt: '2026-09-05T05:00:00.000Z', now: '2026-09-06T04:00:00.000Z' })
+    // A click Insights counts lands on its local day, once however often it is delivered.
+    const call = (id: string, occurredAt: string) => recordOrganizationConversionEvent(db, null, { organizationId: 'org-proof', eventName: 'phone_click',
+      stage: 'external_handoff', surface: 'website', id, occurredAt, timezone: 'Asia/Bangkok' })
+    await Promise.all([call('00000000-0000-4000-8000-000000000001', '2026-09-05T16:59:59.000Z'), call('00000000-0000-4000-8000-000000000001', '2026-09-05T16:59:59.000Z')])
+    await call('00000000-0000-4000-8000-000000000002', '2026-09-05T17:00:00.000Z')
 
     const counts = await db.prepare(`SELECT kind, date, key, CAST(payload_json ->> '$.page_views' AS INTEGER) AS views FROM analytics_summaries
       WHERE organization_id = 'org-proof' AND kind <> 'session' ORDER BY kind, date, key`).all<{ kind: string; date: string; key: string; views: number }>()
     assert.deepEqual(counts.results, [
+      { kind: 'dimension_day', date: '2026-09-05', key: '["interaction","phone_click",""]', views: 1 },
       { kind: 'dimension_day', date: '2026-09-05', key: '["product","product-boat",""]', views: 1 },
       { kind: 'dimension_day', date: '2026-09-05', key: '["visit_source","Direct",""]', views: 1 },
       { kind: 'dimension_day', date: '2026-09-05', key: '["visit_source","Google Ads",""]', views: 2 },
       { kind: 'dimension_day', date: '2026-09-05', key: '["visit_source","Other",""]', views: 0 },
+      { kind: 'dimension_day', date: '2026-09-06', key: '["interaction","phone_click",""]', views: 1 },
       { kind: 'dimension_day', date: '2026-09-06', key: '["product","product-boat",""]', views: 1 },
       { kind: 'dimension_day', date: '2026-09-06', key: '["visit_source","Direct",""]', views: 0 },
       { kind: 'organization_day', date: '2026-09-05', key: '', views: 5 },

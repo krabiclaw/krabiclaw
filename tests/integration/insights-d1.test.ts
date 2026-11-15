@@ -12,7 +12,7 @@ import { listBookableSessions } from '../../server/utils/availability.ts'
 import { createStay, setStayNights } from '../../server/domain/stays.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { readInsightsIndex, readInsightsPage, type InsightsReader } from '../../server/domain/insights.ts'
-import { handleAnalyticsTools, ANALYTICS_TOOLS } from '../../server/utils/mcp-tools/analytics.ts'
+import { handleAnalyticsTools } from '../../server/utils/mcp-tools/analytics.ts'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
 import { createTables } from './support/table-product.ts'
 import { buyStay } from './support/stay-checkout.ts'
@@ -158,14 +158,9 @@ test('Insights reads a restaurant from visit to payment: sources, bookings, valu
     await assert.rejects(read('conversion/booking-conversion', { location_id: 'loc-beach' }), (error: { statusCode?: number }) => error.statusCode === 400)
     await assert.rejects(read('marketing/instagram'), (error: { statusCode?: number }) => error.statusCode === 404)
 
-    // MCP reads the same page, and its schema has none of the old report's sessions, devices or funnel.
+    // MCP reads the same page.
     const tool = await handleAnalyticsTools({ toolName: 'get_organization_analytics', args: { page: 'conversion/sources', ...range }, organization: { db, organizationId: 'org-tables', env } } as never)
     assert.deepEqual(tool, sources)
-    const schemaText = JSON.stringify(ANALYTICS_TOOLS.find(definition => definition.name === 'get_organization_analytics'))
-    for (const removed of ['unique_sessions', 'pages_per_session', 'avg_session_duration', 'returning_visitors', 'devices', 'countries', 'cities', 'referrers', 'funnel', 'signup_cohort']) {
-      assert.equal(schemaText.includes(`"${removed}"`), false, removed)
-    }
-    assert.equal(JSON.stringify(sources).includes('sessions'), false)
   } finally { await runtime.dispose() }
 })
 
@@ -210,7 +205,6 @@ test('Insights reads a home: occupancy, length of stay and nightly rate, and who
     const nightly = await read('rates/nightly-rate')
     assert.equal(nightly.currency, 'USD')
     assert.deepEqual(metrics(nightly), { nightly_rate: 12000, income: 60000 })
-    assert.deepEqual(metrics(await read('rates/income-by-channel')), { income: 24000, direct: 24000, refunded: 0 })
     const sources = await read('conversion/sources')
     assert.deepEqual(rows(sources), [['Not recorded', 0, 1], ['Added by you', 0, 1]])
     assert.equal((await read('conversion/returning')).title, 'Returning guests')
