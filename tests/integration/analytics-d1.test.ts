@@ -53,13 +53,14 @@ test('analytics preserves duplicate, attribution, summary semantics on D1', { ti
     // Page views are the stored daily summaries, so a day the daily aggregation has not summarized has
     // none; sessions are the session summaries every pageview keeps current.
     const unsummarized = await getAnalyticsReport(db, period)
-    assert.deepEqual([unsummarized.metrics.page_views, unsummarized.metrics.unique_sessions, unsummarized.countries], [0, 2, []])
+    assert.deepEqual([unsummarized.metrics.page_views, unsummarized.metrics.unique_sessions, unsummarized.metrics.pages_per_session, unsummarized.countries], [0, 2, 0, []])
     for (const date of ['2026-09-05', '2026-09-06']) await aggregateOrganizationAnalyticsDate(db, 'org-proof', date)
     assert.equal(await db.prepare(`SELECT json_extract(payload_json, '$.returning_visitors') returning_count
       FROM analytics_summaries WHERE organization_id = 'org-proof' AND kind = 'organization_day' AND date = '2026-09-06'`).first('returning_count'), 1)
     const before = await getAnalyticsReport(db, period)
     assert.equal(before.metrics.page_views, 4)
     assert.equal(before.metrics.unique_sessions, 2)
+    assert.equal(before.metrics.pages_per_session, 2, 'the summarized days’ page views over the sessions through the last summarized day')
     assert.equal(before.countries[0]?.country_code, 'TH')
     // The dashboard reads the same summaries without what MCP reads from the events.
     assert.deepEqual(await getDashboardAnalyticsReport(db, await resolveOrganizationAnalyticsContext(db, 'org-proof'), period), dashboardAnalyticsReportSchema.parse(before))

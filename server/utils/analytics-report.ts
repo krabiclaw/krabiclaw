@@ -402,15 +402,21 @@ async function readAnalyticsReport(db: DbClient, context: OrganizationAnalyticsC
     read(`SELECT kind, date, key, payload_json FROM analytics_summaries
       WHERE organization_id = ? AND kind IN ('organization_day', 'page_day', 'dimension_day') AND date BETWEEN ? AND ?
         AND (kind = 'organization_day' OR date >= ?)`, [organizationId, previousDates[0] ?? range.startDate, range.endDate, range.startDate]),
-    // The period's sessions and visitors, from each session's own summary, which every pageview keeps current.
-    read(`WITH sessions AS (SELECT key, (payload_json ->> '$.visitor_id') visitor_id, (payload_json ->> '$.duration_seconds') duration_seconds
-        FROM analytics_summaries WHERE organization_id = ? AND kind = 'session' AND (payload_json ->> '$.last_seen_at') >= ? AND (payload_json ->> '$.started_at') < ?)
+    // The period's sessions and visitors, from each session's own summary, which every pageview keeps current;
+    // and the sessions through the last summarized day, the days the page views cover.
+    read(`WITH sessions AS (SELECT key, (payload_json ->> '$.visitor_id') visitor_id, (payload_json ->> '$.duration_seconds') duration_seconds,
+          (payload_json ->> '$.started_at') started_at
+        FROM analytics_summaries WHERE organization_id = ? AND kind = 'session' AND (payload_json ->> '$.last_seen_at') >= ? AND (payload_json ->> '$.started_at') < ?),
+      summarized_end AS (SELECT day.value ->> '$.end' instant FROM json_each(?) day WHERE day.value ->> '$.date' = (SELECT MAX(date) FROM analytics_summaries
+        WHERE organization_id = ? AND kind = 'organization_day' AND date BETWEEN ? AND ?))
       SELECT COUNT(*) sessions, COUNT(DISTINCT visitor_id) visitors,
+        (SELECT COUNT(*) FROM sessions WHERE started_at < (SELECT instant FROM summarized_end)) summarized_sessions,
         COALESCE(ROUND(AVG(CASE WHEN duration_seconds > 0 THEN duration_seconds END)), 0) avg_duration,
         (SELECT COUNT(DISTINCT current.visitor_id) FROM sessions current WHERE EXISTS (SELECT 1 FROM analytics_summaries earlier
           WHERE earlier.organization_id = ? AND earlier.kind = 'session' AND (earlier.payload_json ->> '$.visitor_id') = current.visitor_id
             AND (earlier.payload_json ->> '$.started_at') < ? AND earlier.key <> current.key)) returning_visitors
-      FROM sessions`, [organizationId, start, end, organizationId, start]),
+      FROM sessions`, [organizationId, start, end, JSON.stringify(range.dates.map(date => ({ date, end: localDateBounds(date, timezone).end }))),
+      organizationId, range.startDate, range.endDate, organizationId, start]),
     ...(conversionDetail ? [
       // Sessions and their converting sessions are counted over the same population: each session
       // grouped by its current last touch, converting when it has an outcome event in the range.
@@ -442,7 +448,7 @@ async function readAnalyticsReport(db: DbClient, context: OrganizationAnalyticsC
   const total = (value: (slice: DailySlice) => number) => slices.reduce((sum, slice) => sum + value(slice), 0)
   const pageViews = total(slice => slice.pageViews)
   const uniqueSessions = n(sessionStats.sessions)
-  const summarizedSessions = total(slice => slice.sessions)
+  const summarizedSessions = n(sessionStats.summarized_sessions)
   const previousViews = previousDates.reduce((sum, date) => sum + sliceOf(date).pageViews, 0)
   const changePercent = previousDates.length && previousViews ? Math.round((pageViews - previousViews) / previousViews * 100) : null
 
@@ -466,7 +472,7 @@ async function readAnalyticsReport(db: DbClient, context: OrganizationAnalyticsC
   const report = {
     period: { start_date: range.startDate, end_date: range.endDate, timezone, analytics_data_start_at: analyticsDataStartAt, native_coverage: nativeCoverage },
     // Page views are the summarized days'; sessions and visitors are current. Pages per session
-    // divides the summarized days' page views by the same days' sessions.
+    // divides the summarized days' page views by the sessions through the last summarized day.
     metrics: {
       page_views: pageViews,
       unique_sessions: uniqueSessions,
