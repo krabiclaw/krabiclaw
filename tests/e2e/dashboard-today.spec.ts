@@ -16,7 +16,7 @@ import { isDashboardInvalidation } from '../../shared/dashboard-invalidations'
 const ORG = '/dashboard/ember-slice-demo'
 
 /** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
+type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; assignees: TaskPerson[]; resolved_at: string }
 
 test('the author can schedule and cancel a private reply from Messages', async ({ page, request, browser, baseURL }, testInfo) => {
   test.setTimeout(120_000)
@@ -231,7 +231,7 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
     await loginAs(memberContext.request, baseURL!, actor!.userId)
     const memberFeed = await memberContext.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
     expect(memberFeed.status(), await memberFeed.text()).toBe(200)
-    expect(await memberFeed.json()).toEqual({ website: null, reservations: { title: null, cards: [] }, tasks: [], opportunities: [], opportunity_issues: [], assignees: [], resolved_at: expect.any(String) })
+    expect(await memberFeed.json()).toEqual({ website: null, reservations: { title: null, cards: [] }, tasks: [], opportunities: [], assignees: [], resolved_at: expect.any(String) })
     const denied = await memberContext.request.get('/api/dashboard/analytics', { params: { org: 'ember-slice-demo' } })
     // Organization-wide surfaces deliberately conceal denied scope with 404.
     expect(denied.status()).toBe(404)

@@ -1,7 +1,7 @@
 import { submittedReviewRequestSql } from '~/server/utils/review-requests'
 import { HTTPError } from 'nitro'
-import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { BOOKING_RECORDS_SQL, bookedRecordWindow } from '~/server/domain/requests'
+import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { bookingWelcomes, bookingWelcomesQuery, type WelcomeRow } from '~/server/domain/opportunities'
 import { isDeliverySent } from '~/server/domain/guest-threads/deliveries'
 import type { GuestThreadDeliveryRow } from '~/server/domain/guest-threads/types'
 import { assertOrganizationWideAccess, type MemberAccessPrincipal } from '~/server/utils/member-access'
@@ -20,11 +20,7 @@ import { stayWeekendPriceSql, experiencePublicationBlocker, getProduct } from '~
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { getSessionAvailability } from '~/server/utils/availability'
 import { MAX_HOMES_CALENDAR_DAYS, readStayGapCandidates, STAY_NIGHT_PRICE_SQL, stayAccessFor } from '~/server/domain/stays'
-import { addLocalDays, formatCalendarRange, formatTimestamp, isValidCalendarDate, localDateAt } from '~/utils/timezone'
-import { PRODUCT_DETAIL_FIELDS, type ProductKind } from '~/shared/product-details'
-import { platformLocale } from '~/shared/platform-locales'
-import { stayGuestFirstName } from '~/shared/bookings'
-import { UPCOMING_RESERVATION_DAYS } from '~/shared/dashboard-today'
+import { addLocalDays, isValidCalendarDate } from '~/utils/timezone'
 
 interface OutcomeEntry {
   source_table: BusinessOutcome['source']['table']
@@ -262,7 +258,7 @@ async function recommendationPublications(db: DbClient, organizationId: string, 
 }
 
 /** Existing post CTA URLs associate a prepared social post with its article; only provider receipts prove distribution. */
-export async function readArticleDistribution(db: DbClient, principal: MemberAccessPrincipal, articleId: string): Promise<ArticleDistribution> {
+async function readArticleDistribution(db: DbClient, principal: MemberAccessPrincipal, articleId: string): Promise<ArticleDistribution> {
   await assertOrganizationWideAccess(db, principal)
   const article = await queryFirst<{ slug: string | null; metadata_json: string }>(db,
     "SELECT slug, metadata_json FROM content_documents WHERE id = ? AND organization_id = ? AND kind = 'article' AND row_role = 'root'", [articleId, principal.organizationId])
@@ -282,110 +278,6 @@ export async function readArticleDistribution(db: DbClient, principal: MemberAcc
   }).map(({ targetUrl: _targetUrl, ...post }) => post)
   const publications = await recommendationPublications(db, principal.organizationId, posts.map(post => post.id))
   return { url, posts: posts.map(post => ({ ...post, publications: publications.filter(publication => publication.postId === post.id) })) }
-}
-
-/** A correction/deferral is about explicit current evidence, never a permanent suppression of a resource. */
-/**
- * A booked visit whose client has heard nothing from the business since booking,
- * with the host's own preparation to send them: an experience's or
- * consultation's "Before you arrive" and "What to bring", or a home's
- * directions, wifi and house manual. A home's check-in instructions are not
- * here; every confirmed stay is already sent them the day before arrival. A
- * table has preparation only when its host wrote some.
- */
-export interface BookingWelcome {
-  requestId: string
-  /** A stay at a home, or any other booking. */
-  kind: 'booking' | 'stay'
-  /** What was booked: an experience, a consultation, a table or a stay's home. */
-  productKind: ProductKind
-  recordId: string
-  status: string
-  /** The booked instant, or a stay's check-in day. */
-  startsAt: string
-  timezone: string
-  productId: string
-  locationId: string | null
-  guestFirstName: string | null
-  /** The message the host reviews and sends, written only from the fields above. */
-  message: string
-}
-
-interface WelcomeRow {
-  unit: 'slot' | 'nights'; product_kind: ProductKind; record_id: string; request_id: string; status: string; starts_at: string; ends_at: string
-  timezone: string; product_id: string; product_name: string; location_id: string | null; guest_name: string | null
-  details_json: string | null; directions: string | null; wifi_network: string | null; wifi_password: string | null; house_manual: string | null
-}
-
-const fieldName = (key: 'preparation' | 'what_to_bring') => PRODUCT_DETAIL_FIELDS.find(field => field.key === key)!.name
-const stayLabels = () => {
-  const locale = platformLocale('en')
-  if (!locale) throw new Error('The English platform locale is missing')
-  return locale.messages
-}
-const filled = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
-
-function welcomeMessage(row: WelcomeRow): string | null {
-  const first = stayGuestFirstName(row.guest_name)
-  const sections: string[] = []
-  if (row.unit === 'slot') {
-    const details = JSON.parse(row.details_json ?? '{}') as Record<string, unknown>
-    if (filled(details.preparation)) sections.push(`${fieldName('preparation')}:\n${details.preparation.trim()}`)
-    const items = Array.isArray(details.what_to_bring) ? details.what_to_bring.filter(filled) : []
-    if (items.length) sections.push(`${fieldName('what_to_bring')}:\n${items.map(item => `- ${item.trim()}`).join('\n')}`)
-  } else {
-    const labels = stayLabels()
-    if (filled(row.directions)) sections.push(`${labels['stay.directions']}:\n${row.directions.trim()}`)
-    const wifi = [filled(row.wifi_network) ? `${labels['stay.wifi_network']}: ${row.wifi_network.trim()}` : null, filled(row.wifi_password) ? `${labels['stay.wifi_password']}: ${row.wifi_password.trim()}` : null].filter(Boolean)
-    if (wifi.length) sections.push(`${labels['stay.wifi_details']}:\n${wifi.join('\n')}`)
-    if (filled(row.house_manual)) sections.push(`${labels['stay.house_manual']}:\n${row.house_manual.trim()}`)
-  }
-  if (!sections.length) return null
-  const window = bookedRecordWindow({ id: row.record_id, ...row })
-  const when = row.unit === 'nights'
-    ? `from ${formatCalendarRange(window.start.date, window.end.date, 'en-US')}`
-    : `on ${formatTimestamp(row.starts_at, 'en-US', row.timezone, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}`
-  const opening = row.unit === 'nights' ? `Looking forward to hosting you at ${row.product_name} ${when}.` : `Looking forward to seeing you for ${row.product_name} ${when}.`
-  return [`Hi${first ? ` ${first}` : ''},`, opening, ...sections].join('\n\n')
-}
-
-/**
- * The upcoming confirmed booked visits a welcome applies to now, or the one
- * conversation named: any record whose offering has host-authored preparation.
- */
-export async function readBookingWelcomes(db: DbClient, organizationId: string, input: { now: Date; requestId?: string; locationId?: string }): Promise<BookingWelcome[]> {
-  const now = input.now.toISOString(), until = new Date(input.now.getTime() + UPCOMING_RESERVATION_DAYS * 86_400_000).toISOString()
-  const only = (column: string, value: string | undefined) => value === undefined ? '' : `AND ${column} = ?`
-  const rows = await queryAll<WelcomeRow>(db, `
-    SELECT br.unit, br.product_kind, br.id AS record_id, r.id AS request_id, br.status, br.starts_at, br.ends_at, br.timezone,
-      br.product_id, br.product_name, br.location_id, json_extract(r.payload_json, '$.guest.name') AS guest_name,
-      p.details_json, c.directions, c.wifi_network, c.wifi_password, c.house_manual
-    FROM ${BOOKING_RECORDS_SQL} br
-    JOIN conversations r ON r.booking_id = br.id AND r.kind = 'booking' AND r.organization_id = br.organization_id
-    JOIN products p ON p.id = br.product_id AND p.organization_id = br.organization_id
-    LEFT JOIN product_stay_configs c ON br.unit = 'nights' AND c.organization_id = br.organization_id AND c.product_id = br.product_id
-    WHERE br.organization_id = ? AND br.status = 'confirmed' AND br.starts_at BETWEEN ? AND ?
-      AND (json_extract(p.details_json, '$.preparation') IS NOT NULL OR json_array_length(p.details_json, '$.what_to_bring') > 0
-        OR COALESCE(c.directions, c.wifi_network, c.wifi_password, c.house_manual) IS NOT NULL)
-      AND r.blocked_at IS NULL
-      -- The client has had no business message in this conversation since they booked.
-      AND NOT EXISTS (SELECT 1 FROM messages e WHERE e.conversation_id = r.id AND e.author_kind = 'member' AND e.occurred_at >= br.created_at)
-      ${only('r.id', input.requestId)} ${only('br.location_id', input.locationId)}
-    ORDER BY br.starts_at, br.id`,
-  [organizationId, new Date(input.now.getTime() - 2 * 86_400_000).toISOString(), until, ...[input.requestId, input.locationId].filter((value): value is string => value !== undefined)])
-  return rows.flatMap((row) => {
-    // A stay is upcoming in its home's own calendar until its guests arrive; anything else until it starts.
-    const arrival = bookedRecordWindow({ id: row.record_id, ...row }).start
-    if (row.unit === 'nights') {
-      const today = localDateAt(input.now, row.timezone)
-      if (arrival.date < today || arrival.date > addLocalDays(today, UPCOMING_RESERVATION_DAYS)) return []
-      if (arrival.instant !== null && arrival.instant <= now) return []
-    } else if (row.starts_at <= now) return []
-    const message = welcomeMessage(row)
-    if (message === null) return []
-    return [{ requestId: row.request_id, kind: row.unit === 'nights' ? 'stay' as const : 'booking' as const, productKind: row.product_kind, recordId: row.record_id, status: row.status, startsAt: row.unit === 'nights' ? arrival.date : row.starts_at, timezone: row.timezone,
-      productId: row.product_id, locationId: row.location_id, guestFirstName: stayGuestFirstName(row.guest_name), message }]
-  })
 }
 
 export async function readBusinessProgressReference(
@@ -535,7 +427,9 @@ export async function readBusinessProgressReference(
     return { ...input, evidence_revision: await creationRequestHash({ operation: input.operation, document, blocks, categories, media, activityEntryId: evidence.activityEntryId, ...(evidence.distribution ? { distribution: evidence.distribution } : {}) }), evidence: progressWire(evidence) }
   }
   if (input.operation === 'booking.welcome') {
-    const [welcome] = await readBookingWelcomes(db, principal.organizationId, { now: new Date(), requestId: input.subject_id })
+    const now = new Date()
+    const [rows] = await executeBatch(db, [bookingWelcomesQuery(principal.organizationId, { now, requestId: input.subject_id })])
+    const [welcome] = bookingWelcomes(rows!.results as WelcomeRow[], now)
     if (!welcome) throw missing()
     return result({ kind: 'booking_welcome', record: { kind: welcome.kind, id: welcome.recordId, status: welcome.status, startsAt: welcome.startsAt }, message: welcome.message })
   }

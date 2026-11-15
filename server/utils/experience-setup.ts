@@ -41,11 +41,6 @@ async function experienceCompletion(db: DbClient, organizationId: string, produc
   return Boolean(published || session)
 }
 
-export async function firstExperienceSetupProgress(db: DbClient, organizationId: string) {
-  const creation = await offeringProductCreation(db, organizationId, productKey)
-  return creation.productId ? { complete: await experienceCompletion(db, organizationId, creation.productId) } : null
-}
-
 async function loadSetup(context: OfferingSetupContext) {
   const { db, organizationId, env, actorId } = context
   const creation = await offeringProductCreation(db, organizationId, productKey)

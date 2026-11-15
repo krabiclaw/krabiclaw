@@ -195,15 +195,6 @@ export async function turnoverTaskQueries(db: DbClient, input: { organizationId:
         WHERE dedupe_key = ? AND status = 'open' AND (${guard.query})`,
       params: [now, now, `turnover:${after.id}`, ...guard.params!],
     })
-  } else {
-    // A stay on the nights of an accepted calendar gap fills it.
-    queries.push({
-      query: `UPDATE tasks SET status = 'done', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ?
-        WHERE organization_id = ? AND kind = 'opportunity' AND status = 'open' AND (${guard.query}) AND opportunity_id IN (
-          SELECT id FROM opportunities WHERE organization_id = ? AND operation = 'stay.gap'
-            AND json_extract(subject_id, '$[0]') = ? AND json_extract(subject_id, '$[1]') < ? AND json_extract(subject_id, '$[2]') > ?)`,
-      params: [now, now, organizationId, ...guard.params!, organizationId, after.product_id, after.check_out_date, after.check_in_date],
-    })
   }
   return queries
 }
@@ -232,13 +223,13 @@ export function messageDeliveryTaskQueries(messageId: string, now: string): Batc
   }]
 }
 
-/** Close matching tasks only when the preceding write or its guarded audit row committed. */
-export function opportunityDoneQuery(organizationId: string, operations: readonly string[], subjectId: string, now: string): BatchQuery {
+/** Close an accepted "take payment" task for the offering only when the preceding payment requirement write committed. */
+export function paymentOpportunityDoneQuery(organizationId: string, productId: string, now: string): BatchQuery {
   return {
     query: `UPDATE tasks SET status = 'done', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ?
       WHERE changes() = 1 AND organization_id = ? AND kind = 'opportunity' AND status = 'open' AND opportunity_id IN (
-        SELECT id FROM opportunities WHERE organization_id = ? AND subject_id = ? AND operation IN (SELECT value FROM json_each(?)))`,
-    params: [now, now, organizationId, organizationId, subjectId, d1JsonStringSet(operations)],
+        SELECT id FROM opportunities WHERE organization_id = ? AND subject_id = ? AND operation = 'product.payment')`,
+    params: [now, now, organizationId, organizationId, productId],
   }
 }
 
@@ -1107,15 +1098,5 @@ export async function reopenTask(db: DbClient, viewer: TaskViewer, taskId: strin
   { query: `DELETE FROM media_placements WHERE organization_id = ? AND owner_type = 'task' AND owner_id = ? AND changes() = 1`, params: [viewer.principal.organizationId, taskId] }], { operation: 'Reopen task' })
   if (results[0]?.meta.changes !== 1) fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'version')
   return afterWrite(db, viewer, taskId)
-}
-
-/** The accepted opportunity's task, written in the accept's own batch. */
-export function opportunityTaskInsert(input: { organizationId: string; opportunityId: string; title: string; subject: { type: TaskRow['subject_type']; id: string } | null; productId: string | null; locationId: string | null; assignedMemberId: string | null; dueAt: string | null; timezone: string; userId: string; now: string; taskId: string }): BatchQuery {
-  return {
-    query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, opportunity_id, title, assigned_member_id, due_at, timezone, status, dedupe_key, version, created_by_user_id, created_at, updated_at)
-      SELECT ?, ?, 'opportunity', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ?, ? WHERE changes() = 1`,
-    params: [input.taskId, input.organizationId, input.subject?.type ?? null, input.subject?.id ?? null, input.productId, input.locationId, input.opportunityId, input.title,
-      input.assignedMemberId, input.dueAt, input.timezone, `opportunity:${input.opportunityId}`, input.userId, input.now, input.now],
-  }
 }
 

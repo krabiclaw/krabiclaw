@@ -253,7 +253,7 @@ test('a guest change request lands once in the stay conversation, survives a rel
     }])
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-13', adults: 2, total_minor: 45_000, version: 1 })
     // The guest's change creates a booking task.
-    const expectedToday = { tasks: [['booking_change', stay.conversation_id]], opportunities: ['social.connect:org'] }
+    const expectedToday = { tasks: [['booking_change', stay.conversation_id]], opportunities: ['payments.connect:org', 'google_ads.connect:org', 'social.connect:org'] }
     assert.deepEqual(await today(), { ...expectedToday, changePath: `/dashboard/org/bookings/${stay.id}`, changeStatusLine: 'Change requested · Cabin' })
 
     // Assignment allows the turnover to be read. Even with a thread seat, it gives no decision permission.

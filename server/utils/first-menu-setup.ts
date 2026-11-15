@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import type { DbClient } from '~/server/db'
-import { execute, queryAll, queryFirst } from '~/server/db'
+import { execute, queryFirst } from '~/server/db'
 import type { OfferingSetupAnswer, OfferingSetupResponse } from '~/shared/offering-setup'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { majorAmountToMinor, minorAmountToMajor } from '~/shared/prices'
@@ -53,30 +53,6 @@ async function readMenuSetup(db: DbClient, organizationId: string, locationId: s
       : !dish.description.trim() && !skips?.description ? 'description'
         : !price && !skips?.price ? 'price' : undefined
   return { draft, menuSections, section, creationKey: creation.key, chosenSectionId: selectedSectionId, dish, variant, currency, price, photo, resume }
-}
-
-export async function firstMenuSetupLocation(db: DbClient, organizationId: string, raw: string, begunOnly: boolean) {
-  const payload = parseOnboardingDraftPayload(raw)
-  if (!firstMenuSetupApplies(payload)) return null
-  const candidates = await queryAll<{ id: string; has_draft_dish: number }>(db, `
-    SELECT l.id, EXISTS (
-      SELECT 1 FROM product_locations pl JOIN products p ON p.organization_id=pl.organization_id AND p.id=pl.product_id
-      WHERE pl.organization_id=l.organization_id AND pl.location_id=l.id AND pl.active=1 AND pl.published=0 AND p.kind='dish'
-        AND NOT EXISTS (SELECT 1 FROM product_publications pp WHERE pp.organization_id=p.organization_id AND pp.product_id=p.id AND pp.published=1)
-    ) AS has_draft_dish
-    FROM business_locations l
-    WHERE l.organization_id = ? AND l.status = 'active'
-    ORDER BY l.created_at, l.id
-  `, [organizationId])
-  const started = candidates.filter(candidate => candidate.has_draft_dish || payload.first_menu_section_ids?.[candidate.id])
-  for (const candidate of started) {
-    const setup = await readMenuSetup(db, organizationId, candidate.id)
-    if (setup?.resume) return { id: candidate.id, started: true }
-  }
-  const first = candidates[0]
-  if (begunOnly || started.length || !first) return null
-  const setup = await readMenuSetup(db, organizationId, first.id)
-  return setup?.resume ? { id: first.id, started: false } : null
 }
 
 export async function firstMenuSetup(context: OfferingSetupContext, locationId: string | undefined, requested: string | undefined, answer: OfferingSetupAnswer | null): Promise<OfferingSetupResponse> {

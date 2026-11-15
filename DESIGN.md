@@ -162,10 +162,10 @@ and, for a manager, suggestions read from its own rows
   scheduled delivery follow their source records. A person closes a task they
   add.
 - **Suggestions** (`server/domain/opportunities.ts`): on Today, the setup the
-  business has not finished (Stripe payments, a custom domain while the site
-  is private, social publishing, Google Ads for a goal that chose it, a first
-  offering, an experience's booking price, taking payment for a priced
-  offering); on a reservation card, the welcome a booked guest who has not
+  business has not finished, in this order (a Stripe account that is not
+  ready, a custom domain while the site is private, a first offering of the
+  business's kind, Google Ads, an experience's price, taking payment for a
+  priced experience or consultation, social publishing); on a reservation card, the welcome a booked guest who has not
   heard from the business is due. Each is read from stored rows on every read
   and goes away when the write that finishes it lands; nothing is recorded or
   dismissed. A card opens the editor or record that owns the work.
@@ -174,9 +174,8 @@ and, for a manager, suggestions read from its own rows
 and the resolved time. The server supplies each card's content and destination. On unfiltered Today,
 workspace managers see the signed preview of a private site and a link into
 the Website status dialog. When Today has no open work, a published site
-links to its public address. Before publishing, a workspace created through
-onboarding can see up to three suggestions. Stripe setup, a custom domain,
-and the first catalog item for its business type take priority when they apply.
+links to its public address. Before publishing, a workspace sees its first
+three suggestions.
 The task sheet holds assignment and completion controls for work that a person
 tracks there. Guest messages enter Messages and update its unread count. A
 payment card opens that offering's Payment settings. Saving the payment

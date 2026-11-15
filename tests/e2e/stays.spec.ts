@@ -41,7 +41,7 @@ function nightCalendarPath(from: string, to: string, productId?: string) {
 }
 
 /** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { reservations: { title: string | null; cards: TodayReservation[] }; tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
+type BusinessToday = { reservations: { title: string | null; cards: TodayReservation[] }; tasks: TaskSection[]; opportunities: OpportunityView[]; assignees: TaskPerson[]; resolved_at: string }
 
 function localDay(offset: number): string {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
@@ -4866,7 +4866,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expectStatus(todayResponse, 200)
       const today = await todayResponse.json() as BusinessToday
       const arrivalPath = `/dashboard/${slug}/bookings/${stays[0]!.booking_id}`
-      expect(today).toMatchObject({ tasks: [], opportunities: [], opportunity_issues: [], assignees: [] })
+      expect(today).toMatchObject({ tasks: [], opportunities: [], assignees: [] })
       const upcomingResponse = await cleaner.request.get(api('today'), { params: { range: 'upcoming' } })
       await expectStatus(upcomingResponse, 200)
       const upcoming = await upcomingResponse.json() as BusinessToday

@@ -919,8 +919,7 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   // Can download an optional photo from a host-supplied URL.
   complete_task: { ...D, openWorldHint: true },
   skip_task: D,
-  // Records what the selector found against its evidence as open rows; existing rows are left as they are, so a repeat records nothing new.
-  list_opportunities: { ...W, idempotentHint: true },
+  list_opportunities: R,
 } as const satisfies Record<string, McpToolAnnotations>
 
 export function buildToolAnnotationsByName() {

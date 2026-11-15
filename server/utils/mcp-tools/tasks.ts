@@ -1,6 +1,6 @@
 import { memberAccessPrincipal } from '~/server/utils/member-access'
 import { closeTask, createTask, listTaskAssignees, listTasks, parseTaskListQuery, taskViewer, updateTask, TASK_KINDS } from '~/server/domain/tasks'
-import { listSuggestions } from '~/server/domain/opportunities'
+import { listOpportunities } from '~/server/domain/opportunities'
 import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
 import { HTTPError } from 'nitro'
 import { chatgptFileInput, organizationTool, type McpToolDefinition } from './shared'
@@ -95,7 +95,7 @@ export async function handleTaskTools(ctx: McpExecutorContext): Promise<unknown>
       })() : []
       return { task: await closeTask(db, await taskViewer(principal), requiredString(args, 'task_id'), { status: toolName === 'complete_task' ? 'done' : 'skipped', note: args.note, photos, env }) }
     }
-    case 'list_opportunities': return await listSuggestions(db, principal, { locationId: optionalString(args, 'location_id') ?? undefined })
+    case 'list_opportunities': return await listOpportunities(db, principal, { locationId: optionalString(args, 'location_id') ?? undefined })
     default: return NOT_HANDLED
   }
 }

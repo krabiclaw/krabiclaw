@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { assertResponsibleMember } from '~/server/utils/member-access'
-import { opportunityDoneQuery, sessionPrepTaskQueries } from '~/server/domain/tasks'
+import { paymentOpportunityDoneQuery, sessionPrepTaskQueries } from '~/server/domain/tasks'
 import { publishAccessInvalidation, publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { assertPublishedHost } from '~/server/utils/public-provider'
 import { creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
@@ -362,7 +362,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   }, ...(unit === 'slot' && reassigned ? sessionPrepTaskQueries({
     query: 'SELECT id FROM product_sessions WHERE organization_id = ? AND product_id = ?',
     params: [input.organizationId, input.productId],
-  }, now) : []), ...(unit === 'slot' && patch.online_payment_required === true ? [opportunityDoneQuery(input.organizationId, ['product.payment'], input.productId, now)] : [])] }
+  }, now) : []), ...(unit === 'slot' && patch.online_payment_required === true ? [paymentOpportunityDoneQuery(input.organizationId, input.productId, now)] : [])] }
 }
 
 export function bookingConfigurationWriteError(error: unknown): unknown {

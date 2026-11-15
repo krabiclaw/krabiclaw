@@ -84,11 +84,6 @@ async function readPracticeArea(context: OfferingSetupContext, productId: string
   return { product, booking, members, attorney, schedule, activeOffices, office, officeRules, officeTime, scope, format, variant, price, currency, draft, intake: payload?.source.details, progress, complete }
 }
 
-export async function firstPracticeAreaSetupIncomplete(context: OfferingSetupContext, productId: string) {
-  const state = await readPracticeArea(context, productId)
-  return state !== null && steps.some(step => !state.complete[step])
-}
-
 export async function firstPracticeAreaSetup(context: OfferingSetupContext, productId: string | undefined, requested: string | undefined, answer: OfferingSetupAnswer | null): Promise<OfferingSetupResponse> {
   const { db, env, organizationId, orgSlug, actorId } = context
   const actor = { actorId }

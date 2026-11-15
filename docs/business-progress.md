@@ -25,21 +25,22 @@ the document revision and produce no additional article outcome. Historical
 actor attribution is reported only when it was recorded.
 
 Today's suggestions are read from the business's own rows each time Today is
-read: setup not yet finished (Stripe payments, a custom domain while the site is
-private, a social account or the plan for social publishing, Google Ads for a
-goal that chose it, a first offering, a booking price for an experience, taking
-payment for a priced offering) and a booked guest who has not heard from the
-business since booking. Each goes away when the write that finishes it lands.
-Nothing is recorded about them and they cannot be accepted or dismissed. The
+read: setup not yet finished (a Stripe account that is not ready, a custom
+domain while the site is private, a first offering of the business's kind,
+Google Ads, a price for an experience, taking payment for a priced experience
+or consultation once payments are ready, a social account or the plan for
+social publishing) and a booked guest who has not heard from the business since
+booking. Each goes away when the write that finishes it lands. Nothing is
+recorded about them and they cannot be accepted or dismissed. The
 `opportunities` table holds the decisions made under the earlier selector and is
-no longer written. `tasks` is work someone has to do, with an assignee, a window
+no longer written; its one remaining reader presents and closes an accepted
+"take payment" task. `tasks` is work someone has to do, with an assignee, a window
 and who closed it; completing and skipping are audit entries here, so they count
 as business activity.
 
 Article activity is recorded by ordinary CMS/MCP writes; reply evidence comes
 from the existing conversation activity and delivery receipts. Goals and
-decisions are collected only through explicit submissions to their APIs:
-Today's priority disclosure creates and archives goals. No
+decisions are collected only through explicit submissions to their APIs. No
 recommendation impression, exposure, usefulness, effort saved or achieved
 business goal is established by these records.
 

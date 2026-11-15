@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:9fe442f48b13e1c67e6b55bc792373583fb3e5409490b24bf53a77ca324835e4",
-  "documentationFingerprint": "sha256:e133782f51fcb1e40025e4851c705df5aa6f16320b99dbe877a25de494d7a145",
+  "fingerprint": "sha256:789722085de986777de5755b5e76032a4d0b26a9fa98e5cb0cea1aa8e9956488",
+  "documentationFingerprint": "sha256:cbfe2e8fd5d7f021751813c70ac58fa80ed689ededff84acbdb2b5cc6b76b636",
   "tools": [
     {
       "name": "add_organization_language",
@@ -68503,7 +68503,7 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "title": "List opportunities"
       },
       "securitySchemes": [

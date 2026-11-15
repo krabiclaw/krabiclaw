@@ -4,7 +4,7 @@ import { jsonResponse } from '~/server/utils/api-response'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { isOrganizationWideRole, memberAccessPrincipal } from '~/server/utils/member-access'
 import { listTaskAssignees, listTasks, parseTaskListQuery, taskViewer } from '~/server/domain/tasks'
-import { listBookingWelcomes, listOpportunities, type OpportunityView } from '~/server/domain/opportunities'
+import { listOpportunities } from '~/server/domain/opportunities'
 import { listTodayReservations } from '~/server/utils/dashboard-agenda'
 import { todayReservationsTitle } from '~/shared/dashboard-today'
 import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
@@ -24,16 +24,17 @@ export default defineHandler(async (event) => {
   const viewer = await taskViewer(principal)
   const query = parseTaskListQuery(getQuery(event), { range: 'today', assignee: 'all' })
   const now = new Date()
-  const [list, assignees, opportunities, suggestions, reservations] = await Promise.all([
+  const [list, assignees, suggested, reservations] = await Promise.all([
     listTasks(db, viewer, query, now),
     listTaskAssignees(db, viewer),
-    viewer.manage && query.range === 'today' ? listOpportunities(db, principal, { now, locationId: query.location_id }) : null,
-    viewer.manage ? listBookingWelcomes(db, principal, { now, locationId: query.location_id }) : new Map<string, OpportunityView>(),
+    viewer.manage ? listOpportunities(db, principal, { now, locationId: query.location_id }) : { opportunities: [] },
     // A task filter shows those tasks alone.
     query.kind ? [] : listTodayReservations(db, organization.id, { range: query.range, vertical: organization.vertical, organizationSlug: organization.slug,
       principal: { env, membership: organization }, locationId: query.location_id }, now),
   ])
-  const cards = reservations.map(card => ({ ...card, suggestion: card.conversation_id ? suggestions.get(card.conversation_id) ?? null : null }))
+  // A booking's welcome is on its card; the business's unfinished setup is Today's.
+  const welcomes = new Map(suggested.opportunities.flatMap(item => item.conversation_id ? [[item.conversation_id, item] as const] : []))
+  const cards = reservations.map(card => ({ ...card, suggestion: card.conversation_id ? welcomes.get(card.conversation_id) ?? null : null }))
   let website = null
   const privateSite = organization.status === 'inactive'
   const hasOpenWork = cards.length > 0 || list.sections.some(section => section.id === 'open' && section.tasks.length > 0)
@@ -62,10 +63,7 @@ export default defineHandler(async (event) => {
     website,
     reservations: { title: todayReservationsTitle(cards.length, query.range, organization.vertical), cards },
     tasks: list.sections,
-    // A booking's welcome is on its card; the business's unfinished setup is Today's.
-    opportunities: opportunities?.opportunities.slice(0, privateSite ? 3 : undefined) ?? [],
-    // Nothing on Today reads a provider any more; iOS 1.7 still decodes this list.
-    opportunity_issues: [],
+    opportunities: query.range === 'today' ? suggested.opportunities.filter(item => !item.conversation_id).slice(0, privateSite ? 3 : undefined) : [],
     assignees, resolved_at: list.resolved_at,
   }
   return jsonResponse(finalizeRequestMetrics(event, 'dashboard-today', today), { headers: { 'cache-control': 'private, no-store' } })

@@ -1030,14 +1030,14 @@
     },
     "list_opportunities": {
       "annotations": {
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "openWorldHint": false,
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Records opportunities backed by current business evidence.",
-        "destructive_justification": "Adds evidence records without deleting opportunities or changing accepted, dismissed or deferred decisions.",
-        "open_world_justification": "Reads only workspace data and the business's configured provider accounts."
+        "read_only_justification": "Reads only the selected workspace's stored setup and bookings.",
+        "destructive_justification": "Does not create, change or delete anything.",
+        "open_world_justification": "Reads only the selected private workspace."
       }
     },
     "list_organization_locales": {
