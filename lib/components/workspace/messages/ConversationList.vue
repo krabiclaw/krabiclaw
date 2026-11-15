@@ -253,9 +253,17 @@ const page = computed(() => rowsKey.value === listKey.value ? data.value ?? null
 const threads = computed(() => page.value?.threads ?? [])
 // The first rows are the likeliest to be opened; any other row is read when the pointer or focus reaches it.
 const prefetch = useConversationPrefetch(props.personalScope)
-const readAheadError = ref<unknown>(null)
+// A failed read-ahead stays in the alert until that conversation is read.
+const readAheadErrors = shallowRef(new Map<string, unknown>())
+const readAheadError = computed(() => readAheadErrors.value.values().next().value ?? null)
 function readAhead(conversationId: string) {
-  prefetch(conversationId)?.then(() => { readAheadError.value = null }, error => { readAheadError.value = error })
+  const settle = (error?: unknown) => {
+    const errors = new Map(readAheadErrors.value)
+    if (error === undefined) errors.delete(conversationId)
+    else errors.set(conversationId, error)
+    readAheadErrors.value = errors
+  }
+  prefetch(conversationId)?.then(page => { if (page) settle() }, settle)
 }
 watch([threads, realtime.status], ([rows]) => {
   for (const thread of rows.slice(0, 5)) if (thread.id !== openThreadId.value) readAhead(thread.id)

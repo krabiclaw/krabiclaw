@@ -155,7 +155,7 @@ export async function loadConversationPage(
   const [headerRows, messageRows] = await executeBatch(db, [{
     query: `WITH authorized AS MATERIALIZED (${access.query})
       SELECT c.*, o.name AS organization_name, COALESCE(l.timezone, o.timezone) AS timezone,
-        ${head ? `CASE WHEN c.viewer_role = 'member' THEN ${SUPPORT_CONVERSATION_SQL('c')} ELSE 0 END` : '0'} AS support,
+        CASE WHEN c.viewer_role = 'member' THEN ${SUPPORT_CONVERSATION_SQL('c')} ELSE 0 END AS support,
         CASE WHEN c.viewer_role = 'member' AND c.kind = 'booking'
           THEN EXISTS (SELECT 1 FROM channel_threads t WHERE t.conversation_id = c.id) OR COALESCE(b.owner = 'channel', 0)
           ELSE 0 END AS airbnb,

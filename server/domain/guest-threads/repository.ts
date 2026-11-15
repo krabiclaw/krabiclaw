@@ -161,6 +161,16 @@ type ListRow = {
   record_title: string | null
   latest_message_id: string | null
   unread: number
+  latest_author_kind: string | null
+  latest_author_user_id: string | null
+  latest_actor_name: string | null
+  latest_event_name: string | null
+  latest_body: string | null
+  latest_provider_inserted_at: string | null
+  latest_occurred_at: string | null
+  latest_photos: number
+  /** A team conversation's members, in seat order, as JSON. */
+  team_people: string | null
 }
 
 /**
@@ -177,7 +187,7 @@ export async function listConversations(
   now = new Date(),
 ): Promise<InboxRow[]> {
   const { query, params } = conversationListQuery(organizationId, opts, now)
-  return presentConversationList(db, await queryAll<ListRow>(db, query, params), opts, now)
+  return presentConversationList(await queryAll<ListRow>(db, query, params), opts, now)
 }
 
 function conversationListQuery(organizationId: string | null, opts: ListGuestThreadsOptions, now: Date): BatchQuery {
@@ -185,7 +195,9 @@ function conversationListQuery(organizationId: string | null, opts: ListGuestThr
   const visible = opts.buyerAudience ? ` AND ${guestVisibleSql('e', 'gt.user_id = me.user_id')}` : ''
   const unread = unreadSql('gt', opts.userId)
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 200))
+  // Each row arrives with its last message and, for the team's, its members: one statement, one round trip.
   return { query: `
+    WITH listed AS (
     SELECT gt.*, ${REPLY_CHANNEL_SQL} AS reply_channel, ${SUPPORT_CONVERSATION_SQL('gt')} AS support,
       o.name AS organization_name, ${threadLocationTitleSql(opts.buyerAudience)} AS location_title, COALESCE(bl.timezone, o.timezone) AS time_zone,
       op.unit AS record_unit, op.starts_at AS record_starts_at, op.stored_ends_at AS record_stored_ends_at, op.timezone AS record_timezone,
@@ -199,26 +211,38 @@ function conversationListQuery(organizationId: string | null, opts: ListGuestThr
     WHERE ${scope.where}${opts.unreadOnly ? ` AND ${unread.sql}` : ''}
     ORDER BY gt.last_message_at DESC, gt.id
     LIMIT ? OFFSET ?
+    )
+    SELECT listed.*, e.author_kind AS latest_author_kind, e.author_user_id AS latest_author_user_id, u.name AS latest_actor_name,
+      e.event_name AS latest_event_name, e.body AS latest_body,
+      json_extract(e.payload_json, '$.provider_inserted_at') AS latest_provider_inserted_at, e.occurred_at AS latest_occurred_at,
+      (SELECT COUNT(*) FROM media_placements mp WHERE mp.owner_type = 'message' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active') AS latest_photos,
+      CASE WHEN listed.kind = 'team' THEN (SELECT json_group_array(json_object('user_id', person.user_id, 'name', person.name))
+        FROM (SELECT p.user_id, pu.name FROM conversation_participants p
+          JOIN member m ON m.organizationId = p.organization_id AND m.userId = p.user_id
+          JOIN user pu ON pu.id = p.user_id
+          WHERE p.role = 'member' AND p.conversation_id = listed.id ORDER BY p.created_at, p.user_id) person) END AS team_people
+    FROM listed
+    LEFT JOIN messages e ON e.id = listed.latest_message_id
+    LEFT JOIN user u ON u.id = e.author_user_id
+    ORDER BY listed.last_message_at DESC, listed.id
   `, params: [...unread.params, ...scope.params, ...(opts.unreadOnly ? unread.params : []), limit, opts.offset ?? 0] }
 }
 
-async function presentConversationList(db: DbClient, rows: ListRow[], opts: ListGuestThreadsOptions, now: Date): Promise<InboxRow[]> {
-  const teamIds = rows.filter(row => row.kind === 'team').map(row => row.id)
-  const [latest, people] = await Promise.all([
-    latestMessages(db, rows.flatMap(row => row.latest_message_id ? [row.latest_message_id] : [])),
-    teamIds.length ? queryAll<{ conversation_id: string; user_id: string; name: string }>(db, `SELECT p.conversation_id, p.user_id, u.name FROM conversation_participants p
-      JOIN member m ON m.organizationId = p.organization_id AND m.userId = p.user_id
-      JOIN user u ON u.id = p.user_id WHERE p.role = 'member' AND p.conversation_id IN (SELECT value FROM json_each(?)) ORDER BY p.created_at, p.user_id`, [d1JsonStringSet(teamIds)]) : [],
-  ])
+function presentConversationList(rows: ListRow[], opts: ListGuestThreadsOptions, now: Date): InboxRow[] {
   return rows.map(row => {
-    const message = row.latest_message_id ? latest.get(row.latest_message_id) : undefined
-    if (row.latest_message_id && !message) throw new Error(`The latest message of conversation ${row.id} could not be read`)
+    if (row.latest_message_id && (row.latest_author_kind === null || row.latest_occurred_at === null)) throw new Error(`The latest message of conversation ${row.id} could not be read`)
+    const message: LatestMessage | undefined = row.latest_author_kind !== null && row.latest_occurred_at !== null ? {
+      authorKind: row.latest_author_kind, actorUserId: row.latest_author_user_id, actorName: row.latest_actor_name, eventName: row.latest_event_name,
+      text: row.latest_body, photos: row.latest_photos,
+      sentAt: row.latest_provider_inserted_at ? providerInstant(row.latest_provider_inserted_at) : row.latest_occurred_at,
+    } : undefined
     const when = row.record_unit === 'nights' && row.record_starts_at && row.record_stored_ends_at && row.record_timezone
       ? stayWhen(bookingDay(row.record_starts_at, row.record_timezone), bookingDay(row.record_stored_ends_at, row.record_timezone), now, row.time_zone)
       : row.record_starts_at ? `${calendarDate(localDateKey(row.record_starts_at, row.time_zone))}, ${clockTime(row.record_starts_at, row.time_zone)}` : null
     const time = listTime(message ? message.sentAt : row.created_at, row.time_zone, now)
     if (row.kind === 'team') {
-      const others = people.filter(person => person.conversation_id === row.id && person.user_id !== opts.userId).map(person => person.name)
+      if (row.team_people === null) throw new Error(`The members of team conversation ${row.id} could not be read`)
+      const others = (JSON.parse(row.team_people) as { user_id: string; name: string }[]).filter(person => person.user_id !== opts.userId).map(person => person.name)
       const title = row.name ?? row.record_title ?? (others.length ? others.join(', ') : 'You')
       return {
         id: row.id, ...opts.includeSortKey && { last_message_at: row.last_message_at }, kind: 'team', title, avatar_initial: initial(title), channel: 'direct',
@@ -252,23 +276,6 @@ async function presentConversationList(db: DbClient, rows: ListRow[], opts: List
 }
 
 type LatestMessage = { authorKind: string; actorUserId: string | null; actorName: string | null; eventName: string | null; text: string | null; photos: number; sentAt: string }
-
-/** The last message of each listed conversation: who sent it, its words and when. */
-async function latestMessages(db: DbClient, ids: string[]): Promise<Map<string, LatestMessage>> {
-  if (!ids.length) return new Map()
-  const rows = await queryAll<{ id: string; author_kind: string; author_user_id: string | null; actor_name: string | null; event_name: string | null; body: string | null; provider_inserted_at: string | null; occurred_at: string; photos: number }>(db, `
-    SELECT e.id, e.author_kind, e.author_user_id, u.name AS actor_name, e.event_name, e.body,
-      json_extract(e.payload_json, '$.provider_inserted_at') AS provider_inserted_at, e.occurred_at,
-      (SELECT COUNT(*) FROM media_placements mp WHERE mp.owner_type = 'message' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active') AS photos
-    FROM messages e LEFT JOIN user u ON u.id = e.author_user_id
-    WHERE e.id IN (SELECT value FROM json_each(?))`, [d1JsonStringSet(ids)])
-  return new Map(rows.map(row => [row.id, {
-    authorKind: row.author_kind, actorUserId: row.author_user_id, actorName: row.actor_name, eventName: row.event_name,
-    text: row.body,
-    photos: row.photos,
-    sentAt: row.provider_inserted_at ? providerInstant(row.provider_inserted_at) : row.occurred_at,
-  }]))
-}
 
 /** "You", or the sender's first name, before the preview. */
 function previewFrom(message: LatestMessage, context: { guestName: string; viewerId: string; primaryGuestId: string | null; buyer: boolean; business: string }): string {
@@ -326,7 +333,7 @@ export async function readWorkspaceInbox(db: DbClient, organizationId: string, o
   ], { operation: 'Read workspace inbox' })
   requireInboxMembership(membership)
   return {
-    threads: await presentConversationList(db, list!.results as ListRow[], opts, now),
+    threads: presentConversationList(list!.results as ListRow[], opts, now),
     unread: presentUnreadCounts(counts!.results as UnreadCountRow[]),
   }
 }

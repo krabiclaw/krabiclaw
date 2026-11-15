@@ -280,7 +280,7 @@ test.describe('lodging identity boundary', () => {
       expect(await teamRows(inviteeBearer)).toEqual([expect.objectContaining({ id: threadId, unread: true })])
 
       // Native arrivals cross the first page. Loading earlier history must keep
-      // its oldest row when the next live arrival refreshes the source window.
+      // its oldest row when the next live arrival joins the transcript.
       let lastHistoryMessage: ConversationMessage | null = null
       for (let index = 0; index < 42; index++) {
         const historySent = await api.post(teamPath, { headers: inviteeBearer, data: { body: `Native team history ${index + 1} ${threadId}`, idempotency_key: crypto.randomUUID() } })
@@ -288,7 +288,11 @@ test.describe('lodging identity boundary', () => {
         lastHistoryMessage = (await historySent.json() as { message: ConversationMessage }).message
       }
       await expect(page.locator(`[data-team-message="${lastHistoryMessage!.id}"]`)).toContainText(lastHistoryMessage!.body!)
+      // Written messages join the open transcript; a fresh read holds the newest page.
       const oldestRow = page.locator(`[data-team-message="${sent.message.id}"]`)
+      await expect(oldestRow).toBeVisible()
+      await page.reload()
+      await expect(page.locator(`[data-team-message="${lastHistoryMessage!.id}"]`)).toBeVisible()
       await expect(oldestRow).toHaveCount(0)
       const earlierMessages = page.getByRole('button', { name: 'Earlier messages', exact: true })
       await expect(earlierMessages).toBeVisible()
