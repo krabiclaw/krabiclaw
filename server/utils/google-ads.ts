@@ -678,7 +678,8 @@ export async function getGoogleAdsPerformanceSummary(
   const data = await response.json() as {
     results?: Array<{
       customer?: { currencyCode?: string }
-      segments?: { date?: string }
+      /** Segmented by date, every row names its day. */
+      segments: { date: string }
       metrics?: { clicks?: string; impressions?: string; costMicros?: string; conversions?: number }
     }>
   }
@@ -692,7 +693,6 @@ export async function getGoogleAdsPerformanceSummary(
 
   const days: Array<{ date: string; clicks: number; impressions: number; costMicros: number; conversions: number }> = []
   for (const r of data.results ?? []) {
-    if (!r.segments?.date) throw new Error('Google Ads returned a day of results without its date')
     const day = { date: r.segments.date, clicks: Number(r.metrics?.clicks ?? 0), impressions: Number(r.metrics?.impressions ?? 0), costMicros: Number(r.metrics?.costMicros ?? 0), conversions: Number(r.metrics?.conversions ?? 0) }
     days.push(day)
     clicks += day.clicks

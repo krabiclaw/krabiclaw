@@ -25,7 +25,7 @@ import { isOrganizationWideRole, resolveUserOrganization } from '~/server/utils/
 import { organizationPublicUrl } from '~/server/utils/domains'
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
-import type { CloudflareEnv } from '~/server/utils/auth'
+import { BUSINESS_CURRENCY_FIXED, businessCurrencyFixed, type CloudflareEnv } from '~/server/utils/auth'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
 import type { CurrencyCode } from '~/shared/currencies'
 import { isValidTimezone } from '~/utils/timezone'
@@ -336,6 +336,7 @@ export async function applyOnboardingDraft(
   if (organization.onboarding_status !== 'pending' || organization.has_bookings) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Onboarding can only replace a pending site with no bookings', data: { code: 'ONBOARDING_REBUILD_NOT_ALLOWED' } })
   }
+  if (await businessCurrencyFixed(db, organizationId, defaultCurrency)) throw new HTTPError({ statusCode: 409, statusMessage: BUSINESS_CURRENCY_FIXED, data: { code: 'CURRENCY_FIXED', field: 'currency' } })
 
   const settingsQueries: BatchQuery[] = [{ query: `
       UPDATE organization

@@ -6,7 +6,6 @@ import { listBusinessOutcomes, readArticleDistribution, readBookingWelcomes, rea
 import type { BusinessProgressOperation, BusinessProgressReference } from '~/shared/business-outcomes'
 import { businessGoalStrategySchema, createBusinessGoalSchema, updateBusinessGoalSchema, type BusinessGoal, type BusinessGoalStrategy } from '~/shared/business-progress'
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
-import { queryOrganizationAnalytics } from '~/server/utils/analytics-query'
 import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
 import { articleSocialPostPath, blogCreatePath, blogEditorPath, firstExperienceSetupPath, firstHomeSetupPath, firstMenuSectionSetupPath, firstPracticeAreaPath, guestConversationPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
 import { listBookableSessions } from '~/server/utils/availability'
@@ -21,7 +20,6 @@ import { querySearchAnalytics } from '~/server/utils/google-search-console'
 import { getSocialConnections } from '~/server/utils/social-publication'
 import { experiencePublicationBlocker, getProduct, listOrganizationProducts, resolveVariantPrice } from '~/server/utils/product-management'
 import type { CurrencyCode } from '~/shared/currencies'
-import { errorChainForTelemetry } from '~/shared/error-telemetry'
 import { firstExperienceSetupProgress } from '~/server/utils/experience-setup'
 import { firstMenuSetupLocation } from '~/server/utils/first-menu-setup'
 import { firstPracticeAreaSetupIncomplete } from '~/server/utils/practice-area-setup'
@@ -157,32 +155,9 @@ interface RecommendationProduct { id: string; name: string; slug: string; kind: 
 
 /** Live provider reports have no persisted counterpart. Cache only this performance window;
  * source completion, authorization and eligibility are read again on every request. */
-async function marketingPages(db: DbClient, principal: MemberAccessPrincipal, organization: { timezone: string; analytics_data_start_at: string | null }, now: Date, useAds: boolean) {
+async function marketingPages(db: DbClient, principal: MemberAccessPrincipal, organization: { timezone: string }, now: Date, useAds: boolean) {
   const issues: string[] = [], pages: MarketingPage[] = []
   const endDate = localDateAt(now, organization.timezone), startDate = addLocalDays(endDate, -27)
-  let nativeSessions: number | null = null
-  let nativeUnavailable = false
-  if (organization.analytics_data_start_at) {
-    try {
-      const report = await queryOrganizationAnalytics(db, { organizationId: principal.organizationId, mode: 'breakdown', startDate, endDate,
-        dimensions: ['page_path'], metrics: ['sessions'], filters: { kind: 'pageview' }, sort: { metric: 'sessions', direction: 'desc' },
-        limit: 30, now, cursorSecret: principal.env.BETTER_AUTH_SECRET })
-      nativeSessions = Number((report.totals.sessions as { value: number }).value)
-      for (const row of report.rows) {
-        const dimensions = row.dimensions as Record<string, unknown>, metrics = row.metrics as Record<string, unknown>
-        if (typeof dimensions.page_path === 'string') pages.push({ path: dimensions.page_path, count: Number(metrics.sessions), source: 'recorded website sessions' })
-      }
-    } catch (error) {
-      nativeUnavailable = true
-      nativeSessions = null
-      pages.length = 0
-      console.error('website_performance_read_failed', {
-        organization_id: principal.organizationId,
-        error_chain: errorChainForTelemetry(error),
-      })
-      issues.push('Website performance could not be loaded. Try again later.')
-    }
-  }
   for (const provider of ['google_ads', 'google_search_console'] as const) {
     if (provider === 'google_ads' && !useAds) continue
     const integration = await readIntegration(db, principal.organizationId, provider)
@@ -215,7 +190,7 @@ async function marketingPages(db: DbClient, principal: MemberAccessPrincipal, or
       issues.push(`${provider === 'google_ads' ? 'Google Ads' : 'Search Console'} performance could not be read: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
-  return { pages, nativeSessions, nativeUnavailable, issues }
+  return { pages, issues }
 }
 
 /** Current source facts select the next useful step. There is no daily reset, task ledger,
@@ -223,8 +198,8 @@ async function marketingPages(db: DbClient, principal: MemberAccessPrincipal, or
 export async function readBusinessRecommendations(db: DbClient, principal: MemberAccessPrincipal, input: { now?: Date; locationId?: string } = {}) {
   await authorize(db, principal)
   const now = input.now ?? new Date(), organizationId = principal.organizationId
-  const organization = await queryFirst<{ slug: string; name: string; vertical: string; status: string; timezone: string; default_currency: CurrencyCode; analytics_data_start_at: string | null }>(db,
-    'SELECT slug,name,vertical,status,timezone,default_currency,analytics_data_start_at FROM organization WHERE id=?', [organizationId])
+  const organization = await queryFirst<{ slug: string; name: string; vertical: string; status: string; timezone: string; default_currency: CurrencyCode }>(db,
+    'SELECT slug,name,vertical,status,timezone,default_currency FROM organization WHERE id=?', [organizationId])
   if (!organization) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
   if (input.locationId && !await queryFirst(db, 'SELECT id FROM business_locations WHERE id=? AND organization_id=?', [input.locationId, organizationId])) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
   const goals = (await queryAllPages<GoalRow>(db, "SELECT id, intent, constraints, target_at, status, strategy_json, created_by_user_id, updated_by_user_id, created_at, updated_at FROM organization_goals WHERE organization_id = ? AND status = 'active' ORDER BY updated_at DESC, id DESC", [organizationId])).map(goalOf)
@@ -254,8 +229,6 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
   const issues = marketing.issues
   const marketingEvidenceUnavailable = issues.length > 0
   const base = `/dashboard/${encodeURIComponent(organization.slug)}`
-  const context = marketing.nativeSessions === null ? marketing.nativeUnavailable ? 'Website traffic measurement is currently unavailable.' : 'Website traffic measurement has not started.'
-    : `${marketing.nativeSessions} recorded website sessions in the current 28-day window; this does not include off-platform customers.`
   const articles = documents.filter(document => document.kind === 'article'), drafts = articles.filter(document => document.status === 'draft')
   const posts = documents.filter(document => document.kind === 'social_post')
   type Candidate = Omit<BusinessRecommendation, 'reference'> & { rank: number; recency: string }
@@ -266,7 +239,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       productId: null, requestId: null, message: null, goal: null, recency: '', ...options })
   }
   const pageEvidence = (slug: string | null) => slug ? marketing.pages.filter(page => page.path.split('/').filter(Boolean).at(-1) === slug) : []
-  const sourceOrder = enabled('google_ads') ? ['Google Ads clicks', 'recorded website sessions', 'organic Google clicks'] : ['recorded website sessions', 'organic Google clicks', 'Google Ads clicks']
+  const sourceOrder = enabled('google_ads') ? ['Google Ads clicks', 'organic Google clicks'] : ['organic Google clicks', 'Google Ads clicks']
   const compareInterest = (left: string | null, right: string | null) => {
     for (const source of sourceOrder) {
       const a = pageEvidence(left).find(page => page.source === source)?.count ?? 0
@@ -287,7 +260,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       `Your draft has been ready since ${since(draft.updated_at)}.${organization.vertical === 'service' ? ' Complete legal review before publishing.' : ''}`,
       blogEditorPath(organization.slug, draft.id), 70, { goal: goalFor('blog') ?? goalFor('google_ads'), locationId: draft.location_id, recency: draft.updated_at, icon: 'i-lucide-file-pen-line' })
     if (!drafts.length) offer('article.create', organizationId, `Start a blog about ${topic}`,
-      `Build useful content for ${organization.name}.${leading && pageEvidence(leading.slug).length ? ` This offering already has recorded website interest.` : ' This is a new content opportunity, not a measured winning topic.'} ${context}`,
+      `Build useful content for ${organization.name}.${leading && pageEvidence(leading.slug).length ? ` This offering already has recorded website interest.` : ' This is a new content opportunity, not a measured winning topic.'}`,
       blogCreatePath(organization.slug), 40, { goal: goalFor('blog') ?? goalFor('google_ads'), productId: leading?.id ?? null, icon: 'i-lucide-file-plus' })
   }
   const adsGoal = goalFor('google_ads')
@@ -346,7 +319,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       canPreparePost = Boolean(unusedPhoto || !posts.length)
       if (canPreparePost) offer('post.create', organizationId,
         unusedPhoto ? 'Turn a business photo into a social post' : `Prepare a photo post about ${topic}`,
-        `${unusedPhoto ? 'A saved image has not been used in a recorded social post. Choose a suitable photo and caption.' : 'Capture a current photo and give customers a useful reason to visit or book.'} ${context}`,
+        `${unusedPhoto ? 'A saved image has not been used in a recorded social post. Choose a suitable photo and caption.' : 'Capture a current photo and give customers a useful reason to visit or book.'}`,
         postEditorPath(organization.slug, 'new', input.locationId), 60, { goal: goalFor('social'), productId: leading?.id ?? null, icon: 'i-lucide-camera' })
       else offer('post.create', organizationId, 'Capture a new business photo for your next post',
         'The previous post is recorded. Capture a fresh photo of your business before preparing another post.',

@@ -239,21 +239,22 @@ test('a table is seated through its location\'s current hours and closing preser
     ] }, ACTOR, env)).status, 200)
     assert.deepEqual((await offered(tuesday)).filter(([time]) => String(time) < '02:15'), [['00:15', 20], ['00:45', 20]])
 
-    const review = (name: string) => ({
-      name: `places/place-id/reviews/${name}`, authorAttribution: { displayName: name }, rating: 5,
+    const review = (name: string, author = name) => ({
+      name: `places/place-id/reviews/${name}`, authorAttribution: { displayName: author }, rating: 5,
       publishTime: '2026-01-01T00:00:00Z',
     })
     const mapsSession = 'bdab991c-96d6-40b0-af53-3077b4073850'
     const originalFetch = globalThis.fetch
     const closure = { kind: 'closure', starts_on: tuesday, ends_on: tuesday, note: 'Private event' } as const
     let racing = false
+    let unnamed = false
     t.mock.method(globalThis, 'fetch', async (...args: Parameters<typeof fetch>) => {
       if (!String(args[0]).startsWith('https://places.googleapis.com/')) return originalFetch(...args)
       if (!racing) assert.equal(new URL(String(args[0])).searchParams.get('sessionToken'), mapsSession)
       if (racing) assert.equal((await updateLocation(db, ORG, LOCATION, { special_hours: [closure] }, ACTOR, env)).status, 200)
       return Response.json({
         id: 'place-id', rating: racing ? 1 : 5, timeZone: { id: ZONE }, regularOpeningHours: hours(22),
-        reviews: [review(racing ? 'stale-review' : 'current-review')],
+        reviews: [unnamed ? review('unnamed-review', '   ') : review(racing ? 'stale-review' : 'current-review')],
       })
     })
     assert.equal((await syncPlaceToLocation(db, 'test-key', ORG, LOCATION, 'place-id', 'import', mapsSession)).reviewsUpserted, 1)
@@ -261,6 +262,11 @@ test('a table is seated through its location\'s current hours and closing preser
     racing = true
     await assert.rejects(syncPlaceToLocation(db, 'test-key', ORG, LOCATION, 'place-id', 'import'), { statusCode: 409 })
     assert.deepEqual((await db.prepare('SELECT author_name FROM reviews WHERE organization_id = ? AND location_id = ?').bind(ORG, LOCATION).all()).results, [{ author_name: 'current-review' }])
+    // A review always has an author: Google sending one without a name stops the sync and stores nothing.
+    racing = false
+    unnamed = true
+    await assert.rejects(syncPlaceToLocation(db, 'test-key', ORG, LOCATION, 'place-id', 'provider', mapsSession), /Invalid Google review identity, rating, or timestamp/)
+    assert.deepEqual((await db.prepare('SELECT author_name FROM reviews WHERE organization_id = ? AND location_id = ?').bind(ORG, LOCATION).all()).results.map(row => row.author_name), ['current-review'])
     assert.deepEqual(await db.prepare('SELECT rating FROM business_locations WHERE id = ?').bind(LOCATION).first(), { rating: 5 })
     assert.deepEqual(await offered(tuesday), [])
   } finally {

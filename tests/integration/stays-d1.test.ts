@@ -58,6 +58,7 @@ import Ajv from 'ajv'
 import { stayPhotoRoomName, type StayPhotoRoom } from '../../shared/stay-photos.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
 import { hashPassword } from 'better-auth/crypto'
+import { updateOrganizationSettingsFields } from '../../server/utils/organization-settings.ts'
 import editNightsRoute from '../../server/api/dashboard/stay-homes/[product_id]/nights.put.ts'
 import { buyStay } from './support/stay-checkout.ts'
 
@@ -1142,6 +1143,45 @@ test('a channel stay is read-only here and is paid through its channel; an app s
     await assert.rejects(createStay(db, env, manager, { ...withPayment, idempotency_key: 'bad-payment', check_in_date: '2026-12-20', check_out_date: '2026-12-22', payment: { amount_minor: -100, method: 'cash', paid_on: '2026-12-01' } }), { status: 422, data: { code: 'INVALID_AMOUNT', field: 'payment.amount_minor' } })
     await assert.rejects(createStay(db, env, manager, { ...withPayment, idempotency_key: 'bad-method', check_in_date: '2026-12-20', check_out_date: '2026-12-22', payment: { amount_minor: 100, method: 'crypto', paid_on: '2026-12-01' } }), { status: 422, data: { code: 'INVALID_STAY_FIELD', field: 'payment.method' } })
     assert.equal(await db.prepare("SELECT count(*) FROM bookings WHERE idempotency_key IN ('bad-payment', 'bad-method')").first('count(*)'), 0)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('the business currency is fixed once a stay records money, through settings and through Better Auth', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  try {
+    const auth = createAuth(env)
+    const password = 'CurrencyProof123!'
+    await db.prepare("INSERT INTO account(id,accountId,providerId,userId,password) VALUES(?,?,'credential',?,?)").bind(OWNER, OWNER, OWNER, await hashPassword(password)).run()
+    const signedIn = await auth.api.signInEmail({ body: { email: `${OWNER}@example.test`, password }, returnHeaders: true })
+    const cookie = signedIn.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    const updateThroughAuth = (currency: string) => auth.handler(new Request('https://proof.example/api/auth/organization/update', {
+      method: 'POST', headers: { 'content-type': 'application/json', cookie, origin: 'https://proof.example' }, body: JSON.stringify({ organizationId: ORG, data: { default_currency: currency } }),
+    }))
+    const stored = async () => (await db.prepare('SELECT default_currency FROM organization WHERE id = ?').bind(ORG).first<{ default_currency: string }>())!.default_currency
+
+    // Before any money, either writer changes it.
+    const authChanged = await updateThroughAuth('EUR')
+    assert.equal(authChanged.status, 200, await authChanged.clone().text())
+    assert.equal(await stored(), 'EUR')
+    assert.equal((await updateOrganizationSettingsFields(db, env, ORG, { default_currency: 'USD' }, OWNER)).status, 200)
+    assert.equal(await stored(), 'USD')
+
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
+    await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'priced', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest })
+
+    // A priced booking holds money in USD: neither writer moves the business to another currency.
+    assert.deepEqual(await updateOrganizationSettingsFields(db, env, ORG, { default_currency: 'EUR', press_email: 'press@example.test' }, OWNER),
+      { status: 409, data: { error: 'The business currency cannot change once money has been recorded', code: 'CURRENCY_FIXED' } })
+    const authRefused = await updateThroughAuth('EUR')
+    assert.equal(authRefused.status, 409)
+    assert.deepEqual(await authRefused.json(), { code: 'CURRENCY_FIXED', message: 'The business currency cannot change once money has been recorded' })
+    assert.equal(await stored(), 'USD')
+    assert.equal(await db.prepare("SELECT json_extract(settings_json, '$.config.press_email') AS press FROM organization WHERE id = ?").bind(ORG).first('press'), null)
+    // Saving the currency it already has is not a change.
+    assert.equal((await updateOrganizationSettingsFields(db, env, ORG, { default_currency: 'usd' }, OWNER)).status, 200)
+    assert.equal(await stored(), 'USD')
   } finally {
     await runtime.dispose()
   }

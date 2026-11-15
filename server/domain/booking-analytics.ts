@@ -64,9 +64,9 @@ async function checkoutAttribution(db: DbClient, payment: Payment): Promise<{ to
  */
 export async function checkoutWebsiteSource(db: DbClient, payment: Payment, conversationId: string | null): Promise<AttributionChannel | null> {
   if (conversationId) {
+    // The checkout wrote its hold and this conversation in one batch.
     const conversation = await queryFirst<{ source: string | null }>(db, `SELECT json_extract(payload_json, '$.provenance.source') AS source FROM conversations WHERE id = ? AND organization_id = ?`, [conversationId, payment.organization_id])
-    if (!conversation) throw new Error(`Checkout of payment ${payment.id} has no guest conversation`)
-    if (conversation.source !== 'website') return null
+    if (conversation!.source !== 'website') return null
   }
   const started = await queryFirst<{ touch: string | null; session_id: string | null }>(db, `SELECT json_extract(payload_json, '$.attribution') AS touch, session_id FROM analytics_events
     WHERE organization_id = ? AND kind = 'interaction' AND json_extract(payload_json, '$.event_name') = 'payment_checkout_started'

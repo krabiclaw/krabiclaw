@@ -104,21 +104,15 @@ function byOffering<T extends { product_id: string; product_name: string }>(rows
     .sort((a, b) => (b.values[0] ?? -1) - (a.values[0] ?? -1) || a.label.localeCompare(b.label))
 }
 
-function singleCurrency(currencies: Iterable<unknown>, fallback: string): string {
-  const found = [...new Set([...currencies].filter((currency): currency is string => typeof currency === 'string'))]
-  if (found.length > 1) throw new HTTPError({ statusCode: 409, message: `Amounts in ${found.join(' and ')} cannot be added together`, data: { code: 'MULTIPLE_CURRENCIES', field: 'currency' } })
-  return found[0] ?? fallback
-}
-
 interface BookingRow {
   id: string; product_id: string; product_name: string; kind: InsightsKind; status: string; starts_at: string; ends_at: string; timezone: string
-  party_size: number; total_minor: number | null; currency: string | null; channel: string; owner: string; website_source: string | null
+  party_size: number; total_minor: number | null; channel: string; owner: string; website_source: string | null
   user_id: string | null; created_at: string; received_at: string | null; returning: number
 }
 const bookingRow = (row: Row): BookingRow => ({
   id: String(row.id), product_id: String(row.product_id), product_name: String(row.product_name), kind: row.kind as InsightsKind, status: String(row.status),
   starts_at: String(row.starts_at), ends_at: String(row.ends_at), timezone: String(row.timezone), party_size: num(row.party_size),
-  total_minor: row.total_minor === null ? null : num(row.total_minor), currency: text(row.currency), channel: String(row.channel), owner: String(row.owner),
+  total_minor: row.total_minor === null ? null : num(row.total_minor), channel: String(row.channel), owner: String(row.owner),
   website_source: text(row.website_source), user_id: text(row.user_id), created_at: String(row.created_at), received_at: text(row.received_at), returning: num(row.booked_before),
 })
 
@@ -186,7 +180,7 @@ function bookingsQuery(context: PageContext, window: 'starts' | 'received', wher
     ? { sql: 'b.starts_at >= ? AND b.starts_at < ?', params: [addLocalDays(context.range.startDate, -1), addLocalDays(context.range.endDate, 2)] }
     : { sql: 'b.received_at >= ? AND b.received_at < ?', params: [context.window.from, context.window.until] }
   return {
-    query: `SELECT b.id, b.product_id, p.name AS product_name, p.kind, b.status, b.starts_at, b.ends_at, b.timezone, b.party_size, b.total_minor, b.currency,
+    query: `SELECT b.id, b.product_id, p.name AS product_name, p.kind, b.status, b.starts_at, b.ends_at, b.timezone, b.party_size, b.total_minor,
         b.channel, b.owner, b.website_source, b.user_id, b.created_at, b.received_at,
         b.user_id IS NOT NULL AND EXISTS (SELECT 1 FROM bookings e WHERE e.organization_id = b.organization_id AND e.user_id = b.user_id AND e.created_at < b.created_at) AS booked_before
       FROM bookings b JOIN products p ON p.organization_id = b.organization_id AND p.id = b.product_id
@@ -199,10 +193,10 @@ function bookingsQuery(context: PageContext, window: 'starts' | 'received', wher
 function paymentQueries(context: PageContext): BatchQuery[] {
   const bookings = bookingsQuery(context, 'starts')
   return [
-    { query: `SELECT p.subject_id AS booking_id, p.currency, p.captured_amount, p.refunded_amount FROM payments p
+    { query: `SELECT p.subject_id AS booking_id, p.captured_amount, p.refunded_amount FROM payments p
         WHERE p.organization_id = ? AND p.subject_type = 'booking' AND p.subject_id IN (SELECT id FROM (${bookings.query}))`,
     params: [context.reader.organizationId, ...bookings.params!] },
-    { query: `SELECT o.booking_id, o.currency, o.amount_minor FROM offline_payments o
+    { query: `SELECT o.booking_id, o.amount_minor FROM offline_payments o
         WHERE o.organization_id = ? AND o.booking_id IN (SELECT id FROM (${bookings.query}))`,
     params: [context.reader.organizationId, ...bookings.params!] },
   ]
@@ -223,8 +217,7 @@ async function batch(context: PageContext, queries: BatchQuery[]) {
 /** The first day the website's visits were counted. */
 const recordedSinceQuery = (context: PageContext): BatchQuery => ({ query: 'SELECT analytics_data_start_at FROM organization WHERE id = ?', params: [context.reader.organizationId] })
 const recordedSince = (rows: Row[], context: PageContext) => {
-  if (!rows[0]) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
-  const start = text(rows[0].analytics_data_start_at)
+  const start = text(rows[0]!.analytics_data_start_at)
   return start ? localDateAt(new Date(start), context.reader.timezone) : null
 }
 
@@ -256,14 +249,12 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
     const reviews = rows!.map((row) => {
       const writtenAt = String(row.written_at)
       const date = writtenAt.length === 10 ? writtenAt : localDateAt(new Date(writtenAt), reader.timezone)
-      const author = text(row.author_name)?.trim()
-      if (!author) throw new HTTPError({ statusCode: 500, message: `Review ${String(row.id)} has no author`, data: { code: 'INVALID_REVIEW', field: 'author_name' } })
       const questions = row.booking_type ? reviewSubject(row.booking_type as 'booking' | 'stay', text(row.product_kind)) : null
       const categories = (JSON.parse(String(row.categories)) as Array<{ category: string; rating: number }>).map(rating => ({
         key: rating.category, rating: rating.rating,
         label: questions ? (REVIEW_CATEGORIES[questions] as ReadonlyArray<{ key: string; label: string }>).find(question => question.key === rating.category)?.label ?? rating.category : rating.category,
       }))
-      return { id: String(row.id), author, rating: num(row.rating), subject: text(row.subject), questions, source: String(row.source), status: row.status as 'pending' | 'approved' | 'rejected' | 'private',
+      return { id: String(row.id), author: String(row.author_name), rating: num(row.rating), subject: text(row.subject), questions, source: String(row.source), status: row.status as 'pending' | 'approved' | 'rejected' | 'private',
         date, title: text(row.title), content: text(row.content), private_feedback: text(row.private_feedback), categories }
     }).filter(review => context.dates.includes(review.date))
     const day = days(context.dates)
@@ -382,14 +373,11 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
   'rates/nightly-rate': async (context) => {
     const [rows] = await batch(context, [bookingsQuery(context, 'starts', "AND b.status = 'confirmed'")])
     const stays = rows!.map(bookingRow).filter(inRange(context))
-    // A stay always carries its total (bookings_money_check); one without is not priced at zero.
-    for (const row of stays) if (row.total_minor === null) throw new Error(`Stay ${row.id} has no stored total`)
-    const currency = singleCurrency(stays.map(row => row.currency), context.reader.defaultCurrency)
     const day = days(context.dates)
     const income = (group: BookingRow[]) => group.reduce((sum, row) => sum + row.total_minor!, 0)
     const nightly = (group: BookingRow[]) => average(income(group), group.reduce((sum, row) => sum + nightsOf(row), 0), 0)
     return {
-      currency,
+      currency: context.reader.defaultCurrency,
       metrics: [
         { key: 'nightly_rate', label: 'Average nightly rate', format: 'money', value: nightly(stays), daily: day.each(stays, startDay, nightly) },
         { key: 'income', label: 'Booking income', format: 'money', value: income(stays), daily: day.each(stays, startDay, income) },
@@ -405,7 +393,6 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
     // The padded read reaches past the range; only the range's bookings' money counts.
     const ids = new Set(bookings.map(row => row.id))
     const payments = allPayments!.filter(row => ids.has(String(row.booking_id))), offline = allOffline!.filter(row => ids.has(String(row.booking_id)))
-    const currency = singleCurrency([...payments, ...offline].map(row => row.currency), context.reader.defaultCurrency)
     // Received for a booking: captured on the site less its refunds, plus what was recorded by hand (a refund recorded negative).
     const received = new Map<string, number>()
     for (const row of payments!) received.set(String(row.booking_id), (received.get(String(row.booking_id)) ?? 0) + num(row.captured_amount) - num(row.refunded_amount))
@@ -414,7 +401,7 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
     const value = (group: BookingRow[]) => average(income(group), group.filter(row => (received.get(row.id) ?? 0) > 0).length, 0)
     const day = days(context.dates)
     return {
-      currency,
+      currency: context.reader.defaultCurrency,
       metrics: [
         { key: 'average_value', label: 'Average booking value', format: 'money', value: value(bookings), daily: day.each(bookings, startDay, value) },
         { key: 'income', label: 'Booking income', format: 'money', value: income(bookings), daily: day.each(bookings, startDay, income) },
@@ -431,7 +418,6 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
     const ids = new Set(bookings.map(row => row.id))
     const payments = allPayments!.filter(row => ids.has(String(row.booking_id))), offline = allOffline!.filter(row => ids.has(String(row.booking_id)))
     const channelStays = bookings.filter(row => row.owner === 'channel' && row.status === 'confirmed' && row.total_minor !== null)
-    const currency = singleCurrency([...payments, ...offline, ...channelStays].map(row => row.currency), context.reader.defaultCurrency)
     const startOf = new Map(bookings.map(row => [row.id, startDay(row)]))
     // Each amount is dated by the start of the booking it was for.
     const amounts = [
@@ -444,7 +430,7 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
     const direct = amounts.filter(row => row.channel === 'Direct')
     const order = ['Direct', 'Recorded by you', ...Object.values(CHANNEL_LABELS)]
     return {
-      currency,
+      currency: context.reader.defaultCurrency,
       metrics: [
         { key: 'income', label: 'Booking income', format: 'money', value: total(amounts), daily: day.sum(amounts, row => row.day, row => row.amount) },
         { key: 'direct', label: 'Direct', format: 'money', value: total(direct), daily: day.sum(direct, row => row.day, row => row.amount) },
