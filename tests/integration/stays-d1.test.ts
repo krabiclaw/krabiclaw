@@ -2198,7 +2198,7 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
       const listing = await readStayHome(db, manager, cabin.id)
       const quote = await quoteStay(db, ORG, listing, { check_in_date: date(offset), check_out_date: date(offset + 2), adults: 2 })
       return createStayRequest(db, env, { organizationId: ORG, buyerUserId: OUTSIDER, key, fingerprint: key, home: listing, quote,
-        guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null }, locale: 'en', ipHash: 'proof' })
+        guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null }, locale: 'en', ipHash: 'proof', websiteSource: 'Direct' })
     }
     const decide = (stay: Awaited<ReturnType<typeof submit>>, action: 'confirm' | 'reject', suffix = '') => executeGuestThreadOperation(db, {
       threadId: stay.conversation_id, organizationId: ORG, action, actorUserId: OWNER, idempotencyKey: `${action}:${stay.id}${suffix}`, stayManager: true,

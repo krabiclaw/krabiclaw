@@ -171,7 +171,7 @@ MCP requests against `server/api/mcp.ts` write rows to `mcp_tool_call_events` (`
 
 Captured per row: surface, authorized organization/location/user id, request id, method, tool name + domain, HTTP status, JSON-RPC error code/message, protocol version, hashed session id, hashed OAuth client id, Cloudflare ray id, catalog fingerprint, operational summaries of arguments and result, unknown-tool fields, status (`success` / `error` / `auth_required` / `blocked`), and duration in ms.
 
-Rows are deleted 180 days after `created_at` by `cleanupMcpToolCallEvents()`, which the daily `analytics-aggregate-daily` task (`0 3 * * *`) runs beside the pageview cleanup. This is the limit the Privacy Policy states.
+Rows are deleted 180 days after `created_at` by `cleanupMcpToolCallEvents()`, which the daily `stripe-ga4-intent-retention` task (`0 3 * * *`) runs beside the GA4 intent retention. This is the limit the Privacy Policy states.
 
 Each `tools/call` with an organization also writes a `usage_events` row (`resource = 'mcp_operation'`). Its `provider` is `mcp_client` for every external MCP client and `krabiclaw` for the public help agent. Rows written before this change say `krabiclaw` for external clients too, because the surface default was applied after the provider was chosen.
 

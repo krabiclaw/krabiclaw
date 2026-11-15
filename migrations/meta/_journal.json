@@ -43,6 +43,13 @@
       "when": 1794638164396,
       "tag": "0005_index_support_conversation_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794720981655,
+      "tag": "0006_insights_counters_and_booking_source",
+      "breakpoints": true
     }
   ]
 }

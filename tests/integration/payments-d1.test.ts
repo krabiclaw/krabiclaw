@@ -111,7 +111,7 @@ async function paidTable(db: D1Database, env: CloudflareEnv) {
  await diningTables(db)
  const opening = { id: 'deposit-request', kind: 'booking' as const, organization_id: ORG, location_id: 'dining', user_id: 'verified', booking_id: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', phone: '+12025550123' }), cancellation: { token_hash: 'deposit-token-hash', expires_at: '2100-01-01T00:00:00.000Z', used_at: null } }, created_at: NOW }
  await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
- const booking = await claimSessionCapacity(db, { policyJson: JSON.stringify(TABLE_TERMS), env, organizationId: ORG, productId: 'tables', sessionId: 'seating', productVariantId: 'table-variant', partySize: 1, userId: 'verified' })
+ const booking = await claimSessionCapacity(db, { websiteSource: null, policyJson: JSON.stringify(TABLE_TERMS), env, organizationId: ORG, productId: 'tables', sessionId: 'seating', productVariantId: 'table-variant', partySize: 1, userId: 'verified' })
  await nameConversationBooking(db, opening.id, booking.bookingId)
  await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,tax_amount,captured_amount,stripe_payment_intent_id,stripe_charge_id,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,'verified','acct_seller',0,'booking',?,'dining','USD',10000,500,10500,'pi_deposit','ch_deposit',?,?,?)")
   .bind(ORG, booking.bookingId, JSON.stringify({ title: 'Dining tables', tax_code: null, price: { unit_amount: 10000, currency: 'USD', tax_behavior: 'exclusive' }, quantity: 1, automatic_tax: false, method_configuration_id: 'pmc_seller', policy: TABLE_TERMS }), NOW, NOW).run()
@@ -260,7 +260,7 @@ test('a checkout thread stays out of Messages until payment creates its booking'
   const owner = async () => (await listConversations(db, ORG, { userId: 'owner-reader' })).map(row => row.id)
   const buyer = async () => (await listConversations(db, null, { userId: 'verified', buyerAudience: true })).map(row => row.id)
   assert.deepEqual([await owner(), await buyer()], [[], []])
-  await nameConversationBooking(db, opening.id, (await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified' })).bookingId)
+  await nameConversationBooking(db, opening.id, (await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified' })).bookingId)
   assert.deepEqual([await owner(), await buyer()], [[opening.id], [opening.id]])
  } finally { await runtime.dispose() }
 })
@@ -272,7 +272,7 @@ test('guest class cancellation refunds through Stripe until 24 hours before the 
    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
    const opening = { id: 'class-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'verified', booking_id: null, payload: threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com' }), created_at: NOW }
    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
-   const booking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified' })
+   const booking = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified' })
    await nameConversationBooking(db, opening.id, booking.bookingId)
    await payable(db, 'class-payment')
    await db.prepare("UPDATE payments SET buyer_user_id='verified',subject_id=?,captured_amount=10000,stripe_payment_intent_id='pi_class',stripe_charge_id='ch_class' WHERE id='class-payment'").bind(booking.bookingId).run()
@@ -317,7 +317,7 @@ test('an advance notice closes a guest\'s own class cancellation at the notice, 
    const opening = { id: 'notice-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'verified', booking_id: null, payload: threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com' }), created_at: NOW }
    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
    // The notice is part of the terms the guest booked under, frozen on the booking.
-   const booking = await claimSessionCapacity(db, { policyJson: JSON.stringify({ ...OPEN_TERMS, advance_notice_minutes: notice }), env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified' })
+   const booking = await claimSessionCapacity(db, { websiteSource: null, policyJson: JSON.stringify({ ...OPEN_TERMS, advance_notice_minutes: notice }), env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified' })
    await nameConversationBooking(db, opening.id, booking.bookingId)
    await payable(db, 'notice-payment')
    await db.prepare("UPDATE payments SET buyer_user_id='verified',subject_id=?,captured_amount=10000,stripe_payment_intent_id='pi_notice',stripe_charge_id='ch_notice' WHERE id='notice-payment'").bind(booking.bookingId).run()
@@ -433,10 +433,10 @@ test('an active payment hold consumes the canonical session capacity until relea
  const { db, runtime, env } = await boot()
  try {
   await payable(db, 'held')
-  await assert.rejects(() => claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
+  await assert.rejects(() => claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
   assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings').first('n'), 0)
   await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='held'").run()
-  const booking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
+  const booking = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
   assert.equal(await db.prepare('SELECT party_size FROM bookings WHERE id=?').bind(booking.bookingId).first('party_size'), 1)
  } finally { await runtime.dispose() }
 })
@@ -448,7 +448,7 @@ test('MCP paid booking cancellation and rejection hand off without preparing mon
    await db.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('owner',?,'verified','owner')").bind(ORG).run()
    const opening = { id: 'paid-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com' }), created_at: NOW }
    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
-   const booking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'guest' })
+   const booking = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'guest' })
    await nameConversationBooking(db, opening.id, booking.bookingId)
    await payable(db, 'paid')
    await db.prepare("UPDATE payments SET subject_id=?,captured_amount=10000,stripe_payment_intent_id='pi_paid',stripe_charge_id='ch_paid' WHERE id='paid'").bind(booking.bookingId).run()
@@ -823,7 +823,7 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
  const {db,runtime,env}=await boot();try{
   const opening={id:'booking-request',kind:'booking' as const,organization_id:ORG,location_id:null,user_id:'verified',booking_id:null,payload:threadPayloadForGuest({name:'Verified',email:'verified@example.com',ipHash:'private-ip-hash'}),created_at:NOW }
   await db.batch(requestInsertQueries(opening).map(write=>db.prepare(write.query).bind(...write.params)))
-  const booking = await claimSessionCapacity(db, {policyJson: OPEN_TERMS_JSON, env,organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1,userId:'verified' })
+  const booking = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env,organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1,userId:'verified' })
   await nameConversationBooking(db, opening.id, booking.bookingId)
   assert.notEqual(booking.bookingId,opening.id)
   await payable(db,'visit-payment')
@@ -988,7 +988,7 @@ test('tenant deletion refuses a connected account retained for another tenant wi
 test('an expired payment hold no longer consumes session capacity', {timeout:120000},async()=>{
  const {db,runtime,env}=await boot();try{
   await payable(db,'expired','2000-01-01T00:00:00.000Z')
-  const booking=await claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1})
+  const booking=await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env,organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1})
   assert.equal(await db.prepare('SELECT party_size FROM bookings WHERE id=?').bind(booking.bookingId).first('party_size'),1)
   assert.equal(await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='expired'").first('status'),'active')
  }finally{await runtime.dispose()}
@@ -1428,7 +1428,7 @@ test('processing webhooks extend only active checkout holds and preserve capacit
       assert.equal((await requirePayment(db, ORG, id)).captured_amount, 0)
       if (status === 'active') {
         assert.ok(Date.parse(hold!.expires_at) >= Date.now() + 13 * 86400_000)
-        await assert.rejects(claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
+        await assert.rejects(claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
       } else {
         assert.equal(hold?.expires_at, expires)
       }
@@ -1552,7 +1552,7 @@ test('a card is authorized, booked, then captured, and a hold that has lapsed st
   const authenticating = await confirmable(db, 'authenticating', inMinutes(1), inMinutes(1))
   assert.deepEqual(await confirm('authenticating', authenticating), { status: 'requires_action', client_secret: 'pi_authenticating_secret', requires_action: true, bank_verification_url: null })
   assert.ok(Date.parse((await holdOf(db, 'authenticating'))!.expires_at) >= Date.now() + 55 * 60_000)
-  await assert.rejects(claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
+  await assert.rejects(claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
   assert.deepEqual(calls.capture, ['direct'])
   statuses.authenticating = 'requires_capture'
   const event = { id: 'evt_authorized', type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_authenticating', metadata: { krabiclaw_payment_id: 'authenticating' } } } } as unknown as Stripe.Event
@@ -1588,7 +1588,7 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
   // The hold lapsed and someone else took the only seat. Stripe holds an authorization; nothing has been charged.
   await confirmable(db, 'taken', inMinutes(-1))
   await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='taken'").run()
-  const seat = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
+  const seat = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
   await deliver('taken')
   assert.deepEqual([calls.cancel, calls.capture, calls.refund], [['taken'], [], []])
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings WHERE id<>?').bind(seat.bookingId).first('n'), 0)
@@ -1695,7 +1695,7 @@ test('a bank debit that cleared after its capacity went is refunded once and nev
   // A debit has no authorization to cancel: the hold lapsed, someone else took the only seat, and the money goes back through the ordinary refund.
   await confirmable(db, 'taken', inMinutes(-1))
   await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='taken'").run()
-  const seat = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
+  const seat = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
   await deliver('taken')
   assert.deepEqual(calls.refund, ['pi_taken'])
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings WHERE id<>?').bind(seat.bookingId).first('n'), 0)
@@ -1847,7 +1847,7 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
     }
     if (query.includes('FROM ad_group')) return Response.json({ results: [] })
     if (query.includes('metrics.cost_micros')) {
-     return Response.json({ results: query.includes("'2026-10-01'") ? [] : [{ customer: { currencyCode: 'USD' }, metrics: { costMicros: '12500000', clicks: '10', impressions: '100', conversions: 1 } }] })
+     return Response.json({ results: query.includes("'2026-10-01'") ? [] : [{ customer: { currencyCode: 'USD' }, segments: { date: query.match(/BETWEEN '([0-9-]+)'/)![1] }, metrics: { costMicros: '12500000', clicks: '10', impressions: '100', conversions: 1 } }] })
     }
     return Response.json({ results: [{ customer: { currencyCode: currency, timeZone, descriptiveName: 'Managed ads fixture', manager: url.pathname.includes('3333333333') } }] })
    }
@@ -2030,7 +2030,7 @@ test('managed spend follows actual account-local closed days and reporting delay
    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer managed-calendar-token')
    const query = JSON.parse(String(init?.body)).query as string
    return Response.json({ results: query.includes('metrics.cost_micros')
-    ? [{ customer: { currencyCode: 'USD' }, metrics: { costMicros: '1000000' } }]
+    ? [{ customer: { currencyCode: 'USD' }, segments: { date: query.match(/BETWEEN '([0-9-]+)'/)![1] }, metrics: { costMicros: '1000000' } }]
     : [{ customer: { currencyCode: 'USD', timeZone } }] })
   })
   assert.deepEqual(await unrecordedAdSpendDays(db, env, ORG, new Date('2026-10-06T12:00:00.000Z')), ['2026-10-02', '2026-10-03'])

@@ -1,3 +1,4 @@
+import type { InsightsPageId } from '~/shared/insights'
 // Shared registry for dashboard deep-links, used by both the client/tenant
 // MCP (server/utils/mcp-tools) and ChowBot's own tool executor
 // (server/utils/chowbot-agent.ts) — two otherwise-separate tool-calling
@@ -138,9 +139,11 @@ export function articleSocialPostPath(orgSlug: string, articleId: string, channe
   return `${organizationBase(orgSlug)}/website/posts/new?${query}`
 }
 
-export function insightsPath(orgSlug: string, query?: { start_date: string; end_date: string; tab?: 'ads' } | { tab: 'reviews'; review: string }): string {
-  const path = `${organizationBase(orgSlug)}/insights`
-  return query ? `${path}?${new URLSearchParams(query)}` : path
+/** An Insights page, with its filters, chosen number or a review to show in the query. */
+export function insightsPath(orgSlug: string, page: InsightsPageId, query?: Partial<Record<'kind' | 'location_id' | 'start_date' | 'end_date' | 'metric' | 'review', string>>): string {
+  const path = `${organizationBase(orgSlug)}/insights/${page}`
+  const search = new URLSearchParams(Object.entries(query ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+  return search.size ? `${path}?${search}` : path
 }
 
 export function bookingEditorPath(orgSlug: string, bookingId: string): string {

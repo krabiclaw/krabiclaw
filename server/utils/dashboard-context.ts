@@ -32,6 +32,8 @@ export interface DashboardOrganizationConfig {
   status: string
   onboarding_status: string
   default_currency: string
+  /** The business's own clock, which its reports count days in. */
+  timezone: string
 }
 
 export type DashboardOrganizationRow = ResolvedMembership & {
@@ -46,7 +48,7 @@ const ORGANIZATION_CONFIG_SELECT = `
   SELECT id, theme_id, vertical, subdomain,
          (SELECT domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS custom_domain,
          (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url,
-         status, onboarding_status, default_currency
+         status, onboarding_status, default_currency, timezone
   FROM organization`
 const ORGANIZATION_CONFIG_BY_ID_SQL = `${ORGANIZATION_CONFIG_SELECT} WHERE id = ? LIMIT 1`
 const ORGANIZATION_CONFIG_BY_SLUG_SQL = `${ORGANIZATION_CONFIG_SELECT} WHERE slug = ? LIMIT 1`

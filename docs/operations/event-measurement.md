@@ -3,11 +3,9 @@
 One tenant-scoped event contract measures every pageview, interaction and
 business outcome, whatever the theme or entry surface. The native D1 store
 (`analytics_events`, `analytics_summaries`) is canonical. The MCP tool
-`query_organization_analytics` is the canonical access contract: the dashboard
-route `/api/dashboard/analytics-query` and CMS Insights call the same
-authorized implementation (`server/utils/analytics-query.ts`), and the summary
-report (`server/utils/analytics-report.ts`, MCP `get_organization_analytics`) is
-built on the same events. Google Analytics 4 is an optional destination for the
+`query_organization_analytics` reads the events (`server/utils/analytics-query.ts`).
+Insights and MCP `get_organization_analytics` read the day counts the visit
+write keeps beside them (docs/operations/analytics.md). Google Analytics 4 is an optional destination for the
 same facts; native records never depend on it, on consent to it, or on its
 delivery succeeding. No surface collects credentials, card data, tokens,
 free-text form content or error messages, and none accepts arbitrary SQL.
@@ -127,8 +125,7 @@ subscription and invoice relationships.
 ## Querying: `query_organization_analytics`
 
 Modes: `events` (event history), `sessions` (derived last-touch view),
-`breakdown` (grouped metrics), `daily_summaries` (the retained daily summary
-rows at their own grain). Inputs: `start_date`/`end_date` in the
+`breakdown` (grouped metrics). Inputs: `start_date`/`end_date` in the
 organization's timezone, string-equality `filters` over the documented fields,
 `attribution_basis` (`observed` | `event_snapshot` | `session_last_touch`),
 `sort`, `limit` (1–200), `cursor`, `dimensions`, `metrics`, `outcome_event`.
@@ -153,23 +150,13 @@ pageviews received by then (a session with no touch by then is Direct). A
 touch that arrives between two pages therefore never moves earlier events
 between groups.
 
-`daily_summaries` (`filters.summary_kind`: `organization_day`, `page_day` or
-`dimension_day`, plus `dimension`/`value`/`path_prefix`) pages completely
-through the daily summaries, a derived view of the native events kept for fast
-reporting. Each row carries its `summary_kind`, grain and stored metrics
-(`coverage.summary_source` lists them). Nothing is reconstructed into events.
-A summary rewritten after the first page makes the cursor stale and it is
-rejected.
-
 ## Retention and coverage
 
 Native analytics facts are not aged out. Pageviews, interactions, outcomes and
 sessions stay in D1 for the life of the organization, so `mode=events` reads
 everything KrabiClaw has collected for it, and no scheduled task deletes
 `analytics_events` or session summaries. Data is deleted when the organization
-itself is deleted (its rows cascade), never because it is old. Daily summaries
-are caches derived from those events; they can be rebuilt from them and never
-replace them. Rejecting Google Analytics consent stops the GA copy and nothing
+itself is deleted (its rows cascade), never because it is old. Rejecting Google Analytics consent stops the GA copy and nothing
 native.
 
 `coverage` reports the oldest native pageview and outcome/interaction, the

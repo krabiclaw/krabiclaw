@@ -37,6 +37,7 @@ interface TenantRow {
   brand_description: string | null;
   media_json: string;
   vertical: string | null;
+  timezone: string;
   facebook_page_id: string | null;
   instagram_username: string | null;
   privacy_policy: number;
@@ -64,7 +65,7 @@ const TENANT_MEDIA_SELECT_SQL = `(SELECT COALESCE(json_group_array(json_object(
 
 const TENANT_SELECT_SQL = `SELECT o.id,
              ${PUBLIC_CACHE_REVISION_SQL} AS public_cache_revision, o.theme_id, o.subdomain, o.status, o.onboarding_status,
-             o.name, o.brand_description, ${TENANT_MEDIA_SELECT_SQL} AS media_json, o.vertical,
+             o.name, o.brand_description, ${TENANT_MEDIA_SELECT_SQL} AS media_json, o.vertical, o.timezone,
              (SELECT i.target_id FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'facebook') AS facebook_page_id,
              (SELECT i.target_name FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'instagram') AS instagram_username,
              EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/privacy' AND ${publicTenantPageSql('d')}) AS privacy_policy,
@@ -232,6 +233,8 @@ function setResolvedTenantContext(
     brand_description: tenant.brand_description,
     theme_id: metadata.themeId,
     vertical: metadata.vertical,
+    // The business's own clock: a visit is counted on its local day.
+    timezone: tenant.timezone,
     site: resolvedSite,
     fontPreset,
     palette,

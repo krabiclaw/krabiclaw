@@ -3,7 +3,8 @@ import type { H3Event } from 'nitro'
 import type { AppDb } from '~/server/db'
 import { executeBatch, queryAll, queryFirst } from '~/server/db'
 import { resolvePublishedTenantPageIdentity as resolveCanonicalTenantPageIdentity } from '~/server/utils/content/pages'
-import { observeAttribution, resolveAttributionTouch, type AttributionParams, type ObservedAttribution } from '~/utils/analytics-attribution'
+import { attributionChannel, observeAttribution, resolveAttributionTouch, type AttributionParams, type ObservedAttribution } from '~/utils/analytics-attribution'
+import { localDateAt } from '~/utils/timezone'
 import { resolveTenantLocalePath } from '~/utils/tenant-locale-path'
 import { parseSiteProductPath } from '~/utils/product-presentation'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -214,6 +215,8 @@ export async function getOrganizationInternalHosts(db: AppDb, organizationId: st
 export interface TenantPageviewInput {
   eventId: string
   organizationId: string
+  /** The organization's time zone: the visit is counted on its local day there. */
+  timezone: string
   pagePath: string
   locale: string | null
   referrerHost: string | null
@@ -250,6 +253,11 @@ export interface TenantPageviewInput {
  * event ID changes nothing: the session update and the inherited snapshot are gated on the insert.
  * A touch replaces the session's last touch only when it is not older than the one already there,
  * so a delayed delivery cannot resurrect a stale campaign.
+ *
+ * The same batch adds the visit to the day counts Insights reads, on the organization's local day
+ * of the event: the day's page views, the page's views, the offering's views when the page is an
+ * offering's, and, on a session's first page view, a visit for the channel it arrived from. Each
+ * count is gated on the one before it, from the event insert on, so a duplicate event adds nothing.
  */
 export async function recordTenantPageview(db: AppDb, input: TenantPageviewInput): Promise<void> {
   const occurredAt = input.occurredAt ?? input.now
@@ -259,6 +267,18 @@ export async function recordTenantPageview(db: AppDb, input: TenantPageviewInput
     source: 'Direct', medium: '(none)', campaign: null, term: null, content: null, referrerHost: null,
     gclid: null, gbraid: null, wbraid: null, fbclid: null, msclkid: null,
   }
+  const date = localDateAt(new Date(occurredAt), input.timezone)
+  // Every count below fires exactly when the statement before it changed one row, so the chain
+  // runs whole after a new event and not at all after a duplicate.
+  const count = (kind: 'organization_day' | 'page_day' | 'dimension_day', key: string, views: { sql: string; params: unknown[] }) => ({
+    query: `INSERT INTO analytics_summaries (id, kind, organization_id, date, key, payload_json, created_at, updated_at)
+      SELECT ?, ?, ?, ?, ?, json_object('page_views', ${views.sql}), ?, ? WHERE changes() = 1
+      ON CONFLICT(organization_id, kind, date, key) DO UPDATE SET updated_at = excluded.updated_at,
+        payload_json = json_set(analytics_summaries.payload_json, '$.page_views',
+          (analytics_summaries.payload_json ->> '$.page_views') + (excluded.payload_json ->> '$.page_views'))`,
+    params: [crypto.randomUUID(), kind, input.organizationId, date, key, ...views.params, input.now, input.now],
+  })
+  const one = { sql: '1', params: [] }
   await executeBatch(db, [
     {
       query: `INSERT OR IGNORE INTO analytics_events (
@@ -273,6 +293,15 @@ export async function recordTenantPageview(db: AppDb, input: TenantPageviewInput
           user_agent: input.userAgent, ip_hash: input.ipHash, country: input.country, region: input.region, city: input.city }), occurredAt,
       ],
     },
+    count('organization_day', '', one),
+    count('page_day', input.pagePath, one),
+    ...(input.productId ? [count('dimension_day', JSON.stringify(['product', input.productId, '']), one)] : []),
+    // A visit is a session's first page view; it arrived from its own touch or directly. Any later
+    // page view of the session adds nothing here and keeps the chain going.
+    count('dimension_day', JSON.stringify(['visit_source', attributionChannel(initial.source, initial.medium), '']), {
+      sql: `CASE WHEN EXISTS (SELECT 1 FROM analytics_summaries s WHERE s.organization_id = ? AND s.kind = 'session' AND s.date = '' AND s.key = ?) THEN 0 ELSE 1 END`,
+      params: [input.organizationId, input.sessionId],
+    }),
     {
       query: `INSERT INTO analytics_summaries (
         id, kind, organization_id, date, key, payload_json, created_at, updated_at

@@ -3169,6 +3169,8 @@ export async function approvedStayPaymentPredicate(db: DbClient, input: {
 export async function createStayRequest(db: DbClient, env: StayMutationEnv, input: {
   organizationId: string; buyerUserId: string; key: string; fingerprint: string; home: StayHome; quote: StayQuote;
   guest: CheckoutStay['guest']; locale: string; ipHash: string
+  /** How the guest arrived on the website (bookings.website_source). */
+  websiteSource: string
 }) {
   const { organizationId, buyerUserId, key, fingerprint, home, quote, guest } = input
   const bookingId = crypto.randomUUID()
@@ -3186,12 +3188,12 @@ export async function createStayRequest(db: DbClient, env: StayMutationEnv, inpu
   try {
     await executeBatch(db, [{
       query: `INSERT INTO bookings (id, organization_id, user_id, product_id, product_variant_id, location_id, starts_at, ends_at, timezone,
-                  party_size, adults, children, infants, status, answers, policy_json, total_minor, currency, idempotency_key, received_at, created_at, updated_at)
-              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ? WHERE ${publicNights.query}
+                  party_size, adults, children, infants, status, answers, policy_json, total_minor, currency, idempotency_key, website_source, received_at, created_at, updated_at)
+              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${publicNights.query}
               ON CONFLICT(organization_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,
       params: [bookingId, organizationId, buyerUserId, home.product_id, home.variant_id, home.location_id, window.starts_at, window.ends_at, quote.timezone,
         quote.adults + quote.children, quote.adults, quote.children, quote.infants, JSON.stringify(guest.answers ?? []), JSON.stringify({ ...policy, stay_request: stayRequest }),
-        quote.total_minor, quote.currency, key, now, now, now, ...publicNights.params!],
+        quote.total_minor, quote.currency, key, input.websiteSource, now, now, now, ...publicNights.params!],
     }, assertBookingBatchWrite({ query: 'EXISTS (SELECT 1 FROM bookings WHERE organization_id=? AND id=?)', params: [organizationId, bookingId] }),
     ...reconcileNightsQueries(organizationId, bookingId, { ...window, updated_at: now, version: 1, product_id: home.product_id,
       check_in_date: quote.check_in_date, check_out_date: quote.check_out_date }),
@@ -3313,7 +3315,9 @@ export async function readApprovedStayCheckout(db: DbClient, organizationId: str
  * claims go, the booking takes the same nights (failing the batch on a night
  * someone else now holds), and its guest conversation opens.
  */
-export function stayFromCheckoutQueries(input: { organizationId: string; stayId: string; holdId: string; paymentId: string; buyerUserId: string; now: string; stay: CheckoutStay; home: CheckoutHome; policy: string }): BatchQuery[] {
+export function stayFromCheckoutQueries(input: { organizationId: string; stayId: string; holdId: string; paymentId: string; buyerUserId: string; now: string; stay: CheckoutStay; home: CheckoutHome; policy: string
+  /** How the guest who paid arrived on the website (bookings.website_source). */
+  websiteSource: string | null }): BatchQuery[] {
   const { quote, guest } = input.stay
   const window = stayWindow({ check_in_date: quote.check_in_date, check_out_date: quote.check_out_date, arrival_time: null }, input.home)
   const requestId = crypto.randomUUID()
@@ -3321,12 +3325,12 @@ export function stayFromCheckoutQueries(input: { organizationId: string; stayId:
     { query: 'DELETE FROM stay_nights WHERE hold_id = ?', params: [input.holdId] },
     {
       query: `INSERT INTO bookings (id, organization_id, user_id, product_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, adults, children, infants,
-                status, answers, policy_json, total_minor, currency, idempotency_key, version, channel, owner, received_at, created_at, updated_at)
-              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, 1, 'direct', 'app', ?, ?, ?
+                status, answers, policy_json, total_minor, currency, idempotency_key, version, channel, owner, website_source, received_at, created_at, updated_at)
+              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, 1, 'direct', 'app', ?, ?, ?, ?
                WHERE EXISTS (SELECT 1 FROM payments WHERE id = ? AND organization_id = ? AND refunded_amount = 0)`,
       params: [input.stayId, input.organizationId, input.buyerUserId, quote.product_id, input.home.variant_id, input.home.location_id, window.starts_at, window.ends_at, input.home.timezone,
         quote.adults + quote.children, quote.adults, quote.children, quote.infants, JSON.stringify(guest.answers ?? []), input.policy, quote.total_minor, quote.currency, `checkout:${input.paymentId}`,
-        input.now, input.now, input.now, input.paymentId, input.organizationId],
+        input.websiteSource, input.now, input.now, input.now, input.paymentId, input.organizationId],
     },
     organizationEventQuery({ organizationId: input.organizationId, locationId: input.home.location_id, actorId: null, eventType: 'stay.created', entityType: 'stay', entityId: input.stayId, metadata: { channel: 'direct', payment_id: input.paymentId }, onlyIfPreviousChangedOneRow: true }),
     ...reconcileNightsQueries(input.organizationId, input.stayId, { updated_at: input.now, version: 1, product_id: quote.product_id, ...window, check_in_date: quote.check_in_date, check_out_date: quote.check_out_date }),

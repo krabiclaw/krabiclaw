@@ -4,7 +4,7 @@ import { CapacityUnavailableError, claimSessionCapacity, paidQuantity, partyPays
 import { cloudflareEnv, cleanString } from '~/server/utils/api-response'
 import { isReservedTestDomain, shouldSendRealEmail } from '~/server/utils/email-delivery'
 import { notifyBookingCreated, raiseSettledFailures } from '~/server/utils/notifications'
-import { measurementOutcome, readPageEventId, recordOrganizationConversionEvent } from '~/server/utils/organization-conversions'
+import { measurementOutcome, readPageEventId, readWebsiteSource, recordOrganizationConversionEvent } from '~/server/utils/organization-conversions'
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import { toE164 } from '~/utils/phone'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
@@ -400,6 +400,8 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
       env,
       organizationId: organization.id, productId: product.id, sessionId: session.id,
       productVariantId, partySize, userId, policyJson: JSON.stringify(policy), answers, resolved,
+      // A guest's booking on the website keeps how they arrived; one a member makes has no source.
+      websiteSource: operator ? null : await readWebsiteSource(db, organization.id, event.req, pageEventId),
       following: bookingId => [
         ...requestInsertQueries({
           kind: 'booking', id: threadId, organization_id: organization.id,
@@ -570,6 +572,7 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
       const stay = await createStayRequest(db, env, {
         organizationId, buyerUserId, key: idempotencyKey, fingerprint,
         home, quote: quoted, guest, locale, ipHash: await hashClientIp(getClientIp(event)),
+        websiteSource: await readWebsiteSource(db, organizationId, event.req, readPageEventId(body.page_event_id)),
       })
       return requestResult(stay.id, stay.conversation_id, false, false)
     }

@@ -295,7 +295,7 @@ async function buildOwnerReviewsUrl(
   opts: { organizationId: string; locationId?: string | null; reviewId: string; visit: boolean }
 ): Promise<string> {
   const slugs = await resolveDashboardSlugs(env, db, opts)
-  return `${platformOrigin(env)}${opts.visit ? insightsPath(slugs.orgSlug, { tab: 'reviews', review: opts.reviewId }) : reviewEditorPath(slugs.orgSlug, opts.reviewId, opts.locationId)}`
+  return `${platformOrigin(env)}${opts.visit ? insightsPath(slugs.orgSlug, 'quality/overall-rating', { review: opts.reviewId }) : reviewEditorPath(slugs.orgSlug, opts.reviewId, opts.locationId)}`
 }
 
 /**

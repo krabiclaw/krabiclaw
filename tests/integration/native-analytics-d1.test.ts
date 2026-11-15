@@ -34,7 +34,7 @@ async function mcp(db: unknown, organizationId: string, args: Record<string, unk
 
 function pageview(over: Partial<TenantPageviewInput> & { eventId: string; sessionId: string; visitorId: string }): TenantPageviewInput {
   return {
-    organizationId: ORG, pagePath: '/', locale: 'en', referrerHost: null, attribution: {}, internalHosts: ['a.example'],
+    organizationId: ORG, timezone: 'Asia/Bangkok', pagePath: '/', locale: 'en', referrerHost: null, attribution: {}, internalHosts: ['a.example'],
     userAgent: 'Desktop', ipHash: 'h', country: 'th', region: null, city: null, locationId: null, pageId: null, pageType: null, recipe: null,
     now: '2026-09-10T03:00:00.000Z', ...over,
   }
@@ -173,7 +173,7 @@ test('native analytics: producers → D1 → MCP query contract', { timeout: 120
   }
 })
 
-test('native analytics: rates share one population, cursors survive attribution changes, summaries page completely, origins keep their own path and context', { timeout: 120_000 }, async () => {
+test('native analytics: rates share one population, cursors survive attribution changes, origins keep their own path and context', { timeout: 120_000 }, async () => {
   const { runtime, db } = await openDb()
   try {
     const settings = '{}'
@@ -226,36 +226,12 @@ test('native analytics: rates share one population, cursors survive attribution 
     assert.equal((second.rows[0] as any).metrics.page_views, 1, 'B is read as it stood at the first page: only its own session, not the moved events')
     assert.equal(second.next_cursor, null)
 
-    // Retained daily summaries: complete, paginated, older than the raw window, at their own grain.
+    // An old day's raw events stay readable as events.
     for (let i = 0; i < 5; i++) {
       await recordTenantPageview(db, pageview({ eventId: uuid(7000 + i), sessionId: uuid(7100), visitorId: uuid(7101), pagePath: `/old${i}`, now: '2026-06-01T03:00:00.000Z' }))
     }
-    const { aggregateOrganizationAnalyticsDate } = await import('../../server/utils/analytics-report.ts')
-    await aggregateOrganizationAnalyticsDate(db, ORG, '2026-06-01')
-    const readSummaries = async (filters: Record<string, string>) => {
-      const rows: any[] = []
-      let cursor: string | null = null
-      do {
-        const page = await mcp(db, ORG, { mode: 'daily_summaries', start_date: '2026-06-01', end_date: '2026-06-01', filters, limit: 2, ...(cursor ? { cursor } : {}) })
-        rows.push(...page.rows); cursor = page.next_cursor
-        assert.equal((page.coverage as any).summary_source.table, 'analytics_summaries')
-      } while (cursor)
-      return rows
-    }
-    const pages = await readSummaries({ summary_kind: 'page_day' })
-    assert.deepEqual(pages.map(r => r.page_path), ['/old0', '/old1', '/old2', '/old3', '/old4'])
-    assert.ok(pages.every(r => r.metrics.page_views === 1))
-    assert.equal((await readSummaries({ summary_kind: 'organization_day' }))[0].metrics.page_views, 5)
-    assert.deepEqual((await readSummaries({ summary_kind: 'dimension_day', dimension: 'device' }))
-      .map(row => ({ device: row.value, pageViews: row.metrics.page_views })), [{ device: 'Desktop', pageViews: 5 }])
-    // The raw events of that old day are still there, next to the summary of them.
     const oldEvents = await mcp(db, ORG, { mode: 'events', start_date: '2026-06-01', end_date: '2026-06-01' })
     assert.equal(oldEvents.rows.length, 5)
-    // A summary rewritten between pages makes the cursor stale instead of skipping rows.
-    const firstSummary = await mcp(db, ORG, { mode: 'daily_summaries', start_date: '2026-06-01', end_date: '2026-06-01', filters: { summary_kind: 'page_day' }, limit: 2 })
-    await aggregateOrganizationAnalyticsDate(db, ORG, '2026-06-01')
-    await assert.rejects(mcp(db, ORG, { mode: 'daily_summaries', start_date: '2026-06-01', end_date: '2026-06-01', filters: { summary_kind: 'page_day' }, limit: 2, cursor: firstSummary.next_cursor }), /rewritten/)
-    await assert.rejects(mcp(db, ORG, { mode: 'daily_summaries', start_date: '2026-06-01', end_date: '2026-06-01' }), /summary_kind/)
   } finally {
     await runtime.dispose()
   }

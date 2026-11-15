@@ -177,7 +177,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     const [seating] = await listBookableSessions(db, { env, organizationId: 'org-proof', productId: tables.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 8 * 86_400_000).toISOString() })
     assert.equal(seating && formatTimestamp(seating.starts_at, 'en', 'Asia/Bangkok', { weekday: 'long', hour: 'numeric', minute: '2-digit' }), 'Monday 4:00 PM')
     const tablePolicy = JSON.stringify({ advance_notice_minutes: null, party_size_min: null, party_size_max: null, minimum_guest_age: null, accessibility_contact_required: false, payment: null })
-    const { bookingId: createdBookingId } = await claimSessionCapacity(db, { env, organizationId: 'org-proof', productId: tables.id, sessionId: seating!.id, productVariantId: tables.variants[0]!.id, partySize: 1, userId: 'guest-proof', policyJson: tablePolicy,
+    const { bookingId: createdBookingId } = await claimSessionCapacity(db, { websiteSource: null, env, organizationId: 'org-proof', productId: tables.id, sessionId: seating!.id, productVariantId: tables.variants[0]!.id, partySize: 1, userId: 'guest-proof', policyJson: tablePolicy,
       following: bookingId => requestInsertQueries({ id: 'change-proof', kind: 'booking', organization_id: 'org-proof', location_id: 'booking-location', booking_id: bookingId,
         user_id: 'guest-proof', payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@proof.example', phone: '+66812345678' }), created_at: now },
       { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Table for 1', note: null }) })
@@ -806,7 +806,7 @@ test('a guest writing while the business edits a table booking does not refuse t
 
     const policyJson = JSON.stringify({ advance_notice_minutes: null, party_size_min: null, party_size_max: null, minimum_guest_age: null, accessibility_contact_required: false, payment: null, cancellation: null })
     const now = new Date().toISOString()
-    await claimSessionCapacity(db, { env, organizationId: 'org-table', productId: oldTown.id, sessionId: first.id, productVariantId: oldTown.variants[0]!.id, partySize: 2, userId: 'guest-table', policyJson,
+    await claimSessionCapacity(db, { websiteSource: null, env, organizationId: 'org-table', productId: oldTown.id, sessionId: first.id, productVariantId: oldTown.variants[0]!.id, partySize: 2, userId: 'guest-table', policyJson,
       following: bookingId => requestInsertQueries({ id: 'table-thread', kind: 'booking', organization_id: 'org-table', location_id: 'loc-old-town', booking_id: bookingId,
         user_id: 'guest-table', payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@table.example', phone: '+66812345678' }), created_at: now },
       { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Table for 2', note: null }) })

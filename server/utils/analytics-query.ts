@@ -1,7 +1,6 @@
 import type { DbClient } from '~/server/db'
 import { queryAll, queryFirst } from '~/server/db'
-import { localDateBounds, parseAnalyticsRange } from '~/server/utils/analytics-calendar'
-import { resolveOrganizationAnalyticsContext } from '~/server/utils/analytics-report'
+import { localDateBounds, parseAnalyticsRange, resolveOrganizationAnalyticsContext } from '~/server/utils/analytics-calendar'
 import { CONVERSION_EVENT_CATALOG, ORGANIZATION_CONVERSION_EVENT_NAMES } from '~/utils/organization-conversion-events'
 
 /**
@@ -11,10 +10,7 @@ import { CONVERSION_EVENT_CATALOG, ORGANIZATION_CONVERSION_EVENT_NAMES } from '~
  * Three modes read what the collector stored, never a projection of it:
  *  - events: individual events with every observation the collector kept;
  *  - sessions: the native session records and their derived last-touch state;
- *  - breakdown: complete grouped results over the whole filtered population;
- *  - daily_summaries: the daily summary rows (organization, page and dimension days) at their
- *    own grain. They outlive raw pageview detail, so a period past it is answered from them, and each
- *    row says it is a summary, not events.
+ *  - breakdown: complete grouped results over the whole filtered population.
  *
  * Everything the caller can name comes from the field, filter and metric registries below. There is
  * no SQL, expression, table or JSON path in the request: an unknown name is rejected, not passed on.
@@ -22,7 +18,7 @@ import { CONVERSION_EVENT_CATALOG, ORGANIZATION_CONVERSION_EVENT_NAMES } from '~
 
 export class AnalyticsQueryError extends Error {}
 
-export type AnalyticsQueryMode = 'events' | 'sessions' | 'breakdown' | 'daily_summaries'
+export type AnalyticsQueryMode = 'events' | 'sessions' | 'breakdown'
 export type AttributionBasis = 'observed' | 'event_snapshot' | 'session_last_touch'
 
 const PAGE_SIZE_DEFAULT = 50
@@ -292,6 +288,7 @@ export async function queryOrganizationAnalytics(db: DbClient, input: AnalyticsQ
   const end = localDateBounds(range.endDate, context.timezone).end
   const limit = input.limit ?? PAGE_SIZE_DEFAULT
   if (!Number.isInteger(limit) || limit < 1 || limit > PAGE_SIZE_MAX) invalid(`limit must be an integer between 1 and ${PAGE_SIZE_MAX}.`)
+  if (!['events', 'sessions', 'breakdown'].includes(input.mode)) invalid('mode must be one of: events, sessions, breakdown.')
   const basis: AttributionBasis = input.attributionBasis ?? (input.mode === 'sessions' ? 'session_last_touch' : 'event_snapshot')
   if (input.mode === 'sessions' && basis !== 'session_last_touch') invalid('Sessions carry only their derived last touch: attribution_basis must be session_last_touch.')
 
@@ -299,8 +296,7 @@ export async function queryOrganizationAnalytics(db: DbClient, input: AnalyticsQ
     mode: input.mode, start_date: range.startDate, end_date: range.endDate, timezone: context.timezone, range_start: start, range_end: end,
     attribution_basis: basis,
   }
-  const summaryFilters = input.mode === 'daily_summaries' ? resolveSummaryFilters(input) : null
-  const filters = summaryFilters ? { where: [], params: [], echo: summaryFilters.echo, needsSession: false } : resolveFilters(input.mode, input.filters, basis)
+  const filters = resolveFilters(input.mode, input.filters, basis)
   resolved.filters = filters.echo
   const outcomeEvent = input.outcomeEvent ?? (typeof input.filters?.outcome_event === 'string' ? input.filters.outcome_event : undefined)
   if (outcomeEvent !== undefined && !(ORGANIZATION_CONVERSION_EVENT_NAMES as readonly string[]).includes(outcomeEvent)) invalid(`outcome_event must be one of: ${ORGANIZATION_CONVERSION_EVENT_NAMES.join(', ')}.`)
@@ -316,10 +312,6 @@ export async function queryOrganizationAnalytics(db: DbClient, input: AnalyticsQ
   const coverage = await coverageFor(db, input.organizationId, { start, end, now, analyticsDataStartAt: context.analyticsDataStartAt, filters, basis })
   const issue = async (key: unknown[] | null) => key ? await encodeCursor(input.cursorSecret, { v: 1, org: input.organizationId, q: queryHash, asOf, key }) : null
 
-  if (input.mode === 'daily_summaries') {
-    const result = await summariesMode(db, input, { start, end, asOf, limit, filters, cursorKey: cursor?.key ?? null, resolved }, summaryFilters!, { startDate: range.startDate, endDate: range.endDate })
-    return { mode: 'daily_summaries', rows: result.rows, next_cursor: await issue(result.nextKey), query: resolved, totals: result.totals, coverage: { ...coverage, summary_source: result.source } }
-  }
   if (input.mode === 'events') {
     const result = await eventsMode(db, input, { start, end, asOf, limit, basis, filters, cursorKey: cursor?.key ?? null, resolved })
     return { mode: 'events', rows: result.rows, next_cursor: await issue(result.nextKey), query: resolved, totals: result.totals, coverage }
@@ -458,86 +450,6 @@ const metricSql = (name: string, ctx: { start: string; end: string; asOf: string
   return { sql: bindWindow(sql, ctx).replaceAll('@outcome', '?'), params: Array(sql.split('@outcome').length - 1).fill(ctx.outcomeEvent) as unknown[] }
 }
 
-interface SummaryFilters { kind: 'organization_day' | 'page_day' | 'dimension_day'; dimension?: string; value?: string; pathPrefix?: string; echo: Record<string, string> }
-
-const SUMMARY_KINDS = ['organization_day', 'page_day', 'dimension_day'] as const
-const SUMMARY_DIMENSIONS = ['country', 'city', 'device', 'referrer'] as const
-
-function resolveSummaryFilters(input: AnalyticsQueryInput): SummaryFilters {
-  if (input.dimensions || input.metrics || input.attributionBasis) invalid('daily_summaries takes summary_kind, dimension, value and path_prefix filters only.')
-  const raw = input.filters ?? {}
-  for (const name of Object.keys(raw)) if (!['summary_kind', 'dimension', 'value', 'path_prefix'].includes(name)) invalid(`Filter "${name}" does not apply to daily_summaries. Supported: summary_kind, dimension, value, path_prefix.`)
-  const text = (name: string) => raw[name] === undefined ? undefined : typeof raw[name] === 'string' && (raw[name] as string).length > 0 && (raw[name] as string).length <= 512 ? raw[name] as string : invalid(`Filter "${name}" must be a non-empty string of at most 512 characters.`)
-  const kind = text('summary_kind') ?? invalid(`daily_summaries requires filters.summary_kind: ${SUMMARY_KINDS.join(', ')}.`)
-  if (!(SUMMARY_KINDS as readonly string[]).includes(kind)) invalid(`summary_kind must be one of: ${SUMMARY_KINDS.join(', ')}.`)
-  const dimension = text('dimension'); const value = text('value'); const pathPrefix = text('path_prefix')
-  if (dimension && !(SUMMARY_DIMENSIONS as readonly string[]).includes(dimension)) invalid(`dimension must be one of: ${SUMMARY_DIMENSIONS.join(', ')}.`)
-  if (kind !== 'dimension_day' && (dimension || value)) invalid('dimension and value apply to summary_kind dimension_day only.')
-  if (value && !dimension) invalid('value requires dimension.')
-  if (kind !== 'page_day' && pathPrefix) invalid('path_prefix applies to summary_kind page_day only.')
-  if (pathPrefix && !pathPrefix.startsWith('/')) invalid('path_prefix must start with "/".')
-  return { kind: kind as SummaryFilters['kind'], dimension, value, pathPrefix, echo: Object.fromEntries(Object.entries({ summary_kind: kind, dimension, value, path_prefix: pathPrefix }).filter(([, v]) => v !== undefined)) as Record<string, string> }
-}
-
-const SUMMARY_METRICS = {
-  organization_day: { page_views: 'page views that day', unique_sessions: 'distinct sessions that day', unique_visitors: 'distinct visitors that day', returning_visitors: 'distinct visitors with an earlier session', avg_session_duration: 'average session duration in seconds', pages_per_session: 'page views per session' },
-  page_day: { page_views: 'page views of the path that day' },
-  dimension_day: { page_views: 'page views in the dimension value that day' },
-} as const
-
-/**
- * The daily summaries, complete and paginated at their stored grain: one row per day
- * (organization_day), per day and page path (page_day) or per day and dimension value
- * (dimension_day). Nothing is reconstructed into events, and distinct counts are those the summary
- * stored for its own grain, not sums of other rows. A summary rewritten after `as_of` makes the
- * cursor stale, since the rows it would continue through are no longer the ones it started over.
- */
-async function summariesMode(db: DbClient, input: AnalyticsQueryInput, ctx: ModeContext, summary: SummaryFilters, days: { startDate: string; endDate: string }) {
-  const direction = input.sort === 'occurred_at_asc' ? 'asc' : (input.sort === undefined || input.sort === 'occurred_at_desc') ? 'desc' : invalid('sort for daily_summaries must be occurred_at_desc or occurred_at_asc (by day).')
-  ctx.resolved.sort = `date_${direction}`
-  const where = ['organization_id = ?', 'kind = ?', 'date >= ?', 'date <= ?']
-  const params: unknown[] = [input.organizationId, summary.kind, days.startDate, days.endDate]
-  if (summary.dimension) { where.push(`key ->> '$[0]' = ?`); params.push(summary.dimension) }
-  if (summary.value) { where.push(`key ->> '$[1]' = ?`); params.push(summary.value) }
-  if (summary.pathPrefix) { where.push(`(key = ? OR key LIKE ? ESCAPE '\\')`); params.push(summary.pathPrefix.replace(/\/$/, '') || '/', `${summary.pathPrefix.replace(/[\\%_]/g, '\\$&')}%`) }
-  const filtered = where.join(' AND ')
-  if (ctx.cursorKey) {
-    const changed = await queryFirst<{ n: number }>(db, `SELECT COUNT(*) AS n FROM analytics_summaries WHERE ${filtered} AND updated_at > ?`, [...params, ctx.asOf])
-    if (Number(changed?.n ?? 0) > 0) invalid('The daily summaries in this range were rewritten after the first page was read. Read the first page again.')
-  }
-  const keyset = ctx.cursorKey ? `AND (date ${direction === 'desc' ? '<' : '>'} ? OR (date = ? AND key > ?))` : ''
-  const cursor = ctx.cursorKey ? [ctx.cursorKey[0], ctx.cursorKey[0], ctx.cursorKey[1]] : []
-  const rows = await queryAll<{ date: string; key: string; payload_json: string; updated_at: string }>(db, `SELECT date, key, payload_json, updated_at FROM analytics_summaries
-    WHERE ${filtered} ${keyset} ORDER BY date ${direction.toUpperCase()}, key ASC LIMIT ?`, [...params, ...cursor, ctx.limit + 1])
-  const page = rows.slice(0, ctx.limit)
-  const last = page.at(-1)
-  const totalRow = await queryFirst<Record<string, unknown>>(db, `SELECT COUNT(*) AS summary_rows, COUNT(DISTINCT date) AS days, COALESCE(SUM(json_extract(payload_json, '$.page_views')), 0) AS page_views FROM analytics_summaries WHERE ${filtered}`, params)
-  const summarizedDays = await queryFirst<{ n: number }>(db, `SELECT COUNT(*) AS n FROM analytics_summaries WHERE organization_id = ? AND kind = 'organization_day' AND date >= ? AND date <= ?`, [input.organizationId, days.startDate, days.endDate])
-  const daysInRange = Math.round((Date.parse(`${days.endDate}T00:00:00Z`) - Date.parse(`${days.startDate}T00:00:00Z`)) / 86_400_000) + 1
-  const totals: AnalyticsQueryResult['totals'] = {
-    summary_rows: { value: Number(totalRow?.summary_rows ?? 0), unit: 'summary rows matching the filters' },
-    days_with_rows: { value: Number(totalRow?.days ?? 0), unit: 'days that have a matching row' },
-  }
-  // Page views add up exactly when the rows partition the views: one row kind of days or pages, or one dimension.
-  if (summary.kind !== 'dimension_day' || summary.dimension) totals.page_views = { value: Number(totalRow?.page_views ?? 0), unit: 'page views (sum of the matching rows)' }
-  return {
-    rows: page.map((row) => {
-      const body = j(row.payload_json) as Record<string, unknown>
-      const identity = summary.kind === 'page_day' ? { page_path: row.key }
-        : summary.kind === 'dimension_day' ? (() => { const [dimension, value, subvalue] = JSON.parse(row.key) as string[]; return { dimension, value, subvalue } })() : {}
-      return { date: row.date, summary_kind: summary.kind, ...identity, metrics: body, summarized_at: row.updated_at }
-    }),
-    nextKey: rows.length > ctx.limit && last ? [last.date, last.key] : null,
-    totals,
-    source: {
-      table: 'analytics_summaries', summary_kind: summary.kind, grain: summary.kind === 'organization_day' ? 'day' : summary.kind === 'page_day' ? 'day and public page path' : 'day and dimension value (country, city, device or referrer)',
-      supported_metrics: SUMMARY_METRICS[summary.kind], derived_from: 'pageview events aggregated per local day; a derived view of the native events, not the events themselves',
-      days_in_range: daysInRange, days_summarized: Number(summarizedDays?.n ?? 0),
-      note: 'Days without an organization_day summary have not been aggregated (the current day, or a day the aggregation has not reached); their pageviews are in events and breakdown.',
-    },
-  }
-}
-
 async function totalsFor(db: DbClient, organizationId: string, ctx: ModeContext & { basis: AttributionBasis }, names: string[], outcomeEvent?: string): Promise<AnalyticsQueryResult['totals']> {
   const where = populationWhere(ctx)
   const bound = names.map(name => metricSql(name, { ...ctx, outcomeEvent }))
@@ -643,7 +555,6 @@ async function coverageFor(db: DbClient, organizationId: string, ctx: { start: s
       oldest_pageview_at: first?.oldest_pageview ?? null,
       oldest_outcome_or_interaction_at: first?.oldest_outcome ?? null,
     },
-    summaries: { note: 'Daily summaries are derived from native events for faster reporting; they add nothing the events do not hold and are not a substitute for them.' },
     requested_range: { start: ctx.start, end: ctx.end, analytics_data_start_at: ctx.analyticsDataStartAt },
     instrumentation: {
       observed_attribution_recorded_from: first?.observed_from ?? null,

@@ -3,7 +3,7 @@ import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
-import { getAnalyticsReport } from '../../server/utils/analytics-report.ts'
+import { readInsightsPage } from '../../server/domain/insights.ts'
 
 test('a business and its locations carry their own clock and currency; nothing supplies one for them', { timeout: 60_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -23,7 +23,8 @@ test('a business and its locations carry their own clock and currency; nothing s
     await assert.rejects(db.prepare("INSERT INTO business_locations (id, organization_id, slug, title) VALUES ('placeless', 'org', 'placeless', 'Placeless')").run(), /NOT NULL constraint failed: business_locations.timezone/)
     await db.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES ('location', 'org', 'location', 'Location', 'America/New_York')").run()
     // Analytics days are the business's own clock, not its location's.
-    const report = await getAnalyticsReport(db, { organizationId: 'org', startDate: '2026-09-05', endDate: '2026-09-06', now: new Date('2026-09-06T12:00:00Z') })
-    assert.equal(report.period.timezone, 'Asia/Bangkok')
+    const page = await readInsightsPage(db, { organizationId: 'org', timezone: 'Asia/Bangkok', defaultCurrency: 'THB', userId: 'owner', analytics: true }, 'conversion/page-views', {}, new Date('2026-09-06T12:00:00Z'))
+    assert.deepEqual(page.period, { start_date: '2026-08-08', end_date: '2026-09-06', timezone: 'Asia/Bangkok' })
+    assert.equal(page.recorded_since, '2026-09-01')
   } finally { await runtime.dispose() }
 })

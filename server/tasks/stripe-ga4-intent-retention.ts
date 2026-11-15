@@ -1,6 +1,7 @@
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { defineScheduledTask } from '~/server/utils/scheduled-task'
 import { expireStripeGa4Intents } from '~/server/utils/stripe-ga4-intents'
+import { cleanupMcpToolCallEvents } from '~/server/utils/mcp-telemetry'
 
 interface StripeGa4IntentRetentionTaskContext {
   cloudflare?: { env?: CloudflareEnv }
@@ -9,12 +10,12 @@ interface StripeGa4IntentRetentionTaskContext {
 export default defineScheduledTask({
   meta: {
     name: 'analytics:stripe-ga4-intent-retention',
-    description: 'Retire expired Stripe GA4 analytics intents',
+    description: 'Retire expired Stripe GA4 analytics intents and MCP tool audit rows past their retention',
   },
   async run({ context }) {
     const env = (context as StripeGa4IntentRetentionTaskContext | undefined)?.cloudflare?.env
     if (!env?.DB && import.meta.dev) {
-      return { result: { expiredStripeGa4Intents: false } }
+      return { result: { expiredStripeGa4Intents: false, mcpToolCallEventsCleaned: 0 } }
     }
     if (!env?.DB) throw new Error('DB is required')
 
@@ -26,6 +27,8 @@ export default defineScheduledTask({
     // A retention pass that did not run is a retention pass that did not run, and
     // the scheduler is the only thing positioned to notice.
     await expireStripeGa4Intents(env.DB)
-    return { result: { expiredStripeGa4Intents: true } }
+    // The MCP tool audit's 180-day retention rides here, the daily retention pass on the same cron.
+    const mcpToolCallEventsCleaned = await cleanupMcpToolCallEvents(env.DB)
+    return { result: { expiredStripeGa4Intents: true, mcpToolCallEventsCleaned } }
   },
 })

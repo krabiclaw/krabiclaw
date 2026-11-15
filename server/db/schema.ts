@@ -1138,6 +1138,12 @@ export const bookings = sqliteTable("bookings", {
 	provider_updated_at: text(),
 	overbooked: integer({ mode: "boolean" }).default(false).notNull(),
 	booked_product_id: text(),
+	// How a guest who booked on the website arrived: the attribution channel
+	// (utils/analytics-attribution.ts ATTRIBUTION_CHANNELS) of the visit the
+	// booking was made from, or of the checkout it was paid through. NULL for a
+	// booking a member added by hand and for a channel's reservation, whose
+	// source is its `channel`. Written once, with the booking.
+	website_source: text(),
 	received_at: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
@@ -2864,15 +2870,15 @@ export const analytics_summaries = sqliteTable("analytics_summaries", {
     AND json_type(payload_json, '$.duration_seconds') IS 'integer' AND (payload_json ->> '$.duration_seconds') >= 0)
     OR (kind != 'session' AND date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
       AND json_type(payload_json, '$.page_views') IS 'integer' AND (payload_json ->> '$.page_views') >= 0)`),
-  check("analytics_summaries_day_metrics_check", sql`kind != 'organization_day' OR (key = ''
-    AND json_type(payload_json, '$.unique_sessions') IS 'integer' AND (payload_json ->> '$.unique_sessions') >= 0
-    AND json_type(payload_json, '$.unique_visitors') IS 'integer' AND (payload_json ->> '$.unique_visitors') >= 0
-    AND json_type(payload_json, '$.returning_visitors') IS 'integer' AND (payload_json ->> '$.returning_visitors') >= 0
-    AND json_type(payload_json, '$.avg_session_duration') IN ('integer', 'real') AND (payload_json ->> '$.avg_session_duration') >= 0
-    AND json_type(payload_json, '$.pages_per_session') IN ('integer', 'real') AND (payload_json ->> '$.pages_per_session') >= 0
-    AND json_type(payload_json, '$.avg_session_duration') IS NOT NULL AND json_type(payload_json, '$.pages_per_session') IS NOT NULL)`),
+  // A day's count is its page views, added to as each visit is recorded (server/utils/pageview-tracking.ts).
+  check("analytics_summaries_day_metrics_check", sql`kind != 'organization_day' OR key = ''`),
+  // A dimension day is [dimension, value, ''] with its count: `visit_source` (a
+  // visit's attribution channel, counted on a session's first page view) and
+  // `product` (views of an offering's page) are kept current by the visit
+  // write. Rows of country, city, device and referrer are earlier nightly
+  // summaries nothing reads or writes any more.
   check("analytics_summaries_dimension_key_check", sql`kind != 'dimension_day' OR (json_valid(key) AND json_type(key) IS 'array' AND json_array_length(key) = 3
-    AND json_type(key, '$[0]') IS 'text' AND (key ->> '$[0]') IN ('country', 'city', 'device', 'referrer')
+    AND json_type(key, '$[0]') IS 'text' AND (key ->> '$[0]') IN ('country', 'city', 'device', 'referrer', 'visit_source', 'product')
     AND json_type(key, '$[1]') IS 'text' AND json_type(key, '$[2]') IS 'text')`),
   uniqueIndex("analytics_summaries_grain_unique").on(table.organization_id, table.kind, table.date, table.key),
   index("analytics_summaries_session_started_idx").on(table.organization_id, sql`(payload_json ->> '$.started_at')`).where(sql`kind = 'session'`),

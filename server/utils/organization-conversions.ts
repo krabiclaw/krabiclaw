@@ -6,7 +6,7 @@ import { deliverForVisitor, type MeasurementProtocolEnv } from '~/server/utils/g
 import { deliverMetaCapiForEvent } from '~/server/utils/meta-capi-delivery'
 import { projectConversionToGa4 } from '~/utils/ga4-projection'
 import { SESSION_COOKIE, VISITOR_COOKIE, hashIp, isCanonicalEventId } from '~/server/utils/pageview-tracking'
-import type { AttributionTouch, ObservedAttribution } from '~/utils/analytics-attribution'
+import { attributionChannel, type AttributionChannel, type AttributionTouch, type ObservedAttribution } from '~/utils/analytics-attribution'
 import {
   CONVERSION_EVENT_CATALOG,
   type ConversionEntityType,
@@ -109,6 +109,28 @@ async function verifiedOriginEvent(db: DbClient, organizationId: string, browser
     attributedAt: text('attributed_at'),
     basis: text('attribution_basis') ?? 'none',
   }
+}
+
+/** The channel a visit's touch arrived from; a visit with no touch of its own or before it arrived directly. */
+export function websiteSourceOf(touch: Pick<AttributionTouch, 'source' | 'medium'> | null): AttributionChannel {
+  return touch ? attributionChannel(touch.source, touch.medium) : 'Direct'
+}
+
+/**
+ * How the guest making a booking on the website arrived (bookings.website_source), read as the
+ * booking's conversion event reads it: the attribution of the visit the booking was made on, else
+ * the session's last touch. A request without this site's analytics session has none recorded.
+ */
+export async function readWebsiteSource(db: DbClient, organizationId: string, origin: { headers: Headers }, originEventId: string | null): Promise<AttributionChannel> {
+  const cookies = parseCookies(origin.headers.get('cookie') ?? '')
+  const sessionId = cookies.get(SESSION_COOKIE)
+  const visitorId = cookies.get(VISITOR_COOKIE)
+  if (!isCanonicalEventId(sessionId) || !isCanonicalEventId(visitorId)) return 'Not recorded'
+  const visit = await verifiedOriginEvent(db, organizationId, { sessionId, visitorId }, originEventId)
+  if (visit) return websiteSourceOf(visit.attribution)
+  const session = await queryFirst<{ attribution: string }>(db, `SELECT json_extract(payload_json, '$.attribution') AS attribution FROM analytics_summaries
+    WHERE organization_id = ? AND kind = 'session' AND date = '' AND key = ?`, [organizationId, sessionId])
+  return session ? websiteSourceOf(JSON.parse(session.attribution) as AttributionTouch) : 'Not recorded'
 }
 
 /** The pageview a form submission says it came from, or null when the claim is not even shaped like one. Whether it is believed is decided when the event is recorded. */

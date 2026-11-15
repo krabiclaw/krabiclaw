@@ -116,7 +116,8 @@ export default defineHandler(async (event) => {
       ? normalizeReferrerHost(`https://${body.referrer_host}`)
       : null
     const geo = getCloudflareGeo(event)
-    const organization = event.context.organization as { vertical?: string | null } | undefined
+    const organization = event.context.organization as { vertical?: string | null; timezone?: string } | undefined
+    if (!organization?.timezone) throw new Error('The tenant context has no organization time zone')
     const [identity, internalHosts] = await Promise.all([
       resolvePublicPageIdentity(cloudflareEnv(event) as never, db, {
         organizationId, pagePath, requestedLocale: locale,
@@ -128,6 +129,7 @@ export default defineHandler(async (event) => {
     await recordTenantPageview(db, {
       eventId: body.event_id,
       organizationId,
+      timezone: organization.timezone,
       pagePath,
       sourcePath: identity.sourcePath,
       locale: identity.locale,

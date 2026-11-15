@@ -1,8 +1,8 @@
 import { queryFirst, type DbClient } from '~/server/db'
-import { recordOrganizationConversionEvent } from '~/server/utils/organization-conversions'
+import { recordOrganizationConversionEvent, websiteSourceOf } from '~/server/utils/organization-conversions'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
 import { AUTHORIZATION_WINDOW_SECONDS, type Payment } from '~/server/domain/payments'
-import type { AttributionTouch } from '~/utils/analytics-attribution'
+import type { AttributionChannel, AttributionTouch } from '~/utils/analytics-attribution'
 
 /**
  * What a business's paid bookings and decisions look like in its analytics: each event is recorded
@@ -55,6 +55,24 @@ async function checkoutAttribution(db: DbClient, payment: Payment): Promise<{ to
   if (!started?.touch) return null
   if (!started.attributed_at) throw new Error(`Checkout of payment ${payment.id} recorded an attribution without its time`)
   return { touch: JSON.parse(started.touch) as AttributionTouch, attributedAt: started.attributed_at }
+}
+
+/**
+ * How the guest who paid a checkout arrived (bookings.website_source), as its started checkout
+ * recorded it in the guest's own request. A checkout a member started for a guest has none; one
+ * whose guest had no analytics session, or that recorded no start, has none recorded.
+ */
+export async function checkoutWebsiteSource(db: DbClient, payment: Payment, conversationId: string | null): Promise<AttributionChannel | null> {
+  if (conversationId) {
+    const conversation = await queryFirst<{ source: string | null }>(db, `SELECT json_extract(payload_json, '$.provenance.source') AS source FROM conversations WHERE id = ? AND organization_id = ?`, [conversationId, payment.organization_id])
+    if (!conversation) throw new Error(`Checkout of payment ${payment.id} has no guest conversation`)
+    if (conversation.source !== 'website') return null
+  }
+  const started = await queryFirst<{ touch: string | null; session_id: string | null }>(db, `SELECT json_extract(payload_json, '$.attribution') AS touch, session_id FROM analytics_events
+    WHERE organization_id = ? AND kind = 'interaction' AND json_extract(payload_json, '$.event_name') = 'payment_checkout_started'
+      AND json_extract(payload_json, '$.entity_type') = 'payment' AND json_extract(payload_json, '$.entity_id') = ?`, [payment.organization_id, payment.id])
+  if (!started?.session_id) return 'Not recorded'
+  return websiteSourceOf(started.touch ? JSON.parse(started.touch) as AttributionTouch : null)
 }
 
 /** A captured payment: its value excludes tax, its collected amount is what the buyer paid. */

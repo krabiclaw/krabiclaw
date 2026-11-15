@@ -10,7 +10,6 @@ export type ScheduledTaskName =
   | 'google-calendar-sync'
   | 'public-resource-cache-invalidation'
   | 'domain-reconciliation'
-  | 'analytics-aggregate-daily'
   | 'google-places-sync'
   | 'review-request-automation'
   | 'stripe-ga4-intent-retention'
@@ -31,7 +30,7 @@ export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName
   '*/5 * * * *': ['google-calendar-sync', 'stay-checkout-holds', 'stay-calendar-links'],
   '*/2 * * * *': ['public-resource-cache-invalidation', 'airbnb-sync', 'channex-ari-delivery', 'scheduled-guest-messages'],
   '*/10 * * * *': ['domain-reconciliation', 'channex-revision-feed'],
-  '0 3 * * *': ['jobs-wake-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
+  '0 3 * * *': ['jobs-wake-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
   '0 0 * * SUN': ['google-places-sync'],
   '0 * * * *': ['review-request-automation'],
   // Staging only ([env.staging.triggers]): the Channex certification run needs imports, pending
@@ -51,7 +50,6 @@ const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'jobs-wake-daily': async () => import('./tasks/jobs-wake-daily'),
   'public-resource-cache-invalidation': async () => import('./tasks/public-resource-cache-invalidation'),
   'domain-reconciliation': async () => import('./tasks/domain-reconciliation'),
-  'analytics-aggregate-daily': async () => import('./tasks/analytics-aggregate-daily'),
   'stripe-ga4-intent-retention': async () => import('./tasks/stripe-ga4-intent-retention'),
   'google-places-sync': async () => import('./tasks/google-places-sync'),
   'review-request-automation': async () => import('./tasks/review-request-automation'),

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:e858f7bf557a3625395c1fc9174d974f15408fd9eafe94ba65d71ebaec786193",
-  "documentationFingerprint": "sha256:0ed95f4dd4018be2f5a21ea3f233a3d61703c383dfbad2251a95394f02c9bdd0",
+  "fingerprint": "sha256:11e83b2caf1e1a673bb63ff537aa58431e6cf4b13ef1d66598715aad4444d330",
+  "documentationFingerprint": "sha256:a5d7a6b586d93bccdffa742e1ddb98e1a02519f4257e35fe111fa08904b84cc8",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -49701,12 +49701,27 @@
     {
       "name": "get_organization_analytics",
       "title": "Get organization analytics",
-      "description": "Read website traffic, attribution, conversions, bookings, collected revenue and refunds. Amounts are minor units per currency; booking quotes are not collected revenue.",
+      "description": "Read one Insights page, as the dashboard shows it: its headline numbers, each one by day, and its list. Pages: rating and reviews, occupancy or bookings, cancellations, length of stay, party size, nightly rate or average value, income by channel, booking conversion, lead time, returning guests, page views, top pages and sources. Money is in minor units of the page currency.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "end_date": {
             "description": "Inclusive local end date in YYYY-MM-DD format. Defaults to today.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "What is booked: stay, experience, service (consultations) or table. Default all. Not read by page views, top pages and sources.",
+            "enum": [
+              "all",
+              "stay",
+              "experience",
+              "service",
+              "table"
+            ],
+            "type": "string"
+          },
+          "location_id": {
+            "description": "One location. Read by rating, Bookings & rates, lead time and returning pages only.",
             "type": "string"
           },
           "organization_id": {
@@ -49715,12 +49730,35 @@
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
           },
+          "page": {
+            "description": "The page, as section/page.",
+            "enum": [
+              "quality/overall-rating",
+              "rates/occupancy-rate",
+              "rates/bookings",
+              "rates/cancellation-rate",
+              "rates/length-of-stay",
+              "rates/party-size",
+              "rates/nightly-rate",
+              "rates/average-value",
+              "rates/income-by-channel",
+              "conversion/booking-conversion",
+              "conversion/lead-time",
+              "conversion/returning",
+              "conversion/page-views",
+              "conversion/top-pages",
+              "conversion/sources"
+            ],
+            "type": "string"
+          },
           "start_date": {
             "description": "Inclusive local start date in YYYY-MM-DD format. Defaults to 29 days before end_date.",
             "type": "string"
           }
         },
-        "required": [],
+        "required": [
+          "page"
+        ],
         "type": "object"
       },
       "outputSchema": {
@@ -49729,833 +49767,324 @@
         "additionalProperties": false,
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "ad_spend": {
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "filters": {
             "additionalProperties": false,
             "properties": {
-              "clicks": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
+              "kind": {
+                "enum": [
+                  "all",
+                  "stay",
+                  "experience",
+                  "service",
+                  "table"
+                ],
+                "type": "string"
               },
-              "conversions": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "cost_per_click_micros": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "error": {
+              "location_id": {
                 "type": [
                   "string",
                   "null"
                 ]
-              },
-              "impressions": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "total_spend_micros": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
               }
             },
             "required": [
-              "total_spend_micros",
-              "clicks",
-              "impressions",
-              "conversions",
-              "cost_per_click_micros"
+              "kind",
+              "location_id"
             ],
             "type": "object"
           },
-          "attributed_value": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "campaign": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "collected_minor": {
-                  "type": "number"
-                },
-                "content": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "currency": {
-                  "type": "string"
-                },
-                "medium": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "net_minor": {
-                  "type": "number"
-                },
-                "purchases": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "refunded_minor": {
-                  "type": "number"
-                },
-                "source": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                }
-              },
-              "required": [
-                "source",
-                "medium",
-                "campaign",
-                "content",
-                "currency",
-                "collected_minor",
-                "refunded_minor",
-                "net_minor",
-                "purchases"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "attribution": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "campaign": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "content": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "converting_sessions": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "medium": {
-                  "type": "string"
-                },
-                "outcome_events": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "session_conversion_rate": {
-                  "type": [
-                    "number",
-                    "null"
-                  ]
-                },
-                "sessions": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "source": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "source",
-                "medium",
-                "campaign",
-                "content",
-                "sessions",
-                "outcome_events",
-                "converting_sessions",
-                "session_conversion_rate"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "booking_value": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "bookings": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "currency": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "location_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "product_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "product_name": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "quoted_value_minor": {
-                  "type": "number"
-                },
-                "valued_bookings": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "product_id",
-                "product_name",
-                "location_id",
-                "currency",
-                "bookings",
-                "valued_bookings",
-                "quoted_value_minor"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "cities": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "city": {
-                  "type": "string"
-                },
-                "country_code": {
-                  "type": "string"
-                },
-                "region": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "views": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "city",
-                "region",
-                "country_code",
-                "views"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "conversions": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "conversion_type": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "converting_sessions": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "distinct_entities": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "event_name": {
-                  "type": "string"
-                },
-                "events": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "nonbrowser_events": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "session_conversion_rate": {
-                  "type": [
-                    "number",
-                    "null"
-                  ]
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "event_name",
-                "stage",
-                "conversion_type",
-                "events",
-                "distinct_entities",
-                "converting_sessions",
-                "nonbrowser_events",
-                "session_conversion_rate"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "countries": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "country": {
-                  "type": "string"
-                },
-                "country_code": {
-                  "type": "string"
-                },
-                "percent_of_total": {
-                  "type": "number"
-                },
-                "views": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "country",
-                "country_code",
-                "views",
-                "percent_of_total"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "coverage": {
-            "additionalProperties": false,
-            "properties": {
-              "ga4_delivery": {
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "count": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "event_name": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "event_name",
-                    "status",
-                    "count"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "measurement_contract_started_at": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "outcome_events_without_attribution": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              }
-            },
-            "required": [
-              "measurement_contract_started_at",
-              "outcome_events_without_attribution",
-              "ga4_delivery"
-            ],
-            "type": "object"
-          },
-          "daily_conversions": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "date": {
-                  "type": "string"
-                },
-                "events": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "date",
-                "events"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "daily_data": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "avg_duration": {
-                  "minimum": 0,
-                  "type": "number"
-                },
-                "date": {
-                  "type": "string"
-                },
-                "page_views": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "sessions": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "date",
-                "page_views",
-                "sessions",
-                "avg_duration"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "devices": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "percent_of_total": {
-                  "type": "number"
-                },
-                "type": {
-                  "type": "string"
-                },
-                "views": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "type",
-                "views",
-                "percent_of_total"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "funnel": {
-            "additionalProperties": false,
-            "properties": {
-              "by_location": {
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "confirmed": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "intent": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "location_id": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "paid": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "paid_collected": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "collected_minor": {
-                            "type": "number"
-                          },
-                          "currency": {
-                            "type": "string"
-                          }
+          "list": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "columns": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "format": {
+                          "enum": [
+                            "count",
+                            "percent",
+                            "rating",
+                            "money",
+                            "nights",
+                            "days",
+                            "people",
+                            "text"
+                          ],
+                          "type": "string"
                         },
-                        "required": [
-                          "currency",
-                          "collected_minor"
-                        ],
-                        "type": "object"
+                        "label": {
+                          "type": "string"
+                        }
                       },
-                      "type": "array"
-                    },
-                    "submitted": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "viewed": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "visits": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "location_id",
-                    "visits",
-                    "viewed",
-                    "intent",
-                    "submitted",
-                    "confirmed",
-                    "paid",
-                    "paid_collected"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "by_source": {
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "channel": {
-                      "enum": [
-                        "Google Ads",
-                        "Instagram",
-                        "Facebook",
-                        "Organic search",
-                        "Direct",
-                        "Referral",
-                        "Other",
-                        "Not recorded"
+                      "required": [
+                        "label",
+                        "format"
                       ],
-                      "type": "string"
+                      "type": "object"
                     },
-                    "confirmed": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "intent": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "paid": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "paid_collected": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "collected_minor": {
-                            "type": "number"
-                          },
-                          "currency": {
-                            "type": "string"
-                          }
+                    "type": "array"
+                  },
+                  "heading": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "rows",
+                    "type": "string"
+                  },
+                  "rows": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "key": {
+                          "type": "string"
                         },
-                        "required": [
-                          "currency",
-                          "collected_minor"
-                        ],
-                        "type": "object"
+                        "label": {
+                          "type": "string"
+                        },
+                        "values": {
+                          "items": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "type": "array"
+                        }
                       },
-                      "type": "array"
+                      "required": [
+                        "key",
+                        "label",
+                        "values"
+                      ],
+                      "type": "object"
                     },
-                    "submitted": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "viewed": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "visits": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "channel",
-                    "visits",
-                    "viewed",
-                    "intent",
-                    "submitted",
-                    "confirmed",
-                    "paid",
-                    "paid_collected"
-                  ],
-                  "type": "object"
+                    "type": "array"
+                  }
                 },
-                "type": "array"
+                "required": [
+                  "kind",
+                  "heading",
+                  "columns",
+                  "rows"
+                ],
+                "type": "object"
               },
-              "confirmed": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "intent": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "paid": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "paid_collected": {
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "collected_minor": {
-                      "type": "number"
-                    },
-                    "currency": {
-                      "type": "string"
-                    }
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "reviews",
+                    "type": "string"
                   },
-                  "required": [
-                    "currency",
-                    "collected_minor"
-                  ],
-                  "type": "object"
+                  "reviews": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "author": {
+                          "type": "string"
+                        },
+                        "categories": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "key": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "rating": {
+                                "maximum": 5,
+                                "minimum": 1,
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "key",
+                              "label",
+                              "rating"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "content": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "date": {
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "private_feedback": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "questions": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "restaurant",
+                                "experience",
+                                "legal_consultation",
+                                "lodging"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "rating": {
+                          "maximum": 5,
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "pending",
+                            "approved",
+                            "rejected",
+                            "private"
+                          ],
+                          "type": "string"
+                        },
+                        "subject": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "title": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "author",
+                        "rating",
+                        "subject",
+                        "questions",
+                        "source",
+                        "status",
+                        "date",
+                        "title",
+                        "content",
+                        "private_feedback",
+                        "categories"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
                 },
-                "type": "array"
-              },
-              "submitted": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "viewed": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "visits": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
+                "required": [
+                  "kind",
+                  "reviews"
+                ],
+                "type": "object"
               }
-            },
-            "required": [
-              "visits",
-              "viewed",
-              "intent",
-              "submitted",
-              "confirmed",
-              "paid",
-              "paid_collected",
-              "by_source",
-              "by_location"
-            ],
-            "type": "object"
+            ]
           },
           "metrics": {
-            "additionalProperties": false,
-            "properties": {
-              "avg_session_duration": {
-                "minimum": 0,
-                "type": "number"
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "format": {
+                  "enum": [
+                    "count",
+                    "percent",
+                    "rating",
+                    "money",
+                    "nights",
+                    "days",
+                    "people",
+                    "text"
+                  ],
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "value": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
               },
-              "change_percent": {
-                "type": [
-                  "number",
-                  "null"
-                ]
-              },
-              "page_views": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "pages_per_session": {
-                "minimum": 0,
-                "type": "number"
-              },
-              "returning_visitors": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "unique_sessions": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "unique_visitors": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              }
+              "required": [
+                "key",
+                "label",
+                "value",
+                "format",
+                "text"
+              ],
+              "type": "object"
             },
-            "required": [
-              "page_views",
-              "unique_sessions",
-              "unique_visitors",
-              "returning_visitors",
-              "avg_session_duration",
-              "pages_per_session",
-              "change_percent"
+            "type": "array"
+          },
+          "page": {
+            "enum": [
+              "quality/overall-rating",
+              "rates/occupancy-rate",
+              "rates/bookings",
+              "rates/cancellation-rate",
+              "rates/length-of-stay",
+              "rates/party-size",
+              "rates/nightly-rate",
+              "rates/average-value",
+              "rates/income-by-channel",
+              "conversion/booking-conversion",
+              "conversion/lead-time",
+              "conversion/returning",
+              "conversion/page-views",
+              "conversion/top-pages",
+              "conversion/sources"
             ],
-            "type": "object"
-          },
-          "net": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "collected_minor": {
-                  "type": "number"
-                },
-                "currency": {
-                  "type": "string"
-                },
-                "net_minor": {
-                  "type": "number"
-                },
-                "refunded_minor": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "currency",
-                "collected_minor",
-                "refunded_minor",
-                "net_minor"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "outcome_attribution": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "campaign": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "content": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "distinct_entities": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "event_name": {
-                  "type": "string"
-                },
-                "events": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "medium": {
-                  "type": "string"
-                },
-                "source": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "source",
-                "medium",
-                "campaign",
-                "content",
-                "event_name",
-                "events",
-                "distinct_entities"
-              ],
-              "type": "object"
-            },
-            "type": "array"
+            "type": "string"
           },
           "period": {
             "additionalProperties": false,
             "properties": {
-              "analytics_data_start_at": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "end_date": {
-                "type": "string"
-              },
-              "native_coverage": {
-                "enum": [
-                  "full",
-                  "partial"
-                ],
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                 "type": "string"
               },
               "start_date": {
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                 "type": "string"
               },
               "timezone": {
@@ -50565,256 +50094,78 @@
             "required": [
               "start_date",
               "end_date",
-              "timezone",
-              "analytics_data_start_at",
-              "native_coverage"
+              "timezone"
             ],
             "type": "object"
           },
-          "referrers": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "percent_of_total": {
-                  "type": "number"
-                },
-                "source": {
-                  "type": "string"
-                },
-                "views": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                }
+          "recorded_since": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                "type": "string"
               },
-              "required": [
-                "source",
-                "views",
-                "percent_of_total"
-              ],
-              "type": "object"
-            },
-            "type": "array"
+              {
+                "type": "null"
+              }
+            ]
           },
-          "signup_cohort": {
+          "section": {
+            "type": "string"
+          },
+          "series": {
             "additionalProperties": false,
             "properties": {
-              "by_signup_attribution": {
+              "dates": {
                 "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "campaign": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "content": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "first_paid_signups": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "medium": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "onboarded_signups": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "revenue": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "collected_minor": {
-                            "type": "number"
-                          },
-                          "currency": {
-                            "type": "string"
-                          },
-                          "net_minor": {
-                            "type": "number"
-                          },
-                          "refunded_minor": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "currency",
-                          "collected_minor",
-                          "refunded_minor",
-                          "net_minor"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
-                    },
-                    "signups": {
-                      "maximum": 9007199254740991,
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "source": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "source",
-                    "medium",
-                    "campaign",
-                    "content",
-                    "signups",
-                    "onboarded_signups",
-                    "first_paid_signups",
-                    "revenue"
-                  ],
-                  "type": "object"
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                  "type": "string"
                 },
                 "type": "array"
               },
-              "first_paid_businesses": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "first_paid_signups": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "observed_through": {
-                "type": "string"
-              },
-              "onboarded_businesses": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "onboarded_signups": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "signups": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
+              "values": {
+                "additionalProperties": {
+                  "items": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "type": "array"
+                },
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
               }
             },
             "required": [
-              "observed_through",
-              "signups",
-              "onboarded_signups",
-              "first_paid_signups",
-              "by_signup_attribution",
-              "onboarded_businesses",
-              "first_paid_businesses"
+              "dates",
+              "values"
             ],
             "type": "object"
           },
-          "top_pages": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "path": {
-                  "type": "string"
-                },
-                "percent_of_total": {
-                  "type": "number"
-                },
-                "views": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "path",
-                "views",
-                "percent_of_total"
-              ],
-              "type": "object"
-            },
-            "type": "array"
+          "subtitle": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
-          "values": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "basis": {
-                  "enum": [
-                    "quoted",
-                    "purchase",
-                    "refund"
-                  ],
-                  "type": "string"
-                },
-                "collected_minor": {
-                  "type": [
-                    "number",
-                    "null"
-                  ]
-                },
-                "currency": {
-                  "type": "string"
-                },
-                "event_name": {
-                  "type": "string"
-                },
-                "events": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "value_minor": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "event_name",
-                "basis",
-                "currency",
-                "events",
-                "value_minor",
-                "collected_minor"
-              ],
-              "type": "object"
-            },
-            "type": "array"
+          "title": {
+            "type": "string"
           }
         },
         "required": [
+          "page",
+          "title",
+          "section",
+          "subtitle",
           "period",
+          "filters",
+          "currency",
+          "recorded_since",
           "metrics",
-          "daily_data",
-          "daily_conversions",
-          "top_pages",
-          "attribution",
-          "outcome_attribution",
-          "attributed_value",
-          "conversions",
-          "values",
-          "booking_value",
-          "net",
-          "funnel",
-          "signup_cohort",
-          "coverage",
-          "countries",
-          "cities",
-          "referrers",
-          "devices"
+          "series",
+          "list"
         ],
         "type": "object"
       },
@@ -83773,7 +83124,7 @@
     {
       "name": "query_organization_analytics",
       "title": "Query organization analytics",
-      "description": "Read unsampled filtered events, sessions, breakdowns or daily summaries. Coverage reports missing facts; use next_cursor with the same query to continue. Event results omit unrestricted actor, custom-properties and metadata payloads.",
+      "description": "Read unsampled filtered events, sessions or breakdowns. Coverage reports missing facts; use next_cursor with the same query to continue. Event results omit unrestricted actor, custom-properties and metadata payloads.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -83886,16 +83237,6 @@
                 "description": "device class derived from the user agent",
                 "type": "string"
               },
-              "dimension": {
-                "description": "daily_summaries with dimension_day: the dimension to read.",
-                "enum": [
-                  "country",
-                  "city",
-                  "device",
-                  "referrer"
-                ],
-                "type": "string"
-              },
               "entity_id": {
                 "description": "the business subject of an outcome or interaction",
                 "type": "string"
@@ -83996,15 +83337,6 @@
                 "description": "outcome or interaction stage",
                 "type": "string"
               },
-              "summary_kind": {
-                "description": "daily_summaries only (required): the summary grain: one row per day, per day and public page path, or per day and country/city/device/referrer value.",
-                "enum": [
-                  "organization_day",
-                  "page_day",
-                  "dimension_day"
-                ],
-                "type": "string"
-              },
               "surface": {
                 "description": "the surface that produced the event",
                 "type": "string"
@@ -84015,10 +83347,6 @@
               },
               "term": {
                 "description": "term on the requested attribution_basis (observed: as the event carried it; event_snapshot: the attribution in force for the event when it happened; session_last_touch: the session's current last touch)",
-                "type": "string"
-              },
-              "value": {
-                "description": "daily_summaries with dimension_day: one value of the dimension.",
                 "type": "string"
               },
               "value_basis": {
@@ -84078,12 +83406,11 @@
             "type": "array"
           },
           "mode": {
-            "description": "events | sessions | breakdown | daily_summaries",
+            "description": "events | sessions | breakdown",
             "enum": [
               "events",
               "sessions",
-              "breakdown",
-              "daily_summaries"
+              "breakdown"
             ],
             "type": "string"
           },
@@ -128144,12 +127471,12 @@
       "arguments": [],
       "rendered": {
         "description": "Review booking demand",
-        "text": "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_conversations plus get_conversation for current guest demand. Recommend the most useful action supported by those records. Use send_message, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff."
+        "text": "Use get_workspace_context and get_organization_analytics (conversion/booking-conversion and conversion/sources) to read recent visits and the bookings they led to. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_conversations plus get_conversation for current guest demand. Recommend the most useful action supported by those records. Use send_message, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff."
       },
       "toolContracts": {
         "create_post": "sha256:a2a95f5e752b47a10f2d42dfaaca0caca19afd2a4110adc3fd97dad2eb8a763a",
         "get_conversation": "sha256:5007b5cc2485f51db503b10ae92e88691fe6d2ffa56dafced5194e41abd1fd3f",
-        "get_organization_analytics": "sha256:4fcc7f6cef537aa552200cc74b666d866684657015427e256651d7791140b814",
+        "get_organization_analytics": "sha256:91733cf6cbe2805dbb1500eec2c7403688dc59a6e19e4ab51436ac2c5e693b51",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversations": "sha256:563552eb6b0af82a762e138edf26711d2560e62fdb2cee2a757e19106704fbad",

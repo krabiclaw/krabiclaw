@@ -126,7 +126,7 @@ test('public experiences require a configured booking flow and retain full or te
       .bind(ORG, legacy.id, start, end, ACTOR.actorId, ACTOR.actorId).run()
     const ids = [external.id, legacy.id].sort()
     assert.deepEqual((await visible()).sort(), ids)
-    await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: legacy.id, sessionId: 'omakase-session', productVariantId: legacy.variants[0]!.id, partySize: 8 })
+    await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: legacy.id, sessionId: 'omakase-session', productVariantId: legacy.variants[0]!.id, partySize: 8 })
     const sessions = await listSessions(db, { env, organizationId: ORG, productId: legacy.id, fromInstant: `${tomorrow}T00:00:00.000Z`, toInstant: `${tomorrow}T23:59:59.999Z` })
     assert.deepEqual(sessions.map(session => ({ remaining: session.remaining, full: session.is_full })), [{ remaining: 0, full: true }])
     assert.deepEqual((await visible()).sort(), ids, 'a full experience stays visible')
@@ -196,7 +196,7 @@ test('advance notice keeps sessions inside it off the public listing and refuses
     assert.deepEqual((await loadPublicProductSessions(db, detail!, env)).map(session => session.id), ['later'])
     assert.deepEqual(await productBookingReadiness(db, ORG, await getProduct(db, ORG, product.id), { requireAllocation: true, env }).then(result => result.ready), true, 'a later session still proves the offering bookable')
 
-    const claim = (sessionId: string) => claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: product.id, sessionId, productVariantId: product.variants[0]!.id, partySize: 1 })
+    const claim = (sessionId: string) => claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: product.id, sessionId, productVariantId: product.variants[0]!.id, partySize: 1 })
     await assert.rejects(claim('soon'), CapacityUnavailableError)
     assert.equal(await db.prepare("SELECT COUNT(*) n FROM bookings WHERE product_session_id = 'soon'").first('n'), 0)
     const booking = await claim('later')
