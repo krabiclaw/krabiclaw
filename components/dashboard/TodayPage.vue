@@ -210,7 +210,7 @@ const business = computed(() => data.value?.business ?? null)
 onScopeDispose(() => {
   const current = business.value
   // Reusing a held read does not extend its life.
-  if (!props.personalScope && current && reading && loadStatus.value === 'success') realtime.held.hold(reading, current, reuseExpiresAt ?? Date.now() + 30_000)
+  if (!props.personalScope && current && reading && loadStatus.value === 'success') realtime.held.hold(reading, current, reuseExpiresAt ?? Date.now() + 30_000, 1)
 })
 const parts = computed(() => {
   const sections = business.value?.tasks ?? []

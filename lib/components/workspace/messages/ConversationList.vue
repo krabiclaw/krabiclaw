@@ -403,7 +403,7 @@ onScopeDispose(() => {
     // Mailboxes and labels change with time. Reusing a held read does not extend its life.
     realtime.held.hold(realtime.held.begin(`inbox:${listKey.value}`, event => event.type === 'access.changed'
       || ((event.type === 'MESSAGE_ACK' || event.type === 'CONVERSATION_LEAVE') && event.user_id === reader.value)
-      || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.scheduled)), current, reuseExpiresAt ?? Date.now() + 30_000)
+      || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.scheduled)), current, reuseExpiresAt ?? Date.now() + 30_000, 1)
   }
 })
 

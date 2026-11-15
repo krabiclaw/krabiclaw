@@ -62,6 +62,7 @@ function heldReads(status: Readonly<Ref<DashboardInvalidationStatus>>, reads: Ma
       Object.assign(read, { value, expiresAt })
       reads.delete(read.key)
       reads.set(read.key, read)
+      for (const [key, other] of reads) if (other.expiresAt !== undefined && other.expiresAt <= Date.now()) reads.delete(key)
       if (!limit) return
       const same = [...reads.values()].filter(other => 'value' in other && screen(other.key) === screen(read.key))
       for (const other of same.slice(0, Math.max(0, same.length - limit))) reads.delete(other.key)
