@@ -40,7 +40,7 @@ import mcpRoute from '../../server/api/mcp.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[payment_id]/return.post.ts'
 import paymentCancelRoute from '../../server/api/public/payments/[payment_id]/cancel.post.ts'
 import paymentHandoffRoute from '../../server/api/public/payments/[payment_id].get.ts'
-import { readStayCalendar } from '../../server/domain/stays.ts'
+import { readHomeCalendar } from '../../server/domain/stays.ts'
 import bookingReceiptRoute from '../../server/api/public/booking-requests/[conversation_id].get.ts'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '../../server/utils/reservation-cancel-token.ts'
 import adSpendDailyTask from '../../server/tasks/marketing-ad-spend-daily.ts'
@@ -1167,7 +1167,7 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     const failedHandoff = await app.request(Object.assign(new Request(`https://payments.proof.example/api/public/payments/changing?claim=${claims.get('changing')!}`), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     assert.equal(failedHandoff.status, 200, await failedHandoff.clone().text())
     assert.deepEqual(await failedHandoff.json(), { ...open, state: 'failed', billing_details: null })
-    const calendar = await readStayCalendar(db, { organizationId: ORG, actorId: 'host', manage: true }, { productId: 'cabin', from: '2099-10-01', to: '2099-10-04' })
+    const calendar = await readHomeCalendar(db, { organizationId: ORG, actorId: 'host', manage: true }, { productId: 'cabin', from: '2099-10-01', to: '2099-10-04' })
     assert.deepEqual(calendar.nights.map(night => [night.date, night.available, night.held_until === null]), [
       ['2099-10-01', true, true], ['2099-10-02', true, true], ['2099-10-03', false, false],
     ])

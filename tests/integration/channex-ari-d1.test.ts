@@ -4,7 +4,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, createProductsBatch, getProduct, reconcileProducts, updateProduct } from '../../server/utils/product-management.ts'
-import { cancelStay, createStay, deliverPendingChannelNights, readStayCalendar, releaseLapsedStayHolds, setStayNights, updateStayHome, verifyStayCalendarOccupancy, type StayAccess } from '../../server/domain/stays.ts'
+import { cancelStay, createStay, deliverPendingChannelNights, readHomeCalendar, readStayHome, releaseLapsedStayHolds, setStayNights, updateStayHome, verifyStayCalendarOccupancy, type StayAccess } from '../../server/domain/stays.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 // A connected home's night changes reach Channex: closed nights, prices and
@@ -183,8 +183,8 @@ test('lapsed hold failures retain their claims and report every failure after in
     assert.deepEqual(sent.map(request => [request.path, request.values.map(value => value.date_from)]), [
       ['/restrictions', [day(60)]], ['/availability', [day(60)]], ['/restrictions', [day(61)]], ['/availability', [day(61)]],
     ])
-    assert.deepEqual((await readStayCalendar(db, manager, { productId: connected, from: day(60), to: day(62) })).nights.map(night => [night.available, night.channel?.state]), [[true, 'needs_review'], [true, 'pushed']])
-    assert.deepEqual((await readStayCalendar(db, manager, { productId: local, from: day(62), to: day(63) })).nights.map(night => [night.available, night.channel]), [[true, null]])
+    assert.deepEqual((await readHomeCalendar(db, manager, { productId: connected, from: day(60), to: day(62) })).nights.map(night => [night.available, night.channel?.state]), [[true, 'needs_review'], [true, 'pushed']])
+    assert.deepEqual((await readHomeCalendar(db, manager, { productId: local, from: day(62), to: day(63) })).nights.map(night => [night.available, night.channel]), [[true, null]])
     await db.prepare('DROP TRIGGER refuse_one_hold_release').run()
     channex.answer['/restrictions'] = undefined
     assert.deepEqual(await releaseLapsedStayHolds(db, env), { released: 2, channel_push: [{ state: 'pushed', detail: null }, { state: 'pushed', detail: null }] })
@@ -201,7 +201,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
   try {
-    const states = async (productId: string, from: string, to: string) => (await readStayCalendar(db, manager, { productId, from, to })).nights.map(night => night.channel)
+    const states = async (productId: string, from: string, to: string) => (await readHomeCalendar(db, manager, { productId, from, to })).nights.map(night => night.channel)
     const log = async () => (await db.prepare("SELECT kind, external_id, status, detail, task_id FROM channel_sync_log WHERE direction = 'outbound' ORDER BY created_at, rowid").all()).results
 
     // Yesterday through two days ahead: closed and priced; yesterday is not sent. A closed
@@ -260,7 +260,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.deepEqual(channex.take(), [])
     assert.deepEqual(await db.prepare('SELECT * FROM bookings WHERE id = ?').bind(stay.id).first(), cancelledRow)
     assert.deepEqual((await db.prepare("SELECT * FROM activity_entries WHERE organization_id = ? AND event_name = 'stay.cancelled' AND json_extract(payload_json, '$.entityId') = ? ORDER BY id").bind(ORG, stay.id).all()).results, cancellationEvents.results)
-    assert.deepEqual((await readStayCalendar(db, manager, { productId: connected, from: day(10), to: day(12) })).nights.map(night => [night.date, night.booking_id, night.available, night.channel]),
+    assert.deepEqual((await readHomeCalendar(db, manager, { productId: connected, from: day(10), to: day(12) })).nights.map(night => [night.date, night.booking_id, night.available, night.channel]),
       [10, 11].map(offset => [day(offset), null, true, { state: 'pushed', detail: null }]))
 
     // A partial rejection is not success: the nights it names read needs_review; availability still goes.
@@ -277,7 +277,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
         rejected = error.data
         return true
       })
-    const rejectedCalendar = await readStayCalendar(db, manager, { productId: connected, from: day(20), to: day(21) })
+    const rejectedCalendar = await readHomeCalendar(db, manager, { productId: connected, from: day(20), to: day(21) })
     assert.deepEqual(rejectedCalendar.nights.map(night => [night.date, night.price_minor, night.closed]), [[day(20), 1, false]])
     assert.deepEqual(channex.take().map(request => request.path), ['/restrictions', '/availability'])
     assert.deepEqual(rejectedCalendar.nights.map(night => night.channel), [rejected!.channel_push])
@@ -378,7 +378,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => value.rate)]), [['/restrictions', ['142.00']], ['/restrictions', ['150.00']]])
     assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
     assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => [value.date_from, value.rate])]), [['/restrictions', [[day(40), '150.00']]]])
-    assert.deepEqual((await readStayCalendar(db, manager, { productId: connected, from: day(40), to: day(41) })).nights.map(night => [night.price_minor, night.channel]), [[150_00, { state: 'pushed', detail: null }]])
+    assert.deepEqual((await readHomeCalendar(db, manager, { productId: connected, from: day(40), to: day(41) })).nights.map(night => [night.price_minor, night.channel]), [[150_00, { state: 'pushed', detail: null }]])
 
     // A connected home with no nightly price still sends its availability and rules; the missing price needs review.
     channex.answer['/availability'] = undefined
@@ -390,7 +390,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
         assert.deepEqual(error.data?.ranges, [{ from: day(5), to: day(6) }])
         return true
       })
-    const noPrice = await readStayCalendar(db, manager, { productId: unpriced, from: day(5), to: day(6) })
+    const noPrice = await readHomeCalendar(db, manager, { productId: unpriced, from: day(5), to: day(6) })
     assert.deepEqual(noPrice.nights.map(night => [night.date, night.closed, night.price_minor, night.channel]), [[day(5), true, null, noPriceOutcome]])
     assert.deepEqual(channex.take(), [
       { path: '/restrictions', values: [{ property_id: 'prop-2', rate_plan_id: 'rate-2', date_from: day(5), date_to: day(5), min_stay_arrival: 2, max_stay: 0, closed_to_arrival: false, closed_to_departure: false, stop_sell: true }] },
@@ -405,11 +405,11 @@ test('night changes on a connected home reach Channex, and what it took is on ea
         assert.equal(Object.hasOwn(error.data ?? {}, 'committed'), false)
         return true
       })
-    assert.equal((await readStayCalendar(db, manager, { productId: connected, from: day(40), to: day(41) })).nights[0]!.closed, false)
+    assert.equal((await readHomeCalendar(db, manager, { productId: connected, from: day(40), to: day(41) })).nights[0]!.closed, false)
     // A home whose channel is disconnected sends nothing, and says it is disconnected.
-    assert.deepEqual(closed.home.channel, { provider: 'channex', status: 'connected' })
+    assert.deepEqual((await readStayHome(db, manager, connected)).channel, { provider: 'channex', status: 'connected' })
     const offline = await setStayNights(db, env, manager, { product_id: local, from: day(5), to: day(6), closed: true })
-    assert.deepEqual(offline.home.channel, { provider: 'channex', status: 'disconnected' })
+    assert.deepEqual((await readStayHome(db, manager, local)).channel, { provider: 'channex', status: 'disconnected' })
     assert.equal(offline.channel_push, null)
     assert.deepEqual(offline.nights.map(night => night.channel), [null])
     assert.deepEqual(channex.take(), [])
@@ -704,7 +704,7 @@ test('catalog price and minimum-stay writes use the same channel completion and 
     await assert.rejects(updateStayHome(unavailable, db, manager, unpriced, { name: 'Must remain Loft', timezone: 'UTC', base_price_minor: null }),
       (error: { status?: number; data?: Record<string, unknown> }) => error.status === 503 && error.data?.code === 'CHANNEL_CONFIGURATION_REQUIRED' && !Object.hasOwn(error.data, 'committed'))
     assert.equal((await getProduct(db, ORG, unpriced)).name, 'Loft')
-    assert.equal((await readStayCalendar(db, manager, { productId: unpriced, from: day(0), to: day(1) })).home.timezone, TZ)
+    assert.equal((await readHomeCalendar(db, manager, { productId: unpriced, from: day(0), to: day(1) })).home.timezone, TZ)
     assert.deepEqual(channex.take(), [])
 
     const update = { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch, idempotencyKey: 'catalog-price' }
@@ -736,7 +736,7 @@ test('catalog price and minimum-stay writes use the same channel completion and 
     // A home default affects arrival only; an absent through rule stays absent.
     assert.deepEqual(minimum[0]!.values, [{ property_id: 'prop-1', rate_plan_id: 'rate-1', date_from: day(0), date_to: day(499), rate: '180.00', min_stay_arrival: 3 }])
 
-    const calendar = await readStayCalendar(db, manager, { productId: connected, from: day(0), to: day(1) })
+    const calendar = await readHomeCalendar(db, manager, { productId: connected, from: day(0), to: day(1) })
     assert.deepEqual(calendar.nights[0]!.channel, { state: 'pushed', detail: null })
 
     // Every affected home is preflighted before any row in the atomic catalog changes.
@@ -764,7 +764,7 @@ test('catalog price and minimum-stay writes use the same channel completion and 
     const refusedProduct = await getProduct(db, ORG, connected)
     assert.equal(refusedProduct.stay!.min_nights, 4)
     assert.equal(refusedProduct.updated_at, refused!.updated_at)
-    const refusedCalendar = await readStayCalendar(db, manager, { productId: connected, from: day(0), to: day(1) })
+    const refusedCalendar = await readHomeCalendar(db, manager, { productId: connected, from: day(0), to: day(1) })
     assert.deepEqual(refusedCalendar.nights.map(night => night.channel), [refused!.channel_push])
     assert.deepEqual(channex.take().map(request => request.path), ['/restrictions'])
 

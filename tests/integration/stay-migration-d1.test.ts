@@ -7,7 +7,7 @@ import { hashPassword } from 'better-auth/crypto'
 import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { createStay, getStay, readStayCalendar, updateStay, type StayAccess } from '../../server/domain/stays.ts'
+import { createStay, getStay, readHomeCalendar, updateStay, type StayAccess } from '../../server/domain/stays.ts'
 import { getStayMigrationContext, importStayMigration, previewStayMigration, verifyStayMigration } from '../../server/domain/stay-migration.ts'
 import { isMigrationContext, isMigrationPreview, isMigrationReceipt, isMigrationVerification, type MigrationInput } from '../../shared/stay-migration.ts'
 import contextRoute from '../../server/api/dashboard/stays/migration/index.get.ts'
@@ -66,7 +66,7 @@ test('Hostaway export imports an ongoing unpaid stay, protects occupancy, preser
     assert.deepEqual([saved.check_in_date, saved.check_out_date, saved.channel, saved.owner], ['2026-10-10', '2026-12-24', 'direct', 'app'])
     assert.equal(await db.prepare('SELECT received_at FROM bookings WHERE id = ?').bind(stayId).first('received_at'), null)
     assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM stay_nights WHERE booking_id = ?').bind(stayId).first('n'), 75)
-    assert.equal((await readStayCalendar(db, access, { productId: home.id, from: '2026-11-05', to: '2026-11-06' })).nights[0]!.available, false)
+    assert.equal((await readHomeCalendar(db, access, { productId: home.id, from: '2026-11-05', to: '2026-11-06' })).nights[0]!.available, false)
     await updateStay(db, env, access, stayId, { version: saved.version, guest_name: 'Dylan corrected by host' })
     const replay = await importStayMigration(db, env, access, { ...source, fingerprint: preview.fingerprint })
     assert.equal(replay.existing, 1); assert.equal(replay.imported, 0)
@@ -130,7 +130,7 @@ test('bounded migration batches resume from canonical stays and manual blocks an
     const second = await importStayMigration(db, env, access, { ...source, fingerprint: preview.fingerprint })
     assert.equal(second.imported, 1); assert.equal(second.existing, 5); assert.equal(second.remaining, 0)
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM bookings WHERE idempotency_key LIKE 'hostaway:%'").first('n'), 6)
-    assert.equal((await readStayCalendar(db, access, { productId: home.id, from: '2026-12-20', to: '2026-12-23' })).nights.every(night => night.closed && !night.available), true)
+    assert.equal((await readHomeCalendar(db, access, { productId: home.id, from: '2026-12-20', to: '2026-12-23' })).nights.every(night => night.closed && !night.available), true)
     const failedSource = input(home.id, `${header}\n${row('repair', '2027-01-10', '2027-01-20')}`)
     const failedPreview = await previewStayMigration(db, access, failedSource)
     const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName(ORG))
@@ -165,7 +165,7 @@ test('bounded migration batches resume from canonical stays and manual blocks an
     await db.prepare("CREATE TRIGGER refuse_migration_receipt BEFORE INSERT ON activity_entries WHEN NEW.event_name = 'stay.migration_imported' BEGIN SELECT RAISE(ABORT, 'Injected receipt failure'); END").run()
     await hub.fetch('https://inbox.test/fail', { method: 'PUT' })
     await assert.rejects(importStayMigration(db, env, access, { ...lostBlockSource, fingerprint: lostBlockPreview.fingerprint }), (error: { data?: { code?: string; committed?: boolean } }) => error.data?.code === 'MIGRATION_RECEIPT_FAILED' && error.data.committed === true)
-    assert.equal((await readStayCalendar(db, access, { productId: home.id, from: '2027-03-01', to: '2027-03-04' })).nights.every(night => night.closed), true)
+    assert.equal((await readHomeCalendar(db, access, { productId: home.id, from: '2027-03-01', to: '2027-03-04' })).nights.every(night => night.closed), true)
     await db.prepare('DROP TRIGGER refuse_migration_receipt').run()
     await hub.fetch('https://inbox.test/fail', { method: 'DELETE' })
     const lostBlockVerification = await verifyStayMigration(db, env, access, { ...lostBlockSource, fingerprint: lostBlockPreview.fingerprint, product_ids: [home.id] })

@@ -655,6 +655,16 @@ export interface BookedRecordInRange {
  * their account shows them. Today, the Agenda, the host Calendar and the
  * bookings list read it.
  */
+/**
+ * A viewer for `bookedRecordsInRange` that reads every booked record of the
+ * membership's business, for a caller that keeps a member's own rows itself:
+ * the homes calendar and the bookings list, whose member rows include the
+ * stays at homes they look after.
+ */
+export function businessWideViewer(membership: BatchQuery): BatchQuery {
+  return { query: `SELECT organization_id, user_id, member_id, 1 AS organization_wide FROM (${membership.query})`, params: membership.params }
+}
+
 export function bookedRecordsInRange(viewer: ViewerTerms, range: { from: string; to: string; pending?: boolean; cancelled?: boolean; guest?: boolean }): BatchQuery {
   const wideFrom = `${addLocalDays(range.from, -1)}T00:00:00.000Z`, wideTo = `${addLocalDays(range.to, 1)}T23:59:59.999Z`
   const whose = range.guest

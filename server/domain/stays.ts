@@ -11,7 +11,7 @@ import { AVAILABILITY_PAGE_DAYS, MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, ST
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertResponsibleMember, assertRoleAllows, assignedMemberSql, BATCH_VIEWER, roleAllows, withViewer, type MemberAccessPrincipal } from '~/server/utils/member-access'
-import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
+import { bookedRecordsInRange, businessWideViewer, type BookedRecordInRange } from '~/server/domain/product-bookings'
 import { organizationEventQuery, type OrganizationEvent } from '~/server/utils/organization-events'
 import { createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
 import { liveHomeSql } from '~/server/utils/billing'
@@ -329,7 +329,6 @@ export interface StayNight {
   channel: { state: 'pending' | 'pushed' | 'needs_review'; detail: string | null } | null
 }
 
-const MAX_LIST_DAYS = 400
 /** Every home's nights at once: three months, a window a multi-calendar pages through. */
 const MAX_HOMES_CALENDAR_DAYS = 92
 const MAX_CALENDAR_BYTES = 2_000_000
@@ -1257,27 +1256,6 @@ export async function moveStayPhotos(db: DbClient, env: CloudflareEnv & GuestInb
 export type StayView<A extends StayAccess> = A extends { manage: true } ? Stay : StayTurnover
 type StayDetailView<A extends StayAccess> = A extends { manage: true } ? StayDetail : StayTurnover
 
-/** Stays overlapping [from, to), newest check-in last. Cancelled stays are included only when asked for. */
-export async function listStays<A extends StayAccess>(db: DbClient, access: A, input: { from: unknown; to: unknown; productId?: string; includeCancelled?: boolean }): Promise<Array<StayView<A>>> {
-  const { from, to } = range(input, MAX_LIST_DAYS)
-  return staysOverlapping(db, access, { from, to, productId: input.productId, includeCancelled: input.includeCancelled })
-}
-
-/** Stays overlapping a range its caller has already checked. */
-async function staysOverlapping<A extends StayAccess>(db: DbClient, access: A, input: { from: string; to: string; productId?: string; includeCancelled?: boolean }): Promise<Array<StayView<A>>> {
-  const { from, to } = input
-  const scope = visibleHomes(access)
-  const window = stayOverlapSql(from, to)
-  const rows = await queryAll<Record<string, unknown>>(db, `
-    SELECT ${STAY_COLUMNS} FROM ${STAY_FROM}
-     WHERE s.organization_id = ? AND s.product_session_id IS NULL AND ${window.sql}
-       ${input.productId ? 'AND s.product_id = ?' : ''} ${input.includeCancelled ? '' : "AND s.status <> 'cancelled'"} AND ${scope.sql}
-     ORDER BY s.starts_at, s.id`, [access.organizationId, ...window.params, ...(input.productId ? [input.productId] : []), ...scope.params])
-  return rows.map(mapStay).filter(stay => staysOverlap(stay, from, to))
-    .sort((a, b) => a.check_in_date.localeCompare(b.check_in_date) || a.id.localeCompare(b.id))
-    .map(stay => access.manage ? stay : stayTurnover(stay)) as Array<StayView<A>>
-}
-
 export async function getStay<A extends StayAccess>(db: DbClient, access: A, stayId: string): Promise<StayDetailView<A>> {
   const scope = visibleHomes(access)
   const row = await queryFirst<Record<string, unknown> & Pick<StayDetail, 'guest_image_url'>>(db, `
@@ -1310,25 +1288,23 @@ export async function getStay<A extends StayAccess>(db: DbClient, access: A, sta
 const STAY_NIGHT_PRICE_SQL = `(SELECT pr.unit_amount FROM product_variants v JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
   WHERE v.organization_id = n.organization_id AND v.product_id = n.product_id AND pr.stay_date = n.date)`
 
-/** Every night of [from, to) at one home: whether it is free, its price and rules, and the stay holding it. */
-export async function readStayCalendar<A extends StayAccess>(db: DbClient, access: A, input: { productId: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Array<StayView<A>> }> {
-  const { from, to } = range(input, STAY_CALENDAR_DAYS)
-  const home = await readStayHome(db, access, input.productId)
-  const [nights, stays] = await Promise.all([homeNights(db, access.organizationId, home, from, to), staysOverlapping(db, access, { from, to, productId: input.productId })])
-  return { home, nights, stays }
+/**
+ * The homes calendar for a caller with a resolved stay access: one home's
+ * nights, or every home's it may see, with the stays holding them, in the one
+ * batch the host Calendar reads. A night's booking_id names its booking.
+ */
+export async function readStayCalendar(db: DbClient, access: StayAccess, input: { productId?: string; from: unknown; to: unknown }): Promise<{ from: string; to: string } & ReturnType<typeof stayCalendarOf>> {
+  const { from, to } = range(input, input.productId ? STAY_CALENDAR_DAYS : MAX_HOMES_CALENDAR_DAYS)
+  const viewer: BatchQuery = { query: 'SELECT ? AS organization_id, ? AS user_id, NULL AS member_id, ? AS organization_wide', params: [access.organizationId, access.actorId, access.manage ? 1 : 0] }
+  const calendar = stayCalendarOf(await executeBatch(db, stayCalendarQueries(viewer, { from, to, productId: input.productId ?? null }), { operation: 'Read homes calendar' }), access.manage, { from, to })
+  if (input.productId && !calendar.homes.length) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
+  return { from, to, ...calendar }
 }
 
-/**
- * Every night of [from, to) at every home this caller may see, the
- * multi-calendar's read, in one batch: each home as the calendar draws it with
- * its nights, and the stays holding any of them. A night's booking_id names
- * its booking. The host Calendar route reads the same statements behind its
- * own membership.
- */
-export async function readStayCalendars(db: DbClient, access: StayAccess, input: { from: unknown; to: unknown }): Promise<{ from: string; to: string } & ReturnType<typeof stayCalendarOf>> {
-  const { from, to } = range(input, MAX_HOMES_CALENDAR_DAYS)
-  const viewer: BatchQuery = { query: 'SELECT ? AS organization_id, ? AS user_id, NULL AS member_id, ? AS organization_wide', params: [access.organizationId, access.actorId, access.manage ? 1 : 0] }
-  return { from, to, ...stayCalendarOf(await executeBatch(db, stayCalendarQueries(viewer, { from, to, productId: null }), { operation: 'Read homes calendar' }), access.manage, { from, to }) }
+/** One home's calendar from the homes calendar read: what get_stay_calendar and a nights write answer with. */
+export async function readHomeCalendar(db: DbClient, access: StayAccess, input: { productId: string; from: unknown; to: unknown }): Promise<{ home: StayCalendarHome; nights: StayNight[]; stays: StayCalendarStay[] }> {
+  const { homes: [entry], stays } = await readStayCalendar(db, access, input)
+  return { home: entry!.home, nights: entry!.nights, stays }
 }
 
 /** What of a home the host calendar draws. */
@@ -1362,12 +1338,23 @@ export function stayCalendarQueries(membership: BatchQuery, input: { from: strin
   const homes: BatchQuery = { query: `SELECT c.product_id FROM product_stay_configs c WHERE c.organization_id = ${BATCH_VIEWER.organization}
     ${input.productId ? 'AND c.product_id = ?' : ''} AND ${scope.sql}`, params: input.productId ? [input.productId] : [] }
   // The calendar keeps the stays of the homes it shows, so it reads every booked record of the business.
-  const everyRecord: BatchQuery = { query: `SELECT organization_id, user_id, member_id, 1 AS organization_wide FROM (${membership.query})`, params: membership.params }
   return [
     ...stayHomeQueries(organization, input.productId, scope).map(query => withViewer(membership, query)),
-    withViewer(everyRecord, bookedRecordsInRange(BATCH_VIEWER, input)),
+    withViewer(businessWideViewer(membership), bookedRecordsInRange(BATCH_VIEWER, input)),
     ...homeNightsQueries(organization, homes, input.from, input.to, true).map(query => withViewer(membership, query)),
   ]
+}
+
+/** The stays among booked records that `keep` keeps and that hold a night of [from, to), as the calendar and the bookings list show them, earliest check-in first. */
+export function calendarStays(records: BookedRecordInRange[], manage: boolean, window: { from: string; to: string }, keep: (record: BookedRecordInRange) => boolean): Array<StayCalendarStay & { name: string }> {
+  return records.flatMap((record) => {
+    if (record.unit !== 'nights' || record.conversation_id === null || !keep(record)) return []
+    if (record.adults === null || record.children === null) throw new Error(`Stay ${record.id} has no party breakdown`)
+    const stay = { unit: 'nights' as const, booking_id: record.id, product_id: record.product_id, status: record.status,
+      guest_name: manage ? record.guest_name : stayGuestFirstName(record.guest_name), adults: record.adults, children: record.children,
+      check_in_date: bookingDay(record.starts_at, record.timezone), check_out_date: bookingDay(record.ends_at, record.timezone), ...(manage ? { channel: record.channel } : {}), name: record.product_name }
+    return staysOverlap(stay, window.from, window.to) ? [stay] : []
+  }).sort((a, b) => a.check_in_date.localeCompare(b.check_in_date) || a.booking_id.localeCompare(b.booking_id))
 }
 
 /** The host calendar from `stayCalendarQueries`' results. */
@@ -1376,14 +1363,7 @@ export function stayCalendarOf(results: Array<{ results: unknown[] }>, manage: b
   const homes = stayHomesFrom(rows!.results as Array<Record<string, unknown>>, prices!.results as Array<Price & { product_id: string }>)
   const nights = homeNightsFrom(homes, nightResults, window.from, window.to) as StayNight[][]
   const shown = new Set(homes.map(home => home.product_id))
-  const stays = (records!.results as BookedRecordInRange[]).flatMap((record): StayCalendarStay[] => {
-    if (record.unit !== 'nights' || record.conversation_id === null || !shown.has(record.product_id)) return []
-    if (record.adults === null || record.children === null) throw new Error(`Stay ${record.id} has no party breakdown`)
-    const stay: StayCalendarStay = { unit: 'nights', booking_id: record.id, product_id: record.product_id, status: record.status,
-      guest_name: manage ? record.guest_name : stayGuestFirstName(record.guest_name), adults: record.adults, children: record.children,
-      check_in_date: bookingDay(record.starts_at, record.timezone), check_out_date: bookingDay(record.ends_at, record.timezone), ...(manage ? { channel: record.channel } : {}) }
-    return staysOverlap(stay, window.from, window.to) ? [stay] : []
-  }).sort((a, b) => a.check_in_date.localeCompare(b.check_in_date) || a.booking_id.localeCompare(b.booking_id))
+  const stays = calendarStays(records!.results as BookedRecordInRange[], manage, window, record => shown.has(record.product_id)).map(({ name: _name, ...stay }) => stay)
   return {
     homes: homes.map((home, index) => ({ home: Object.fromEntries(STAY_CALENDAR_HOME_FIELDS.map(field => [field, home[field]])) as StayCalendarHome, nights: nights[index]! })),
     stays,
@@ -2507,7 +2487,7 @@ function nightAudit(home: StayHome, access: StayAccess, dates: readonly string[]
   }
 }
 
-export async function setStayNights(db: DbClient, env: StayMutationEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Stay[]; channel_push: SuccessfulChannelPush | null }> {
+export async function setStayNights(db: DbClient, env: StayMutationEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; from: unknown; to: unknown }): Promise<{ home: StayCalendarHome; nights: StayNight[]; stays: StayCalendarStay[]; channel_push: SuccessfulChannelPush | null }> {
   requireManager(access)
   const unknown = Object.keys(input).find(key => !['organization_id', 'product_id', 'from', 'to', 'weekdays', 'reset', 'closed', 'price_minor', 'price_change_percent', 'min_stay_arrival', 'max_stay', 'closed_to_arrival', 'closed_to_departure'].includes(key))
   if (unknown) fail(422, 'INVALID_STAY_FIELD', `${unknown} is not a night setting`, unknown)
@@ -2615,7 +2595,8 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
   const channelPush = await pushNights(db, env, access, home.product_id, ranges)
   return completeChannelPush(channelPush, { product_id: home.product_id, updated_at: now, ranges }, async () => {
     await publishStayInvalidation(env, { type: 'nights.changed', organization_id: access.organizationId, location_id: home.location_id, product_id: home.product_id, booking_id: null }, { updated_at: now })
-    return readStayCalendar(db, access, { productId: home.product_id, from, to })
+    // The home's calendar as the host Calendar reads it, after the write.
+    return readHomeCalendar(db, access, { productId: home.product_id, from, to })
   })
 }
 

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:bc8063b984a07a9cf233bebf134c53c1c30ef4a40b3923e3aa614b3b9cccf2bc",
-  "documentationFingerprint": "sha256:fc1b7ed359a76bb51e00dbd9c78b083b70d3e5b3cece51315d5092a2192ffdea",
+  "fingerprint": "sha256:6f47a82c8e4a414b23ac80d483c64a8b57f86d6e05332e819547511bf7a5186e",
+  "documentationFingerprint": "sha256:25fd0861f1b9b3ec646802f8eac3d6c1285317af55be4bd6307dd47fccdc50bf",
   "tools": [
     {
       "name": "add_organization_language",
@@ -64007,7 +64007,7 @@
     {
       "name": "get_stay_calendar",
       "title": "Get stay calendar",
-      "description": "Read every night of a date range at one home: availability, nightly price, booking restrictions and the stays holding those nights. Returns scheduling details; members read each stay as its dates, arrival time, guest first name and party. Owners and admins use get_product_booking for one booking’s contact and payment details, or get_product for the home’s photos and room groups.",
+      "description": "Read every night of a date range at one home: availability, nightly price, booking restrictions and the stays holding those nights. Returns scheduling details; each stay is its dates, status, guest and party; members read the guest’s first name and no channel. Owners and admins use get_product_booking for one booking’s contact and payment details, or get_product for the home’s photos and room groups.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -64089,21 +64089,51 @@
           "home": {
             "additionalProperties": false,
             "properties": {
-              "base_price_minor": {
+              "address": {
+                "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
+                "properties": {
+                  "address": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "country": {
+                    "pattern": "^[A-Z]{2}$",
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "zip_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "address",
+                  "city",
+                  "state",
+                  "country",
+                  "zip_code"
+                ],
                 "type": [
-                  "integer",
+                  "object",
                   "null"
                 ]
               },
-              "base_price_tax_behavior": {
-                "enum": [
-                  "unspecified",
-                  "inclusive",
-                  "exclusive",
-                  null
-                ],
+              "base_price_minor": {
                 "type": [
-                  "string",
+                  "integer",
                   "null"
                 ]
               },
@@ -64166,47 +64196,16 @@
                   "null"
                 ]
               },
-              "channel": {
-                "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
-                "properties": {
-                  "provider": {
-                    "enum": [
-                      "channex"
-                    ],
-                    "type": "string"
-                  },
-                  "status": {
-                    "enum": [
-                      "importing",
-                      "connected",
-                      "disconnected"
-                    ],
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "provider",
-                  "status"
+              "cancellation_policy": {
+                "description": "Policy shown to guests for stays under 28 nights. Null when the provider has not supplied one. New authored homes start on Flexible. It does not refund by itself.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  null
                 ],
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "check_in_end_time": {
-                "description": "The end of the check-in window, local HH:MM; null is a flexible end.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "check_in_time": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "check_out_time": {
                 "type": [
                   "string",
                   "null"
@@ -64220,12 +64219,17 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "location_id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "max_guests": {
-                "type": "integer"
+              "long_term_cancellation_policy": {
+                "description": "Policy shown to guests for stays of 28 nights or more. Null when the provider has not supplied one. New authored homes start on Firm Long Term.",
+                "enum": [
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "min_nights": {
                 "type": "integer"
@@ -64247,18 +64251,14 @@
               "product_id",
               "name",
               "internal_name",
-              "location_id",
               "timezone",
               "currency",
               "base_price_minor",
-              "base_price_tax_behavior",
-              "check_in_time",
-              "check_in_end_time",
-              "check_out_time",
-              "max_guests",
               "min_nights",
               "calendar_rules",
-              "channel"
+              "address",
+              "cancellation_policy",
+              "long_term_cancellation_policy"
             ],
             "type": "object"
           },
@@ -64379,187 +64379,71 @@
           },
           "stays": {
             "items": {
-              "anyOf": [
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "adults": {
-                      "type": "integer"
-                    },
-                    "channel": {
-                      "enum": [
-                        "airbnb",
-                        "vrbo",
-                        "booking_com",
-                        "direct"
-                      ],
-                      "type": "string"
-                    },
-                    "check_in_date": {
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                      "type": "string"
-                    },
-                    "check_out_date": {
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                      "type": "string"
-                    },
-                    "children": {
-                      "type": "integer"
-                    },
-                    "ends_at": {
-                      "description": "Checkout: an ISO instant at the home's checkout time, or the day alone when the home has no checkout time.",
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "guest_name": {
-                      "description": "The guest as their conversation names them; null for a channel conversation that names no one.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "infants": {
-                      "type": "integer"
-                    },
-                    "overbooked": {
-                      "type": "boolean"
-                    },
-                    "owner": {
-                      "enum": [
-                        "app",
-                        "channel"
-                      ],
-                      "type": "string"
-                    },
-                    "product_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "starts_at": {
-                      "description": "Check-in: an ISO instant at the home's check-in time (or the arrival the host recorded), or the day alone when the home has no check-in time.",
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "status": {
-                      "enum": [
-                        "pending",
-                        "confirmed",
-                        "cancelled"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "product_id",
-                    "channel",
-                    "owner",
-                    "status",
-                    "overbooked",
-                    "starts_at",
-                    "ends_at",
-                    "check_in_date",
-                    "check_out_date",
-                    "adults",
-                    "children",
-                    "infants",
-                    "guest_name"
-                  ],
-                  "type": "object"
+              "additionalProperties": false,
+              "properties": {
+                "adults": {
+                  "type": "integer"
                 },
-                {
-                  "additionalProperties": false,
-                  "description": "A member’s view of a stay at a home they look after: dates, arrival time, the guest’s first name and party. Owners and admins read the whole stay.",
-                  "properties": {
-                    "adults": {
-                      "type": "integer"
-                    },
-                    "check_in_date": {
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                      "type": "string"
-                    },
-                    "check_out_date": {
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                      "type": "string"
-                    },
-                    "children": {
-                      "type": "integer"
-                    },
-                    "ends_at": {
-                      "description": "Checkout: an ISO instant at the home's checkout time, or the day alone when the home has no checkout time.",
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "guest_name": {
-                      "description": "The guest as their conversation names them; null for a channel conversation that names no one.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "infants": {
-                      "type": "integer"
-                    },
-                    "location_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "no_show_at": {
-                      "description": "When the host recorded that the guest never arrived; null otherwise.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "product_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "starts_at": {
-                      "description": "Check-in: an ISO instant at the home's check-in time (or the arrival the host recorded), or the day alone when the home has no check-in time.",
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "status": {
-                      "enum": [
-                        "pending",
-                        "confirmed",
-                        "cancelled"
-                      ],
-                      "type": "string"
-                    },
-                    "timezone": {
-                      "minLength": 1,
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "product_id",
-                    "location_id",
-                    "timezone",
-                    "status",
-                    "starts_at",
-                    "ends_at",
-                    "check_in_date",
-                    "check_out_date",
-                    "adults",
-                    "children",
-                    "infants",
-                    "guest_name",
-                    "no_show_at"
+                "booking_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "channel": {
+                  "description": "Where the stay was booked; owners and admins only.",
+                  "enum": [
+                    "airbnb",
+                    "vrbo",
+                    "booking_com",
+                    "direct"
                   ],
-                  "type": "object"
+                  "type": "string"
+                },
+                "check_in_date": {
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                  "type": "string"
+                },
+                "check_out_date": {
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                  "type": "string"
+                },
+                "children": {
+                  "type": "integer"
+                },
+                "guest_name": {
+                  "description": "The guest as their conversation names them; a member reads the first name.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "product_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "pending",
+                    "confirmed",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                },
+                "unit": {
+                  "const": "nights"
                 }
-              ]
+              },
+              "required": [
+                "unit",
+                "booking_id",
+                "product_id",
+                "status",
+                "guest_name",
+                "adults",
+                "children",
+                "check_in_date",
+                "check_out_date"
+              ],
+              "type": "object"
             },
             "type": "array"
           }
@@ -100159,21 +100043,51 @@
           "home": {
             "additionalProperties": false,
             "properties": {
-              "base_price_minor": {
+              "address": {
+                "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
+                "properties": {
+                  "address": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "country": {
+                    "pattern": "^[A-Z]{2}$",
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "zip_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "address",
+                  "city",
+                  "state",
+                  "country",
+                  "zip_code"
+                ],
                 "type": [
-                  "integer",
+                  "object",
                   "null"
                 ]
               },
-              "base_price_tax_behavior": {
-                "enum": [
-                  "unspecified",
-                  "inclusive",
-                  "exclusive",
-                  null
-                ],
+              "base_price_minor": {
                 "type": [
-                  "string",
+                  "integer",
                   "null"
                 ]
               },
@@ -100236,47 +100150,16 @@
                   "null"
                 ]
               },
-              "channel": {
-                "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
-                "properties": {
-                  "provider": {
-                    "enum": [
-                      "channex"
-                    ],
-                    "type": "string"
-                  },
-                  "status": {
-                    "enum": [
-                      "importing",
-                      "connected",
-                      "disconnected"
-                    ],
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "provider",
-                  "status"
+              "cancellation_policy": {
+                "description": "Policy shown to guests for stays under 28 nights. Null when the provider has not supplied one. New authored homes start on Flexible. It does not refund by itself.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  null
                 ],
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "check_in_end_time": {
-                "description": "The end of the check-in window, local HH:MM; null is a flexible end.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "check_in_time": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "check_out_time": {
                 "type": [
                   "string",
                   "null"
@@ -100290,12 +100173,17 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "location_id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "max_guests": {
-                "type": "integer"
+              "long_term_cancellation_policy": {
+                "description": "Policy shown to guests for stays of 28 nights or more. Null when the provider has not supplied one. New authored homes start on Firm Long Term.",
+                "enum": [
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "min_nights": {
                 "type": "integer"
@@ -100317,18 +100205,14 @@
               "product_id",
               "name",
               "internal_name",
-              "location_id",
               "timezone",
               "currency",
               "base_price_minor",
-              "base_price_tax_behavior",
-              "check_in_time",
-              "check_in_end_time",
-              "check_out_time",
-              "max_guests",
               "min_nights",
               "calendar_rules",
-              "channel"
+              "address",
+              "cancellation_policy",
+              "long_term_cancellation_policy"
             ],
             "type": "object"
           },
@@ -100449,187 +100333,71 @@
           },
           "stays": {
             "items": {
-              "anyOf": [
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "adults": {
-                      "type": "integer"
-                    },
-                    "channel": {
-                      "enum": [
-                        "airbnb",
-                        "vrbo",
-                        "booking_com",
-                        "direct"
-                      ],
-                      "type": "string"
-                    },
-                    "check_in_date": {
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                      "type": "string"
-                    },
-                    "check_out_date": {
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                      "type": "string"
-                    },
-                    "children": {
-                      "type": "integer"
-                    },
-                    "ends_at": {
-                      "description": "Checkout: an ISO instant at the home's checkout time, or the day alone when the home has no checkout time.",
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "guest_name": {
-                      "description": "The guest as their conversation names them; null for a channel conversation that names no one.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "infants": {
-                      "type": "integer"
-                    },
-                    "overbooked": {
-                      "type": "boolean"
-                    },
-                    "owner": {
-                      "enum": [
-                        "app",
-                        "channel"
-                      ],
-                      "type": "string"
-                    },
-                    "product_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "starts_at": {
-                      "description": "Check-in: an ISO instant at the home's check-in time (or the arrival the host recorded), or the day alone when the home has no check-in time.",
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "status": {
-                      "enum": [
-                        "pending",
-                        "confirmed",
-                        "cancelled"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "product_id",
-                    "channel",
-                    "owner",
-                    "status",
-                    "overbooked",
-                    "starts_at",
-                    "ends_at",
-                    "check_in_date",
-                    "check_out_date",
-                    "adults",
-                    "children",
-                    "infants",
-                    "guest_name"
-                  ],
-                  "type": "object"
+              "additionalProperties": false,
+              "properties": {
+                "adults": {
+                  "type": "integer"
                 },
-                {
-                  "additionalProperties": false,
-                  "description": "A member’s view of a stay at a home they look after: dates, arrival time, the guest’s first name and party. Owners and admins read the whole stay.",
-                  "properties": {
-                    "adults": {
-                      "type": "integer"
-                    },
-                    "check_in_date": {
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                      "type": "string"
-                    },
-                    "check_out_date": {
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                      "type": "string"
-                    },
-                    "children": {
-                      "type": "integer"
-                    },
-                    "ends_at": {
-                      "description": "Checkout: an ISO instant at the home's checkout time, or the day alone when the home has no checkout time.",
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "guest_name": {
-                      "description": "The guest as their conversation names them; null for a channel conversation that names no one.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "infants": {
-                      "type": "integer"
-                    },
-                    "location_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "no_show_at": {
-                      "description": "When the host recorded that the guest never arrived; null otherwise.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "product_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "starts_at": {
-                      "description": "Check-in: an ISO instant at the home's check-in time (or the arrival the host recorded), or the day alone when the home has no check-in time.",
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "status": {
-                      "enum": [
-                        "pending",
-                        "confirmed",
-                        "cancelled"
-                      ],
-                      "type": "string"
-                    },
-                    "timezone": {
-                      "minLength": 1,
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "product_id",
-                    "location_id",
-                    "timezone",
-                    "status",
-                    "starts_at",
-                    "ends_at",
-                    "check_in_date",
-                    "check_out_date",
-                    "adults",
-                    "children",
-                    "infants",
-                    "guest_name",
-                    "no_show_at"
+                "booking_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "channel": {
+                  "description": "Where the stay was booked; owners and admins only.",
+                  "enum": [
+                    "airbnb",
+                    "vrbo",
+                    "booking_com",
+                    "direct"
                   ],
-                  "type": "object"
+                  "type": "string"
+                },
+                "check_in_date": {
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                  "type": "string"
+                },
+                "check_out_date": {
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                  "type": "string"
+                },
+                "children": {
+                  "type": "integer"
+                },
+                "guest_name": {
+                  "description": "The guest as their conversation names them; a member reads the first name.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "product_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "pending",
+                    "confirmed",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                },
+                "unit": {
+                  "const": "nights"
                 }
-              ]
+              },
+              "required": [
+                "unit",
+                "booking_id",
+                "product_id",
+                "status",
+                "guest_name",
+                "adults",
+                "children",
+                "check_in_date",
+                "check_out_date"
+              ],
+              "type": "object"
             },
             "type": "array"
           }
