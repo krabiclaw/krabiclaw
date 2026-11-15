@@ -43,6 +43,13 @@
       "when": 1794638164396,
       "tag": "0005_index_support_conversation_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794721699590,
+      "tag": "0006_drop_content_documents_links_org_unique",
+      "breakpoints": true
     }
   ]
 }
