@@ -49,7 +49,7 @@ function slotRead(organizationId: string, products: BatchQuery, request: Availab
 async function publicSessions(calendar: SlotCalendar, product: SlotProduct, request: AvailabilityRequest, now: Date) {
   const { schedule } = calendar
   const zones = [...schedule.locations.values()].map(location => location.timezone)
-  if (schedule.config.held_online && schedule.provider && typeof request.requested !== 'string') zones.push(schedule.provider.timezone)
+  if (schedule.config.held_online && schedule.provider && typeof request.locationId !== 'string') zones.push(schedule.provider.timezone)
   if (request.requested !== undefined && (request.requested === 'online' ? zones.length === 0 : !schedule.locations.has(request.requested))) {
     throw new HTTPError({ statusCode: 404, statusMessage: 'This product is not on sale at that location' })
   }
