@@ -95,7 +95,7 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
   })),
   organizationTool({ name: 'request_product_booking_change', outputSchema: { type: 'object', anyOf: [changeResult, { ...nightBookingReceipt,
     properties: { ...nightBookingReceipt.properties, scheduled_message_id: text }, required: [...nightBookingReceipt.required, 'scheduled_message_id'] }] }, domain: 'bookings', minimumRole: 'member',
-    description: 'Propose a different session or party size to the guest, or apply the move now when allowed. Legal consultation time changes require client acceptance. Give product_id for a table move to a different offering, or to move a stay to another home. For a stay, apply must be true; the guest receives the new arrival instructions.',
+    description: 'Propose a different session or party size to the guest, or apply the move now when allowed. A proposal emails the guest a link to accept or decline and the booking stays as it is until they accept; send no separate message about it. Legal consultation time changes require client acceptance. Give product_id for a table move to a different offering, or to move a stay to another home. For a stay, apply must be true; the guest receives the new arrival instructions.',
     inputSchema: { booking_id: bookingId, product_session_id: text, product_id: text, party_size: { type: 'integer', minimum: 1, maximum: 99 }, version,
       apply: { type: 'boolean' }, idempotency_key: key, anyOf: [{ required: ['product_session_id'] }, { required: ['product_id', 'apply'], properties: { apply: { const: true } } }] },
     required: ['booking_id', 'version', 'idempotency_key'],
