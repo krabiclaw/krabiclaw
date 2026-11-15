@@ -37,6 +37,8 @@
           <NuxtLink
             :to="{ path: threadRoute(thread), query: route.query }"
             :data-thread-row="thread.id"
+            @pointerenter="void prefetch(thread.id)"
+            @focus="void prefetch(thread.id)"
             :aria-current="thread.id === openThreadId ? 'page' : undefined"
             class="relative flex items-start gap-4 rounded-xl py-4 pl-7 pr-3 transition duration-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             :class="thread.id === openThreadId ? 'bg-elevated' : 'hover:bg-elevated/60'"
@@ -249,6 +251,11 @@ const { data, pending, status, error: threadsError, refresh, clear } = await use
 
 const page = computed(() => rowsKey.value === listKey.value ? data.value ?? null : null)
 const threads = computed(() => page.value?.threads ?? [])
+// The first rows are the likeliest to be opened; any other row is read when the pointer or focus reaches it.
+const prefetch = useConversationPrefetch(props.personalScope)
+watch([threads, realtime.status], ([rows]) => {
+  for (const thread of rows.slice(0, 5)) if (thread.id !== openThreadId.value) void prefetch(thread.id)
+}, { immediate: true })
 
 async function loadMore() {
   const before = data.value

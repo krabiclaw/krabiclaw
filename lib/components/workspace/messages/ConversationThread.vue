@@ -102,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { isConversationEntry, isConversationOperation } from './guest-thread-client'
+import { isConversationEntriesPage, isConversationEntry, isConversationOperation } from './guest-thread-client'
 import type { ConversationEntriesPage, ConversationEntry, ConversationPage } from '~/shared/messages-contract'
 import type { MessageIdentity } from '~/shared/dashboard-invalidations'
 
@@ -519,6 +519,36 @@ function resetTranscriptState() {
   suggestions.value = []
 }
 
+/**
+ * A written message arrives with the end of this reader's transcript. It joins
+ * the head when the head already ends at the message before it; any other
+ * head is read again.
+ */
+function appendWrittenTail(tail: ConversationEntriesPage, written: MessageIdentity): boolean {
+  if (!isConversationEntriesPage(tail)) throw new Error('A written message arrived with an invalid transcript tail')
+  const head = data.value
+  if (!head || pending.value || sending.value || reconciling || tail.conversation_id !== props.threadId) return false
+  const messages = tail.entries.filter(entry => entry.type !== 'day')
+  const arrived = messages.at(-1)
+  if (arrived?.type !== 'message' || arrived.id !== written.id || arrived.sequence !== written.sequence) return false
+  const last = head.entries.findLast(entry => entry.type !== 'day')
+  if (last?.id === arrived.id) return true
+  if (last?.id !== messages.at(-2)?.id) return false
+  // With older messages before it, the tail's first message was marked without its predecessor.
+  const anchor = tail.page.before === null ? messages[0]! : messages[1]
+  if (!anchor) return false
+  const from = anchor.id === arrived.id ? head.entries.length : head.entries.findIndex(entry => entry.id === anchor.id)
+  if (from < 0) return false
+  const at = tail.entries.findIndex(entry => entry.id === anchor.id)
+  const day = anchor.id === arrived.id && tail.entries[at - 1]?.type === 'day' ? at - 1 : at
+  data.value = {
+    ...head,
+    entries: [...head.entries.slice(0, from), ...tail.entries.slice(day)],
+    page: { ...head.page, oldest: head.page.oldest ?? arrived.sequence, newest: Math.max(head.page.newest ?? 0, arrived.sequence) },
+  }
+  return true
+}
+
 watch(realtime.accessEnded, clearAccess, { flush: 'sync' })
 watch(realtime.event, event => {
   if (!event) return
@@ -532,6 +562,7 @@ watch(realtime.event, event => {
   }
   if ((event.type !== 'MESSAGE_CREATE' && event.type !== 'MESSAGE_UPDATE') || event.scheduled || event.conversation_id !== props.threadId) return
   if (event.type === 'MESSAGE_CREATE' && event.message) {
+    if (event.tail && appendWrittenTail(event.tail, event.message)) return
     deferredCreates.push(event.message)
     void drainThreadChanges()
     return

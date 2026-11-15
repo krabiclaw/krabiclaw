@@ -140,6 +140,7 @@ function presentEntries(
 
 /** One authorization snapshot, indexed window and roster for web, native and MCP. */
 export async function loadConversationPage(db: DbClient, viewer: TranscriptViewer, window: ConversationWindow & { before: null }, now?: Date): Promise<ConversationPage>
+export async function loadConversationPage(db: DbClient, viewer: TranscriptViewer, window: ConversationWindow & { before: number }, now?: Date): Promise<ConversationEntriesPage>
 export async function loadConversationPage(db: DbClient, viewer: TranscriptViewer, window: ConversationWindow, now?: Date): Promise<ConversationPage | ConversationEntriesPage>
 export async function loadConversationPage(
   db: DbClient, { conversationId, userId, organizationId }: TranscriptViewer, window: ConversationWindow, now = new Date(),

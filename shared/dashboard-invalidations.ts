@@ -1,3 +1,5 @@
+import type { ConversationEntriesPage } from './messages-contract'
+
 interface DashboardInvalidationBase {
   event_id: string
   organization_id: string
@@ -22,6 +24,12 @@ export interface ConversationEvent extends DashboardInvalidationBase {
   location_id: string | null
   team: boolean
   message?: MessageIdentity
+  /**
+   * The end of the recipient's own transcript through the written message, as
+   * Discord's MESSAGE_CREATE carries its message. The gateway reads it for each
+   * recipient; a publisher never sets it.
+   */
+  tail?: ConversationEntriesPage
   /** Only the scheduled outbox changed. There is no new or updated chat entry. */
   scheduled?: true
 }
@@ -85,5 +93,7 @@ export function isDashboardInvalidation(value: unknown): value is DashboardInval
   return (value.type === 'MESSAGE_CREATE' || value.type === 'MESSAGE_UPDATE')
     && typeof value.conversation_id === 'string' && Boolean(value.conversation_id) && typeof value.team === 'boolean'
     && (value.message === undefined || isMessageIdentity(value.message))
+    && (value.tail === undefined || (value.type === 'MESSAGE_CREATE' && value.message !== undefined && isRecord(value.tail)
+      && value.tail.conversation_id === value.conversation_id && Array.isArray(value.tail.entries) && isRecord(value.tail.page)))
     && (value.scheduled === undefined || (value.scheduled === true && value.type === 'MESSAGE_UPDATE' && !value.team && value.message === undefined))
 }
