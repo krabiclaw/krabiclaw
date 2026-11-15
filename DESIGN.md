@@ -117,7 +117,7 @@ The destinations are files under `O`, and their URLs are their files:
 | --- | --- |
 | Website | `O/website` — Pages, Blog, Posts, Reviews, Q&A, Brand, Preferences, Website booking |
 | Preferences | `O/website/preferences` and its leaves — Status, Languages, Domains, Currency |
-| Pages | `O/website/pages`, a page `O/website/pages/:pageId`, the Links page `O/website/pages/links` |
+| Pages | `O/website/pages`, a page `O/website/pages/:pageId` |
 | Blog | `O/website/blog` |
 | Reviews | `O/website/reviews` |
 | Q&A | `O/website/qa` |
@@ -1230,8 +1230,8 @@ Nuxt's error page. A guard that has to run again when the route changes belongs
 in a `watchEffect`, because moving between leaves reuses the component.
 
 A record the list does not contain is missing state, not an empty draft:
-`links/items/<unknown-id>` rendering a blank Link editor, with a Save that would
-write the list back unchanged, is the failure this rule exists to prevent.
+a leaf editor rendering a blank editor with a Save that would write the list back
+unchanged is the failure this rule exists to prevent.
 
 A missing record and a failed request are not the same event and do not get the
 same answer. A record that is not there is not a page, so it 404s. A request

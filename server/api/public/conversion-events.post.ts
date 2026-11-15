@@ -125,20 +125,6 @@ export default defineHandler(async (event) => {
       if (!variant) return jsonResponse({ error: 'Variant not found' }, { status: 404 })
       variantId = variant.id
     }
-  } else if (eventName === 'link_click') {
-    stage = 'external_handoff'
-    entityId = cleanString(body.link_item_id, 120) || null
-    if (!entityId) return jsonResponse({ error: 'link_item_id is required' }, { status: 400 })
-    const link = await queryFirst<{ id: string; label: string; destination: string; sort_order: number; page_path: string }>(db, `SELECT b.id, (b.data_json ->> '$.label') AS label, (source.data_json ->> '$.url') AS destination, source.position AS sort_order, d.path AS page_path
-      FROM content_blocks b JOIN content_documents d ON d.id = b.document_id
-      JOIN content_documents root ON root.id = COALESCE(d.root_id,d.id)
-      JOIN content_blocks source ON source.id = COALESCE(b.source_block_id,b.id)
-      WHERE b.id = ? AND d.organization_id = ? AND b.type = 'cta' AND root.kind = 'page' AND root.row_role = 'root'
-        AND (root.metadata_json ->> '$.recipe') = 'links' AND (source.data_json ->> '$.status') = 'active' LIMIT 1`, [entityId, organizationId])
-    const host = link ? destinationHost(link.destination) : null
-    if (!link || !host) return jsonResponse({ error: 'Link item not found' }, { status: 404 })
-    entityType = 'content_block'; ctaDestination = host; pageType = 'links'; pagePath = link.page_path
-    metadata = { link_label: link.label, position: Number(link.sort_order) + 1, destination_hostname: host }
   } else if (eventName === 'donation_click') {
     stage = 'external_handoff'
     const documentId = cleanString(body.document_id, 120)

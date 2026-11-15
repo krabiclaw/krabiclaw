@@ -111,7 +111,7 @@ test.describe('dashboard pane hierarchy', () => {
   test('each Menu destination is a root at its own URL, and Website content nests under Website', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/menu`)
-    const segments = ['website/pages', 'website/blog', 'website/reviews', 'website/qa', 'website/brand', 'website/pages/links', 'website/posts', 'locations', 'team', 'products', 'products/menu']
+    const segments = ['website/pages', 'website/blog', 'website/reviews', 'website/qa', 'website/brand', 'website/posts', 'locations', 'team', 'products', 'products/menu']
     const resolved = await page.evaluate(({ org, segments }) => {
       const router = (document.querySelector('#__nuxt') as Element & {
         __vue_app__: { config: { globalProperties: { $router: { resolve: (path: string) => { path: string; matched: Array<{ path: string; meta: { tab?: unknown; back?: unknown } }> } } } } }
@@ -134,7 +134,6 @@ test.describe('dashboard pane hierarchy', () => {
       'website/reviews': { path: `${ORG}/website/reviews`, levels: [`${o}/website`, `${o}/website/reviews`], ...website },
       'website/qa': { path: `${ORG}/website/qa`, levels: [`${o}/website`, `${o}/website/qa`], ...website },
       'website/brand': { path: `${ORG}/website/brand`, levels: [`${o}/website`, `${o}/website/brand`], ...website },
-      'website/pages/links': { path: `${ORG}/website/pages/links`, levels: [`${o}/website`, `${o}/website/pages`, `${o}/website/pages/links`], ...website },
       'website/posts': { path: `${ORG}/website/posts`, levels: [`${o}/website`, `${o}/website/posts`], ...website },
       'locations': { path: `${ORG}/locations`, levels: [`${o}/locations`], ...website },
       'team': { path: `${ORG}/team`, levels: [`${o}/team`], ...website },
@@ -1945,35 +1944,38 @@ test.describe('dashboard pane hierarchy', () => {
 
   test('mobile leaf drawers retain their parent and discard drafts on Close and Cancel', async ({ page }) => {
     test.setTimeout(90_000)
-    const links = `${ORG}/website/pages/links`
-    const endpoint = `/api/editor/organizations/${seededTenant('restaurant').organizationId}/links-page`
+    const organizationId = seededTenant('restaurant').organizationId
+    const endpoint = `/api/editor/organizations/${organizationId}/products`
     const beforeResponse = await page.request.get(endpoint)
     expect(beforeResponse.status(), await beforeResponse.text()).toBe(200)
-    const before = await beforeResponse.json() as { page: { title: string }; items: unknown[] }
-    expect(before.page.title).not.toBe('')
+    const products = (await beforeResponse.json() as { products: Array<{ id: string; name: string; kind: string }> }).products
+    const product = products.find(row => row.kind === 'dish')!
+    expect(product).toBeDefined()
+    expect(product.name).not.toBe('')
+    const productUrl = `${ORG}/products/${product.id}`
     const writes: string[] = []
     page.on('request', request => {
-      if (new URL(request.url()).pathname === endpoint && request.method() !== 'GET') writes.push(request.method())
+      if (new URL(request.url()).pathname.startsWith(`/api/editor/organizations/${organizationId}/`) && request.method() !== 'GET') writes.push(`${request.method()} ${new URL(request.url()).pathname}`)
     })
-    const parent = page.locator('#dashboard-panel-organization-links')
-    const leaf = page.locator('#dashboard-panel-organization-links-title')
-    const dialog = page.getByRole('dialog', { name: 'Title', exact: true })
-    const input = leaf.getByRole('textbox', { name: 'Links page title', exact: true })
+    const parent = page.locator('#dashboard-panel-product')
+    const leaf = page.locator('#dashboard-panel-product-name')
+    const dialog = page.getByRole('dialog', { name: 'Name', exact: true })
+    const input = leaf.getByRole('textbox', { name: 'Name', exact: true })
 
     for (const viewport of [PHONE, NARROW]) {
       await page.setViewportSize(viewport)
-      await open(page, links)
+      await open(page, productUrl)
       // Close and Cancel are the drawer's own controls; Escape, the backdrop and the swipe are the drawer component's.
       for (const dismissal of ['Close', 'Cancel'] as const) {
         const parentBefore = await parent.boundingBox()
         expect(parentBefore).not.toBeNull()
-        await parent.getByRole('link', { name: /^Title/ }).click()
-        await expect(page).toHaveURL(`${links}/title`)
+        await parent.getByRole('link', { name: /^Name/ }).click()
+        await expect(page).toHaveURL(`${productUrl}/name`)
         await expect(dialog).toBeVisible()
         await expect(parent).toBeVisible()
         expect((await parent.boundingBox())!.height).toBeCloseTo(parentBefore!.height, 1)
         await expect(leaf).toHaveCount(1)
-        await expect(input).toHaveValue(before.page.title)
+        await expect(input).toHaveValue(product.name)
         await expect.poll(async () => {
           const parentBox = await parent.boundingBox()
           const drawerBox = await dialog.boundingBox()
@@ -1998,20 +2000,19 @@ test.describe('dashboard pane hierarchy', () => {
         } else {
           await leaf.getByRole('button', { name: 'Cancel', exact: true }).click()
         }
-        await expect(page).toHaveURL(links)
+        await expect(page).toHaveURL(productUrl)
         await expect(leaf).toHaveCount(0)
         await expect(page.getByRole('dialog')).toHaveCount(0)
-        await expectPanes(page, ['organization-links'])
-        await expect(parent.getByRole('link', { name: /^Title/ })).toContainText(before.page.title)
+        await expectPanes(page, ['product'])
+        await expect(parent.getByRole('link', { name: /^Name/ })).toContainText(product.name)
         if (viewport.width < 768) await expect(page.getByTestId('dashboard-mobile-nav')).toBeVisible()
       }
     }
     expect(writes).toEqual([])
     const afterResponse = await page.request.get(endpoint)
     expect(afterResponse.status(), await afterResponse.text()).toBe(200)
-    const after = await afterResponse.json() as typeof before
-    expect(after.page.title).toBe(before.page.title)
-    expect(after.items).toEqual(before.items)
+    const afterProduct = ((await afterResponse.json() as { products: Array<{ id: string; name: string }> }).products).find(row => row.id === product.id)
+    expect(afterProduct?.name).toBe(product.name)
   })
 
   test('a photo library dialog stays above its leaf drawer and Escape dismisses only the top level', async ({ page }) => {
@@ -2273,13 +2274,18 @@ test.describe('dashboard pane hierarchy', () => {
   })
 
   test('a leaf URL reloads its drawer and resizing keeps one editor with its draft', async ({ page }) => {
-    const links = `${ORG}/website/pages/links`
+    const organizationId = seededTenant('restaurant').organizationId
+    const pagesRead = await page.request.get(`/api/editor/organizations/${organizationId}/pages`)
+    expect(pagesRead.status(), await pagesRead.text()).toBe(200)
+    const tenantPage = (await pagesRead.json() as { pages: Array<{ id: string; title: string }> }).pages.find(row => row.title !== 'Home')!
+    expect(tenantPage).toBeDefined()
+    const pageUrl = `${ORG}/website/pages/${tenantPage.id}`
     const query = `?location_id=${seededTenant('restaurant').locations.brooklyn.id}`
-    const leafUrl = `${links}/title${query}`
-    const parent = page.locator('#dashboard-panel-organization-links')
-    const leaf = page.locator('#dashboard-panel-organization-links-title')
+    const leafUrl = `${pageUrl}/title${query}`
+    const parent = page.locator('#dashboard-panel-organization-page')
+    const leaf = page.locator('#dashboard-panel-organization-page-title')
     const dialog = page.getByRole('dialog', { name: 'Title', exact: true })
-    const input = page.getByRole('textbox', { name: 'Links page title', exact: true })
+    const input = page.getByRole('textbox', { name: 'Title', exact: true })
     await page.setViewportSize(PHONE)
     await open(page, leafUrl)
     await expect(dialog).toBeVisible()
@@ -2297,7 +2303,7 @@ test.describe('dashboard pane hierarchy', () => {
 
     await page.setViewportSize(WIDE)
     await expect(page.getByRole('dialog')).toHaveCount(0)
-    await expectPanes(page, ['organization-links', 'organization-links-title'])
+    await expectPanes(page, ['organization-page', 'organization-page-title'])
     await expect(input).toHaveCount(1)
     await expect(input).toHaveValue(draft)
     await expect(leaf).toHaveCount(1)
@@ -2322,11 +2328,11 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(page.getByRole('button', { name: 'Save', exact: true })).toHaveCount(1)
       await expect(page).toHaveURL(leafUrl)
     }
-    await expect(leaf.getByTestId('dashboard-navbar-close')).toHaveAttribute('href', `${links}${query}`)
+    await expect(leaf.getByTestId('dashboard-navbar-close')).toHaveAttribute('href', `${pageUrl}${query}`)
     await leaf.getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(page).toHaveURL(`${links}${query}`)
+    await expect(page).toHaveURL(`${pageUrl}${query}`)
     await expect(page.getByRole('dialog')).toHaveCount(0)
-    await expectPanes(page, ['organization-links'])
+    await expectPanes(page, ['organization-page'])
     await expect(parent.getByRole('link', { name: /^Title/ })).toContainText(savedTitle)
   })
 

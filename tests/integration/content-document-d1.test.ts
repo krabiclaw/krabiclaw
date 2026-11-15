@@ -71,7 +71,7 @@ test('document scopes, translations, block ownership and concurrent edits persis
       blocks: [{ id: 'body', type: 'markdown', data: { markdown: 'Cross-document overwrite', editor_mode: 'rich' } }] }))
     await db.prepare("INSERT INTO media_assets (id,organization_id,kind,provider,source) VALUES ('shared-image','one','image','cloudflare_r2','uploaded')").run()
     const sourceLinks = await createContentDocumentWithBlocks(db, { id: 'links', organizationId: 'one',
-      kind: 'page', rowRole: 'root', locale: 'en', title: 'Links', path: '/links', metadata: { recipe: 'links', page_type: 'custom' } },
+      kind: 'page', rowRole: 'root', locale: 'en', title: 'Links', path: '/links', metadata: { recipe: 'custom', page_type: 'custom' } },
     [{ id: 'link-a', type: 'cta', data: { label: 'A', url: '/a' } }, { id: 'link-b', type: 'cta', data: { label: 'B', url: '/b' } }])
     const translatedLinks = await createContentDocumentWithBlocks(db, { id: 'links-th', organizationId: 'one',
       kind: 'page', rowRole: 'representation', rootId: sourceLinks.document.id, locale: 'th', title: 'Translated links', path: '/links' },

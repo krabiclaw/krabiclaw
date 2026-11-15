@@ -133,10 +133,6 @@ export function useOrganizationConversionTracking() {
     track({ event_name: 'donation_click', stage: 'external_handoff', document_id: documentId, page_path: pagePath, page_type: 'donate', tier_label: tierLabel, tier_amount: tierAmount })
   }
 
-  function trackLinkClick(linkItemId: string) {
-    track({ event_name: 'link_click', stage: 'external_handoff', link_item_id: linkItemId, page_type: 'links', page_path: '/links' })
-  }
-
   function trackProductOrder(locationId: string | null, productId: string, pagePath?: string) {
     track({ event_name: 'product_order_external_click', stage: 'external_handoff', location_id: locationId, product_id: productId, page_type: 'product', page_path: pagePath })
   }
@@ -151,11 +147,10 @@ export function useOrganizationConversionTracking() {
   }
 
   // The destination is resolved server-side from the organization's current announcement
-  // config, the same way link_click resolves its host from the stored link — the client never
-  // asserts which URL it actually reached.
+  // config — the client never asserts which URL it actually reached.
   function trackAnnouncementCtaClick(pagePath: string) {
     track({ event_name: 'announcement_cta_click', stage: 'external_handoff', page_path: pagePath })
   }
 
-  return { track, pageEventId, trackProductView, trackCheckoutStart, trackConsultationClick, mirrorSubmission, trackDonationClick, trackLinkClick, trackProductOrder, trackPhoneClick, trackAnnouncementView, trackAnnouncementCtaClick }
+  return { track, pageEventId, trackProductView, trackCheckoutStart, trackConsultationClick, mirrorSubmission, trackDonationClick, trackProductOrder, trackPhoneClick, trackAnnouncementView, trackAnnouncementCtaClick }
 }

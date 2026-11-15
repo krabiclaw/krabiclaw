@@ -159,10 +159,6 @@ export function brandEditorPath(orgSlug: string): string {
   return `${organizationBase(orgSlug)}/website/brand`
 }
 
-export function linksEditorPath(orgSlug: string): string {
-  return `${organizationBase(orgSlug)}/website/pages/links`
-}
-
 export function postEditorPath(orgSlug: string, postId: string, locationId?: string | null): string {
   return scopedTo(`${organizationBase(orgSlug)}/website/posts/${encodeURIComponent(postId)}`, locationId)
 }

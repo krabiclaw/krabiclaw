@@ -56,7 +56,6 @@ import { setPublicConsultationMode } from '~/server/utils/professional-services'
 import { isLodgingConfirmationMode } from '~/shared/lodging-booking'
 import { loadSettingsPayload, updateOrganizationSettingsFields } from '~/server/utils/organization-settings'
 import type { UpdateOrganizationSettingsRequest } from '~/server/types/organization'
-import { getLinksPage, OrganizationLinksValidationError, upsertLinksPage } from '~/server/utils/links-page'
 import { blankBlogLocalizedText, blogLocalizedTextFields, initialBlogEditorBlocks, type EditorContentBlock, readBlogLocalizedText, writeBlogLocalizedText } from '~/utils/blog-editor'
 import { PRICING_CALCULATOR_COLUMNS, pricingCalculatorConfig, pricingCalculatorRows, updatePricingCalculator } from '~/utils/pricing-calculator'
 import { SITE_PALETTE_MODES, SITE_PALETTE_ROLES, STARTER_PALETTES, type SitePalettePatch } from '~/shared/site-palette'
@@ -722,7 +721,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         { id: 'translate-pages', label: 'Translate pages', native: 'pages', query: { locale: language.locale } },
         { id: 'translate-catalog', label: 'Translate Catalog', native: 'catalog-translation', query: { locale: language.locale } },
         { id: 'translate-locations', label: organization.vertical === 'service' ? 'Translate offices' : 'Translate locations', native: 'location-translations', query: { locale: language.locale } },
-        ...([['social_post', 'Posts'], ['article', 'Blog'], ['qa', 'Q&A'], ['links', 'Links']] as const).map(([kind, label]) => ({
+        ...([['social_post', 'Posts'], ['article', 'Blog'], ['qa', 'Q&A']] as const).map(([kind, label]) => ({
           id: `translate-${kind}`, label: `Translate ${label}`, native: 'document-translations', query: { locale: language.locale, kind },
         })),
         { id: 'translate-categories', label: 'Translate blog categories', native: 'category-translations', query: { locale: language.locale } },
@@ -807,7 +806,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
   if (['document-translations', 'document-translation', 'document-translation-languages'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Content not found')
     const kind = query.kind
-    if (kind !== 'article' && kind !== 'social_post' && kind !== 'qa' && kind !== 'links') return missing('Content kind not found')
+    if (kind !== 'article' && kind !== 'social_post' && kind !== 'qa') return missing('Content kind not found')
     if (view === 'document-translation-languages') {
       if (answer) return invalid('Choose a language')
       const documentId = typeof query.document_id === 'string' ? query.document_id : missing('Content not found')
@@ -818,16 +817,14 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     }
     const language = await assertOrganizationLanguage(db, organization.id, query.locale)
     if (language.source) return missing('Choose an additional language')
-    const links = kind === 'links' ? await getLinksPage(db, organization.id) : null
-    const records = links ? links.page ? [{ id: links.page.id, title: links.page.title, summary: null, updated_at: links.page.updated_at, metadata_json: '{}' }] : []
-      : await queryAll<{ id: string; title: string | null; summary: string | null; updated_at: string; metadata_json: string }>(db, `
-        SELECT id, title, summary, updated_at, metadata_json FROM content_documents
-        WHERE organization_id = ? AND kind = ? AND row_role = 'root'
-          ${view === 'document-translation' ? 'AND id = ?' : "AND status = 'published'"}
-          AND (kind <> 'qa' OR source = 'manual')
-        ORDER BY sort_order, created_at, id
-      `, [organization.id, kind, ...(view === 'document-translation' ? [typeof query.document_id === 'string' ? query.document_id : missing('Content not found')] : [])])
-    const title = kind === 'article' ? 'Blog' : kind === 'social_post' ? 'Posts' : kind === 'qa' ? 'Q&A' : 'Links'
+    const records = await queryAll<{ id: string; title: string | null; summary: string | null; updated_at: string; metadata_json: string }>(db, `
+      SELECT id, title, summary, updated_at, metadata_json FROM content_documents
+      WHERE organization_id = ? AND kind = ? AND row_role = 'root'
+        ${view === 'document-translation' ? 'AND id = ?' : "AND status = 'published'"}
+        AND (kind <> 'qa' OR source = 'manual')
+      ORDER BY sort_order, created_at, id
+    `, [organization.id, kind, ...(view === 'document-translation' ? [typeof query.document_id === 'string' ? query.document_id : missing('Content not found')] : [])])
+    const title = kind === 'article' ? 'Blog' : kind === 'social_post' ? 'Posts' : 'Q&A'
     if (view === 'document-translations') {
       if (answer) return missing('Choose content to translate')
       return { title, fields: [], empty_title: 'No content to translate', rows: records.map(record => ({
@@ -841,7 +838,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     if (saved && !('content_blocks' in saved)) throw new Error('The saved translation has no document blocks')
     const fields = [
       field('title', kind === 'qa' ? 'Question' : 'Title', 'text', saved?.title, { hint: record.title ?? undefined, optional: kind !== 'qa' }),
-      ...(!links ? [field('summary', kind === 'qa' ? 'Answer' : kind === 'article' ? 'Excerpt' : 'Caption', 'textarea', saved?.summary, { hint: record.summary ?? undefined, optional: true })] : []),
+      field('summary', kind === 'qa' ? 'Answer' : kind === 'article' ? 'Excerpt' : 'Caption', 'textarea', saved?.summary, { hint: record.summary ?? undefined, optional: true }),
     ]
     let blocks: ContentBlockInput[] | undefined
     const articleEdits: Array<{ key: string; path: Parameters<typeof writeBlogLocalizedText>[1]; data: Record<string, unknown>; required: boolean }> = []
@@ -862,11 +859,6 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
           articleEdits.push({ key, path: item.path, data: translated.data, required: Boolean(item.value.trim()) })
         }
       }
-    } else if (links) {
-      for (const item of links.items) {
-        const translation = saved?.content_blocks.find(block => block.source_block_id === item.id)
-        fields.push(field(`link:${item.id}`, 'Link label', 'text', translation?.data.label, { hint: item.label, optional: true }))
-      }
     }
     const revision = JSON.stringify([record.updated_at, saved?.updated_at])
     const screen = { title: record.title || title, fields, rows: [], revision, save_label: 'Save' }
@@ -879,16 +871,10 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       if (edit.required && !value.trim()) invalid('Translate every authored article field before saving')
       writeBlogLocalizedText(edit.data, edit.path, value)
     }
-    if (links) blocks = links.items.flatMap(item => {
-      const label = answer.values[`link:${item.id}`]!.trim()
-      if (!label) return []
-      const id = saved?.content_blocks.find(block => block.source_block_id === item.id)?.id
-      return [{ id, source_block_id: item.id, type: 'cta' as const, data: { label } }]
-    })
     const values = {
       title: answer.values.title?.trim() || null,
       summary: answer.values.summary?.trim() || null,
-      ...(!links && kind !== 'qa' ? { seo_keywords: saved?.seo_keywords ?? null } : {}),
+      ...(kind !== 'qa' ? { seo_keywords: saved?.seo_keywords ?? null } : {}),
       ...(kind === 'social_post' && answer.values.button?.trim() ? { metadata: { call_to_action: { label: answer.values.button.trim() } } } : {}),
     }
     await putLocalizationForAuthoring(env, env.DB, { organizationId: organization.id, resourceType: 'content_document', resourceId: record.id, locale: language.locale, values, contentBlocks: blocks, expectedUpdatedAt: saved?.updated_at, userId })
@@ -1624,72 +1610,17 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     if (result.status >= 400) throw new HTTPError({ statusCode: result.status, message: String(result.data.error), data: result.data })
     return screen
   }
-  if (['links-page', 'links-title', 'links-item', 'links-order'].includes(view)) {
-    if (!isOrganizationWideRole(organization.role)) return missing('Links page not found')
-    const { page, items } = await getLinksPage(db, organization.id)
-    const adding = query.link_id === undefined
-    if (view === 'links-page') {
-      if (answer) return missing('Choose a link or setting')
-      return { title: page?.title ?? 'Links', fields: [], rows: [
-        { id: 'title', label: page ? 'Title' : 'Create links page', summary: page?.title, native: 'links-title' },
-        ...items.map(item => ({ id: item.id, label: item.label, summary: item.status === 'hidden' ? 'Hidden' : item.destination, native: 'links-item', query: { link_id: item.id } })),
-        ...(page ? [{ id: 'add', label: 'Add a link', native: 'links-item' }] : []),
-        ...(items.length > 1 ? [{ id: 'order', label: 'Reorder links', native: 'links-order' }] : []),
-      ] }
-    }
-    const title = view === 'links-title'
-    const order = view === 'links-order'
-    if (!title && !page) return missing('Create the links page first')
-    const item = title || order || adding ? null : items.find(item => item.id === query.link_id) ?? missing('Link not found')
-    const fields = title ? [field('title', 'Title', 'text', page?.title)] : order ? [
-      field('order', 'Order', 'order', items.map(item => item.id).join('\n'), { choices: items.map(item => ({ value: item.id, label: item.label })) }),
-    ] : [
-      field('label', 'Label', 'text', item?.label),
-      field('destination', 'Destination', 'text', item?.destination),
-      field('visible', 'Show on links page', 'toggle', item?.status !== 'hidden'),
-      ...(item ? [field('remove', 'Remove link', 'toggle', false)] : []),
-    ]
-    const revision = page?.updated_at ?? 'new'
-    const screen = { title: title ? 'Links page title' : order ? 'Reorder links' : item?.label ?? 'Add a link', fields, rows: [], revision, save_label: 'Save' }
-    if (!answer) return screen
-    if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The links page changed. Reopen it before saving.' })
-    if (fields.length !== Object.keys(answer.values).length || fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this editor')
-    let next: Parameters<typeof upsertLinksPage>[1]['items'] = items
-    if (order) {
-      const ids = answer.values.order!.split('\n')
-      if (new Set(ids).size !== items.length || ids.length !== items.length) return invalid('Include each link once')
-      next = ids.map((id, sort_order) => ({ ...(items.find(item => item.id === id) ?? invalid('Link not found')), sort_order }))
-    } else if (!title) {
-      const visible = answer.values.visible
-      if (visible !== 'true' && visible !== 'false') return invalid('Choose On or Off')
-      const update = { label: answer.values.label, destination: answer.values.destination, status: visible === 'true' ? 'active' : 'hidden' }
-      next = !item ? [...items, { ...update, sort_order: items.length }]
-        : answer.values.remove === 'true' ? items.filter(row => row.id !== item.id)
-        : items.map(row => row.id === item.id ? { ...row, ...update } : row)
-    }
-    try {
-      await upsertLinksPage(db, {
-        organizationId: organization.id, page: { title: title ? answer.values.title : page!.title },
-        items: next, updatedBy: userId, expectedUpdatedAt: page?.updated_at,
-      })
-    } catch (error) {
-      if (error instanceof OrganizationLinksValidationError) return invalid(error.message)
-      throw error
-    }
-    await purgePublicResourceCacheNow(env, organization.id)
-    return screen
-  }
   if (['pages', 'page', 'page-add', 'page-delete', 'page-content', 'page-sections', 'page-order', 'page-section-add', 'page-section-remove', 'page-media', 'page-media-item', 'page-media-order', 'page-records', 'page-record', 'page-record-order', 'page-settings', 'page-calculator'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Page not found')
     const scope = { organizationId: organization.id }
     const locale = typeof query.locale === 'string' ? query.locale : undefined
     if (view === 'pages') {
       if (answer) return missing('Choose a page to edit')
-      const pages = (await listTenantPages(db, organization.id)).filter(page => page.recipe !== 'links')
+      const pages = await listTenantPages(db, organization.id)
       return { title: 'Pages', fields: [], rows: [...pages.map(page => ({
         id: page.id, label: page.title, summary: page.path, native: locale ? 'page-content' : 'page',
         query: { page_id: page.id, ...(locale ? { locale } : {}) },
-      })), ...(!locale ? [{ id: 'links', label: 'Links', native: 'links-page', query: {} }, { id: 'add', label: 'Add a page', native: 'page-add', query: {} }] : [])] }
+      })), ...(!locale ? [{ id: 'add', label: 'Add a page', native: 'page-add', query: {} }] : [])] }
     }
     if (view === 'page-add') {
       if (locale) return missing('Create the source page first')
