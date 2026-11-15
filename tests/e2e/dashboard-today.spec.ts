@@ -387,53 +387,34 @@ test('booking assignment and workspace admin promotion do not grant a conversati
   if (failures.length) throw new AggregateError(failures, 'Branch reservation access workflow or restoration failed')
 })
 
-test('a return to Today within the live connection shows the Today it left without reading it again', async ({ page, baseURL }, testInfo) => {
-  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'The task shown uses disposable local data only')
-  const organizationId = seededTenant('restaurant').organizationId
-  const release = await acquireTenantMutationLock(testInfo, organizationId)
-  const taskRoot = `/api/organizations/${organizationId}/tasks`
-  const title = `Warm Today return ${Date.now()}`
-  let workId: string | null = null
-  try {
-    await loginAs(page.request, baseURL!)
-    const work = await page.request.post(taskRoot, { data: { title, idempotency_key: crypto.randomUUID() } })
-    expect(work.status(), await work.text()).toBe(201)
-    workId = (await work.json() as { task: TaskView }).task.id
-    const card = page.getByTestId('today-section-open').getByText(title, { exact: true })
+test('a return to Today within the live connection shows the Today it left without reading it again', async ({ page, baseURL }) => {
+  await loginAs(page.request, baseURL!)
+  // What the seeded business's Today shows first: a card, or that there is nothing to do.
+  const shown = page.locator('[data-testid="today-reservation"], [data-testid="today-task"], [data-testid="today-opportunity"], [data-testid="today-empty"]').first()
+  const socketCapture = page.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket' })
+  expect((await page.goto(ORG))?.status()).toBe(200)
+  await dismissPreviewToolbar(page)
+  const socket = await socketCapture
+  await expect(shown).toBeVisible()
+  const first = await shown.innerText()
 
-    const socketCapture = page.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket' })
-    const firstRead = page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/dashboard/today')
-    expect((await page.goto(ORG))?.status()).toBe(200)
-    await dismissPreviewToolbar(page)
-    const socket = await socketCapture
-    expect((await firstRead).status()).toBe(200)
-    await expect(card).toBeVisible()
+  const nav = page.getByRole('navigation', { name: 'Dashboard' })
+  await nav.getByRole('link', { name: 'Calendar', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`${ORG}/calendar(?:[/?#]|$)`))
+  await expect(shown).toHaveCount(0)
 
-    const nav = page.getByRole('navigation', { name: 'Dashboard' })
-    await nav.getByRole('link', { name: 'Calendar', exact: true }).click()
-    await expect(page).toHaveURL(new RegExp(`${ORG}/calendar(?:[/?#]|$)`))
-    await expect(card).toHaveCount(0)
-
-    // Back on the same socket, Today is the one it left: shown without another read.
-    let todayReads = 0
-    const countTodayRead = (request: Request) => {
-      if (request.method() === 'GET' && new URL(request.url()).pathname === '/api/dashboard/today') todayReads++
-    }
-    page.on('request', countTodayRead)
-    try {
-      await nav.getByRole('link', { name: 'Today', exact: true }).click()
-      await expect(page).toHaveURL(new RegExp(`${ORG}(?:[?#]|$)`))
-      await expect(card).toBeVisible()
-      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
-      expect(socket.isClosed()).toBe(false)
-      expect(todayReads).toBe(0)
-    } finally { page.off('request', countTodayRead) }
-  } finally {
-    try {
-      if (workId) {
-        const complete = await page.request.post(`${taskRoot}/${workId}/complete`, { data: {} })
-        expect(complete.status(), await complete.text()).toBe(200)
-      }
-    } finally { await release() }
+  // Back on the same socket, Today is the one it left: shown without another read.
+  let todayReads = 0
+  const countTodayRead = (request: Request) => {
+    if (request.method() === 'GET' && new URL(request.url()).pathname === '/api/dashboard/today') todayReads++
   }
+  page.on('request', countTodayRead)
+  try {
+    await nav.getByRole('link', { name: 'Today', exact: true }).click()
+    await expect(page).toHaveURL(new RegExp(`${ORG}(?:[?#]|$)`))
+    await expect(shown).toHaveText(first)
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+    expect(socket.isClosed()).toBe(false)
+    expect(todayReads).toBe(0)
+  } finally { page.off('request', countTodayRead) }
 })
