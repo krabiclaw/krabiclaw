@@ -9,7 +9,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
-import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
+import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayHome, STAY_CALENDAR_HOME_FIELDS, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { closeTask, listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
@@ -1298,7 +1298,8 @@ test('the multi-calendar reads every home the caller looks after, each night as 
     assert.deepEqual(all.homes.map(entry => entry.home.name), ['Cabin', 'Lake house'])
     for (const entry of all.homes) {
       const own = await readStayCalendar(db, manager, { productId: entry.home.product_id, ...window })
-      assert.deepEqual(entry, { home: own.home, nights: own.nights })
+      // The calendar draws a home's name, clock, price, minimum nights, rules, address and cancellation terms; nothing else of it.
+      assert.deepEqual(entry, { home: Object.fromEntries(STAY_CALENDAR_HOME_FIELDS.map(field => [field, own.home[field]])), nights: own.nights })
     }
     const cabinNights = all.homes[0]!.nights
     assert.deepEqual(cabinNights.map(night => [night.date, night.booking_id, night.closed, night.available]), [
@@ -1308,13 +1309,13 @@ test('the multi-calendar reads every home the caller looks after, each night as 
     assert.deepEqual(all.homes[1]!.nights.slice(1, 4).map(night => [night.date, night.price_minor, night.min_stay_arrival, night.booking_id]), [
       ['2026-11-02', 22_000, 3, null], ['2026-11-03', 22_000, 3, null], ['2026-11-04', 15_000, 2, lakeStay.id],
     ])
-    assert.deepEqual(all.stays.map(stay => [stay.id, stay.guest_name, stay.channel, stay.check_in_date, stay.check_out_date]), [
+    assert.deepEqual(all.stays.map(stay => [stay.booking_id, stay.guest_name, stay.channel, stay.check_in_date, stay.check_out_date]), [
       [cabinStay.id, 'Ana', 'direct', '2026-10-30', '2026-11-03'], [lakeStay.id, 'Bo', 'direct', '2026-11-04', '2026-11-07'],
     ])
     const assigned = await readStayCalendars(db, cleaner, window)
     assert.deepEqual(assigned.homes.map(entry => entry.home.product_id), [cabin.id])
     assert.deepEqual(assigned.homes[0]!.nights, cabinNights)
-    assert.deepEqual(assigned.stays.map(stay => stay.id), [cabinStay.id])
+    assert.deepEqual(assigned.stays.map(stay => stay.booking_id), [cabinStay.id])
     assert.deepEqual(await readStayCalendars(db, outsider, window), { ...window, homes: [], stays: [] })
     await assert.rejects(readStayCalendars(db, manager, { from: '2026-11-01', to: '2027-02-02' }), code('INVALID_RANGE'))
   } finally {
@@ -1423,7 +1424,8 @@ test('a member reads a stay at a home they look after as its turnover on every r
     assert.deepEqual(await getStay(db, cleaner, stay.id), turnover)
     assert.deepEqual(await listStays(db, cleaner, window), [turnover])
     assert.deepEqual((await readStayCalendar(db, cleaner, { productId: cabin.id, ...window })).stays, [turnover])
-    assert.deepEqual((await readStayCalendars(db, cleaner, window)).stays, [turnover])
+    assert.deepEqual((await readStayCalendars(db, cleaner, window)).stays, [{ unit: 'nights', booking_id: stay.id, product_id: cabin.id, status: 'confirmed',
+      guest_name: 'Ana', adults: 2, children: 1, check_in_date: '2026-11-01', check_out_date: '2026-11-03' }])
     // Owners and admins read the whole stay, unchanged.
     const whole = await getStay(db, manager, stay.id)
     assert.deepEqual([whole.guest_name, whole.guest_email, whole.private_notes, whole.total_minor, whole.paid_minor, whole.payments.length, whole.conversation_id], ['Ana Silva', 'ana@example.test', 'Door code 4411', 45_000, 20_000, 1, stay.conversation_id])

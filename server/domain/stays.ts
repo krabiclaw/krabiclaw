@@ -10,7 +10,8 @@ import { acceptFormAnswers } from '~/server/domain/form-questions'
 import { AVAILABILITY_PAGE_DAYS, MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, STAY_DIRECT_DISCOUNTS, stayChannelCalendarRules, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertResponsibleMember, assertRoleAllows, assignedMemberSql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assertResponsibleMember, assertRoleAllows, assignedMemberSql, BATCH_VIEWER, roleAllows, withViewer, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
 import { organizationEventQuery, type OrganizationEvent } from '~/server/utils/organization-events'
 import { createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
 import { liveHomeSql } from '~/server/utils/billing'
@@ -468,8 +469,10 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
 /** A home's settings and nightly offer, without its photos, rooms and accessibility: what its calendar reads. */
 type StayHomeCore = Omit<StayHome, 'photos' | 'photo_rooms' | 'accessibility'>
 
-async function stayHomeRows(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHomeCore[]> {
-  const rows = await queryAll<Record<string, unknown>>(db, `
+/** The statements that read homes and their nightly prices, for a caller's batch; `organization` is SQL naming the organization. */
+function stayHomeQueries(organization: BatchQuery, productId: string | null, scope: { sql: string; params: unknown[] }): [BatchQuery, BatchQuery] {
+  return [{
+    query: `
     SELECT p.id AS product_id, (SELECT json_group_array(v.id) FROM product_variants v WHERE v.organization_id = c.organization_id AND v.product_id = c.product_id) AS variant_ids, p.updated_at, p.name, c.internal_name, p.description, p.details_json, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
            b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, b.calendar_rules, ${stayWeekendPriceSql('c')} AS weekend_price_minor, c.property_type_group, c.property_type,
            c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
@@ -485,15 +488,26 @@ async function stayHomeRows(db: DbClient, organizationId: string, productId: str
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
       JOIN organization o ON o.id = c.organization_id
       LEFT JOIN product_channel_mappings m ON m.organization_id = c.organization_id AND m.product_id = c.product_id AND m.provider = 'channex'
-     WHERE c.organization_id = ? ${productId !== null ? 'AND c.product_id = ?' : ''} AND ${scope.sql}
-     ORDER BY c.internal_name, p.id`, [organizationId, ...(productId !== null ? [productId] : []), ...scope.params])
-  if (!rows.length) return []
-  const prices = await queryAll<Price & { product_id: string }>(db, `
-    SELECT pr.*, v.product_id FROM prices pr
+     WHERE c.organization_id = ${organization.query} ${productId !== null ? 'AND c.product_id = ?' : ''} AND ${scope.sql}
+     ORDER BY c.internal_name, p.id`,
+    params: [...organization.params!, ...(productId !== null ? [productId] : []), ...scope.params],
+  }, {
+    query: `SELECT pr.*, v.product_id FROM prices pr
       JOIN product_variants v ON v.organization_id = pr.organization_id AND v.id = pr.product_variant_id
       JOIN product_stay_configs c ON c.organization_id = v.organization_id AND c.product_id = v.product_id
-     WHERE pr.organization_id = ? ${productId ? 'AND v.product_id = ?' : ''} AND v.active = 1 AND pr.stay_date IS NULL AND pr.weekend = 0
-     ORDER BY v.sort_order, v.id`, [organizationId, ...(productId ? [productId] : [])])
+     WHERE pr.organization_id = ${organization.query} ${productId ? 'AND v.product_id = ?' : ''} AND v.active = 1 AND pr.stay_date IS NULL AND pr.weekend = 0
+     ORDER BY v.sort_order, v.id`,
+    params: [...organization.params!, ...(productId ? [productId] : [])],
+  }]
+}
+
+async function stayHomeRows(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHomeCore[]> {
+  const [rows, prices] = await executeBatch(db, stayHomeQueries({ query: '?', params: [organizationId] }, productId, scope), { operation: 'Read homes' })
+  return stayHomesFrom(rows!.results as Array<Record<string, unknown>>, prices!.results as Array<Price & { product_id: string }>)
+}
+
+/** Homes from their rows and prices, each checked as it is read. */
+function stayHomesFrom(rows: Array<Record<string, unknown>>, prices: Array<Price & { product_id: string }>): StayHomeCore[] {
   return rows.map((row) => {
     if (typeof row.internal_name !== 'string' || !row.internal_name.trim()) throw new Error(`Home ${row.product_id} has no internal name`)
     const variants = JSON.parse(String(row.variant_ids)) as string[]
@@ -501,7 +515,7 @@ async function stayHomeRows(db: DbClient, organizationId: string, productId: str
     const amenityAnswers = parseStayAmenityAnswers(JSON.parse(String(row.amenities)))
     const details = validateProductDetails('stay', JSON.parse(String(row.details_json)))
     validateStayAlarmDetails(details, amenityAnswers)
-    if (!isCurrencyCode(row.default_currency)) throw new Error(`Organization ${organizationId} has an unsupported default currency`)
+    if (!isCurrencyCode(row.default_currency)) throw new Error(`The organization of home ${String(row.product_id)} has an unsupported default currency`)
     const own = prices.filter(price => price.product_id === row.product_id).map(price => ({ ...price, active: Number(price.active) === 1 }))
     const base = selectPrice(own, { currency: row.default_currency, location_id: String(row.location_id) })
     return {
@@ -1306,14 +1320,74 @@ export async function readStayCalendar<A extends StayAccess>(db: DbClient, acces
 
 /**
  * Every night of [from, to) at every home this caller may see, the
- * multi-calendar's read: each home with its nights, and the stays holding any
- * of them. A night's booking_id names its booking.
+ * multi-calendar's read, in one batch: each home as the calendar draws it with
+ * its nights, and the stays holding any of them. A night's booking_id names
+ * its booking. The host Calendar route reads the same statements behind its
+ * own membership.
  */
-export async function readStayCalendars<A extends StayAccess>(db: DbClient, access: A, input: { from: unknown; to: unknown }): Promise<{ from: string; to: string; homes: Array<{ home: StayHome; nights: StayNight[] }>; stays: Array<StayView<A>> }> {
+export async function readStayCalendars(db: DbClient, access: StayAccess, input: { from: unknown; to: unknown }): Promise<{ from: string; to: string } & ReturnType<typeof stayCalendarOf>> {
   const { from, to } = range(input, MAX_HOMES_CALENDAR_DAYS)
-  const [homes, stays] = await Promise.all([stayHomes(db, access, null), staysOverlapping(db, access, { from, to })])
-  const nights = homes.length ? await homesNights(db, access.organizationId, homes, from, to) : []
-  return { from, to, homes: homes.map((home, index) => ({ home, nights: nights[index]! })), stays }
+  const viewer: BatchQuery = { query: 'SELECT ? AS organization_id, ? AS user_id, NULL AS member_id, ? AS organization_wide', params: [access.organizationId, access.actorId, access.manage ? 1 : 0] }
+  return { from, to, ...stayCalendarOf(await executeBatch(db, stayCalendarQueries(viewer, { from, to, productId: null }), { operation: 'Read homes calendar' }), access.manage, { from, to }) }
+}
+
+/** What of a home the host calendar draws. */
+export const STAY_CALENDAR_HOME_FIELDS = ['product_id', 'name', 'internal_name', 'timezone', 'currency', 'base_price_minor', 'min_nights', 'calendar_rules', 'address', 'cancellation_policy', 'long_term_cancellation_policy'] as const
+export type StayCalendarHome = Pick<StayHome, typeof STAY_CALENDAR_HOME_FIELDS[number]>
+
+/** A stay as the host calendar draws it; a member reads the guest's first name and no channel. */
+export interface StayCalendarStay {
+  unit: 'nights'
+  booking_id: string
+  product_id: string
+  status: 'pending' | 'confirmed' | 'cancelled'
+  guest_name: string | null
+  adults: number
+  children: number
+  check_in_date: string
+  check_out_date: string
+  channel?: StayChannel
+}
+
+/**
+ * The host calendar's statements for the batch the membership (BATCH_VIEWER)
+ * leads: the homes the viewer may see and their prices, the booked records,
+ * and the nights of [from, to), each statement taking its homes from the same
+ * visible-homes subquery.
+ */
+export function stayCalendarQueries(membership: BatchQuery, input: { from: string; to: string; productId: string | null }): BatchQuery[] {
+  const organization: BatchQuery = { query: BATCH_VIEWER.organization, params: [] }
+  const scope = { sql: `(${BATCH_VIEWER.organizationWide} = 1 OR EXISTS (SELECT 1 FROM product_booking_configs looked_after WHERE looked_after.organization_id = c.organization_id
+    AND looked_after.product_id = c.product_id AND ${assignedMemberSql('looked_after', BATCH_VIEWER.user)}))`, params: [] }
+  const homes: BatchQuery = { query: `SELECT c.product_id FROM product_stay_configs c WHERE c.organization_id = ${BATCH_VIEWER.organization}
+    ${input.productId ? 'AND c.product_id = ?' : ''} AND ${scope.sql}`, params: input.productId ? [input.productId] : [] }
+  // The calendar keeps the stays of the homes it shows, so it reads every booked record of the business.
+  const everyRecord: BatchQuery = { query: `SELECT organization_id, user_id, member_id, 1 AS organization_wide FROM (${membership.query})`, params: membership.params }
+  return [
+    ...stayHomeQueries(organization, input.productId, scope).map(query => withViewer(membership, query)),
+    withViewer(everyRecord, bookedRecordsInRange(BATCH_VIEWER, input)),
+    ...homeNightsQueries(organization, homes, input.from, input.to, true).map(query => withViewer(membership, query)),
+  ]
+}
+
+/** The host calendar from `stayCalendarQueries`' results. */
+export function stayCalendarOf(results: Array<{ results: unknown[] }>, manage: boolean, window: { from: string; to: string }): { homes: Array<{ home: StayCalendarHome; nights: StayNight[] }>; stays: StayCalendarStay[] } {
+  const [rows, prices, records, ...nightResults] = results
+  const homes = stayHomesFrom(rows!.results as Array<Record<string, unknown>>, prices!.results as Array<Price & { product_id: string }>)
+  const nights = homeNightsFrom(homes, nightResults, window.from, window.to) as StayNight[][]
+  const shown = new Set(homes.map(home => home.product_id))
+  const stays = (records!.results as BookedRecordInRange[]).flatMap((record): StayCalendarStay[] => {
+    if (record.unit !== 'nights' || record.conversation_id === null || !shown.has(record.product_id)) return []
+    if (record.adults === null || record.children === null) throw new Error(`Stay ${record.id} has no party breakdown`)
+    const stay: StayCalendarStay = { unit: 'nights', booking_id: record.id, product_id: record.product_id, status: record.status,
+      guest_name: manage ? record.guest_name : stayGuestFirstName(record.guest_name), adults: record.adults, children: record.children,
+      check_in_date: bookingDay(record.starts_at, record.timezone), check_out_date: bookingDay(record.ends_at, record.timezone), ...(manage ? { channel: record.channel } : {}) }
+    return staysOverlap(stay, window.from, window.to) ? [stay] : []
+  }).sort((a, b) => a.check_in_date.localeCompare(b.check_in_date) || a.booking_id.localeCompare(b.booking_id))
+  return {
+    homes: homes.map((home, index) => ({ home: Object.fromEntries(STAY_CALENDAR_HOME_FIELDS.map(field => [field, home[field]])) as StayCalendarHome, nights: nights[index]! })),
+    stays,
+  }
 }
 
 /** A hold's claim counts while its hold is active and unexpired; this selects the claims that no longer do. */
@@ -1325,35 +1399,60 @@ async function homeNights(db: DbClient, organizationId: string, home: StayHomeCo
   return (await homesNights(db, organizationId, [home], from, to))[0]!
 }
 
-/** Every night of [from, to) at each of these homes, in their order, with what their channel last took. */
-async function homesNights(db: DbClient, organizationId: string, homes: readonly StayHomeCore[], from: string, to: string): Promise<StayNight[][]> {
-  const ids = d1JsonStringSet(homes.map(home => home.product_id))
-  const [nights, pushes] = await Promise.all([
-    homesOpenNights(db, organizationId, homes, from, to),
-    queryAll<{ product_id: string; date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null }>(db, 'SELECT product_id, date, state, detail FROM channel_night_pushes WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) AND date >= ? AND date < ?', [organizationId, ids, from, to]),
-  ])
-  const pushByNight = new Map(pushes.map(row => [`${row.product_id} ${row.date}`, { state: row.state, detail: row.detail }]))
-  return nights.map((home, index) => home.map(night => ({ ...night, channel: pushByNight.get(`${homes[index]!.product_id} ${night.date}`) ?? null })))
-}
-
-/** Every night of [from, to) at each of these homes, as a guest or a calendar export reads them: four queries for any number of homes. */
-async function homesOpenNights(db: DbClient, organizationId: string, homes: readonly StayHomeCore[], from: string, to: string): Promise<Array<Array<Omit<StayNight, 'channel'>>>> {
-  const ids = d1JsonStringSet(homes.map(home => home.product_id))
-  const [overrides, claims, movedAway, overbooked] = await Promise.all([
-    queryAll<Record<string, unknown>>(db, `SELECT n.*, ${STAY_NIGHT_PRICE_SQL} AS price_minor FROM product_nights n WHERE n.organization_id = ? AND n.product_id IN (SELECT value FROM json_each(?)) AND n.date >= ? AND n.date < ?`, [organizationId, ids, from, to]),
-    queryAll<{ product_id: string; date: string; booking_id: string | null; held_until: string | null; calendar: StayCalendarChannel | null }>(db, `SELECT stay_nights.product_id, stay_nights.date, stay_nights.booking_id, h.expires_at AS held_until, k.channel AS calendar FROM stay_nights
+/**
+ * The statements that read the nights of [from, to) at the homes `products`
+ * selects, for a caller's batch: overrides, claims, nights a moved reservation
+ * still holds, overbooked channel stays and, when asked, what each channel last
+ * took. `organization` is SQL naming the organization.
+ */
+function homeNightsQueries(organization: BatchQuery, products: BatchQuery, from: string, to: string, channel: boolean): BatchQuery[] {
+  const org = organization.query, ids = products.query
+  const window = stayOverlapSql(from, to)
+  return [{
+    query: `SELECT n.*, ${STAY_NIGHT_PRICE_SQL} AS price_minor FROM product_nights n WHERE n.organization_id = ${org} AND n.product_id IN (${ids}) AND n.date >= ? AND n.date < ?`,
+    params: [...organization.params!, ...products.params!, from, to],
+  }, {
+    query: `SELECT stay_nights.product_id, stay_nights.date, stay_nights.booking_id, h.expires_at AS held_until, k.channel AS calendar FROM stay_nights
       LEFT JOIN payment_checkout_holds h ON h.id = stay_nights.hold_id
       LEFT JOIN stay_calendar_links k ON k.id = stay_nights.calendar_link_id
-      WHERE stay_nights.organization_id = ? AND stay_nights.product_id IN (SELECT value FROM json_each(?)) AND stay_nights.date >= ? AND stay_nights.date < ? AND NOT (${LAPSED_HOLD_CLAIM_SQL})`, [organizationId, ids, from, to]),
+      WHERE stay_nights.organization_id = ${org} AND stay_nights.product_id IN (${ids}) AND stay_nights.date >= ? AND stay_nights.date < ? AND NOT (${LAPSED_HOLD_CLAIM_SQL})`,
+    params: [...organization.params!, ...products.params!, from, to],
+  }, {
     // A reservation stays on the listing it was booked on after its guest moved: the channel still holds those nights, the nights it claims at the home it moved to.
-    queryAll<{ id: string; booked_product_id: string; date: string }>(db, `SELECT s.id, s.booked_product_id, n.date FROM bookings s JOIN stay_nights n ON n.organization_id = s.organization_id AND n.booking_id = s.id
-      WHERE s.organization_id = ? AND s.booked_product_id IN (SELECT value FROM json_each(?)) AND s.status <> 'cancelled' AND n.date >= ? AND n.date < ?`, [organizationId, ids, from, to]),
-    queryAll<{ id: string; product_id: string; booked_product_id: string | null; starts_at: string; ends_at: string; timezone: string }>(db, `
-      SELECT id, product_id, booked_product_id, starts_at, ends_at, timezone FROM bookings s
-      WHERE organization_id=? AND owner='channel' AND status='confirmed' AND overbooked=1 AND ${stayOverlapSql(from, to).sql}
-        AND (product_id IN (SELECT value FROM json_each(?)) OR booked_product_id IN (SELECT value FROM json_each(?)))`,
-      [organizationId, ...stayOverlapSql(from, to).params, ids, ids]),
-  ])
+    query: `SELECT s.id, s.booked_product_id, n.date FROM bookings s JOIN stay_nights n ON n.organization_id = s.organization_id AND n.booking_id = s.id
+      WHERE s.organization_id = ${org} AND s.booked_product_id IN (${ids}) AND s.status <> 'cancelled' AND n.date >= ? AND n.date < ?`,
+    params: [...organization.params!, ...products.params!, from, to],
+  }, {
+    query: `SELECT id, product_id, booked_product_id, starts_at, ends_at, timezone FROM bookings s
+      WHERE organization_id = ${org} AND owner = 'channel' AND status = 'confirmed' AND overbooked = 1 AND ${window.sql}
+        AND (product_id IN (${ids}) OR booked_product_id IN (${ids}))`,
+    params: [...organization.params!, ...window.params, ...products.params!, ...products.params!],
+  }, ...(channel ? [{
+    query: `SELECT product_id, date, state, detail FROM channel_night_pushes WHERE organization_id = ${org} AND product_id IN (${ids}) AND date >= ? AND date < ?`,
+    params: [...organization.params!, ...products.params!, from, to],
+  }] : [])]
+}
+
+/** Every night of [from, to) at each of these homes, in their order, with what their channel last took. */
+async function homesNights(db: DbClient, organizationId: string, homes: readonly StayHomeCore[], from: string, to: string): Promise<StayNight[][]> {
+  return homeNightsFrom(homes, await executeBatch(db, homeNightsQueries({ query: '?', params: [organizationId] }, { query: 'SELECT value FROM json_each(?)', params: [d1JsonStringSet(homes.map(home => home.product_id))] }, from, to, true), { operation: 'Read home nights' }), from, to) as StayNight[][]
+}
+
+/** Every night of [from, to) at each of these homes, as a guest or a calendar export reads them: no channel state. */
+async function homesOpenNights(db: DbClient, organizationId: string, homes: readonly StayHomeCore[], from: string, to: string): Promise<Array<Array<Omit<StayNight, 'channel'>>>> {
+  return homeNightsFrom(homes, await executeBatch(db, homeNightsQueries({ query: '?', params: [organizationId] }, { query: 'SELECT value FROM json_each(?)', params: [d1JsonStringSet(homes.map(home => home.product_id))] }, from, to, false), { operation: 'Read home nights' }), from, to)
+}
+
+/** The nights of each home, from `homeNightsQueries`' results; with the channel statement, each night carries what its channel last took. */
+function homeNightsFrom(homes: ReadonlyArray<Pick<StayHomeCore, 'product_id' | 'min_nights' | 'base_price_minor' | 'calendar_rules'>>, results: Array<{ results: unknown[] }>, from: string, to: string): Array<Array<Omit<StayNight, 'channel'> & Partial<Pick<StayNight, 'channel'>>>> {
+  const [overrides, claims, movedAway, overbooked, pushes] = results.map(result => result.results) as [
+    Array<Record<string, unknown>>,
+    Array<{ product_id: string; date: string; booking_id: string | null; held_until: string | null; calendar: StayCalendarChannel | null }>,
+    Array<{ id: string; booked_product_id: string; date: string }>,
+    Array<{ id: string; product_id: string; booked_product_id: string | null; starts_at: string; ends_at: string; timezone: string }>,
+    Array<{ product_id: string; date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null }> | undefined,
+  ]
+  const pushByNight = pushes && new Map(pushes.map(row => [`${row.product_id} ${row.date}`, { state: row.state, detail: row.detail }]))
   const overrideByNight = new Map(overrides.map(row => [`${String(row.product_id)} ${String(row.date)}`, row]))
   const claimByNight = new Map(claims.map(row => [`${row.product_id} ${row.date}`, row]))
   for (const night of movedAway) {
@@ -1373,7 +1472,7 @@ async function homesOpenNights(db: DbClient, organizationId: string, homes: read
     }
   }
   return homes.map((home) => {
-    const nights: Array<Omit<StayNight, 'channel'>> = []
+    const nights: Array<Omit<StayNight, 'channel'> & Partial<Pick<StayNight, 'channel'>>> = []
     for (let offset = 0; offset < days(from, to); offset++) {
       const night = addDays(from, offset)
       const key = `${home.product_id} ${night}`
@@ -1394,6 +1493,7 @@ async function homesOpenNights(db: DbClient, organizationId: string, homes: read
         source: row ? row.source as 'host' | 'import' : null,
         held_until: heldUntil,
         calendar: claim?.calendar ?? null,
+        ...(pushByNight ? { channel: pushByNight.get(key) ?? null } : {}),
       })
     }
     return nights
