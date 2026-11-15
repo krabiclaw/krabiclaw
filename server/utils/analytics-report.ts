@@ -369,9 +369,10 @@ function netByCurrency(valueRows: Array<Record<string, unknown>>) {
 }
 
 /**
- * One read of the report, in one D1 batch. Traffic is the stored daily summaries of the range and
- * of the period before it: a day the daily aggregation has not summarized (today, and yesterday
- * until the aggregation runs) reads as no traffic. The MCP report adds what is read from the events.
+ * One read of the report, in one D1 batch. Sessions and visitors are the stored session summaries
+ * every pageview maintains. Page views and their breakdowns are the stored daily summaries of the
+ * range and of the period before it: a day the daily aggregation has not summarized (today, and
+ * yesterday until it runs) has none. The MCP report adds what is read from the events.
  */
 async function readAnalyticsReport(db: DbClient, context: OrganizationAnalyticsContext, input: { startDate?: string; endDate?: string; now?: Date }, conversionDetail: boolean) {
   const { organizationId, timezone, analyticsDataStartAt } = context
@@ -401,6 +402,15 @@ async function readAnalyticsReport(db: DbClient, context: OrganizationAnalyticsC
     read(`SELECT kind, date, key, payload_json FROM analytics_summaries
       WHERE organization_id = ? AND kind IN ('organization_day', 'page_day', 'dimension_day') AND date BETWEEN ? AND ?
         AND (kind = 'organization_day' OR date >= ?)`, [organizationId, previousDates[0] ?? range.startDate, range.endDate, range.startDate]),
+    // The period's sessions and visitors, from each session's own summary, which every pageview keeps current.
+    read(`WITH sessions AS (SELECT key, (payload_json ->> '$.visitor_id') visitor_id, (payload_json ->> '$.duration_seconds') duration_seconds
+        FROM analytics_summaries WHERE organization_id = ? AND kind = 'session' AND (payload_json ->> '$.last_seen_at') >= ? AND (payload_json ->> '$.started_at') < ?)
+      SELECT COUNT(*) sessions, COUNT(DISTINCT visitor_id) visitors,
+        COALESCE(ROUND(AVG(CASE WHEN duration_seconds > 0 THEN duration_seconds END)), 0) avg_duration,
+        (SELECT COUNT(DISTINCT current.visitor_id) FROM sessions current WHERE EXISTS (SELECT 1 FROM analytics_summaries earlier
+          WHERE earlier.organization_id = ? AND earlier.kind = 'session' AND (earlier.payload_json ->> '$.visitor_id') = current.visitor_id
+            AND (earlier.payload_json ->> '$.started_at') < ? AND earlier.key <> current.key)) returning_visitors
+      FROM sessions`, [organizationId, start, end, organizationId, start]),
     ...(conversionDetail ? [
       // Sessions and their converting sessions are counted over the same population: each session
       // grouped by its current last touch, converting when it has an outcome event in the range.
@@ -418,6 +428,7 @@ async function readAnalyticsReport(db: DbClient, context: OrganizationAnalyticsC
     ] : []),
   ], { operation: 'Read analytics report' })).map(result => result.results as Row[])
   const summaryRows = results[0] as unknown as AnalyticsSummaryRow[]
+  const sessionStats = results[1]![0]!
 
   const summarized = new Map<string, Omit<AnalyticsSummaryRow, 'date'>[]>()
   for (const row of summaryRows) summarized.set(row.date, [...summarized.get(row.date) ?? [], row])
@@ -430,7 +441,8 @@ async function readAnalyticsReport(db: DbClient, context: OrganizationAnalyticsC
   const slices = range.dates.map(sliceOf)
   const total = (value: (slice: DailySlice) => number) => slices.reduce((sum, slice) => sum + value(slice), 0)
   const pageViews = total(slice => slice.pageViews)
-  const uniqueSessions = total(slice => slice.sessions)
+  const uniqueSessions = n(sessionStats.sessions)
+  const summarizedSessions = total(slice => slice.sessions)
   const previousViews = previousDates.reduce((sum, date) => sum + sliceOf(date).pageViews, 0)
   const changePercent = previousDates.length && previousViews ? Math.round((pageViews - previousViews) / previousViews * 100) : null
 
@@ -453,14 +465,15 @@ async function readAnalyticsReport(db: DbClient, context: OrganizationAnalyticsC
 
   const report = {
     period: { start_date: range.startDate, end_date: range.endDate, timezone, analytics_data_start_at: analyticsDataStartAt, native_coverage: nativeCoverage },
-    // Each day's counts, added: a visitor seen on two days counts on both.
+    // Page views are the summarized days'; sessions and visitors are current. Pages per session
+    // divides the summarized days' page views by the same days' sessions.
     metrics: {
       page_views: pageViews,
       unique_sessions: uniqueSessions,
-      unique_visitors: total(slice => slice.visitors),
-      returning_visitors: total(slice => slice.returningVisitors),
-      avg_session_duration: uniqueSessions ? Math.round(total(slice => slice.avgDuration * slice.sessions) / uniqueSessions) : 0,
-      pages_per_session: uniqueSessions ? Math.round(pageViews / uniqueSessions * 100) / 100 : 0,
+      unique_visitors: n(sessionStats.visitors),
+      returning_visitors: n(sessionStats.returning_visitors),
+      avg_session_duration: n(sessionStats.avg_duration),
+      pages_per_session: summarizedSessions ? Math.round(pageViews / summarizedSessions * 100) / 100 : 0,
       change_percent: changePercent,
     },
     daily_data: slices.map(slice => ({ date: slice.date, page_views: slice.pageViews, sessions: slice.sessions, avg_duration: slice.avgDuration })),
@@ -474,9 +487,9 @@ async function readAnalyticsReport(db: DbClient, context: OrganizationAnalyticsC
     devices: dimensionRows('device').map(row => ({ type: row.value, views: row.views, percent_of_total: percent(row.views) })),
   }
   if (!conversionDetail) return { report, detail: null }
-  const [attributionRows, cohortRows] = [results[1]!, results[2]!]
-  const funnelResults = results.slice(3, 3 + funnelQueries.length)
-  const detailResults = results.slice(3 + funnelQueries.length)
+  const [attributionRows, cohortRows] = [results[2]!, results[3]!]
+  const funnelResults = results.slice(4, 4 + funnelQueries.length)
+  const detailResults = results.slice(4 + funnelQueries.length)
   // The events' own sessions in the range: every one has its last touch in the attribution rows.
   const eventSessions = attributionRows.reduce((sum, row) => sum + n(row.sessions), 0)
   return {
