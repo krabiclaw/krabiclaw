@@ -61,7 +61,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db } as CloudflareEnv
     const policyJson = JSON.stringify({ advance_notice_minutes: null, party_size_min: null, party_size_max: null, minimum_guest_age: null, accessibility_contact_required: false, payment: null, cancellation: null })
     async function bookSession(id: string, sessionId = 'session-proof', cancellation: { token_hash: string | null; expires_at: string | null; used_at: null } = { token_hash: null, expires_at: null, used_at: null }) {
-      return claimSessionCapacity(db, {
+      return claimSessionCapacity(db, { websiteSource: null, 
         env, organizationId: ORG, productId: 'product-proof', sessionId,
         productVariantId: 'variant-proof', partySize: 1, userId: null, policyJson,
         following: bookingId => requestInsertQueries({

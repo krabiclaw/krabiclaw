@@ -102,6 +102,7 @@ import TodayTaskSheet from './TodayTaskSheet.vue'
 import TodayTaskCreate from './TodayTaskCreate.vue'
 import { getErrorMessage } from '~/utils/errors'
 import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload, type TodayReservation } from '~/shared/dashboard-today'
+import { businessChanged, type HeldRead } from '~/composables/useDashboardInvalidations'
 import type { AgendaPayload } from '~/server/utils/dashboard-agenda'
 import type { TaskKind, TaskPerson, TaskSection, TaskView } from '~/server/domain/tasks'
 import type { OpportunityView } from '~/server/domain/opportunities'
@@ -184,23 +185,16 @@ const isAgenda = (value: unknown): value is AgendaPayload => isRecord(value) && 
 // A return within the live connection shows the Today it left, as the Messages inbox does: kept for
 // 30 seconds while the socket stays open, dropped by any event Today re-reads on.
 const todayKey = () => `today-${orgSlug.value}-${range.value}-${taskKind.value ?? 'all'}`
-let readConnectionEpoch: number | null = null
-let readInvalidations: number | null = null
-let reuseExpiresAt: number | null = null
+let reading: HeldRead | undefined
+let reuseExpiresAt: number | undefined
 const { data, pending, status: loadStatus, error: loadError, refresh } = await useAsyncData(
   todayKey,
   async (): Promise<{ business: BusinessToday | null; visits: TodayCard[] }> => {
     if (!props.personalScope) {
-      const held = realtime.recentToday.snapshot
-      realtime.recentToday.snapshot = undefined
-      readInvalidations = realtime.recentToday.invalidations
-      if (held?.key === todayKey() && held.expiresAt > Date.now() && realtime.status.value === 'open' && isBusinessToday(held.page)) {
-        readConnectionEpoch = realtime.connectionEpoch.value
-        reuseExpiresAt = held.expiresAt
-        return { business: held.page, visits: [] }
-      }
-      readConnectionEpoch = realtime.connectionEpoch.value
-      reuseExpiresAt = null
+      const held = realtime.held.take(`today:${todayKey()}`)
+      reading = realtime.held.begin(`today:${todayKey()}`, businessChanged)
+      reuseExpiresAt = held?.expiresAt
+      if (isBusinessToday(held?.value)) return { business: held.value, visits: [] }
       return { business: await dashboardApi<BusinessToday>('/api/dashboard/today', { query: { range: range.value, kind: taskKind.value }, validate: isBusinessToday }), visits: [] }
     }
     if (range.value === 'today') return { business: null, visits: (await applicationFetch<TodayFeedPayload>('/api/account/today', { validate: isFeed })).cards }
@@ -215,12 +209,8 @@ const { data, pending, status: loadStatus, error: loadError, refresh } = await u
 const business = computed(() => data.value?.business ?? null)
 onScopeDispose(() => {
   const current = business.value
-  // A page read before an event that changes Today is not the Today the event left.
-  if (props.personalScope || !current || loadStatus.value !== 'success' || realtime.status.value !== 'open' || readConnectionEpoch !== realtime.connectionEpoch.value
-    || readInvalidations !== realtime.recentToday.invalidations) return
-  // Reusing a snapshot does not extend its life.
-  const expiresAt = reuseExpiresAt ?? Date.now() + 30_000
-  if (expiresAt > Date.now()) realtime.recentToday.snapshot = { key: todayKey(), page: current, expiresAt }
+  // Reusing a held read does not extend its life.
+  if (!props.personalScope && current && reading && loadStatus.value === 'success') realtime.held.hold(reading, current, reuseExpiresAt ?? Date.now() + 30_000, 1)
 })
 const parts = computed(() => {
   const sections = business.value?.tasks ?? []

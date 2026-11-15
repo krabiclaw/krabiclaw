@@ -58,7 +58,7 @@ extend that model. Never add a second one beside it.
 | Push device | `device_tokens` | server/domain/devices.ts | APNs / Web Push |
 | Notification preference | `user_notification_preferences` | server/domain/notification-preferences.ts | KrabiClaw |
 | Workspace state | `user_workspace_state` | server/utils/mcp-context.ts | KrabiClaw |
-| Analytics | `analytics_events` `analytics_summaries` | server/utils/analytics-report.ts | KrabiClaw |
+| Analytics (visits, conversions, and the day counts the visit write keeps for Insights) | `analytics_events` `analytics_summaries` | server/utils/pageview-tracking.ts | KrabiClaw |
 | MCP tool audit | `mcp_tool_call_events` | server/utils/mcp-protocol.ts | KrabiClaw |
 | Usage (application activity and quantities billed through Stripe meters) | `usage_events` | server/utils/usage-metering.ts | KrabiClaw and Stripe |
 
@@ -72,6 +72,7 @@ Each of these columns exists on its owner table only.
 | `party_size` | `bookings` |
 | `no_show_at` | `bookings` |
 | `cancellation_reason` | `bookings` |
+| `website_source` | `bookings` |
 | `duration_minutes` | `product_booking_configs` |
 | `seating_interval_minutes` | `product_booking_configs` |
 | `advance_notice_minutes` | `product_booking_configs` |

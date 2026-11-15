@@ -13,6 +13,8 @@ export const googleAdsInsightsSchema = z.discriminatedUnion('status', [
     customer: z.object({ id: z.string(), name: z.string(), currency: z.string() }),
     period: z.object({ startDate: z.string(), endDate: z.string() }),
     totals: z.object({ costMicros: count, clicks: count, impressions: count, conversions: z.number().nonnegative(), averageCpcMicros: count }),
+    /** Each day of the range Google reported activity on; a day it did not report had none. */
+    days: z.array(z.object({ date: z.string(), costMicros: count, clicks: count, impressions: count, conversions: z.number().nonnegative() })),
     campaigns: z.array(z.object({ id: z.string(), name: z.string(), status: z.string(), costMicros: count, clicks: count, impressions: count, conversions: z.number().nonnegative() })),
     /** Whether Chris manages these campaigns under the managed-ads agreement. */
     managed: z.boolean(),

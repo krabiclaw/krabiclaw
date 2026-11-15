@@ -574,29 +574,20 @@ test('a new article publishes its composed body directly and retries publication
   }
 })
 
-test('Insights reads a linked report period and preserves preset changes in its URL', async ({ page }) => {
+test('Insights reads a linked report period and preserves range changes in its URL', async ({ page }) => {
   // A period the business's own analytics cover (they begin when the seed takes it live), unlike any preset.
   const today = localDateAt(new Date(), seededTenant('restaurant').timezone)
   const range = { start_date: addLocalDays(today, -2), end_date: today }
-  const linkedPath = insightsPath(orgSlug, range)
-  const isReport = (response: import('@playwright/test').Response) => new URL(response.url()).pathname === '/api/dashboard/analytics'
+  const linkedPath = insightsPath(orgSlug, 'conversion/page-views', range)
+  const isReport = (response: import('@playwright/test').Response) => new URL(response.url()).pathname === '/api/dashboard/insights/conversion/page-views'
   expect((await page.goto(linkedPath))?.status()).toBe(200)
   await waitForNuxtHydration(page)
-  const reportPeriod = page.getByTestId('insights-period').locator('time')
-  await expect(reportPeriod.nth(0)).toHaveAttribute('datetime', range.start_date)
-  await expect(reportPeriod.nth(1)).toHaveAttribute('datetime', range.end_date)
-  const linkedUrl = new URL(page.url())
-  const first = await page.request.get('/api/dashboard/analytics', { params: { org: orgSlug, start_date: linkedUrl.searchParams.get('start_date')!, end_date: linkedUrl.searchParams.get('end_date')! } })
-  expect(first.status(), await first.text()).toBe(200)
-  expect((await first.json()).report.period).toMatchObject({ start_date: range.start_date, end_date: range.end_date })
-  await expect(page.getByText('Traffic trend', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('insights-chart').getByRole('heading', { name: 'Page views' })).toBeVisible()
   const datePill = page.getByTestId('insights-date-range-pill')
-  await expect(datePill).toBeVisible()
+  // The period the page itself read, as it shows it.
+  await expect(datePill.locator('time').first()).toHaveAttribute('datetime', range.start_date)
+  await expect(datePill.locator('time').last()).toHaveAttribute('datetime', range.end_date)
 
-  await page.reload()
-  await waitForNuxtHydration(page)
-  await expect(reportPeriod.nth(0)).toHaveAttribute('datetime', range.start_date)
-  await expect(reportPeriod.nth(1)).toHaveAttribute('datetime', range.end_date)
   const updatedRange = { start_date: addLocalDays(today, -6), end_date: today }
   const rangeReport = page.waitForResponse(isReport)
   await datePill.click()
@@ -605,7 +596,18 @@ test('Insights reads a linked report period and preserves preset changes in its 
   await page.getByRole('button', { name: 'Apply', exact: true }).click()
   const preset = await rangeReport
   expect(preset.status(), await preset.text()).toBe(200)
-  const period = (await preset.json() as { report: { period: { start_date: string; end_date: string } } }).report.period
-  expect(period.start_date).toBe(updatedRange.start_date)
-  await expect(page).toHaveURL(insightsPath(orgSlug, { start_date: period.start_date, end_date: period.end_date }))
+  const period = (await preset.json() as { period: { start_date: string; end_date: string } }).period
+  expect(period).toMatchObject({ start_date: updatedRange.start_date, end_date: updatedRange.end_date })
+  await expect(datePill.locator('time').first()).toHaveAttribute('datetime', updatedRange.start_date)
+  await expect(datePill.locator('time').last()).toHaveAttribute('datetime', updatedRange.end_date)
+  await expect(page).toHaveURL(insightsPath(orgSlug, 'conversion/page-views', { start_date: period.start_date, end_date: period.end_date }))
+
+  // Choosing a headline number puts it in the URL and the chart follows it.
+  expect((await page.goto(insightsPath(orgSlug, 'conversion/booking-conversion', updatedRange)))?.status()).toBe(200)
+  const headline = page.locator('[data-testid^="insights-metric-link-"]').nth(1)
+  const key = (await headline.getAttribute('data-testid'))!.replace('insights-metric-link-', '')
+  const label = (await headline.textContent())!.trim()
+  await headline.click()
+  await expect(page).toHaveURL(new RegExp(`[?&]metric=${key}(?:&|$)`))
+  await expect(page.getByTestId('insights-chart').getByRole('heading', { level: 2 })).toHaveText(label)
 })

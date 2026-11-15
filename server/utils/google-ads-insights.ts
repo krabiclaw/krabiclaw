@@ -1,7 +1,6 @@
 import { linkedAccountAccessToken, readLinkedAccount, type CloudflareEnv } from '~/server/utils/auth'
 import { readIntegration } from '~/server/utils/organization-integrations'
-import { resolveOrganizationAnalyticsContext } from '~/server/utils/analytics-report'
-import { parseAnalyticsRange } from '~/server/utils/analytics-calendar'
+import { parseAnalyticsRange, resolveOrganizationAnalyticsContext } from '~/server/utils/analytics-calendar'
 import { getGoogleAdsCustomer, getGoogleAdsPerformanceSummary, listGoogleAdsCampaigns } from '~/server/utils/google-ads'
 import { listServices } from '~/server/utils/organization-services'
 import type { GoogleAdsInsights } from '~/shared/google-ads-insights'
@@ -31,6 +30,7 @@ export async function loadGoogleAdsInsights(env: CloudflareEnv, organizationId: 
     customer: { id: connection.target_id, name: connection.target_name, currency: customer.currencyCode },
     period: { startDate: range.startDate, endDate: range.endDate },
     totals: { costMicros: summary.costMicros, clicks: summary.clicks, impressions: summary.impressions, conversions: summary.conversions, averageCpcMicros: summary.averageCpcMicros },
+    days: summary.days,
     // A removed campaign belongs in the range only by what it spent there.
     campaigns: campaigns
       .filter(campaign => campaign.status !== 'REMOVED' || campaign.costMicros > 0 || campaign.clicks > 0 || campaign.impressions > 0)

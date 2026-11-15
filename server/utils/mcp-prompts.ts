@@ -175,7 +175,7 @@ export function renderMcpPrompt(name: string, args: Record<string, string>): { d
     case "grow_my_bookings": {
       return {
         description: "Review booking demand",
-        text: "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_conversations plus get_conversation for current guest demand. Recommend the most useful action supported by those records. Use send_message, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff.",
+        text: "Use get_workspace_context and get_organization_analytics (conversion/booking-conversion and conversion/sources) to read recent visits and the bookings they led to. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_conversations plus get_conversation for current guest demand. Recommend the most useful action supported by those records. Use send_message, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff.",
       };
     }
     default:

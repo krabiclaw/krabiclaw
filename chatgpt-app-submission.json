@@ -663,9 +663,9 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Computes analytics from saved organization facts and optionally reads connected Google Ads performance.",
-        "destructive_justification": "Does not alter native analytics events or change connected Google Ads campaigns.",
-        "open_world_justification": "Reports only the selected business stored analytics and its configured Google Ads account."
+        "read_only_justification": "Reads one Insights page from the selected business's saved reviews, bookings, payments and visit counts.",
+        "destructive_justification": "Does not change reviews, bookings, payments or analytics.",
+        "open_world_justification": "Reports only the selected business's own stored records."
       }
     },
     "get_organization_settings": {
@@ -1338,18 +1338,6 @@
         "read_only_justification": "Reads an advertising performance summary report in the connected Meta Ad Account.",
         "destructive_justification": "Does not edit campaigns, enable advertising or change budgets.",
         "open_world_justification": "Queries performance only within the business configured Meta Ad Account."
-      }
-    },
-    "query_organization_analytics": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Runs a filtered read of the selected organization’s saved analytics events or summaries.",
-        "destructive_justification": "Does not modify analytics events, sessions or aggregate reports.",
-        "open_world_justification": "Queries only analytics retained for the selected business, not other websites."
       }
     },
     "query_search_console": {

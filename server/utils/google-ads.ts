@@ -656,6 +656,8 @@ export async function getGoogleAdsPerformanceSummary(
   averageCpcMicros: number
   /** The account's currency, which `costMicros` is in. */
   currencyCode: string
+  /** The same numbers for each day with activity, in the account's time zone. */
+  days: Array<{ date: string; clicks: number; impressions: number; costMicros: number; conversions: number }>
 }> {
   const cid = cleanCustomerId(customerId)
   const headers = googleAdsHeaders(accessToken, developerToken)
@@ -667,7 +669,7 @@ export async function getGoogleAdsPerformanceSummary(
     method: 'POST',
     headers,
     body: JSON.stringify({
-      query: `SELECT customer.currency_code, metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions FROM customer WHERE segments.date BETWEEN '${start}' AND '${end}'`,
+      query: `SELECT customer.currency_code, segments.date, metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions FROM customer WHERE segments.date BETWEEN '${start}' AND '${end}'`,
     }),
   })
 
@@ -676,6 +678,8 @@ export async function getGoogleAdsPerformanceSummary(
   const data = await response.json() as {
     results?: Array<{
       customer?: { currencyCode?: string }
+      /** Segmented by date, every row names its day. */
+      segments: { date: string }
       metrics?: { clicks?: string; impressions?: string; costMicros?: string; conversions?: number }
     }>
   }
@@ -687,15 +691,18 @@ export async function getGoogleAdsPerformanceSummary(
   let costMicros = 0
   let conversions = 0
 
+  const days: Array<{ date: string; clicks: number; impressions: number; costMicros: number; conversions: number }> = []
   for (const r of data.results ?? []) {
-    clicks += Number(r.metrics?.clicks ?? 0)
-    impressions += Number(r.metrics?.impressions ?? 0)
-    costMicros += Number(r.metrics?.costMicros ?? 0)
-    conversions += Number(r.metrics?.conversions ?? 0)
+    const day = { date: r.segments.date, clicks: Number(r.metrics?.clicks ?? 0), impressions: Number(r.metrics?.impressions ?? 0), costMicros: Number(r.metrics?.costMicros ?? 0), conversions: Number(r.metrics?.conversions ?? 0) }
+    days.push(day)
+    clicks += day.clicks
+    impressions += day.impressions
+    costMicros += day.costMicros
+    conversions += day.conversions
   }
 
   const averageCpcMicros = clicks > 0 ? Math.round(costMicros / clicks) : 0
-  return { clicks, impressions, costMicros, conversions, averageCpcMicros, currencyCode: currencyCode ?? '' }
+  return { clicks, impressions, costMicros, conversions, averageCpcMicros, currencyCode: currencyCode ?? '', days }
 }
 
 export const GOOGLE_ADS_REPORTS = ['campaign_daily', 'search_terms', 'keywords', 'landing_pages', 'geography'] as const

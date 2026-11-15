@@ -154,7 +154,7 @@ test('public discovery resolves translations through current publication owners'
       assert.deepEqual(identity, { publicPath: path, sourcePath: path.slice(3), locale: 'th',
         locationId: null, pageId: null, documentId: null, pageType: null, recipe: null, productId: null })
       const eventId = crypto.randomUUID()
-      await recordTenantPageview(db, { eventId, organizationId: 'tenant', pagePath: identity.publicPath,
+      await recordTenantPageview(db, { eventId, organizationId: 'tenant', timezone: 'UTC', pagePath: identity.publicPath,
         sourcePath: identity.sourcePath, locale: identity.locale, referrerHost: null, attribution: {}, internalHosts: [],
         userAgent: 'Desktop', ipHash: 'proof', sessionId: 'localized-visit', visitorId: 'localized-visitor',
         country: null, region: null, city: null, locationId: identity.locationId, pageId: identity.pageId,
@@ -188,7 +188,7 @@ test('public discovery resolves translations through current publication owners'
         locationId: 'branch', pageId: null, pageType: null, recipe: null, documentId: null, productId: null })
       assert(identity)
       const eventId = crypto.randomUUID()
-      await recordTenantPageview(db, { eventId, organizationId: 'tenant', pagePath: identity.publicPath,
+      await recordTenantPageview(db, { eventId, organizationId: 'tenant', timezone: 'UTC', pagePath: identity.publicPath,
         sourcePath: identity.sourcePath, locale: identity.locale, referrerHost: null, attribution: {}, internalHosts: [],
         userAgent: 'Desktop', ipHash: 'proof', sessionId: 'localized-visit', visitorId: 'localized-visitor',
         country: null, region: null, city: null, locationId: identity.locationId, pageId: identity.pageId,

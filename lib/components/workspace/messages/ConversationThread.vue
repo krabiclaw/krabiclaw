@@ -146,7 +146,7 @@ const before = computed(() => older.value.length ? older.value[0]!.page.before :
 let olderRequest: AbortController | undefined
 
 function clearTranscript() {
-  realtime.recentConversations.delete(props.threadId)
+  realtime.held.take(`conversation:${props.threadId}`)
   olderRequest?.abort()
   older.value = []
   clear()

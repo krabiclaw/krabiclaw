@@ -11,7 +11,7 @@ import { fetchCimdMetadataResource } from '~/server/utils/cimd-metadata-fetch'
 import type { GenericEndpointContext } from '@better-auth/core'
 import { getCurrentAuthEndpointContext } from '@better-auth/core/context'
 import { HTTPError, type H3Event } from 'nitro';
-import { createDb, executeBatch, queryAll, queryFirst, schema, type BatchQuery } from '~/server/db'
+import { createDb, executeBatch, queryAll, queryFirst, schema, type BatchQuery, type DbClient } from '~/server/db'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { sendWhatsAppOtp } from '~/server/utils/whatsapp'
 import { parsePhoneOrThrow } from '~/utils/phone'
@@ -95,6 +95,24 @@ function assertOrganizationFacts(data: { default_currency?: unknown; timezone?: 
   if (data.timezone !== undefined && !isValidTimezone(typeof data.timezone === 'string' ? data.timezone : null)) throw new APIError('BAD_REQUEST', { message: 'timezone must be an IANA time zone' })
 }
 
+
+/**
+ * Every amount a business holds is in its one currency, so the currency is
+ * fixed once a payment, a recorded payment or a priced booking exists, or a
+ * channel is connected (it delivers reservations in the currency it was
+ * connected in). Each write of `default_currency` asks this before it changes it.
+ */
+export const BUSINESS_CURRENCY_FIXED = 'The business currency cannot change once money has been recorded or a channel is connected'
+export async function businessCurrencyFixed(db: DbClient, organizationId: string, currency: string): Promise<boolean> {
+  const row = await queryFirst<{ fixed: number }>(db, `SELECT default_currency <> ? AND (
+      EXISTS (SELECT 1 FROM payments WHERE organization_id = organization.id)
+      OR EXISTS (SELECT 1 FROM offline_payments WHERE organization_id = organization.id)
+      OR EXISTS (SELECT 1 FROM bookings WHERE organization_id = organization.id AND currency IS NOT NULL)
+      OR EXISTS (SELECT 1 FROM channex_connections WHERE organization_id = organization.id AND channel_id IS NOT NULL)) AS fixed
+    FROM organization WHERE id = ?`, [currency, organizationId])
+  if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
+  return row.fixed === 1
+}
 
 /**
  * Better Auth Stripe wraps the organization plugin's delete hook with its own
@@ -390,7 +408,12 @@ function buildAuth(env: CloudflareEnv) {
           })
         }
       },
-      beforeUpdateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
+      beforeUpdateOrganization: async ({ organization, member }: { organization: Record<string, unknown>; member: { organizationId: string } }) => {
+        assertOrganizationFacts(organization)
+        if (typeof organization.default_currency === 'string' && await businessCurrencyFixed(db, member.organizationId, organization.default_currency)) {
+          throw new APIError('CONFLICT', { code: 'CURRENCY_FIXED', message: BUSINESS_CURRENCY_FIXED })
+        }
+      },
       afterAddMember: async ({ member }: { member: { organizationId: string } }) => recordMemberChange(member.organizationId),
       afterAcceptInvitation: async ({ member }: { member: { organizationId: string } }) => recordMemberChange(member.organizationId),
       afterRemoveMember: async ({ member }: { member: { id: string; organizationId: string; userId: string } }) => {

@@ -217,7 +217,7 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,default_capacity,confirmation_mode,held_online,scheduling_mode,assigned_member_id,online_payment_required,created_by,updated_by) VALUES('product',?,'slot',60,1,'review',1,'provider','host-member',1,'host','host')").bind(ORG).run()
     await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by) VALUES('session',?,'product','America/New_York','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z',1,'scheduled','host','host')").bind(ORG).run()
     const opening = { id: 'consult-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: null, payload: threadPayloadForGuest({ name: 'Client', email: 'client@example.test' }), created_at: NOW }
-    const booking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1,
+    const booking = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1,
       following: bookingId => requestInsertQueries({ ...opening, booking_id: bookingId }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Consultation for 1', note: null }) })
     const jobs = async () => (await db.prepare("SELECT kind, subject_type, subject_id, assigned_member_id, starts_at, status FROM tasks WHERE kind IN ('consultation_prep', 'consultation_follow_up') ORDER BY kind").all<{ kind: string; status: string }>()).results
     const recompute = () => executeBatch(db, conversationTaskQueries(opening.id, new Date().toISOString()), { operation: 'Recompute consultation jobs' })
@@ -280,7 +280,7 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     await db.prepare("UPDATE bookings SET status = 'cancelled', cancelled_at = ? WHERE id = ?").bind(NOW, booking.bookingId).run()
     await recompute()
     const replacement = { ...opening, id: 'replacement-request', payload: threadPayloadForGuest({ name: 'Replacement Client', email: 'replacement@example.test' }) }
-    const newBooking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1,
+    const newBooking = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1,
       following: bookingId => requestInsertQueries({ ...replacement, booking_id: bookingId }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Consultation for 1', note: null }) })
     await db.prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?").bind(newBooking.bookingId).run()
     await executeBatch(db, conversationTaskQueries(replacement.id, new Date().toISOString()), { operation: 'Recompute replacement consultation jobs' })

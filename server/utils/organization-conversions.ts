@@ -1,12 +1,14 @@
 import { parseCookies } from 'better-auth/cookies'
 import type { DbClient } from '~/server/db'
-import { execute, queryFirst } from '~/server/db'
+import { executeBatch, queryFirst } from '~/server/db'
 import { getClientIp } from '~/server/utils/hourly-rate-limit'
 import { deliverForVisitor, type MeasurementProtocolEnv } from '~/server/utils/ga4-delivery'
 import { deliverMetaCapiForEvent } from '~/server/utils/meta-capi-delivery'
 import { projectConversionToGa4 } from '~/utils/ga4-projection'
-import { SESSION_COOKIE, VISITOR_COOKIE, hashIp, isCanonicalEventId } from '~/server/utils/pageview-tracking'
-import type { AttributionTouch, ObservedAttribution } from '~/utils/analytics-attribution'
+import { SESSION_COOKIE, VISITOR_COOKIE, dayCountQuery, hashIp, isCanonicalEventId } from '~/server/utils/pageview-tracking'
+import { clickKey, type InsightsClickEvent } from '~/shared/insights'
+import { localDateAt } from '~/utils/timezone'
+import { attributionChannel, type AttributionChannel, type AttributionTouch, type ObservedAttribution } from '~/utils/analytics-attribution'
 import {
   CONVERSION_EVENT_CATALOG,
   type ConversionEntityType,
@@ -20,10 +22,17 @@ export type { ConversionEntityType, ConversionStage }
 
 export type ConversionSurface = 'website' | 'dashboard' | 'mcp' | 'auth' | 'stripe'
 
-export interface OrganizationConversionInput {
+/**
+ * One conversion to record. A click Insights counts carries the organization's time zone (it is
+ * counted on the organization's local day there); every other event carries none.
+ */
+export type OrganizationConversionInput = ConversionFields & (
+  | { eventName: InsightsClickEvent; timezone: string }
+  | { eventName: Exclude<OrganizationConversionEventName, InsightsClickEvent>; timezone?: undefined })
+
+interface ConversionFields {
   /** The business whose outcome is measured — not necessarily the subject's own organization. */
   organizationId: string
-  eventName: OrganizationConversionEventName
   stage: ConversionStage
   locationId?: string | null
   /** The product and variant this event is about, when it is about one (a booking's selection, a product view). */
@@ -109,6 +118,28 @@ async function verifiedOriginEvent(db: DbClient, organizationId: string, browser
     attributedAt: text('attributed_at'),
     basis: text('attribution_basis') ?? 'none',
   }
+}
+
+/** The channel a visit's touch arrived from; a visit with no touch of its own or before it arrived directly. */
+export function websiteSourceOf(touch: Pick<AttributionTouch, 'source' | 'medium'> | null): AttributionChannel {
+  return touch ? attributionChannel(touch.source, touch.medium) : 'Direct'
+}
+
+/**
+ * How the guest making a booking on the website arrived (bookings.website_source), read as the
+ * booking's conversion event reads it: the attribution of the visit the booking was made on, else
+ * the session's last touch. A request without this site's analytics session has none recorded.
+ */
+export async function readWebsiteSource(db: DbClient, organizationId: string, origin: { headers: Headers }, originEventId: string | null): Promise<AttributionChannel> {
+  const cookies = parseCookies(origin.headers.get('cookie') ?? '')
+  const sessionId = cookies.get(SESSION_COOKIE)
+  const visitorId = cookies.get(VISITOR_COOKIE)
+  if (!isCanonicalEventId(sessionId) || !isCanonicalEventId(visitorId)) return 'Not recorded'
+  const visit = await verifiedOriginEvent(db, organizationId, { sessionId, visitorId }, originEventId)
+  if (visit) return websiteSourceOf(visit.attribution)
+  const session = await queryFirst<{ attribution: string }>(db, `SELECT json_extract(payload_json, '$.attribution') AS attribution FROM analytics_summaries
+    WHERE organization_id = ? AND kind = 'session' AND date = '' AND key = ?`, [organizationId, sessionId])
+  return session ? websiteSourceOf(JSON.parse(session.attribution) as AttributionTouch) : 'Not recorded'
 }
 
 /** The pageview a form submission says it came from, or null when the claim is not even shaped like one. Whether it is believed is decided when the event is recorded. */
@@ -222,12 +253,16 @@ export async function recordOrganizationConversionEvent(db: DbClient, origin: { 
     product_id: input.productId ?? (input.entityType === 'product' ? input.entityId : null) ?? null, variant_id: input.variantId ?? null,
     value: input.value ?? null, metadata: input.metadata ?? null,
     ip_hash: ipHash, user_agent: (origin?.headers.get('user-agent') || '').slice(0, 1024) || null })
-  const inserted = await execute(db, `INSERT OR IGNORE INTO analytics_events (
+  // A click Insights counts adds one to its day, on the organization's local day of the click,
+  // in the same batch and only when the event is new: a duplicate adds nothing.
+  const dayCount = input.timezone === undefined ? []
+    : [dayCountQuery({ organizationId: input.organizationId, date: localDateAt(new Date(now), input.timezone), now }, 'dimension_day', clickKey(input.eventName))]
+  const [inserted] = await executeBatch(db, [{ query: `INSERT OR IGNORE INTO analytics_events (
     id, kind, organization_id, session_id, visitor_id, location_id, page_path, payload_json, created_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, params: [
     id, rule.kind, input.organizationId, browser?.sessionId ?? null, browser?.visitorId ?? null, input.locationId ?? origin_?.page.location_id ?? null, origin_?.page.path ?? input.pagePath ?? null, payload, now,
-  ])
-  if (Number(inserted.meta?.changes ?? 0) === 1) return { id, created: true }
+  ] }, ...dayCount])
+  if (Number(inserted?.meta?.changes ?? 0) === 1) return { id, created: true }
 
   // An interaction with a supplied identity that already exists is the same interaction delivered
   // again. The identity must be this organization's own: another tenant's event is never returned.

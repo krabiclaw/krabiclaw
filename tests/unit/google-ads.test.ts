@@ -287,24 +287,29 @@ test('campaign updates reject incomplete input and another campaign’s budget b
   await assert.rejects(updateGoogleAdsCampaign('token', 'dev', '3317427925', { campaignId: '222', status: 'ENABLED', budgetId: '888', dailyBudgetAmountMicros: 20000000 }), /does not belong to campaign 222/u)
 })
 
-test('getGoogleAdsPerformanceSummary queries customer aggregates and calculates blended CPC', async (t) => {
-  t.mock.method(globalThis, 'fetch', async () => {
+test('getGoogleAdsPerformanceSummary reads the customer by day and totals it with blended CPC', async (t) => {
+  let query = ''
+  t.mock.method(globalThis, 'fetch', async (_url: string, init: RequestInit) => {
+    query = (JSON.parse(String(init.body)) as { query: string }).query
     return Response.json({
       results: [
-        {
-          customer: { currencyCode: 'USD' },
-          metrics: { clicks: '100', impressions: '2000', costMicros: '50000000', conversions: 10 },
-        },
+        { customer: { currencyCode: 'USD' }, segments: { date: '2026-09-01' }, metrics: { clicks: '60', impressions: '1200', costMicros: '30000000', conversions: 6 } },
+        { customer: { currencyCode: 'USD' }, segments: { date: '2026-09-03' }, metrics: { clicks: '40', impressions: '800', costMicros: '20000000', conversions: 4 } },
       ],
     })
   })
 
   const summary = await getGoogleAdsPerformanceSummary('test-token', 'dev-tok', '331-742-7925', '2026-09-01', '2026-09-30')
+  assert.match(query, /segments\.date, metrics\.clicks/)
   assert.equal(summary.currencyCode, 'USD')
   assert.equal(summary.clicks, 100)
   assert.equal(summary.impressions, 2000)
   assert.equal(summary.costMicros, 50000000)
   assert.equal(summary.conversions, 10)
   assert.equal(summary.averageCpcMicros, 500000) // 50M / 100
+  assert.deepEqual(summary.days, [
+    { date: '2026-09-01', clicks: 60, impressions: 1200, costMicros: 30000000, conversions: 6 },
+    { date: '2026-09-03', clicks: 40, impressions: 800, costMicros: 20000000, conversions: 4 },
+  ])
 })
 

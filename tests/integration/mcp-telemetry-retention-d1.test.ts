@@ -3,7 +3,7 @@ import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
-import analyticsDaily from '../../server/tasks/analytics-aggregate-daily.ts'
+import retention from '../../server/tasks/stripe-ga4-intent-retention.ts'
 import { logMcpToolCallEvent } from '../../server/utils/mcp-telemetry.ts'
 
 // Privacy Policy: MCP tool-call telemetry is deleted 180 days after creation.
@@ -58,7 +58,7 @@ test('MCP telemetry stores only operational facts and the daily task deletes rec
     await db.prepare("INSERT INTO mcp_tool_call_events (id, method, status, created_at, arguments_summary_json) VALUES ('diagnostic-day-8', 'tools/call', 'success', ?, ?)")
       .bind(daysAgo(8), diagnostic.arguments_summary_json).run()
 
-    const outcome = await analyticsDaily.run({ name: 'analytics-aggregate-daily', payload: {}, context: { cloudflare: { env: { DB: db } } } })
+    const outcome = await retention.run({ name: 'stripe-ga4-intent-retention', payload: {}, context: { cloudflare: { env: { DB: db } } } })
 
     assert.equal((outcome as { result: { mcpToolCallEventsCleaned: number } }).result.mcpToolCallEventsCleaned, 2)
     const remaining = await db.prepare('SELECT id FROM mcp_tool_call_events ORDER BY id').all<{ id: string }>()

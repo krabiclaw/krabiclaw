@@ -825,7 +825,6 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   get_resource_localization: R,
   get_organization: R,
   get_organization_analytics: R,
-  query_organization_analytics: R,
   query_google_analytics: R,
   query_search_console: R,
   list_media_assets: R,

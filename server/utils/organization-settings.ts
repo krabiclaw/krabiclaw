@@ -20,7 +20,7 @@ import { SITE_RECIPE_KEYS, SITE_RECIPE_OPTIONS, isSiteRecipeValue, parseSiteReci
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation } from '~/shared/media-placement-contract'
 import { refreshSocialCard, regenerateOrganizationSocialCards } from '~/server/utils/social-card'
 import { organizationAdapter } from '~/server/utils/member-access'
-import { linkedAccountOwner, type CloudflareEnv } from '~/server/utils/auth'
+import { BUSINESS_CURRENCY_FIXED, businessCurrencyFixed, linkedAccountOwner, type CloudflareEnv } from '~/server/utils/auth'
 import { prepareFormQuestionsWrite, readFormQuestions } from '~/server/domain/form-questions'
 import { formQuestionsRevision, type FormQuestion } from '~/shared/form-questions'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
@@ -689,6 +689,10 @@ export async function updateOrganizationSettingsFields(
     } catch {
       return { status: 400, data: { error: 'Invalid media references' } }
     }
+  }
+
+  if (typeof updates.default_currency === 'string' && await businessCurrencyFixed(db, organizationId, updates.default_currency.toUpperCase().trim())) {
+    return { status: 409, data: { error: BUSINESS_CURRENCY_FIXED, code: 'CURRENCY_FIXED' } }
   }
 
   const configError = await updateNonOrganizationConfigFields(db, organizationId, updates)

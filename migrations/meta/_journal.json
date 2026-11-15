@@ -57,6 +57,13 @@
       "when": 1794726494346,
       "tag": "0007_drop_goals_opportunities_and_retired_task_kinds",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794733451287,
+      "tag": "0008_insights_counters_and_booking_source",
+      "breakpoints": true
     }
   ]
 }

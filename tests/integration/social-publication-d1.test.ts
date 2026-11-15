@@ -1057,7 +1057,7 @@ test('Instagram insights read the connected account and its posts for the organi
     assert.equal(report.status, 'connected')
     if (report.status !== 'connected') return
     assert.equal(report.username, 'krabiclaw')
-    assert.deepEqual(report.period, range)
+    assert.deepEqual(report.period, { ...range, timezone: 'Asia/Bangkok' })
     // Zero is Instagram's zero; a metric it did not return is null.
     assert.deepEqual(report.account, { views: 1200, reach: 0, accounts_engaged: 14, total_interactions: 31, likes: 20, comments: 3, shares: 4, saves: 4, replies: null, profile_links_taps: 2 })
     const [accountRequest] = meta.sent(request => request.path.endsWith(`${IG}/insights`))

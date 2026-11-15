@@ -56,6 +56,7 @@ import Ajv from 'ajv'
 import { stayPhotoRoomName, type StayPhotoRoom } from '../../shared/stay-photos.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
 import { hashPassword } from 'better-auth/crypto'
+import { updateOrganizationSettingsFields } from '../../server/utils/organization-settings.ts'
 import editNightsRoute from '../../server/api/dashboard/stay-homes/[product_id]/nights.put.ts'
 import { buyStay } from './support/stay-checkout.ts'
 
@@ -1107,6 +1108,10 @@ test('a channel stay is read-only here and is paid through its channel; an app s
     await assert.rejects(recordStayPayment(db, env, manager, stay.id, { amount_minor: 100, method: 'crypto', paid_on: '2026-11-01', idempotency_key: 'pay-3' }), code('INVALID_STAY_FIELD'))
     const partial = await recordStayPayment(db, env, manager, stay.id, { amount_minor: 20_000, method: 'cash', paid_on: '2026-11-01', reference: 'deposit', idempotency_key: 'pay-4' })
     assert.deepEqual([partial.stay.paid_minor, partial.stay.payment_status, partial.stay.payments.length], [20_000, 'partial', 1])
+    // Money is recorded in USD: the business currency no longer changes.
+    assert.deepEqual(await updateOrganizationSettingsFields(db, env, ORG, { default_currency: 'EUR' }, OWNER),
+      { status: 409, data: { error: 'The business currency cannot change once money has been recorded or a channel is connected', code: 'CURRENCY_FIXED' } })
+    assert.equal(await db.prepare('SELECT default_currency FROM organization WHERE id = ?').bind(ORG).first('default_currency'), 'USD')
     const storedPayment = await db.prepare('SELECT id, amount_minor, reference, note FROM offline_payments WHERE organization_id = ? AND booking_id = ? AND idempotency_key = ?').bind(ORG, stay.id, 'pay-4').first<{ id: string; amount_minor: number; reference: string | null; note: string | null }>()
     assert.deepEqual(storedPayment, { id: partial.payment.id, amount_minor: 20_000, reference: 'deposit', note: null })
     // A retried record is the same payment; the same key for another payment is refused.
@@ -2120,7 +2125,7 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
       const listing = await readStayHome(db, manager, cabin.id)
       const quote = await quoteStay(db, ORG, listing, { check_in_date: date(offset), check_out_date: date(offset + 2), adults: 2 })
       return createStayRequest(db, env, { organizationId: ORG, buyerUserId: OUTSIDER, key, fingerprint: key, home: listing, quote,
-        guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null }, locale: 'en', ipHash: 'proof' })
+        guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null }, locale: 'en', ipHash: 'proof', websiteSource: 'Direct' })
     }
     const decide = (stay: Awaited<ReturnType<typeof submit>>, action: 'confirm' | 'reject', suffix = '') => executeGuestThreadOperation(db, {
       threadId: stay.conversation_id, organizationId: ORG, action, actorUserId: OWNER, idempotencyKey: `${action}:${stay.id}${suffix}`, stayManager: true,

@@ -116,11 +116,12 @@ export default defineHandler(async (event) => {
       ? normalizeReferrerHost(`https://${body.referrer_host}`)
       : null
     const geo = getCloudflareGeo(event)
-    const organization = event.context.organization as { vertical?: string | null } | undefined
+    // Tenant resolution set it with organizationId; organization.timezone is NOT NULL.
+    const organization = event.context.organization as { vertical: string | null; timezone: string }
     const [identity, internalHosts] = await Promise.all([
       resolvePublicPageIdentity(cloudflareEnv(event) as never, db, {
         organizationId, pagePath, requestedLocale: locale,
-        themeId: event.context.themeId as string | null | undefined, vertical: organization?.vertical,
+        themeId: event.context.themeId as string | null | undefined, vertical: organization.vertical,
       }),
       getOrganizationInternalHosts(db, organizationId, event.url.hostname),
     ])
@@ -128,6 +129,7 @@ export default defineHandler(async (event) => {
     await recordTenantPageview(db, {
       eventId: body.event_id,
       organizationId,
+      timezone: organization.timezone,
       pagePath,
       sourcePath: identity.sourcePath,
       locale: identity.locale,

@@ -228,14 +228,15 @@ const { data, pending, status, error: threadsError, refresh, clear } = await use
   nextPageError.value = null
   const scope = listKey.value
   if (readConnectionEpoch === null) {
-    const held = realtime.recentInbox.snapshot
-    realtime.recentInbox.snapshot = undefined
-    if (held?.key === scope && held.expiresAt > Date.now() && realtime.status.value === 'open') {
+    // The inbox key holds only the window this list stored, every loaded page included.
+    const held = realtime.held.take(`inbox:${scope}`)
+    if (held) {
+      const window = held.value as ThreadListPage
       readConnectionEpoch = realtime.connectionEpoch.value
       reuseExpiresAt = held.expiresAt
-      loadedPages = 1 + held.page.pagination.offset / held.page.pagination.limit
+      loadedPages = 1 + window.pagination.offset / window.pagination.limit
       rowsKey.value = scope
-      return held.page
+      return window
     }
     await realtime.waitForFirstOpen(signal)
   }
@@ -401,9 +402,10 @@ onScopeDispose(() => {
   if (!props.personalScope && current && reader.value && status.value === 'success' && !loadingMore.value && !reconciling
     && !nextPageError.value && !toggling.size && !fullRefresh && !changedIds.size && realtime.status.value === 'open'
     && readConnectionEpoch === realtime.connectionEpoch.value) {
-    // Mailboxes and labels change with time. Reusing a snapshot does not extend its life.
-    const expiresAt = reuseExpiresAt ?? Date.now() + 30_000
-    if (expiresAt > Date.now()) realtime.recentInbox.snapshot = { key: listKey.value, page: current, expiresAt }
+    // Mailboxes and labels change with time. Reusing a held read does not extend its life.
+    realtime.held.hold(realtime.held.begin(`inbox:${listKey.value}`, event => event.type === 'access.changed'
+      || ((event.type === 'MESSAGE_ACK' || event.type === 'CONVERSATION_LEAVE') && event.user_id === reader.value)
+      || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.scheduled)), current, reuseExpiresAt ?? Date.now() + 30_000, 1)
   }
 })
 

@@ -1565,6 +1565,8 @@ export async function sessionClaimQuery(db: DbClient, input: {
   answers?: FormAnswerSnapshot[]
   /** The guest said "this many or more". */
   partySizeIsMinimum?: boolean
+  /** How a website guest arrived (bookings.website_source); null for a booking a member makes. */
+  websiteSource: string | null
   now: string
 }): Promise<BatchQuery> {
   const allocation = await sessionAllocationPredicate(db, input)
@@ -1572,7 +1574,7 @@ export async function sessionClaimQuery(db: DbClient, input: {
     query: `
       INSERT INTO bookings (
         id, organization_id, product_id, product_session_id, product_variant_id, location_id, starts_at, ends_at, timezone,
-        user_id, party_size, party_size_is_minimum, answers, policy_json, status, received_at, created_at, updated_at
+        user_id, party_size, party_size_is_minimum, answers, policy_json, status, website_source, received_at, created_at, updated_at
       )
       SELECT ?, ?, ?, ?, ?,
         (SELECT location_id FROM product_sessions WHERE id = ? AND organization_id = ?),
@@ -1582,7 +1584,7 @@ export async function sessionClaimQuery(db: DbClient, input: {
         ?, ?, ?, ?, ?,
         COALESCE((SELECT status FROM bookings WHERE id = ?),
           (SELECT CASE WHEN confirmation_mode = 'review' THEN 'pending' ELSE 'confirmed' END
-           FROM product_booking_configs WHERE product_id = ? AND organization_id = ?)), ?, ?, ?
+           FROM product_booking_configs WHERE product_id = ? AND organization_id = ?)), ?, ?, ?, ?
       WHERE ${allocation.query}
         AND EXISTS(SELECT 1 FROM product_variants v WHERE v.id=? AND v.product_id=? AND v.organization_id=? AND v.active=1)
       ON CONFLICT (id) DO NOTHING
@@ -1590,7 +1592,7 @@ export async function sessionClaimQuery(db: DbClient, input: {
     params: [
       input.bookingId, input.organizationId, input.productId, input.sessionId, input.productVariantId,
       ...[0, 1, 2, 3].flatMap(() => [input.sessionId, input.organizationId]),
-      input.userId ?? null, input.partySize, input.partySizeIsMinimum ?? false, JSON.stringify(input.answers ?? []), input.policyJson, input.replacingBookingId ?? null, input.productId, input.organizationId, input.now, input.now, input.now,
+      input.userId ?? null, input.partySize, input.partySizeIsMinimum ?? false, JSON.stringify(input.answers ?? []), input.policyJson, input.replacingBookingId ?? null, input.productId, input.organizationId, input.websiteSource, input.now, input.now, input.now,
       ...allocation.params!, input.productVariantId,input.productId,input.organizationId,
     ],
   }
@@ -1619,6 +1621,8 @@ export async function claimSessionCapacity(db: DbClient, input: {
   policyJson: string
   answers?: FormAnswerSnapshot[]
   partySizeIsMinimum?: boolean
+  /** How a website guest arrived (bookings.website_source); null for a booking a member makes. */
+  websiteSource: string | null
   /**
    * The writes that belong to this claim, given the id it minted.
    *

@@ -94,9 +94,12 @@ export function useOrganizationConversionTracking() {
 
   // A product was viewed / a booking was started: native interactions first, then the GA4
   // ecommerce event through Zaraz's ecommerce API. Neither is an outcome.
-  function trackProductView(productId: string, locationId: string | null, ecommerce: Record<string, unknown> | null) {
-    void recordNative({ event_name: 'product_view', stage: 'viewed', product_id: productId, location_id: locationId, page_type: 'product' })
-      .then((eventId) => { if (eventId && ecommerce) window.zaraz?.ecommerce?.('Product Viewed', { ...ecommerce, event_id: eventId }) })
+  // A product view is its page's view: the pageview collector records it and counts it for the
+  // offering. Google Analytics' Product Viewed carries that recorded pageview's id.
+  function trackProductView(ecommerce: Record<string, unknown>) {
+    if (!import.meta.client || previewAuthorized || automatedBrowser()) return
+    void Promise.race([pageEventIdFor(window.location.pathname), whenLeaving()])
+      .then((eventId) => { if (eventId) window.zaraz?.ecommerce?.('Product Viewed', { ...ecommerce, event_id: eventId }) })
   }
 
   function trackCheckoutStart(productId: string | null, locationId: string | null, ecommerce: Record<string, unknown> | null, variantId?: string | null) {

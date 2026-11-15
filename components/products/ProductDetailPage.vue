@@ -896,10 +896,10 @@ const sessionPickLabel = computed(() => props.vertical === 'service' ? t('site.e
 // has it, so a tab left open does not offer a seat that has since gone. Only
 // for a product a guest can book here; an enquiry has no calendar.
 onMounted(() => {
-  // Every product view is a native interaction; only a priced, bookable product is an ecommerce item.
-  trackProductView(props.product.id, props.location?.id ?? null, offer.value && !enquiryOnly.value
-    ? { product_id: props.product.id, name: props.product.name, currency: offer.value.currency, price: ga4Major(offer.value.unit_amount, offer.value.currency) }
-    : null)
+  // The page view is the product view; only a priced, bookable product is an ecommerce item.
+  if (offer.value && !enquiryOnly.value) {
+    trackProductView({ product_id: props.product.id, name: props.product.name, currency: offer.value.currency, price: ga4Major(offer.value.unit_amount, offer.value.currency) })
+  }
   // A page that places this offering's booking (?book=1) arrives with its booking open.
   if (useRoute().query.book === '1' && canBook.value && !enquiryOnly.value && !canOrderExternally.value) {
     if (isStay.value) stayBooking.bookingOpen.value = true

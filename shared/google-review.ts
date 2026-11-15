@@ -50,7 +50,8 @@ export function normalizeGoogleReview(value: unknown) {
   const content = review.text == null ? {} : record(review.text)
   const original = review.originalText == null ? {} : record(review.originalText)
   const google_review_id = text(review.name)
-  const author_name = text(author.displayName)
+  // A review always names its author; Google's display name is the only one an imported review has.
+  const author_name = text(author.displayName)?.trim()
   const original_review_date = text(review.publishTime)
   if (!google_review_id || !/^places\/[^/]+\/reviews\/[^/]+$/.test(google_review_id) || !author_name
     || typeof review.rating !== 'number' || !Number.isFinite(review.rating) || review.rating < 1 || review.rating > 5
