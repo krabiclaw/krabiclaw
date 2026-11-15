@@ -295,12 +295,12 @@ function previewFrom(message: LatestMessage, context: { guestName: string; viewe
 }
 
 /**
- * Whether the Current mailbox holds an unread conversation, for the nav's dot:
- * the list's own scope and the one unread statement, so the dot never
- * disagrees with a row.
+ * Whether the reader's whole Current mailbox holds an unread conversation, for
+ * the nav's dot: the list's access scope and the one unread statement, without
+ * the page's filters.
  */
 function hasUnreadQuery(organizationId: string | null, opts: ListGuestThreadsOptions, now: Date): BatchQuery {
-  const scope = inboxScope(organizationId, { ...opts, conversationIds: undefined, kind: null, q: null, mailbox: 'current', unreadOnly: false }, now.toISOString())
+  const scope = inboxScope(organizationId, { userId: opts.userId, buyerAudience: opts.buyerAudience, mailbox: 'current' }, now.toISOString())
   const unread = unreadSql('gt', opts.userId)
   return { query: `SELECT EXISTS (SELECT 1 FROM ${scope.from} WHERE ${scope.where} AND ${unread.sql}) AS has_unread`, params: [...scope.params, ...unread.params] }
 }

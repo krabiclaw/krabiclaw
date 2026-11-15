@@ -526,9 +526,10 @@ const newestBusinessId = computed(() => entries.value.findLast(entry => entry.ty
 
 /**
  * A written message arrives with the end of this reader's transcript and joins
- * the head where the head ends at the message before it. An activity entry can
- * change the conversation's header, and a message written beside this reader's
- * own reply lands above it; those are read with the head.
+ * the head where the head ends at the message before it. An activity entry, or
+ * a guest's first message in an Airbnb Support conversation, can change the
+ * conversation's header, and a message written beside this reader's own reply
+ * lands above it; those are read with the head.
  */
 function appendWrittenTail(tail: ConversationEntriesPage, written: MessageIdentity): boolean {
   if (!isConversationEntriesPage(tail)) throw new Error('A written message arrived with an invalid transcript tail')
@@ -537,6 +538,7 @@ function appendWrittenTail(tail: ConversationEntriesPage, written: MessageIdenti
   const messages = tail.entries.filter(entry => entry.type !== 'day')
   const arrived = messages.at(-1)
   if (arrived?.type !== 'message' || arrived.id !== written.id || arrived.sequence !== written.sequence) return false
+  if (head.conversation.kind === 'support' && arrived.side === 'guest') return false
   const last = head.entries.findLast(entry => entry.type !== 'day')
   if (last?.id === arrived.id) return true
   if (last?.id !== messages.at(-2)?.id) return false
