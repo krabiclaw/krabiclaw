@@ -36,9 +36,10 @@ enforces the shape and the once-per-subject rule.
 ### Interactions and their producers
 
 Every browser-emitted fact is an `interaction` event with a stable UUID chosen
-by its producer: the same ID delivered twice is one event, two views of a
-product are two events. `POST /api/analytics/interactions` (public origin) and
-`POST /api/public/conversion-events` (product views and booking starts) are the
+by its producer: the same ID delivered twice is one event, two clicks are two
+events. A product view is its page's pageview, counted for the offering; its
+GA `Product Viewed` carries that pageview's id. `POST /api/analytics/interactions` (public origin) and
+`POST /api/public/conversion-events` (clicks and booking starts) are the
 only browser entrances; both write through
 `recordOrganizationConversionEvent`. Google Analytics is only ever a projection of a
 recorded native event: the browser sends the Zaraz copy after the native
@@ -55,7 +56,7 @@ event (delivered with keepalive) but no GA copy.
 
 | Interaction | Canonical producer | GA4 name |
 | --- | --- | --- |
-| `product_view`, `checkout_start` | `ProductDetailPage.vue` via `useOrganizationConversionTracking` | `view_item`, `begin_checkout` |
+| `checkout_start` | `ProductDetailPage.vue` via `useOrganizationConversionTracking` | `begin_checkout` |
 | `consultation_cta_click`, `product_order_external_click`, `link_click`, `donation_click` | `useOrganizationConversionTracking` | same name |
 | `phone_click` | one click listener in `registerPageviewTracking` (`utils/pageview-tracking-runtime.client.ts`) for every `tel:` link on a tracked page, whichever component drew it; the server matches the number to a location (`dialsSameNumber`, `utils/phone.ts`) | same name |
 | `organization_created`, `domain_connected`, `subscription_upgrade`, `subscription_downgrade`, `subscription_checkout_success`, `post_created`, `post_published`, `image_uploaded`, `video_uploaded`, `media_library_viewed`, `dashboard_visited` | `useAnalytics` (measured on the platform organization; subject is the organization worked on, actor is the user; only the catalog's allowlisted scalar `properties` are kept) | same name |

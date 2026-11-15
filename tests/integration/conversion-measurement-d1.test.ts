@@ -450,7 +450,7 @@ test('conversion session bounds survive out-of-order arrivals on D1', { timeout:
   const { runtime, db } = await openDb()
   try {
     await db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org-bounds', 'Bounds', 'bounds', 'USD', 'Asia/Bangkok')").run()
-    const input = { organizationId: 'org-bounds', eventName: 'product_view', stage: 'viewed', surface: 'website', entityType: 'product', entityId: 'product-1' } as const
+    const input = { organizationId: 'org-bounds', eventName: 'announcement_view', stage: 'viewed', surface: 'website' } as const
     for (const hour of ['03', '05', '01', '04']) {
       await recordOrganizationConversionEvent(db, browser, { ...input, occurredAt: `2026-09-10T${hour}:00:00.000Z` })
     }

@@ -1148,7 +1148,7 @@ test('a channel stay is read-only here and is paid through its channel; an app s
   }
 })
 
-test('the business currency is fixed once a stay records money, through settings and through Better Auth', { timeout: 120_000 }, async () => {
+test('the business currency is fixed once a channel is connected or a stay records money, through settings and through Better Auth', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   try {
     const auth = createAuth(env)
@@ -1168,15 +1168,22 @@ test('the business currency is fixed once a stay records money, through settings
     assert.equal((await updateOrganizationSettingsFields(db, env, ORG, { default_currency: 'USD' }, OWNER)).status, 200)
     assert.equal(await stored(), 'USD')
 
+    // A connected channel delivers reservations in the currency it was connected in: with no money yet, the currency is already fixed.
+    await db.prepare("INSERT INTO channex_connections (organization_id, status, group_id, channel_id, connected_at) VALUES (?, 'connected', 'currency-group', 'currency-airbnb', ?)").bind(ORG, NOW).run()
+    assert.deepEqual(await updateOrganizationSettingsFields(db, env, ORG, { default_currency: 'EUR' }, OWNER),
+      { status: 409, data: { error: 'The business currency cannot change once money has been recorded or a channel is connected', code: 'CURRENCY_FIXED' } })
+    assert.equal(await stored(), 'USD')
+    await db.prepare('DELETE FROM channex_connections WHERE organization_id = ?').bind(ORG).run()
+
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
     await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'priced', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest })
 
     // A priced booking holds money in USD: neither writer moves the business to another currency.
     assert.deepEqual(await updateOrganizationSettingsFields(db, env, ORG, { default_currency: 'EUR', press_email: 'press@example.test' }, OWNER),
-      { status: 409, data: { error: 'The business currency cannot change once money has been recorded', code: 'CURRENCY_FIXED' } })
+      { status: 409, data: { error: 'The business currency cannot change once money has been recorded or a channel is connected', code: 'CURRENCY_FIXED' } })
     const authRefused = await updateThroughAuth('EUR')
     assert.equal(authRefused.status, 409)
-    assert.deepEqual(await authRefused.json(), { code: 'CURRENCY_FIXED', message: 'The business currency cannot change once money has been recorded' })
+    assert.deepEqual(await authRefused.json(), { code: 'CURRENCY_FIXED', message: 'The business currency cannot change once money has been recorded or a channel is connected' })
     assert.equal(await stored(), 'USD')
     assert.equal(await db.prepare("SELECT json_extract(settings_json, '$.config.press_email') AS press FROM organization WHERE id = ?").bind(ORG).first('press'), null)
     // Saving the currency it already has is not a change.

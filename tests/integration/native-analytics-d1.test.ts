@@ -59,7 +59,7 @@ test('native analytics: each producer stores its event with the context it happe
     assert.equal((await stored(db, uuid(12))).payload.attribution_basis, 'inherited')
 
     // Interactions: same id once, new id twice.
-    const view = { organizationId: ORG, eventName: 'product_view', stage: 'viewed', surface: 'website', entityType: 'product', entityId: 'prod-1', productId: 'prod-1', originEventId: uuid(11), pagePath: '/th/pricing' } as const
+    const view = { organizationId: ORG, eventName: 'announcement_view', stage: 'viewed', surface: 'website', originEventId: uuid(11), pagePath: '/th/pricing' } as const
     const at = (occurredAt: string) => ({ occurredAt })
     const a = await recordOrganizationConversionEvent(db, cookieFor(S1, V1), { ...view, id: uuid(20), ...at('2026-09-10T03:06:00.000Z') })
     const b = await recordOrganizationConversionEvent(db, cookieFor(S1, V1), { ...view, id: uuid(20), ...at('2026-09-10T03:06:00.000Z') })
@@ -69,7 +69,7 @@ test('native analytics: each producer stores its event with the context it happe
     assert.deepEqual(measurementOutcome({ status: 'fulfilled', value: a }), { status: 'recorded', event_id: uuid(20) })
     assert.deepEqual(measurementOutcome({ status: 'rejected', reason: new Error('quote unresolved') }), { status: 'failed', reason: 'quote unresolved' })
     await assert.rejects(recordOrganizationConversionEvent(db, cookieFor(S1, V1), { ...view, organizationId: OTHER, id: uuid(20) }), /another organization/)
-    assert.equal(await db.prepare("SELECT count(*) FROM analytics_events WHERE organization_id = ? AND (payload_json ->> '$.event_name') = 'product_view'").bind(ORG).first('count(*)'), 2)
+    assert.equal(await db.prepare("SELECT count(*) FROM analytics_events WHERE organization_id = ? AND (payload_json ->> '$.event_name') = 'announcement_view'").bind(ORG).first('count(*)'), 2)
     const first = await stored(db, uuid(20))
     assert.equal(first.kind, 'interaction')
     assert.equal(first.payload.page.locale, 'th', 'the interaction carries the origin visit language')
@@ -116,9 +116,6 @@ test('a click Insights counts adds one to its local day, once', { timeout: 120_0
     ])
     await call(3, '2026-09-11T10:00:00.000Z')
     assert.deepEqual((await counts())[0], { date: '2026-09-11', key: '["interaction","phone_click",""]', clicks: 2 })
-    // A click without the business's time zone has no day to count on: nothing is stored.
-    await assert.rejects(recordOrganizationConversionEvent(db, null, { organizationId: ORG, eventName: 'phone_click', stage: 'external_handoff', surface: 'website', id: uuid(4) }), /needs its time zone/)
-    assert.equal(await db.prepare('SELECT count(*) FROM analytics_events WHERE id = ?').bind(uuid(4)).first('count(*)'), 0)
     // An interaction Insights does not count adds no day count.
     await recordOrganizationConversionEvent(db, null, { organizationId: ORG, eventName: 'announcement_view', stage: 'viewed', surface: 'website', id: uuid(5), occurredAt: '2026-09-11T10:00:00.000Z' })
     assert.equal((await counts()).length, 2)

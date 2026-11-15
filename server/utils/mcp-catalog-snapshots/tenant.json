@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:72012d6fee9acf6eb4f9011dba1af67a263fcd52ae92513a966740db19a23226",
-  "documentationFingerprint": "sha256:ce1f2dc5283880b1fa9ec91117bd480201bff488ee1baf315920775f2477cc97",
+  "fingerprint": "sha256:8603cad5fd9b72d65c27f56c0a01acb635f6aec0bf535318d6fbcf6e8ac3b5e1",
+  "documentationFingerprint": "sha256:04d8dfb2eeb4cc8f3f4247e5006efce949b7ada4664fe5be590650231945a1e9",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -50098,17 +50098,6 @@
             ],
             "type": "object"
           },
-          "recorded_since": {
-            "anyOf": [
-              {
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "section": {
             "type": "string"
           },
@@ -50162,7 +50151,6 @@
           "period",
           "filters",
           "currency",
-          "recorded_since",
           "metrics",
           "series",
           "list"
@@ -127075,7 +127063,7 @@
       "toolContracts": {
         "create_post": "sha256:a2a95f5e752b47a10f2d42dfaaca0caca19afd2a4110adc3fd97dad2eb8a763a",
         "get_conversation": "sha256:5007b5cc2485f51db503b10ae92e88691fe6d2ffa56dafced5194e41abd1fd3f",
-        "get_organization_analytics": "sha256:6af4029e23a8363a30310b6307534f92e50bd6bae3ab5a1d0b00f2c91aa6a2a1",
+        "get_organization_analytics": "sha256:0a138f87b50a331bea65168db050027df0a1f7d72e994b66f3c1972567a77475",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversations": "sha256:563552eb6b0af82a762e138edf26711d2560e62fdb2cee2a757e19106704fbad",

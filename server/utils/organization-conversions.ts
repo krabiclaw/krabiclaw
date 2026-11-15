@@ -6,7 +6,7 @@ import { deliverForVisitor, type MeasurementProtocolEnv } from '~/server/utils/g
 import { deliverMetaCapiForEvent } from '~/server/utils/meta-capi-delivery'
 import { projectConversionToGa4 } from '~/utils/ga4-projection'
 import { SESSION_COOKIE, VISITOR_COOKIE, dayCountQuery, hashIp, isCanonicalEventId } from '~/server/utils/pageview-tracking'
-import { clickKey, isInsightsClick } from '~/shared/insights'
+import { clickKey, type InsightsClickEvent } from '~/shared/insights'
 import { localDateAt } from '~/utils/timezone'
 import { attributionChannel, type AttributionChannel, type AttributionTouch, type ObservedAttribution } from '~/utils/analytics-attribution'
 import {
@@ -22,10 +22,17 @@ export type { ConversionEntityType, ConversionStage }
 
 export type ConversionSurface = 'website' | 'dashboard' | 'mcp' | 'auth' | 'stripe'
 
-export interface OrganizationConversionInput {
+/**
+ * One conversion to record. A click Insights counts carries the organization's time zone (it is
+ * counted on the organization's local day there); every other event carries none.
+ */
+export type OrganizationConversionInput = ConversionFields & (
+  | { eventName: InsightsClickEvent; timezone: string }
+  | { eventName: Exclude<OrganizationConversionEventName, InsightsClickEvent>; timezone?: undefined })
+
+interface ConversionFields {
   /** The business whose outcome is measured — not necessarily the subject's own organization. */
   organizationId: string
-  eventName: OrganizationConversionEventName
   stage: ConversionStage
   locationId?: string | null
   /** The product and variant this event is about, when it is about one (a booking's selection, a product view). */
@@ -68,13 +75,6 @@ export interface OrganizationConversionInput {
   attribution?: { touch: AttributionTouch; attributedAt: string } | null
   /** Overrides the event time; defaults to now. Provider events carry their own occurrence time. */
   occurredAt?: string
-  /** The organization's time zone, required for a click Insights counts: it is counted on its local day there. */
-  timezone?: string
-}
-
-function requiredTimezone(input: OrganizationConversionInput): string {
-  if (!input.timezone) throw new Error(`${input.eventName} is counted on the organization's local day and needs its time zone`)
-  return input.timezone
 }
 
 interface PageContext {
@@ -255,9 +255,8 @@ export async function recordOrganizationConversionEvent(db: DbClient, origin: { 
     ip_hash: ipHash, user_agent: (origin?.headers.get('user-agent') || '').slice(0, 1024) || null })
   // A click Insights counts adds one to its day, on the organization's local day of the click,
   // in the same batch and only when the event is new: a duplicate adds nothing.
-  const dayCount = isInsightsClick(input.eventName)
-    ? [dayCountQuery({ organizationId: input.organizationId, date: localDateAt(new Date(now), requiredTimezone(input)), now }, 'dimension_day', clickKey(input.eventName))]
-    : []
+  const dayCount = input.timezone === undefined ? []
+    : [dayCountQuery({ organizationId: input.organizationId, date: localDateAt(new Date(now), input.timezone), now }, 'dimension_day', clickKey(input.eventName))]
   const [inserted] = await executeBatch(db, [{ query: `INSERT OR IGNORE INTO analytics_events (
     id, kind, organization_id, session_id, visitor_id, location_id, page_path, payload_json, created_at
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, params: [

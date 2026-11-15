@@ -68,8 +68,7 @@ export const CONVERSION_EVENT_CATALOG = {
   product_order_external_click: interaction({ origin: 'public', stages: ['external_handoff'], entityType: 'product', ga4: { name: 'product_order_external_click' }, ga4Sender: 'browser', funnel: 'intent' }),
   link_click: interaction({ origin: 'public', stages: ['external_handoff'], entityType: 'content_block', ga4: { name: 'link_click' }, ga4Sender: 'browser' }),
   donation_click: interaction({ origin: 'public', stages: ['external_handoff'], entityType: 'content_document', ga4: { name: 'donation_click' }, ga4Sender: 'browser' }),
-  // A product was viewed / a booking was started. Interactions: neither is a sale nor a booking.
-  product_view: interaction({ origin: 'public', stages: ['viewed'], entityType: 'product', ga4: { name: 'view_item' }, ga4Sender: 'browser', funnel: 'viewed' }),
+  // A booking was started: an interaction, not a sale nor a booking. (A product view is its page's view.)
   checkout_start: interaction({ origin: 'public', stages: ['started'], entityType: null, ga4: { name: 'begin_checkout' }, ga4Sender: 'browser', funnel: 'intent' }),
   // The universal announcement modal (organization-level, not tied to a page or product).
   announcement_view: interaction({ origin: 'public', stages: ['viewed'], entityType: null, ga4: { name: 'announcement_view' }, ga4Sender: 'browser', funnel: 'viewed' }),

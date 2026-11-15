@@ -29,7 +29,8 @@ export const INSIGHTS_CLICKS = [
   { key: 'clicked_to_call', label: 'Clicked to call', events: ['phone_click'], verticals: null },
   { key: 'clicked_to_order', label: 'Clicked to order', events: ['product_order_external_click'], verticals: ['restaurant'] },
 ] as const satisfies ReadonlyArray<{ key: string; label: string; events: readonly string[]; verticals: readonly string[] | null }>
-export const isInsightsClick = (event: string) => INSIGHTS_CLICKS.some(click => (click.events as readonly string[]).includes(event))
+export type InsightsClickEvent = typeof INSIGHTS_CLICKS[number]['events'][number]
+export const isInsightsClick = (event: string): event is InsightsClickEvent => INSIGHTS_CLICKS.some(click => (click.events as readonly string[]).includes(event))
 /** A click's day count: the dimension day [interaction, event name, '']. */
 export const clickKey = (event: string) => JSON.stringify(['interaction', event, ''])
 
@@ -188,8 +189,6 @@ export const insightsPageSchema = z.object({
   filters: z.object({ kind: z.enum(['all', ...INSIGHTS_KINDS]), location_id: z.string().nullable() }),
   /** The currency every money number on the page is in; null when the page has none. */
   currency: z.string().nullable(),
-  /** The first day the website's visits were counted; days before it have none to show. Null on pages of bookings and reviews. */
-  recorded_since: date.nullable(),
   metrics: z.array(z.object({ key: z.string(), label: z.string(), value: number, format, text: z.string().nullable() })),
   /** Each headline number's value on each day of the range; a metric absent here has no chart. Null is a day with nothing to measure. */
   series: z.object({ dates: z.array(date), values: z.record(z.string(), z.array(number)) }),

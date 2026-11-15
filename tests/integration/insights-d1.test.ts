@@ -135,7 +135,6 @@ test('Insights reads a restaurant from visit to payment: sources, bookings, valu
     // A restaurant's site has no click to book; clicks are not about one kind, so a kind's page has none.
     assert.deepEqual(metrics(await read('conversion/booking-conversion', { kind: 'table' })), { conversion: 100, views: 2, bookings: 2 })
     assert.equal(conversion.metrics[1]!.label, 'Table page views')
-    assert.equal(conversion.recorded_since, '2000-01-01')
     const lead = await read('conversion/lead-time')
     assert.equal(lead.subtitle, 'Website bookings')
     assert.deepEqual(metrics(lead), { average_lead: 2, within_3_days: 100 })

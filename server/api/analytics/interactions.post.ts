@@ -7,6 +7,7 @@ import { HOUR_MS, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-li
 import { boundedOccurrence, isCanonicalEventId } from '~/server/utils/pageview-tracking'
 import { BROWSER_INTERACTION_EVENT_NAMES, CONVERSION_EVENT_CATALOG, type OrganizationConversionEventName } from '~/utils/organization-conversion-events'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
+import type { InsightsClickEvent } from '~/shared/insights'
 
 const SIGNED_IN_EVENTS = new Set<string>(BROWSER_INTERACTION_EVENT_NAMES.filter(name => CONVERSION_EVENT_CATALOG[name].origin === 'authenticated'))
 
@@ -41,7 +42,8 @@ export default defineHandler(async (event) => {
   }
 
   const result = await recordOrganizationConversionEvent(env.DB, event.req, {
-    organizationId, eventName: eventName as OrganizationConversionEventName, stage: 'occurred', surface: 'dashboard',
+    // Signed-in product usage is never one of the website clicks Insights counts (those are public).
+    organizationId, eventName: eventName as Exclude<OrganizationConversionEventName, InsightsClickEvent>, stage: 'occurred', surface: 'dashboard',
     ...(subjectOrganizationId ? { entityType: 'organization' as const, entityId: subjectOrganizationId } : {}),
     actor: { type: 'user', id: session.user.id },
     id: body.event_id, properties: body.properties && typeof body.properties === 'object' && !Array.isArray(body.properties) ? body.properties as Record<string, unknown> : null,

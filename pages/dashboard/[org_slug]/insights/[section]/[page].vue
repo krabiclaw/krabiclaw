@@ -17,9 +17,6 @@
       <UAlert v-if="error" color="error" variant="soft" :title="`${fallbackTitle} could not be loaded`" :description="getErrorMessage(error, 'Insights request failed')" />
       <UAlert v-else-if="view?.unavailable" color="neutral" variant="soft" :description="view.unavailable.message" :actions="[{ label: view.unavailable.action, to: view.unavailable.to }]" />
       <template v-else-if="view">
-        <p v-if="view.recordedSince && period && period.start_date < view.recordedSince" class="text-sm text-muted">
-          Visits are counted from {{ formatDate(view.recordedSince) }}.
-        </p>
         <p v-if="view.note" class="text-sm text-muted">{{ view.note }}</p>
         <dl class="flex flex-wrap gap-x-10 gap-y-5" data-testid="insights-metrics">
           <div v-for="metric in view.metrics" :key="metric.key" class="min-w-32">
@@ -124,7 +121,7 @@ const { data, error } = await useAsyncData(() => `insights:${readKey.value}`, ()
 // Every page reads as the same shape: numbers with their days, and a list.
 interface ViewMetric { key: string; label: string; display: string; daily: Array<number | null> | null; format: (value: number) => string }
 interface View {
-  title: string; subtitle: string | null; note: string | null; recordedSince: string | null; dates: string[]; metrics: ViewMetric[]
+  title: string; subtitle: string | null; note: string | null; dates: string[]; metrics: ViewMetric[]
   reviews: InsightsReview[] | null; table: { heading: string; columns: string[]; rows: Array<{ key: string; label: string; cells: string[] }> } | null
   unavailable: { message: string; action: string; to: string } | null
 }
@@ -152,7 +149,7 @@ const view = computed<View | null>(() => {
         display: metric.format === 'text' ? metric.text ?? '—' : metric.value === null ? '—' : format(metric.value) }
     })
     const list = page.list
-    return { title: page.title, subtitle: page.subtitle, note: null, recordedSince: page.recorded_since, dates: page.series.dates, metrics, unavailable: null,
+    return { title: page.title, subtitle: page.subtitle, note: null, dates: page.series.dates, metrics, unavailable: null,
       reviews: list.kind === 'reviews' ? list.reviews : null,
       table: list.kind === 'rows' ? { heading: list.heading, columns: list.columns.map(column => column.label),
         rows: list.rows.map(row => ({ key: row.key, label: page.page === 'conversion/page-views' ? formatDate(row.label) : row.label,
@@ -187,7 +184,7 @@ const view = computed<View | null>(() => {
     table: { heading: 'Campaign', columns: ['Spend', 'Clicks'], rows: page.campaigns.map(campaign => ({ key: campaign.id, label: campaign.name, cells: [money(campaign.costMicros), count(campaign.clicks)] })) } }
 })
 function emptyView(title: string): View {
-  return { title, subtitle: null, note: null, recordedSince: null, dates: [], metrics: [], reviews: null, table: null, unavailable: null }
+  return { title, subtitle: null, note: null, dates: [], metrics: [], reviews: null, table: null, unavailable: null }
 }
 const fallbackTitle = computed(() => pageTitle(definition.value!.id, booked.value, (filters.value.kind ?? 'all') as InsightsKind | 'all'))
 const selected = computed(() => {

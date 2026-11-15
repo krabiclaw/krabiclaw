@@ -201,7 +201,10 @@ function mapLocalization(row: ResourceLocalizationRow): ResourceLocalizationReco
   return { ...rest, values: parsed as LocalizedValues }
 }
 
-/** The published, active Product a location-scoped route names, with the location that serves it. */
+/**
+ * The published Product a location-scoped route names, with the location that serves it. A paused
+ * offering is still published and its page is served (loadPublicProductCollection), so it is found.
+ */
 export async function findPublishedProductAtRoute(
   db: DbClient,
   organizationId: string,
@@ -212,9 +215,9 @@ export async function findPublishedProductAtRoute(
       JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
         AND pub.published = 1
       JOIN product_locations pl ON pl.product_id = p.id AND pl.organization_id = p.organization_id
-       AND pl.published = 1 AND pl.active = 1
+       AND pl.published = 1
       JOIN business_locations l ON l.id = pl.location_id AND l.organization_id = ? AND l.slug = ?
-     WHERE p.organization_id = ? AND p.slug = ? AND p.active = 1 LIMIT 1
+     WHERE p.organization_id = ? AND p.slug = ? LIMIT 1
   `, [organizationId, route.locationSlug, organizationId, route.productSlug]) ?? null
 }
 

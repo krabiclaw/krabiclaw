@@ -144,7 +144,6 @@ export async function readInsightsPage(db: DbClient, reader: InsightsReader, pag
     period: { start_date: range.startDate, end_date: range.endDate, timezone: reader.timezone },
     filters: { kind, location_id: locationId },
     currency: read.currency ?? null,
-    recorded_since: read.recordedSince ?? null,
     metrics: read.metrics.map(metric => ({ key: metric.key, label: metric.label, value: metric.value, format: metric.format, text: metric.text ?? null })),
     series: { dates: range.dates, values: Object.fromEntries(read.metrics.filter(metric => metric.daily).map(metric => [metric.key, metric.daily!])) },
     list: read.list,
@@ -169,7 +168,6 @@ interface PageRead {
   list: InsightsPage['list']
   subtitle?: string
   currency?: string
-  recordedSince?: string | null
 }
 
 /** The bookings of the page's kinds (and location), in a window of one of their times. */
@@ -212,13 +210,6 @@ async function batch(context: PageContext, queries: BatchQuery[]) {
   const results = (await executeBatch(context.db, [...queries, bookedKindsQuery(context.reader.organizationId)], { operation: `read Insights ${context.definition.id}` })).map(rowsOf)
   context.booked = bookedKinds(results.pop()!)
   return results
-}
-
-/** The first day the website's visits were counted. */
-const recordedSinceQuery = (context: PageContext): BatchQuery => ({ query: 'SELECT analytics_data_start_at FROM organization WHERE id = ?', params: [context.reader.organizationId] })
-const recordedSince = (rows: Row[], context: PageContext) => {
-  const start = text(rows[0]!.analytics_data_start_at)
-  return start ? localDateAt(new Date(start), context.reader.timezone) : null
 }
 
 const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise<PageRead>> = {
@@ -443,14 +434,13 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
 
   'conversion/booking-conversion': async (context) => {
     const kinds = pageKinds(context.definition, context.kind)
-    const [views, rows, start, clicked] = await batch(context, [
+    const [views, rows, clicked] = await batch(context, [
       // An offering's views are counted on its own page; a dish is not an offering here.
       { query: `SELECT s.date, (s.key ->> '$[1]') AS product_id, p.name AS product_name, CAST(s.payload_json ->> '$.page_views' AS INTEGER) AS views
           FROM analytics_summaries s JOIN products p ON p.organization_id = s.organization_id AND p.id = (s.key ->> '$[1]')
           WHERE s.organization_id = ? AND s.kind = 'dimension_day' AND s.date BETWEEN ? AND ? AND (s.key ->> '$[0]') = 'product' AND p.kind IN (SELECT value FROM json_each(?))`,
       params: [context.reader.organizationId, context.range.startDate, context.range.endDate, JSON.stringify(kinds)] },
       bookingsQuery(context, 'received', 'AND b.website_source IS NOT NULL'),
-      recordedSinceQuery(context),
       // The clicks counted on their own write (server/utils/organization-conversions.ts), beside the business's vertical.
       { query: `SELECT o.vertical, s.date, s.key, CAST(s.payload_json ->> '$.page_views' AS INTEGER) AS clicks FROM organization o
           LEFT JOIN analytics_summaries s ON s.organization_id = o.id AND s.kind = 'dimension_day' AND s.date BETWEEN ? AND ? AND s.key IN (SELECT value FROM json_each(?))
@@ -467,7 +457,6 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
     const day = days(context.dates)
     const offering = singular(offeringsWord(context.booked, context.kind))
     return {
-      recordedSince: recordedSince(start!, context),
       metrics: [
         { key: 'conversion', label: 'Booking conversion', format: 'percent', value: percent(sum(all, 'bookings'), sum(all, 'views')), daily: day.each(all, row => row.date, group => percent(sum(group, 'bookings'), sum(group, 'views'))) },
         { key: 'views', label: `${offering} page views`, format: 'count', value: sum(all, 'views'), daily: day.sum(all, row => row.date, row => row.views) },
@@ -521,19 +510,17 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
 
   'conversion/page-views': async (context) => {
     const { reader, range } = context
-    const [current, previous, start] = await batch(context, [
+    const [current, previous] = await batch(context, [
       { query: `SELECT date, CAST(payload_json ->> '$.page_views' AS INTEGER) AS views FROM analytics_summaries WHERE organization_id = ? AND kind = 'organization_day' AND key = '' AND date BETWEEN ? AND ?`,
         params: [reader.organizationId, range.startDate, range.endDate] },
       { query: `SELECT COALESCE(SUM(CAST(payload_json ->> '$.page_views' AS INTEGER)), 0) AS views FROM analytics_summaries WHERE organization_id = ? AND kind = 'organization_day' AND key = '' AND date BETWEEN ? AND ?`,
         params: [reader.organizationId, range.previousStartDate, range.previousEndDate] },
-      recordedSinceQuery(context),
     ])
     const day = days(context.dates)
     const daily = day.sum(current!, row => String(row.date), row => num(row.views))
     const total = daily.reduce((sum, views) => sum + views, 0)
     const before = num(previous![0]?.views)
     return {
-      recordedSince: recordedSince(start!, context),
       metrics: [
         { key: 'page_views', label: 'Page views', format: 'count', value: total, daily },
         { key: 'change', label: 'Change', format: 'percent', value: before ? Math.round((total - before) / before * 1000) / 10 : null },
@@ -548,16 +535,14 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
     const views = `CAST(payload_json ->> '$.page_views' AS INTEGER)`
     const scope = `organization_id = ? AND kind = 'page_day' AND date BETWEEN ? AND ?`
     const params = [reader.organizationId, range.startDate, range.endDate]
-    const [pages, daily, distinct, start] = await batch(context, [
+    const [pages, daily, distinct] = await batch(context, [
       { query: `SELECT key, SUM(${views}) AS views FROM analytics_summaries WHERE ${scope} GROUP BY key HAVING SUM(${views}) > 0 ORDER BY views DESC, key LIMIT 100`, params },
       { query: `SELECT date, SUM(${views}) AS views, SUM(${views} > 0) AS pages FROM analytics_summaries WHERE ${scope} GROUP BY date`, params },
       { query: `SELECT COUNT(DISTINCT key) AS pages FROM analytics_summaries WHERE ${scope} AND ${views} > 0`, params },
-      recordedSinceQuery(context),
     ])
     const day = days(context.dates)
     const top = pages![0]
     return {
-      recordedSince: recordedSince(start!, context),
       metrics: [
         { key: 'page_views', label: 'Page views', format: 'count', value: daily!.reduce((sum, row) => sum + num(row.views), 0), daily: day.sum(daily!, row => String(row.date), row => num(row.views)) },
         { key: 'pages_viewed', label: 'Pages viewed', format: 'count', value: num(distinct![0]?.pages), daily: day.sum(daily!, row => String(row.date), row => num(row.pages)) },
@@ -569,12 +554,11 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
 
   'conversion/sources': async (context) => {
     const { reader, range } = context
-    const [visits, rows, start] = await batch(context, [
+    const [visits, rows] = await batch(context, [
       { query: `SELECT date, (key ->> '$[1]') AS source, CAST(payload_json ->> '$.page_views' AS INTEGER) AS visits FROM analytics_summaries
           WHERE organization_id = ? AND kind = 'dimension_day' AND date BETWEEN ? AND ? AND (key ->> '$[0]') = 'visit_source'`,
       params: [reader.organizationId, range.startDate, range.endDate] },
       bookingsQuery(context, 'received'),
-      recordedSinceQuery(context),
     ])
     // A website booking's source is how its guest arrived; a member's own is theirs; a channel's is the channel.
     const sourceOf = (row: BookingRow) => row.website_source ?? (row.channel === 'direct' ? 'Added by you' : CHANNEL_LABELS[row.channel] ?? row.channel)
@@ -589,7 +573,6 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
     const order: string[] = [...ATTRIBUTION_CHANNELS, 'Added by you', ...Object.values(CHANNEL_LABELS)]
     const sources = [...new Set(facts.map(row => row.source))].sort((a, b) => (order.indexOf(a) + 1 || order.length + 1) - (order.indexOf(b) + 1 || order.length + 1) || a.localeCompare(b))
     return {
-      recordedSince: recordedSince(start!, context),
       metrics: [
         { key: 'visits', label: 'Visits', format: 'count', value: sum(facts, 'visits'), daily: day.sum(facts, row => row.date, row => row.visits) },
         { key: 'website_bookings', label: 'Bookings from your website', format: 'count', value: website.length, daily: day.sum(website, row => row.date, () => 1) },

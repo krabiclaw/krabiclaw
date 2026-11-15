@@ -98,15 +98,17 @@ function assertOrganizationFacts(data: { default_currency?: unknown; timezone?: 
 
 /**
  * Every amount a business holds is in its one currency, so the currency is
- * fixed once a payment, a recorded payment or a priced booking exists. Each
- * write of `default_currency` asks this before it changes it.
+ * fixed once a payment, a recorded payment or a priced booking exists, or a
+ * channel is connected (it delivers reservations in the currency it was
+ * connected in). Each write of `default_currency` asks this before it changes it.
  */
-export const BUSINESS_CURRENCY_FIXED = 'The business currency cannot change once money has been recorded'
+export const BUSINESS_CURRENCY_FIXED = 'The business currency cannot change once money has been recorded or a channel is connected'
 export async function businessCurrencyFixed(db: DbClient, organizationId: string, currency: string): Promise<boolean> {
   const row = await queryFirst<{ fixed: number }>(db, `SELECT default_currency <> ? AND (
       EXISTS (SELECT 1 FROM payments WHERE organization_id = organization.id)
       OR EXISTS (SELECT 1 FROM offline_payments WHERE organization_id = organization.id)
-      OR EXISTS (SELECT 1 FROM bookings WHERE organization_id = organization.id AND currency IS NOT NULL)) AS fixed
+      OR EXISTS (SELECT 1 FROM bookings WHERE organization_id = organization.id AND currency IS NOT NULL)
+      OR EXISTS (SELECT 1 FROM channex_connections WHERE organization_id = organization.id AND channel_id IS NOT NULL)) AS fixed
     FROM organization WHERE id = ?`, [currency, organizationId])
   if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
   return row.fixed === 1

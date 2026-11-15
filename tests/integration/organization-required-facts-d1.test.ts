@@ -25,6 +25,5 @@ test('a business and its locations carry their own clock and currency; nothing s
     // Analytics days are the business's own clock, not its location's.
     const page = await readInsightsPage(db, { organizationId: 'org', timezone: 'Asia/Bangkok', defaultCurrency: 'THB', userId: 'owner', analytics: true }, 'conversion/page-views', {}, new Date('2026-09-06T12:00:00Z'))
     assert.deepEqual(page.period, { start_date: '2026-08-08', end_date: '2026-09-06', timezone: 'Asia/Bangkok' })
-    assert.equal(page.recorded_since, '2026-09-01')
   } finally { await runtime.dispose() }
 })

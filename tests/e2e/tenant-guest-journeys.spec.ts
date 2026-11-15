@@ -3,7 +3,7 @@ import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { seededTenant } from './seed/manifest'
 import { devLoginHeaders, seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
 import { loginAs } from './helpers/auth'
-import { mcpData, mcpRequest } from './helpers/mcp'
+import { insightsRowValue, mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTables } from './helpers/tables'
 import type { Product, PublicProduct } from '../../server/types/products'
@@ -601,17 +601,18 @@ for (const seeded of [
       const paused = mcpData<{ product: { active: boolean; publications: Array<{ organization_id: string; published: boolean }> } }>(await (await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: target.org, product_id: product.id } })).json()).product
       expect(paused.active).toBe(false)
       expect(paused.publications).toContainEqual(expect.objectContaining({ organization_id: target.org, published: true }))
-      const pausedView = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events'
-        && response.request().postDataJSON()?.event_name === 'product_view' && response.request().postDataJSON()?.product_id === product.id)
+      // A paused offering's page is still served, and viewing it is a view of the offering: Insights lists an
+      // experience's views under Booking conversion, and a dish (not booked) under Top pages by its path.
+      const offeringViews = () => target.experience
+        ? insightsRowValue(page.request, baseURL!, target.org, 'conversion/booking-conversion', product.name, 1)
+        : insightsRowValue(page.request, baseURL!, target.org, 'conversion/top-pages', publicPath, 0)
+      const viewsBefore = await offeringViews()
       await openTenantPage(page, `${target.base}${publicPath}`, target.headers)
       await expect(page.getByRole('heading', { name: product.name, level: 1, exact: true })).toBeVisible()
       await expect(page.getByText(detail, { exact: true })).toBeVisible()
       await expect(page.locator(`a[href="${externalUrl}"]:visible`)).toHaveCount(0)
       await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `${target.base}${publicPath}`)
-      // A paused offering's page is still viewed: its product view is recorded as a new event.
-      const pausedViewResponse = await pausedView
-      expect(pausedViewResponse.status()).toBe(201)
-      expect(await pausedViewResponse.json()).toEqual({ success: true, id: expect.any(String), recorded: true })
+      await expect.poll(offeringViews).toBe(viewsBefore + 1)
     } finally {
       try {
         expect((await page.request.delete(`${editor}/${product.id}`)).status()).toBe(200)

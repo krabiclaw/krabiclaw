@@ -44,8 +44,7 @@ write keeps current (`recordTenantPageview` in `server/utils/pageview-tracking.t
 recording a visit adds one, in the same batch, to the organization's local day
 of the visit, for the day, the page, the offering whose page it is and, on a
 session's first page view, the channel it arrived from. A duplicate event adds
-nothing. Visits are counted from the organization's `analytics_data_start_at`,
-and a page whose range starts before it says so.
+nothing. Visits are counted from the organization's `analytics_data_start_at`.
 
 Clicks are counted the same way by the click's own write
 (`recordOrganizationConversionEvent` in `server/utils/organization-conversions.ts`):
