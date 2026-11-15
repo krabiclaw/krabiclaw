@@ -7,7 +7,7 @@ import { STAY_CHANNELS } from '~/shared/bookings'
 import type { McpExecutorContext } from './execution'
 import { createLocation, getLocation, updateLocation, type CreateLocationInput, type LocationRecord } from '~/server/utils/location-management'
 import { AGENDA_KINDS, listAgenda, type AgendaKind } from '~/server/utils/dashboard-agenda'
-import { closeDates, closureOnDate, datedHours, getDateIntervals, openDates } from '~/shared/reservation-hours'
+import { closeDates, locationDayClosure, openDates } from '~/shared/reservation-hours'
 import { renderStructuredResponse } from '~/server/utils/mcp-render'
 import { paginateMcpCollection } from '~/server/utils/mcp-pagination'
 import { NOT_HANDLED, assertDomainSuccess, mutationContextPayload, omit, optionalString, requiredString, workspaceLocationsPayload } from './execution'
@@ -279,14 +279,10 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
       });
       const locations = location ? [location] : await Promise.all(agenda.locations.map(row => requireLocation(organization, row.id)))
       const unavailable = locations.flatMap(location => days.flatMap((date) => {
-        const identity = { date, location_id: location.id }
-        if (location.status !== 'active') return [{ ...identity, reason: 'inactive' }]
-        const closure = closureOnDate(location.special_hours, date)
-        if (closure) return [{ ...identity, reason: 'closure', note: closure.note ?? null }]
-        const dated = datedHours(location.special_hours, date)
-        if (dated?.kind === 'hours' && !dated.periods.length) return [{ ...identity, reason: 'dated_hours', note: dated.note ?? null }]
-        const intervals = getDateIntervals(location.opening_hours, location.special_hours, date)
-        return intervals !== null && !intervals.length ? [{ ...identity, reason: 'regular_hours' }] : []
+        const closure = locationDayClosure(location, location.opening_hours, location.special_hours, date)
+        if (!closure) return []
+        const identity = { date, location_id: location.id, reason: closure.reason }
+        return [closure.reason === 'closure' || closure.reason === 'dated_hours' ? { ...identity, note: closure.note } : identity]
       }))
       return {
         items: agenda.items,

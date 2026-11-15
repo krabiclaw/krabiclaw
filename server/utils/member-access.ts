@@ -75,9 +75,9 @@ export function memberAccessPrincipal(
   } as MemberAccessPrincipal
 }
 
-/** The conversation seat query has already joined this live Better Auth member row. */
-export function conversationMemberPrincipal(
-  membership: NonNullable<Awaited<ReturnType<typeof import('~/server/domain/conversations').resolveConversationAccess>>['membership']>,
+/** A statement in the caller's own batch has already joined this live Better Auth member row (the conversation seat, the host calendar). */
+export function joinedMemberPrincipal(
+  membership: { userId: string; organizationId: string; memberId: string; role: string },
   input: { env: CloudflareEnv; event?: H3Event },
 ): MemberAccessPrincipal {
   return memberAccessPrincipal(resolvedMembershipOf(membership), input)

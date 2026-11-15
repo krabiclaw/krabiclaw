@@ -4,7 +4,6 @@ import { HTTPError } from 'h3'
 import { jsonResponse } from '~/server/utils/api-response'
 import { isPlacesSessionToken, syncPlaceToLocation } from '~/server/utils/google-places'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
-import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { queryFirst } from '~/server/db'
 import { requireRequestedLocationAccess } from '~/server/utils/location-access'
 
@@ -44,8 +43,7 @@ export default defineHandler(async (event) => {
   if (body?.session_token !== undefined && !isPlacesSessionToken(body.session_token)) return jsonResponse({ error: 'session_token must be a UUID' }, { status: 400 })
 
   try {
-    const { place, reviewsUpserted } = await syncPlaceToLocation(db, apiKey, organization.id, locationId, placeId, 'import', body?.session_token)
-    await purgePublicResourceCacheNow(env, organization.id)
+    const { place, reviewsUpserted } = await syncPlaceToLocation(db, apiKey, organization.id, locationId, placeId, 'import', body?.session_token, { env, actorId: organization.user_id })
 
     return jsonResponse({
       success: true, synced_at: new Date().toISOString(), reviews_upserted: reviewsUpserted, place: {

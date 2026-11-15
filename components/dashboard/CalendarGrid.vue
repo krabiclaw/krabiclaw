@@ -323,7 +323,7 @@ const placeRows = computed<GridRow[]>(() => (placesData.value?.places ?? [])
     const cells = days.map((day): GridCell => {
       const label = day.held?.kind === 'hours' || day.held?.kind === 'inactive' ? 'Closed' : day.closed ? 'Blocked' : day.free ? `${day.free} free` : ''
       return { date: day.date, open: !day.closed && day.held?.kind !== 'unscheduled', held: day.held !== null, strike: day.closed && !day.held, mark: null, label,
-        title: `${place.name} · ${formatCalendarDate(day.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${day.held ? day.held.text : day.closed ? 'Blocked' : 'Available'}${day.free ? ` · ${day.free} free` : ''}` }
+        title: `${place.name} · ${formatCalendarDate(day.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${day.held ? day.held.text : day.closed ? 'Blocked' : 'Available'}${day.free ? ` · ${day.free} free` : ''}${day.places_left ? ` · ${day.places_left} ${day.places_left === 1 ? 'place' : 'places'} left` : ''}` }
     })
     return { id, name: place.name, detail: place.detail, to: { path: `/dashboard/${orgSlug}/calendar`, query: scope }, cells, bars, gaps: new Map(), place, days }
   }))

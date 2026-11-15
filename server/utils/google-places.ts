@@ -1,6 +1,7 @@
 import { HTTPError } from 'h3'
 import { normalizeGoogleOpeningHours, type OpeningHours } from '~/shared/reservation-hours'
-import { serializeOpeningHours } from '~/server/utils/location-management'
+import { updateLocation } from '~/server/utils/location-management'
+import type { CloudflareEnv } from '~/server/utils/auth'
 import type { D1Database } from '@cloudflare/workers-types'
 import { normalizeGoogleReview, type GoogleReview } from '~/shared/google-review'
 import { executeBatch, queryFirst, type BatchQuery } from '~/server/db'
@@ -138,11 +139,14 @@ export async function syncPlaceToLocation(
   placeId: string,
   scope: 'import' | 'provider',
   sessionToken?: string,
+  /** Who imports: the explicit import writes the location through `updateLocation`, the one writer of its hours. */
+  importer?: { env: CloudflareEnv; actorId: string },
 ): Promise<{ place: PlaceDetails; reviewsUpserted: number }> {
   const current = await queryFirst<{ updated_at: string; google_place_id: string | null }>(db,
     'SELECT updated_at, google_place_id FROM business_locations WHERE id = ? AND organization_id = ?', [locationId, organizationId])
   if (!current) throw new HTTPError({ statusCode: 404, statusMessage: 'Location not found' })
   if (scope === 'provider' && current.google_place_id !== placeId) throw new HTTPError({ statusCode: 409, statusMessage: 'The location is no longer connected to this Google place' })
+  if (scope === 'import' && !importer) throw new Error('A Google Maps import names who imports it')
   const place = await getPlaceDetails(apiKey, placeId, { sessionToken })
   if (!place.placeId) throw new Error(`Google Maps returned no place id for ${placeId}`)
   const now = new Date().toISOString()
@@ -150,62 +154,42 @@ export async function syncPlaceToLocation(
     query: 'EXISTS (SELECT 1 FROM business_locations WHERE id = ? AND organization_id = ? AND updated_at = ? AND google_place_id IS ?)',
     params: [locationId, organizationId, current.updated_at, current.google_place_id],
   }
-
-  const location = scope === 'import'
-    ? { query: `
-    UPDATE business_locations SET
-      phone = COALESCE(?, phone),
-      website_url = COALESCE(?, website_url),
-      address = COALESCE(?, address),
-      latitude = COALESCE(?, latitude),
-      longitude = COALESCE(?, longitude),
-      maps_url = COALESCE(?, maps_url),
-      opening_hours = ?,
-      timezone = COALESCE(?, timezone),
-      rating = ?,
-      review_count = ?,
-      google_place_id = ?,
-      last_synced_at = ?,
-      updated_at = ?
-    WHERE id = ? AND organization_id = ? AND (${version.query})
-  `, params: [
-      place.phone,
-      place.websiteUrl,
-      place.address ? JSON.stringify(place.address) : null,
-      place.lat,
-      place.lng,
-      place.mapsUrl,
-      serializeOpeningHours(place.openingHours),
-      place.timezone,
-      place.rating,
-      place.ratingCount,
-      place.placeId,
-      now,
-      now,
-      locationId,
-      organizationId,
-      ...version.params!,
-    ] }
-    : { query: `
-    UPDATE business_locations SET
-      maps_url = COALESCE(?, maps_url),
-      rating = ?,
-      review_count = ?,
-      last_synced_at = ?,
-      updated_at = ?
-    WHERE id = ? AND organization_id = ? AND (${version.query})
-  `, params: [place.mapsUrl, place.rating, place.ratingCount, now, now, locationId, organizationId, ...version.params!] }
-
+  const changed = new HTTPError({ statusCode: 409, statusMessage: 'The location changed while Google Maps was syncing. Reload it and try again.' })
   // The whole batch checks the old version before the location write advances it.
   const reviews = googleReviewUpserts({ organizationId, locationId }, place.reviews, now, version)
-  const results = await executeBatch(db, [
-    ...staleGoogleReviewDeletes({ organizationId, locationId }, place.reviews, version),
-    ...reviews, location])
-  if (Number(results.at(-1)?.meta?.changes ?? 0) !== 1) {
-    throw new HTTPError({ statusCode: 409, statusMessage: 'The location changed while Google Maps was syncing. Reload it and try again.' })
-  }
-  const reviewsUpserted = results.slice(-1 - reviews.length, -1).reduce((count, result) => count + Number(result.meta?.changes ?? 0), 0)
+  const reviewWrites = [...staleGoogleReviewDeletes({ organizationId, locationId }, place.reviews, version), ...reviews]
 
+  if (scope === 'import') {
+    // What Google does not know is kept; what it knows replaces the tenant's details.
+    const result = await updateLocation(db, organizationId, locationId, {
+      ...(place.phone !== null ? { phone: place.phone } : {}),
+      ...(place.websiteUrl !== null ? { website_url: place.websiteUrl } : {}),
+      ...(place.address !== null ? { address: place.address } : {}),
+      ...(place.lat !== null && place.lng !== null ? { latitude: place.lat, longitude: place.lng } : {}),
+      ...(place.mapsUrl !== null ? { maps_url: place.mapsUrl } : {}),
+      ...(place.timezone !== null ? { timezone: place.timezone } : {}),
+      opening_hours: place.openingHours, rating: place.rating, review_count: place.ratingCount, google_place_id: place.placeId,
+      updated_at: current.updated_at,
+    }, importer!.actorId, importer!.env, [...reviewWrites, {
+      query: `UPDATE business_locations SET last_synced_at = ? WHERE id = ? AND organization_id = ? AND (${version.query})`,
+      params: [now, locationId, organizationId, ...version.params!],
+    }])
+    if (result.status === 409) throw changed
+    if (result.status !== 200) throw new HTTPError({ statusCode: result.status, statusMessage: 'error' in result.data ? String(result.data.error) : 'Google Maps details could not be saved' })
+    return { place, reviewsUpserted: reviews.length }
+  }
+
+  const results = await executeBatch(db, [...reviewWrites, { query: `
+    UPDATE business_locations SET
+      maps_url = COALESCE(?, maps_url),
+      rating = ?,
+      review_count = ?,
+      last_synced_at = ?,
+      updated_at = ?
+    WHERE id = ? AND organization_id = ? AND (${version.query})
+  `, params: [place.mapsUrl, place.rating, place.ratingCount, now, now, locationId, organizationId, ...version.params!] }])
+  if (Number(results.at(-1)?.meta?.changes ?? 0) !== 1) throw changed
+  const reviewsUpserted = results.slice(-1 - reviews.length, -1).reduce((count, result) => count + Number(result.meta?.changes ?? 0), 0)
   return { place, reviewsUpserted }
 }
 

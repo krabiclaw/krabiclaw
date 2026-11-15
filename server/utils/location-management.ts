@@ -408,13 +408,15 @@ export async function updateLocation(
   /** The member making the change, or null for KrabiClaw's own (recorded as a system event). */
   userId: string | null,
   env: CloudflareEnv,
-  writeGuard?: BatchQuery,
+  /** Statements that run first in the same batch: a caller's guard, or the rest of an import this write is part of. */
+  writeGuard?: BatchQuery | BatchQuery[],
   options: { allowHomeActivation?: boolean } = {},
 ) {
   const existing = await loadLocation(db, organizationId, locationIdOrSlug);
   if (!existing) {
     return { status: 404, data: { error: "Location not found.", code: 'LOCATION_NOT_FOUND', field: 'location_id' } };
   }
+  const preceding = writeGuard === undefined ? [] : Array.isArray(writeGuard) ? writeGuard : [writeGuard];
   const locationId = existing.id;
   if (input.slug !== undefined && input.slug !== existing.slug) {
     return { status: 400, data: { error: 'A location keeps its saved slug', code: 'INVALID_LOCATION_FIELD', field: 'slug' } };
@@ -576,8 +578,15 @@ export async function updateLocation(
       : previous === next;
     if (!equal) changedFields.push(field);
   }
+  const expectedUpdatedAt = input.updated_at ?? existing.updated_at;
+  const version = { query: 'EXISTS (SELECT 1 FROM business_locations WHERE id = ? AND organization_id = ? AND updated_at = ?)', params: [locationId, organizationId, expectedUpdatedAt] };
   if (!changedFields.length) {
-    if (writeGuard) await executeBatch(db, [writeGuard]);
+    // The caller's statements land only on the row it read, as an update would.
+    if (preceding.length) {
+      const landed = await executeBatch(db, [{ query: `SELECT CASE WHEN (${version.query}) THEN NULL ELSE json_extract('{}', 'LOCATION_VERSION_CONFLICT') END`, params: version.params }, ...preceding])
+        .then(() => true, (error: unknown) => { if (error instanceof Error && /LOCATION_VERSION_CONFLICT/.test(error.message)) return false; throw error });
+      if (!landed) return stale;
+    }
     await reportBillingUsage(env, db, organizationId, { committed: true });
     if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId });
     await purgePublicResourceCacheNow(env, organizationId);
@@ -589,8 +598,6 @@ export async function updateLocation(
   // the row it read. With the caller's updated_at in the WHERE, a row that
   // moved since matches nothing and the write is refused rather than applied
   // over someone else's.
-  const expectedUpdatedAt = input.updated_at ?? existing.updated_at;
-  const version = { query: 'EXISTS (SELECT 1 FROM business_locations WHERE id = ? AND organization_id = ? AND updated_at = ?)', params: [locationId, organizationId, expectedUpdatedAt] };
   const runUpdate = async (boundParams: Array<string | number | null>): Promise<boolean> => {
     const statements: BatchQuery[] = [publicResourceCacheInvalidationQuery(organizationId, 'location_updated', version)];
     statements.push({
@@ -619,8 +626,8 @@ export async function updateLocation(
     }));
     // An inactive location takes its homes off the live count. Making it
     // active again is guarded by the same home-activation boundary.
-    const results = await executeWithinCapacity(env, db, organizationId, [...(writeGuard ? [writeGuard] : []), ...statements], { action: 'make it active', allowHomeActivation: options.allowHomeActivation });
-    const changed = (results[writeGuard ? 2 : 1]?.meta?.changes ?? 0) === 1;
+    const results = await executeWithinCapacity(env, db, organizationId, [...preceding, ...statements], { action: 'make it active', allowHomeActivation: options.allowHomeActivation });
+    const changed = (results[preceding.length + 1]?.meta?.changes ?? 0) === 1;
     // The saved privacy mode must be visible even if readback or card work fails.
     if (changed) await purgePublicResourceCacheNow(env, organizationId);
     return changed;

@@ -26,7 +26,7 @@ import {
 } from '../../server/utils/product-management.ts'
 import { AmbiguousPriceError } from '../../shared/prices.ts'
 import { groupProductsByCollection } from '../../utils/product-presentation.ts'
-import { CapacityUnavailableError, claimSessionCapacity, listSessions, sessionMoveQuery, setProductBookingConfig } from '../../server/utils/availability.ts'
+import { CapacityUnavailableError, claimSessionCapacity, getScheduleSession, sessionMoveQuery, setProductBookingConfig } from '../../server/utils/availability.ts'
 import { loadPublicSiteProductDetail, loadPublicProductCollection, loadPublicProductDetail, loadPublicProductSessions } from '../../server/utils/public-products.ts'
 import { readPublicProductAvailability } from '../../server/utils/public-session-booking.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -112,7 +112,8 @@ test('public experiences require a configured booking flow and retain full or te
     assert.deepEqual(await productBookingReadiness(db, ORG, await getProduct(db, ORG, legacy.id), { env }), { ready: false, missing: ['booking.schedule'] })
     assert.deepEqual(await visible(), [])
     assert.deepEqual(await listOrganizationProducts(db, { organizationId: ORG, publishedOnly: true, kind: 'experience', window: { limit: 1, offset: 0 }, env }), [])
-    await assert.rejects(listPublicBookingSessions(db, ORG, legacy.slug, env), (error: { statusCode?: number }) => error.statusCode === 404)
+    // Publishing is where readiness is checked; the availability read does not repeat it, so a schedule-less offering offers no time.
+    assert.deepEqual(await listPublicBookingSessions(db, ORG, legacy.slug, env), { unit: 'slot', product: { id: legacy.id, name: legacy.name, slug: legacy.slug }, timezone: 'Asia/Bangkok', sessions: [] })
     await assert.rejects(setProductPublication(db, { env, organizationId: ORG, productId: legacy.id, published: true, actor: ACTOR }),
       (error: { statusCode?: number; data?: { code?: string; missing?: string[] } }) => error.statusCode === 409 && error.data?.code === 'EXPERIENCE_BOOKING_INCOMPLETE' && error.data.missing?.includes('booking.schedule') === true)
 
@@ -127,8 +128,8 @@ test('public experiences require a configured booking flow and retain full or te
     const ids = [external.id, legacy.id].sort()
     assert.deepEqual((await visible()).sort(), ids)
     await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: legacy.id, sessionId: 'omakase-session', productVariantId: legacy.variants[0]!.id, partySize: 8 })
-    const sessions = await listSessions(db, { env, organizationId: ORG, productId: legacy.id, fromInstant: `${tomorrow}T00:00:00.000Z`, toInstant: `${tomorrow}T23:59:59.999Z` })
-    assert.deepEqual(sessions.map(session => ({ remaining: session.remaining, full: session.is_full })), [{ remaining: 0, full: true }])
+    const full = await getScheduleSession(db, env, { organizationId: ORG, productId: legacy.id, sessionId: 'omakase-session' })
+    assert.deepEqual({ remaining: full.remaining, full: full.is_full }, { remaining: 0, full: true })
     assert.deepEqual((await visible()).sort(), ids, 'a full experience stays visible')
     await db.prepare("UPDATE bookings SET status = 'cancelled', cancelled_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE product_session_id = 'omakase-session'").run()
     await db.prepare("UPDATE business_locations SET special_hours = ? WHERE id = 'loc-a'")
