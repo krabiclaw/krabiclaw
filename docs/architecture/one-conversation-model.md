@@ -253,7 +253,7 @@ Writers today: `appendEntry` (`entries.ts:61`) plus about 12 hand-written `INSER
 | Nav badge | `unread-count.get.ts` | Includes archived |
 | App icon | `unreadBadge` | Counts alerts, not conversations |
 
-**Replaces it:** one unread SQL on `conversation_participants`, one read writer (read-through on open; mark read/unread from the list), and one count used by the list, filter, nav, app icon and MCP.
+**Replaces it:** one unread SQL on `conversation_participants`, one read writer (read-through on open; mark read/unread from the list), and one unread statement used by the list's rows, the nav's dot (`has_unread`), the app icon and MCP.
 
 ### 4. Alerts: deleted
 

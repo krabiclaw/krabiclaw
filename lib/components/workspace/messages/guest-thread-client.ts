@@ -7,7 +7,6 @@ import type {
   GuestThreadSubmissionType,
   InboxListPage,
   InboxRow,
-  InboxUnreadCounts,
 } from '~/server/domain/guest-threads/types'
 
 /*
@@ -22,7 +21,7 @@ import type {
 // stopped sending, so there is one declaration and this reads it.
 export type SubmissionType = GuestThreadSubmissionType
 export type ThreadListItem = InboxRow
-export type ThreadListPage = InboxListPage & { unread?: InboxUnreadCounts; count?: number }
+export type ThreadListPage = InboxListPage
 export type ThreadDetails = ConversationDetails
 
 export const removeInboxConversationKey: InjectionKey<(id: string) => void> = Symbol('remove-inbox-conversation')
@@ -64,8 +63,7 @@ export function isThreadListResponse(value: unknown): value is ThreadListPage {
     && (!value.pagination.has_more || value.threads.length === Number(value.pagination.limit))
     && new Set(value.threads.map(thread => isRecord(thread) ? thread.id : undefined)).size === value.threads.length
     && value.threads.every(isRow)
-    && (value.count === undefined || isCount(value.count))
-    && (value.unread === undefined || (isRecord(value.unread) && ['all', 'guests', 'support', 'team'].every(kind => isCount((value.unread as Record<string, unknown>)[kind]))))
+    && typeof value.has_unread === 'boolean'
 }
 
 function isPhoto(value: unknown): boolean {

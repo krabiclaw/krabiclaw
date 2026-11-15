@@ -17,6 +17,8 @@ export interface DashboardInvalidationConnection {
   reconnectEpoch: Ref<number>
   accessEnded: Ref<number>
   recentConversations: Map<string, ConversationPage>
+  /** Heads being read before their conversation opens; an opening conversation takes its read from here. */
+  conversationReads: Map<string, Promise<ConversationPage | undefined>>
   recentInbox: { snapshot?: { key: string; page: ThreadListPage; expiresAt: number } }
   connect: () => void
   waitForFirstOpen: (signal: AbortSignal) => Promise<void>
@@ -30,13 +32,14 @@ const HEARTBEAT_TIMEOUT_MS = 8_000
 
 function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationId: Readonly<Ref<string | null | undefined>>, reader: Readonly<Ref<string | undefined>>): DashboardInvalidationConnection {
   const recentConversations = new Map<string, ConversationPage>()
+  const conversationReads = new Map<string, Promise<ConversationPage | undefined>>()
   const recentInbox: DashboardInvalidationConnection['recentInbox'] = {}
   // `nuxt dev` cannot carry this socket: its dev server answers the upgrade
   // with a plain 200 (docs/local-development.md). Realtime runs under
   // `yarn dev:worker`, staging and production; here the dashboard stays on its
   // reads instead of retrying a connection that cannot open and reporting it.
   if (import.meta.dev) {
-    return { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), reconnectEpoch: ref(0), accessEnded: ref(0), recentConversations, recentInbox, connect: () => {}, waitForFirstOpen: async () => {} }
+    return { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), reconnectEpoch: ref(0), accessEnded: ref(0), recentConversations, conversationReads, recentInbox, connect: () => {}, waitForFirstOpen: async () => {} }
   }
 
   const status = ref<DashboardInvalidationStatus>('closed')
@@ -257,7 +260,7 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     status.value = 'closed'
   })
 
-  return { status, event, connectionEpoch, reconnectEpoch, accessEnded, recentConversations, recentInbox, connect, waitForFirstOpen }
+  return { status, event, connectionEpoch, reconnectEpoch, accessEnded, recentConversations, conversationReads, recentInbox, connect, waitForFirstOpen }
 }
 
 export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>, personal: Readonly<Ref<boolean>>, reader: Readonly<Ref<string | undefined>>, sessionPending: Readonly<Ref<boolean>>): DashboardInvalidationConnection {

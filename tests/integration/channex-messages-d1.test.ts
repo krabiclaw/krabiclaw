@@ -11,7 +11,7 @@ import { applyChannelBooking, createStay, type ChannelBooking } from '../../serv
 import { backfillChannexMessages, mirrorChannexMessageEvent, mirrorChannexThread } from '../../server/domain/guest-threads/channel-messages.ts'
 import { sendGuestThreadReply, sendScheduledGuestReply } from '../../server/domain/guest-threads/operations.ts'
 import { conversationPageFor } from './support/conversation-page.ts'
-import { listConversations } from '../../server/domain/guest-threads/repository.ts'
+import { listConversations, readWorkspaceInbox } from '../../server/domain/guest-threads/repository.ts'
 import { appendMessage, assertConversationAccess, type MessageRow } from '../../server/domain/conversations.ts'
 import { createDeliveryReceipt, listThreadDeliveries, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { getGuestRequest } from '../../server/domain/requests.ts'
@@ -324,10 +324,10 @@ test('the inbox exposes every page with a stable tie order and validates paginat
         db.prepare("INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role) VALUES (?, ?, ?, 'member')").bind(id, ORG, OWNER),
       ])
     }
-    const first = guestThreadListPage(await listConversations(db, ORG, { userId: OWNER, limit: 4, offset: 0 }), { limit: 3, offset: 0 })
+    const first = guestThreadListPage(await readWorkspaceInbox(db, ORG, { userId: OWNER, limit: 4, offset: 0 }), { limit: 3, offset: 0 })
     assert.deepEqual(first.threads.map(thread => thread.id), ['a', 'b', 'c'])
     assert.deepEqual(first.pagination, { limit: 3, offset: 0, has_more: true, next_offset: 3 })
-    const last = guestThreadListPage(await listConversations(db, ORG, { userId: OWNER, limit: 4, offset: 3 }), { limit: 3, offset: 3 })
+    const last = guestThreadListPage(await readWorkspaceInbox(db, ORG, { userId: OWNER, limit: 4, offset: 3 }), { limit: 3, offset: 3 })
     assert.deepEqual(last.threads.map(thread => thread.id), ['d', 'e'])
     assert.deepEqual(last.pagination, { limit: 3, offset: 3, has_more: false, next_offset: null })
     for (const [query, field] of [[{ limit: '0' }, 'limit'], [{ limit: '101' }, 'limit'], [{ offset: '-1' }, 'offset'], [{ limit: ['3'] }, 'limit'],

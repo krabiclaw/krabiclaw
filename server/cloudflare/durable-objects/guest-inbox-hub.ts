@@ -4,6 +4,8 @@ import { isDashboardInvalidation, type DashboardInvalidation } from '../../../sh
 import { queryAll, queryFirst } from '~/server/db'
 import { assignedMemberSql, memberAccessPrincipal, resolveMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import { assertConversationAccess, guestVisibleSql } from '~/server/domain/conversations'
+import { loadConversationPage } from '~/server/domain/conversation-history'
+import type { ConversationEntriesPage } from '~/shared/messages-contract'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { runOrganizationJobs } from '~/server/domain/cleaner-jobs'
 import { guestInboxTarget, SCHEDULED_AUTHOR_HEADER } from '~/server/cloudflare/guest-inbox-events'
@@ -73,6 +75,24 @@ async function canReceive(env: GuestInboxHubEnv, membership: ResolvedMembership,
   return Boolean(await queryFirst(env.DB, `SELECT c.product_id FROM product_stay_configs s JOIN product_booking_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
       WHERE c.organization_id = ? AND c.product_id = ? AND (${assignedMemberSql('c')})`,
     [membership.organizationId, event.product_id, membership.userId]))
+}
+
+/**
+ * The end of one recipient's transcript through a written message: the same
+ * read as their transcript request, so its words, names and receipts are
+ * theirs. Three messages give the written one and its predecessor their run
+ * and day marks. A recipient who cannot read it this way receives the event alone.
+ */
+async function writtenMessageTail(env: GuestInboxHubEnv, event: DashboardInvalidation, viewer: { userId: string; organizationId?: string }): Promise<ConversationEntriesPage | undefined> {
+  if (event.type !== 'MESSAGE_CREATE' || !event.message) return undefined
+  const written = event.message
+  try {
+    const tail = await loadConversationPage(env.DB, { conversationId: event.conversation_id, ...viewer }, { before: written.sequence + 1, limit: 3 })
+    return tail.entries.some(entry => entry.type !== 'day' && entry.id === written.id) ? tail : undefined
+  } catch (error) {
+    if (error instanceof HTTPError && error.status === 404) return undefined
+    throw error
+  }
 }
 
 /** Use the conversation's guest seats and the same visibility rule as its history. */
@@ -187,6 +207,8 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     if (!organizationId || !isDashboardInvalidation(event) || event.organization_id !== organizationId) {
       return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid dashboard invalidation', 'body')
     }
+    // Each recipient's transcript tail is read here; a publication cannot supply one.
+    if ('tail' in event) return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'A publication cannot carry transcript entries', 'tail')
     const accountUserId = request.headers.get('x-krabiclaw-account-user-id')
     if (accountUserId !== null) {
       if (!accountUserId || !('conversation_id' in event) || ('scheduled' in event && event.scheduled) || ('team' in event && event.team)
@@ -263,15 +285,25 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
       const revoke = !session || (accountUserId === null && !membership)
       if (membership) {
         if (!deliveries.has(attachment.userId)) {
-          const seesConversation = !scheduleOnly || scheduleTaskChange ? await canReceive(this.env, membership, event) : false
+          const [seesConversation, tail] = await Promise.all([
+            !scheduleOnly || scheduleTaskChange ? canReceive(this.env, membership, event) : false,
+            writtenMessageTail(this.env, event, { userId: attachment.userId, organizationId }),
+          ])
           const seesSchedule = (scheduleOnly || !seesConversation) && (scheduledAuthor === ''
             ? await roleAllows({ ...membership, permissions: { operations: ['update'] } }) : scheduledAuthor === attachment.userId)
-          deliveries.set(attachment.userId, !scheduleOnly && seesConversation ? encoded
+          deliveries.set(attachment.userId, !scheduleOnly && seesConversation ? tail ? JSON.stringify({ ...event, tail }) : encoded
             : seesSchedule ? scheduledChange : seesConversation ? scheduleTaskChange : null)
         }
         const delivery = deliveries.get(attachment.userId)
         if (!delivery) continue
         eventToSend = delivery
+      } else if (session && accountUserId !== null) {
+        // The guest audience already named this account for this message.
+        if (!deliveries.has(accountUserId)) {
+          const tail = await writtenMessageTail(this.env, event, { userId: accountUserId })
+          deliveries.set(accountUserId, tail ? JSON.stringify({ ...event, tail }) : encoded)
+        }
+        eventToSend = deliveries.get(accountUserId)!
       }
       if (socket.readyState !== WebSocket.OPEN) continue
       eligible += 1

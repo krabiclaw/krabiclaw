@@ -5,7 +5,7 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { appendMessage, markConversationRead, markConversationUnread } from '../../server/domain/conversations.ts'
-import { countUnreadAsGuest, countUnreadConversations, listConversations, unreadBadge } from '../../server/domain/guest-threads/repository.ts'
+import { listConversations, readGuestInbox, readWorkspaceInbox, unreadBadge } from '../../server/domain/guest-threads/repository.ts'
 
 // Unread is one statement (conversations.ts unreadSql): a message from someone
 // else newer than the person's read position. Every surface reads it: the list
@@ -36,17 +36,23 @@ test('unread is a message from someone else after your read position, the same c
       `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,location_id,starts_at,ends_at,timezone,user_id,party_size,policy_json,status,created_at,updated_at)
         SELECT 'booking','${ORG}','class',id,'seat',location_id,starts_at,ends_at,timezone,'${GUEST}',1,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}','confirmed','${NOW}','${NOW}' FROM product_sessions WHERE id = 'session'`,
     ].map(statement => db.prepare(statement)))
+    const guestUnread = async (userId: string) => {
+      const inbox = await readGuestInbox(db, { userId, mailbox: 'current' })
+      const unread = inbox.threads.filter(row => row.unread).length
+      assert.equal(inbox.has_unread, unread > 0, 'the dot is the rows marked unread')
+      return unread
+    }
     /** Every surface's reading of one person's unread state, which must agree. */
     const surfaces = async (userId: string) => {
       const rows = await listConversations(db, ORG, { userId, mailbox: 'current' })
       const filtered = await listConversations(db, ORG, { userId, mailbox: 'current', unreadOnly: true })
-      const counts = await countUnreadConversations(db, ORG, { userId })
+      const inbox = await readWorkspaceInbox(db, ORG, { userId, mailbox: 'current' })
       const badge = await unreadBadge(db, userId)
       const unread = rows.filter(row => row.unread).map(row => row.id)
       assert.deepEqual(filtered.map(row => row.id), unread, 'the Unread filter is the rows marked unread')
-      assert.equal(counts.all, unread.length, 'the filter counts are the rows marked unread')
-      assert.equal(counts.guests + counts.support + counts.team, counts.all)
-      assert.equal(badge, counts.all, 'the app badge is the same count')
+      assert.deepEqual(inbox.threads.filter(row => row.unread).map(row => row.id), unread, 'the inbox response lists the same rows')
+      assert.equal(inbox.has_unread, unread.length > 0, 'the dot is the rows marked unread')
+      assert.equal(badge, unread.length, 'the app badge counts the same rows')
       return unread.sort()
     }
 
@@ -56,7 +62,7 @@ test('unread is a message from someone else after your read position, the same c
       .map(write => db.prepare(write.query).bind(...write.params)))
     const opening = (await db.prepare("SELECT id FROM messages WHERE conversation_id = 'booking-conversation' AND event_name = 'thread.opening'").first<string>('id'))!
     assert.deepEqual(await surfaces(OWNER), ['booking-conversation'])
-    assert.equal(await countUnreadAsGuest(db, GUEST), 0, 'the guest booked it: its opening is theirs')
+    assert.equal(await guestUnread(GUEST), 0, 'the guest booked it: its opening is theirs')
     // Opening it reads it through the newest message shown.
     await markConversationRead(db, { organizationId: ORG, conversationId: 'booking-conversation', userId: OWNER, throughMessageId: opening })
     assert.deepEqual(await surfaces(OWNER), [])
@@ -64,11 +70,11 @@ test('unread is a message from someone else after your read position, the same c
     // KrabiClaw's messages count as unread: an event in the conversation (here a payment) is unread to the business and the guest.
     await appendMessage(db, { conversationId: 'booking-conversation', authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: 'Payment received' })
     assert.deepEqual(await surfaces(OWNER), ['booking-conversation'])
-    assert.equal(await countUnreadAsGuest(db, GUEST), 1)
+    assert.equal(await guestUnread(GUEST), 1)
     // A business reply is the guest's to read; the member who wrote it has read it.
     await appendMessage(db, { conversationId: 'booking-conversation', authorKind: 'member', authorUserId: OWNER, eventName: 'thread.member_reply', body: 'See you then', channel: 'web' })
     assert.deepEqual(await surfaces(OWNER), [])
-    assert.equal(await countUnreadAsGuest(db, GUEST), 1)
+    assert.equal(await guestUnread(GUEST), 1)
 
     // Mark unread works anywhere there is a message from someone else: the newest one is unread again.
     await markConversationUnread(db, { organizationId: ORG, conversationId: 'booking-conversation', userId: OWNER })

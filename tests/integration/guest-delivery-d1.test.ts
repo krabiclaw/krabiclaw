@@ -12,7 +12,7 @@ import { Miniflare } from 'miniflare'
 import { createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isVisibleDeliveryFailure, listThreadDeliveries, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { appendMessage, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { executeGuestThreadOperation, sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
-import { countUnreadAsGuest, listConversations } from '../../server/domain/guest-threads/repository.ts'
+import { listConversations, readGuestInbox } from '../../server/domain/guest-threads/repository.ts'
 import { moveBooking, requestBookingChange, respondToBookingChange } from '../../server/domain/guest-threads/booking-changes.ts'
 import { notifyContactSubmitted, notifyFinancialNotification, notifyStayCancelled, notifyBookingCreated } from '../../server/utils/notifications.ts'
 import { buyStay } from './support/stay-checkout.ts'
@@ -33,6 +33,14 @@ import { renderNotificationEmail } from '../../server/emails/render.ts'
 import { reviewRequestMessage } from '../../server/notifications/guest-events.ts'
 import { addLocalDays, formatCalendarDate, formatTimestamp, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
+
+async function guestUnread(db: Parameters<typeof readGuestInbox>[0], userId: string) {
+  const inbox = await readGuestInbox(db, { userId, mailbox: 'current' })
+  const unread = inbox.threads.filter(row => row.unread).length
+  assert.equal(inbox.has_unread, unread > 0, 'the dot is the rows marked unread')
+  return unread
+}
+
 
 test('a guest-thread email is sent once per event: replays send nothing, a failed send goes again, and a late reply never moves the thread', async () => {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -62,7 +70,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       contactId: 'contact-proof', guestName: 'Proof Guest', email: 'guest@proof.example', subject: null, message: 'Hello' })))
     assert.equal((await listConversations(db, 'org-proof', { userId: 'user-proof', unreadOnly: true }))[0]?.id, 'contact-proof')
     // The guest wrote it: their own words are not unread to them.
-    assert.equal(await countUnreadAsGuest(db, 'guest-proof'), 0)
+    assert.equal(await guestUnread(db, 'guest-proof'), 0)
 
     assert.deepEqual((await db.prepare("SELECT d.purpose,d.status FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id WHERE e.conversation_id='contact-proof' ORDER BY d.purpose").all()).results,
       [{ purpose: 'guest_acknowledgement', status: 'sent' }, { purpose: 'owner_alert', status: 'sent' }])
@@ -192,7 +200,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     }
     const proposal = await propose('first-change', 2)
     // The proposal is KrabiClaw's message in the guest's conversation, unread to them until they open it.
-    assert.equal(await countUnreadAsGuest(db, 'guest-proof'), 1)
+    assert.equal(await guestUnread(db, 'guest-proof'), 1)
     const proposalEmail = await db.prepare('SELECT status,email_json FROM guest_thread_deliveries WHERE message_id = ? AND purpose=\'status_update\'').bind(proposal.requestId).first<{status:string;email_json:string}>()
     assert.equal(proposalEmail?.status, 'sent')
     const proposalMessage = JSON.parse(proposalEmail!.email_json).message
@@ -290,7 +298,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     assert.equal((await deliveryRow(deliveryId))?.provider_message_id, sent?.provider_message_id)
     assert.equal((await deliveryRow(deliveryId))?.email_json, sent.email_json, 'replaying a staff reply preserves its frozen email request')
     // The business's reply is unread to the guest until they open it, once however often it is replayed.
-    assert.equal(await countUnreadAsGuest(db, 'guest-proof'), 2)
+    assert.equal(await guestUnread(db, 'guest-proof'), 2)
 
 
     // A delayed delivery cannot replace a newer guest message in the inbox.
