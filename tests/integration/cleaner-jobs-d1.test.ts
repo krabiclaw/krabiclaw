@@ -104,8 +104,8 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.deepEqual([thread.name, thread.booking_id, thread.participants.map(person => person.id).sort(), await isUnread(db, cleaner, thread.id)], [null, dee.id, ['admin', 'cleaner', 'owner'], true])
     const [job] = await automatic(thread.id)
     assert.equal(job!.key, jobKey(turnover))
-    assert.match(job!.body, /^Turnover: Cabin\n/)
-    assert.match(job!.body, /\n10:00 AM – 3:00 PM\nDee checks out at 10:00 AM\.$/)
+    const checkoutDay = new Intl.DateTimeFormat('en', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${day(3)}T12:00:00Z`)).replace(',', '')
+    assert.equal(job!.body, `Clean Cabin after Dee checks out, ${checkoutDay}, 10:00 AM.`)
     const messages = (await conversationPageFor(db, cleaner, thread.id)).entries.filter(entry => entry.type === 'message').reverse()
     assert.deepEqual([messages[0]!.automatic, messages[0]!.author_user_id], [true, null])
     // The hosts read along, and it is unread for them too until they do.
@@ -121,8 +121,8 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
 
     // The evening before, the morning of, and the warning to the hosts two hours before Lee arrives; each once.
     for (const [when, key, pattern] of [
-      [at(day(2), '18:05'), `reminder:${turnover.id}:evening:${day(3)}`, /^Tomorrow: turnover at Cabin, 10:00 AM – 3:00 PM\.$/],
-      [at(day(3), '08:05'), `reminder:${turnover.id}:morning:${day(3)}`, /^Today: turnover at Cabin, 10:00 AM – 3:00 PM\.$/],
+      [at(day(2), '18:05'), `reminder:${turnover.id}:evening:${day(3)}`, /^Tomorrow: clean Cabin after the 10:00 AM checkout\.$/],
+      [at(day(3), '08:05'), `reminder:${turnover.id}:morning:${day(3)}`, /^Today: clean Cabin after the 10:00 AM checkout\.$/],
       [at(day(3), '13:05'), `warning:${turnover.id}:${turnover.due_at}`, /^Cabin is not marked done and the next guests arrive at 3:00 PM\.$/],
     ] as const) {
       await runOrganizationJobs(env, db, ORG, when)
@@ -143,7 +143,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     const cookThreads = (await teamThreads(cook)).filter(item => item.booking_id === dee.id)
     assert.equal(cookThreads.length, 1)
     assert.deepEqual(cookThreads[0]!.participants.map(person => person.id).sort(), ['admin', 'cook', 'owner'])
-    assert.equal((await automatic(cookThreads[0]!.id)).find(message => message.key === jobKey(turnover))?.body.split('\n')[0], 'Turnover: Cabin')
+    assert.equal((await automatic(cookThreads[0]!.id)).find(message => message.key === jobKey(turnover))?.body, `Clean Cabin after Dee checks out, ${checkoutDay}, 10:00 AM.`)
 
     // Done, in one tap: "Done" is the cook's own message in the conversation, and nobody is alerted.
     const closed = await closeTask(db, await taskViewer(principal('cook', 'member')), turnover.id, { status: 'done', env })

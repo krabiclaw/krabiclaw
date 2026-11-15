@@ -13,6 +13,7 @@ import { createTables } from './support/table-product.ts'
 import { createStay, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
 import { resolveOrganizationMembership } from '../../server/utils/member-access.ts'
+import { stayReadyTaskQueries } from '../../server/domain/tasks.ts'
 import { handleTaskTools } from '../../server/utils/mcp-tools/tasks.ts'
 import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
@@ -154,17 +155,21 @@ test('Today shows every booking type as one card for its own business, with the 
     assert.deepEqual([law.title, law.cards[0]!.when], ['You have 2 upcoming consultations', visit(estate.startsAt)])
     // A class is one card for everyone booked into it.
     assert.deepEqual(studio.cards.map(shape), [
-      { id: `class:${pottery.session.id}`, headline: 'Wheel Throwing Class for 3', line: 'studio office', action: { title: 'Message the class', detail: '1 group is coming' },
+      { id: `class:${pottery.session.id}`, headline: 'Wheel Throwing Class', line: 'studio office · 3 guests', action: { title: 'Message the class', detail: 'See who is coming' },
         to: `/dashboard/studio/calendar/sessions/${pottery.session.id}?date=${inTwoDays}&product_id=${pottery.product.id}` },
     ])
     assert.equal(studio.title, 'You have 1 upcoming class')
     // The owner looks after the home, so the clean after Diana's stay is theirs too, on its own day.
     const turnover = String(await db.prepare("SELECT id FROM tasks WHERE kind = 'turnover' AND subject_id = ?").bind(stay.id).first('id'))
     assert.deepEqual(inn.cards.map(shape), [
-      { id: `booking:${stay.id}`, headline: 'Diana’s group of 2', line: 'Seaview Cottage · no payment recorded', action: { title: 'Share info about your place', detail: 'Help Diana get ready' }, to: `/dashboard/inn/messages/${stay.conversation_id}` },
+      { id: `booking:${stay.id}`, headline: 'Diana’s group of 2', line: 'Seaview Cottage', action: { title: 'Share info about your place', detail: 'Help Diana get ready' }, to: `/dashboard/inn/messages/${stay.conversation_id}` },
       { id: `task:${turnover}`, headline: 'Clean up after Diana’s group of 2', line: 'Seaview Cottage', action: { title: 'Tap Done when it’s finished', detail: 'In Diana’s conversation' }, to: `/dashboard/inn/messages/${stay.conversation_id}` },
     ])
     assert.equal(inn.title, 'You have 1 upcoming reservation and 1 upcoming home to clean')
+    // A make-ready job at a home with no check-in time is the arrival's work: it is the action of Diana's card, not a card on her checkout day.
+    await db.batch(stayReadyTaskQueries({ organizationId: 'inn', stayId: stay.id, now: new Date().toISOString(), previousProductId: home.id, guard: { query: '1', params: [] }, guestName: 'Diana Lee', checkInDate: inTwoDays,
+      home: { product_id: home.id, location_id: 'inn-site', timezone: ZONE, check_in_time: null, internal_name: 'Seaview Cottage', assigned_member_id: 'inn-owner' } }).map(query => db.prepare(query.query).bind(...query.params ?? [])))
+    assert.deepEqual((await today('inn', 'upcoming')).cards.map(card => [card.id, card.action.title]), [[`booking:${stay.id}`, 'You’re cleaning'], [`task:${turnover}`, 'Tap Done when it’s finished']])
     assert.equal(inn.cards[0]!.when, `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).formatRange(new Date(`${inTwoDays}T00:00:00Z`), new Date(`${addLocalDays(inTwoDays, 3)}T00:00:00Z`)).replace(/[\u2009\u202f]/g, ' ')}`)
     // A restaurant has no host-written preparation, so its reservation has no welcome.
     assert.deepEqual(bistro.cards.map(shape), [
@@ -177,7 +182,7 @@ test('Today shows every booking type as one card for its own business, with the 
       // The bistro's tables are not a menu: it still has its first dish to add.
       const dish = org === 'bistro' ? [['product.create:bistro', 'Add your first dish', 'Start your menu', '/dashboard/bistro/products/new?kind=dish']] : []
       assert.deepEqual({ title, cards: cards.map(card => [card.id, card.headline, card.action.title, card.to]) },
-        { title: `You have ${1 + dish.length} ${dish.length ? 'things' : 'thing'} to set up`, cards: [[`payments.connect:${org}`, 'Set up payments', 'Connect with Stripe', `/dashboard/${org}/payments/payout-method`], ...dish] })
+        { title: 'Finish setting up to take bookings', cards: [[`payments.connect:${org}`, 'Set up payments', 'Connect with Stripe', `/dashboard/${org}/payments/payout-method`], ...dish] })
     }
 
     // The message is written from the offering's and the home's own fields, and the conversation opens with it.

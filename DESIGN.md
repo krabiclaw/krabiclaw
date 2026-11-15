@@ -178,8 +178,10 @@ no border or badges: when, once ("3:00 PM", "Oct 26 – 29", "Thu, Nov 20 ·
 sentence with who and how many ("Eva’s group of 4 checks in", "Pottery wheel
 class for 6", "Clean up after Parity’s group of 2"); one line of where, with
 the money for owners and admins; then the two-line action. The heading uses
-the business's word ("You have 2 reservations and 1 request"); empty, "Nothing
-needs you today". On desktop the cards sit in a centered grid, each at most
+the business's word ("You have 2 reservations and 1 task"); setup is not
+counted, and a business with only setup left reads "Finish setting up to take
+bookings"; empty, "Nothing needs you today". A class is named by itself, its
+line where and how many guests are booked. On desktop the cards sit in a centered grid, each at most
 380px wide; on a phone, one column. A card with no picture shows a small round
 tile with its icon instead, so it stays short.
 

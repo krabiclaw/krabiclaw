@@ -1,6 +1,6 @@
 <template>
   <article class="ti" data-testid="today-item" :data-item-id="item.id">
-    <component :is="item.to ? NuxtLink : 'div'" v-bind="item.to ? { to: { path: item.to, state: item.draft ? { draft: item.draft } : undefined } } : {}" class="ti-main">
+    <component :is="item.to ? NuxtLink : 'div'" v-bind="item.to ? { to: { path: item.to, state: item.draft ? { draft: item.draft } : undefined }, 'aria-describedby': actionId } : {}" class="ti-main">
       <span v-if="item.when" class="ti-when">{{ item.when }}</span>
       <span v-if="src" class="ti-pic"><img :src="src" alt="" class="size-full object-cover"></span>
       <span v-else class="ti-tile"><UIcon :name="item.icon" class="size-6" /></span>
@@ -11,8 +11,9 @@
       <span class="min-w-0"><b>{{ item.action.title }}</b><small>{{ item.action.detail }}</small></span>
       <UIcon :name="busy ? 'i-lucide-loader-circle' : 'i-lucide-circle-check'" class="size-6 shrink-0" :class="{ 'animate-spin': busy }" aria-hidden="true" />
     </button>
+    <!-- One keyboard stop: the strip repeats the card's link, and the link is described by its action. -->
     <NuxtLink v-else-if="item.to" :to="{ path: item.to, state: item.draft ? { draft: item.draft } : undefined }" class="ti-strip" tabindex="-1" aria-hidden="true">
-      <span class="min-w-0"><b>{{ item.action.title }}</b><small>{{ item.action.detail }}</small></span>
+      <span :id="actionId" class="min-w-0"><b>{{ item.action.title }}</b><small>{{ item.action.detail }}</small></span>
       <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0" />
     </NuxtLink>
   </article>
@@ -30,6 +31,7 @@ import { cfImageVariant } from '~/utils/cf-image'
  */
 const props = defineProps<{ item: TodayItem; busy?: boolean }>()
 const emit = defineEmits<{ done: [item: TodayItem] }>()
+const actionId = useId()
 const src = computed(() => cfImageVariant(props.item.image_url, { width: 760, height: 570, fit: 'cover', format: 'auto' }) || props.item.image_url || undefined)
 </script>
 

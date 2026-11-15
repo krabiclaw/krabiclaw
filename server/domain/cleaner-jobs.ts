@@ -52,7 +52,9 @@ function rosterFor(task: TaskRow, members: Member[]): Roster | null {
 }
 
 function lines(view: TaskView): string {
-  return [`${view.sheet.heading}: ${view.sheet.title}`, view.sheet.date, view.when, view.detail, view.notes].filter((line): line is string => Boolean(line)).join('\n')
+  // A clean says itself in one sentence; other jobs name their kind, place and day.
+  const head = view.kind === 'turnover' ? [view.detail] : [`${view.sheet.heading}: ${view.sheet.title}`, view.sheet.date, view.when, view.detail]
+  return [...head, view.notes].filter((line): line is string => Boolean(line)).join('\n')
 }
 
 /** The reminders a job gets, each at its instant, as [key suffix, instant, valid until]. */
@@ -211,8 +213,12 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
         if (reminder.at > now) { pending.push(reminder.at); continue }
         if (now >= reminder.until) continue
         const when = view.when ? `, ${view.when}` : ''
-        const body = reminder.kind === 'evening' ? `Tomorrow: ${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${when}.`
-          : reminder.kind === 'morning' ? `Today: ${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${when}.`
+        // A clean is "Today: clean Ocean Avenue Studio after the 11:00 AM checkout."
+        const job = task.kind === 'turnover' && task.starts_at
+          ? `clean ${view.sheet.title} after the ${formatTimestamp(task.starts_at, 'en', task.timezone, { hour: 'numeric', minute: '2-digit' })} checkout`
+          : `${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${when}`
+        const body = reminder.kind === 'evening' ? `Tomorrow: ${job}.`
+          : reminder.kind === 'morning' ? `Today: ${job}.`
             : `${view.sheet.title} is not marked done and the next guests arrive at ${formatTimestamp(task.due_at!, 'en', task.timezone, { hour: 'numeric', minute: '2-digit' })}.`
         await post(subject, roster.seats, reminder.key, body, reminder.kind === 'warning' ? roster.hosts : roster.cleaners, heldIn!)
       }

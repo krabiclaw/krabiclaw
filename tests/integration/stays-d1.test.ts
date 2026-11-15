@@ -1344,7 +1344,7 @@ test('unknown home clocks preserve turnover dates without inventing task instant
     assert.equal(tasks.length, 1)
     assert.equal(tasks[0]!.booking_id, first.id)
     // A home with no clock has no window to show: the day is the checkout's.
-    assert.deepEqual([tasks[0]!.when, tasks[0]!.title, tasks[0]!.detail], [null, 'Clean up after Ana’s group of 2', 'Ana checks out Tue, Nov 3.'])
+    assert.deepEqual([tasks[0]!.when, tasks[0]!.title, tasks[0]!.detail], [null, 'Clean up after Ana’s group of 2', 'Clean Cabin after Ana checks out, Tue Nov 3.'])
     assert.deepEqual(tasks[0]!.sheet, { heading: 'Turnover', title: 'Cabin', date: 'Tue, Nov 3' })
     // The cleaner closes it in one tap: the list reads the closed card exactly as the close returned it, with who closed it.
     const closed = await closeTask(db, viewer, tasks[0]!.id, { status: 'done', env })

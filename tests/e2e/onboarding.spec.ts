@@ -254,7 +254,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   expect(context.organization.subdomain).toBe(subdomain)
 
   // A new business has nothing booked and cannot take payment yet: Today is its setup, and the site stays private until it is published.
-  await expect(page.getByTestId('today-title')).toContainText('to set up')
+  await expect(page.getByTestId('today-title')).toHaveText('Finish setting up to take bookings')
   const payments = page.locator(`[data-item-id="payments.connect:${organizationId}"]`)
   await expect(payments).toContainText('Set up payments')
   await expect(payments.getByRole('link').first()).toHaveAttribute('href', /\/payments\/payout-method$/)

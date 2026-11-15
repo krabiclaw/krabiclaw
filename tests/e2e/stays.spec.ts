@@ -546,7 +546,7 @@ test('a home keeps its operator name independent from its public title across CM
   const upcomingToday = await upcoming.json() as BusinessToday
   // The owner looks after the home: the stay is one card on its arrival day, and the clean after it one card on its checkout day.
   expect(upcomingToday.cards.map(card => [card.id.split(':')[0], card.headline, card.line])).toEqual([
-    ['booking', 'Ana’s group of 3', `${internalName} · no payment recorded`],
+    ['booking', 'Ana’s group of 3', internalName],
     ['task', 'Clean up after Ana’s group of 3', internalName],
   ])
   const reservation = upcomingToday.cards[0]!
@@ -690,8 +690,8 @@ test('a responsible home member reads its stays as turnovers on every surface un
     await expectStatus(ownerToday, 200)
     const ownerTodayBody = await ownerToday.json() as BusinessToday
     // A business that cannot take payment yet also has that step, after the day's cards.
-    expect([ownerTodayBody.title, ownerTodayBody.cards]).toEqual(['You have 1 reservation and 1 thing to set up', [{
-      id: `arrival:${stay.booking_id}`, when: '3:30 PM', image_url: null, icon: 'i-lucide-house', headline: `${guestName}’s group of 3 checks in`, line: 'Cliff Cabin · no payment recorded',
+    expect([ownerTodayBody.title, ownerTodayBody.cards]).toEqual(['You have 1 reservation', [{
+      id: `arrival:${stay.booking_id}`, when: '3:30 PM', image_url: null, icon: 'i-lucide-house', headline: `${guestName}’s group of 3 checks in`, line: 'Cliff Cabin',
       action: { title: 'Say hello to your guests', detail: 'See if they have any questions' }, to: `/dashboard/${slug}/messages/${stay.conversation_id}`, draft: null, done: null,
     }, {
       id: `payments.connect:${organizationId}`, when: null, image_url: null, icon: 'i-lucide-credit-card', headline: 'Set up payments', line: null,
@@ -765,24 +765,24 @@ test('a responsible home member reads its stays as turnovers on every surface un
     expect((await hosted.json() as { conversation_id: string }).conversation_id).toBe(jobThreadId)
     expect(await teamThread(jobThreadId)).toMatchObject({ name: null, booking_id: stay.booking_id })
     expect((await teamRows()).find(row => row.id === jobThreadId)).toMatchObject({ title: 'Cliff Cabin' })
+    const checkout = (options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en', { timeZone: stay.timezone, ...options }).format(new Date(stay.ends_at))
+    const cleanPost = `Clean Cliff Cabin after ${guestName} checks out, ${checkout({ weekday: 'short', month: 'short', day: 'numeric' }).replace(',', '')}, ${checkout({ hour: 'numeric', minute: '2-digit' })}.`
     await expect.poll(async () => {
       const read = await memberContext.request.get(`/api/messages/${jobThreadId}`)
       await expectStatus(read, 200)
       return (await read.json() as ConversationPage).entries.flatMap(entry => entry.type === 'message' && entry.automatic && entry.body ? [entry.body.split('\n')[0]] : [])
-    }, { timeout: 30_000, message: 'the hub posts the turnover into the conversation after the stay write' }).toEqual(['Turnover: Cliff Cabin'])
+    }, { timeout: 30_000, message: 'the hub posts the turnover into the conversation after the stay write' }).toEqual([cleanPost])
     // KrabiClaw's job message is news to the member until they open the conversation.
     expect((await teamRows()).find(row => row.id === jobThreadId)).toMatchObject({ kind: 'team', unread: true })
     await memberPage.goto(`/dashboard/${slug}/messages/${jobThreadId}?kind=team`)
     await expect(memberPage.getByText('Sent automatically')).toBeVisible()
     await expect.poll(async () => (await teamRows()).find(row => row.id === jobThreadId)?.unread).toBe(false)
-    const turnoverPost = memberPage.locator('[data-team-message][data-automatic]').filter({ hasText: 'Turnover: Cliff Cabin' })
+    const turnoverPost = memberPage.locator('[data-team-message][data-automatic]').filter({ hasText: cleanPost })
     await expect(turnoverPost).toHaveCount(1)
-    await expect(turnoverPost).toContainText(`${guestName} checks out at 11:00 AM.`)
     // The member's Upcoming is the clean, one card that opens this conversation; nothing of the guest but their first name.
     const upcoming = await memberContext.request.get(api('today?range=upcoming'))
     await expectStatus(upcoming, 200)
     const upcomingBody = await upcoming.json() as BusinessToday
-    const checkout = (options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en', { timeZone: stay.timezone, ...options }).format(new Date(stay.ends_at))
     const clean = upcomingBody.cards.find(card => card.headline === `Clean up after ${guestName}’s group of 3`)
     expect([upcomingBody.title, upcomingBody.cards.length]).toEqual(['You have 1 upcoming home to clean', 1])
     expect(clean).toEqual({ id: expect.stringMatching(/^task:/), when: `${checkout({ weekday: 'short', month: 'short', day: 'numeric' })} · ${checkout({ hour: 'numeric', minute: '2-digit' })}`, image_url: null, icon: 'i-lucide-house', done: null,
@@ -4162,7 +4162,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
     const homes = [assignedHome, { product_id: otherHome.id, location_id: locations.data!.locations[0]!.id }]
     const assigned = await call('update_product', { product_id: homes[0]!.product_id, stay: { assigned_member_id: memberId } })
     expect(assigned.error).toBeNull()
-    const stays: Array<{ booking_id: string }> = []
+    const stays: Array<Pick<NightBooking, 'booking_id' | 'ends_at' | 'timezone'>> = []
     for (const [index, home] of homes.entries()) {
       const made = await page.request.post(api('bookings'), { data: { product_id: home.product_id, check_in_date: localDay(0), check_out_date: localDay(2), adults: 2,
         guest_name: index === 0 ? 'Ana Silva' : 'Private Silva', total_minor: 30_000, idempotency_key: crypto.randomUUID() } })
@@ -4930,7 +4930,9 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
         const read = await cleaner.request.get(`/api/messages/${jobThread!.id}`)
         await expectStatus(read, 200)
         const lines = (await read.json() as ConversationPage).entries.flatMap(entry => entry.type === 'message' && entry.automatic && entry.body ? [entry.body.split('\n')[0]] : [])
-        return { job: lines.filter(line => line === 'Turnover: Assigned Cabin').length, other: lines.filter(line => line !== 'Turnover: Assigned Cabin' && !/^No longer yours: turnover at Assigned Cabin, /.test(line)) }
+        const leaving = (options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en', { timeZone: stays[0]!.timezone, ...options }).format(new Date(stays[0]!.ends_at))
+        const clean = `Clean Assigned Cabin after Ana checks out, ${leaving({ weekday: 'short', month: 'short', day: 'numeric' }).replace(',', '')}, ${leaving({ hour: 'numeric', minute: '2-digit' })}.`
+        return { job: lines.filter(line => line === clean).length, other: lines.filter(line => line !== clean && !/^No longer yours: turnover at Assigned Cabin, /.test(line)) }
       }, { timeout: 30_000, message: 'the job is posted into the conversation as an automatic message' }).toEqual({ job: 1, other: [] })
       expect((await cleanerTeamRows()).find(item => item.id === jobThread!.id)?.unread).toBe(true)
 

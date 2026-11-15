@@ -30,7 +30,9 @@ const NOUNS = {
   reservation: ['reservation', 'reservations'], consultation: ['consultation', 'consultations'], class: ['class', 'classes'],
   clean: ['home to clean', 'homes to clean'], follow_up: ['follow-up', 'follow-ups'], request: ['request', 'requests'],
   change: ['change request', 'change requests'], message: ['message that didn’t send', 'messages that didn’t send'],
-  task: ['task', 'tasks'], setup: ['thing to set up', 'things to set up'],
+  task: ['task', 'tasks'],
+  // Setup is listed but never counted in the heading.
+  setup: ['', ''],
 } as const
 
 /** The tile a card shows when what it is about has no picture of its own. */
@@ -86,7 +88,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
 
   const cards: Card[] = []
   const byBooking = new Map<string, Card>()
-  const byClass = new Map<string, { card: Card; party: number; groups: number; paid: number; total: number | null; currency: string | null }>()
+  const byClass = new Map<string, { card: Card; party: number }>()
   const add = (input: Omit<Card, 'done'> & { done?: Card['done'] }) => {
     const card: Card = { done: null, ...input }
     cards.push(card)
@@ -137,15 +139,14 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
       // A class is one card for everyone booked into it.
       const held = byClass.get(record.product_session_id)
       if (held) {
-        held.party += record.party_size; held.groups += 1; held.paid += record.paid_minor
-        held.total = held.total === null || record.total_minor === null ? null : held.total + record.total_minor
+        held.party += record.party_size
         held.card.bookings.push(record.id); byBooking.set(record.id, held.card)
         continue
       }
       const card = add({ ...base, id: `class:${record.product_session_id}`, noun: 'class', order: [0, record.starts_at], draft: null, when: visitWhen(record.starts_at, zone), headline: '',
         to: `/dashboard/${encodeURIComponent(viewer.slug)}/calendar/sessions/${encodeURIComponent(record.product_session_id)}?${new URLSearchParams({ date: start, product_id: record.product_id })}`,
-        action: { title: 'Message the class', detail: '' } })
-      byClass.set(record.product_session_id, { card, party: record.party_size, groups: 1, paid: record.paid_minor, total: record.total_minor, currency: record.currency })
+        action: { title: 'Message the class', detail: 'See who is coming' } })
+      byClass.set(record.product_session_id, { card, party: record.party_size })
       continue
     }
     const service = record.product_kind === 'service'
@@ -155,16 +156,18 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   }
   for (const [, held] of byClass) {
     const record = (recordResult!.results as BookedRecordInRange[]).find(row => row.id === held.card.bookings[0])!
-    held.card.headline = `${record.product_name} for ${held.party}`
-    held.card.line = [record.location_title, manage ? money({ ...record, status: 'confirmed', unit: 'slot', total_minor: held.total, currency: held.currency, paid_minor: held.paid }) : null].filter(Boolean).join(' · ') || null
-    held.card.action.detail = `${held.groups} ${held.groups === 1 ? 'group is' : 'groups are'} coming`
+    // A class is named by itself; its line is where and how many people are booked.
+    held.card.headline = record.product_name
+    held.card.line = [record.location_id === null ? 'Online' : record.location_title, `${held.party} ${held.party === 1 ? 'guest' : 'guests'}`].filter(Boolean).join(' · ')
   }
 
   for (const work of workResult!.results as OpenWorkRow[]) {
     const job = work.kind === 'turnover' || work.kind === 'stay_ready' || work.kind === 'consultation_follow_up' || work.kind === 'consultation_prep'
     const bookingZone = work.booking_timezone ?? work.timezone
     const at = work.starts_at ?? work.due_at
-    const day = at ? localDateAt(new Date(at), work.timezone) : work.booking_ends_at ? bookingDay(work.booking_ends_at, bookingZone) : null
+    // An untimed job is on its booking's day: a make-ready on the arrival, a clean on the checkout.
+    const untimed = work.kind === 'stay_ready' ? work.booking_starts_at : work.booking_ends_at
+    const day = at ? localDateAt(new Date(at), work.timezone) : untimed ? bookingDay(untimed, bookingZone) : null
     const guest = first(work.guest_name)
     const group = work.party_size === null ? 'a guest' : guestGroup(work.guest_name, work.party_size)
     const to = work.booking_id ? recordPath(work.booking_id, work.guest_conversation_id, work.viewer_seated) : null
@@ -217,7 +220,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     const headline = work.kind === 'turnover' ? `Clean up after ${group}` : work.kind === 'stay_ready' ? `Get ${work.product_name ?? 'the home'} ready for ${group}` : `Follow up with ${group}`
     const team = work.team_conversation_id
     add({
-      id: `task:${work.id}`, noun: work.kind === 'consultation_follow_up' ? 'follow_up' : 'clean', order: [0, at ?? work.booking_ends_at ?? ''], bookings: [], day,
+      id: `task:${work.id}`, noun: work.kind === 'consultation_follow_up' ? 'follow_up' : 'clean', order: [0, at ?? untimed ?? ''], bookings: [], day,
       when: at ? visitWhen(at, work.timezone) : range === 'today' ? 'Today' : formatTimestamp(`${day}T12:00:00.000Z`, 'en', 'UTC', { weekday: 'short', month: 'short', day: 'numeric' }),
       image_url: picture('product', work.product_id), icon: iconOf(work.product_kind), headline: headline.charAt(0).toUpperCase() + headline.slice(1),
       line: work.booking_unit === 'nights' ? work.product_name : work.location_id === null ? 'Online' : work.location_title,
@@ -240,17 +243,22 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   }
 }
 
-/** "You have 2 reservations and 1 request", "You have 2 upcoming reservations", "Nothing needs you today". */
+/**
+ * "You have 2 reservations and 1 task", "You have 2 upcoming reservations",
+ * "Nothing needs you today". Setup is not counted: a business with only setup
+ * left reads "Finish setting up to take bookings".
+ */
 function heading(cards: Card[], range: Range): string {
-  if (!cards.length) return range === 'today' ? 'Nothing needs you today' : 'Nothing needs you in the coming days'
-  const parts = (Object.keys(NOUNS) as Noun[]).flatMap((noun) => {
+  const counted = cards.filter(card => card.noun !== 'setup')
+  if (!counted.length) return cards.length ? 'Finish setting up to take bookings' : range === 'today' ? 'Nothing needs you today' : 'Nothing needs you in the coming days'
+  const parts = (Object.keys(NOUNS) as Noun[]).filter(noun => noun !== 'setup').flatMap((noun) => {
     const count = cards.filter(card => card.noun === noun).length
     return count ? [`${count} ${range === 'upcoming' ? 'upcoming ' : ''}${NOUNS[noun][count === 1 ? 0 : 1]}`] : []
   })
   return `You have ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]}`
 }
 
-/** What an owner or admin reads of a booking's money: "$1,240 paid", "$200 of $380 paid", "free", "no payment recorded". */
+/** What an owner or admin reads of a booking's money, only when there is some: "$1,240 paid", "$200 of $380 paid", "free", a request's price. */
 function money(record: Pick<BookedRecordInRange, 'status' | 'unit' | 'owner' | 'channel' | 'total_minor' | 'currency' | 'paid_minor' | 'id'>): string | null {
   if (record.unit === 'nights' && isChannelManagedStay(record)) return record.channel === 'direct' ? null : `Paid through ${STAY_CHANNEL_LABELS[record.channel]}`
   if (record.total_minor === 0) return 'free'
@@ -261,6 +269,6 @@ function money(record: Pick<BookedRecordInRange, 'status' | 'unit' | 'owner' | '
   }
   if (record.status === 'pending') return record.total_minor === null ? null : format(record.total_minor)
   if (record.paid_minor > 0) return record.total_minor !== null && record.paid_minor < record.total_minor ? `${format(record.paid_minor)} of ${format(record.total_minor)} paid` : `${format(record.paid_minor)} paid`
-  return record.total_minor === null ? null : 'no payment recorded'
+  return null
 }
 

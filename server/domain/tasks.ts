@@ -489,7 +489,9 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       // The stored window: checkout, and the next arrival when it is the same day.
       const checkout = row.starts_at === null ? null : time(row.starts_at)
       when = checkout && row.due_at !== null && sameDay(row.starts_at!, row.due_at) ? `${checkout} – ${time(row.due_at)}` : checkout
-      detail = checkout ? `${who(stay.guest_name)} checks out at ${checkout}.` : `${who(stay.guest_name)} checks out ${calendarDay(stay.check_out_date)}.`
+      // The job as its team reads it: "Clean Ocean Avenue Studio after Parity checks out, Sun Nov 15, 11:00 AM."
+      const checkoutDay = (row.starts_at === null ? calendarDay(stay.check_out_date) : day(row.starts_at)).replace(',', '')
+      detail = `Clean ${product.name} after ${who(stay.guest_name)} checks out, ${checkoutDay}${checkout ? `, ${checkout}` : ''}.`
       path = viewer.manage ? bookingPath(stay.id) : null
       sheet = { heading: 'Turnover', title: product.name, date: row.starts_at === null ? calendarDay(stay.check_out_date) : day(row.starts_at) }
       break
@@ -759,10 +761,14 @@ export interface OpenWorkRow {
  * The viewer's open work that Today shows beside its bookings, as one statement:
  * jobs (a turnover, a home to get ready, a follow-up, a consultation's prep),
  * a message that did not send, a change waiting on the business and a task
- * someone added, starting or due on or before `to` (a turnover with no time by
- * its checkout; a message, a change or an undated task whenever). A booking's
+ * someone added, starting or due on or before `to` (an untimed turnover by its
+ * checkout, an untimed make-ready by the arrival; a message, a change or an
+ * undated task whenever). A booking's
  * review is its pending booking.
  */
+/** An untimed job's day is its booking's: a home made ready for an arrival, a clean after a checkout. */
+const UNTIMED_JOB_DAY_SQL = "CASE WHEN x.kind = 'stay_ready' THEN b.starts_at ELSE b.ends_at END"
+
 export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
   const wideTo = `${addLocalDays(to, 1)}T23:59:59.999Z`
   return {
@@ -791,8 +797,8 @@ export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
       LEFT JOIN product_stay_configs sc ON b.product_session_id IS NULL AND sc.organization_id = b.organization_id AND sc.product_id = b.product_id
       LEFT JOIN business_locations l ON l.organization_id = b.organization_id AND l.id = COALESCE(b.location_id, sc.location_id)
       LEFT JOIN conversations r ON r.organization_id = b.organization_id AND r.booking_id = b.id AND r.kind = 'booking'
-     WHERE x.kind IN ('message_delivery', 'booking_change') OR COALESCE(x.starts_at, x.due_at, b.ends_at, '') <= ?
-     ORDER BY COALESCE(x.starts_at, x.due_at, b.ends_at), x.id`,
+     WHERE x.kind IN ('message_delivery', 'booking_change') OR COALESCE(x.starts_at, x.due_at, ${UNTIMED_JOB_DAY_SQL}, '') <= ?
+     ORDER BY COALESCE(x.starts_at, x.due_at, ${UNTIMED_JOB_DAY_SQL}), x.id`,
     params: [wideTo],
   }
 }
