@@ -261,6 +261,22 @@ Do not preserve custom credential or lifecycle infrastructure merely because it
 already exists. If a canonical provider/library mechanism supersedes it, delete
 the custom implementation in the same change.
 
+### Test and review accounts
+
+Do not create user accounts, sign-up aliases or reviewer logins. Use the ones
+that exist:
+
+- `CANARY_LOGIN_EMAIL` / `CANARY_LOGIN_PASSWORD` in `.env`
+  (`paulchrisluke+app-review@gmail.com`): the one demo and reviewer login. It
+  owns the demo businesses, is the login given to OpenAI's plugin review, and
+  is what production verification signs in with. It has no access to client
+  businesses and no admin role; do not add either.
+- `APP_REVIEW_EMAIL` / `APP_REVIEW_PASSWORD` in `.env`: the App Store review
+  login.
+
+Another account needs an owner instruction that names it. A guest email on a
+test booking is not an account.
+
 ## Tenant integrity
 
 Tenant boundaries are strict.
