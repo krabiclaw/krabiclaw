@@ -5,9 +5,11 @@ Occupancy & rates (a business with places to stay) or Bookings & rates, then
 Conversion and Marketing. Each page is its own URL,
 `/dashboard/:org/insights/<section>/<page>`, with its kind, location, range and
 chosen number in the query, and one read, `GET /api/dashboard/insights/<section>/<page>`
-(`server/domain/insights.ts`, `shared/insights.ts`). The web dashboard, the app
-and MCP `get_organization_analytics` read the same pages. `GET /api/dashboard/insights`
-names what the business books, its locations and the pages the member may open.
+(`server/domain/insights.ts`, `shared/insights.ts`), which sends every string the
+page shows: titles, chips, numbers, chart labels and the list. The web dashboard,
+the app and MCP `get_organization_analytics` read the same pages.
+`GET /api/dashboard/insights` lists the sections and pages the member may open,
+titled in the words of what the business books.
 A member who does not read analytics reads Quality for the visits they look after.
 
 Every number is read from the stored records it is about, in one D1 batch:
@@ -54,8 +56,7 @@ recorded before this count existed (it shipped with the Insights pages) stay in
 `analytics_events` and are not counted.
 
 Insights → Instagram and → Google Ads are read live from the provider when the
-page opens (`GET /api/dashboard/instagram-insights`,
-`GET /api/dashboard/google-ads-insights`), through the Better Auth linked
+page opens, through the same page read, by the Better Auth linked
 account that connected it, and nothing is stored. Instagram needs the Growth
 plan and the `instagram_business_manage_insights` permission; each missing piece
 is its own state. Google Ads reports spend, clicks and conversions by day in the

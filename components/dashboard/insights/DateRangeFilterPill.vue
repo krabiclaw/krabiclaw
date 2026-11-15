@@ -6,11 +6,11 @@
       :class="isCustomRange ? 'ring-1 ring-primary border-primary' : ''"
       data-testid="insights-date-range-pill"
     >
-      <time :datetime="startDate || undefined">{{ displayStart }}</time>
+      <time :datetime="range?.start_date">{{ range?.start_label ?? 'Start' }}</time>
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" class="size-2.5 stroke-current stroke-[3]" fill="none" aria-hidden="true">
         <path d="M28 16H2M17 4l11.3 11.3a1 1 0 0 1 0 1.4L17 28" />
       </svg>
-      <time :datetime="endDate || undefined">{{ displayEnd }}</time>
+      <time :datetime="range?.end_date">{{ range?.end_label ?? 'End' }}</time>
       <span v-if="isCustomRange" class="size-1.5 rounded-full bg-primary" title="Custom filter active" />
     </button>
 
@@ -61,11 +61,11 @@
 </template>
 
 <script setup lang="ts">
-import { formatCalendarDate } from '~/utils/timezone'
+import type { InsightsPage } from '~/shared/insights'
 
 const props = defineProps<{
-  startDate: string
-  endDate: string
+  /** The range the page read, with the labels it draws. */
+  range: InsightsPage['filters']['range'] | null
   defaultDays?: number
 }>()
 
@@ -74,27 +74,17 @@ const emit = defineEmits<{
 }>()
 
 const isOpen = ref(false)
-const draftStart = ref(props.startDate)
-const draftEnd = ref(props.endDate)
+const draftStart = ref(props.range?.start_date ?? '')
+const draftEnd = ref(props.range?.end_date ?? '')
 
-watch(() => [props.startDate, props.endDate], ([newStart, newEnd]) => {
-  draftStart.value = newStart ?? ''
-  draftEnd.value = newEnd ?? ''
-})
-
-const displayStart = computed(() => {
-  if (!props.startDate) return 'Start'
-  return formatCalendarDate(props.startDate, 'en', { month: 'short', day: 'numeric' })
-})
-
-const displayEnd = computed(() => {
-  if (!props.endDate) return 'End'
-  return formatCalendarDate(props.endDate, 'en', { month: 'short', day: 'numeric' })
+watch(() => props.range, (range) => {
+  draftStart.value = range?.start_date ?? ''
+  draftEnd.value = range?.end_date ?? ''
 })
 
 const isCustomRange = computed(() => {
-  if (!props.startDate || !props.endDate) return false
-  const diffDays = Math.round((Date.parse(`${props.endDate}T00:00:00Z`) - Date.parse(`${props.startDate}T00:00:00Z`)) / 86_400_000) + 1
+  if (!props.range) return false
+  const diffDays = Math.round((Date.parse(`${props.range.end_date}T00:00:00Z`) - Date.parse(`${props.range.start_date}T00:00:00Z`)) / 86_400_000) + 1
   return diffDays !== (props.defaultDays ?? 30)
 })
 
@@ -104,8 +94,8 @@ const isValidRange = computed(() => {
 })
 
 function cancel() {
-  draftStart.value = props.startDate
-  draftEnd.value = props.endDate
+  draftStart.value = props.range?.start_date ?? ''
+  draftEnd.value = props.range?.end_date ?? ''
   isOpen.value = false
 }
 

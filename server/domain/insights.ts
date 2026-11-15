@@ -1,25 +1,33 @@
 import { HTTPError } from 'nitro'
 import { executeBatch, type BatchQuery, type DbClient } from '~/server/db'
+import type { CloudflareEnv } from '~/server/utils/auth'
 import { localDateBounds, parseAnalyticsRange } from '~/server/utils/analytics-calendar'
 import { assignedGuestThreadScope, roleAllows } from '~/server/utils/member-access'
+import { loadInstagramInsights } from '~/server/utils/instagram-insights'
+import { loadGoogleAdsInsights } from '~/server/utils/google-ads-insights'
 import { bookingDay } from '~/server/domain/requests'
 import { ATTRIBUTION_CHANNELS } from '~/utils/analytics-attribution'
-import { addLocalDays, localDateAt } from '~/utils/timezone'
+import { addLocalDays, formatCalendarDate, localDateAt } from '~/utils/timezone'
+import { paymentMoney } from '~/shared/payment-display'
 import { REVIEW_CATEGORIES, reviewSubject } from '~/shared/review-questions'
 import {
-  INSIGHTS_CLICKS, INSIGHTS_KINDS, INSIGHTS_PAGES, clickKey, bookerWord, insightsIndexSchema, insightsPage, insightsPageSchema, offeringsWord, pageKinds, pageTitle, sectionTitle,
-  type InsightsFormat, type InsightsIndex, type InsightsKind, type InsightsKindFilter, type InsightsPage, type InsightsPageDefinition, type InsightsStoredPageId,
+  INSIGHTS_CLICKS, INSIGHTS_KINDS, INSIGHTS_KIND_LABELS, INSIGHTS_PAGES, clickKey, bookerWord, insightsIndexSchema, insightsPage, insightsPageSchema, offeringsWord, pageKinds, pageShown, pageTitle, sectionTitle,
+  type InsightsIndex, type InsightsKind, type InsightsKindFilter, type InsightsPage, type InsightsPageDefinition, type InsightsStoredPageId,
 } from '~/shared/insights'
 
 /**
  * The Insights pages, read from the stored records each number is about:
  * reviews, bookings, nights, payments, and the day counts the visit write keeps
  * (server/utils/pageview-tracking.ts). Every page is one D1 batch of
- * independent statements; nothing is summarized ahead of time.
+ * independent statements; nothing is summarized ahead of time. Marketing pages
+ * are read from Instagram and Google Ads as they open. Every string a screen
+ * draws is composed here.
  */
 
 export interface InsightsReader {
   organizationId: string
+  /** The dashboard's address for the business, for the links a page offers. */
+  slug: string
   timezone: string
   defaultCurrency: string
   userId: string
@@ -28,12 +36,12 @@ export interface InsightsReader {
 }
 
 /** Who may read which pages, by the role's own permissions. A role with neither reads nothing. */
-export async function insightsReader(organization: { id: string; role: string; timezone: string; default_currency: string }, userId: string): Promise<InsightsReader> {
+export async function insightsReader(organization: { id: string; slug: string; role: string; timezone: string; default_currency: string }, userId: string): Promise<InsightsReader> {
   const analytics = await roleAllows({ organizationId: organization.id, role: organization.role, permissions: { analytics: ['read'] } })
   if (!analytics && !await roleAllows({ organizationId: organization.id, role: organization.role, permissions: { operations: ['assigned'] } })) {
     throw new HTTPError({ statusCode: 403, message: 'Access denied', data: { code: 'FORBIDDEN', field: 'permissions' } })
   }
-  return { organizationId: organization.id, timezone: organization.timezone, defaultCurrency: organization.default_currency, userId, analytics }
+  return { organizationId: organization.id, slug: organization.slug, timezone: organization.timezone, defaultCurrency: organization.default_currency, userId, analytics }
 }
 
 type Row = Record<string, unknown>
@@ -41,25 +49,38 @@ const rowsOf = (result: { results?: unknown[] } | undefined) => (result?.results
 const text = (value: unknown) => typeof value === 'string' ? value : null
 const num = (value: unknown) => Number(value ?? 0)
 
-/** What the business books: its homes, and the offerings it takes bookings for. */
-const bookedKindsQuery = (organizationId: string): BatchQuery => ({ query: `SELECT DISTINCT p.kind FROM products p WHERE p.organization_id = ? AND (
-    (p.kind = 'stay' AND EXISTS (SELECT 1 FROM product_stay_configs s WHERE s.organization_id = p.organization_id AND s.product_id = p.id))
-    OR (p.kind IN ('experience', 'service', 'table') AND EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id = p.organization_id AND c.product_id = p.id)))`,
-params: [organizationId] })
-const bookedKinds = (rows: Row[]) => { const kinds = new Set(rows.map(row => row.kind)); return INSIGHTS_KINDS.filter(kind => kinds.has(kind)) }
+/** What the business books (its homes, and the offerings it takes bookings for), whether it has a menu, and its locations: one statement. */
+const businessQuery = (organizationId: string): BatchQuery => ({ query: `SELECT
+    (SELECT json_group_array(kind) FROM (SELECT DISTINCT p.kind FROM products p WHERE p.organization_id = ? AND (
+      (p.kind = 'stay' AND EXISTS (SELECT 1 FROM product_stay_configs s WHERE s.organization_id = p.organization_id AND s.product_id = p.id))
+      OR (p.kind IN ('experience', 'service', 'table') AND EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id = p.organization_id AND c.product_id = p.id))))) AS kinds,
+    EXISTS (SELECT 1 FROM products WHERE organization_id = ? AND kind = 'dish') AS has_menu,
+    (SELECT json_group_array(json_object('id', id, 'title', title)) FROM business_locations WHERE organization_id = ?) AS locations`,
+params: [organizationId, organizationId, organizationId] })
+interface Business { booked: InsightsKind[]; hasMenu: boolean; locations: Array<{ id: string; title: string }> }
+function business(row: Row): Business {
+  const kinds = new Set(JSON.parse(String(row.kinds)) as string[])
+  const order = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0
+  return {
+    booked: INSIGHTS_KINDS.filter(kind => kinds.has(kind)),
+    hasMenu: num(row.has_menu) === 1,
+    locations: (JSON.parse(String(row.locations)) as Array<{ id: string; title: string }>).sort((a, b) => order(a.title, b.title) || order(a.id, b.id)),
+  }
+}
+/** The kinds a page is about, of those the business books: a page is titled in their words. */
+const covered = (page: InsightsPageDefinition, booked: readonly InsightsKind[]) => booked.filter(kind => !page.kinds || (page.kinds as readonly string[]).includes(kind))
 
-/** The business's pages and what its filters choose between. */
+/** The business's sections and pages, as the list beside a page shows them. */
 export async function readInsightsIndex(db: DbClient, reader: InsightsReader): Promise<InsightsIndex> {
-  const [kinds, menu, locations] = await executeBatch(db, [
-    bookedKindsQuery(reader.organizationId),
-    { query: `SELECT EXISTS (SELECT 1 FROM products WHERE organization_id = ? AND kind = 'dish') AS has_menu`, params: [reader.organizationId] },
-    { query: 'SELECT id, title FROM business_locations WHERE organization_id = ? ORDER BY title, id', params: [reader.organizationId] },
-  ], { operation: 'read Insights index' })
+  const [result] = await executeBatch(db, [businessQuery(reader.organizationId)], { operation: 'read Insights index' })
+  const { booked } = business(rowsOf(result)[0]!)
+  const pages = INSIGHTS_PAGES.filter(page => (reader.analytics || page.id === 'quality/overall-rating') && pageShown(page, booked))
   return insightsIndexSchema.parse({
-    kinds: bookedKinds(rowsOf(kinds)),
-    has_menu: num(rowsOf(menu)[0]?.has_menu) === 1,
-    locations: rowsOf(locations).map(row => ({ id: String(row.id), title: String(row.title) })),
-    pages: INSIGHTS_PAGES.filter(page => reader.analytics || page.id === 'quality/overall-rating').map(page => page.id),
+    sections: [...new Set(pages.map(page => page.section))].map(section => ({
+      id: section,
+      title: sectionTitle(section, booked, 'all'),
+      pages: pages.filter(page => page.section === section).map(page => ({ id: page.id, title: pageTitle(page.id, covered(page, booked), 'all') })),
+    })),
   })
 }
 
@@ -71,8 +92,22 @@ const dayDiff = (from: string, to: string) => Math.round((Date.parse(`${to}T00:0
 const CHANNEL_LABELS: Record<string, string> = { airbnb: 'Airbnb', vrbo: 'Vrbo', booking_com: 'Booking.com' }
 const singular = (plural: string) => plural === 'Practice areas' ? 'Practice area' : plural.replace(/s$/, '')
 
+/** How a number reads. Money is in the minor units of the page's currency; micros are Google Ads'. */
+type Format = 'count' | 'percent' | 'rating' | 'money' | 'micros' | 'nights' | 'days' | 'people' | 'text'
+const count = (value: number) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(value)
+function formatter(format: Format, currency: string | null): (value: number) => string {
+  if (format === 'percent') return value => `${count(value)}%`
+  if (format === 'rating') return value => new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 }).format(value)
+  if (format === 'money') return value => paymentMoney(Math.round(value), currency)
+  if (format === 'micros') return value => new Intl.NumberFormat('en-US', { style: 'currency', currency: currency! }).format(value / 1_000_000)
+  if (format === 'nights') return value => `${count(value)} ${value === 1 ? 'night' : 'nights'}`
+  if (format === 'days') return value => `${count(value)} ${value === 1 ? 'day' : 'days'}`
+  return count
+}
+const shortDate = (date: string) => formatCalendarDate(date, 'en', { month: 'short', day: 'numeric' })
+
 /** One headline number and its value on each day. */
-interface Metric { key: string; label: string; value: number | null; format: InsightsFormat; text?: string | null; daily?: Array<number | null> }
+interface Metric { key: string; label: string; value: number | null; format: Format; text?: string | null; daily?: Array<number | null> }
 
 /** Per-day accumulators over the range, by the local day each record falls on. */
 function days(dates: string[]) {
@@ -122,33 +157,66 @@ const bookingRow = (row: Row): BookingRow => ({
  * start in the range; Conversion counts the bookings made in it (received live:
  * a channel's imported history has no time it was made).
  */
-export async function readInsightsPage(db: DbClient, reader: InsightsReader, pageId: string, query: InsightsQuery, now = new Date()): Promise<InsightsPage> {
+export async function readInsightsPage(db: DbClient, reader: InsightsReader, pageId: string, query: InsightsQuery, env: CloudflareEnv): Promise<InsightsPage> {
   const definition = insightsPage(pageId)
-  if (!definition || definition.section === 'marketing') throw new HTTPError({ statusCode: 404, message: 'Insights page not found', data: { code: 'INSIGHTS_PAGE_NOT_FOUND', field: 'page' } })
-  const id = definition.id as InsightsStoredPageId
-  if (!reader.analytics && id !== 'quality/overall-rating') throw new HTTPError({ statusCode: 403, message: 'Access denied', data: { code: 'FORBIDDEN', field: 'permissions' } })
+  if (!definition) throw new HTTPError({ statusCode: 404, message: 'Insights page not found', data: { code: 'INSIGHTS_PAGE_NOT_FOUND', field: 'page' } })
+  if (!reader.analytics && definition.id !== 'quality/overall-rating') throw new HTTPError({ statusCode: 403, message: 'Access denied', data: { code: 'FORBIDDEN', field: 'permissions' } })
   const kind = (query.kind ?? 'all') as InsightsKindFilter
   if (kind !== 'all' && !(INSIGHTS_KINDS as readonly string[]).includes(kind)) throw new HTTPError({ statusCode: 400, message: `kind must be all or one of ${INSIGHTS_KINDS.join(', ')}`, data: { code: 'INVALID_FILTER', field: 'kind' } })
-  if (kind !== 'all' && (definition.filters === 'range' || !pageKinds(definition, kind).length)) throw new HTTPError({ statusCode: 400, message: `${pageTitle(id, [kind], kind)} is not read by kind ${kind}`, data: { code: 'INVALID_FILTER', field: 'kind' } })
+  if (kind !== 'all' && (definition.filters === 'range' || !pageKinds(definition, kind).length)) throw new HTTPError({ statusCode: 400, message: `${pageTitle(definition.id, [kind], kind)} is not read by kind ${kind}`, data: { code: 'INVALID_FILTER', field: 'kind' } })
   const locationId = query.location_id || null
   if (locationId && definition.filters !== 'kind_location') throw new HTTPError({ statusCode: 400, message: 'This page is not read by location', data: { code: 'INVALID_FILTER', field: 'location_id' } })
-  const range = parseAnalyticsRange({ startDate: query.start_date || undefined, endDate: query.end_date || undefined, timeZone: reader.timezone, now })
+  const range = parseAnalyticsRange({ startDate: query.start_date || undefined, endDate: query.end_date || undefined, timeZone: reader.timezone, now: new Date() })
   const window = { from: localDateBounds(range.startDate, reader.timezone).start, until: localDateBounds(range.endDate, reader.timezone).end }
-  const context: PageContext = { db, reader, definition, kind, locationId, dates: range.dates, range, window, booked: [] }
-  const read = await PAGE_READS[id](context)
+  const context: PageContext = { db, reader, definition, kind, locationId, dates: range.dates, range, window, business: { booked: [], hasMenu: false, locations: [] } }
+  const read = definition.section === 'marketing'
+    ? await MARKETING_READS[definition.id as keyof typeof MARKETING_READS](env, context)
+    : await PAGE_READS[definition.id as InsightsStoredPageId](context)
+  const { booked, hasMenu, locations } = context.business
+  const kinds = covered(definition, booked)
+
+  // One chip names what is shown and opens the kinds and locations the page reads, when there is more than one of either.
+  const choices = [
+    ...definition.filters !== 'range' && kinds.length > 1 ? [{ param: 'kind' as const, legend: 'What', selected: kind,
+      options: [{ value: 'all', label: 'All offerings' }, ...kinds.map(value => ({ value, label: INSIGHTS_KIND_LABELS[value] }))] }] : [],
+    ...definition.filters === 'kind_location' && locations.length > 1 ? [{ param: 'location_id' as const, legend: 'Location', selected: locationId ?? 'all',
+      options: [{ value: 'all', label: 'All locations' }, ...locations.map(location => ({ value: location.id, label: location.title }))] }] : [],
+  ]
+  const chosen = (param: string, value: string) => choices.find(choice => choice.param === param)?.options.find(option => option.value === value)?.label
+  const show = (format: Format) => formatter(format, read.currency ?? null)
+  const list = read.list
   return insightsPageSchema.parse({
-    page: id,
-    // A page is titled in the words of the kinds it is about: Bookings of experiences are Bookings beside homes.
-    title: pageTitle(id, context.booked.filter(booked => !definition.kinds || (definition.kinds as readonly string[]).includes(booked)), kind),
-    section: sectionTitle(definition.section, context.booked, kind),
+    title: pageTitle(definition.id, kinds, kind),
     subtitle: read.subtitle ?? null,
-    period: { start_date: range.startDate, end_date: range.endDate, timezone: reader.timezone },
-    filters: { kind, location_id: locationId },
-    currency: read.currency ?? null,
-    metrics: read.metrics.map(metric => ({ key: metric.key, label: metric.label, value: metric.value, format: metric.format, text: metric.text ?? null })),
-    series: { dates: range.dates, values: Object.fromEntries(read.metrics.filter(metric => metric.daily).map(metric => [metric.key, metric.daily!])) },
-    list: read.list,
+    note: hasMenu && (definition.section === 'rates' || definition.id === 'conversion/booking-conversion')
+      ? 'Your menu is not booked, so its dishes count only under Page views and Top pages.' : read.note ?? null,
+    action: read.action ?? null,
+    filters: {
+      offering: choices.length ? { label: [chosen('kind', kind) ?? 'All offerings', locationId ? chosen('location_id', locationId) : null].filter(Boolean).join(' · '), choices } : null,
+      range: { start_date: range.startDate, end_date: range.endDate, start_label: shortDate(range.startDate), end_label: shortDate(range.endDate) },
+    },
+    metrics: read.metrics.map(metric => ({ key: metric.key, label: metric.label, chartable: !!metric.daily,
+      display: metric.format === 'text' ? metric.text ?? '—' : metric.value === null ? '—' : show(metric.format)(metric.value) })),
+    series: {
+      dates: range.dates.map(date => ({ date, label: shortDate(date) })),
+      charts: Object.fromEntries(read.metrics.filter(metric => metric.daily).map(metric => [metric.key, chart(metric, show(metric.format))])),
+    },
+    list: !list ? null : list.kind === 'reviews' ? { ...list, empty: 'Once a guest reviews a visit in this range, the review will appear here.' } : {
+      kind: 'rows', heading: list.heading, columns: list.columns.map(column => ({ label: column.label })), empty: 'Nothing in this range matches these filters.',
+      rows: list.rows.map(row => ({ key: row.key, label: row.label, cells: row.values.map((value, position) => value === null ? '—' : show(list.columns[position]!.format)(value)) })),
+    },
   })
+}
+
+/** A number's chart: five ticks from zero to a round top, and each day as its point reads. */
+function chart(metric: Metric, show: (value: number) => string) {
+  const top = Math.max(0, ...metric.daily!.filter((value): value is number => value !== null))
+  const maximum = top <= 4 ? 4 : Math.ceil(top / 4) * 4
+  const label = metric.label.toLowerCase()
+  return {
+    axis: [0, 1, 2, 3, 4].map(step => ({ value: maximum * step / 4, label: show(maximum * step / 4) })),
+    points: metric.daily!.map(value => ({ value, display: value === null ? `No ${label}` : `${show(value)} ${label}` })),
+  }
 }
 
 interface PageContext {
@@ -161,13 +229,17 @@ interface PageContext {
   range: { startDate: string; endDate: string; previousStartDate: string; previousEndDate: string }
   /** The range as instants: [from, until). */
   window: { from: string; until: string }
-  /** What the business books, read in the page's batch: the page's words follow it. */
-  booked: InsightsKind[]
+  /** What the business books, its menu and locations, read in the page's batch: the page's words and choices follow it. */
+  business: Business
 }
+type Review = Extract<NonNullable<InsightsPage['list']>, { kind: 'reviews' }>['reviews'][number]
 interface PageRead {
   metrics: Metric[]
-  list: InsightsPage['list']
+  list: { kind: 'rows'; heading: string; columns: Array<{ label: string; format: Format }>; rows: Array<{ key: string; label: string; values: Array<number | null> }> }
+    | { kind: 'reviews'; reviews: Review[] } | null
   subtitle?: string
+  note?: string
+  action?: { label: string; to: string }
   currency?: string
 }
 
@@ -208,10 +280,13 @@ const nightsOf = (row: BookingRow) => dayDiff(startDay(row), bookingDay(row.ends
 
 /** The page's one D1 round trip: its statements and, last, what the business books. */
 async function batch(context: PageContext, queries: BatchQuery[]) {
-  const results = (await executeBatch(context.db, [...queries, bookedKindsQuery(context.reader.organizationId)], { operation: `read Insights ${context.definition.id}` })).map(rowsOf)
-  context.booked = bookedKinds(results.pop()!)
+  const results = (await executeBatch(context.db, [...queries, businessQuery(context.reader.organizationId)], { operation: `read Insights ${context.definition.id}` })).map(rowsOf)
+  context.business = business(results.pop()![0]!)
   return results
 }
+
+/** A review's state when it is not published. */
+const REVIEW_STATUS = { pending: 'Awaiting review', rejected: 'Not published', private: 'Private' } as const
 
 const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise<PageRead>> = {
   'quality/overall-rating': async (context) => {
@@ -221,7 +296,7 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
     const kinds = context.kind === 'all' ? null : pageKinds(context.definition, context.kind)
     const written = 'COALESCE(r.original_review_date, r.created_at)'
     const [rows] = await batch(context, [{
-      query: `SELECT r.id, r.author_name, r.rating, r.status, r.source, r.title, r.content, r.private_feedback, ${written} AS written_at,
+      query: `SELECT r.id, r.author_name, r.rating, r.status, r.title, r.content, r.private_feedback, ${written} AS written_at,
           p.kind AS product_kind, COALESCE(p.name, bl.title) AS subject,
           (SELECT CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END FROM bookings b WHERE b.organization_id = r.organization_id AND b.id = r.booking_id) AS booking_type,
           (SELECT json_group_array(json_object('category', c.category, 'rating', c.rating)) FROM review_category_ratings c WHERE c.review_id = r.id) AS categories
@@ -242,12 +317,11 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
       const writtenAt = String(row.written_at)
       const date = writtenAt.length === 10 ? writtenAt : localDateAt(new Date(writtenAt), reader.timezone)
       const questions = row.booking_type ? reviewSubject(row.booking_type as 'booking' | 'stay', text(row.product_kind)) : null
-      const categories = (JSON.parse(String(row.categories)) as Array<{ category: string; rating: number }>).map(rating => ({
-        key: rating.category, rating: rating.rating,
-        label: questions ? (REVIEW_CATEGORIES[questions] as ReadonlyArray<{ key: string; label: string }>).find(question => question.key === rating.category)?.label ?? rating.category : rating.category,
-      }))
-      return { id: String(row.id), author: String(row.author_name), rating: num(row.rating), subject: text(row.subject), questions, source: String(row.source), status: row.status as 'pending' | 'approved' | 'rejected' | 'private',
-        date, title: text(row.title), content: text(row.content), private_feedback: text(row.private_feedback), categories }
+      const categories = (JSON.parse(String(row.categories)) as Array<{ category: string; rating: number }>).map(rating => `${questions
+        ? (REVIEW_CATEGORIES[questions] as ReadonlyArray<{ key: string; label: string }>).find(question => question.key === rating.category)?.label ?? rating.category : rating.category} ${rating.rating}`)
+      return { date, rating: num(row.rating), review: { id: String(row.id), author: String(row.author_name), rating: num(row.rating),
+        status: REVIEW_STATUS[row.status as keyof typeof REVIEW_STATUS] ?? null, line: [text(row.subject), formatCalendarDate(date, 'en')].filter(Boolean).join(' · '),
+        categories: categories.join(' · ') || null, title: text(row.title), content: text(row.content), private_feedback: text(row.private_feedback) } }
     }).filter(review => context.dates.includes(review.date))
     const day = days(context.dates)
     const at = (review: { date: string }) => review.date
@@ -259,7 +333,7 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
           daily: day.each(reviews, at, group => percent(group.filter(review => review.rating === 5).length, group.length)) },
         { key: 'reviews', label: 'Reviews', format: 'count', value: reviews.length, daily: day.sum(reviews, at, () => 1) },
       ],
-      list: { kind: 'reviews', reviews },
+      list: { kind: 'reviews', reviews: reviews.map(review => review.review) },
     }
   },
 
@@ -302,14 +376,14 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
     const bookings = rows!.map(bookingRow).filter(inRange(context))
     const day = days(context.dates)
     const confirmed = (group: BookingRow[]) => group.filter(row => row.status === 'confirmed').length
-    const title = pageTitle('rates/bookings', context.booked.filter(booked => booked !== 'stay'), context.kind)
+    const title = pageTitle('rates/bookings', context.business.booked.filter(booked => booked !== 'stay'), context.kind)
     return {
       metrics: [
         { key: 'confirmed', label: title, format: 'count', value: confirmed(bookings), daily: day.each(bookings, startDay, confirmed) },
         { key: 'requested', label: 'Requested', format: 'count', value: bookings.length, daily: day.sum(bookings, startDay, () => 1) },
         { key: 'confirmed_share', label: 'Confirmed share', format: 'percent', value: percent(confirmed(bookings), bookings.length), daily: day.each(bookings, startDay, group => percent(confirmed(group), group.length)) },
       ],
-      list: { kind: 'rows', heading: offeringsWord(context.booked, context.kind), columns: [{ label: 'Confirmed', format: 'count' }, { label: 'Requested', format: 'count' }],
+      list: { kind: 'rows', heading: offeringsWord(context.business.booked, context.kind), columns: [{ label: 'Confirmed', format: 'count' }, { label: 'Requested', format: 'count' }],
         rows: byOffering(bookings, group => [confirmed(group), group.length]) },
     }
   },
@@ -325,7 +399,7 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
         { key: 'cancelled', label: 'Cancelled', format: 'count', value: cancelled(bookings), daily: day.each(bookings, startDay, cancelled) },
         { key: 'bookings', label: 'Bookings', format: 'count', value: bookings.length, daily: day.sum(bookings, startDay, () => 1) },
       ],
-      list: { kind: 'rows', heading: offeringsWord(context.booked, context.kind), columns: [{ label: 'Cancellation rate', format: 'percent' }, { label: 'Cancelled', format: 'count' }],
+      list: { kind: 'rows', heading: offeringsWord(context.business.booked, context.kind), columns: [{ label: 'Cancellation rate', format: 'percent' }, { label: 'Cancelled', format: 'count' }],
         rows: byOffering(bookings, group => [percent(cancelled(group), group.length), cancelled(group)]) },
     }
   },
@@ -357,7 +431,7 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
         { key: 'average_party', label: 'Average party size', format: 'people', value: mean(bookings), daily: day.each(bookings, startDay, mean) },
         { key: 'largest_party', label: 'Largest party', format: 'people', value: largest(bookings), daily: day.each(bookings, startDay, largest) },
       ],
-      list: { kind: 'rows', heading: offeringsWord(context.booked, context.kind), columns: [{ label: 'Average party size', format: 'people' }, { label: 'Bookings', format: 'count' }],
+      list: { kind: 'rows', heading: offeringsWord(context.business.booked, context.kind), columns: [{ label: 'Average party size', format: 'people' }, { label: 'Bookings', format: 'count' }],
         rows: byOffering(bookings, group => [mean(group), group.length]) },
     }
   },
@@ -398,7 +472,7 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
         { key: 'average_value', label: 'Average booking value', format: 'money', value: value(bookings), daily: day.each(bookings, startDay, value) },
         { key: 'income', label: 'Booking income', format: 'money', value: income(bookings), daily: day.each(bookings, startDay, income) },
       ],
-      list: { kind: 'rows', heading: offeringsWord(context.booked, context.kind), columns: [{ label: 'Average booking value', format: 'money' }, { label: 'Booking income', format: 'money' }],
+      list: { kind: 'rows', heading: offeringsWord(context.business.booked, context.kind), columns: [{ label: 'Average booking value', format: 'money' }, { label: 'Booking income', format: 'money' }],
         rows: byOffering(bookings, group => [value(group), income(group)]) },
     }
   },
@@ -456,7 +530,7 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
     const all = [...viewed, ...made]
     const sum = (group: typeof all, field: 'views' | 'bookings') => group.reduce((total, row) => total + row[field], 0)
     const day = days(context.dates)
-    const offering = singular(offeringsWord(context.booked, context.kind))
+    const offering = singular(offeringsWord(context.business.booked, context.kind))
     return {
       metrics: [
         { key: 'conversion', label: 'Booking conversion', format: 'percent', value: percent(sum(all, 'bookings'), sum(all, 'views')), daily: day.each(all, row => row.date, group => percent(sum(group, 'bookings'), sum(group, 'views'))) },
@@ -468,7 +542,7 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
           return { key: click.key, label: click.label, format: 'count', value: daily.reduce((total, count) => total + count, 0), daily }
         }),
       ],
-      list: { kind: 'rows', heading: offeringsWord(context.booked, context.kind), columns: [{ label: 'Booking conversion', format: 'percent' }, { label: 'Page views', format: 'count' }, { label: 'Bookings', format: 'count' }],
+      list: { kind: 'rows', heading: offeringsWord(context.business.booked, context.kind), columns: [{ label: 'Booking conversion', format: 'percent' }, { label: 'Page views', format: 'count' }, { label: 'Bookings', format: 'count' }],
         rows: byOffering(all, group => [percent(sum(group, 'bookings'), sum(group, 'views')), sum(group, 'views'), sum(group, 'bookings')]) },
     }
   },
@@ -487,7 +561,7 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
         { key: 'average_lead', label: 'Average lead time', format: 'days', value: mean(bookings), daily: day.each(bookings, receivedDay(context), mean) },
         { key: 'within_3_days', label: 'Booked within 3 days', format: 'percent', value: soon(bookings), daily: day.each(bookings, receivedDay(context), soon) },
       ],
-      list: { kind: 'rows', heading: offeringsWord(context.booked, context.kind), columns: [{ label: 'Average lead time', format: 'days' }, { label: 'Bookings', format: 'count' }],
+      list: { kind: 'rows', heading: offeringsWord(context.business.booked, context.kind), columns: [{ label: 'Average lead time', format: 'days' }, { label: 'Bookings', format: 'count' }],
         rows: byOffering(bookings, group => [mean(group), group.length]) },
     }
   },
@@ -497,14 +571,14 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
     const bookings = rows!.map(bookingRow)
     const returning = (group: BookingRow[]) => group.filter(row => row.returning === 1).length
     const day = days(context.dates)
-    const people = bookerWord(context.booked, context.kind)
+    const people = bookerWord(context.business.booked, context.kind)
     return {
       subtitle: 'Website bookings',
       metrics: [
         { key: 'returning_share', label: `Returning ${people}`, format: 'percent', value: percent(returning(bookings), bookings.length), daily: day.each(bookings, receivedDay(context), group => percent(returning(group), group.length)) },
         { key: 'returning', label: 'Bookings by returning ' + people, format: 'count', value: returning(bookings), daily: day.each(bookings, receivedDay(context), returning) },
       ],
-      list: { kind: 'rows', heading: offeringsWord(context.booked, context.kind), columns: [{ label: `Returning ${people}`, format: 'percent' }, { label: 'Bookings', format: 'count' }],
+      list: { kind: 'rows', heading: offeringsWord(context.business.booked, context.kind), columns: [{ label: `Returning ${people}`, format: 'percent' }, { label: 'Bookings', format: 'count' }],
         rows: byOffering(bookings, group => [percent(returning(group), group.length), group.length]) },
     }
   },
@@ -527,7 +601,7 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
         { key: 'change', label: 'Change', format: 'percent', value: before ? Math.round((total - before) / before * 1000) / 10 : null },
       ],
       list: { kind: 'rows', heading: 'Day', columns: [{ label: 'Page views', format: 'count' }],
-        rows: context.dates.map((date, index) => ({ key: date, label: date, values: [daily[index]!] })).reverse() },
+        rows: context.dates.map((date, index) => ({ key: date, label: formatCalendarDate(date, 'en'), values: [daily[index]!] })).reverse() },
     }
   },
 
@@ -582,6 +656,41 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
       list: { kind: 'rows', heading: 'Source', columns: [{ label: 'Visits', format: 'count' }, { label: 'Bookings', format: 'count' }],
         rows: sources.map(source => { const group = facts.filter(row => row.source === source); return { key: source, label: source, values: [sum(group, 'visits'), sum(group, 'bookings')] } })
           .filter(row => row.values.some(value => value)) },
+    }
+  },
+}
+
+/** The Marketing pages, read from the provider as they open; a page that cannot be read says why and where to fix it. */
+const MARKETING_READS: Record<'marketing/instagram' | 'marketing/google-ads', (env: CloudflareEnv, context: PageContext) => Promise<PageRead>> = {
+  'marketing/instagram': async (env, context) => {
+    const page = await loadInstagramInsights(env, context.reader.organizationId, { startDate: context.range.startDate, endDate: context.range.endDate })
+    if (page.status !== 'connected') return { metrics: [], list: null, note: page.message, action: { label: 'Instagram settings', to: `/dashboard/${context.reader.slug}/integrations/instagram` } }
+    return {
+      note: `@${page.username} · Instagram reports its numbers up to 48 hours late.`,
+      metrics: [
+        { key: 'posts', label: 'Posts published', format: 'count', value: page.media.length,
+          daily: days(context.dates).sum(page.media, post => localDateAt(new Date(post.postedAt), page.period.timezone), () => 1) },
+        { key: 'reach', label: 'Accounts reached', format: 'count', value: page.account.reach },
+        { key: 'views', label: 'Views', format: 'count', value: page.account.views },
+      ],
+      list: { kind: 'rows', heading: 'Post', columns: [{ label: 'Views', format: 'count' }, { label: 'Reach', format: 'count' }],
+        rows: page.media.map(post => ({ key: post.id, label: post.caption || 'Untitled post', values: [post.insights?.views ?? null, post.insights?.reach ?? null] })) },
+    }
+  },
+  'marketing/google-ads': async (env, context) => {
+    const page = await loadGoogleAdsInsights(env, context.reader.organizationId, { startDate: context.range.startDate, endDate: context.range.endDate })
+    if (page.status !== 'connected') return { metrics: [], list: null, note: page.message, action: { label: 'Google Ads settings', to: `/dashboard/${context.reader.slug}/integrations/google-ads` } }
+    const day = (field: 'costMicros' | 'clicks' | 'conversions') => context.dates.map(date => page.days.find(entry => entry.date === date)?.[field] ?? 0)
+    return {
+      currency: page.customer.currency,
+      note: `${page.customer.name} · Spend is as Google Ads reports it.`,
+      metrics: [
+        { key: 'spend', label: 'Spend', format: 'micros', value: page.totals.costMicros, daily: day('costMicros') },
+        { key: 'clicks', label: 'Clicks', format: 'count', value: page.totals.clicks, daily: day('clicks') },
+        { key: 'conversions', label: 'Conversions', format: 'count', value: page.totals.conversions, daily: day('conversions') },
+      ],
+      list: { kind: 'rows', heading: 'Campaign', columns: [{ label: 'Spend', format: 'micros' }, { label: 'Clicks', format: 'count' }],
+        rows: page.campaigns.map(campaign => ({ key: campaign.id, label: campaign.name, values: [campaign.costMicros, campaign.clicks] })) },
     }
   },
 }

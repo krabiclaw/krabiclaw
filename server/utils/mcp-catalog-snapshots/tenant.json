@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:7a77eab050ce79cdbc47bda9bae71094ff42ea6c5228fec2a2d3f8fd70066d0d",
-  "documentationFingerprint": "sha256:0e923fb123bdbfe6002aa37bb8ce34e999eff9b7d6e24011f950b1ca87396874",
+  "fingerprint": "sha256:bc8063b984a07a9cf233bebf134c53c1c30ef4a40b3923e3aa614b3b9cccf2bc",
+  "documentationFingerprint": "sha256:fc1b7ed359a76bb51e00dbd9c78b083b70d3e5b3cece51315d5092a2192ffdea",
   "tools": [
     {
       "name": "add_organization_language",
@@ -48950,7 +48950,7 @@
     {
       "name": "get_organization_analytics",
       "title": "Get organization analytics",
-      "description": "Read one Insights page, as the dashboard shows it: its headline numbers, each one by day, and its list. Pages: rating and reviews, occupancy or bookings, cancellations, length of stay, party size, nightly rate or average value, income by channel, booking conversion (with website clicks to book, call or order), lead time, returning guests, page views, top pages and sources. Money is in minor units of the page currency.",
+      "description": "Read one Insights page, as the dashboard shows it: its headline numbers, each one by day, and its list, every number written as the page shows it. Pages: rating and reviews, occupancy or bookings, cancellations, length of stay, party size, nightly rate or average value, income by channel, booking conversion (with website clicks to book, call or order), lead time, returning guests, page views, top pages and sources.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -49016,245 +49016,286 @@
         "additionalProperties": false,
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "currency": {
-            "type": [
-              "string",
-              "null"
+          "action": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "to"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "filters": {
             "additionalProperties": false,
             "properties": {
-              "kind": {
-                "enum": [
-                  "all",
-                  "stay",
-                  "experience",
-                  "service",
-                  "table"
-                ],
-                "type": "string"
-              },
-              "location_id": {
-                "type": [
-                  "string",
-                  "null"
+              "offering": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "choices": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "legend": {
+                              "type": "string"
+                            },
+                            "options": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "label"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "param": {
+                              "enum": [
+                                "kind",
+                                "location_id"
+                              ],
+                              "type": "string"
+                            },
+                            "selected": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "param",
+                            "legend",
+                            "options",
+                            "selected"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "label",
+                      "choices"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
+              },
+              "range": {
+                "additionalProperties": false,
+                "properties": {
+                  "end_date": {
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "type": "string"
+                  },
+                  "end_label": {
+                    "type": "string"
+                  },
+                  "start_date": {
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "type": "string"
+                  },
+                  "start_label": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "start_date",
+                  "end_date",
+                  "start_label",
+                  "end_label"
+                ],
+                "type": "object"
               }
             },
             "required": [
-              "kind",
-              "location_id"
+              "offering",
+              "range"
             ],
             "type": "object"
           },
           "list": {
-            "oneOf": [
+            "anyOf": [
               {
-                "additionalProperties": false,
-                "properties": {
-                  "columns": {
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "format": {
-                          "enum": [
-                            "count",
-                            "percent",
-                            "rating",
-                            "money",
-                            "nights",
-                            "days",
-                            "people",
-                            "text"
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "columns": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "label": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "label"
                           ],
-                          "type": "string"
+                          "type": "object"
                         },
-                        "label": {
-                          "type": "string"
-                        }
+                        "type": "array"
                       },
-                      "required": [
-                        "label",
-                        "format"
-                      ],
-                      "type": "object"
-                    },
-                    "type": "array"
-                  },
-                  "heading": {
-                    "type": "string"
-                  },
-                  "kind": {
-                    "const": "rows",
-                    "type": "string"
-                  },
-                  "rows": {
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "key": {
-                          "type": "string"
-                        },
-                        "label": {
-                          "type": "string"
-                        },
-                        "values": {
-                          "items": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
-                          },
-                          "type": "array"
-                        }
+                      "empty": {
+                        "type": "string"
                       },
-                      "required": [
-                        "key",
-                        "label",
-                        "values"
-                      ],
-                      "type": "object"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "heading",
-                  "columns",
-                  "rows"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "reviews",
-                    "type": "string"
-                  },
-                  "reviews": {
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "author": {
-                          "type": "string"
-                        },
-                        "categories": {
-                          "items": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "key": {
+                      "heading": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "rows",
+                        "type": "string"
+                      },
+                      "rows": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "cells": {
+                              "items": {
                                 "type": "string"
                               },
-                              "label": {
-                                "type": "string"
-                              },
-                              "rating": {
-                                "maximum": 5,
-                                "minimum": 1,
-                                "type": "integer"
-                              }
+                              "type": "array"
                             },
-                            "required": [
-                              "key",
-                              "label",
-                              "rating"
-                            ],
-                            "type": "object"
-                          },
-                          "type": "array"
-                        },
-                        "content": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "date": {
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                          "type": "string"
-                        },
-                        "id": {
-                          "type": "string"
-                        },
-                        "private_feedback": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "questions": {
-                          "anyOf": [
-                            {
-                              "enum": [
-                                "restaurant",
-                                "experience",
-                                "legal_consultation",
-                                "lodging"
-                              ],
+                            "key": {
                               "type": "string"
                             },
-                            {
-                              "type": "null"
+                            "label": {
+                              "type": "string"
                             }
-                          ]
-                        },
-                        "rating": {
-                          "maximum": 5,
-                          "minimum": 1,
-                          "type": "integer"
-                        },
-                        "source": {
-                          "type": "string"
-                        },
-                        "status": {
-                          "enum": [
-                            "pending",
-                            "approved",
-                            "rejected",
-                            "private"
+                          },
+                          "required": [
+                            "key",
+                            "label",
+                            "cells"
                           ],
-                          "type": "string"
+                          "type": "object"
                         },
-                        "subject": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "title": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "author",
-                        "rating",
-                        "subject",
-                        "questions",
-                        "source",
-                        "status",
-                        "date",
-                        "title",
-                        "content",
-                        "private_feedback",
-                        "categories"
-                      ],
-                      "type": "object"
+                        "type": "array"
+                      }
                     },
-                    "type": "array"
+                    "required": [
+                      "kind",
+                      "heading",
+                      "columns",
+                      "rows",
+                      "empty"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "empty": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "reviews",
+                        "type": "string"
+                      },
+                      "reviews": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "author": {
+                              "type": "string"
+                            },
+                            "categories": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "content": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "line": {
+                              "type": "string"
+                            },
+                            "private_feedback": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "rating": {
+                              "maximum": 5,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "status": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "title": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "author",
+                            "rating",
+                            "status",
+                            "line",
+                            "categories",
+                            "title",
+                            "content",
+                            "private_feedback"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "reviews",
+                      "empty"
+                    ],
+                    "type": "object"
                   }
-                },
-                "required": [
-                  "kind",
-                  "reviews"
-                ],
-                "type": "object"
+                ]
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -49262,17 +49303,10 @@
             "items": {
               "additionalProperties": false,
               "properties": {
-                "format": {
-                  "enum": [
-                    "count",
-                    "percent",
-                    "rating",
-                    "money",
-                    "nights",
-                    "days",
-                    "people",
-                    "text"
-                  ],
+                "chartable": {
+                  "type": "boolean"
+                },
+                "display": {
                   "type": "string"
                 },
                 "key": {
@@ -49280,105 +49314,108 @@
                 },
                 "label": {
                   "type": "string"
-                },
-                "text": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "value": {
-                  "type": [
-                    "number",
-                    "null"
-                  ]
                 }
               },
               "required": [
                 "key",
                 "label",
-                "value",
-                "format",
-                "text"
+                "display",
+                "chartable"
               ],
               "type": "object"
             },
             "type": "array"
           },
-          "page": {
-            "enum": [
-              "quality/overall-rating",
-              "rates/occupancy-rate",
-              "rates/bookings",
-              "rates/cancellation-rate",
-              "rates/length-of-stay",
-              "rates/party-size",
-              "rates/nightly-rate",
-              "rates/average-value",
-              "rates/income-by-channel",
-              "conversion/booking-conversion",
-              "conversion/lead-time",
-              "conversion/returning",
-              "conversion/page-views",
-              "conversion/top-pages",
-              "conversion/sources"
-            ],
-            "type": "string"
-          },
-          "period": {
-            "additionalProperties": false,
-            "properties": {
-              "end_date": {
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                "type": "string"
-              },
-              "start_date": {
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                "type": "string"
-              },
-              "timezone": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "start_date",
-              "end_date",
-              "timezone"
-            ],
-            "type": "object"
-          },
-          "section": {
-            "type": "string"
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "series": {
             "additionalProperties": false,
             "properties": {
-              "dates": {
-                "items": {
-                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "values": {
+              "charts": {
                 "additionalProperties": {
-                  "items": {
-                    "type": [
-                      "number",
-                      "null"
-                    ]
+                  "additionalProperties": false,
+                  "properties": {
+                    "axis": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "label": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "value",
+                          "label"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "points": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "display": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "value",
+                          "display"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
                   },
-                  "type": "array"
+                  "required": [
+                    "axis",
+                    "points"
+                  ],
+                  "type": "object"
                 },
                 "propertyNames": {
                   "type": "string"
                 },
                 "type": "object"
+              },
+              "dates": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "date",
+                    "label"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
               }
             },
             "required": [
               "dates",
-              "values"
+              "charts"
             ],
             "type": "object"
           },
@@ -49393,13 +49430,11 @@
           }
         },
         "required": [
-          "page",
           "title",
-          "section",
           "subtitle",
-          "period",
+          "note",
+          "action",
           "filters",
-          "currency",
           "metrics",
           "series",
           "list"
@@ -126066,7 +126101,7 @@
       "toolContracts": {
         "create_post": "sha256:a2a95f5e752b47a10f2d42dfaaca0caca19afd2a4110adc3fd97dad2eb8a763a",
         "get_conversation": "sha256:5007b5cc2485f51db503b10ae92e88691fe6d2ffa56dafced5194e41abd1fd3f",
-        "get_organization_analytics": "sha256:0a138f87b50a331bea65168db050027df0a1f7d72e994b66f3c1972567a77475",
+        "get_organization_analytics": "sha256:6778353a6266b04efaca189217f19982d643d91249d8444829e9936ff203e487",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversations": "sha256:563552eb6b0af82a762e138edf26711d2560e62fdb2cee2a757e19106704fbad",

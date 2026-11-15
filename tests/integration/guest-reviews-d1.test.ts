@@ -357,18 +357,18 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     // Insights → Overall rating is where they are read: a member who reads no analytics reads their own visits' reviews.
     const organization = (await db.prepare("SELECT timezone, default_currency FROM organization WHERE id = 'org'").first<{ timezone: string; default_currency: string }>())!
     const feedbackFor = async (userId: string, analytics: boolean) => {
-      const page = await readInsightsPage(db, { organizationId: 'org', timezone: organization.timezone, defaultCurrency: organization.default_currency, userId, analytics }, 'quality/overall-rating', {})
-      assert.equal(page.list.kind, 'reviews')
-      return page.list.kind === 'reviews' ? page.list.reviews : []
+      const page = await readInsightsPage(db, { organizationId: 'org', slug: 'proof', timezone: organization.timezone, defaultCurrency: organization.default_currency, userId, analytics }, 'quality/overall-rating', {}, env)
+      assert.equal(page.list?.kind, 'reviews')
+      return page.list?.kind === 'reviews' ? page.list.reviews : []
     }
     const owner = await feedbackFor('owner', true)
     assert.deepEqual(owner.map(review => review.id).sort(), [consultationReviewId, dinnerReviewId].sort())
     assert.equal(owner.filter(review => review.private_feedback !== null).length, 2)
-    assert.deepEqual(owner.find(review => review.id === dinnerReviewId)?.categories, [{ key: 'atmosphere', label: 'Atmosphere', rating: 3 }, { key: 'food', label: 'Food', rating: 5 }])
+    assert.equal(owner.find(review => review.id === dinnerReviewId)?.categories, 'Atmosphere 3 · Food 5')
     const host = await feedbackFor('host', false)
     assert.deepEqual(host.map(review => [review.id, review.private_feedback]), [[dinnerReviewId, 'The patio heater was broken.']])
     assert.deepEqual(await feedbackFor('other', false), [])
-    await assert.rejects(readInsightsPage(db, { organizationId: 'org', timezone: organization.timezone, defaultCurrency: organization.default_currency, userId: 'host', analytics: false }, 'rates/cancellation-rate', {}),
+    await assert.rejects(readInsightsPage(db, { organizationId: 'org', slug: 'proof', timezone: organization.timezone, defaultCurrency: organization.default_currency, userId: 'host', analytics: false }, 'rates/cancellation-rate', {}, env),
       (error: { statusCode?: number }) => error.statusCode === 403)
 
     // The responsible host is told about the review on their visit; the unrelated member is not.

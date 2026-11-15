@@ -36,8 +36,9 @@ async function openDb(name: string) {
   return { runtime, db, env }
 }
 
-const metrics = (page: InsightsPage) => Object.fromEntries(page.metrics.map(metric => [metric.key, metric.format === 'text' ? metric.text : metric.value]))
-const rows = (page: InsightsPage) => page.list.kind === 'rows' ? page.list.rows.map(row => [row.label, ...row.values]) : []
+const metrics = (page: InsightsPage) => Object.fromEntries(page.metrics.map(metric => [metric.key, metric.display]))
+const rows = (page: InsightsPage) => page.list?.kind === 'rows' ? page.list.rows.map(row => [row.label, ...row.cells]) : []
+const point = (page: InsightsPage, key: string, date: string) => page.series.charts[key]!.points[page.series.dates.findIndex(day => day.date === date)]!.value
 
 test('Insights reads a restaurant from visit to payment: sources, bookings, value and conversion', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await openDb('insights-tables')
@@ -96,30 +97,33 @@ test('Insights reads a restaurant from visit to payment: sources, bookings, valu
         VALUES (?, 'org-tables', 'acct_tables', 0, 'booking', ?, 'loc-beach', 'THB', ?, ?, ?, '{}', ?, ?)`).bind(paymentId, bookingId, collected, collected, refunded, now, now).run()
     }
 
-    const reader: InsightsReader = { organizationId: 'org-tables', timezone: TZ, defaultCurrency: 'THB', userId: 'tables-owner', analytics: true }
+    const reader: InsightsReader = { organizationId: 'org-tables', slug: 'tables', timezone: TZ, defaultCurrency: 'THB', userId: 'tables-owner', analytics: true }
     const range = { start_date: addLocalDays(today, -1), end_date: addLocalDays(today, 3) }
-    const read = (page: string, query: Record<string, string> = {}) => readInsightsPage(db as never, reader, page, { ...range, ...query })
+    const read = (page: string, query: Record<string, string> = {}) => readInsightsPage(db as never, reader, page, { ...range, ...query }, env)
     const index = await readInsightsIndex(db as never, reader)
-    assert.deepEqual(index, { kinds: ['table'], has_menu: false, locations: [{ id: 'loc-beach', title: 'Beach' }, { id: 'loc-town', title: 'Town' }], pages: index.pages })
-    assert.equal(index.pages.length, 17)
+    // A restaurant's pages, in its words: no homes, Reservations, Returning diners.
+    assert.deepEqual(index.sections.map(section => [section.title, section.pages.map(page => page.title)]), [['Quality', ['Overall rating']],
+      ['Bookings & rates', ['Reservations', 'Cancellation rate', 'Party size', 'Average value', 'Income by channel']],
+      ['Conversion', ['Booking conversion', 'Booking lead time', 'Returning diners', 'Page views', 'Top pages', 'Sources']], ['Marketing', ['Instagram', 'Google Ads']]])
 
     const bookings = await read('rates/bookings')
     assert.equal(bookings.title, 'Reservations')
-    assert.equal(bookings.section, 'Bookings & rates')
-    assert.deepEqual(metrics(bookings), { confirmed: 2, requested: 3, confirmed_share: 66.7 })
-    const dinner = bookings.series.dates.indexOf(dinnerDate)
-    assert.deepEqual([bookings.series.values.confirmed![dinner], bookings.series.values.requested![dinner], bookings.series.values.requested![0]], [2, 3, 0])
-    assert.deepEqual(rows(bookings).sort(), [[`Tables loc-beach`, 2, 2], [`Tables loc-town`, 0, 1]])
-    assert.deepEqual(metrics(await read('rates/bookings', { location_id: 'loc-town' })), { confirmed: 0, requested: 1, confirmed_share: 0 })
+    assert.deepEqual(metrics(bookings), { confirmed: '2', requested: '3', confirmed_share: '66.7%' })
+    assert.deepEqual([point(bookings, 'confirmed', dinnerDate), point(bookings, 'requested', dinnerDate), point(bookings, 'requested', range.start_date)], [2, 3, 0])
+    assert.deepEqual(rows(bookings).sort(), [[`Tables loc-beach`, '2', '2'], [`Tables loc-town`, '0', '1']])
+    // One kind is booked, so the chip offers the two locations only.
+    assert.deepEqual(bookings.filters.offering, { label: 'All offerings', choices: [{ param: 'location_id', legend: 'Location', selected: 'all',
+      options: [{ value: 'all', label: 'All locations' }, { value: 'loc-beach', label: 'Beach' }, { value: 'loc-town', label: 'Town' }] }] })
+    const atTown = await read('rates/bookings', { location_id: 'loc-town' })
+    assert.deepEqual(metrics(atTown), { confirmed: '0', requested: '1', confirmed_share: '0%' })
+    assert.equal(atTown.filters.offering?.label, 'All offerings · Town')
 
-    assert.deepEqual(metrics(await read('rates/cancellation-rate')), { cancellation_rate: 33.3, cancelled: 1, bookings: 3 })
-    assert.deepEqual(metrics(await read('rates/party-size')), { average_party: 2, largest_party: 2 })
-    const value = await read('rates/average-value')
-    assert.equal(value.currency, 'THB')
-    assert.deepEqual(metrics(value), { average_value: 105250, income: 210500 })
+    assert.deepEqual(metrics(await read('rates/cancellation-rate')), { cancellation_rate: '33.3%', cancelled: '1', bookings: '3' })
+    assert.deepEqual(metrics(await read('rates/party-size')), { average_party: '2', largest_party: '2' })
+    assert.deepEqual(metrics(await read('rates/average-value')), { average_value: 'THB\u00a01,052.50', income: 'THB\u00a02,105.00' })
     const income = await read('rates/income-by-channel')
-    assert.deepEqual(metrics(income), { income: 210500, direct: 210500, refunded: 3500 })
-    assert.deepEqual(rows(income), [['Direct', 210500]])
+    assert.deepEqual(metrics(income), { income: 'THB\u00a02,105.00', direct: 'THB\u00a02,105.00', refunded: 'THB\u00a035.00' })
+    assert.deepEqual(rows(income), [['Direct', 'THB\u00a02,105.00']])
 
     // The ad visitor calls the beach twice and follows a dish's order link once: each click's own write counts it.
     const click = (id: string, eventName: 'phone_click' | 'product_order_external_click') => recordOrganizationConversionEvent(db, ad, {
@@ -129,34 +133,36 @@ test('Insights reads a restaurant from visit to payment: sources, bookings, valu
     await click('55555552-5555-4555-8555-555555555555', 'phone_click')
     await click('55555553-5555-4555-8555-555555555555', 'product_order_external_click')
     const conversion = await read('conversion/booking-conversion')
-    assert.deepEqual(metrics(conversion), { conversion: 100, views: 2, bookings: 2, clicked_to_call: 2, clicked_to_order: 1 })
+    assert.deepEqual(metrics(conversion), { conversion: '100%', views: '2', bookings: '2', clicked_to_call: '2', clicked_to_order: '1' })
     assert.deepEqual(conversion.metrics.slice(3).map(metric => metric.label), ['Clicked to call', 'Clicked to order'])
-    assert.equal(conversion.series.values.clicked_to_call![conversion.series.dates.indexOf(today)], 2)
+    assert.equal(point(conversion, 'clicked_to_call', today), 2)
     // A restaurant's site has no click to book; clicks are not about one kind, so a kind's page has none.
-    assert.deepEqual(metrics(await read('conversion/booking-conversion', { kind: 'table' })), { conversion: 100, views: 2, bookings: 2 })
+    assert.deepEqual(metrics(await read('conversion/booking-conversion', { kind: 'table' })), { conversion: '100%', views: '2', bookings: '2' })
     assert.equal(conversion.metrics[1]!.label, 'Table page views')
     const lead = await read('conversion/lead-time')
     assert.equal(lead.subtitle, 'Website bookings')
-    assert.deepEqual(metrics(lead), { average_lead: 2, within_3_days: 100 })
+    assert.deepEqual(metrics(lead), { average_lead: '2 days', within_3_days: '100%' })
     const returning = await read('conversion/returning')
     assert.equal(returning.title, 'Returning diners')
-    assert.deepEqual(metrics(returning), { returning_share: 0, returning: 0 })
+    assert.deepEqual(metrics(returning), { returning_share: '0%', returning: '0' })
 
     const views = await read('conversion/page-views')
-    assert.deepEqual(metrics(views), { page_views: 4, change: null })
-    assert.equal(views.series.values.page_views![views.series.dates.indexOf(today)], 4)
+    assert.deepEqual(metrics(views), { page_views: '4', change: '—' })
+    assert.equal(point(views, 'page_views', today), 4)
     const top = await read('conversion/top-pages')
-    assert.deepEqual(metrics(top), { page_views: 4, pages_viewed: 3, most_viewed: '/' })
-    assert.deepEqual(rows(top), [['/', 2], ['/reservations/loc-beach', 1], ['/reservations/loc-town', 1]])
+    assert.deepEqual(metrics(top), { page_views: '4', pages_viewed: '3', most_viewed: '/' })
+    assert.deepEqual(rows(top), [['/', '2'], ['/reservations/loc-beach', '1'], ['/reservations/loc-town', '1']])
     const sources = await read('conversion/sources')
-    assert.deepEqual(metrics(sources), { visits: 2, website_bookings: 2, search_bookings: 0 })
-    assert.deepEqual(rows(sources), [['Google Ads', 1, 1], ['Direct', 1, 1], ['Added by you', 0, 1]])
+    assert.deepEqual(metrics(sources), { visits: '2', website_bookings: '2', search_bookings: '0' })
+    assert.deepEqual(rows(sources), [['Google Ads', '1', '1'], ['Direct', '1', '1'], ['Added by you', '0', '1']])
 
     // A page reads only the filters it has; a kind it does not describe is refused.
     await assert.rejects(read('conversion/page-views', { kind: 'table' }), (error: { statusCode?: number }) => error.statusCode === 400)
     await assert.rejects(read('rates/occupancy-rate', { kind: 'table' }), (error: { statusCode?: number }) => error.statusCode === 400)
     await assert.rejects(read('conversion/booking-conversion', { location_id: 'loc-beach' }), (error: { statusCode?: number }) => error.statusCode === 400)
-    await assert.rejects(read('marketing/instagram'), (error: { statusCode?: number }) => error.statusCode === 404)
+    // Marketing comes through the same read: without the Growth plan it says so and where to fix it.
+    const instagram = await read('marketing/instagram')
+    assert.deepEqual([instagram.note, instagram.action, instagram.metrics, instagram.list], ['Instagram insights require the Growth plan.', { label: 'Instagram settings', to: '/dashboard/tables/integrations/instagram' }, [], null])
 
     // MCP reads the same page.
     const tool = await handleAnalyticsTools({ toolName: 'get_organization_analytics', args: { page: 'conversion/sources', ...range }, organization: { db, organizationId: 'org-tables', env } } as never)
@@ -192,23 +198,22 @@ test('Insights reads a home: occupancy, length of stay and nightly rate, and who
     assert.deepEqual((await db.prepare('SELECT id, website_source FROM bookings').all<{ id: string; website_source: string | null }>()).results.map(row => [row.id === bought.id, row.website_source]).sort(),
       [[false, null], [true, 'Not recorded']])
 
-    const reader: InsightsReader = { organizationId: 'org-stays', timezone: TZ, defaultCurrency: 'USD', userId: 'stays-owner', analytics: true }
-    const read = (page: string) => readInsightsPage(db as never, reader, page, { start_date: today, end_date: addLocalDays(today, 19) })
+    const reader: InsightsReader = { organizationId: 'org-stays', slug: 'retreat', timezone: TZ, defaultCurrency: 'USD', userId: 'stays-owner', analytics: true }
+    const read = (page: string) => readInsightsPage(db as never, reader, page, { start_date: today, end_date: addLocalDays(today, 19) }, env)
     const occupancy = await read('rates/occupancy-rate')
-    assert.equal(occupancy.section, 'Occupancy & rates')
+    assert.equal((await readInsightsIndex(db as never, reader)).sections[1]!.title, 'Occupancy & rates')
     // 20 nights, 2 closed: 5 of 18 open nights booked.
-    assert.deepEqual(metrics(occupancy), { occupancy: 27.8, nights_booked: 5, nights_blocked: 2 })
-    assert.equal(occupancy.series.values.occupancy![15], null)
-    assert.equal(occupancy.series.values.occupancy![5], 100)
-    assert.deepEqual(rows(occupancy), [['Cabin', 27.8, 5]])
-    assert.deepEqual(metrics(await read('rates/length-of-stay')), { average_nights: 2.5, longest: 3 })
-    const nightly = await read('rates/nightly-rate')
-    assert.equal(nightly.currency, 'USD')
-    assert.deepEqual(metrics(nightly), { nightly_rate: 12000, income: 60000 })
+    assert.deepEqual(metrics(occupancy), { occupancy: '27.8%', nights_booked: '5 nights', nights_blocked: '2 nights' })
+    const chart = occupancy.series.charts.occupancy!
+    assert.deepEqual([chart.points[15], chart.points[5]], [{ value: null, display: 'No average occupancy rate' }, { value: 100, display: '100% average occupancy rate' }])
+    assert.deepEqual(chart.axis.map(tick => tick.label), ['0%', '25%', '50%', '75%', '100%'])
+    assert.deepEqual(rows(occupancy), [['Cabin', '27.8%', '5 nights']])
+    assert.deepEqual(metrics(await read('rates/length-of-stay')), { average_nights: '2.5 nights', longest: '3 nights' })
+    assert.deepEqual(metrics(await read('rates/nightly-rate')), { nightly_rate: '$120.00', income: '$600.00' })
     const sources = await read('conversion/sources')
-    assert.deepEqual(rows(sources), [['Not recorded', 0, 1], ['Added by you', 0, 1]])
+    assert.deepEqual(rows(sources), [['Not recorded', '0', '1'], ['Added by you', '0', '1']])
     assert.equal((await read('conversion/returning')).title, 'Returning guests')
     // A home's site lists a phone but has no consultation button or order link: only calls are counted beside its bookings.
-    assert.deepEqual(metrics(await read('conversion/booking-conversion')), { conversion: null, views: 0, bookings: 1, clicked_to_call: 0 })
+    assert.deepEqual(metrics(await read('conversion/booking-conversion')), { conversion: '—', views: '0', bookings: '1', clicked_to_call: '0' })
   } finally { await runtime.dispose() }
 })

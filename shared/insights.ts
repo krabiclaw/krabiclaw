@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { REVIEW_SUBJECTS } from './review-questions'
 
 /**
  * Insights: Airbnb's Performance pages for every kind of business. Each page is
@@ -139,66 +138,78 @@ export function pageTitle(id: InsightsPageId, booked: readonly InsightsKind[], k
   }
 }
 
-/** How a number reads. Money is in the minor units of the page's currency. */
-export const INSIGHTS_FORMATS = ['count', 'percent', 'rating', 'money', 'nights', 'days', 'people', 'text'] as const
-export type InsightsFormat = typeof INSIGHTS_FORMATS[number]
-
-const format = z.enum(INSIGHTS_FORMATS)
-const number = z.number().nullable()
+const text = z.string()
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 
+/** GET /api/dashboard/insights: the sections and pages this member opens, in order, titled in the words of what the business books. */
 export const insightsIndexSchema = z.object({
-  /** What the business books; a kind filter is offered when there is more than one. */
-  kinds: z.array(z.enum(INSIGHTS_KINDS)),
-  /** Whether the business has a menu; its dishes count only as pages viewed. */
-  has_menu: z.boolean(),
-  /** The places a location filter chooses between, offered when there is more than one. */
-  locations: z.array(z.object({ id: z.string(), title: z.string() })),
-  /** The pages this member may open. A member who reads no analytics reads Quality for the visits they look after. */
-  pages: z.array(z.enum(INSIGHTS_PAGES.map(page => page.id) as [InsightsPageId, ...InsightsPageId[]])),
+  sections: z.array(z.object({
+    id: z.enum(['quality', 'rates', 'conversion', 'marketing']),
+    title: text,
+    pages: z.array(z.object({ id: z.enum(INSIGHTS_PAGES.map(page => page.id) as [InsightsPageId, ...InsightsPageId[]]), title: text })),
+  })),
 })
 export type InsightsIndex = z.infer<typeof insightsIndexSchema>
 
-export const insightsReviewSchema = z.object({
-  id: z.string(),
-  author: z.string(),
-  rating: z.number().int().min(1).max(5),
-  /** The offering reviewed, or the location of a review left without one. */
-  subject: z.string().nullable(),
-  /** The review questions it answered, when it reviewed a booked visit. */
-  questions: z.enum(REVIEW_SUBJECTS).nullable(),
-  source: z.string(),
-  status: z.enum(['pending', 'approved', 'rejected', 'private']),
-  /** The local day the review was written. */
-  date,
-  title: z.string().nullable(),
-  content: z.string().nullable(),
-  private_feedback: z.string().nullable(),
-  categories: z.array(z.object({ key: z.string(), label: z.string(), rating: z.number().int().min(1).max(5) })),
-})
-export type InsightsReview = z.infer<typeof insightsReviewSchema>
+const option = z.object({ value: z.string(), label: text })
 
+/**
+ * GET /api/dashboard/insights/<section>/<page>: one page as every screen
+ * draws it. Every string is composed on the server; a chart's points keep
+ * their raw values for drawing.
+ */
 export const insightsPageSchema = z.object({
-  page: z.enum(INSIGHTS_STORED_PAGE_IDS as [InsightsStoredPageId, ...InsightsStoredPageId[]]),
-  title: z.string(),
-  section: z.string(),
+  title: text,
   /** What the numbers cover when it is not every booking, such as "Website bookings". */
-  subtitle: z.string().nullable(),
-  period: z.object({ start_date: date, end_date: date, timezone: z.string() }),
-  filters: z.object({ kind: z.enum(['all', ...INSIGHTS_KINDS]), location_id: z.string().nullable() }),
-  /** The currency every money number on the page is in; null when the page has none. */
-  currency: z.string().nullable(),
-  metrics: z.array(z.object({ key: z.string(), label: z.string(), value: number, format, text: z.string().nullable() })),
-  /** Each headline number's value on each day of the range; a metric absent here has no chart. Null is a day with nothing to measure. */
-  series: z.object({ dates: z.array(date), values: z.record(z.string(), z.array(number)) }),
+  subtitle: text.nullable(),
+  /** The menu note, the provider's note, or why the page cannot be read. */
+  note: text.nullable(),
+  /** Where to fix a page that cannot be read; the page then has no numbers. */
+  action: z.object({ label: text, to: text }).nullable(),
+  filters: z.object({
+    /** One chip naming what is shown; it opens each choice the page offers ("kind", "location_id" in the query, "all" for none). */
+    offering: z.object({
+      label: text,
+      choices: z.array(z.object({ param: z.enum(['kind', 'location_id']), legend: text, options: z.array(option), selected: z.string() })),
+    }).nullable(),
+    range: z.object({ start_date: date, end_date: date, start_label: text, end_label: text }),
+  }),
+  /** The headline numbers; a chartable one has a chart under its key. */
+  metrics: z.array(z.object({ key: z.string(), label: text, display: text, chartable: z.boolean() })),
+  series: z.object({
+    dates: z.array(z.object({ date, label: text })),
+    /** Per chartable metric: the y-axis ticks bottom to top, and one point per date (null: nothing to measure that day). */
+    charts: z.record(z.string(), z.object({
+      axis: z.array(z.object({ value: z.number(), label: text })),
+      points: z.array(z.object({ value: z.number().nullable(), display: text })),
+    })),
+  }),
   list: z.discriminatedUnion('kind', [
     z.object({
       kind: z.literal('rows'),
-      heading: z.string(),
-      columns: z.array(z.object({ label: z.string(), format })),
-      rows: z.array(z.object({ key: z.string(), label: z.string(), values: z.array(number) })),
+      heading: text,
+      columns: z.array(z.object({ label: text })),
+      rows: z.array(z.object({ key: z.string(), label: text, cells: z.array(text) })),
+      empty: text,
     }),
-    z.object({ kind: z.literal('reviews'), reviews: z.array(insightsReviewSchema) }),
-  ]),
+    z.object({
+      kind: z.literal('reviews'),
+      reviews: z.array(z.object({
+        id: z.string(),
+        author: text,
+        rating: z.number().int().min(1).max(5),
+        /** "Awaiting review", "Not published", "Private"; none once published. */
+        status: text.nullable(),
+        /** What was reviewed and the day it was written: "Pottery class · Nov 3, 2026". */
+        line: text,
+        /** "Atmosphere 3 · Food 5". */
+        categories: text.nullable(),
+        title: text.nullable(),
+        content: text.nullable(),
+        private_feedback: text.nullable(),
+      })),
+      empty: text,
+    }),
+  ]).nullable(),
 })
 export type InsightsPage = z.infer<typeof insightsPageSchema>
