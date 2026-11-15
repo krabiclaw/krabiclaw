@@ -396,7 +396,7 @@ test('a return to Today within the live connection shows the Today it left witho
   await dismissPreviewToolbar(page)
   const socket = await socketCapture
   await expect(shown).toBeVisible()
-  const first = await shown.innerText()
+  const first = (await shown.textContent())!
 
   const nav = page.getByRole('navigation', { name: 'Dashboard' })
   await nav.getByRole('link', { name: 'Calendar', exact: true }).click()
