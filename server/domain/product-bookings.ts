@@ -10,7 +10,7 @@ import { measurementOutcome, readPageEventId, readWebsiteSource, recordOrganizat
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import { toE164 } from '~/utils/phone'
 import { addLocalDays } from '~/utils/timezone'
-import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { execute, executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { bookingPolicy, formatBookingPolicySummary } from '~/server/utils/booking-policy-summary'
 import { timedBookingPriceFrom, timedBookingPricesQuery } from '~/server/domain/bookings'
 import type { Price } from '~/shared/prices'
