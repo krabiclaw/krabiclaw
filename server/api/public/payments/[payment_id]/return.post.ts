@@ -12,5 +12,5 @@ export default defineHandler(async (event) => {
   if (!organizationId || !paymentId || typeof body.claim !== 'string') return jsonResponse({ error: 'Payment not found' }, { status: 404 })
   const env = cloudflareEnv(event)
   if (!env.DB) return jsonResponse({ error: 'Database not available' }, { status: 500 })
-  return jsonResponse(await completePaymentReturn(env.DB, env, organizationId, paymentId, body.claim, () => ensureInteractionUser(event, env)), { headers: { 'cache-control': 'private, no-store' } })
+  return jsonResponse(await completePaymentReturn(env.DB, env, organizationId, paymentId, body.claim, async () => (await ensureInteractionUser(event, env)).id), { headers: { 'cache-control': 'private, no-store' } })
 })

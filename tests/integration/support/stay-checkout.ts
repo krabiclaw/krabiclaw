@@ -2,6 +2,8 @@ import { commitBooking } from '../../../server/domain/payments/events.ts'
 import { requirePayment } from '../../../server/domain/payments/index.ts'
 import type { StayPurchase } from '../../../server/domain/payments/checkout.ts'
 import { stayCheckoutPolicy } from '../../../server/domain/stays.ts'
+import { bookingPolicy } from '../../../server/utils/booking-policy-summary.ts'
+import { requireBookingConfig } from '../../../server/utils/availability.ts'
 import type { CloudflareEnv } from '../../../server/utils/auth.ts'
 
 /**
@@ -32,7 +34,7 @@ export async function buyStay(db: D1Database, env: CloudflareEnv, input: {
     nightly: nights.map(date => ({ date, price_minor: input.nightlyMinor })), guest: input.guest,
   }
   // The terms checkout freezes with the purchase, from the home as it stands.
-  const policy = JSON.parse(await stayCheckoutPolicy(db as never, input.organizationId, { ...purchase, tax_behavior: 'unspecified' }))
+  const policy = stayCheckoutPolicy(bookingPolicy(await requireBookingConfig(db, input.organizationId, purchase.product_id), null), { ...purchase, tax_behavior: 'unspecified' })
   const now = new Date().toISOString()
   const paymentId = `${input.id}-payment`, holdId = `${input.id}-hold`
   await db.batch([

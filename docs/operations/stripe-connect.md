@@ -19,6 +19,7 @@ https://<environment-host>/api/stripe/connect/webhook
 
 Subscribe it to:
 
+- `v2.core.account.closed`
 - `v2.core.account.updated`
 - `v2.core.account[configuration.merchant].capability_status_updated`
 - `v2.core.account[configuration.merchant].updated`
@@ -89,9 +90,10 @@ therefore guarded by an organization-unique reservation plus a stable Stripe
 idempotency key. Stripe redelivers an event whose webhook failed
 ([automatic retries](https://docs.stripe.com/webhooks#automatic-retries)), and
 `stripe_webhook_events` records the events each processor has processed, so a
-redelivery of a processed event does nothing. Stripe remains the
-source of truth, so dashboard refreshes retrieve the account again instead of
-inferring readiness from the return redirect.
+redelivery of a processed event does nothing. Checkout uses the account state
+projected by those webhooks, including when the merchant loses a required
+capability or closes the account. An explicit dashboard refresh retrieves the
+account from Stripe rather than inferring readiness from the return redirect.
 
 The country and live/test mode are immutable after reservation. A mismatch is a
 conflict, not a fallback. Account Links are single-use and short-lived, so every

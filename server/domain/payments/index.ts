@@ -69,6 +69,11 @@ export interface Payment {
 export type VisiblePayment = Omit<Payment, 'idempotency_key' | 'review_json' | 'return_token' | 'return_token_hash'>
 function visiblePayment(payment: Payment): VisiblePayment {
   const visible: Partial<Payment> = { ...payment }
+  const snapshot = JSON.parse(payment.price_snapshot_json) as Record<string, unknown>
+  if ('checkout_origin' in snapshot) {
+    delete snapshot.checkout_origin
+    visible.price_snapshot_json = JSON.stringify(snapshot)
+  }
   delete visible.idempotency_key
   delete visible.review_json
   delete visible.return_token

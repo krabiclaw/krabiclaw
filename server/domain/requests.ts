@@ -350,7 +350,7 @@ export function bookingConversationQueries(input: {
         AND NOT EXISTS (SELECT 1 FROM conversations WHERE kind = 'booking' AND booking_id = ?)`,
     params: [input.requestId, input.organizationId, input.locationId, input.bookingId, input.userId, JSON.stringify(payload), input.now, input.now, input.organizationId, input.bookingId, input.bookingId],
   }, initialConversationParticipants(input.requestId, input.organizationId),
-  initialListingParticipants(input.organizationId, input.requestId), publicResourceCacheInvalidationQuery(input.organizationId, 'guest-thread-create')]
+  initialListingParticipants(input.organizationId, input.requestId)]
 }
 
 /**

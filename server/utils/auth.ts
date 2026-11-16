@@ -600,7 +600,9 @@ function buildAuth(env: CloudflareEnv) {
     databaseHooks: {
       session: {
         create: {
-          after: async (session) => {
+          after: async (session, context) => {
+            // The anonymous endpoint creates an unverified identity, so there is no verified email to link.
+            if (context?.path === '/sign-in/anonymous') return
             const user = await (await createAuth(env).$context).adapter.findOne<Pick<UserWithAnonymous, 'id' | 'email' | 'emailVerified' | 'isAnonymous'>>({
               model: 'user', where: [{ field: 'id', value: session.userId }], select: ['id', 'email', 'emailVerified', 'isAnonymous'],
             })
@@ -1141,9 +1143,9 @@ export async function getAuthSession(event: H3Event, env: CloudflareEnv): Promis
  * same browser reuses it. Call it only once the write is about to happen: a page
  * view or a rejected submission must not mint an identity.
  */
-export async function ensureInteractionUser(event: H3Event, env: CloudflareEnv): Promise<string> {
+export async function ensureInteractionUser(event: H3Event, env: CloudflareEnv): Promise<{ id: string; email: string; name: string; isAnonymous?: boolean | null }> {
   const session = await getAuthSession(event, env)
-  if (session?.user) return session.user.id
+  if (session?.user) return session.user
   const auth = createAuth(env)
   const { headers, response } = await auth.api.signInAnonymous({
     headers: event.req.headers,
@@ -1153,7 +1155,7 @@ export async function ensureInteractionUser(event: H3Event, env: CloudflareEnv):
   for (const cookie of headers.getSetCookie()) {
     event.res.headers.append('set-cookie', cookie)
   }
-  return response.user.id
+  return { ...response.user, isAnonymous: true }
 }
 
 /**

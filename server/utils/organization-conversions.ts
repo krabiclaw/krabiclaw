@@ -1,5 +1,5 @@
 import { parseCookies } from 'better-auth/cookies'
-import type { DbClient } from '~/server/db'
+import type { BatchQuery, DbClient } from '~/server/db'
 import { executeBatch, queryFirst } from '~/server/db'
 import { getClientIp } from '~/server/utils/hourly-rate-limit'
 import { deliverForVisitor, type MeasurementProtocolEnv } from '~/server/utils/ga4-delivery'
@@ -97,27 +97,74 @@ interface VerifiedOriginEvent {
   basis: string
 }
 
+interface ConversionBrowser { sessionId: string; visitorId: string }
+interface OriginEventRow { id: string; page_path: string; location_id: string | null; payload_json: string }
+
+export interface ConversionOriginSnapshot {
+  session_id: string
+  visitor_id: string
+  pageview: OriginEventRow | null
+  attribution: AttributionTouch | null
+  last_touch_at: string | null
+}
+
+const DIRECT_TOUCH: AttributionTouch = { source: 'Direct', medium: '(none)', campaign: null, term: null, content: null,
+  referrerHost: null, gclid: null, gbraid: null, wbraid: null, fbclid: null, msclkid: null }
+
+function conversionBrowser(origin: { headers: Headers } | null): ConversionBrowser | null {
+  const cookies = parseCookies(origin?.headers.get('cookie') ?? '')
+  const sessionId = cookies.get(SESSION_COOKIE)
+  const visitorId = cookies.get(VISITOR_COOKIE)
+  return isCanonicalEventId(sessionId) && isCanonicalEventId(visitorId) ? { sessionId, visitorId } : null
+}
+
+const originEventScope = `FROM analytics_events
+  WHERE id = ? AND kind = 'pageview' AND organization_id = ? AND session_id = ? AND visitor_id = ?`
+
+function originEventFields(row: OriginEventRow): VerifiedOriginEvent {
+  const payload = JSON.parse(row.payload_json) as Record<string, unknown>
+  const value = (key: string) => typeof payload[key] === 'string' ? payload[key] as string : null
+  return {
+    id: row.id,
+    page: { path: row.page_path, source_path: value('source_path'), locale: value('locale'), page_id: value('page_id'), page_type: value('page_type'),
+      document_id: value('document_id'), product_id: value('product_id'), location_id: row.location_id },
+    observed: (payload.observed as ObservedAttribution | null | undefined) ?? null,
+    attribution: (payload.attribution as AttributionTouch | null | undefined) ?? null,
+    attributedAt: value('attributed_at'),
+    basis: value('attribution_basis') ?? 'none',
+  }
+}
+
+/** The checkout write takes the browser's current visit with its purchase so later queue delivery cannot change the source. */
+export function conversionOriginSnapshotQuery(organizationId: string, origin: { request: { headers: Headers }; pageEventId: string | null } | null): BatchQuery {
+  const browser = conversionBrowser(origin?.request ?? null)
+  if (!browser) return { query: 'SELECT NULL' }
+  return { query: `WITH session AS (
+      SELECT payload_json FROM analytics_summaries WHERE organization_id = ? AND kind = 'session' AND date = '' AND key = ?
+    ) SELECT json_object('session_id', ?, 'visitor_id', ?,
+      'pageview', json((SELECT json_object('id', id, 'page_path', page_path, 'location_id', location_id,
+        'payload_json', json_remove(payload_json, '$.ip_hash', '$.user_agent', '$.country', '$.region', '$.city') || '') ${originEventScope})),
+      'attribution', json((SELECT json_extract(payload_json, '$.attribution') FROM session)),
+      'last_touch_at', (SELECT json_extract(payload_json, '$.last_touch_at') FROM session))`,
+    params: [organizationId, browser.sessionId, browser.sessionId, browser.visitorId, origin?.pageEventId ?? null, organizationId, browser.sessionId, browser.visitorId],
+  }
+}
+
+export function conversionSnapshotAttribution(snapshot: ConversionOriginSnapshot, occurredAt: string) {
+  const visit = snapshot.pageview && originEventFields(snapshot.pageview)
+  return visit ? { touch: visit.attribution, attributedAt: visit.attributedAt }
+    : { touch: snapshot.attribution ?? DIRECT_TOUCH, attributedAt: snapshot.last_touch_at ?? occurredAt }
+}
+
 /**
  * The pageview an outcome claims to have happened on, believed only when it is this organization's
  * own pageview recorded for this very visitor session. Anything else — an unknown id, another
  * tenant's event, another visitor's — is not context and is dropped rather than trusted.
  */
-async function verifiedOriginEvent(db: DbClient, organizationId: string, browser: { sessionId: string; visitorId: string }, originEventId: string | null | undefined): Promise<VerifiedOriginEvent | null> {
+async function verifiedOriginEvent(db: DbClient, organizationId: string, browser: ConversionBrowser, originEventId: string | null | undefined): Promise<VerifiedOriginEvent | null> {
   if (!originEventId || !isCanonicalEventId(originEventId)) return null
-  const row = await queryFirst<{ id: string; page_path: string; location_id: string | null; payload_json: string }>(db, `SELECT id, page_path, location_id, payload_json FROM analytics_events
-    WHERE id = ? AND kind = 'pageview' AND organization_id = ? AND session_id = ? AND visitor_id = ?`, [originEventId, organizationId, browser.sessionId, browser.visitorId])
-  if (!row) return null
-  const payload = JSON.parse(row.payload_json) as Record<string, unknown>
-  const text = (key: string) => typeof payload[key] === 'string' ? payload[key] as string : null
-  return {
-    id: row.id,
-    page: { path: row.page_path, source_path: text('source_path'), locale: text('locale'), page_id: text('page_id'), page_type: text('page_type'),
-      document_id: text('document_id'), product_id: text('product_id'), location_id: row.location_id },
-    observed: (payload.observed as ObservedAttribution | null | undefined) ?? null,
-    attribution: (payload.attribution as AttributionTouch | null | undefined) ?? null,
-    attributedAt: text('attributed_at'),
-    basis: text('attribution_basis') ?? 'none',
-  }
+  const row = await queryFirst<OriginEventRow>(db, `SELECT id, page_path, location_id, payload_json ${originEventScope}`, [originEventId, organizationId, browser.sessionId, browser.visitorId])
+  return row ? originEventFields(row) : null
 }
 
 /** The channel a visit's touch arrived from; a visit with no touch of its own or before it arrived directly. */
@@ -131,14 +178,12 @@ export function websiteSourceOf(touch: Pick<AttributionTouch, 'source' | 'medium
  * the session's last touch. A request without this site's analytics session has none recorded.
  */
 export async function readWebsiteSource(db: DbClient, organizationId: string, origin: { headers: Headers }, originEventId: string | null): Promise<AttributionChannel | null> {
-  const cookies = parseCookies(origin.headers.get('cookie') ?? '')
-  const sessionId = cookies.get(SESSION_COOKIE)
-  const visitorId = cookies.get(VISITOR_COOKIE)
-  if (!isCanonicalEventId(sessionId) || !isCanonicalEventId(visitorId)) return null
-  const visit = await verifiedOriginEvent(db, organizationId, { sessionId, visitorId }, originEventId)
+  const browser = conversionBrowser(origin)
+  if (!browser) return null
+  const visit = await verifiedOriginEvent(db, organizationId, browser, originEventId)
   if (visit) return websiteSourceOf(visit.attribution)
   const session = await queryFirst<{ attribution: string }>(db, `SELECT json_extract(payload_json, '$.attribution') AS attribution FROM analytics_summaries
-    WHERE organization_id = ? AND kind = 'session' AND date = '' AND key = ?`, [organizationId, sessionId])
+    WHERE organization_id = ? AND kind = 'session' AND date = '' AND key = ?`, [organizationId, browser.sessionId])
   return session ? websiteSourceOf(JSON.parse(session.attribution) as AttributionTouch) : null
 }
 
@@ -176,7 +221,7 @@ async function entityEventId(organizationId: string, eventName: string, entityId
  * nonbrowser outcome with no attribution. A browser session is never minted
  * here.
  */
-export async function recordOrganizationConversionEvent(db: DbClient, origin: { headers: Headers } | null, input: OrganizationConversionInput) {
+export async function recordOrganizationConversionEvent(db: DbClient, origin: { headers: Headers } | null, input: OrganizationConversionInput, snapshot?: ConversionOriginSnapshot | null) {
   const rule: ConversionEventDefinition = CONVERSION_EVENT_CATALOG[input.eventName]
   if (!(rule.stages as readonly ConversionStage[]).includes(input.stage)) throw new Error(`Invalid stage for ${input.eventName}`)
   if (rule.entityType !== null && input.entityType !== rule.entityType) throw new Error(`Invalid entity type for ${input.eventName}`)
@@ -204,10 +249,7 @@ export async function recordOrganizationConversionEvent(db: DbClient, origin: { 
   const properties = allowlistedProperties(rule, input.properties)
 
   const now = input.occurredAt ?? new Date().toISOString()
-  const cookies = parseCookies(origin?.headers.get('cookie') ?? '')
-  const sessionId = cookies.get(SESSION_COOKIE)
-  const visitorId = cookies.get(VISITOR_COOKIE)
-  const browser = isCanonicalEventId(sessionId) && isCanonicalEventId(visitorId) ? { sessionId, visitorId } : null
+  const browser = snapshot ? { sessionId: snapshot.session_id, visitorId: snapshot.visitor_id } : conversionBrowser(origin)
 
   let attribution: unknown = input.attribution?.touch ?? null
   let attributedAt: string | null = input.attribution?.attributedAt ?? null
@@ -226,14 +268,16 @@ export async function recordOrganizationConversionEvent(db: DbClient, origin: { 
       crypto.randomUUID(), input.organizationId, browser.sessionId,
       JSON.stringify({ visitor_id: browser.visitorId, started_at: now, last_seen_at: now,
         landing_path: input.pagePath?.startsWith('/') ? input.pagePath : '/', duration_seconds: 0,
-        attribution: { source: 'Direct', medium: '(none)', campaign: null, term: null, content: null,
-          referrerHost: null, gclid: null, gbraid: null, wbraid: null, fbclid: null, msclkid: null }, last_touch_at: null }), now, now,
+        attribution: DIRECT_TOUCH, last_touch_at: null }), now, now,
     ])
     if (!session) throw new Error('Analytics session unavailable')
-    attribution = JSON.parse(session.attribution)
-    attributedAt = session.last_touch_at ?? now
-    attributionBasis = session.last_touch_at ? 'session_current' : 'none'
-    origin_ = await verifiedOriginEvent(db, input.organizationId, browser, input.originEventId)
+    attribution = snapshot ? snapshot.attribution ?? DIRECT_TOUCH : JSON.parse(session.attribution)
+    const lastTouchAt = snapshot ? snapshot.last_touch_at : session.last_touch_at
+    attributedAt = lastTouchAt ?? now
+    attributionBasis = lastTouchAt ? 'session_current' : 'none'
+    origin_ = snapshot
+      ? snapshot.pageview && originEventFields(snapshot.pageview)
+      : await verifiedOriginEvent(db, input.organizationId, browser, input.originEventId)
     if (origin_) {
       // The visit this happened on keeps its own context, including having none: a later campaign
       // touch on the same session is not the context of an earlier visit.

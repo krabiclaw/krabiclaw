@@ -48,10 +48,15 @@ export async function listCustomerCards(stripe: Stripe, customerId: string, opti
  * offers those cards again at that business alone; this keeps which Customer is
  * theirs. A guest pays without one.
  */
-export async function connectedBuyerCustomer(db: DbClient, stripe: Stripe, userId: string, stripeAccountId: string, livemode: boolean): Promise<{ customerId: string; savedCards: number } | null> {
-  const user = await queryFirst<{ email: string; name: string | null; isAnonymous: number | null }>(db, 'SELECT email, name, "isAnonymous" FROM user WHERE id = ?', [userId])
+export interface ConnectedBuyer { id: string; email: string; name: string | null; isAnonymous?: boolean | number | null }
+
+export async function connectedBuyerCustomer(db: DbClient, stripe: Stripe, buyer: ConnectedBuyer | string, stripeAccountId: string, livemode: boolean): Promise<{ customerId: string; savedCards: number } | null> {
+  const user = typeof buyer === 'string'
+    ? await queryFirst<ConnectedBuyer>(db, 'SELECT id, email, name, "isAnonymous" FROM user WHERE id = ?', [buyer])
+    : buyer
   if (!user) throw new Error('The buyer was not found')
   if (user.isAnonymous) return null
+  const userId = user.id
   const connected = { stripeAccount: stripeAccountId }
   let mapping = await queryFirst<{ stripe_customer_id: string }>(db, 'SELECT stripe_customer_id FROM stripe_connected_customers WHERE user_id=? AND stripe_account_id=? AND livemode=?', [userId, stripeAccountId, Number(livemode)])
   if (!mapping) {

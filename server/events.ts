@@ -49,6 +49,7 @@ export type DomainEvent =
   | { type: 'stay.channel_revision'; organization_id: string; booking_id: string; revision_id: string; previous: ChannelStayTerms | null; terms: ChannelStayTerms }
   | { type: 'stay.guide_changed'; organization_id: string; product_id: string }
   | { type: 'payment.financial'; organization_id: string; payment_id: string; notice: PaymentFinancialEvent }
+  | { type: 'payment.checkout_started'; organization_id: string; payment_id: string; saved_cards_offered: number | null }
   | {
       type: 'payment.captured'; organization_id: string; payment_id: string; notice: PaymentFinancialEvent
       intent_created: number; saved_method_id: string | null
@@ -159,6 +160,11 @@ export async function consumeEvent(env: CloudflareEnv, event: DomainEvent): Prom
     const { scheduleBusinessWake } = await import('~/server/cloudflare/guest-inbox-events')
     await planStayCheckInMessages(env.DB, event.organization_id, event.product_id)
     await scheduleBusinessWake(env, event.organization_id, 'outbox', Date.now())
+    return
+  }
+  if (event.type === 'payment.checkout_started') {
+    const { recordCheckoutStarted } = await import('~/server/domain/booking-analytics')
+    await recordCheckoutStarted(env.DB, event)
     return
   }
   if (event.type === 'payment.financial' || event.type === 'payment.captured') {

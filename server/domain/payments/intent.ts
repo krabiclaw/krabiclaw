@@ -4,20 +4,19 @@ import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { connectedBuyerCustomer } from '~/server/utils/billing-customer'
 import { createStripeClient } from '~/server/utils/stripe-client'
-import { paymentsStripe, paymentsStripeKeys } from '~/server/utils/stripe-connect'
+import { paymentsStripe, paymentsStripeKeys, validatedSurchargeBasisPoints } from '~/server/utils/stripe-connect'
 import { claimCheckoutReturn, tokenHash } from './buyer'
 import { approvedStayBooking, type Payment } from './index'
-import { isStayPurchase, surchargeBasisPoints, type PaymentReview } from './checkout'
+import { isStayPurchase, type PaymentReview } from './checkout'
 import { PRICE_TAX_BEHAVIORS, type Price } from '~/shared/prices'
-import { reconcilePaymentIntent, confirmationHoldUntil, releaseApprovedStayConfirmation } from './events'
-import { publishPaymentNotification } from './notifications'
+import { checkoutHoldSql, reconcilePaymentIntent, confirmationHoldUntil, readCheckoutHold, releaseApprovedStayConfirmation, type CheckoutHold } from './events'
 import { assertBookingBatchWrite, bookingBatchWriteRefused } from '~/server/utils/availability'
 import { approvedStayPaymentPredicate } from '~/server/domain/stays'
 import { accountActivityPath } from '~/shared/account-activity'
 import { isRecord } from '~/server/utils/type-guards'
-import { loadOwnerPictures } from '~/server/notifications/hero'
+import { ownerPicture, type PicturePlacement } from '~/server/notifications/hero'
+import { mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
 import { getGuestRequest, type GuestThreadPayload } from '~/server/domain/requests'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '~/server/utils/reservation-cancel-token'
 
@@ -31,20 +30,59 @@ import { createReplayableReservationCancelToken, hashReservationCancelToken } fr
 type IntentWithSurcharge = Stripe.PaymentIntent & { amount_details?: { surcharge?: { status?: string; maximum_amount?: number; amount?: number } } }
 export type PaymentHandoffState = 'open' | 'processing' | 'verifying' | 'paid' | 'failed' | 'expired'
 
-type CheckoutPayment = Payment & { confirmation_in_flight: number; stripe_payment_intent_id: string; checkout_expires_at: string; return_expires_at: string }
+type CheckoutPayment = Payment & {
+  confirmation_in_flight: number; stripe_payment_intent_id: string; checkout_expires_at: string; return_expires_at: string
+  surcharge_basis_points: number | null; checkout_hold: string | null; stripe_customer_id: string | null
+  hold_starts_at: string | null; hold_ends_at: string | null; hold_timezone: string | null
+  hold_quantity: number | null; hold_conversation_id: string | null
+  product_kind: string | null; product_slug: string | null; location_slug: string | null; advance_notice_minutes: number | null
+  picture_placements: string | null
+}
+type CheckoutRead = 'claim' | 'handoff' | 'review' | 'settlement'
 
-async function readCheckoutPayment(db: DbClient, organizationId: string, paymentId: string, claim: string, now: string): Promise<CheckoutPayment> {
+const handoffProductId = `NULLIF(CASE WHEN json_type(p.price_snapshot_json,'$.stay') IS NOT NULL
+  THEN json_extract(p.price_snapshot_json,'$.stay.product_id')
+  WHEN json_type(p.price_snapshot_json,'$.product_id')='text' THEN json_extract(p.price_snapshot_json,'$.product_id') END, '')`
+const handoffLocationId = "NULLIF(COALESCE(h.location_id,p.location_id),'')"
+const handoffOwnerId = `COALESCE(${handoffProductId},${handoffLocationId})`
+const handoffPicturePlacements = mediaPlacementsQuery({
+  organizationId: { sql: 'p.organization_id' },
+  ownerType: { sql: `(CASE WHEN ${handoffProductId} IS NULL THEN 'business_location' ELSE 'product' END)` },
+  owners: { sql: `SELECT ${handoffOwnerId}` },
+  includeOrganizationFallback: true,
+})
+
+async function readCheckoutPayment(db: DbClient, organizationId: string, paymentId: string, claim: string, now: string, read: CheckoutRead): Promise<CheckoutPayment> {
   // A malformed claim is a 400 only for a checkout that exists on this site.
   const hash = /^[a-f0-9-]{72}$/u.test(claim) ? await tokenHash(claim) : null
-  const payment = await queryFirst<Payment & { confirmation_in_flight: number }>(db, `SELECT p.*,
-    EXISTS (SELECT 1 FROM payment_checkout_holds h WHERE h.payment_id=p.id AND h.organization_id=p.organization_id
-      AND h.status='active' AND h.expires_at>?
-      AND json_type(p.review_json,'$.confirmation_started_at')='text') AS confirmation_in_flight
-    FROM payments p WHERE p.id=? AND p.organization_id=? AND (? IS NULL OR p.return_token_hash=?)`, [now, paymentId, organizationId, hash, hash])
+  const handoff = read === 'handoff'
+  const pricing = handoff || read === 'review'
+  const payment = await queryFirst<CheckoutPayment>(db, `SELECT p.*,
+    CASE WHEN h.status='active' AND h.expires_at>? AND json_type(p.review_json,'$.confirmation_started_at')='text' THEN 1 ELSE 0 END AS confirmation_in_flight
+    ${pricing ? ', a.surcharge_basis_points' : ''}
+    ${read === 'settlement' ? `, (${checkoutHoldSql}) AS checkout_hold` : ''}
+    ${handoff ? `, customer.stripe_customer_id, h.starts_at AS hold_starts_at, h.ends_at AS hold_ends_at, h.timezone AS hold_timezone,
+      h.quantity AS hold_quantity, h.conversation_id AS hold_conversation_id,
+      product.kind AS product_kind, product.slug AS product_slug, location.slug AS location_slug, config.advance_notice_minutes,
+      CASE WHEN ${handoffOwnerId} IS NOT NULL THEN (
+        SELECT json_group_array(json_object('owner_type',owner_type,'slot',slot,'kind',kind,
+          'public_url',public_url,'thumbnail_url',thumbnail_url,'alt_text',alt_text))
+        FROM (${handoffPicturePlacements.query})
+      ) END AS picture_placements` : ''}
+    FROM payments p
+    LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id
+    ${pricing ? 'LEFT JOIN stripe_connected_accounts a ON a.organization_id=p.organization_id AND a.stripe_account_id=p.stripe_account_id AND a.livemode=p.livemode' : ''}
+    ${handoff ? `LEFT JOIN stripe_connected_customers customer ON customer.user_id=p.buyer_user_id AND customer.stripe_account_id=p.stripe_account_id AND customer.livemode=p.livemode
+      LEFT JOIN products product ON product.organization_id=p.organization_id
+        AND product.id=${handoffProductId}
+      LEFT JOIN product_booking_configs config ON config.organization_id=p.organization_id AND config.product_id=product.id
+      LEFT JOIN business_locations location ON location.organization_id=p.organization_id
+        AND location.id=${handoffLocationId}` : ''}
+    WHERE p.id=? AND p.organization_id=? AND (? IS NULL OR p.return_token_hash=?)`, [now, ...(handoff ? handoffPicturePlacements.params ?? [] : []), paymentId, organizationId, hash, hash])
   if (!payment) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
   if (hash === null) throw new HTTPError({ statusCode: 400, statusMessage: 'Purchase claim required' })
   if (!payment.stripe_payment_intent_id || !payment.checkout_expires_at || !payment.return_expires_at) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
-  return payment as CheckoutPayment
+  return payment
 }
 
 async function readCheckoutIntent(stripe: Stripe, payment: CheckoutPayment, now: string) {
@@ -55,9 +93,9 @@ async function readCheckoutIntent(stripe: Stripe, payment: CheckoutPayment, now:
 }
 
 /** The purchase its return token authorizes, with what Stripe says of its intent now. */
-export async function requireClaimedPayment(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string) {
+export async function requireClaimedPayment(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, read: Exclude<CheckoutRead, 'handoff'> = 'claim') {
   const now = new Date().toISOString()
-  const payment = await readCheckoutPayment(db, organizationId, paymentId, claim, now)
+  const payment = await readCheckoutPayment(db, organizationId, paymentId, claim, now, read)
   const stripe = paymentsStripe(env, Boolean(payment.livemode))
   return { payment, stripe, ...await readCheckoutIntent(stripe, payment, now) }
 }
@@ -100,41 +138,36 @@ function snapshotOf(payment: Payment) {
  * picture, the time it holds and what kind of booking it is. The time is the
  * checkout hold's — the one the purchase reserved.
  */
-async function handoffSubject(db: DbClient, organizationId: string, payment: Payment, snapshot: ReturnType<typeof snapshotOf>, state: PaymentHandoffState) {
+async function handoffSubject(db: DbClient, organizationId: string, payment: CheckoutPayment, snapshot: ReturnType<typeof snapshotOf>, state: PaymentHandoffState) {
   // A session's time is its hold's; a stay's nights are its purchase's.
   const slot = payment.subject_type === 'booking' && snapshot.stay === null
-  const hold = slot || snapshot.approval
-    ? await queryFirst<{ starts_at: string; ends_at: string; timezone: string; location_id: string | null; quantity: number; conversation_id: string | null }>(db, 'SELECT starts_at,ends_at,timezone,location_id,quantity,conversation_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, organizationId])
-    : null
-  if ((slot || snapshot.approval) && !hold?.conversation_id) throw new Error('Payment has no checkout conversation')
+  const heldSlot = slot || snapshot.approval
+  if (heldSlot && !payment.hold_conversation_id) throw new Error('Payment has no checkout conversation')
   let guest: GuestThreadPayload['guest'] | null = state === 'open' ? snapshot.stayGuest : null
-  if (state === 'open' && slot && hold) {
-    const request = hold.conversation_id ? await getGuestRequest(db, hold.conversation_id, organizationId, 'booking') : null
+  if (state === 'open' && slot && payment.hold_conversation_id) {
+    const request = await getGuestRequest(db, payment.hold_conversation_id, organizationId, 'booking')
     const contact = request?.kind === 'booking' ? request.payload.guest : null
     if (!contact?.name || !contact.email) throw new Error('Open checkout has no guest contact in its booking conversation')
     guest = { name: contact.name, email: contact.email, phone: contact.phone }
   }
   const productId = snapshot.stay?.product_id ?? snapshot.product_id
   // A payment outlives its product: a deleted product leaves its kind unknown, and the summary omits what depends on it.
-  const locationId = hold?.location_id ?? payment.location_id
-  const subject = productId || locationId ? await queryFirst<{ kind: string | null; product_slug: string | null; location_slug: string | null; advance_notice_minutes: number | null }>(db, `
-    SELECT p.kind,p.slug AS product_slug,l.slug AS location_slug,c.advance_notice_minutes
-    FROM (SELECT ? AS organization_id, ? AS product_id, ? AS location_id) chosen
-    LEFT JOIN products p ON p.id=chosen.product_id AND p.organization_id=chosen.organization_id
-    LEFT JOIN product_booking_configs c ON c.product_id=p.id AND c.organization_id=p.organization_id
-    LEFT JOIN business_locations l ON l.id=chosen.location_id AND l.organization_id=chosen.organization_id`, [organizationId, productId, locationId]) : null
   // Null once it has passed: paying now buys a booking that is already non-refundable. A stay's terms are its booked policy.
-  const freeUntil = hold ? freeCancellationUntil(hold.starts_at, subject?.advance_notice_minutes ?? null) : null
-  const [ownerType, ownerId] = productId ? ['product', productId] as const : ['business_location', hold?.location_id ?? payment.location_id] as const
-  const picture = ownerId ? (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null : null
+  const freeUntil = heldSlot && payment.hold_starts_at ? freeCancellationUntil(payment.hold_starts_at, payment.advance_notice_minutes) : null
+  const ownerType = productId ? 'product' : 'business_location'
+  const placements = payment.picture_placements
+    ? JSON.parse(payment.picture_placements) as (PicturePlacement & { owner_type: string })[]
+    : []
+  const picture = ownerPicture(ownerType, placements.filter(row => row.owner_type === ownerType), placements.filter(row => row.owner_type === 'organization'))
   return {
-    approved_stay_path: snapshot.approval && hold?.conversation_id ? accountActivityPath('stay', hold.conversation_id) : null,
-    kind: subject?.kind ?? (productId ? null : payment.subject_type), image_url: picture?.imageUrl ?? null, starts_at: hold?.starts_at ?? null, ends_at: hold?.ends_at ?? null, timezone: hold?.timezone ?? null,
+    approved_stay_path: snapshot.approval && payment.hold_conversation_id ? accountActivityPath('stay', payment.hold_conversation_id) : null,
+    kind: payment.product_kind ?? (productId ? null : payment.subject_type), image_url: picture?.imageUrl ?? null,
+    starts_at: heldSlot ? payment.hold_starts_at : null, ends_at: heldSlot ? payment.hold_ends_at : null, timezone: heldSlot ? payment.hold_timezone : null,
     // The party the booking is for: a table's deposit is one per booking, whatever the party.
-    party_size: hold?.quantity ?? null,
+    party_size: heldSlot ? payment.hold_quantity : null,
     billing_details: guest ? { name: guest.name, email: guest.email, ...(guest.phone ? { phone: guest.phone } : {}) } : null,
     // Where the offering's page is, so the buyer can read its full terms or change what they picked.
-    product_slug: subject?.product_slug ?? null, location_slug: subject?.location_slug ?? null,
+    product_slug: payment.product_slug, location_slug: payment.location_slug,
     free_cancellation_until: freeUntil && new Date().toISOString() <= freeUntil ? freeUntil : null,
   }
 }
@@ -142,7 +175,7 @@ async function handoffSubject(db: DbClient, organizationId: string, payment: Pay
 /** What the pay page needs to mount Stripe's Payment Element on the connected account. */
 export async function paymentHandoff(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string) {
   const now = new Date().toISOString()
-  const payment = await readCheckoutPayment(db, organizationId, paymentId, claim, now)
+  const payment = await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'handoff')
   const keys = paymentsStripeKeys(env, Boolean(payment.livemode))
   if (!keys?.publishableKey) throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe is not configured' })
   const stripe = createStripeClient(keys.secretKey, 'payments')
@@ -152,12 +185,10 @@ export async function paymentHandoff(db: DbClient, env: CloudflareEnv, organizat
   if (intent.metadata.krabiclaw_payment_id !== payment.id) throw new Error('Stripe PaymentIntent does not match the purchase')
   // Stripe's own saved-card features for a signed-in buyer, scoped to this business's customer.
   let customerSession: string | null = null
-  if (state === 'open' && payment.buyer_user_id) {
-    const customer = await connectedBuyerCustomer(db, stripe, payment.buyer_user_id, payment.stripe_account_id, Boolean(payment.livemode))
-    if (customer) {
-      const session = await stripe.customerSessions.create({ customer: customer.customerId, components: { payment_element: { enabled: true, features: { payment_method_save: 'enabled', payment_method_save_usage: 'off_session', payment_method_redisplay: 'enabled', payment_method_redisplay_limit: 10, payment_method_remove: 'enabled' } } } }, { stripeAccount: payment.stripe_account_id })
-      customerSession = session.client_secret
-    }
+  const customerId = typeof intent.customer === 'string' ? intent.customer : intent.customer?.id
+  if (state === 'open' && customerId && payment.stripe_customer_id === customerId) {
+    const session = await stripe.customerSessions.create({ customer: customerId, components: { payment_element: { enabled: true, features: { payment_method_save: 'enabled', payment_method_save_usage: 'off_session', payment_method_redisplay: 'enabled', payment_method_redisplay_limit: 10, payment_method_remove: 'enabled' } } } }, { stripeAccount: payment.stripe_account_id })
+    customerSession = session.client_secret
   }
   return {
     payment_id: payment.id, state, title: snapshot.title, quantity: snapshot.quantity, unit_amount: snapshot.unit_amount, stay: snapshot.stay,
@@ -165,7 +196,7 @@ export async function paymentHandoff(db: DbClient, env: CloudflareEnv, organizat
     stripe_account_id: payment.stripe_account_id, publishable_key: keys.publishableKey, payment_method_types: intent.payment_method_types,
     customer_session_client_secret: customerSession,
     bank_verification_url: state === 'verifying' ? bankVerificationUrl(intent) : null,
-    surcharge_basis_points: await surchargeBasisPoints(db, organizationId, payment.stripe_account_id),
+    surcharge_basis_points: validatedSurchargeBasisPoints(payment.surcharge_basis_points),
   }
 }
 
@@ -201,12 +232,12 @@ export async function cancelStayPayment(db: DbClient, env: CloudflareEnv, organi
  * carries none. Stripe's answer missing is an error, never a free payment.
  */
 export async function reviewPayment(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, paymentMethodId: string, buyerIp: string | null) {
-  const { payment, stripe, intent: current, state, confirming } = await requireClaimedPayment(db, env, organizationId, paymentId, claim)
+  const { payment, stripe, intent: current, state, confirming } = await requireClaimedPayment(db, env, organizationId, paymentId, claim, 'review')
   if (confirming) throw new HTTPError({ statusCode: 409, statusMessage: 'This payment is already in progress', data: { code: 'payment_in_progress' } })
   if (state !== 'open') throw new HTTPError({ statusCode: 409, statusMessage: state === 'paid' ? 'This payment is already complete' : state === 'processing' || state === 'verifying' ? 'This payment is already in progress' : state === 'expired' ? 'This payment has expired; start the booking again' : 'This payment was not accepted; start the booking again', data: { code: `payment_${state}` } })
   if (!/^pm_[A-Za-z0-9]+$/u.test(paymentMethodId)) throw new HTTPError({ statusCode: 400, statusMessage: 'Payment method required' })
   const snapshot = snapshotOf(payment)
-  const rate = await surchargeBasisPoints(db, organizationId, payment.stripe_account_id)
+  const rate = validatedSurchargeBasisPoints(payment.surcharge_basis_points)
   const method = await stripe.paymentMethods.retrieve(paymentMethodId, {}, { stripeAccount: payment.stripe_account_id })
   const tax = snapshot.automatic_tax ? await calculateTax(stripe, payment, snapshot, method, buyerIp) : null
   const amount = tax?.amount_total ?? payment.amount
@@ -265,7 +296,8 @@ async function calculateTax(stripe: Stripe, payment: Payment, snapshot: ReturnTy
  * Every path settles idempotently from Stripe's own status.
  */
 export async function confirmPayment(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, input: { payment_method_id: string; total: number }, siteOrigin: string) {
-  const { payment, stripe, intent: current, state, confirming } = await requireClaimedPayment(db, env, organizationId, paymentId, claim)
+  const { payment, stripe, intent: current, state, confirming } = await requireClaimedPayment(db, env, organizationId, paymentId, claim, 'settlement')
+  const hold = payment.checkout_hold ? JSON.parse(payment.checkout_hold) as CheckoutHold : null
   if (confirming) throw new HTTPError({ statusCode: 409, statusMessage: 'This payment is already in progress', data: { code: 'payment_in_progress' } })
   if (state !== 'open') throw new HTTPError({ statusCode: 409, statusMessage: state === 'paid' ? 'This payment is already complete' : state === 'processing' || state === 'verifying' ? 'This payment is already in progress' : 'This payment can no longer be confirmed; start the booking again', data: { code: `payment_${state}` } })
   const review = parseReview(payment.review_json)
@@ -281,7 +313,6 @@ export async function confirmPayment(db: DbClient, env: CloudflareEnv, organizat
   let confirmingPayment = payment
   const expiresAt = confirmationHoldUntil(payment, approval ? started : undefined)
   if (approval) {
-    const hold = await queryFirst<{ conversation_id: string | null; buyer_user_id: string | null }>(db, 'SELECT conversation_id,buyer_user_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, organizationId])
     if (!stay || !hold?.conversation_id || !hold.buyer_user_id) throw new Error('Approved stay payment has no stay or guest conversation')
     const bookable = await approvedStayPaymentPredicate(db, {
       ...approval, organizationId, productId: stay.product_id, checkIn: stay.check_in_date, checkOut: stay.check_out_date,
@@ -323,7 +354,7 @@ export async function confirmPayment(db: DbClient, env: CloudflareEnv, organizat
     } as Stripe.PaymentIntentConfirmParams, { stripeAccount: payment.stripe_account_id, idempotencyKey: `krabiclaw-confirm:${payment.id}:${review.reviewed_at}` })
   } catch (error) {
     if (approval && error instanceof stripe.errors.StripeCardError && error.payment_intent) {
-      await reconcilePaymentIntent(db, stripe, confirmingPayment, error.payment_intent, env)
+      await reconcilePaymentIntent(db, stripe, confirmingPayment, error.payment_intent, env, hold)
     } else if (approval && (error instanceof stripe.errors.StripeAuthenticationError || error instanceof stripe.errors.StripePermissionError ||
       (error instanceof stripe.errors.StripeInvalidRequestError && error.statusCode === 400 && error.code !== 'payment_intent_unexpected_state'
         && (error.param || error.code?.startsWith('parameter_')))) && error.headers?.['stripe-should-retry'] !== 'true') {
@@ -331,7 +362,7 @@ export async function confirmPayment(db: DbClient, env: CloudflareEnv, organizat
     }
     throw error
   }
-  const settled = await reconcilePaymentIntent(db, stripe, confirmingPayment, confirmed, env)
+  const settled = await reconcilePaymentIntent(db, stripe, confirmingPayment, confirmed, env, hold)
   // Automatic confirmation lets whoever holds this secret confirm the intent, so only a payment that needs the browser gets it. Bank verification happens on Stripe's own page.
   const verifying = settled.next_action?.type === 'verify_with_microdeposits'
   const authenticating = settled.status === 'requires_action' && !verifying
@@ -353,15 +384,9 @@ export type PaymentReturn =
   /** What it was for has gone, so the authorization was cancelled and nothing was charged. */
   | { state: 'expired' }
 
-async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment): Promise<PaymentReturn> {
-  const receipt = await queryFirst<{ status: string | null; session_id: string | null; refunded_amount: number; conversation_id: string | null }>(db, `
-    SELECT h.status,h.session_id,p.refunded_amount,c.id AS conversation_id
-    FROM payments p
-    LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id
-    LEFT JOIN conversations c ON c.booking_id=h.converted_booking_id AND c.organization_id=p.organization_id AND c.kind='booking'
-    WHERE p.id=? AND p.organization_id=?`, [payment.id, payment.organization_id])
-  if (!receipt) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
-  if (!receipt.status) throw new Error('Captured payment has no checkout hold')
+async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment, hold: CheckoutHold | null): Promise<PaymentReturn> {
+  const receipt = hold?.status === 'converted' ? hold : await readCheckoutHold(db, payment)
+  if (!receipt) throw new Error('Captured payment has no checkout hold')
   if (receipt.status !== 'converted') {
     if (receipt.refunded_amount > 0) return { state: 'refunded' }
     // A bank debit that cleared after its capacity went is refunded in full; Stripe may still be settling that refund.
@@ -371,15 +396,14 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
     throw new Error('Captured payment has no booking it paid for')
   }
   if (payment.subject_type !== 'booking') throw new Error(`Payment subject ${payment.subject_type} has no guest confirmation`)
-  const conversationId = receipt.conversation_id
+  const conversationId = receipt.receipt_conversation_id
   if (!conversationId) throw new Error('Converted hold has no booking conversation')
   if (receipt.session_id === null) {
     // A stay is read by its conversation, as the guest's account reads it.
     return { state: 'paid', kind: 'stay', activity_id: conversationId, receipt_token: (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', conversationId)).token }
   }
-  const request = await getGuestRequest(db, conversationId, payment.organization_id, 'booking')
   const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', conversationId)
-  if (!request || request.kind !== 'booking' || await hashReservationCancelToken(cancellation.token) !== request.payload.cancellation.token_hash) throw new Error('Paid booking is missing its receipt capability')
+  if (await hashReservationCancelToken(cancellation.token) !== receipt.receipt_cancellation_hash) throw new Error('Paid booking is missing its receipt capability')
   return { state: 'paid', kind: 'booking', conversation_id: conversationId, cancellation_token: cancellation.token }
 }
 
@@ -389,25 +413,23 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
  * buyer and its receipt is named; a payment still clearing claims nothing.
  */
 export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, buyer: () => Promise<string>): Promise<PaymentReturn> {
-  const { payment, stripe, intent, confirming } = await requireClaimedPayment(db, env, organizationId, paymentId, claim)
+  const { payment, stripe, intent, confirming } = await requireClaimedPayment(db, env, organizationId, paymentId, claim, 'settlement')
+  const hold = payment.checkout_hold ? JSON.parse(payment.checkout_hold) as CheckoutHold : null
   if (intent.livemode !== Boolean(payment.livemode) || intent.metadata.krabiclaw_payment_id !== payment.id) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
   if (confirming) {
-    const settled = await reconcilePaymentIntent(db, stripe, payment, intent, env)
+    const settled = await reconcilePaymentIntent(db, stripe, payment, intent, env, hold)
     if (settled.status === 'requires_payment_method' && settled.last_payment_error) {
       throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe declined this payment', data: { code: 'payment_declined' } })
     }
     return { state: 'processing' }
   }
   if (intent.status !== 'succeeded' && intent.status !== 'processing' && intent.status !== 'requires_capture') throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
-  const settled = await reconcilePaymentIntent(db, stripe, payment, intent, env)
+  const settled = await reconcilePaymentIntent(db, stripe, payment, intent, env, hold)
   if (settled.status === 'processing') return { state: 'processing' }
   if (settled.status !== 'succeeded') return { state: 'expired' }
   // The approval checkout began in the buyer's account; the business's site may have a different browser session.
   const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
   if (!isRecord(snapshot)) throw new Error('Payment has no frozen purchase')
-  if (!approvedStayBooking(snapshot)) await claimCheckoutReturn(db, await buyer(), claim)
-  const charge = typeof intent.latest_charge === 'string' ? null : intent.latest_charge
-  // The capture alert names the buyer who has now proved the purchase; the event key makes it the same alert.
-  await publishPaymentNotification(env, payment, { kind: 'payment_captured', nativeId: settled.id, status: settled.status, amount: settled.amount_received, email: charge?.billing_details.email ?? null })
-  return paymentReceipt(db, env, payment)
+  if (!approvedStayBooking(snapshot)) await claimCheckoutReturn(db, await buyer(), claim, { ...payment, captured_amount: settled.amount_received })
+  return paymentReceipt(db, env, payment, hold)
 }

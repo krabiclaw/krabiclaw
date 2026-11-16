@@ -143,7 +143,7 @@ export async function createInquiry(event: H3Event, input: { organizationId: str
 
   // The person is the Better Auth user; what they typed stays on the thread as
   // this message's guest snapshot and is never copied onto that user.
-  const userId = operator ? null : await ensureInteractionUser(event, env)
+  const userId = operator ? null : (await ensureInteractionUser(event, env)).id
   const now = new Date().toISOString()
   try {
     await executeBatch(db, requestInsertQueries({ id, kind: 'contact', organization_id: organization.id, location_id: assignedLocationId,

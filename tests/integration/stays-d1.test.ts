@@ -28,7 +28,9 @@ import paymentReviewRoute from '../../server/api/public/payments/[payment_id]/re
 import { createProductBooking, notifyProductBookingCreated } from '../../server/domain/product-bookings.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getThreadOperationalRecord, requestActions } from '../../server/domain/requests.ts'
-import { cancelStayAsGuest, createStayRequest, dispatchStayCheckoutDeadlines } from '../../server/domain/stays.ts'
+import { cancelStayAsGuest, createStayRequest, dispatchStayCheckoutDeadlines, readPublicStayHome } from '../../server/domain/stays.ts'
+import { bookingPolicy } from '../../server/utils/booking-policy-summary.ts'
+import { requireBookingConfig } from '../../server/utils/availability.ts'
 import { projectStripeConnectedAccount, reserveStripeConnectedAccount } from '../../server/utils/stripe-connect.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[payment_id]/return.post.ts'
 import { tokenHash } from '../../server/domain/payments/buyer.ts'
@@ -1783,14 +1785,13 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     const checkoutSigned = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
     const checkoutGuest = checkoutSigned.response!.user.id
     const checkoutCookie = checkoutSigned.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
-    // The checkout as Stripe's capture finds it: the payment captured, its hold not yet converted. The return
-    // reconciles the payment, which runs the real conversion that makes the checkout guest's stay.
+    // Stripe has authorized the card. The return converts the hold into the checkout guest's stay and captures the authorization.
     const nightly = ['2026-11-01', '2026-11-02', '2026-11-03'].map(date => ({ date, price_minor: 15_000 }))
     const purchase = { product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', check_in_date: '2026-11-01', check_out_date: '2026-11-04', adults: 2, children: 0, infants: 0, total_minor: 45_000, currency: 'USD', cancellation_policy: 'moderate', nightly, guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null } } as const
     // The terms the checkout froze with its purchase.
-    const policy = JSON.parse(await stayCheckoutPolicy(db, ORG, { ...purchase, tax_behavior: 'unspecified' }))
+    const policy = stayCheckoutPolicy(bookingPolicy(await requireBookingConfig(db, ORG, purchase.product_id), null), { ...purchase, tax_behavior: 'unspecified' })
     await db.prepare(`INSERT INTO payments (id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,captured_amount,stripe_payment_intent_id,price_snapshot_json,created_at,updated_at)
-      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'booking', NULL, 'cabin-site', 'USD', 45000, 45000, 'pi_stay-pay', ?, ?, ?)`).bind(ORG, checkoutGuest, JSON.stringify({ title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD' }, method_configuration_id: 'pmc_test', stay: purchase, policy }), NOW, NOW).run()
+      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'booking', NULL, 'cabin-site', 'USD', 45000, 0, 'pi_stay-pay', ?, ?, ?)`).bind(ORG, checkoutGuest, JSON.stringify({ title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD' }, method_configuration_id: 'pmc_test', stay: purchase, policy }), NOW, NOW).run()
     await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, location_id, timezone, buyer_user_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, converted_booking_id, expires_at, created_at)
       VALUES ('stay-hold', ?, ?, 'cabin-site', 'America/Denver', ?, 'stay-pay', 2, 45000, 'USD', '2026-11-01', '2026-11-04', 'active', NULL, '2099-01-01T00:00:00.000Z', ?)`).bind(ORG, cabin.id, checkoutGuest, NOW).run()
     const claim = crypto.randomUUID() + crypto.randomUUID()
@@ -2189,9 +2190,9 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
     await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
     const date = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
     const submit = async (key: string, offset: number) => {
-      const listing = await readStayHome(db, manager, cabin.id)
+      const listing = await readPublicStayHome(db, ORG, cabin.id)
       const quote = await quoteStay(db, ORG, listing, { check_in_date: date(offset), check_out_date: date(offset + 2), adults: 2 })
-      return createStayRequest(db, env, { organizationId: ORG, buyerUserId: OUTSIDER, key, fingerprint: key, home: listing, quote,
+      return createStayRequest(db, env, { organizationId: ORG, buyerUserId: OUTSIDER, key, fingerprint: key, home: listing, quote, policy: stayCheckoutPolicy(listing.guestTerms, quote),
         guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null }, locale: 'en', ipHash: 'proof', websiteSource: 'Direct' })
     }
     const decide = (stay: Awaited<ReturnType<typeof submit>>, action: 'confirm' | 'reject', suffix = '') => executeGuestThreadOperation(db, {

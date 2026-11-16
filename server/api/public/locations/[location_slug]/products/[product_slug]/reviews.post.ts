@@ -47,7 +47,7 @@ export default defineHandler(async (event) => {
     `, [organizationId, resolved.location.id, resolved.product.id, ipHash, author, rating, title, content])
     const id = resubmitted?.id ?? crypto.randomUUID()
     if (!resubmitted) {
-      const userId = await ensureInteractionUser(event, env)
+      const { id: userId } = await ensureInteractionUser(event, env)
       await execute(db, `
         INSERT INTO reviews (id, organization_id, location_id, product_id, user_id, author_name, rating, title, content, status, ip_hash, user_agent)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

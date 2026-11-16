@@ -159,12 +159,6 @@ export function turnoverHomeColumns(checkIn: string): string {
   return Object.entries(turnoverHomeFields(checkIn)).map(([key, value]) => `${value} AS ${key}`).join(', ')
 }
 
-/** Carry the same facts when the caller's primary read is a booking or hold. */
-export function turnoverHomeSql(organization: string, product: string, checkIn: string): string {
-  const fields = Object.entries(turnoverHomeFields(checkIn)).map(([key, value]) => `'${key}', ${value}`).join(', ')
-  return `(SELECT json_object(${fields}) FROM ${TURNOVER_HOME_FROM} WHERE c.organization_id = ${organization} AND c.product_id = ${product})`
-}
-
 type TurnoverAnchor = Pick<StayWindow, 'product_id' | 'check_in_date'>
 type TurnoverChange = { organizationId: string; before: TurnoverAnchor | null; after: TurnoverAnchor }
 
@@ -189,7 +183,7 @@ export function readTurnoverHomes(db: DbClient, change: TurnoverChange): Promise
  * the next arrival.
  * `before` is the stay as it was, null when the write creates it.
  */
-export function turnoverTaskQueries(input: TurnoverChange & { after: StayWindow; now: string; homes: TurnoverHome[] }): BatchQuery[] {
+export function turnoverTaskQueries(input: TurnoverChange & { after: StayWindow; now: string; homes: TurnoverHome[] }) {
   const { organizationId, after, now, homes } = input
   const afterHome = homes.find(home => home.product_id === after.product_id)
   if (!afterHome) throw new Error(`Home ${after.product_id} has no stay settings`)
@@ -245,7 +239,9 @@ export function turnoverTaskQueries(input: TurnoverChange & { after: StayWindow;
       params: [now, now, `turnover:${after.id}`, ...guard.params!],
     })
   }
-  return queries
+  const keys = [...windows.keys()].map(id => `turnover:${id}`)
+  if (after.status !== 'confirmed') keys.push(`turnover:${after.id}`)
+  return { queries, keys }
 }
 
 /**

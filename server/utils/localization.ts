@@ -113,15 +113,20 @@ export async function getPersistedSourceLocale(
      WHERE organization_id = ?  AND is_source = 1
      ORDER BY id
   `, [organizationId])
-  const source = rows.length === 1 ? rows[0] : undefined
-  if (!source || source.status !== 'published' || !platformLocale(source.locale)) {
+  const source = rows.length === 1 ? rows[0]! : null
+  requireSourceLocale(organizationId, source?.locale ?? null, source?.status ?? null)
+  return { ...source!, is_source: true }
+}
+
+export function requireSourceLocale(organizationId: string, locale: string | null, status: string | null): string {
+  if (locale === null || status !== 'published' || !platformLocale(locale)) {
     throw new HTTPError({
       statusCode: 500,
       statusMessage: 'Organization source locale integrity check failed',
       data: { code: 'ORGANIZATION_SOURCE_LOCALE_INTEGRITY', organization_id: organizationId },
     })
   }
-  return { ...source, is_source: Boolean(source.is_source) }
+  return locale
 }
 
 export async function listOrganizationLocaleRecords(

@@ -22,6 +22,8 @@ import { requestInsertQueries } from '../../server/domain/requests.ts'
 import { appendMessage, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { archiveConversation } from '../../server/domain/guest-threads/repository.ts'
 import { stayCheckoutPolicy, stayFromCheckoutQueries } from '../../server/domain/stays.ts'
+import { bookingPolicy } from '../../server/utils/booking-policy-summary.ts'
+import { requireBookingConfig } from '../../server/utils/availability.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 /*
@@ -178,7 +180,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
       VALUES ('site-pay', ?, 'site-guest', 'acct_contract', 0, 'booking', NULL, 'location', 'USD', 45000, 45000, 'pi_site', ?, ?, ?)`).bind(ORG, JSON.stringify({ stay: purchase }), NOW, NOW).run()
     const variant = (await db.prepare('SELECT id FROM product_variants WHERE product_id = ?').bind(home.id).first<{ id: string }>())!
     await executeBatch(db, stayFromCheckoutQueries({ organizationId: ORG, stayId: 'site-stay', holdId: 'site-hold', paymentId: 'site-pay', buyerUserId: 'site-guest', now: NOW, websiteSource: 'Direct',
-      stay: { quote: purchase, guest: purchase.guest }, policy: await stayCheckoutPolicy(db, ORG, { ...purchase, tax_behavior: 'unspecified' }),
+      stay: { quote: purchase, guest: purchase.guest }, policy: JSON.stringify(stayCheckoutPolicy(bookingPolicy(await requireBookingConfig(db, ORG, purchase.product_id), null), { ...purchase, tax_behavior: 'unspecified' })),
       home: { name: home.name, location_id: 'location', timezone: 'America/Denver', check_in_time: '16:00', check_out_time: '10:00', variant_id: variant.id } }))
     const siteThreadId = (await db.prepare("SELECT id FROM conversations WHERE booking_id = 'site-stay' AND kind = 'booking'").first<{ id: string }>())!.id
     // A question through the contact form that nobody has written in for 30 days: past by the rule, not archived.
