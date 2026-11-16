@@ -617,7 +617,7 @@ test.describe('OAuth discovery endpoints', () => {
       expect(body.result?.resultType).toBe('complete')
       expect(body.result?.isError).toBe(true)
       expect(body.result?.structuredContent).toBeUndefined()
-      expect(body.result?._meta?.['io.modelcontextprotocol/serverInfo']).toEqual({ name: 'krabiclaw-mcp', title: 'Blawby', version: 'phase-5' })
+      expect(body.result?._meta?.['io.modelcontextprotocol/serverInfo']).toEqual({ name: 'krabiclaw-mcp', version: 'phase-5' })
       const resourceMetadata = new URL('/.well-known/oauth-protected-resource/api/mcp', baseURL!).href
       const challenges = body.result?._meta?.['mcp/www_authenticate'] as string[]
       expect(challenges).toHaveLength(1)
@@ -625,7 +625,7 @@ test.describe('OAuth discovery endpoints', () => {
       expect(challenges[0]).toContain('error="invalid_token"')
       expect(challenges[0]).toContain('error_description=')
       if (credential === 'missing') expect(challenges).toEqual([
-        `Bearer resource_metadata="${resourceMetadata}", error="invalid_token", error_description="Authentication required: connect Blawby to continue."`,
+        `Bearer resource_metadata="${resourceMetadata}", error="invalid_token", error_description="Authentication required: connect KrabiClaw to continue."`,
       ])
     })
   }

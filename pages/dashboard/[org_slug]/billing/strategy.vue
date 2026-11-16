@@ -35,7 +35,7 @@ import { SERVICES, SERVICE_PRICES } from '~/shared/billing-model'
 import { isServices, useOrganizationBilling, useOrganizationServices } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'SEO and marketing strategy | Blawby', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'SEO and marketing strategy | KrabiClaw', robots: 'noindex, nofollow' })
 
 const serviceOffer = offer('strategy')
 const dashboard = useDashboardOrganization()

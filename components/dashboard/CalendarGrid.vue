@@ -108,7 +108,7 @@
                   :data-channel="bar.channel"
                   :data-booked="bar.date"
                 >
-                  <img v-if="bar.channel === 'direct'" src="/platform/blawby.svg" alt="" class="size-3.5 shrink-0">
+                  <img v-if="bar.channel === 'direct'" src="/platform/krabiclaw-symbol.svg" alt="" class="size-3.5 shrink-0">
                   <UIcon v-else-if="bar.channel === 'airbnb'" name="i-simple-icons-airbnb" class="size-3.5 shrink-0" />
                   <span v-else-if="bar.channel" class="shrink-0 font-bold" aria-hidden="true">{{ CHANNEL_BARS[bar.channel].mark }}</span>
                   <span class="truncate">{{ bar.label }}</span>

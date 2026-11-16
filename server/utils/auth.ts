@@ -64,7 +64,7 @@ export function oauthSigningConfig(authBaseUrl: string) {
     resources: [
       {
         identifier: `${authBaseUrl}/api/mcp`,
-        name: 'Blawby',
+        name: 'KrabiClaw tenant MCP',
         allowedScopes: ['openid', 'email', 'offline_access', 'tenant'],
         signingAlgorithm: OAUTH_SIGNING_POLICY.algorithm,
       },
@@ -186,8 +186,6 @@ export interface CloudflareEnv {
   CLOUDFLARE_API_TOKEN?: string
   CLOUDFLARE_IMAGES_API_TOKEN?: string
   CF_ZONE_ID?: string
-  CF_PLATFORM_ZARAZ_ZONE_ID?: string
-  OPENAI_APPS_CHALLENGE_BLAWBY_B64?: string
   CF_CUSTOM_HOSTNAMES_API_TOKEN?: string
   CF_SAAS_CNAME_TARGET?: string
   NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN?: string
@@ -211,7 +209,6 @@ export interface CloudflareEnv {
   RESEND_PRODUCT_NEWS_TOPIC_ID?: string
   EMAIL_FROM?: string
   EMAIL_DELIVERY_MODE?: string
-  EMAIL_REPLY_DOMAIN?: string
   EMAIL_REPLY_SECRET?: string
   MEDIA_BUCKET?: R2Bucket
   ORGANIZATION_CACHE?: KVNamespace

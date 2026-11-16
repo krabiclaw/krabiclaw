@@ -7,14 +7,14 @@ import { TENANT_TYPES } from '~/utils/tenant-routing'
 import { BASIC_HOMES, BUSINESS_PLAN_ID, homePrice, nextHomePrice, PAYMENTS_FEE, pricingNotice, SERVICES } from '~/shared/billing-model'
 import { PRICING_COMPARISON, comparisonValue } from '~/shared/pricing-comparison'
 import { getPublishedTenantPage } from '~/server/utils/content/pages'
-import { renderContentBlocksForLlm, resolvePublicOrigin } from '~/server/utils/platform-llm'
+import { renderContentBlocksForLlm } from '~/server/utils/platform-llm'
 
-export function renderPlansMarkdown(plans: Plan[], origin: string): string {
+export function renderPlansMarkdown(plans: Plan[]): string {
   const betaSpotsLeft = plans.find(plan => plan.beta_spots_left !== undefined)?.beta_spots_left ?? 0
   const lines: string[] = [
-    '# Blawby Pricing & Plans',
+    '# KrabiClaw Pricing & Plans',
     '',
-    '> Transparent pricing for the Blawby conversational AI website builder.',
+    '> Transparent pricing for the KrabiClaw conversational AI website builder.',
     '',
     pricingNotice(betaSpotsLeft),
     '',
@@ -62,13 +62,13 @@ export function renderPlansMarkdown(plans: Plan[], origin: string): string {
   }
   lines.push('')
   lines.push('## Add-ons')
-  lines.push('Services from Blawby\'s own people, added to a paid plan from Plan and billing.')
+  lines.push('Services from KrabiClaw\'s own people, added to a paid plan from Plan and billing.')
   for (const service of [SERVICES.managed_ads, SERVICES.strategy]) {
     lines.push(`- **${service.name}**: ${service.price}. ${service.description} ${service.billing}`)
   }
   lines.push('')
   lines.push('---')
-  lines.push(`For questions, documentation, or custom enterprise requirements, visit ${origin}/docs or contact hello@krabiclaw.com.`)
+  lines.push('For questions, documentation, or custom enterprise requirements, visit https://krabiclaw.com/docs or contact hello@krabiclaw.com.')
   lines.push('')
 
   return lines.join('\n')
@@ -100,5 +100,5 @@ export default defineHandler(async (event) => {
   // The beta spots left change as businesses subscribe, so a copy is kept no longer than the page's own.
   setHeader(event, 'cache-control', 'public, max-age=300')
   const content = renderContentBlocksForLlm(page.blocks.map(block => ({ ...block, level: block.level ?? null })))
-  return textResponse(`${renderPlansMarkdown(plans, resolvePublicOrigin(event))}\n${content}\n`, {}, 'text/markdown; charset=utf-8')
+  return textResponse(`${renderPlansMarkdown(plans)}\n${content}\n`, {}, 'text/markdown; charset=utf-8')
 })

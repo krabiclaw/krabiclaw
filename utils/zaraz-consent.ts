@@ -14,10 +14,7 @@ export const ZARAZ_ANALYTICS_PURPOSE = {
   description: `${english.legal.analytics_notice} ${english.legal.analytics_notice_link}.`,
 }
 
-export function zarazConsentModalIntroHtml(platformOrigin: string) {
-  const privacyUrl = new URL('/policies/privacy', platformOrigin)
-  return `${english.legal.analytics_notice} <a href="${privacyUrl.href}">${english.legal.analytics_notice_link}</a>.`
-}
+export const ZARAZ_CONSENT_MODAL_INTRO_HTML = `${english.legal.analytics_notice} <a href="https://krabiclaw.com/policies/privacy">${english.legal.analytics_notice_link}</a>.`
 
 /**
  * The event name the collector sends to Zaraz once the native pageview is accepted. The GA4

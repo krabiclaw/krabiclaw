@@ -75,7 +75,7 @@ const service = computed(() => route.query.service === 'managed-ads' || route.qu
 const servicePath = computed(() => service.value ? `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/billing/${service.value}` : undefined)
 const onStarter = computed(() => billing.value?.plan === STARTER_PLAN_ID && !billing.value.stripeSubscriptionId)
 const title = computed(() => onStarter.value && service.value !== 'managed-ads' ? 'Choose a plan' : 'Upgrade to Business')
-useSeoMeta({ title: () => `${title.value} | Blawby`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${title.value} | KrabiClaw`, robots: 'noindex, nofollow' })
 
 // Business has nothing above it, and a plan already changing has no second change to start.
 watchEffect(() => {

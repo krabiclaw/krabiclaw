@@ -24,7 +24,7 @@ export async function seedPlatform(owner: SeedClient, platformOrganizationId: st
     await tool('set_media', { placement: { owner_type: 'content_block', owner_id: hero.id, slot }, asset_id: artwork.id })
   }
 
-  for (const [path, title] of [['/plugin', 'Blawby for your AI assistant'], ['/products', 'Your website is just the beginning']]) {
+  for (const [path, title] of [['/plugin', 'KrabiClaw for your AI assistant'], ['/products', 'Your website is just the beginning']]) {
     await tool('create_site_page', { path, title, page_type: 'custom', locale: 'en', blocks: [{ type: 'hero', data: { title } }] })
   }
   await tool('create_site_page', {

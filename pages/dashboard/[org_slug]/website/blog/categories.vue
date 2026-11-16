@@ -61,7 +61,7 @@ import { getErrorMessage } from '~/utils/errors'
 
 definePageMeta({ layout: 'dashboard', key: route => String(route.params.org_slug) })
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
-useSeoMeta({ title: 'Categories | Blawby Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Categories | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 
 const dashboardApi = useDashboardApi()
 const route = useRoute()

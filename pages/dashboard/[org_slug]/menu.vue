@@ -34,7 +34,7 @@ import DashboardMenuContent from '~/lib/components/workspace/dashboard/Dashboard
 import { dashboardSearchOpenKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu' })
-useSeoMeta({ title: 'Menu | Blawby Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Menu | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 
 const openDashboardSearch = inject(dashboardSearchOpenKey)!
 </script>

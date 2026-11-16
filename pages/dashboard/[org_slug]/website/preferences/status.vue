@@ -22,7 +22,7 @@
       Whether the website is public. Search engines follow from this: a Live
       site is indexed and a Draft one is not, so there is no second switch.
     -->
-    <UAlert v-if="suspended" color="error" variant="soft" icon="i-lucide-lock" title="Suspended" description="Blawby has suspended this website. Contact support to restore it." />
+    <UAlert v-if="suspended" color="error" variant="soft" icon="i-lucide-lock" title="Suspended" description="KrabiClaw has suspended this website. Contact support to restore it." />
 
     <div v-else class="space-y-4" role="radiogroup" aria-label="Website status">
       <button

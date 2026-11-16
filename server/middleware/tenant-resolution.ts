@@ -264,8 +264,6 @@ export default defineHandler(async (event) => {
   }
 
   const url = event.url;
-  // Domain verification belongs to the request host and does not read a site.
-  if (url.pathname === '/.well-known/openai-apps-challenge') return;
   const tenantPath = normalizedPath(url.pathname);
   // Diagnostics must still reach operational logs when tenant/D1 resolution fails.
   if (tenantPath === BROWSER_ERROR_PATH) return;

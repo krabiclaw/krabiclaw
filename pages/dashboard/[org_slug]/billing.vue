@@ -68,7 +68,7 @@ import { SERVICE_PRICES, SERVICES, STARTER_PLAN_ID, isNewSalePlan } from '~/shar
 import { cardBrandLabel, useHomesQuote, useOrganizationBilling, useOrganizationServices, usePaymentMethods } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
-useSeoMeta({ title: 'Plan and billing | Blawby', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Plan and billing | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const router = useRouter()

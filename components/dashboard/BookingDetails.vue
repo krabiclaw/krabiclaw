@@ -46,7 +46,7 @@
           :description="`Booked as ${detail.booked_home_name} on ${channelName}. These nights are held on the home the guest moved to.`"
           :actions="[{ label: 'Undo move', color: 'neutral', variant: 'outline', loading: busy === 'undo_move', onClick: undoMove }]"
         />
-        <UAlert v-if="!personalScope && guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in Blawby, which requires a guest name, but it has none." />
+        <UAlert v-if="!personalScope && guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in KrabiClaw, which requires a guest name, but it has none." />
         <div class="flex flex-col items-center pb-12 text-center" :class="recordImage ? 'pt-2' : 'pt-10'">
           <img v-if="recordImage" :src="recordImage" alt="" class="aspect-square w-full max-w-80 rounded-2xl bg-elevated object-cover" :class="!personalScope && !purchase && recordGuestName ? '' : 'mb-6'">
           <div v-if="!personalScope && !purchase && recordGuestName" class="relative mx-auto mb-6 shrink-0 md:mb-8" :class="[recordImage ? '-mt-12 md:-mt-14' : '', partySize && partySize > 1 ? 'h-30 w-35 md:h-40 md:w-46' : 'size-27 md:size-36']">

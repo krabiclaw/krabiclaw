@@ -702,7 +702,7 @@ test('one provider\'s online offerings exclude overlapping pending requests and 
     assert.equal((await savedPlaces(db, env, inputs[1 - index]!.sessionId)).is_full, true)
     assert.equal((await savedPlaces(db, env, 'session-adjacent')).remaining, 1)
     assert.equal((await savedPlaces(db, env, 'session-independent')).remaining, 1)
-    const confirm = { threadId: winner.requestId, organizationId: ORG, action: 'confirm', actorUserId: ACTOR, idempotencyKey: 'confirm-once', env: { ...env, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only' } }
+    const confirm = { threadId: winner.requestId, organizationId: ORG, action: 'confirm', actorUserId: ACTOR, idempotencyKey: 'confirm-once', env: { ...env, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only' } }
     assert.equal((await executeGuestThreadOperation(db, confirm)).ok, true)
     assert.equal((await executeGuestThreadOperation(db, confirm)).ok, true)
     assert.equal((await getThreadOperationalRecord(db, winner.requestId))?.status, 'confirmed')

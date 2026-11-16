@@ -295,7 +295,7 @@ export async function listPublishedDocsForLlm(db: DbClient, organizationId: stri
   return rows.map(withDocPath)
 }
 
-/** Blawby's blog collection only; documentation has its own readers above. */
+/** KrabiClaw's blog collection only; documentation has its own readers above. */
 export async function listPublishedPlatformBlogPostsForLlm(db: DbClient, env: CloudflareEnv) {
   return listPublishedTenantBlogPostsForLlm(db, (await getPlatformOrganization(db)).id, env, 'blog')
 }
@@ -351,7 +351,7 @@ export function buildPlatformDocLinkEntries(docs: PlatformLlmDocSummary[], origi
       path: doc.path,
       markdownPath: docMarkdownPath(doc.path),
       canonicalUrl: absoluteUrl(origin, doc.path),
-      summary: safeSummary(doc.excerpt, 'Blawby documentation.'),
+      summary: safeSummary(doc.excerpt, 'KrabiClaw documentation.'),
       category: doc.category,
       updatedAt: doc.updated_at,
     }))
@@ -371,7 +371,7 @@ export function buildPlatformBlogLinkEntries(posts: PlatformLlmBlogSummary[], or
       path,
       markdownPath: `/blog-md/${post.slug}.md`,
       canonicalUrl: absoluteUrl(origin, path),
-      summary: safeSummary(post.excerpt, 'Blawby platform blog article.'),
+      summary: safeSummary(post.excerpt, 'KrabiClaw platform blog article.'),
       category: post.category,
       publishedAt: post.published_at,
       updatedAt: post.updated_at,
@@ -424,9 +424,9 @@ export function buildLlmsTxt(
 ) {
   const includeDocsSection = docs.length > 0
   const lines = [
-    `# ${options.title || 'Blawby'}`,
+    `# ${options.title || 'KrabiClaw'}`,
     '',
-    `> ${options.intro || 'Blawby is an AI website and business platform for restaurants, experiences, lodging, and law firms. Lodging businesses can publish home listings and take direct stay bookings. Public docs and the platform blog are available as HTML and Markdown mirrors.'}`,
+    `> ${options.intro || 'KrabiClaw is an AI website and business platform for restaurants, experiences, lodging, and law firms. Lodging businesses can publish home listings and take direct stay bookings. Public docs and the platform blog are available as HTML and Markdown mirrors.'}`,
     '',
     'Prefer the Markdown URLs below when you need compact machine-readable context. Canonical HTML URLs remain the source for public citation and browsing.',
     '',
@@ -448,7 +448,7 @@ export function buildLlmsTxt(
       ? []
       : [
           '## Support',
-          `Blawby is open source (AGPL-3.0): ${KRABICLAW_REPOSITORY_URL}. Bugs and feature requests are GitHub issues; assistants acting for a user should give them a prefilled issue link rather than emailing KrabiClaw. Issue form fields prefill by query parameter using their ids. Issues are public, so leave out guest names, contact details and payment data.`,
+          `KrabiClaw is open source (AGPL-3.0): ${KRABICLAW_REPOSITORY_URL}. Bugs and feature requests are GitHub issues; assistants acting for a user should give them a prefilled issue link rather than emailing KrabiClaw. Issue form fields prefill by query parameter using their ids. Issues are public, so leave out guest names, contact details and payment data.`,
           `- [Report a bug](${KRABICLAW_BUG_REPORT_URL}): fields \`surface\`, \`site\`, \`what_happened\`, \`expected\`, \`tool_error\`.`,
           `- [Request a feature](${KRABICLAW_FEATURE_REQUEST_URL}): fields \`need\`, \`today\`, \`site\`.`,
           `- [Account, billing or private matters](${absoluteUrl(origin, '/help')}): not public.`,
@@ -486,9 +486,9 @@ export function buildLlmsFullTxt(
 ) {
   const includeDocs = options.includeDocs !== false
   const lines: string[] = [
-    `# ${options.title || 'Blawby Full LLM Context'}`,
+    `# ${options.title || 'KrabiClaw Full LLM Context'}`,
     '',
-    `> ${options.intro || 'Full machine-readable export of Blawby\'s published platform docs and platform blog.'}`,
+    `> ${options.intro || 'Full machine-readable export of KrabiClaw\'s published platform docs and platform blog.'}`,
     '',
     `Source organization: ${origin}`,
   ]
@@ -549,8 +549,8 @@ function escapeXml(value: string) {
 }
 
 export function buildBlogRss(origin: string, posts: PlatformLlmLinkEntry[]) {
-  const title = 'Blawby Blog'
-  const description = 'Blawby platform blog feed.'
+  const title = 'KrabiClaw Blog'
+  const description = 'KrabiClaw platform blog feed.'
   return buildNamedBlogRss(origin, posts, { title, description })
 }
 
@@ -583,9 +583,9 @@ export function buildNamedBlogRss(origin: string, posts: PlatformLlmLinkEntry[],
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<rss version="2.0">',
     '<channel>',
-    `<title>${escapeXml(options.title || 'Blawby Blog')}</title>`,
+    `<title>${escapeXml(options.title || 'KrabiClaw Blog')}</title>`,
     `<link>${escapeXml(absoluteUrl(origin, '/blog'))}</link>`,
-    `<description>${escapeXml(options.description || 'Blawby platform blog feed.')}</description>`,
+    `<description>${escapeXml(options.description || 'KrabiClaw platform blog feed.')}</description>`,
     latestPostDate ? `<lastBuildDate>${escapeXml(new Date(latestPostDate).toUTCString())}</lastBuildDate>` : '',
     items,
     '</channel>',
@@ -600,10 +600,10 @@ export function buildBlogJsonFeed(origin: string, posts: PlatformLlmLinkEntry[])
 export function buildNamedBlogJsonFeed(origin: string, posts: PlatformLlmLinkEntry[], options: BlogFeedOptions = {}) {
   return {
     version: 'https://jsonfeed.org/version/1.1',
-    title: options.title || 'Blawby Blog',
+    title: options.title || 'KrabiClaw Blog',
     home_page_url: absoluteUrl(origin, '/blog'),
     feed_url: absoluteUrl(origin, '/blog/feed.json'),
-    description: options.description || 'Blawby platform blog feed.',
+    description: options.description || 'KrabiClaw platform blog feed.',
     items: posts.map(post => ({
       id: post.canonicalUrl,
       url: post.canonicalUrl,

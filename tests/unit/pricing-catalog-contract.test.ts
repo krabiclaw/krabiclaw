@@ -172,9 +172,9 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
     },
   ]
 
-  const md = renderPlansMarkdown(dummyPlans, 'https://example.com')
-  assert.ok(md.includes('# Blawby Pricing & Plans'))
-  assert.ok(md.includes('\nBeta pricing. Prices will rise for new subscribers as Blawby grows; you keep the price you subscribe at for 12 months.\n'))
+  const md = renderPlansMarkdown(dummyPlans)
+  assert.ok(md.includes('# KrabiClaw Pricing & Plans'))
+  assert.ok(md.includes('\nBeta pricing. Prices will rise for new subscribers as KrabiClaw grows; you keep the price you subscribe at for 12 months.\n'))
   assert.ok(md.includes('## Free'))
   assert.ok(md.includes('Free ($0/month)'))
   assert.ok(md.includes('## Growth'))
@@ -183,7 +183,7 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
   assert.ok(md.includes('Custom Domain: Not included'))
   assert.ok(md.includes('- **Homes**: 1 included. A home is a place to stay.\n'))
   assert.ok(md.includes('- **Homes**: $4 per home per month. A home is a place to stay.\n'))
-  const business = renderPlansMarkdown([{ ...dummyPlans[1]!, id: 'business', name: 'Business', prices: [{ id: 'p_business', amount: 14900, currency: 'usd', interval: 'month' }] }], 'https://example.com')
+  const business = renderPlansMarkdown([{ ...dummyPlans[1]!, id: 'business', name: 'Business', prices: [{ id: 'p_business', amount: 14900, currency: 'usd', interval: 'month' }] }])
   assert.ok(business.includes('$149/month'))
   assert.ok(!business.includes('rental unit'))
   assert.ok(business.includes('- **Payments fees**: 1.4% of payment volume, plus Stripe fees.\n'))
@@ -198,14 +198,14 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
 // While beta spots are left, the Markdown states them and the price that follows them.
 test('the beta spots and the price after them are stated while spots are left', () => {
   assert.equal(nextHomePrice(), '$12')
-  assert.equal(pricingNotice(0), 'Beta pricing. Prices will rise for new subscribers as Blawby grows; you keep the price you subscribe at for 12 months.')
+  assert.equal(pricingNotice(0), 'Beta pricing. Prices will rise for new subscribers as KrabiClaw grows; you keep the price you subscribe at for 12 months.')
   assert.equal(pricingNotice(7), 'Beta pricing: 7 of 10 spots left. After that, new subscribers pay $12 per home per month. You keep the price you subscribe at for 12 months.')
   const growth: Plan = {
     id: 'growth', name: 'Growth', tagline: '', highlighted: false, features: [], beta_spots_left: 7,
     prices: [{ id: 'p_growth', amount: 4900, currency: 'usd', interval: 'month' }],
     limits: { custom_domains: true, google_places: true, support: 'Priority' }, cta: { label: 'Get Growth', href: '/signup' },
   }
-  const md = renderPlansMarkdown([growth], 'https://example.com')
+  const md = renderPlansMarkdown([growth])
   assert.ok(md.includes('\nBeta pricing: 7 of 10 spots left. After that, new subscribers pay $12 per home per month. You keep the price you subscribe at for 12 months.\n'))
   assert.ok(md.includes('- **Homes**: $4 per home per month (beta price; $12 per home per month once the beta spots are taken). A home is a place to stay.\n'))
 })

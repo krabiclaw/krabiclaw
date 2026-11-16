@@ -1,6 +1,6 @@
 <template>
   <!--
-    The one way Blawby offers something the business does not have yet, in
+    The one way KrabiClaw offers something the business does not have yet, in
     Airbnb's shape: an illustrated card that opens "How it works", and one
     action. The card is shown only to someone who can act on it; everyone
     else reads who can.

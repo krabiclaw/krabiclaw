@@ -66,7 +66,7 @@ export const integrationsKey = Symbol('integrations') as InjectionKey<{
 import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vue'
 import type { CatalogRow, CatalogScreen } from '~/shared/catalog-screen'
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
-useSeoMeta({ title: 'Connections | Blawby Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Connections | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 const route = useRoute()
 const level = useRouteLevel()
 const dashboardApi = useDashboardApi()
