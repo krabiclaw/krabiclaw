@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:6f47a82c8e4a414b23ac80d483c64a8b57f86d6e05332e819547511bf7a5186e",
-  "documentationFingerprint": "sha256:25fd0861f1b9b3ec646802f8eac3d6c1285317af55be4bd6307dd47fccdc50bf",
+  "fingerprint": "sha256:415b6acdee69972f26445e73dd1baa0e977fc3265516416a39ee4b68d85450e6",
+  "documentationFingerprint": "sha256:1adabec63fbf2551cfd74793752b01e2e1d4137880e6244bab8fad77edcf6b27",
   "tools": [
     {
       "name": "add_organization_language",
@@ -50084,6 +50084,45 @@
               "seo_title": {
                 "type": [
                   "string",
+                  "null"
+                ]
+              },
+              "social_card_refresh": {
+                "additionalProperties": false,
+                "description": "The latest brand-name change’s social-card refresh. Read with get_organization_settings until complete. Failed refreshes can be retried under Website → Brand → Name.",
+                "properties": {
+                  "cursor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "error": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "pending",
+                      "complete",
+                      "failed"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "status",
+                  "cursor",
+                  "error"
+                ],
+                "type": [
+                  "object",
                   "null"
                 ]
               },
@@ -111620,6 +111659,45 @@
                   "null"
                 ]
               },
+              "social_card_refresh": {
+                "additionalProperties": false,
+                "description": "The latest brand-name change’s social-card refresh. Read with get_organization_settings until complete. Failed refreshes can be retried under Website → Brand → Name.",
+                "properties": {
+                  "cursor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "error": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "pending",
+                      "complete",
+                      "failed"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "status",
+                  "cursor",
+                  "error"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "status": {
                 "type": "string"
               },
@@ -111637,6 +111715,45 @@
               }
             },
             "type": "object"
+          },
+          "social_card_refresh": {
+            "additionalProperties": false,
+            "description": "The latest brand-name change’s social-card refresh. Read with get_organization_settings until complete. Failed refreshes can be retried under Website → Brand → Name.",
+            "properties": {
+              "cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "complete",
+                  "failed"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "status",
+              "cursor",
+              "error"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "updated_at": {
             "type": "string"
@@ -125814,7 +125931,7 @@
         "publish_website": "sha256:05e40520e524c3ab6c5cf48d56bd0cc94e9e18f61c11b519930950ecc0c7fdee",
         "save_website_draft": "sha256:175fdfcf6b66beeecf25d2db60354d5273ea34c59ad8140487e3e714001cfc35",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
-        "update_organization_settings": "sha256:7191c77fc0ed6eb5ce818283be58acb26679a8cf793cbba600dccb694e8051a6",
+        "update_organization_settings": "sha256:e1cf97ba916ebf6b4116caa9e748cedc5b64c93c7e1043d6bf5e594a75aa7862",
         "update_site_page": "sha256:ddc337bdcab4df17d99b7913ea2dbf4ed1f0ba91a60a1f39f97b8e08a6e451ad"
       }
     },

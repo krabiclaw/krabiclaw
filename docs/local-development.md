@@ -140,10 +140,14 @@ It requires the target Worker to be running and `CANARY_LOGIN_PASSWORD` for the
 authorized account (`--email` selects it). Remote targets also require an explicit
 `--base-url`.
 
-Social cards are rendered by the write that changes their inputs and only where
-Cloudflare Images is configured (production); a local setup has no Images token,
-so `yarn local:cards` skips every card that would need generating. Staging
-schedules only the Channex sync, ARI and revision queues.
+Most writes render the cards they change. A brand-name write instead saves a
+refresh receipt under Website → Brand → Name. Production processes one card
+per scheduled advance. Use the dashboard to finish or retry the refresh, or
+pass `--organization-id` and `--refresh-id` to `yarn local:cards`.
+
+Only production has Cloudflare Images credentials. A local or staging run
+reports incomplete generation when a card needs rendering. Staging schedules
+only the Channex sync, ARI and revision queues.
 
 An explicitly requested ordinary staging refresh uses `corepack yarn db:pull:staging`.
 It reads the deployed production Worker's `DB` source and preserves staging's `jwks` signing

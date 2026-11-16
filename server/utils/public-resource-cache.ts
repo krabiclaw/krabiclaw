@@ -1,9 +1,10 @@
-import { execute, queryAll, type BatchQuery, type DbClient } from '~/server/db'
+import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { purgeOrganizationKvCache } from '~/server/utils/edge-cache'
 import { syncOrganizationSearchIndex } from '~/server/utils/public-search'
 import { isNonProductionHost, normalizeHost } from '~/server/utils/tenant-hosts'
 import { publishBusinessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { advanceOrganizationSocialCardRefresh, expiredSocialCardRefreshClaim, SOCIAL_CARD_REFRESH_PREFIX, type SocialCardEnv } from '~/server/utils/social-card'
 
 // KV read-through cache for public shell and page resource queries.
 // Mirrors edge-cache.ts's HTML cache shape, but keyed by organizationId + resource
@@ -43,7 +44,7 @@ export function publicResourceCacheInvalidationQuery(
   }
 }
 
-export type OrganizationChangeDrainEnv = Pick<CloudflareEnv, 'AI_SEARCH' | 'AI_SEARCH_INSTANCE_ID' | 'NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN' | 'NUXT_PUBLIC_PLATFORM_DOMAIN'>
+export type OrganizationChangeDrainEnv = SocialCardEnv & Pick<CloudflareEnv, 'AI_SEARCH' | 'AI_SEARCH_INSTANCE_ID' | 'NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN' | 'NUXT_PUBLIC_PLATFORM_DOMAIN'>
 
 /**
  * The scheduled drainer. A write purges its site's caches itself and records
@@ -64,18 +65,19 @@ export async function drainPublicResourceCacheInvalidations(
   if (productionSearch && !env.AI_SEARCH_INSTANCE_ID?.trim()) throw new Error('AI_SEARCH_INSTANCE_ID is required to drain site changes')
   const now = options.now ?? new Date()
   const nowIso = now.toISOString()
+  const socialCardReason = `${SOCIAL_CARD_REFRESH_PREFIX}%`
   const terminalRetentionCutoff = new Date(now.getTime() - CACHE_INVALIDATION_TERMINAL_RETENTION_MS).toISOString()
   // A row is processed after it is created, so the created_at bound removes
   // nothing the processed_at one keeps; it lets the status index range-scan
   // instead of reading every retained row on each two-minute run.
   await execute(db, `
     DELETE FROM public_resource_cache_invalidations
-     WHERE status IN ('processed', 'failed') AND created_at < ? AND processed_at < ?
-  `, [terminalRetentionCutoff, terminalRetentionCutoff])
+     WHERE status IN ('processed', 'failed') AND created_at < ? AND processed_at < ? AND reason NOT LIKE ?
+  `, [terminalRetentionCutoff, terminalRetentionCutoff, socialCardReason])
   const rows = await queryAll<{ id: string; organization_id: string }>(db, `
     SELECT id, organization_id FROM public_resource_cache_invalidations
-     WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?
-  `, [options.limit ?? 50])
+     WHERE status = 'pending' AND reason NOT LIKE ? ORDER BY created_at ASC LIMIT ?
+  `, [socialCardReason, options.limit ?? 50])
   let processed = 0
   const failures: Error[] = []
   const failedOrganizations = new Map<string, string>()
@@ -114,6 +116,18 @@ export async function drainPublicResourceCacheInvalidations(
       await finish(row.id, 'failed', message)
       failures.push(error instanceof Error ? error : new Error(String(error)))
       failedOrganizations.set(row.organization_id, message)
+    }
+  }
+  const cardRefresh = await queryFirst<{ id: string; organization_id: string }>(db, `
+    SELECT id, organization_id FROM public_resource_cache_invalidations
+    WHERE reason LIKE ? AND (status = 'pending' OR (status = 'processing' AND processed_at < ?))
+    ORDER BY COALESCE(processed_at, created_at), rowid LIMIT 1
+  `, [socialCardReason, expiredSocialCardRefreshClaim(now)])
+  if (cardRefresh) {
+    const { refresh } = await advanceOrganizationSocialCardRefresh({ db, env, organizationId: cardRefresh.organization_id, id: cardRefresh.id })
+    if (refresh?.status === 'failed' && refresh.error) {
+      failedOrganizations.set(cardRefresh.organization_id, refresh.error)
+      failures.push(new Error(refresh.error))
     }
   }
   if (failures.length > 0) {
