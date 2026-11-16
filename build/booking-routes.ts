@@ -63,6 +63,7 @@ export function mountBookingRoutes(pages: PageNode[]): void {
   if (!conversation) throw new Error('The conversation page was not found; its reservation cannot open beside it')
   const reservation = renamed(canonical, 'dashboard-org_slug-bookings', 'dashboard-org_slug-messages-conversation_id-reservation')
   reservation.path = 'reservation/:record_id()'
+  reservation.meta = { ...reservation.meta, dashboardThirdPane: true }
   conversation.children = [...(conversation.children ?? []), reservation]
   const bookingIndex = pages.indexOf(booking)
   if (bookingIndex === -1) throw new Error('The booking subtree must be a root before it is mounted beneath Today')

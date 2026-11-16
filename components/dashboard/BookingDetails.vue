@@ -37,17 +37,27 @@
           :description="`${channelName} confirmed this stay on nights another stay holds. Cancel this stay on ${channelName}, or cancel the other stay where it was booked.`"
         />
         <UAlert v-if="!personalScope && guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in KrabiClaw, which requires a guest name, but it has none." />
-        <div class="flex flex-col items-center pb-12 text-center" :class="recordImage ? 'pt-2' : 'pt-10'">
-          <img v-if="recordImage" :src="recordImage" alt="" class="aspect-square w-full max-w-80 rounded-2xl bg-elevated object-cover" :class="!personalScope && !purchase && recordGuestName ? '' : 'mb-6'">
-          <div v-if="!personalScope && !purchase && recordGuestName" class="relative mx-auto mb-6 shrink-0 md:mb-8" :class="[recordImage ? '-mt-12 md:-mt-14' : '', partySize && partySize > 1 ? 'h-30 w-35 md:h-40 md:w-46' : 'size-27 md:size-36']">
-            <UAvatar :src="recordGuestImage || undefined" :alt="recordGuestName" :text="recordGuestName.slice(0, 1).toUpperCase()" size="3xl" class="absolute bottom-0 left-0 bg-accented" :class="partySize && partySize > 1 ? 'size-21 md:size-28' : 'size-27 md:size-36'" :ui="{ fallback: 'text-[30px] font-semibold text-highlighted md:text-4xl' }" />
-            <ChannelMark v-if="detail" :channel="detail.channel" large class="absolute bottom-0" :class="partySize && partySize > 1 ? 'left-15 md:left-21' : 'right-0'" />
-            <span v-if="partySize > 1" class="absolute right-0 top-0 flex size-16 items-center justify-center rounded-full bg-accented text-[9px] font-bold text-highlighted md:size-21 md:text-xs" :aria-label="otherGuestLabel">+{{ partySize - 1 }}</span>
+        <!-- A business's reservation, in Airbnb's order: the photo, what was booked, who is coming, then the dates below. -->
+        <div v-if="!personalScope && !purchase" class="pb-8">
+          <img v-if="recordImage" :src="recordImage" alt="" class="mb-6 aspect-[4/3] w-full rounded-2xl bg-elevated object-cover">
+          <h2 class="break-words text-[26px] font-semibold leading-8 tracking-tight text-highlighted">{{ heroSubtitle || heroTitle }}</h2>
+          <p class="mt-1 break-words text-base text-muted">{{ heroSubtitle ? heroTitle : '' }}{{ heroDate ? ` · ${heroDate}` : '' }}</p>
+          <div v-if="recordGuestName" class="mt-4 flex items-center gap-2">
+            <span class="relative">
+              <UAvatar :src="recordGuestImage || undefined" :alt="recordGuestName" :text="recordGuestName.slice(0, 1).toUpperCase()" size="xl" class="bg-accented" :ui="{ fallback: 'font-semibold text-highlighted' }" />
+              <ChannelMark v-if="detail" :channel="detail.channel" class="absolute -bottom-1 -right-1" />
+            </span>
+            <span v-if="partySize > 1" class="flex size-10 items-center justify-center rounded-full bg-accented text-xs font-bold text-highlighted" :aria-label="otherGuestLabel">+{{ partySize - 1 }}</span>
           </div>
+        </div>
+        <div v-else class="flex flex-col items-center pb-12 text-center" :class="recordImage ? 'pt-2' : 'pt-10'">
+          <img v-if="recordImage" :src="recordImage" alt="" class="mb-6 aspect-square w-full max-w-80 rounded-2xl bg-elevated object-cover">
           <h2 class="max-w-full break-words text-[32px] font-semibold leading-9 tracking-tight text-highlighted">{{ heroTitle }}</h2>
           <p v-if="heroDate" class="mt-4 break-words text-base text-muted">{{ heroDate }}</p>
           <p v-if="heroSubtitle" class="mt-1 break-words text-base text-muted">{{ heroSubtitle }}</p>
-          <UBadge v-if="stay && (personalScope || (manage && requestStatus))" class="mt-3" :color="stay.status === 'confirmed' ? 'success' : 'neutral'" variant="soft" :label="statusLabel" />
+        </div>
+        <div class="flex flex-col" :class="!personalScope && !purchase ? 'items-start' : 'items-center text-center'">
+          <UBadge v-if="stay && (personalScope || manage)" class="mt-3" :color="stay.status === 'confirmed' ? 'success' : 'neutral'" variant="soft" :label="statusLabel" />
           <div v-if="manage && hostActions.includes('confirm')" class="mt-5 flex flex-wrap justify-center gap-3">
             <UButton color="neutral" size="lg" :label="t('stay.approve_request')" :loading="busy === 'confirm'" :disabled="busy !== null" @click="decide('confirm')" />
             <UButton color="neutral" variant="outline" size="lg" :label="t('stay.decline_request')" :loading="busy === 'reject'" :disabled="busy !== null" @click="decide('reject')" />
@@ -750,7 +760,7 @@ const guestCount = computed(() => stay.value ? stay.value.adults + stay.value.ch
 const paymentProcessing = computed(() => accountStay.value?.payment_processing === true)
 const requestStatus = computed(() => detail.value?.request_status)
 const hostActions = computed(() => managedStay.value?.booking.available_actions ?? [])
-const pageTitle = computed(() => stay.value ? props.personalScope ? 'Your stay' : statusLabel.value : timedTitle.value)
+const pageTitle = computed(() => stay.value ? props.personalScope ? 'Your stay' : 'Reservation' : timedTitle.value)
 const statusLabel = computed(() => {
   if (!stay.value) return 'Stay'
   if (paymentProcessing.value) return t('payment.processing')

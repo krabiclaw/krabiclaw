@@ -40,9 +40,11 @@
                   </button>
                 </div>
                 <!-- A job is a card in the thread with its Done on it, as Airbnb's requests are. -->
-                <div v-if="message.job && message.body" class="w-full min-w-64 max-w-sm rounded-3xl bg-elevated p-4" data-testid="conversation-job-card">
-                  <p class="whitespace-pre-wrap break-words text-base font-medium text-highlighted">{{ message.body }}</p>
-                  <UButton v-if="data?.work?.type === 'done'" label="Done" color="neutral" block class="mt-3 rounded-xl" :loading="closing" data-testid="conversation-job-done" @click="emit('done')" />
+                <div v-if="message.job && message.body" class="w-full min-w-64 max-w-sm rounded-3xl bg-accented/50 p-2" data-testid="conversation-job-card">
+                  <div class="rounded-2xl bg-default p-4 shadow-sm">
+                    <p class="whitespace-pre-wrap break-words text-base font-medium text-highlighted">{{ message.body }}</p>
+                    <UButton v-if="data?.work?.type === 'done'" label="Done" color="neutral" variant="soft" block class="mt-3 rounded-xl" :loading="closing" data-testid="conversation-job-done" @click="emit('done')" />
+                  </div>
                 </div>
                 <div
                   v-else-if="message.body"

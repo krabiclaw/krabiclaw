@@ -2,9 +2,9 @@
   <DashboardIndexPanel id="organization-messages-thread" :title="conversation?.title ?? 'Conversation'" fill :auto-open="reservationTo">
     <!-- Airbnb's thread header: who is in it, what it is about, and one way into "In this conversation". No row of buttons. -->
     <template v-if="conversation" #center>
-      <button type="button" class="flex min-w-0 items-center gap-3 overflow-hidden rounded-full py-1 pe-2 text-left hover:bg-elevated" :data-thread-id="conversation.id" aria-label="In this conversation" @click="sheetOpen = true">
+      <button type="button" class="me-auto flex min-w-0 items-center gap-3 overflow-hidden rounded-full py-1 pe-2 text-left hover:bg-elevated" :data-thread-id="conversation.id" aria-label="In this conversation" @click="sheetOpen = true">
         <span class="flex shrink-0 -space-x-3">
-          <InboxAvatar v-for="person in conversation.participants.slice(0, 3)" :key="person.id ?? person.name" :name="person.name" :initial="person.name.slice(0, 1)" :support="conversation.kind === 'support'" size="sm" class="ring-2 ring-default" />
+          <InboxAvatar v-for="person in conversation.participants.slice(0, 3)" :key="person.id ?? person.name" :name="person.name" :initial="person.name.slice(0, 1)" :image="person.image" :support="conversation.kind === 'support'" size="sm" class="ring-2 ring-default" />
         </span>
         <span class="truncate text-xl font-semibold text-highlighted">{{ conversation.title }}</span>
         <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />

@@ -4,7 +4,8 @@
     data-dashboard-index
     :class="level.mode.value === 'yield' ? 'hidden' : undefined"
     :data-yield="level.mode.value === 'yield' ? '' : undefined"
-    :default-size="pair ? (pairedSize ?? 50) : undefined"
+    :key="level.third.value"
+    :default-size="pair ? (level.third.value === 2 ? 26 : level.third.value === 1 ? 46 : pairedSize ?? 50) : undefined"
     :ui="panelUi"
   >
     <template #header>
