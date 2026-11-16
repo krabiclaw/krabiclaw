@@ -17,8 +17,8 @@ export interface PricingComparisonRow {
 export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly PricingComparisonRow[] }> = [
   { title: 'Your website', rows: [
     { id: 'site.management', label: 'Business website', detail: 'Restaurant, experience, law firm or lodging website.', included: 'Included' },
-    { id: 'themes.public', label: 'Saya and Blawby themes', detail: 'The theme follows your business type.', included: 'Included' },
-    { id: 'site.management', label: 'KrabiClaw subdomain', detail: 'A hosted address for your site.', included: 'Included' },
+    { id: 'themes.public', label: 'Saya and Blawby Legal themes', detail: 'The theme follows your business type.', included: 'Included' },
+    { id: 'site.management', label: 'Hosted subdomain', detail: 'A hosted address for your site.', included: 'Included' },
     { id: 'site.seo', label: 'Structured search metadata', detail: 'Business-type metadata supports search discovery; search ranking or indexing is not guaranteed.', included: 'Included' },
     { id: 'domains.custom', label: 'Your own domain', detail: 'Connect an owned domain after completing DNS setup.', entitlement: 'custom_domains' },
     { id: 'content.custom-pages', label: 'Custom pages', detail: 'Create and edit additional page documents.', entitlement: 'custom_pages' },
@@ -35,19 +35,19 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
     { id: 'posts.website', label: 'Website posts', detail: 'Create and publish posts on your website.', included: 'Included' },
     { id: 'social.external-channels', label: 'Facebook, Instagram and Discord publishing', detail: 'Explicit publishing to connected channels requires provider permissions and valid media.', entitlement: 'managed_service' },
     { id: 'ads.google', label: 'Google Ads campaign management', detail: 'Create and pause Search campaigns and change their daily budgets in a connected Google Ads account. Ad spend is billed by Google; campaigns we manage are 10% of monthly ad spend.', entitlement: 'google_ads_management' },
-    { id: 'app.ios', label: 'iPhone companion app', detail: 'Use your existing KrabiClaw account with no extra subscription. Team permissions and plan capabilities still apply.', included: 'Included' },
+    { id: 'app.ios', label: 'iPhone companion app', detail: 'Use your existing Blawby account with no extra subscription. Team permissions and plan capabilities still apply.', included: 'Included' },
   ] },
   { title: 'Places to stay', rows: [
     { id: 'stays.listings', label: 'Home listings and photo tours', detail: 'Publish home descriptions, amenities, rooms, photos and house rules on your lodging website.', included: 'Included' },
     { id: 'stays.calendar', label: 'Nightly rates and stay calendar', detail: 'Set nightly prices, block dates and record stays and offline payments. Team members see the homes assigned to them.', included: 'Included' },
-    { id: 'stays.airbnb', label: 'Airbnb sync', detail: 'Choose listings from your connected Airbnb account to sync stays and availability. KrabiClaw checks your home allowance first and completes setup in the background. Publishing a home on your website is separate.', entitlement: 'channel_sync' },
+    { id: 'stays.airbnb', label: 'Airbnb sync', detail: 'Choose listings from your connected Airbnb account to sync stays and availability. Blawby checks your home allowance first and completes setup in the background. Publishing a home on your website is separate.', entitlement: 'channel_sync' },
     { id: 'stays.guest-messaging', label: 'Arrival guides and guest messages', detail: 'Save private arrival instructions and guest replies, and schedule messages around booking, check-in and checkout. Delivery needs a guest conversation and a configured channel.', included: 'Included' },
     { id: 'stays.direct-booking', label: 'Direct stay booking with online payment', detail: `Guests book available nights and pay on your website. Requires Stripe setup; ${PAYMENTS_FEE}, billed at the end of each month.`, entitlement: 'payments' },
   ] },
   { title: 'Guests and bookings', rows: [
     { id: 'bookings.requests', label: 'Bookings and consultation requests', detail: 'Availability depends on your business type and configured offerings.', included: 'Included' },
     { id: 'bookings.member-availability', label: 'Team availability', detail: 'Set working hours and time off, and assign a team member to a service.', included: 'Included' },
-    { id: 'bookings.calendar-sync', label: 'Google Calendar sync', detail: 'Busy times on a team member’s Google Calendar cannot be booked, and every booking lands on the business’s KrabiClaw calendar.', entitlement: 'calendar_sync' },
+    { id: 'bookings.calendar-sync', label: 'Google Calendar sync', detail: 'Busy times on a team member’s Google Calendar cannot be booked, and every booking lands on the business’s Blawby calendar.', entitlement: 'calendar_sync' },
     { id: 'catalog.products', label: 'Ticketed experiences', detail: 'For configured experience products. Payment processing terms apply.', included: 'Included' },
     { id: 'payments.acceptance', label: 'Online payments', detail: `${PAYMENTS_FEE}, billed on your subscription at the end of each month. Set up your Stripe account to accept payments.`, entitlement: 'payments' },
     { id: 'notifications.email-dashboard', label: 'Booking email notifications', detail: 'Automatic booking email is separate from an explicit review request.', included: 'Included' },

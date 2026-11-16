@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { buildReplyToAddress, InboundEmailRejection, parseReplyToAddress, verifyReplyToken } from '../../server/utils/reply-address.ts'
 
-const env = { EMAIL_REPLY_SECRET: 'reply-contract-test-key', NUXT_PUBLIC_PLATFORM_DOMAIN: 'example.com' }
+const env = { EMAIL_REPLY_SECRET: 'reply-contract-test-key', EMAIL_REPLY_DOMAIN: 'reply.example.com' }
 const entry = '1f9d0aaa-226a-4e91-90b5-f4872451a438'
 const sign = (fact: string) => createHmac('sha256', env.EMAIL_REPLY_SECRET).update(fact).digest('hex').slice(0, 24)
 
@@ -20,7 +20,7 @@ test('a guest reply address round-trips to its entry and verifies only as the gu
   assert.throws(() => parseReplyToAddress(env, `${address}@reply.example.com`), InboundEmailRejection)
   // The retired request-addressed format is no longer accepted.
   assert.throws(() => parseReplyToAddress(env, `rr${entry.replaceAll('-', '')}${token}@reply.example.com`), InboundEmailRejection)
-  await assert.rejects(verifyReplyToken({ NUXT_PUBLIC_PLATFORM_DOMAIN: 'example.com' }, entry, { kind: 'guest' }, token), /EMAIL_REPLY_SECRET/u)
+  await assert.rejects(verifyReplyToken({ EMAIL_REPLY_DOMAIN: 'reply.example.com' }, entry, { kind: 'guest' }, token), /EMAIL_REPLY_SECRET/u)
 })
 
 test('a member reply address verifies only for its member', async () => {

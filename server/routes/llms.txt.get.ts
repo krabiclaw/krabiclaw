@@ -76,7 +76,7 @@ export default defineHandler(async (event) => {
       {
         coreHeading: 'Platform & Solutions',
         coreLinks: [
-          { title: 'KrabiClaw Model Context Protocol (MCP)', path: '/plugin', description: 'Manage websites, menus, stay availability, and bookings directly via Claude Desktop, ChatGPT, or compatible MCP clients.' },
+          { title: 'Blawby Model Context Protocol (MCP)', path: '/plugin', description: 'Manage websites, menus, stay availability, and bookings directly via Claude Desktop, ChatGPT, or compatible MCP clients.' },
           { title: 'Pricing & Plans', path: '/pricing', description: 'Published plans, included features, and payment pricing.' },
           { title: 'Law firms (Blawby)', path: '/legal', description: 'Law firm websites, practice areas, and legal consultation requests.' },
           { title: 'Restaurants (Saya)', path: '/restaurants', description: 'Restaurant websites, menus, and table reservations.' },

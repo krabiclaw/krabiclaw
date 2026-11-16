@@ -144,7 +144,7 @@ const listItems = computed(() => loadError.value ? [] : products.value.map(row =
 }), row, status: itemStatus(row) })))
 
 
-useSeoMeta({ title: () => (collection.value?.name ?? 'Section') + ' | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => (collection.value?.name ?? 'Section') + ' | Blawby Dashboard', robots: 'noindex, nofollow' })
 watchEffect(() => {
   if (!catalog.pending.value && !catalog.error.value && !collection.value) showError(createError({ statusCode: 404, statusMessage: 'Section not found' }))
 })

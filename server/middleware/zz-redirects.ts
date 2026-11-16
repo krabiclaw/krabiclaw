@@ -6,6 +6,7 @@ import { cloudflareEnv } from '~/server/utils/api-response'
 import { markTranscriptMiddlewareComplete } from '~/server/utils/request-metrics'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
 import { presentationForProduct } from '~/utils/product-presentation'
+import { isNonProductionHost, normalizeHost } from '~/server/utils/tenant-hosts'
 
 const platformRedirects: Record<string, string> = {
   '/mcp': '/plugin',
@@ -143,6 +144,22 @@ async function resolveTenantRedirectForRequest(event: H3Event) {
 export default defineHandler(async (event) => {
   const url = event.url
   const normalizedPathname = url.pathname === '/' ? '/' : url.pathname.replace(/\/$/, '')
+  const { method, headers } = event.req
+  const browserEntry = method === 'HEAD' || (method === 'GET' && headers.get('accept')?.includes('text/html'))
+  if (browserEntry && (
+    normalizedPathname === '/login' || normalizedPathname === '/signup'
+    || normalizedPathname === '/forgot-password' || normalizedPathname === '/dashboard'
+    || normalizedPathname.startsWith('/dashboard/') || /^\/accept-invitation\/[^/]+$/.test(normalizedPathname)
+  )) {
+    const env = cloudflareEnv(event)
+    const authOrigin = env.BETTER_AUTH_URL && new URL(env.BETTER_AUTH_URL)
+    if (authOrigin && authOrigin.protocol === 'https:' && !isNonProductionHost(authOrigin.hostname)
+      && authOrigin.hostname !== url.hostname && url.hostname === normalizeHost(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)) {
+      // Better Auth sets a host-only state cookie when the browser starts
+      // OAuth. Start on the same host that will receive the provider callback.
+      return redirect(`${authOrigin.origin}${url.pathname}${url.search}`, 302)
+    }
+  }
   if (event.context.tenantType === TENANT_TYPES.PLATFORM && normalizedPathname === '/features') {
     return redirect(`/products${url.search}`, 301)
   }
@@ -155,7 +172,8 @@ export default defineHandler(async (event) => {
   if (
     normalizedPathname === '/api/mcp' &&
     event.req.method === 'GET' &&
-    ((event.req.headers.get('accept')) ?? '').includes('text/html')
+    ((event.req.headers.get('accept')) ?? '').includes('text/html') &&
+    url.origin === cloudflareEnv(event).BETTER_AUTH_URL?.replace(/\/$/, '')
   ) {
     return redirect('/docs/mcp-setup', 302)
   }

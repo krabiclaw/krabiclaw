@@ -23,7 +23,7 @@ import { SURCHARGE_POLICY } from '~/shared/billing-model'
 import { isConnectedAccount, useConnectAccount, type ConnectedAccount } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Card surcharge | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Card surcharge | Blawby', robots: 'noindex, nofollow' })
 
 const dashboardApi = useDashboardApi()
 const { account, setAccount, connectPending, connectError } = useConnectAccount()
