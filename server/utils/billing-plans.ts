@@ -74,7 +74,7 @@ const STARTER_PLAN: Plan = {
   highlighted: false,
   prices: [],
   features: [
-    'Free Blawby ChatGPT app — build & edit your site by chatting',
+    'Free KrabiClaw ChatGPT app — build & edit your site by chatting',
     'Bookings, ticketed experiences & consultation requests',
     'Home listings, nightly rates & stay calendars',
     'Airbnb connection for listing imports, stays & availability',

@@ -1498,7 +1498,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
   context.mock.timers.enable({ apis: ['Date'], now: duringStay })
   const { runtime, db, env: bindings } = await boot()
   try {
-    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
     // The guest's notices are written in the business's source language.
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
@@ -1710,7 +1710,7 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
   const { runtime, db, env: bindings } = await boot()
   try {
     // A demo business on the live platform pays in Stripe test mode, which bills no usage.
-    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary', STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary' }
+    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary', STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary' }
     // The guest's notices are written in the business's source language.
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
@@ -1799,7 +1799,7 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
   try {
     const env = {
       ...bindings, BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
-      NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://sites.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply',
+      NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://sites.example', EMAIL_REPLY_SECRET: 'local-stay-reply',
       EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary',
       STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary', STRIPE_TEST_PUBLISHABLE_KEY: 'pk_test_mock',
       STRIPE_TEST_PAYMENTS_METHOD_CONFIGURATION: 'pmc_parent',
@@ -2116,7 +2116,7 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
   const { runtime, db, env: bindings } = await boot()
   try {
     const env = {
-      ...bindings, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only',
+      ...bindings, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only',
     }
     await db.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status) VALUES('org-en',?,'en',1,'published')").bind(ORG).run()
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })

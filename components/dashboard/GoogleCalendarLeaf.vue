@@ -56,13 +56,13 @@ const conflictRows = computed<EditorNavigationItem[]>(() => [{
   ...(membersError.value ? {} : { summary: 'Times someone is busy in Google Calendar can’t be booked with them. Only busy times are read, never what an event is. Each member turns this on under My account → Google Calendar sync.' }),
 }])
 const bookingRows = computed<EditorNavigationItem[]>(() => [{
-  id: 'calendar', label: calendar.value?.calendar_name ?? 'Blawby', icon: 'i-lucide-calendar-check',
+  id: 'calendar', label: calendar.value?.calendar_name ?? 'KrabiClaw', icon: 'i-lucide-calendar-check',
   summary: 'Every booking appears here with the guest’s name. It updates when a booking moves and disappears when it’s cancelled.',
   to: calendar.value ? `https://calendar.google.com/calendar/u/0/r?cid=${btoa(calendar.value.calendar_id).replace(/=+$/, '')}` : undefined,
 }])
 const howItWorks: EditorNavigationItem[] = [
   { id: 'conflicts', label: 'Check for conflicts', icon: 'i-lucide-users', summary: 'Times a team member is busy in Google Calendar can’t be booked with them.' },
-  { id: 'bookings', label: 'Add bookings to your calendar', icon: 'i-lucide-calendar-check', summary: 'Every booking appears on a Blawby calendar in your Google account, and follows the booking.' },
+  { id: 'bookings', label: 'Add bookings to your calendar', icon: 'i-lucide-calendar-check', summary: 'Every booking appears on a KrabiClaw calendar in your Google account, and follows the booking.' },
 ]
 async function run(action:()=>Promise<void>) {
  saving.value=true; failure.value=''

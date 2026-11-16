@@ -114,11 +114,11 @@ function setLocationSlot(request: APIRequestContext, slot: LocationSlot) {
 // value here: it means the location had none, which is not the same as "leave it".
 let priorSpecialHours: { value: unknown } | null = null
 // The Brooklyn location's hours and its tables are shared with the calendar and MCP specs.
-let releaseTenantLock: (() => Promise<void>) | null = null
+let releaseDemoLock: (() => Promise<void>) | null = null
 
 test.afterEach(async ({ page }) => {
-  const release = releaseTenantLock
-  releaseTenantLock = null
+  const release = releaseDemoLock
+  releaseDemoLock = null
   try {
     if (!priorSpecialHours) return
     const previous = priorSpecialHours.value
@@ -431,11 +431,8 @@ for (const viewport of [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'mobile', width: 375, height: 812 },
 ]) {
-  test(`In this conversation archives a conversation and moves it back (${viewport.name})`, async ({ page, request }, testInfo) => {
+  test(`In this conversation archives a conversation and moves it back (${viewport.name})`, async ({ page, request }) => {
     test.skip(!writable, 'Guest-thread writes require disposable local or preview data')
-    // Both viewports require their own just-created conversation to be first
-    // in this shared inbox. A parallel viewport's newer row would win.
-    releaseTenantLock = await acquireTenantMutationLock(testInfo, organizationId())
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
     await loginAs(page.request, baseURL, ownerId)
     const nonce = Date.now()
@@ -536,7 +533,7 @@ for (const viewport of [
 
 test('Calendar retains confirmed table bookings and their detail sends one change request', async ({ page }, testInfo) => {
   test.skip(!writable, 'Today writes require disposable local or preview data')
-  releaseTenantLock = await acquireTenantMutationLock(testInfo, demoOrganizationId())
+  releaseDemoLock = await acquireTenantMutationLock(testInfo, demoOrganizationId())
   await loginAs(page.request, baseURL)
 
   const now = Date.now()
@@ -834,7 +831,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
 
 test('buyer opens the reservation from chat to decide a booking change', async ({ page, playwright }, testInfo) => {
   test.skip(!local, 'Buyer decisions and log-only delivery use disposable local data')
-  releaseTenantLock = await acquireTenantMutationLock(testInfo, demoOrganizationId())
+  releaseDemoLock = await acquireTenantMutationLock(testInfo, demoOrganizationId())
   const owner = await playwright.request.newContext({ baseURL })
   let threadId: string | null = null
   let changeBookingId: string | null = null

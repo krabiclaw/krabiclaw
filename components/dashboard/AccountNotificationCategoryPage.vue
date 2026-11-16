@@ -68,7 +68,7 @@ const offHere = computed(() => draft.push && pushSubscription.state.value.availa
 const pushLine = computed(() => {
   const { availability, ios } = pushSubscription.state.value
   if (availability === 'blocked') return 'Blocked in this browser. Allow it in site settings.'
-  if (availability === 'unsupported') return ios ? 'On iPhone, add Blawby to your Home Screen first.' : 'This browser can\'t show notifications.'
+  if (availability === 'unsupported') return ios ? 'On iPhone, add KrabiClaw to your Home Screen first.' : 'This browser can\'t show notifications.'
   return offHere.value ? 'Not on in this browser.' : undefined
 })
 

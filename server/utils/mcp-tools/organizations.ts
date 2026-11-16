@@ -102,7 +102,7 @@ const ORGANIZATION_SETTINGS_READ_PROPERTIES = {
   brand_description: { type: ['string', 'null'] },
   font_preset: { type: 'string', enum: [...ORGANIZATION_FONT_PRESETS] },
   ...Object.fromEntries(SITE_RECIPE_KEYS.map(key => [key, { type: 'string', enum: [...SITE_RECIPE_OPTIONS[key]], description: `${SITE_RECIPE_DESCRIPTIONS[key]} Absent when the site uses the Default.` }])),
-  palette: { type: ['object', 'null'], description: 'The colors the site renders, light and dark: its own, or the default. Null on Blawby\'s own site.', properties: { light: PALETTE_COLORS_SCHEMA, dark: PALETTE_COLORS_SCHEMA } },
+  palette: { type: ['object', 'null'], description: 'The colors the site renders, light and dark: its own, or the default. Null on KrabiClaw\'s own site.', properties: { light: PALETTE_COLORS_SCHEMA, dark: PALETTE_COLORS_SCHEMA } },
   palette_source: { type: ['string', 'null'], enum: ['custom', 'default', null] },
   announcement: ANNOUNCEMENT_READ_SCHEMA,
   media: { type: 'array', items: ORGANIZATION_MEDIA_ITEM_SCHEMA },
@@ -158,7 +158,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
     outputSchema: websiteDraftOutputSchema,
   })),
   globalTool(withToolAnnotations({
-    name: 'publish_website', description: 'Publish a saved website draft, select it as your workspace and notify Blawby operators by email. Finish any returned missing fields before retrying. Repeating a completed publication can resend the operator email.',
+    name: 'publish_website', description: 'Publish a saved website draft, select it as your workspace and notify KrabiClaw operators by email. Finish any returned missing fields before retrying. Repeating a completed publication can resend the operator email.',
     domain: 'organizations', minimumRole: 'admin',
     inputSchema: { type: 'object', properties: { draft_id: { type: 'string', minLength: 1 }, updated_at: { type: 'string', format: 'date-time' } }, required: ['draft_id', 'updated_at'], additionalProperties: false },
     outputSchema: { type: 'object', properties: {
@@ -212,7 +212,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
     })),
   organizationTool({
       name: 'get_organization',
-      description: "Read the selected Blawby site’s identity, public address and settings. organization_id is the internal ID returned by get_workspace_context or list_organizations, not a URL, domain or business name.",
+      description: "Read the selected KrabiClaw site’s identity, public address and settings. organization_id is the internal ID returned by get_workspace_context or list_organizations, not a URL, domain or business name.",
       domain: 'organizations',
       minimumRole: 'admin',
       outputSchema: {
@@ -241,7 +241,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'get_organization_settings',
-      description: "Read editable settings for the selected Blawby site. Use its internal organization_id from get_workspace_context or list_organizations, not its public URL, domain or name.",
+      description: "Read editable settings for the selected KrabiClaw site. Use its internal organization_id from get_workspace_context or list_organizations, not its public URL, domain or name.",
       domain: 'organizations',
       minimumRole: 'admin',
       outputSchema: {

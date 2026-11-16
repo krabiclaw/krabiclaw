@@ -97,7 +97,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     // A booking arrives confirmed and is complete once its end passes, so
     // cancelling is the only transition a person makes.
     await db.prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?").bind(record!.id).run()
-    const operation = { threadId: winner, organizationId: ORG, action: 'cancel', actorUserId: ACTOR, idempotencyKey: 'cancel-proof', env: { NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } }
+    const operation = { threadId: winner, organizationId: ORG, action: 'cancel', actorUserId: ACTOR, idempotencyKey: 'cancel-proof', env: { NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } }
     assert.equal((await executeGuestThreadOperation(db, operation)).ok, true)
     assert.equal((await executeGuestThreadOperation(db, operation)).ok, true)
     const bookingStatus = (conversationId: string) => db.prepare('SELECT b.status FROM bookings b JOIN conversations c ON c.booking_id = b.id WHERE c.id = ?').bind(conversationId).first('status')

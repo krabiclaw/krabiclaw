@@ -196,7 +196,7 @@ const resultTypeMeta: Partial<Record<PublicSearchResult['type'], { badge: string
 
 const surfaceLabel = computed(() => {
   if (props.surface === 'tenant_blog') return t('site.footer.blog')
-  if (props.surface === 'public') return 'Blawby'
+  if (props.surface === 'public') return 'KrabiClaw'
   if (props.surface === 'docs') return 'Documentation'
   if (props.surface === 'blog') return 'Blog'
   return 'Dashboard'

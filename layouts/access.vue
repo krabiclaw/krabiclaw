@@ -1,7 +1,6 @@
 <template>
   <div class="min-h-screen bg-default flex items-center justify-center px-6 py-12">
     <main class="w-full max-w-md">
-      <img v-if="!oauthViewHasMark" src="/platform/blawby.svg" alt="Blawby" width="40" height="40" class="mb-5 rounded-lg">
       <slot />
     </main>
   </div>
@@ -9,9 +8,6 @@
 
 <script setup lang="ts">
 import '~/assets/css/platform-app-entry.css'
-
-const route = useRoute()
-const oauthViewHasMark = computed(() => route.path === '/oauth/login' || route.path === '/oauth/consent')
 
 // The stable surface file is written by `nuxt build`; under `nuxt dev` Vite serves
 // the imported entry itself, so the link exists only in built output.

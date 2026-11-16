@@ -65,7 +65,7 @@ import { minorAmountToMajor } from '~/shared/prices'
 import type { CurrencyCode } from '~/shared/currencies'
 
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Stripe payout history | Blawby', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Stripe payout history | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const api = useDashboardApi()

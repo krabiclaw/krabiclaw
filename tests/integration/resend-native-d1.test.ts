@@ -199,7 +199,7 @@ const unexpectedReport = async (error: unknown) => { throw error }
 test('email purpose controls Resend unsubscribe headers and invalid required state never reaches the provider', async (t) => {
   const resend = fakeResend(t)
   const localUnsubscribe = await buildUnsubscribeUrls({
-    NUXT_PUBLIC_PLATFORM_DOMAIN: 'http://localhost:3000', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-unsubscribe-proof',
+    NUXT_PUBLIC_PLATFORM_DOMAIN: 'http://localhost:3000', EMAIL_REPLY_SECRET: 'local-unsubscribe-proof',
   }, { userId: 'user-proof', category: 'reviews' }, 'subscribed')
   assert(localUnsubscribe)
   const footerUrl = new URL(localUnsubscribe.pageUrl)
@@ -335,7 +335,7 @@ test('conversation email uses provider-assigned ancestry and freezes each delive
 
     const guestMessageId = '<guest-first@provider-proof.com>'
     const inboundEnv = { ...PROVIDER_ENV, DB: db, GUEST_INBOX_HUBS: hubs, BETTER_AUTH_SECRET: 'threading-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
-      STRIPE_SECRET_KEY: 'sk_test_threading_no_stripe_requests', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'threading-proof' } as unknown as CloudflareEnv
+      STRIPE_SECRET_KEY: 'sk_test_threading_no_stripe_requests', EMAIL_REPLY_SECRET: 'threading-proof' } as unknown as CloudflareEnv
     const incoming = { from: guestEmail, subject: `Re: ${rootEmail.subject}`, messageId: guestMessageId, inReplyTo: root.email_message_id, references: root.email_message_id }
     await receiveGuestEmail(inboundEnv, { entryId: opening.id, token: await buildReplyToken(inboundEnv.EMAIL_REPLY_SECRET!, opening.id, { kind: 'guest' }),
       body: 'Thanks. Is parking free?', files: [], messageId: guestMessageId, headers: incoming })
@@ -482,7 +482,7 @@ test('message alerts thread per recipient and replying to one answers the guest 
   const { runtime, db, hubs } = await runtimeWithSchema()
   try {
     const env = { ...PROVIDER_ENV, DB: db, GUEST_INBOX_HUBS: hubs, BETTER_AUTH_SECRET: 'alert-thread-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
-      STRIPE_SECRET_KEY: 'sk_test_alert_thread_no_stripe_requests', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'alert-thread-proof', WHATSAPP_DELIVERY_MODE: 'log_only' } as unknown as CloudflareEnv
+      STRIPE_SECRET_KEY: 'sk_test_alert_thread_no_stripe_requests', EMAIL_REPLY_SECRET: 'alert-thread-proof', WHATSAPP_DELIVERY_MODE: 'log_only' } as unknown as CloudflareEnv
     await db.prepare("INSERT INTO organization (id,name,slug,subdomain,default_currency,timezone) VALUES ('inn','Harbor Inn','harbor','harbor','USD','UTC')").run()
     await db.prepare("INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES ('inn-en','inn','en',1,'published')").run()
     await db.prepare("INSERT INTO user (id,name,email,emailVerified) VALUES ('owner','Owner','owner@provider-proof.com',1)").run()

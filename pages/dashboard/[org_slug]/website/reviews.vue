@@ -9,5 +9,5 @@ import TestimonialList from '~/components/dashboard/TestimonialList.vue'
 
 definePageMeta({ layout: 'dashboard' })
 
-useSeoMeta({ title: 'Reviews | Blawby', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Reviews | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

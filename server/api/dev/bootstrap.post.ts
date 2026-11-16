@@ -26,11 +26,11 @@ export default defineHandler(async (event) => {
   const created = await auth.api.createUser({ body: { email, name, password, role: 'admin', data: { id, emailVerified: true } } })
   if (created.user.id !== id) throw new HTTPError({ statusCode: 500, message: 'Better Auth did not keep the requested administrator ID' })
   const organization = await auth.api.createOrganization({
-    body: { name: 'Blawby', slug: 'platform', userId: id, default_currency: 'USD', timezone: 'America/Los_Angeles' },
+    body: { name: 'KrabiClaw', slug: 'platform', userId: id, default_currency: 'USD', timezone: 'America/Los_Angeles' },
   })
   if (!organization) throw new HTTPError({ statusCode: 500, message: 'Better Auth did not create the platform organization' })
   const provisioned = await provisionOrganization(env, db, id, {
-    organizationId: organization.id, name: 'Blawby', subdomain: 'krabiclaw', vertical: 'service', sourceLocale: 'en', origin: event.req,
+    organizationId: organization.id, name: 'KrabiClaw', subdomain: 'krabiclaw', vertical: 'service', sourceLocale: 'en', origin: event.req,
   })
   if (provisioned.status !== 200) throw new HTTPError({ statusCode: provisioned.status, message: `Provisioning the platform organization failed: ${JSON.stringify(provisioned.data)}` })
   await executeBatch(db, [{

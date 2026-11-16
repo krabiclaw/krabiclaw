@@ -126,7 +126,7 @@ export default {
     "cancellation_policy": "Cancellation policy",
     "add_dates_for_policy": "Add your dates to see the cancellation policy for your stay.",
     "updating_price": "Updating price…",
-    "receipt_missing_description": "Your stay is in your confirmation email, and in your Blawby account once you create one with the email you booked with.",
+    "receipt_missing_description": "Your stay is in your confirmation email, and in your KrabiClaw account once you create one with the email you booked with.",
     "your_stay": "Your stay",
     "check_in": "Check-in",
     "check_out": "Checkout",
@@ -401,8 +401,8 @@ export default {
   },
   "guest_account": {
     "title": "Keep track of your bookings",
-    "body": "Create a free Blawby account to see your bookings, messages and receipts from every business you use, in one place.",
-    "body_email": "Create a free Blawby account with {email} to see this booking, your messages and receipts from every business you use, in one place.",
+    "body": "Create a free KrabiClaw account to see your bookings, messages and receipts from every business you use, in one place.",
+    "body_email": "Create a free KrabiClaw account with {email} to see this booking, your messages and receipts from every business you use, in one place.",
     "create": "Create an account",
     "sign_in": "Already have an account? Sign in"
   },
@@ -411,7 +411,7 @@ export default {
     "reviews": "Guest reviews & ratings."
   },
   "legal": {
-    "powered_by": "Powered by Blawby",
+    "powered_by": "Powered by KrabiClaw",
     "payment_methods": "Payment methods accepted",
     "accept": "Accept",
     "analytics_notice": "We use cookies to improve your experience. By continuing, you agree to our",

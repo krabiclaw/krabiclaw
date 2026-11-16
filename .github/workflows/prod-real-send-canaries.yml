@@ -60,8 +60,8 @@ jobs:
           check_route "https://northcarolinalegalservices.org/" "${ncls_origin}"
           check_route "https://ncls.krabiclaw.com/" "${ncls_origin}"
 
-          for url in "https://blawby.com/" "https://blawby.com/blog"; do
-            check_route "${url}" "https://blawby.com"
+          for url in "https://krabiclaw.com/" "https://krabiclaw.com/blog"; do
+            check_route "${url}" "https://krabiclaw.com"
           done
 
   prod-provider-status:
