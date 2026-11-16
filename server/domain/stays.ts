@@ -1791,11 +1791,11 @@ export interface HostawayStaySource {
   channel_booking_id?: string | null
 }
 
-async function publishCreatedStay(db: DbClient, env: StayMutationEnv, access: StayAccess & { manage: true }, stay: StayDetail): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null }> {
+async function publishCreatedStay(db: DbClient, env: StayMutationEnv, access: StayAccess & { manage: true }, stay: StayDetail, imported = false): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null }> {
   await planSourceMessages(db, access.organizationId, stay.id)
   const channelPush = await pushNights(db, env, access, stay.product_id, [[stay.check_in_date, stay.check_out_date]])
   return completeChannelPush(channelPush, { product_id: stay.product_id, booking_id: stay.id, version: stay.version, ranges: [[stay.check_in_date, stay.check_out_date]] }, async () => {
-    await publishStayChange(env, db, access.organizationId, stay, true)
+    await publishStayChange(env, db, access.organizationId, stay, true, imported)
     return getStay(db, access, stay.id)
   })
 }
@@ -1846,7 +1846,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
     return getStay(db, access, stored.id)
   }
   // A replay pushes again, so retrying a create whose push did not land repairs it.
-  const pushed = (stay: StayDetail) => publishCreatedStay(db, env, access, stay)
+  const pushed = (stay: StayDetail) => publishCreatedStay(db, env, access, stay, options?.imported !== undefined)
   const earlier = await replay()
   if (earlier) return pushed(earlier)
   if (!imported) assertStayCheckoutHorizon(fields.check_out_date, homeToday(home.timezone))
@@ -2563,7 +2563,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     } else if (currentRevisionId === booking.revision_id) {
       throw new HTTPError({ statusCode: 503, message: 'The saved channel revision has no audit identifying its affected homes', data: { code: 'CHANNEL_REVISION_AUDIT_REQUIRED', field: 'revision_id', committed: true, revision_id: booking.revision_id, booking_id: stored.id, product_id: stored.product_id, version: stored.version } })
     }
-    await publishStayChange(env, db, organizationId, stored, true)
+    await publishStayChange(env, db, organizationId, stored, true, booking.imported)
   }
   if (existing && existing.provider_updated_at !== null && existing.provider_updated_at >= booking.provider_updated_at) {
     await planSourceMessages(db, organizationId, existing.id)
@@ -2675,7 +2675,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   return { ...await storedStay(db, organizationId, stored.id), applied: changed === 1, change: changed === 1 ? await recordedChange() : null }
 }
 
-async function publishStayChange(env: GuestInboxPublicationEnv, db: DbClient, organizationId: string, stay: Stay, nightsChanged: boolean): Promise<void> {
+async function publishStayChange(env: GuestInboxPublicationEnv, db: DbClient, organizationId: string, stay: Stay, nightsChanged: boolean, imported = false): Promise<void> {
   const input = { organization_id: organizationId, location_id: stay.location_id, product_id: stay.product_id, booking_id: stay.id }
   await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { version: stay.version })
   if (nightsChanged) await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { version: stay.version })
@@ -2686,7 +2686,8 @@ async function publishStayChange(env: GuestInboxPublicationEnv, db: DbClient, or
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, booking_id: stay.id, product_id: stay.product_id, version: stay.version, conversation_id: stay.conversation_id }, cause })
   }
   // The stay's clean follows in its conversation: the write only announces that jobs changed.
-  await publishEvent(env as EventsEnv, { type: 'jobs.changed', organization_id: organizationId })
+  // A stay loaded from a home's existing reservations is not news: its job is posted without alerting anyone.
+  await publishEvent(env as EventsEnv, { type: 'jobs.changed', organization_id: organizationId, quiet: imported })
 }
 
 async function storedStay(db: DbClient, organizationId: string, stayId: string): Promise<Stay> {

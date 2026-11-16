@@ -9,7 +9,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 */
 export type DomainEvent =
   /** A job was created, given out, moved or closed in this business: its conversation, its post and its reminders follow. */
-  | { type: 'jobs.changed'; organization_id: string }
+  | { type: 'jobs.changed'; organization_id: string; /** Post without alerting anyone: the jobs are not news (an import, or work that already existed). */ quiet?: boolean }
 
 export interface EventsEnv { EVENTS?: { send(_event: DomainEvent): Promise<void> } }
 
@@ -23,7 +23,7 @@ export async function publishEvent(env: EventsEnv, event: DomainEvent): Promise<
 export async function consumeEvent(env: CloudflareEnv, event: DomainEvent): Promise<void> {
   if (event.type === 'jobs.changed') {
     const { postJobs } = await import('~/server/domain/cleaner-jobs')
-    await postJobs(env, env.DB, event.organization_id)
+    await postJobs(env, env.DB, event.organization_id, { quiet: event.quiet === true })
     // The reminders it stored are sent at their exact times: the business's hub is told to look.
     const { publishBusinessInvalidation } = await import('~/server/cloudflare/guest-inbox-events')
     await publishBusinessInvalidation(env, event.organization_id)

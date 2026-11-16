@@ -100,7 +100,8 @@ function plannedSendQueries(task: Pick<TaskRow, 'id' | 'organization_id' | 'time
  * reminders are stored, when the write returns. A job that could not be told
  * about fails the write.
  */
-export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId: string, now = new Date()): Promise<void> {
+export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId: string, options: { quiet?: boolean; now?: Date } = {}): Promise<void> {
+  const now = options.now ?? new Date()
   const organization = await queryFirst<{ name: string }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
   if (!organization) throw new Error(`Organization ${organizationId} is missing`)
   const [members, tasks] = await Promise.all([
@@ -229,7 +230,7 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
         ? last && (last[0] === baseKey || last[0].startsWith(`${baseKey}:after:`))
         : postsByThread.get(heldIn)?.has(baseKey))
       if (!postedForAssignment) {
-        const result = await post(subject, roster.seats, jobKey(task, prep ? last?.[1] : undefined), lines(view), roster.cleaners, heldIn ?? undefined)
+        const result = await post(subject, roster.seats, jobKey(task, prep ? last?.[1] : undefined), lines(view), options.quiet ? [] : roster.cleaners, heldIn ?? undefined)
         threads.set(result.threadId, { subject_id: subject.id, participants_key: targetKey! })
         heldIn = result.threadId
       }
