@@ -282,8 +282,8 @@ test('Calendar backfill publishes separate tenant jobs and a pending projection 
       events.set(url.pathname, payload)
       return Response.json(payload)
     })
-    await consumeEvent(env, { type: 'calendar.backfill' })
-    assert.deepEqual(queued.toSorted((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    await consumeEvent(env, { type: 'deployment.adopt_pending_work' })
+    assert.deepEqual(queued.filter(event => event.type === 'calendar.changed').toSorted((a, b) => a.organization_id.localeCompare(b.organization_id)),
       ['a-broken', 'b-failed', 'c-healthy'].map(organization_id => ({ type: 'calendar.changed', organization_id, booking_id: null })))
     const eventFor = (organization_id: string): DomainEvent => ({ type: 'calendar.changed', organization_id, booking_id: null })
     await assert.rejects(consumeEvent(env, eventFor('a-broken')), error => {

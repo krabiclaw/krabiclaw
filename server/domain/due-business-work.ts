@@ -13,9 +13,9 @@ export const RETENTION_HUB = 'platform:analytics-retention'
 /** Deployment adopts work that has no Worker wake yet, including writes made by the old build. */
 export async function enqueueOutstandingWork(env: CloudflareEnv): Promise<void> {
   const due = Date.now()
-  const rows = await queryAllPages<{
+  const deadlines = await queryAllPages<{
     organization_id: string
-    kind: 'reviews' | 'checkout' | 'channex_ari' | 'ad_spend' | 'site' | 'calendar' | 'calendar_cleanup'
+    kind: 'reviews' | 'checkout' | 'channex_ari' | 'ad_spend'
   }>(env.DB, `
     SELECT DISTINCT organization_id, 'reviews' AS kind
     FROM bookings WHERE channel = 'direct' AND status = 'confirmed' AND length(ends_at) > 10 AND ends_at > ?
@@ -35,7 +35,13 @@ export async function enqueueOutstandingWork(env: CloudflareEnv): Promise<void> 
       UNION SELECT organization_id FROM usage_events WHERE resource='ad_spend'
         AND provider_occurred_at IS NOT NULL AND delivery_at IS NULL
     )
-    UNION ALL SELECT DISTINCT organization_id, 'site'
+    ORDER BY kind, organization_id
+  `, [new Date(due - REVIEW_REQUEST_TTL_DAYS * 86_400_000).toISOString()])
+  const projections = await queryAllPages<{
+    organization_id: string
+    kind: 'site' | 'calendar' | 'calendar_cleanup'
+  }>(env.DB, `
+    SELECT DISTINCT organization_id, 'site' AS kind
     FROM public_resource_cache_invalidations WHERE status IN ('pending', 'failed')
     UNION ALL SELECT organization_id, 'calendar'
     FROM organization_integrations WHERE provider='google_calendar' AND status <> 'setting_up'
@@ -43,13 +49,15 @@ export async function enqueueOutstandingWork(env: CloudflareEnv): Promise<void> 
     FROM google_calendar_cleanup_jobs WHERE state IN ('pending', 'error')
       AND NOT EXISTS (SELECT 1 FROM organization WHERE organization.id=google_calendar_cleanup_jobs.organization_id)
     ORDER BY kind, organization_id
-  `, [new Date(due - REVIEW_REQUEST_TTL_DAYS * 86_400_000).toISOString()])
+  `, [])
   await publishEvent(env, { type: 'business.wake', organization_id: RETENTION_HUB, kind: 'retention', due_at: due })
-  for (const { organization_id, kind } of rows) {
+  for (const { organization_id, kind } of deadlines) {
+    await publishEvent(env, { type: 'business.wake', organization_id, kind, due_at: due })
+  }
+  for (const { organization_id, kind } of projections) {
     if (kind === 'site') await publishEvent(env, { type: 'site.cache_changed', organization_id, invalidation_id: null })
     else if (kind === 'calendar') await publishEvent(env, { type: 'calendar.changed', organization_id, booking_id: null })
-    else if (kind === 'calendar_cleanup') await publishEvent(env, { type: 'calendar.cleanup', organization_id })
-    else await publishEvent(env, { type: 'business.wake', organization_id, kind, due_at: due })
+    else await publishEvent(env, { type: 'calendar.cleanup', organization_id })
   }
   const jobs = await queryAllPages<{ organization_id: string; id: string }>(env.DB,
     "SELECT organization_id, id FROM airbnb_sync_jobs WHERE state = 'pending' ORDER BY id", [])

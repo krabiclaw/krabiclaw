@@ -340,7 +340,7 @@ test('an organization write purges that organization despite an older invalidati
   await queue.drain(env, 'site.cache_changed')
   assert.equal(await db.prepare("SELECT status FROM public_resource_cache_invalidations WHERE id = 'older-other-org'").first('status'), 'pending')
   assert.equal(await kv.get('public~org~v4~page'), 'cached public resource')
-  await consumeEvent(env, { type: 'site.cache_backfill' })
+  await consumeEvent(env, { type: 'deployment.adopt_pending_work' })
   await queue.drain(env, 'site.cache_changed')
   assert.equal(await kv.get('public~org~v4~page'), null)
   assert.equal(await kv.get('html:org.krabiclaw.com:/'), null)

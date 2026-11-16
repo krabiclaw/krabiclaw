@@ -634,8 +634,9 @@ the intersecting managed days have actual daily spend receipts, including zero
 spend, in the usage outbox. The hub keeps the last eligible reporting deadline
 after the agreement ends and sends pending events through the usage outbox,
 including after Ads is disconnected. `delivery_at` is written after Stripe
-accepts the meter event. For cutover, publish one `ad_spend.backfill` message to
-`EVENTS` to arm hubs for existing agreements and undelivered ad-spend usage.
+accepts the meter event. The deployment workflow queues outstanding work after
+the new Worker serves its own assets. That event arms the hubs for existing
+agreements and undelivered ad-spend usage.
 
 Provider reporting contracts: [Google Ads reporting](https://developers.google.com/google-ads/api/docs/reporting/overview),
 [Meta Ads Insights](https://developers.facebook.com/documentation/ads-commerce/marketing-api/insights).
