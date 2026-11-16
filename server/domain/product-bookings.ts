@@ -21,7 +21,7 @@ import { ensureInteractionUser, getAuthSession, type CloudflareEnv } from '~/ser
 import { bookingDay, getGuestRequest, getThreadOperationalRecord, requestInsertQueries, stayRequestProgress, threadPayloadForGuest, type BookingOperator } from '~/server/domain/requests'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { GUEST_NOTE_EVENT, openingSentence } from '~/server/domain/guest-threads/opening'
-import { DEFAULT_EMAIL_DAILY_LIMIT as EMAIL_DAILY_LIMIT, DEFAULT_IP_HOURLY_LIMIT as IP_HOURLY_LIMIT, getClientIp, hashClientIp, hashIdentifier, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
+import { DEFAULT_IP_HOURLY_LIMIT as IP_HOURLY_LIMIT, getClientIp, hashClientIp, hashIdentifier, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { HTTPError, type H3Event } from 'nitro'
 import { createPaymentCheckout } from '~/server/domain/payments/checkout'
@@ -60,16 +60,11 @@ interface BookingContact {
   idempotencyKey: string
 }
 
-async function bookingRateLimit(db: DbClient, env: CloudflareEnv, ipHash: string, email: string): Promise<string | null> {
+async function bookingRateLimit(db: DbClient, env: CloudflareEnv, ipHash: string): Promise<string | null> {
   if (import.meta.dev || env.E2E_ALLOW_DEV_ROUTES === 'true') return null
-  const now = Date.now()
-  const hourWindow = Math.floor(now / 3_600_000)
-  const today = new Date(now).toISOString().slice(0, 10)
+  const hourWindow = Math.floor(Date.now() / 3_600_000)
   if (!await incrementHourlyRateLimit(db, `rate:book:ip:${ipHash}:${hourWindow}`, IP_HOURLY_LIMIT, 3_600_000)) {
     return 'Too many requests. Please try again later.'
-  }
-  if (!await incrementHourlyRateLimit(db, `rate:book:email:${await hashIdentifier(email)}:${today}`, EMAIL_DAILY_LIMIT, 86_400_000)) {
-    return 'Too many booking requests from this email. Please try again tomorrow.'
   }
   return null
 }
@@ -354,7 +349,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   }
 
   const ipHash = await hashClientIp(getClientIp(event))
-  const limited = !operator && await bookingRateLimit(db, env, ipHash, guestEmail)
+  const limited = !operator && await bookingRateLimit(db, env, ipHash)
   if (limited) return creationResult({ error: limited }, { status: 429 })
 
   const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', threadId)
@@ -565,7 +560,7 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
   let buyerUserId: string | undefined
   try {
     if (!retrying) quoted = await quoteStay(db, organizationId, home, request)
-    const limited = !retrying && await bookingRateLimit(db, env, await hashClientIp(getClientIp(event)), email)
+    const limited = !retrying && await bookingRateLimit(db, env, await hashClientIp(getClientIp(event)))
     if (limited) stayBookingError(429, 'RATE_LIMITED', limited, 'guest_email')
     await requireChannelPush(db, env, organizationId, home.product_id)
     if (policy?.confirmation_mode === 'review') {
