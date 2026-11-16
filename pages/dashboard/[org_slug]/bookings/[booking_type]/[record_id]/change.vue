@@ -112,7 +112,7 @@ const { data: sessionData, error: sessionsError, status: sessionsStatus } = awai
   () => {
     const record = booking.value
     if (!record || !record.product_id || !/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) return Promise.resolve(null)
-    return api<{ options: SessionRow[] }>(`${dashboardBookingPath(record.booking_id!)}/change-options`, {
+    return api<{ options: SessionRow[] }>(`${dashboardBookingPath(record.booking_id!)}/move-options`, {
       query: { from: draft.date, to: addLocalDays(draft.date, 1), ...(movesBetweenLocations.value ? { location_id: draft.locationId } : {}) }, validate: isSessionList,
     })
   },
@@ -159,7 +159,7 @@ async function send() {
   saving.value = true
   error.value = null
   try {
-    await api(`${dashboardBookingPath(record.booking_id!)}/change`, {
+    await api(`${dashboardBookingPath(record.booking_id!)}/move`, {
       method: 'POST',
       body: { ...proposal, version: record.version, idempotency_key: attempt.key },
       validate: isRecord,

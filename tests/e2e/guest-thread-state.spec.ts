@@ -767,7 +767,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const requestedAt = new Date().toISOString()
   const requestCompleted = page.waitForResponse(response =>
     response.request().method() === 'POST'
-    && new URL(response.url()).pathname.endsWith(`/api/dashboard/bookings/${upcomingBookingId}/change`),
+    && new URL(response.url()).pathname.endsWith(`/api/dashboard/bookings/${upcomingBookingId}/move`),
   )
   await page.getByRole('button', { name: 'Send request', exact: true }).click()
   const changeResponse = await requestCompleted
@@ -852,7 +852,7 @@ test('buyer opens the reservation from chat to decide a booking change', async (
       return (await response.json() as { booking: { version: number; updated_at: string; booking_date: string; booking_time: string; party_size: number; location_id: string; product_session_id: string; pending_change: { message_id: string; before: { party_size: number }; after: { party_size: number } } | null } }).booking
     }
     const original = await read()
-    const changePath = `/api/dashboard/bookings/${booked.bookingId}/change`
+    const changePath = `/api/dashboard/bookings/${booked.bookingId}/move`
     const changeParams = { org: demoSlug() }
     const requestChange = async (partySize: number) => {
       const current = await read()

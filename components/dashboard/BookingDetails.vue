@@ -1032,7 +1032,7 @@ async function deletePayment(paymentId: string) {
 async function changeStay(input: { check_in_date: string; check_out_date: string; adults: number; children: number }) {
   const value = detail.value
   if (!value) throw new Error('The stay is not loaded')
-  await dashboardApi(`${dashboardBookingPath(value.booking_id)}/change`, { method: 'POST', validate: isNightBooking, body: { ...input, version: value.version } })
+  await dashboardApi(`${dashboardBookingPath(value.booking_id)}/move`, { method: 'POST', validate: isNightBooking, body: { ...input, version: value.version } })
   await refreshDetails()
 }
 
