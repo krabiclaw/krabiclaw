@@ -6,7 +6,7 @@ import { recordBookingCancelled, recordBookingDecision } from '~/server/domain/b
 import { execute, executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { shouldSendRealEmail } from '~/server/utils/email-delivery'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
-import { bookingDay, canMarkNoShow, getGuestRequest, getThreadOperationalRecord, noStayRequestPaymentInFlightSql, requestActions, requestSummary, stayRequestPayBySql, stayRequestRespondBySql, validateGuestRequest, type GuestRequest, type ThreadOperationalRecord } from '~/server/domain/requests'
+import { bookingDay, getGuestRequest, getThreadOperationalRecord, noStayRequestPaymentInFlightSql, requestActions, requestSummary, stayRequestPayBySql, stayRequestRespondBySql, validateGuestRequest, type GuestRequest, type ThreadOperationalRecord } from '~/server/domain/requests'
 import type { StayAccess } from '~/server/domain/stays'
 import { revokeReviewRequestQuery } from '~/server/utils/review-requests'
 import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deliveries'
@@ -730,7 +730,7 @@ export async function moderateGuestThread(db: DbClient, input: {
 }
 
 export async function executeBookingStatus(db: DbClient, input: Omit<ExecuteOperationInput, 'threadId'> & {
-  action: 'confirm' | 'reject' | 'cancel' | 'no_show'
+  action: 'confirm' | 'reject' | 'cancel'
   bookingId: string
   threadId?: string | null
   version: number
@@ -743,7 +743,7 @@ export async function executeBookingStatus(db: DbClient, input: Omit<ExecuteOper
     FROM bookings b WHERE b.id=? AND b.organization_id=?`, [input.bookingId, input.organizationId])
   if (!record) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   if (input.threadId && input.threadId !== record.conversation_id) throw new HTTPError({ statusCode: 404, message: 'Booking conversation not found' })
-  if (record.unit === 'nights' && input.action !== 'no_show'
+  if (record.unit === 'nights'
     && (!input.stayAccess?.manage || input.stayAccess.organizationId !== input.organizationId || input.stayAccess.actorId !== input.actorUserId)) {
     throw new HTTPError({ statusCode: 403, message: 'Organization access required' })
   }
@@ -764,43 +764,7 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
   if ('ok' in context) return context
   if (bookingId && context.record?.id !== bookingId) return { ok: false, status: 404, reason: 'source_not_found' }
 
-  if (input.action === 'no_show') return await executeNoShow(db, context, input)
   return await executeSourceMutation(db, context, input)
-}
-
-/**
- * Record that the guest did not come. The visit keeps its status; its review
- * invitation is never sent, and a link already sent stops working, in the
- * same batch as the ledger entry that says who recorded it.
- */
-async function executeNoShow(db: DbClient, context: ThreadContext, input: ExecuteOperationInput): Promise<OperationOutcome> {
-  const record = context.record
-  if (!record) return { ok: false, status: 404, reason: 'source_not_found' }
-  const dedupeKey = operationDedupeKey(input)
-  const eventName = `${record.unit === 'nights' ? 'stay' : 'booking'}.no_show`
-  const existing = await findMessageByDedupeKey(db, dedupeKey)
-  if (existing) return entryMatchesRequest(existing, eventName) ? await successfulOutcome(db, context) : conflict()
-  const now = new Date().toISOString()
-  if (input.version !== undefined && record.version !== input.version) return conflict('This booking changed since you opened it. Reload and try again.')
-  if (!canMarkNoShow(record, now)) return conflict('Only a confirmed visit that has started and has no review can be marked as a no-show')
-  const entryId = crypto.randomUUID()
-  await executeBatch(db, [
-    ...messageQueries({ id: entryId, conversationId: context.thread.id, authorKind: 'krabiclaw', authorUserId: input.actorUserId, body: 'Marked as a no-show',
-      eventName, payload: { action: 'no_show', booking_id: record.id }, dedupeKey, occurredAt: now,
-      guard: { sql: `c.organization_id = ? AND NOT EXISTS (SELECT 1 FROM reviews rv WHERE rv.organization_id = c.organization_id AND rv.booking_id = c.booking_id)
-        AND EXISTS (SELECT 1 FROM bookings src WHERE src.id = ? AND src.id = c.booking_id AND src.organization_id = c.organization_id AND src.status = 'confirmed' AND src.no_show_at IS NULL AND src.version = ?)`,
-      params: [context.thread.organization_id, record.id, record.version] } }).queries,
-    {
-      query: `UPDATE bookings SET no_show_at = ?, updated_at = ?, version = version + 1
-        WHERE id = ? AND no_show_at IS NULL AND EXISTS (SELECT 1 FROM messages WHERE id = ?)`,
-      params: [now, now, record.id, entryId],
-    },
-    revokeReviewRequestQuery(record.id, entryId, now),
-  ], { operation: `guest thread ${eventName}` })
-  const applied = await findMessageByDedupeKey(db, dedupeKey)
-  if (!applied) return conflict('The visit changed before it could be marked as a no-show')
-  if (!entryMatchesRequest(applied, eventName)) return conflict()
-  return await successfulOutcome(db, context)
 }
 
 /**

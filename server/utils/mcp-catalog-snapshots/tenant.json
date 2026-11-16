@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:7a287e2b1dcd17a4e3bc77a58b4014e02ec144a9b347ad73f95a6acb2fa66534",
-  "documentationFingerprint": "sha256:5c8d2e3caaacedeb2c638f9f4561fec715b1c18eb8557c15250ce5622a99598a",
+  "fingerprint": "sha256:075b5fd2291b73afd24a331cae648304f8575ffd1f0e438b6d1840bd588e4d40",
+  "documentationFingerprint": "sha256:ef05379cd5187f89e11bd2e4c810d438d7f28aedf45487fc2c86ea0926a5509c",
   "tools": [
     {
       "name": "add_organization_language",
@@ -13372,7 +13372,6 @@
                   "booking_review",
                   "booking_change",
                   "custom",
-                  "stay_ready",
                   "consultation_prep",
                   "consultation_follow_up"
                 ],
@@ -37126,7 +37125,7 @@
         "additionalProperties": false,
         "properties": {
           "assigned_member_id": {
-            "description": "A Better Auth member id from list_tasks assignees; null to unassign.",
+            "description": "A Better Auth member id from list_tasks assignees. null unassigns only a task someone added; a job (a clean, a home to get ready, a follow-up, a prep) always has a member.",
             "type": [
               "string",
               "null"
@@ -37299,7 +37298,6 @@
                   "booking_review",
                   "booking_change",
                   "custom",
-                  "stay_ready",
                   "consultation_prep",
                   "consultation_follow_up"
                 ],
@@ -53866,19 +53864,6 @@
                         },
                         "type": "array"
                       },
-                      "booked_home_name": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "booked_product_id": {
-                        "description": "The listing a channel reservation is booked on when the host moved the guest to another home; null when they sleep where they booked.",
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
                       "cancellation_policy": {
                         "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
                         "enum": [
@@ -54249,8 +54234,6 @@
                     "required": [
                       "id",
                       "product_id",
-                      "booked_product_id",
-                      "booked_home_name",
                       "location_id",
                       "timezone",
                       "channel",
@@ -70126,7 +70109,6 @@
               "booking_review",
               "booking_change",
               "custom",
-              "stay_ready",
               "consultation_prep",
               "consultation_follow_up"
             ],
@@ -70333,7 +70315,6 @@
                           "booking_review",
                           "booking_change",
                           "custom",
-                          "stay_ready",
                           "consultation_prep",
                           "consultation_follow_up"
                         ],
@@ -70677,202 +70658,6 @@
         }
       ],
       "domain": "conversations",
-      "minimumRole": "member",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "no_show_product_booking",
-      "title": "No show product booking",
-      "description": "Record that a guest did not attend a booking that has begun and does not have a guest review.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "booking_id": {
-            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from conversation_id, which identifies the inbox conversation.",
-            "type": "string"
-          },
-          "idempotency_key": {
-            "description": "Caller-supplied durable idempotency key. Reuse only for the identical operation.",
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "version": {
-            "description": "The booking version from get_product_booking. A stale version is refused.",
-            "minimum": 1,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "booking_id",
-          "version",
-          "idempotency_key"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "available_actions": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "conversation_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "ok": {
-            "const": true
-          },
-          "record": {
-            "properties": {
-              "assigned_member_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "ends_at": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "kind": {
-                "enum": [
-                  "booking"
-                ],
-                "type": "string"
-              },
-              "location_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "party_size": {
-                "minimum": 1,
-                "type": "integer"
-              },
-              "product_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "product_kind": {
-                "description": "What was booked: an experience, legal consultation, restaurant table or place to stay.",
-                "enum": [
-                  "dish",
-                  "experience",
-                  "service",
-                  "stay",
-                  "table"
-                ],
-                "type": "string"
-              },
-              "product_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "starts_at": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "status": {
-                "enum": [
-                  "pending",
-                  "confirmed",
-                  "cancelled"
-                ],
-                "type": "string"
-              },
-              "timezone": {
-                "minLength": 1,
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "kind",
-              "status",
-              "party_size",
-              "starts_at",
-              "ends_at",
-              "timezone",
-              "assigned_member_id",
-              "location_id",
-              "product_id",
-              "product_kind",
-              "product_name"
-            ],
-            "type": "object"
-          },
-          "status": {
-            "const": 200
-          },
-          "thread": {
-            "properties": {
-              "id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "kind": {
-                "enum": [
-                  "booking"
-                ],
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "kind"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "ok",
-          "status",
-          "conversation_id",
-          "record",
-          "available_actions",
-          "thread"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": false,
-        "title": "No show product booking"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "bookings",
       "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -96018,7 +95803,7 @@
     {
       "name": "request_product_booking_change",
       "title": "Request product booking change",
-      "description": "Propose a different session or party size to the guest, or apply the move now when allowed. A proposal emails the guest a link to accept or decline and the booking stays as it is until they accept; send no separate message about it. Legal consultation time changes require client acceptance. Give product_id for a table move to a different offering, or to move a stay to another home. For a stay, apply must be true; the guest receives the new arrival instructions.",
+      "description": "Propose a different session or party size to the guest, or apply the move now when allowed. A proposal emails the guest a link to accept or decline and the booking stays as it is until they accept; send no separate message about it. Legal consultation time changes require client acceptance. Give product_id for a table move to a different offering. For a stay, give new dates with apply true.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -96268,10 +96053,6 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "scheduled_message_id": {
-                "minLength": 1,
-                "type": "string"
-              },
               "status": {
                 "enum": [
                   "pending",
@@ -96301,8 +96082,7 @@
               "updated_at",
               "check_in_date",
               "check_out_date",
-              "channel_push",
-              "scheduled_message_id"
+              "channel_push"
             ],
             "type": "object"
           }
@@ -100777,7 +100557,6 @@
                   "booking_review",
                   "booking_change",
                   "custom",
-                  "stay_ready",
                   "consultation_prep",
                   "consultation_follow_up"
                 ],
@@ -125287,7 +125066,7 @@
         "additionalProperties": false,
         "properties": {
           "assigned_member_id": {
-            "description": "A Better Auth member id from list_tasks assignees; null to unassign.",
+            "description": "A Better Auth member id from list_tasks assignees. null unassigns only a task someone added; a job (a clean, a home to get ready, a follow-up, a prep) always has a member.",
             "type": [
               "string",
               "null"
@@ -125463,7 +125242,6 @@
                   "booking_review",
                   "booking_change",
                   "custom",
-                  "stay_ready",
                   "consultation_prep",
                   "consultation_follow_up"
                 ],
@@ -125739,7 +125517,7 @@
         "cancel_product_booking": "sha256:117436c3b77b52e28d4c7baa8f2a7b128c044f4265fc20d038ef5a8e72ddd0f6",
         "confirm_product_booking": "sha256:44be0ae50ae38e0e7f9610cd8eff82af1212af3eb160c66d082804673dafd71e",
         "get_conversation": "sha256:5007b5cc2485f51db503b10ae92e88691fe6d2ffa56dafced5194e41abd1fd3f",
-        "get_product_booking": "sha256:dc627db96028c7e276e50d86819579fe2e1ec552cda94ea7e3b75edab8ceae15",
+        "get_product_booking": "sha256:b140d7060e1d7083c969bccd8f6b7b8b0d0e8922d6f3de39aa3b933cf2cceb0a",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
         "list_conversations": "sha256:563552eb6b0af82a762e138edf26711d2560e62fdb2cee2a757e19106704fbad",
@@ -125748,7 +125526,7 @@
         "mark_conversation_read": "sha256:4284ca380f9c4245e346ef2952bbb3d0e49719491d6a3ada129bf55a681672a4",
         "mark_conversation_unread": "sha256:93abd5acbb4e271d1a1bf843bc1c9a3ef04a44e20b3252461c089d612ab69161",
         "reject_product_booking": "sha256:3b265f1588dfdd8d008d243b0a93e298afb2bc7ac7ff265afe72de2aebfd475f",
-        "request_product_booking_change": "sha256:b57021c68ec60a45aa274dd1a4ad59658afb99c4b8127c2c8ba20e2c347da5dd",
+        "request_product_booking_change": "sha256:e20d2d6560a958fffbed04e12d794cdf0476133dd14ba3433abd07e60bfad2ee",
         "send_message": "sha256:4cac8008e1434c5ec878d41deec75950ca99aad5e6f94092a3e5fdf0731a85ec",
         "start_conversation": "sha256:a39d46341c069673d967628f78638bb7ddbcf94a8689796860962531e8d2192d",
         "update_conversation_group": "sha256:9e592077c678b7f3e11eb78535391b0d8ae3cff57f58e5ba78923e20710142c5"

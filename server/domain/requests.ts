@@ -387,24 +387,13 @@ export function threadPayloadForGuest(input: GuestThreadInput): GuestThreadPaylo
  * because the clock says so.
  */
 export function requestActions(record: ThreadOperationalRecord | null, now: string): string[] {
-  const noShow = canMarkNoShow(record, now) ? ['no_show'] : []
-  if (!canCancelBookingRequest(record, now)) return noShow
+  if (!canCancelBookingRequest(record, now)) return []
   if (record.unit === 'nights') {
-    if (record.status !== 'pending' || !record.respond_by) return noShow
-    if (record.pay_by) return !record.payment_processing && record.pay_by > now ? ['cancel'] : noShow
-    return record.respond_by > now ? ['confirm', 'reject'] : noShow
+    if (record.status !== 'pending' || !record.respond_by) return []
+    if (record.pay_by) return !record.payment_processing && record.pay_by > now ? ['cancel'] : []
+    return record.respond_by > now ? ['confirm', 'reject'] : []
   }
-  return [...(record.status === 'pending' ? ['confirm', 'reject', 'change', 'cancel'] : ['change', 'cancel']), ...noShow]
-}
-
-/**
- * A confirmed visit that has begun can be recorded as a no-show, until the
- * guest has reviewed it. It is the one thing that stops a visit's review
- * invitation without cancelling the visit.
- */
-export function canMarkNoShow(record: ThreadOperationalRecord | null, now: string): record is ThreadOperationalRecord {
-  return Boolean(record && record.status === 'confirmed' && record.no_show_at === null && record.review_id === null
-    && record.starts_at <= (isBookingDay(record.starts_at) ? localDateAt(new Date(now), record.timezone) : now))
+  return record.status === 'pending' ? ['confirm', 'reject', 'change', 'cancel'] : ['change', 'cancel']
 }
 
 export function canCancelBookingRequest(record: ThreadOperationalRecord | null, now: string): record is ThreadOperationalRecord {

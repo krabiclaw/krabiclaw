@@ -11,7 +11,7 @@ import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events
 export default defineHandler(async event => {
   const action = getRouterParam(event, 'action')
   const stayChange = action === 'accept_change' || action === 'decline_change'
-  if (!stayChange && action !== 'confirm' && action !== 'reject' && action !== 'cancel' && action !== 'no_show') throw new HTTPError({ statusCode: 404, message: 'Booking action not found' })
+  if (!stayChange && action !== 'confirm' && action !== 'reject' && action !== 'cancel') throw new HTTPError({ statusCode: 404, message: 'Booking action not found' })
   const context = await dashboardBookingContext(event)
   const { db, env, organization, userId, access, principal, bookingId, booking } = context
   if (booking.unit === 'nights' && !access.manage) {

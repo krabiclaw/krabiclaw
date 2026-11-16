@@ -87,7 +87,6 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
   ...([
     ['confirm', 'Confirm a pending product booking or consultation after staff review and email the guest, keeping its session and places. No payment is collected.'],
     ['reject', 'Decline a pending product booking or consultation, release its places and email the guest. A required refund returns financial_action_required and a dashboard URL before status changes.'],
-    ['no_show', 'Record that a guest did not attend a booking that has begun and does not have a guest review.'],
     ['cancel', 'Cancel a pending or confirmed booking before it ends and tell the guest: a product booking or consultation releases its places; a stay the host entered frees its nights, cancels its pending automatic messages and updates the home\'s connected Airbnb availability through Channex (a channel\'s stay is cancelled on its channel). A required refund returns financial_action_required and a dashboard URL before status changes.'],
   ] as const).map(([action, purpose]) => organizationTool({
     name: `${action}_product_booking`, outputSchema: action === 'cancel' ? { type: 'object', anyOf: [operationResult, nightsCancelResult] } : operationResult, domain: 'bookings', minimumRole: 'member', description: purpose,
@@ -197,8 +196,8 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     if (result.kind === 'stay') return { success: true, ...nightBookingMutation(result.stay) }
     return renderStructuredResponse({ success: result.status < 400, ...result.body, http_status: result.status }, undefined, undefined, result.status >= 400)
   }
-  const statusActions: Record<string, 'confirm' | 'reject' | 'cancel' | 'no_show'> = {
-    confirm_product_booking: 'confirm', reject_product_booking: 'reject', cancel_product_booking: 'cancel', no_show_product_booking: 'no_show',
+  const statusActions: Record<string, 'confirm' | 'reject' | 'cancel'> = {
+    confirm_product_booking: 'confirm', reject_product_booking: 'reject', cancel_product_booking: 'cancel',
   }
   const action = statusActions[toolName]
   if (!action && !['get_product_booking', 'request_product_booking_change', 'update_product_booking'].includes(toolName)) return NOT_HANDLED

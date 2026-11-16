@@ -147,8 +147,6 @@ export interface DashboardBookingDetails {
   contact_phone: string | null
   /** When staff recorded the guest did not come. */
   no_show_at: string | null
-  /** The team may still record a no-show: confirmed, begun, and not reviewed. */
-  can_mark_no_show: boolean
   /** Where the visit's review invitation stands, for the team; null before one is sent. */
   review_invitation: { state: 'sent' | 'submitted' | 'revoked' | 'expired'; at: string } | null
 }
@@ -360,7 +358,6 @@ async function composeBookingDetails(
     guest_can_retry_cancellation: guestCanRetryCancellation,
     guest_cancel_refunds: now <= freeCancellationUntil(row.starts_at, policy.advance_notice_minutes),
     contact_phone: contact?.contactPhone ?? null,
-    can_mark_no_show: !reader.buyerUserId && row.status === 'confirmed' && row.no_show_at === null && row.review_id === null && row.starts_at <= now,
     review_invitation: reader.buyerUserId ? null : await reviewInvitationState(db, row.booking_id, now),
   }
 }
@@ -494,7 +491,6 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     guest_can_retry_cancellation: false,
     guest_cancel_refunds: false,
     no_show_at: null,
-    can_mark_no_show: false,
     review_invitation: null,
     contact_phone: contact?.contactPhone ?? null,
   }

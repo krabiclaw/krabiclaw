@@ -393,15 +393,6 @@
       </div>
     </div>
   </DashboardListItemDialog>
-  <DashboardListItemDialog v-model:open="noShowOpen" title="Mark as a no-show" :show-actions="false" :error="actionError">
-    <div v-if="booking" class="space-y-5">
-      <p class="text-sm leading-relaxed text-muted">{{ firstName(booking.guest_name ?? '') }} won’t be asked to review this {{ noun }}, and a review link already sent stops working. The {{ noun }} itself stays as it is. This cannot be undone.</p>
-      <div class="flex items-center justify-between gap-4 pt-1">
-        <UButton label="Keep as is" color="neutral" variant="ghost" @click="noShowOpen = false" />
-        <UButton label="Mark as a no-show" color="error" :loading="busy === 'no_show'" @click="runAction('no_show')" />
-      </div>
-    </div>
-  </DashboardListItemDialog>
   <!--
     Cancelling gets a screen that states the consequence and lets the tenant say
     why, rather than a native confirm() stacked on top of the sheet that opened
@@ -590,7 +581,6 @@ async function answerChange(decision: 'accept' | 'decline') {
   }
 }
 const cancelOpen = ref(false)
-const noShowOpen = ref(false)
 const cancelNote = ref('')
 // What a cancellation gives back: everything still captured, as Airbnb's host cancellation does.
 const refundable = computed(() => (booking.value?.payments ?? []).reduce((sum, entry) => sum + entry.payment.captured_amount - entry.payment.refunded_amount, 0))
@@ -614,14 +604,13 @@ const availableActions = computed<Array<{ value: string; label: string; icon: st
   if (props.personalScope) return booking.value.guest_can_cancel
     ? [{ value: 'cancel', label: `Cancel ${presentation.value.noun}`, icon: 'i-lucide-calendar-x', color: 'error' as const }]
     : []
-  const noShow = booking.value.can_mark_no_show ? [{ value: 'no_show', label: 'Mark as a no-show', icon: 'i-lucide-user-x', color: 'neutral' as const }] : []
-  if (booking.value.complete) return noShow
+  if (booking.value.complete) return []
   if (booking.value.type === 'booking' && booking.value.status === 'pending') return [
     { value: 'confirm', label: `Confirm ${presentation.value.noun}`, icon: 'i-lucide-calendar-check', color: 'success' as const },
     { value: 'reject', label: `Decline ${presentation.value.noun}`, icon: 'i-lucide-calendar-x', color: 'error' as const },
   ]
   if (booking.value.status !== 'confirmed') return []
-  return [{ value: 'cancel', label: `Cancel ${presentation.value.noun}`, icon: 'i-lucide-calendar-x', color: 'error' as const }, ...noShow]
+  return [{ value: 'cancel', label: `Cancel ${presentation.value.noun}`, icon: 'i-lucide-calendar-x', color: 'error' as const }]
 })
 
 const REVIEW_INVITATION_LABELS = { sent: 'Sent', submitted: 'Answered', revoked: 'Withdrawn', expired: 'Expired' } as const
@@ -684,10 +673,6 @@ function selectAction(action: string) {
   if (action === 'cancel' && !booking.value?.guest_can_retry_cancellation) {
     manageOpen.value = false
     openCancel()
-  } else if (action === 'no_show') {
-    manageOpen.value = false
-    actionError.value = null
-    noShowOpen.value = true
   } else void runAction(action)
 }
 
@@ -751,7 +736,6 @@ async function runAction(action: string) {
   await run(action, async () => {
     await updateStatus(action, record, action === 'cancel' ? cancelNote.value.trim() : '')
     cancelOpen.value = false
-    noShowOpen.value = false
     manageOpen.value = false
   }, 'Booking could not be updated', false)
 }

@@ -768,7 +768,6 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   list_product_bookings: R,
   list_product_booking_sessions: R,
   confirm_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
-  no_show_product_booking: { ...D, idempotentHint: true },
   update_product_booking: { ...D, openWorldHint: true },
   reject_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
   cancel_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
