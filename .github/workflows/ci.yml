@@ -300,13 +300,13 @@ jobs:
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
-      NUXT_PUBLIC_PLATFORM_DOMAIN: https://krabiclaw.com
+      NUXT_PUBLIC_PLATFORM_DOMAIN: https://blawby.com
       NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://krabiclaw.com
-      NUXT_PUBLIC_APP_NAME: KrabiClaw
-      NUXT_PUBLIC_SITE_URL: https://krabiclaw.com
-      NUXT_PUBLIC_HELP_URL: https://krabiclaw.com/help
+      NUXT_PUBLIC_APP_NAME: Blawby
+      NUXT_PUBLIC_SITE_URL: https://blawby.com
+      NUXT_PUBLIC_HELP_URL: https://blawby.com/help
       NUXT_PUBLIC_WHATSAPP_NUMBER: "16197200000"
-      BETTER_AUTH_URL: https://krabiclaw.com
+      BETTER_AUTH_URL: https://blawby.com
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -348,7 +348,26 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: corepack yarn wrangler deploy --strict
+          BLAWBY_ZARAZ_RUNTIME_API_TOKEN: ${{ secrets.BLAWBY_ZARAZ_RUNTIME_API_TOKEN }}
+          OPENAI_APPS_CHALLENGE_BLAWBY_B64: ${{ secrets.OPENAI_APPS_CHALLENGE_BLAWBY_B64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          binding_file=$(mktemp "${RUNNER_TEMP}/blawby-secrets.XXXXXX")
+          trap 'unlink "$binding_file"' EXIT
+          jq -en '
+            env.BLAWBY_ZARAZ_RUNTIME_API_TOKEN as $zaraz |
+            env.OPENAI_APPS_CHALLENGE_BLAWBY_B64 as $challenge |
+            select(($zaraz | length) > 0 and ($challenge | length) > 0) |
+            {CLOUDFLARE_API_TOKEN: $zaraz, OPENAI_APPS_CHALLENGE_BLAWBY_B64: $challenge}
+          ' > "$binding_file"
+          node -e '
+            const b64 = process.env.OPENAI_APPS_CHALLENGE_BLAWBY_B64;
+            const bytes = Buffer.from(b64, "base64");
+            if (!bytes.length || bytes.toString("base64") !== b64) throw Error("Invalid Blawby OpenAI challenge encoding");
+          '
+          corepack yarn wrangler deploy --strict --secrets-file "$binding_file"
   verify-production:
     name: Verify production
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -360,14 +379,14 @@ jobs:
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
-      NUXT_PUBLIC_PLATFORM_DOMAIN: https://krabiclaw.com
+      NUXT_PUBLIC_PLATFORM_DOMAIN: https://blawby.com
       NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://krabiclaw.com
-      NUXT_PUBLIC_APP_NAME: KrabiClaw
-      NUXT_PUBLIC_SITE_URL: https://krabiclaw.com
-      NUXT_PUBLIC_HELP_URL: https://krabiclaw.com/help
+      NUXT_PUBLIC_APP_NAME: Blawby
+      NUXT_PUBLIC_SITE_URL: https://blawby.com
+      NUXT_PUBLIC_HELP_URL: https://blawby.com/help
       NUXT_PUBLIC_WHATSAPP_NUMBER: "16197200000"
-      BETTER_AUTH_URL: https://krabiclaw.com
-      PLAYWRIGHT_PREVIEW_URL: https://krabiclaw.com
+      BETTER_AUTH_URL: https://blawby.com
+      PLAYWRIGHT_PREVIEW_URL: https://blawby.com
       PLAYWRIGHT_WORKERS: "1"
       EXPECTED_NUXT_BUILD_ID: ${{ needs.deploy-production.outputs.nuxt_build_id }}
     steps:
@@ -396,7 +415,7 @@ jobs:
           https://www.potteryhousekrabi.com
           https://www.kikuzuki-thailand.com
           https://www.northcarolinalegalservices.org
-          https://krabiclaw.com
+          https://blawby.com
       - name: Refresh production search index
         env:
           PLATFORM_SEARCH_REINDEX_SECRET: ${{ secrets.PLATFORM_SEARCH_REINDEX_SECRET }}

@@ -2038,7 +2038,7 @@
       "description": "Save a real conversation attachment and publish a website-only announcement.",
       "user_prompt": "Use this attached photo for a new announcement on Ember & Slice: “A fresh look for our café.” Publish it on our website and send me the link. Keep it off Facebook and Instagram.",
       "file_attachment_urls": [
-        "https://krabiclaw.com/templates/saya-preview.jpg"
+        "https://blawby.com/templates/saya-preview.jpg"
       ],
       "tools_triggered": "list_organizations, save_media_attachment, create_post, publish_post, get_post",
       "expected_output": "Saves the host-provided image attachment as a public asset, creates the requested announcement, and publishes only the website target after any required confirmation. Opens the returned public URL and verifies the correct image and text. No social-provider post is created.",
