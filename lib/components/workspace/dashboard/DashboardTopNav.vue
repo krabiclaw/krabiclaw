@@ -6,10 +6,10 @@
       : 'grid grid-cols-[1fr_auto]'"
     data-testid="dashboard-top-nav"
   >
-    <NuxtLink :to="homeTo" class="group flex w-fit shrink-0 items-center gap-2.5 no-underline">
+    <NuxtLink :to="homeTo" aria-label="Blawby dashboard" class="group flex w-fit shrink-0 items-center gap-2.5 no-underline">
       <img
         src="/platform/blawby.svg"
-        alt="Blawby"
+        alt=""
         width="36"
         height="36"
         class="size-8 rounded-[9px] transition-transform duration-200 group-hover:rotate-12"

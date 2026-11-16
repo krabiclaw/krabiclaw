@@ -231,15 +231,12 @@
 
       <!-- Booking Settings Card (Airbnb Parity) -->
       <div v-if="surface === 'settings'" class="mb-6">
-        <div
+        <NuxtLink
+          :to="`${settingsPath}/booking`"
           class="block w-full text-left rounded-3xl p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           :class="{ 'ring-2 ring-highlighted': isBookingActive }"
-          tabindex="0"
-          role="link"
           :aria-current="isBookingActive ? 'page' : undefined"
           data-testid="website-booking-card"
-          @click="navigateTo(`${settingsPath}/booking`)"
-          @keydown.enter="navigateTo(`${settingsPath}/booking`)"
         >
           <div class="flex items-center justify-between">
             <h2 class="text-xl font-bold text-highlighted tracking-tight">
@@ -251,7 +248,7 @@
           <p class="mt-2 text-sm text-muted">
             {{ bookingCardSubtitle }}
           </p>
-        </div>
+        </NuxtLink>
       </div>
 
 
