@@ -1,5 +1,5 @@
 import { bookingReviewDueAt } from '~/server/utils/review-request-delivery'
-import { changedTaskIds, publishChangedJobs, publishEvent, type DomainEvent, type EventsEnv } from '~/server/events'
+import { changedTaskIds, publishEvent, type DomainEvent, type EventsEnv } from '~/server/events'
 import { PUBLIC_PROVIDER_JSON_SQL, PUBLISHED_PROFILE_SQL, RESERVATION_HOST_SQL, type PublicProvider } from '~/shared/member-scheduling'
 import { bookChannelConversationGuest, reconcileGuestListingParticipants } from '~/server/domain/conversation-participants'
 import { HTTPError } from 'nitro'
@@ -3327,7 +3327,7 @@ export function stayFromCheckoutQueries(input: { organizationId: string; stayId:
 }
 
 /** After a stay is made from a checkout: its scheduled messages, its channel and the screens showing it. */
-export async function completeStayFromCheckout(db: DbClient, env: StayMutationEnv, organizationId: string, stayId: string, captured: boolean): Promise<void> {
+export async function completeStayFromCheckout(db: DbClient, env: StayMutationEnv, organizationId: string, stayId: string): Promise<void> {
   const stay = await storedStay(db, organizationId, stayId)
   const change = { organizationId, before: null, after: stay }
   const homes = await readTurnoverHomes(db, change)
@@ -3340,8 +3340,7 @@ export async function completeStayFromCheckout(db: DbClient, env: StayMutationEn
       params: [organizationId, d1JsonStringSet(keys)] },
   ], { operation: 'Complete paid stay turnover and cache invalidation' })
   const taskIds = changedTaskIds(results)
-  if (captured) await publishStayChange(env, organizationId, stay, [[stay.check_in_date, stay.check_out_date]], true, taskIds)
-  else await publishChangedJobs(env, organizationId, taskIds)
+  await publishStayChange(env, organizationId, stay, [[stay.check_in_date, stay.check_out_date]], true, taskIds)
 }
 
 /** The stay a captured checkout made, read for its confirmation. */

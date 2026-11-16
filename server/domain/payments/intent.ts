@@ -291,7 +291,7 @@ async function calculateTax(stripe: Stripe, payment: Payment, snapshot: ReturnTy
 
 /**
  * Confirms exactly what was reviewed: the same method on the intent, the same
- * total. A card or Link is authorized, booked, then captured here or, after 3DS,
+ * total. A card or Link is captured before booking here or, after 3DS,
  * from the webhook or the return; a bank debit clears later and books then.
  * Every path settles idempotently from Stripe's own status.
  */
@@ -343,6 +343,7 @@ export async function confirmPayment(db: DbClient, env: CloudflareEnv, organizat
   let confirmed: Stripe.PaymentIntent
   try {
     confirmed = await stripe.paymentIntents.confirm(current.id, {
+      expand: ['latest_charge'],
       // A method that leaves the site comes back to this pay page, which completes the return there.
       return_url: new URL(`/pay/${encodeURIComponent(payment.id)}?claim=${encodeURIComponent(claim)}`, siteOrigin).toString(),
       // A concurrent review can change the attached method before Stripe receives this confirmation.
@@ -379,7 +380,7 @@ export type PaymentReturn =
   | { state: 'paid'; kind: 'stay'; activity_id: string; receipt_token: string }
   /** Stripe is still clearing the payment; nothing is booked until it captures. */
   | { state: 'processing' }
-  /** A bank debit cleared after what it paid for was taken; the payment is refunded in full, or Stripe is still settling that refund. */
+  /** The payment captured after capacity was lost and the full refund is recorded or pending. */
   | { state: 'refunded' }
   /** What it was for has gone, so the authorization was cancelled and nothing was charged. */
   | { state: 'expired' }
@@ -389,7 +390,7 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
   if (!receipt) throw new Error('Captured payment has no checkout hold')
   if (receipt.status !== 'converted') {
     if (receipt.refunded_amount > 0) return { state: 'refunded' }
-    // A bank debit that cleared after its capacity went is refunded in full; Stripe may still be settling that refund.
+    // A payment captured after its capacity went is refunded in full; Stripe may still be settling that refund.
     const refund = await queryFirst<{ status: string; error: string | null }>(db, 'SELECT status, error FROM payment_refunds WHERE payment_id=? ORDER BY created_at DESC LIMIT 1', [payment.id])
     if (refund && ['creating', 'pending', 'requires_action', 'succeeded'].includes(refund.status)) return { state: 'refunded' }
     if (refund) throw new Error(`Captured payment has no booking and its refund ${refund.status}${refund.error ? `: ${refund.error}` : ''}`)
