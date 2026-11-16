@@ -1,161 +1,40 @@
-name: Production Real-Send Canaries
+name: Blawby Pages edge preflight
 
-on:
-  workflow_dispatch:
-    inputs:
-      run_auth_canary:
-        description: "Send a real production auth OTP canary"
-        required: true
-        type: boolean
-        default: false
-      run_notification_canary:
-        description: "Send real production email + WhatsApp notification canaries"
-        required: true
-        type: boolean
-        default: false
+on: workflow_dispatch
 
 permissions:
   contents: read
 
 jobs:
-  prod-smoke:
-    name: Production smoke
+  edge:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     steps:
-      - name: Check paid client + platform public routes
-        shell: bash
+      - name: Check the Blawby home page with curl
         run: |
           set -euo pipefail
-          check_route() {
-            local url="$1"
-            local expected_origin="$2"
-            local result code effective_url title
-            result=$(curl -L --connect-timeout 10 --max-time 30 -s -o /tmp/page.html -w "%{http_code} %{url_effective}" "${url}")
-            read -r code effective_url <<< "${result}"
-            title=$(grep -o '<title>.*</title>' /tmp/page.html | head -n1 | sed -E 's#</?title>##g' || true)
-            echo "${url} -> ${code} ${effective_url} | ${title:-<no-title>}"
-            [[ "${code}" -lt 400 ]] || (echo "Route failed: ${url}" && exit 1)
-            [[ "${effective_url}" == "${expected_origin}" || "${effective_url}" == "${expected_origin}/"* ]] || \
-              (echo "Wrong final origin: expected ${expected_origin}, got ${effective_url}" && exit 1)
-          }
-
-          pottery_origin="https://www.potteryhousekrabi.com"
-          for route in "/" "/experiences" "/experiences/pottery-wheel-class" "/about" "/contact"; do
-            check_route "${pottery_origin}${route}" "${pottery_origin}"
-          done
-          check_route "https://pottery-house.krabiclaw.com/" "${pottery_origin}"
-
-          kikuzuki_origin="https://www.kikuzuki-thailand.com"
-          for route in "/" "/menu" "/locations" "/reservations"; do
-            check_route "${kikuzuki_origin}${route}" "${kikuzuki_origin}"
-          done
-          check_route "https://kikuzuki-thailand.com/" "${kikuzuki_origin}"
-          check_route "https://kikuzuki-krabi-thailand.krabiclaw.com/" "${kikuzuki_origin}"
-
-          ncls_origin="https://www.northcarolinalegalservices.org"
-          for route in "/" "/services" "/pricing" "/contact"; do
-            check_route "${ncls_origin}${route}" "${ncls_origin}"
-          done
-          check_route "https://northcarolinalegalservices.org/" "${ncls_origin}"
-          check_route "https://ncls.krabiclaw.com/" "${ncls_origin}"
-
-          for url in "https://blawby.com/" "https://blawby.com/blog"; do
-            check_route "${url}" "https://blawby.com"
-          done
-
-  prod-provider-status:
-    name: Production provider status
-    runs-on: ubuntu-latest
-    needs: [prod-smoke]
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
-        with:
-          node-version: "24.18.1"
-      - name: Check WhatsApp and Resend credentials without sending
-        env:
-          CANARY_BASE_URL: ${{ secrets.CANARY_BASE_URL }}
-          CANARY_STATUS_SECRET: ${{ secrets.CANARY_STATUS_SECRET }}
-        run: node scripts/canary-provider-status.mjs
-
-  prod-auth-canary:
-    name: Production auth canary
-    if: ${{ inputs.run_auth_canary }}
-    runs-on: ubuntu-latest
-    needs: [prod-smoke]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
-        with:
-          node-version: "24.18.1"
-      - run: corepack enable
-      - name: Restore Yarn package cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: ~/.yarn/berry/cache
-          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
-          restore-keys: yarn-${{ runner.os }}-
-      - run: corepack yarn install --immutable
-      - run: corepack yarn playwright install --with-deps chromium
-      - name: Run production auth canary
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CANARY_BASE_URL: ${{ secrets.CANARY_BASE_URL }}
-          CANARY_PHONE_E164: ${{ secrets.CANARY_PHONE_E164 }}
-          CANARY_ORG_ID: ${{ secrets.CANARY_ORG_ID }}
-        run: |
-          set -euo pipefail
-          yarn canary:prod | tee canary-auth.log
-      - name: Upload auth canary log
+          status=$(curl --silent --show-error --max-time 30 --dump-header "$RUNNER_TEMP/blawby-home.headers" --output "$RUNNER_TEMP/blawby-home.html" --write-out '%{http_code}' https://blawby.com/)
+          echo "curl / status=$status"
+          awk 'BEGIN { IGNORECASE=1 } /^(content-type|cf-ray|cf-mitigated):/ { print }' "$RUNNER_TEMP/blawby-home.headers"
+          [[ "$status" == 200 ]]
+          rg -qi '^content-type: text/html' "$RUNNER_TEMP/blawby-home.headers"
+          rg -qi '^cf-ray: ' "$RUNNER_TEMP/blawby-home.headers"
+          if rg -qi '^cf-mitigated:|cdn-cgi/challenge-platform' "$RUNNER_TEMP/blawby-home.headers" || rg -qi '<title>Just a moment' "$RUNNER_TEMP/blawby-home.html"; then
+            echo 'Cloudflare challenged the home page'
+            exit 1
+          fi
+      - name: Replay the Node build lookup against the Pages origin
         if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: prod-auth-canary-log
-          path: canary-auth.log
-          if-no-files-found: ignore
-
-  prod-notification-canary:
-    name: Production notification canary
-    if: ${{ inputs.run_notification_canary }}
-    runs-on: ubuntu-latest
-    needs: [prod-smoke]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
-        with:
-          node-version: "24.18.1"
-      - run: corepack enable
-      - name: Restore Yarn package cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: ~/.yarn/berry/cache
-          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
-          restore-keys: yarn-${{ runner.os }}-
-      - run: corepack yarn install --immutable
-      - name: Run production notification canary
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CANARY_BASE_URL: ${{ secrets.CANARY_BASE_URL }}
-          CANARY_ORG_ID: ${{ secrets.CANARY_ORG_ID }}
-          CANARY_NOTIFICATION_EMAIL: ${{ secrets.CANARY_NOTIFICATION_EMAIL }}
-          CANARY_NOTIFICATION_PHONE_E164: ${{ secrets.CANARY_NOTIFICATION_PHONE_E164 }}
         run: |
-          set -euo pipefail
-          yarn canary:notifications 2>&1 | tee canary-notifications.log
-      - name: Upload notification canary log
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: prod-notification-canary-log
-          path: canary-notifications.log
-          if-no-files-found: ignore
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict'
+          const url = new URL('/_nuxt/builds/latest.json', 'https://blawby.com')
+          url.searchParams.set('deployment-check', Date.now() + '-' + crypto.randomUUID())
+          const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(30_000) })
+          const headers = Object.fromEntries(['cf-ray', 'cf-mitigated', 'content-type'].map(name => [name, response.headers.get(name)]))
+          console.log(JSON.stringify({ path: url.pathname, status: response.status, ...headers }))
+          assert.equal(headers['cf-mitigated'], null)
+          assert.ok(headers['cf-ray'])
+          assert.equal(response.status, 404)
+          assert.doesNotMatch(await response.text(), /<title>Just a moment/i)
+          NODE
