@@ -12,7 +12,7 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
       params: to.params,
       query: to.query,
       hash: to.hash,
-    })
+    }, { replace: true })
   }
   if (to.path.startsWith('/dashboard/')) {
     const preferenceMatch = to.path.match(/^\/dashboard\/([^/]+)\/website\/(status|domains|localization|currency)(\/.*)?$/)
