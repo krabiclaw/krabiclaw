@@ -2,7 +2,7 @@ import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 import { executeBatch, queryFirst } from '~/server/db'
-import { dashboardOrgQueryParam, getDashboardMemberContext } from '~/server/utils/dashboard-context'
+import { dashboardMemberQuery, dashboardOrgQueryParam, getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { assignedMemberSql, BATCH_VIEWER, joinedMemberPrincipal, memberAccessPrincipal, membershipBySlugQuery, withViewer } from '~/server/utils/member-access'
@@ -34,17 +34,22 @@ async function dashboardBookingsContext(event: H3Event) {
 }
 
 export async function dashboardBookingContext(event: H3Event) {
-  const context = await dashboardBookingsContext(event)
+  const { env, db, session, userId, membership, organizationFrom } = await dashboardMemberQuery(event)
   const bookingId = getRouterParam(event, 'booking_id')
   if (!bookingId) throw new HTTPError({ statusCode: 400, message: 'Booking ID is required' })
-  const booking = await queryFirst<Pick<BookedRecord, 'unit' | 'status' | 'respond_by' | 'product_id'> & { conversation_id: string }>(context.db, `
-    SELECT b.unit, c.id AS conversation_id, b.status, b.respond_by, b.product_id FROM ${BOOKING_RECORDS_SQL} b
+  const [memberResult, bookingResult] = await executeBatch(db, [membership, withViewer(membership, {
+    query: `SELECT b.unit, c.id AS conversation_id, b.status, b.respond_by, b.product_id, ${assignedMemberSql('b', BATCH_VIEWER.user)} AS assigned
+      FROM ${BOOKING_RECORDS_SQL} b
       JOIN conversations c ON c.booking_id=b.id AND c.organization_id=b.organization_id AND c.kind='booking'
-      WHERE b.organization_id = ? AND b.id = ?
-        ${context.access.manage ? '' : `AND ${assignedMemberSql('b')}`}
-  `, [context.organization.id, bookingId, ...(context.access.manage ? [] : [context.userId])])
-  if (!booking) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
-  return { ...context, bookingId, booking }
+      WHERE b.organization_id = ${BATCH_VIEWER.organization} AND b.id = ?`,
+    params: [bookingId],
+  })], { operation: 'Read dashboard booking access' })
+  const organization = organizationFrom(memberResult?.results[0])
+  const principal = memberAccessPrincipal(organization, { env, event })
+  const access = await stayAccessFor(principal)
+  const booking = bookingResult?.results[0] as Pick<BookedRecord, 'unit' | 'status' | 'respond_by' | 'product_id'> & { conversation_id: string; assigned: number } | undefined
+  if (!booking || (!access.manage && !booking.assigned)) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
+  return { db, env, session, userId, organization, principal, access, bookingId, booking }
 }
 
 export async function dashboardBookingDetails(event: H3Event) {

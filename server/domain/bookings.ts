@@ -37,11 +37,21 @@ export async function setBookingNote(db: DbClient, scope: BookingScope, body: un
   if (written.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'This booking changed since you opened it. Reload and try again.' })
 }
 
+export function timedBookingPricesQuery(organization: BatchQuery, variants: BatchQuery): BatchQuery {
+  return { query: `SELECT * FROM prices WHERE organization_id=${organization.query}
+    AND product_variant_id IN (${variants.query}) AND stay_date IS NULL AND weekend=0`,
+  params: [...organization.params ?? [], ...variants.params ?? []] }
+}
+
+export function timedBookingPriceFrom(prices: Price[], input: { variantId: string; locationId: string | null; currency: CurrencyCode; now: string }): Price | null {
+  return selectPrice(prices.filter(price => price.product_variant_id === input.variantId).map(price => ({ ...price, active: Boolean(price.active) })), {
+    currency: input.currency, location_id: input.locationId, at: input.now, billing: { type: 'one_time' },
+  })
+}
+
 export async function readTimedBookingPrice(db: DbClient, input: {
   organizationId: string; variantId: string; locationId: string | null; currency: CurrencyCode; now: string
 }): Promise<Price | null> {
-  const prices = await queryAll<Price>(db, 'SELECT * FROM prices WHERE organization_id=? AND product_variant_id=? AND stay_date IS NULL AND weekend=0', [input.organizationId, input.variantId])
-  return selectPrice(prices.map(price => ({ ...price, active: Boolean(price.active) })), {
-    currency: input.currency, location_id: input.locationId, at: input.now, billing: { type: 'one_time' },
-  })
+  const { query, params } = timedBookingPricesQuery({ query: '?', params: [input.organizationId] }, { query: 'SELECT ?', params: [input.variantId] })
+  return timedBookingPriceFrom(await queryAll<Price>(db, query, params), input)
 }

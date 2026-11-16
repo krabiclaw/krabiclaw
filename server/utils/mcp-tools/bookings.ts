@@ -249,7 +249,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     return { success: true, conversation_id: proposal.conversationId, change_status: proposal.changeStatus, record: mcpBookingRecord(operationalRecord) }
   }
   if (!action || typeof args.version !== 'number') throw new HTTPError({ statusCode: 400, message: 'Booking version is required' })
-  const result = await executeBookingStatus(db, { bookingId: id, version: args.version, threadId: thread.id, organizationId, action, actorUserId: organization.userId,
+  const result = await executeBookingStatus(db, { bookingId: id, version: args.version, threadId: thread.id, organizationId, action, actorUserId: organization.userId, actorRole: principal.role,
     idempotencyKey: key, env, stayAccess: access, reason: optionalString(args, 'reason') ?? undefined, financialWritesAllowed: false })
   if (result.kind === 'stay') {
     const { stay } = result

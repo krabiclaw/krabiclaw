@@ -1,7 +1,8 @@
 import { changedTaskIds, publishChangedJobs, publishEvent, type DomainEvent } from '~/server/events'
 import { HTTPError } from 'nitro'
 import { bookingStatusQuery } from '~/server/domain/bookings'
-import { visitRefundQueries } from '~/server/domain/payments/visit-refund'
+import { visitRefundPaymentQuery, visitRefundQueries } from '~/server/domain/payments/visit-refund'
+import type { Payment } from '~/server/domain/payments'
 import { recordBookingCancelled, recordBookingDecision } from '~/server/domain/booking-analytics'
 import { execute, executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { shouldSendRealEmail } from '~/server/utils/email-delivery'
@@ -439,8 +440,15 @@ async function executeSourceMutation(
   const deliveryId = deliveryDedupeKey(input)
   if (!context.thread.payload.guest.email) throw new Error(`Booking conversation ${context.thread.id} has no guest email`)
   // Declining or cancelling a paid booking returns the payment in the same batch, once the operator approved it.
-  const refundPlan = (plan.action === 'reject' || plan.action === 'cancel') && context.record
-    ? await visitRefundQueries(db,{action:plan.action,organizationId:context.thread.organization_id,actorUserId:input.actorUserId,bookingId:context.record.id,authorizationId:input.financialAuthorizationId,financialWritesAllowed:input.financialWritesAllowed,note:input.body,committed:{query:'EXISTS(SELECT 1 FROM messages WHERE id=?)',params:[entryId]},now}) : {queries:[],guard:null}
+  const refundPayment = visitRefundPaymentQuery(input.organizationId, context.record.id)
+  const refundPlan = plan.action === 'reject' || plan.action === 'cancel'
+    ? await visitRefundQueries(db, {
+      action: plan.action, organizationId: input.organizationId, actorUserId: input.actorUserId, bookingId: context.record.id,
+      authorizationId: input.financialAuthorizationId, financialWritesAllowed: input.financialWritesAllowed, note: input.body, now,
+      committed: { query: 'EXISTS(SELECT 1 FROM messages WHERE id=?)', params: [entryId] },
+      payment: await queryFirst<Payment>(db, refundPayment.query, refundPayment.params) ?? null,
+      actorRole: async () => (await queryFirst<{ role: string }>(db, 'SELECT role FROM member WHERE organizationId=? AND userId=?', [input.organizationId, input.actorUserId]))?.role ?? null,
+    }) : { queries: [], guard: null }
   const stay = nightly ? await import('~/server/domain/stays') : null
   const nightRelease = stay && plan.afterStatus === 'cancelled'
     ? stay.stayRequestReleaseQueries({ ...context.record, check_in_date: bookingDay(context.record.starts_at, context.record.timezone),
@@ -714,6 +722,7 @@ export async function executeBookingStatus(db: DbClient, input: Omit<ExecuteOper
   threadId?: string | null
   version: number
   stayAccess?: StayAccess
+  actorRole: string
 }) {
   if (!Number.isSafeInteger(input.version) || input.version < 1) throw new HTTPError({ statusCode: 400, message: 'Booking version is required' })
   const record = await queryFirst<{ unit: 'slot' | 'nights'; conversation_id: string | null; status: string; respond_by: string | null }>(db, `SELECT CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit,
@@ -729,7 +738,7 @@ export async function executeBookingStatus(db: DbClient, input: Omit<ExecuteOper
   if (record.unit === 'nights' && input.action === 'cancel' && (!record.respond_by || record.status === 'confirmed')) {
     const { cancelStay } = await import('~/server/domain/stays')
     const stay = await cancelStay(db, input.env, input.stayAccess!, input.bookingId, {
-      version: input.version, reason: input.reason ?? input.body, authorization_id: input.financialAuthorizationId, financial_writes_allowed: input.financialWritesAllowed,
+      version: input.version, reason: input.reason ?? input.body, authorization_id: input.financialAuthorizationId, financial_writes_allowed: input.financialWritesAllowed, actorRole: input.actorRole,
     })
     return { kind: 'stay' as const, stay }
   }

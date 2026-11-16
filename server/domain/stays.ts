@@ -18,7 +18,7 @@ import { createLocation, updateLocation, type UpdateLocationInput } from '~/serv
 import { liveHomeSql } from '~/server/utils/billing'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { calculateMapUrl, coordinatesFailure } from '~/utils/location-map'
-import { visitRefundQueries } from '~/server/domain/payments/visit-refund'
+import { visitRefundPaymentQuery, visitRefundQueries } from '~/server/domain/payments/visit-refund'
 import { bookedPolicyFor, LONG_TERM_STAY_NIGHTS, stayCancellationRefund, type StayBookedPolicy, type StayCancellationInput } from '~/shared/stay-cancellation'
 import { executeRefund, requirePayment, type Payment } from '~/server/domain/payments'
 import { paymentsStripe } from '~/server/utils/stripe-connect'
@@ -1254,7 +1254,7 @@ export async function moveStayPhotos(db: DbClient, env: CloudflareEnv & GuestInb
 export type StayView<A extends StayAccess> = A extends { manage: true } ? Stay : StayTurnover
 type StayDetailView<A extends StayAccess> = A extends { manage: true } ? StayDetail : StayTurnover
 
-export async function getStay<A extends StayAccess>(db: DbClient, access: A, stayId: string): Promise<StayDetailView<A>> {
+function stayDetailQuery(access: StayAccess, stayId: string): BatchQuery {
   const scope = visibleHomes(access)
   const paymentColumns = access.manage ? `,
     (SELECT json_group_array(json_object('id', id, 'booking_id', booking_id, 'amount_minor', amount_minor, 'currency', currency,
@@ -1265,14 +1265,18 @@ export async function getStay<A extends StayAccess>(db: DbClient, access: A, sta
       'refunded_minor', refunded_amount, 'receipt_url', receipt_url, 'created_at', created_at))
       FROM payments WHERE organization_id = s.organization_id AND subject_type = 'booking' AND subject_id = s.id
     ) AS online_payments_json` : ''
-  const row = await queryFirst<Record<string, unknown> & Pick<StayDetail, 'guest_image_url'> & {
-    offline_payments_json?: string; online_payments_json?: string
-  }>(db, `
-    SELECT ${STAY_COLUMNS}, (SELECT u.image FROM user u WHERE u.id = s.user_id) AS guest_image_url ${paymentColumns}
+  return {
+    query: `SELECT ${STAY_COLUMNS}, (SELECT u.image FROM user u WHERE u.id = s.user_id) AS guest_image_url ${paymentColumns}
       FROM ${STAY_FROM}
-     WHERE s.organization_id = ? AND s.id = ? AND s.product_session_id IS NULL AND ${scope.sql}`, [access.organizationId, stayId, ...scope.params])
+     WHERE s.organization_id = ? AND s.id = ? AND s.product_session_id IS NULL AND ${scope.sql}`,
+    params: [access.organizationId, stayId, ...scope.params],
+  }
+}
+
+function stayDetailFrom<A extends StayAccess>(access: A, row: unknown): StayDetailView<A> {
   if (!row) fail(404, 'STAY_NOT_FOUND', 'That stay is not in this organization')
-  const { offline_payments_json: offline, online_payments_json: online, guest_image_url, ...record } = row
+  const { offline_payments_json: offline, online_payments_json: online, guest_image_url, ...record } = row as Record<string, unknown>
+    & Pick<StayDetail, 'guest_image_url'> & { offline_payments_json?: string; online_payments_json?: string }
   const stay = mapStay(record)
   if (!access.manage) return stayTurnover(stay) as StayDetailView<A>
   if (offline === undefined || online === undefined) throw new Error('The stay detail query did not return its payment data')
@@ -1284,6 +1288,11 @@ export async function getStay<A extends StayAccess>(db: DbClient, access: A, sta
   const status = isChannelManagedStay(stay) ? null
     : paid === 0 ? 'unpaid' : paid < stay.total_minor ? 'partial' : paid === stay.total_minor ? 'paid' : 'overpaid'
   return { ...stay, guest_image_url, payments, online_payment, paid_minor: paid, payment_status: status } as StayDetailView<A>
+}
+
+export async function getStay<A extends StayAccess>(db: DbClient, access: A, stayId: string): Promise<StayDetailView<A>> {
+  const { query, params } = stayDetailQuery(access, stayId)
+  return stayDetailFrom(access, await queryFirst(db, query, params))
 }
 
 /** The price of an inventory date is the dated price of its home's variant. */
@@ -1916,6 +1925,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
         context: access.audit, afterState: { ...fields, channel, channel_booking_id: channelBookingId }, ...(imported ? { metadata: { imported } } : {}) }),
       ...(payment ? stayPaymentInsert(access, { id, currency: home.currency, location_id: home.location_id }, payment, `${key}:payment`, now) : []),
       ...turnovers.queries,
+      stayDetailQuery(access, id),
     ], { operation: 'Create stay' })
   } catch (error) {
     if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
@@ -1925,21 +1935,22 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
     }
     throw error
   }
-  return publish(await getStay(db, access, id), changedTaskIds(writes))
+  return publish(stayDetailFrom(access, writes.at(-1)?.results[0]), changedTaskIds(writes))
 }
 
 export function assertStayRequestEditable(stay: Pick<Stay, 'status' | 'respond_by'>): void {
   if (stay.status === 'pending' && stay.respond_by) fail(409, 'STAY_REQUEST_PENDING', 'A stay request can be edited once the guest has paid.', 'booking_id')
 }
 
-async function requireAppStay(db: DbClient, access: StayAccess, stayId: string, expectedVersion: unknown): Promise<StayDetail> {
-  requireManager(access)
-  const stay = await getStay(db, access, stayId)
-  if (isChannelManagedStay(stay)) channelOwned(stay, 'belongs to')
-  if (stay.status === 'cancelled') fail(409, 'STAY_NOT_EDITABLE', 'This stay is cancelled')
-  assertStayRequestEditable(stay)
-  if (expectedVersion !== stay.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
-  return stay
+function stayTurnoverHomeQuery(organizationId: string, stayId: string, checkIn: string | null): BatchQuery {
+  // The current stay's UTC day may be a day after its local arrival day.
+  const anchor = "MIN(COALESCE(date(?), date(s.starts_at)), date(s.starts_at, '-1 day'))"
+  return {
+    query: `SELECT ${turnoverHomeColumns(anchor)}, b.default_capacity AS max_guests FROM ${TURNOVER_HOME_FROM}
+      JOIN bookings s ON s.organization_id = c.organization_id AND s.product_id = c.product_id
+      WHERE s.organization_id = ? AND s.id = ? AND s.product_session_id IS NULL`,
+    params: [checkIn, organizationId, stayId],
+  }
 }
 
 /** The version-guarded update leads its batch; whether it applied is read from its result. */
@@ -1949,11 +1960,16 @@ function versionChanged(results: unknown): boolean {
 
 export async function updateStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: Record<string, unknown> & { version: unknown }): Promise<StayDetail> {
   requireManager(access)
-  const current = await requireAppStay(db, access, stayId, input.version)
-  const earliest = typeof input.check_in_date === 'string' && input.check_in_date < current.check_in_date ? input.check_in_date : current.check_in_date
-  const home = await queryFirst<TurnoverHome & Pick<StayHome, 'max_guests'>>(db, `
-    SELECT ${turnoverHomeColumns('?')}, b.default_capacity AS max_guests FROM ${TURNOVER_HOME_FROM}
-    WHERE c.organization_id = ? AND c.product_id = ?`, [earliest, access.organizationId, current.product_id])
+  const [currentResult, homeResult] = await executeBatch(db, [
+    stayDetailQuery(access, stayId),
+    stayTurnoverHomeQuery(access.organizationId, stayId, typeof input.check_in_date === 'string' ? input.check_in_date : null),
+  ], { operation: 'Read stay for edit' })
+  const current = stayDetailFrom(access, currentResult?.results[0])
+  if (isChannelManagedStay(current)) channelOwned(current, 'belongs to')
+  if (current.status === 'cancelled') fail(409, 'STAY_NOT_EDITABLE', 'This stay is cancelled')
+  assertStayRequestEditable(current)
+  if (input.version !== current.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
+  const home = homeResult?.results[0] as (TurnoverHome & Pick<StayHome, 'max_guests'>) | undefined
   if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
   const before: StayFields = { check_in_date: current.check_in_date, check_out_date: current.check_out_date, arrival_time: recordedArrival(current, home), adults: current.adults, children: current.children, infants: current.infants,
     guest_name: current.guest_name ?? '', guest_email: current.guest_email, guest_phone: current.guest_phone, total_minor: current.total_minor, private_notes: current.private_notes }
@@ -1980,13 +1996,14 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
       bookingContactQuery({ organizationId: access.organizationId, bookingId: stayId, version: next, updatedAt: now, locationId: home.location_id, guest: { name: fields.guest_name, email: fields.guest_email, phone: fields.guest_phone } }),
       ...reconcileNightsQueries(access.organizationId, stayId, { updated_at: now, version: next, product_id: current.product_id, ...window, check_in_date: fields.check_in_date, check_out_date: fields.check_out_date }),
       ...turnovers.queries,
+      stayDetailQuery(access, stayId),
     ], { operation: 'Update stay' })
   } catch (error) {
     if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
     throw error
   }
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
-  const stay = await getStay(db, access, stayId)
+  const stay = stayDetailFrom(access, results.at(-1)?.results[0])
   const nightsChanged = current.check_in_date !== stay.check_in_date || current.check_out_date !== stay.check_out_date
   const ranges = nightsChanged ? [[current.check_in_date, current.check_out_date], [stay.check_in_date, stay.check_out_date]] as const : []
   await publishStayChange(env, access.organizationId, stay, ranges, nightsChanged, changedTaskIds(results))
@@ -2000,23 +2017,31 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
  * the caller that holds it (server/api/dashboard/payments/refund.post.ts).
  * Without one the cancellation is refused with where to approve it.
  */
-export async function cancelStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: { version: unknown; reason?: unknown; authorization_id?: string; financial_writes_allowed?: boolean }): Promise<StayDetail> {
+export async function cancelStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: { version: unknown; reason?: unknown; authorization_id?: string; financial_writes_allowed?: boolean; actorRole: string }): Promise<StayDetail> {
   requireManager(access)
-  const current = await getStay(db, access, stayId)
+  const [currentResult, paymentResult, homeResult] = await executeBatch(db, [
+    stayDetailQuery(access, stayId),
+    visitRefundPaymentQuery(access.organizationId, stayId),
+    stayTurnoverHomeQuery(access.organizationId, stayId, null),
+  ], { operation: 'Read stay for cancellation' })
+  const current = stayDetailFrom(access, currentResult?.results[0])
   if (isChannelManagedStay(current)) channelOwned(current, 'belongs to')
   if (input.version !== current.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
   const reason = optionalText(input.reason, 'reason', 500)
   // A current-version replay publishes the saved cancellation without another mutation or refund intent.
   if (current.status === 'cancelled') return publishBookingNights(env, access.organizationId, current, [])
+  const home = homeResult?.results[0] as TurnoverHome | undefined
+  if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
   const next = current.version + 1
   const now = new Date().toISOString()
   const refund = await visitRefundQueries(db, {
     action: 'cancel', organizationId: access.organizationId, actorUserId: access.actorId, bookingId: stayId,
     authorizationId: input.authorization_id, financialWritesAllowed: input.financial_writes_allowed, note: reason ?? undefined, now,
+    payment: (paymentResult?.results[0] as Payment | undefined) ?? null, actorRole: () => Promise.resolve(input.actorRole),
     committed: { query: "EXISTS(SELECT 1 FROM bookings WHERE organization_id=? AND id=? AND status='cancelled' AND version=?)", params: [access.organizationId, stayId, next] },
   })
   const change = { organizationId: access.organizationId, before: current, after: { ...current, status: 'cancelled' as const } }
-  const turnovers = turnoverTaskQueries({ ...change, now, homes: await readTurnoverHomes(db, change) })
+  const turnovers = turnoverTaskQueries({ ...change, now, homes: [home] })
   const results = await executeBatch(db, [
     bookingStatusQuery({ organizationId: access.organizationId, bookingId: stayId, status: 'cancelled', reason, now,
       guard: { query: `version = ? AND owner = 'app' AND status <> 'cancelled' AND product_session_id IS NULL AND (${refund.guard?.query ?? '1 = 1'})`,
@@ -2025,9 +2050,10 @@ export async function cancelStay(db: DbClient, env: StayMutationEnv, access: Sta
     ...reconcileNightsQueries(access.organizationId, stayId, { updated_at: now, version: next, product_id: current.product_id, starts_at: current.starts_at, ends_at: current.ends_at, check_in_date: current.check_in_date, check_out_date: current.check_out_date }),
     ...refund.queries,
     ...turnovers.queries,
+    stayDetailQuery(access, stayId),
   ], { operation: 'Cancel stay' })
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
-  return publishBookingNights(env, access.organizationId, await getStay(db, access, stayId), changedTaskIds(results))
+  return publishBookingNights(env, access.organizationId, stayDetailFrom(access, results.at(-1)?.results[0]), changedTaskIds(results))
 }
 
 /** What cancelling a stay returns to its guest now, by the policy they booked under, out of what they paid. */

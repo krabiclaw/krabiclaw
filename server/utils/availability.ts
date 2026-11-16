@@ -1383,10 +1383,21 @@ interface SessionSelector {
   now?: string
 }
 
+export type SavedBookingOpening = Pick<ProductSession, 'starts_at' | 'location_id'>
+
+export function savedBookingOpeningQuery(organization: BatchQuery, product: BatchQuery, sessionId: string): BatchQuery {
+  return { query: `SELECT starts_at, location_id FROM product_sessions
+    WHERE organization_id=${organization.query} AND product_id=${product.query} AND id=?`,
+  params: [...organization.params ?? [], ...product.params ?? [], sessionId] }
+}
+
+function readSavedBookingOpening(db: DbClient, input: SessionSelector) {
+  const { query, params } = savedBookingOpeningQuery({ query: '?', params: [input.organizationId] }, { query: '?', params: [input.productId] }, input.sessionId)
+  return queryFirst<SavedBookingOpening>(db, query, params)
+}
+
 /** The offered time a session id names, read through the slot reader at that instant. */
-async function findOpening(db: DbClient, env: CloudflareEnv | null, input: SessionSelector, now: string, scope: SlotReadScope) {
-  const saved = await queryFirst<ProductSession>(db, `SELECT * FROM product_sessions WHERE organization_id=? AND product_id=? AND id=?`,
-    [input.organizationId, input.productId, input.sessionId])
+async function openingAt(db: DbClient, env: CloudflareEnv | null, input: SessionSelector, saved: SavedBookingOpening | undefined, now: string, scope: SlotReadScope) {
   const starts = saved?.starts_at ?? projectedIdPattern.exec(input.sessionId)?.[1]
   if (!starts || !Number.isFinite(Date.parse(starts))) return null
   const calendar = await readSlotCalendar(db, env, {
@@ -1395,6 +1406,10 @@ async function findOpening(db: DbClient, env: CloudflareEnv | null, input: Sessi
   })
   const opening = calendar.openings.find(item => item.session.id === input.sessionId)
   return { calendar, opening: opening && bookableSessions(calendar.schedule, [opening.session as BookableSession], now).length ? opening : null }
+}
+
+async function findOpening(db: DbClient, env: CloudflareEnv | null, input: SessionSelector, now: string, scope: SlotReadScope) {
+  return openingAt(db, env, input, await readSavedBookingOpening(db, input), now, scope)
 }
 
 /** Verify a session selector without storing its occurrence. */
@@ -1406,8 +1421,14 @@ export async function findBookableSession(db: DbClient, input: SessionSelector, 
 export async function resolveBookingSession(db: DbClient, input: SessionSelector & {
   env: CloudflareEnv; actorId: string
 }, scope: SlotReadScope = 'bookable'): Promise<ResolvedBookingSession> {
+  return bookingSessionFrom(db, input, await readSavedBookingOpening(db, input), scope)
+}
+
+export async function bookingSessionFrom(db: DbClient, input: SessionSelector & {
+  env: CloudflareEnv; actorId: string
+}, saved: SavedBookingOpening | undefined, scope: SlotReadScope = 'bookable'): Promise<ResolvedBookingSession> {
   const now = input.now ?? new Date().toISOString()
-  const found = await findOpening(db, input.env, input, now, scope)
+  const found = await openingAt(db, input.env, input, saved, now, scope)
   if (!found) throw new HTTPError({ statusCode: 404, message: 'That session is not open for booking' })
   const { calendar, opening } = found
   if (!opening) throw new HTTPError({ statusCode: 409, message: 'That session is no longer offered. Choose an available time.' })

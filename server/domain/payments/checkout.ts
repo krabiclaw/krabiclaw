@@ -87,7 +87,10 @@ function checkoutKey(organizationId: string, idempotencyKey: string): string {
   return `checkout:${organizationId}:${idempotencyKey.trim()}`
 }
 
-export function checkoutAttemptQuery(organizationId: string, idempotencyKey: string): BatchQuery {
+export function checkoutAttemptQuery(organization: string | BatchQuery, idempotencyKey: string): BatchQuery {
+  const scope = typeof organization === 'string' ? { query: '?', params: [organization] } : organization
+  const key = typeof organization === 'string' ? { query: '?', params: [checkoutKey(organization, idempotencyKey)] }
+    : { query: `('checkout:' || ${scope.query} || ':' || ?)`, params: [...scope.params ?? [], idempotencyKey.trim()] }
   return { query: `
     SELECT p.*, h.status AS hold_status, h.expires_at AS hold_expires_at, h.quantity AS hold_quantity,
       r.id AS hold_conversation_id, json_extract(r.payload_json, '$.provenance.fingerprint') AS hold_fingerprint,
@@ -96,8 +99,8 @@ export function checkoutAttemptQuery(organizationId: string, idempotencyKey: str
     FROM payments p LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id
     LEFT JOIN conversations r ON r.id=h.conversation_id AND r.organization_id=p.organization_id
     LEFT JOIN stripe_connected_accounts a ON a.organization_id=p.organization_id AND a.stripe_account_id=p.stripe_account_id AND a.livemode=p.livemode
-    WHERE p.idempotency_key=? AND p.organization_id=?`,
-    params: [new Date().toISOString(), checkoutKey(organizationId, idempotencyKey), organizationId] }
+    WHERE p.idempotency_key=${key.query} AND p.organization_id=${scope.query}`,
+    params: [new Date().toISOString(), ...key.params, ...scope.params ?? []] }
 }
 
 export function readCheckoutAttempt(db: DbClient, organizationId: string, idempotencyKey: string) {
@@ -297,7 +300,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       // The connected configuration the acceptance check verified: cards, Link, wallets, and ACH Direct Debit.
       payment_method_configuration: methodConfigurationId,
       automatic_payment_methods: { enabled: true, allow_redirects: 'always' },
-      // A card or Link is authorized, booked, then captured. ACH has no authorization.
+      // A card or Link is authorized, then captured before booking. ACH clears later.
       payment_method_options: { card: { capture_method: 'manual' }, link: { capture_method: 'manual' } },
       application_fee_amount: 0,
       description: projectionTitle,

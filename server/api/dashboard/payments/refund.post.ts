@@ -34,7 +34,7 @@ export default defineHandler(async event=>{
   const failures:unknown[]=[]
   try {
    await executeBookingStatus(db, {
-    env, organizationId: organization.id, actorUserId: userId, bookingId: payment.subject_id!, threadId: stay.conversation_id,
+    env, organizationId: organization.id, actorUserId: userId, actorRole: principal.role, bookingId: payment.subject_id!, threadId: stay.conversation_id,
     action: 'cancel', version: stay.version, reason: authorization.note ?? undefined, financialAuthorizationId: body.authorization_id, stayAccess: access,
    })
   } catch(error) {
@@ -68,7 +68,7 @@ export default defineHandler(async event=>{
   const action:VisitRefundAction=authorization.action==='reject_booking'?'reject':'cancel'
   const payment=paid,booking=booked
   if(!booking.conversation_id) throw new HTTPError({statusCode:409,statusMessage:'Paid booking request is unavailable'})
-  const status=await executeBookingStatus(db,{threadId:booking.conversation_id,organizationId:organization.id,bookingId:payment.subject_id!,version:booking.version,action,actorUserId:userId,idempotencyKey:`paid-${action}:${body.authorization_id}`,financialAuthorizationId:body.authorization_id,...(authorization.note?{body:authorization.note}:{}),env})
+  const status=await executeBookingStatus(db,{threadId:booking.conversation_id,organizationId:organization.id,bookingId:payment.subject_id!,version:booking.version,action,actorUserId:userId,actorRole:principal.role,idempotencyKey:`paid-${action}:${body.authorization_id}`,financialAuthorizationId:body.authorization_id,...(authorization.note?{body:authorization.note}:{}),env})
   if(status.kind!=='booking') throw new Error('Timed booking refund changed its inventory unit')
   const {outcome}=status
   const key=visitRefundKey(action,payment.subject_id!)

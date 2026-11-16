@@ -32,7 +32,7 @@ export default defineHandler(async event => {
   if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1) throw new HTTPError({ statusCode: 400, message: 'Booking version is required' })
   const idempotencyKey = typeof body.idempotency_key === 'string' ? body.idempotency_key : event.req.headers.get('idempotency-key') ?? undefined
   const result = await executeBookingStatus(db, {
-    bookingId, version, organizationId: organization.id, threadId: booking.conversation_id, actorUserId: userId, action, idempotencyKey, env, stayAccess: access,
+    bookingId, version, organizationId: organization.id, threadId: booking.conversation_id, actorUserId: userId, actorRole: principal.role, action, idempotencyKey, env, stayAccess: access,
     reason: typeof body.reason === 'string' ? body.reason : undefined,
     financialAuthorizationId: typeof body.authorization_id === 'string' ? body.authorization_id : undefined,
     financialWritesAllowed: await roleAllows({ ...principal, permissions: { payments: ['refund'] } }),

@@ -6,7 +6,7 @@ import type { H3Event } from 'nitro'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession, type CloudflareEnv } from '~/server/utils/auth'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import { assertOrganizationWideAccess, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveUserOrganization, type ResolvedMembership } from '~/server/utils/member-access'
+import { assertOrganizationWideAccess, ASSIGNED_SERVICE_SQL, DASHBOARD_ORGANIZATION_COLUMNS, joinedMembership, memberAccessPrincipal, membershipByIdQuery, membershipBySlugQuery, resolveUserOrganization, type ResolvedMembership } from '~/server/utils/member-access'
 import { getOrganizationPlan } from '~/server/utils/billing-access'
 
 import { parsePostalAddress } from '~/utils/postal-address'
@@ -44,14 +44,7 @@ export type DashboardOrganizationRow = ResolvedMembership & {
   memberId: string
 } & DashboardOrganizationConfig
 
-const ORGANIZATION_CONFIG_SELECT = `
-  SELECT id, theme_id, vertical, subdomain,
-         (SELECT domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS custom_domain,
-         (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url,
-         status, onboarding_status, default_currency, timezone
-  FROM organization`
-const ORGANIZATION_CONFIG_BY_ID_SQL = `${ORGANIZATION_CONFIG_SELECT} WHERE id = ? LIMIT 1`
-const ORGANIZATION_CONFIG_BY_SLUG_SQL = `${ORGANIZATION_CONFIG_SELECT} WHERE slug = ? LIMIT 1`
+const ORGANIZATION_CONFIG_BY_ID_SQL = `SELECT o.id, ${DASHBOARD_ORGANIZATION_COLUMNS} FROM organization o WHERE o.id = ?`
 
 // The dashboard shows the business's mark and nothing else of its media: the
 // sidebar avatar is its `logo` as its owner presents it, or no avatar at all.
@@ -212,6 +205,24 @@ export async function getDashboardMemberContext(event: H3Event, options: Dashboa
   userId: string
   organization: DashboardOrganizationRow | null
 }> {
+  const context = await dashboardSessionContext(event)
+  const slug = options.organizationSlug ?? dashboardOrgQueryParam(event)
+  if (options.requireOrganization !== false && !slug) throw dashboardOrganizationRequired()
+  // Only callers outside a tenant URL may use the session's active organization.
+  const sessionRecord = context.session.session as typeof context.session.session & { activeOrganizationId?: string | null }
+  const activeId = typeof sessionRecord.activeOrganizationId === 'string' ? sessionRecord.activeOrganizationId : null
+  const membership = slug ? membershipBySlugQuery(slug, context.userId)
+    : activeId ? membershipByIdQuery(activeId, context.userId) : null
+  let row = membership && await queryFirst(context.db, membership.query, membership.params)
+  if (!row && options.requireOrganization === false && slug && activeId) {
+    const activeMembership = membershipByIdQuery(activeId, context.userId)
+    row = await queryFirst(context.db, activeMembership.query, activeMembership.params)
+  }
+  if (!row && options.requireOrganization === false) return { ...context, organization: null }
+  return { ...context, organization: dashboardOrganizationFrom(row) }
+}
+
+async function dashboardSessionContext(event: H3Event) {
   const env = cloudflareEnv(event)
   const db = env.DB
 
@@ -224,57 +235,27 @@ export async function getDashboardMemberContext(event: H3Event, options: Dashboa
     throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
   }
 
-  // Session-wide activeOrganizationId is only ever considered when this specific
-  // caller has declared it has no URL-scoped org context (requireOrganization: false —
-  // the dashboard boot-discovery endpoint and the notifications badge, both of which
-  // run outside any /dashboard/{orgSlug}/... route). Every other caller must resolve
-  // strictly from the `org` query param; a missing one there is a real error, not
-  // a cue to guess from a session field that can be stale relative to the URL.
-  const sessionRecord = session.session as typeof session.session & { activeOrganizationId?: string | null }
-  const activeOrganizationId = options.requireOrganization === false && typeof sessionRecord.activeOrganizationId === 'string'
-    ? sessionRecord.activeOrganizationId
-    : null
+  return { env, db, session, userId: session.user.id }
+}
 
-  // The route names the organization by slug, so its configuration row is read
-  // beside the membership resolution instead of after it: one round trip fewer
-  // on every dashboard call. The row only counts once the membership confirms
-  // it is the same organization.
-  const requestedSlug = options.organizationSlug ?? dashboardOrgQueryParam(event)
-  const [membership, configBySlug] = await Promise.all([
-    resolveRequestedOrganization(event, db, session.user.id, {
-      activeOrganizationId,
-      organizationSlug: options.organizationSlug,
-    }),
-    requestedSlug ? queryFirst<DashboardOrganizationConfig & { id: string }>(db, ORGANIZATION_CONFIG_BY_SLUG_SQL, [requestedSlug]) : null,
-  ])
+function dashboardOrganizationRequired() {
+  return new HTTPError({ statusCode: 400, message: 'Organization context is required. Use /dashboard/{orgSlug} routes.',
+    data: { code: 'ORGANIZATION_REQUIRED', field: 'org' } })
+}
 
-  if (!membership) {
-    if (options.requireOrganization === false) {
-      return { env, db, session, userId: session.user.id, organization: null }
-    }
-    const hasQueryParam = Boolean(options.organizationSlug ?? dashboardOrgQueryParam(event))
-    throw new HTTPError({
-      statusCode: hasQueryParam ? 404 : 400,
-      message: hasQueryParam
-        ? 'Organization not found'
-        : 'Organization context is required. Use /dashboard/{orgSlug} routes.',
-      data: { code: hasQueryParam ? 'ORGANIZATION_NOT_FOUND' : 'ORGANIZATION_REQUIRED', field: 'org' },
-    })
+function dashboardOrganizationFrom(row: unknown): DashboardOrganizationRow {
+  if (!row) throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
+  const { organization_id, member_id, user_id, role, organization_wide: _wide, ...organization } = row as DashboardOrganizationConfig & {
+    organization_id: string; name: string; slug: string; member_id: string; user_id: string; role: string; organization_wide: number
   }
+  return { ...joinedMembership({ organization_id, member_id, user_id, role }), id: organization_id, ...organization }
+}
 
-  // Better Auth owns the membership and the organization's identity; its own
-  // adapter does not return the tenant configuration columns beside them, so
-  // they are read here from the same row and carried on one object.
-  const configRow = configBySlug?.id === membership.id
-    ? configBySlug
-    : await queryFirst<DashboardOrganizationConfig & { id: string }>(db, ORGANIZATION_CONFIG_BY_ID_SQL, [membership.id])
-  if (!configRow) {
-    throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
-  }
-  const { id: _configId, ...config } = configRow
-  const organization: DashboardOrganizationRow = Object.assign(membership, config)
-
-  return { env, db, session, userId: session.user.id, organization }
+export async function dashboardMemberQuery(event: H3Event) {
+  const context = await dashboardSessionContext(event)
+  const slug = dashboardOrgQueryParam(event)
+  if (!slug) throw dashboardOrganizationRequired()
+  return { ...context, membership: membershipBySlugQuery(slug, context.userId), organizationFrom: dashboardOrganizationFrom }
 }
 
 export async function getDashboardContext(
