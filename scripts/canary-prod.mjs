@@ -33,9 +33,10 @@ async function main() {
   const expectedOrgId = env('CANARY_ORG_ID')
 
   const membershipCheck = d1Query(`
-    SELECT u.id AS user_id
+    SELECT u.id AS user_id, o.slug AS organization_slug
     FROM user u
     JOIN member m ON m.userId = u.id
+    JOIN organization o ON o.id = m.organizationId
     WHERE u.email = '${sqlEscape(email)}'
       AND m.organizationId = '${sqlEscape(expectedOrgId)}'
     LIMIT 1
@@ -64,7 +65,8 @@ async function main() {
       throw new Error(`Session does not match the configured canary account (${session.status()})`)
     }
 
-    const contextRes = await context.request.get('/api/dashboard/context')
+    const organizationSlug = encodeURIComponent(membershipCheck.organization_slug)
+    const contextRes = await context.request.get(`/api/dashboard/context?org=${organizationSlug}`)
     if (contextRes.status() !== 200) throw new Error(`Dashboard context failed (${contextRes.status()})`)
     const dashboardContext = await contextRes.json()
 
@@ -74,8 +76,10 @@ async function main() {
     }
 
     const page = await context.newPage()
-    const dashboard = await page.goto(`${baseUrl}/dashboard`, { waitUntil: 'networkidle' })
-    if (!dashboard || dashboard.status() >= 400) {
+    const dashboardPath = `/dashboard/${organizationSlug}`
+    const dashboard = await page.goto(dashboardPath, { waitUntil: 'networkidle' })
+    const loadedPath = new URL(page.url()).pathname
+    if (!dashboard?.ok() || (loadedPath !== dashboardPath && !loadedPath.startsWith(`${dashboardPath}/`))) {
       throw new Error(`Dashboard page load failed (${dashboard?.status() ?? 'no_response'})`)
     }
 
