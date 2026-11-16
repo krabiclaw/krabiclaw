@@ -1,4 +1,4 @@
-import { linkGuestConversationSeats } from '~/server/domain/conversation-participants'
+import { linkGuestConversationSeats, transferBookingGuestSeat } from '~/server/domain/conversation-participants'
 import { executeBatch, queryAll, type BatchQuery, type DbClient } from '~/server/db'
 
 /**
@@ -39,6 +39,28 @@ export function anonymousLinkQueries(from: string, to: string, now: string): Bat
   ]
 }
 
+function claimUnownedBookingsQueries(userId: string, email: string, now: string): BatchQuery[] {
+  const scope = {
+    query: `c.kind = 'booking' AND c.user_id IS NULL AND lower(c.payload_json ->> '$.guest.email') = lower(?)
+      AND EXISTS (SELECT 1 FROM bookings b WHERE b.organization_id = c.organization_id AND b.id = c.booking_id
+        AND b.owner = 'app' AND (b.user_id IS NULL OR b.user_id = ?))`,
+    params: [email, userId],
+  }
+  const claim = (table: string, column: string, key: string, from: 'id' | 'booking_id', qualifier = ''): BatchQuery => ({
+    query: `UPDATE ${table} SET ${column} = ? WHERE ${column} IS NULL ${qualifier}
+      AND (${key}, organization_id) IN (SELECT c.${from}, c.organization_id FROM conversations c WHERE ${scope.query})`,
+    params: [userId, ...scope.params],
+  })
+  return [
+    ...transferBookingGuestSeat(scope, userId, now),
+    claim('messages', 'author_user_id', 'conversation_id', 'id', "AND author_kind = 'guest'"),
+    claim('review_requests', 'user_id', 'booking_id', 'booking_id'),
+    claim('reviews', 'user_id', 'booking_id', 'booking_id', "AND source = 'direct'"),
+    claim('bookings', 'user_id', 'id', 'booking_id'),
+    { query: `UPDATE conversations AS c SET user_id = ? WHERE ${scope.query}`, params: [userId, ...scope.params] },
+  ]
+}
+
 /**
  * A guest books on a business's own site, on its host, as an anonymous user;
  * the account lives on the platform. Whoever controls a verified inbox already
@@ -58,4 +80,5 @@ export async function linkGuestIdentitiesByVerifiedEmail(db: DbClient, user: { i
   [user.email, user.email])
   const now = new Date().toISOString()
   for (const { user_id: from } of identities) await executeBatch(db, anonymousLinkQueries(from, user.id, now), { operation: 'verified-email-guest-link' })
+  await executeBatch(db, claimUnownedBookingsQueries(user.id, user.email, now), { operation: 'verified-email-booking-claim' })
 }
