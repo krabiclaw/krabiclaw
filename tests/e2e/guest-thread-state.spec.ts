@@ -531,10 +531,10 @@ for (const viewport of [
   })
 }
 
-test('Calendar retains confirmed table bookings and their detail sends one change request', async ({ page }, testInfo) => {
+test('Calendar retains confirmed table bookings and their detail sends one change request', async ({ page, playwright }, testInfo) => {
   test.skip(!writable, 'Today writes require disposable local or preview data')
   releaseDemoLock = await acquireTenantMutationLock(testInfo, demoOrganizationId())
-  await loginAs(page.request, baseURL)
+  await loginAs(page.request, baseURL, 'user-e2e-demo-owner')
 
   const now = Date.now()
   const firstName = 'Maya'
@@ -563,15 +563,22 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const requestIds: string[] = []
   const futureSeating = await openSeating(page.request, 2, 2 * 86_400_000)
   // Two days out, so the change request below is inside the 24-hour change window whatever the hour.
-  for (const [name, email, seating] of [
-    [guestName, guestEmail, todaySeating!],
-    ['Priya Patel', `priya-${now}@example.test`, futureSeating],
-  ] as const) {
-    const booked = await bookTable(page.request, { name, email, phone: '+12025550123', partySize: 2, seating })
-    bookingIds.push(booked.bookingId)
-    requestIds.push(booked.requestId)
+  const guest = await playwright.request.newContext({ baseURL })
+  try {
+    for (const [name, email, seating] of [
+      [guestName, guestEmail, todaySeating!],
+      ['Priya Patel', `priya-${now}@example.test`, futureSeating],
+    ] as const) {
+      const booked = await bookTable(guest, { name, email, phone: '+12025550123', partySize: 2, seating })
+      bookingIds.push(booked.bookingId)
+      requestIds.push(booked.requestId)
+    }
+  } finally {
+    await guest.dispose()
   }
   const upcomingBookingId = bookingIds[1]!
+  const threadPath = (conversationId: string) => `/dashboard/${demoSlug()}/messages/${conversationId}`
+  const reservationPath = (conversationId: string, bookingId: string) => `${threadPath(conversationId)}/reservation/${bookingId}`
 
   await dismissPreviewToolbar(page)
 
@@ -587,7 +594,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   await expectStatus(agendaResponse, 200)
   const agenda = await agendaResponse.json() as { items: Array<{ id: string; to: string; starts_at: string; ends_at: string }> }
   const reservation = agenda.items.find(item => item.id === `booking:${requestIds[0]}`)
-  expect(reservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/${bookingIds[0]}`)
+  expect(reservation?.to).toBe(threadPath(requestIds[0]!))
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
   const opened = await page.goto(`${baseURL}${todayCard!.to}`)
@@ -598,138 +605,108 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const upcomingFeed = await upcomingResponse.json() as BusinessToday
   expect(upcomingFeed.cards.find(card => card.id === `booking:${upcomingBookingId}`)).toMatchObject({ headline: 'Priya’s group of 2' })
   const upcomingReservation = agenda.items.find(item => item.id === `booking:${requestIds[1]}`)
-  expect(upcomingReservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/${upcomingBookingId}`)
+  expect(upcomingReservation?.to).toBe(threadPath(requestIds[1]!))
   expect(localDateAt(new Date(upcomingReservation!.starts_at), timezone) > localToday.date).toBe(true)
 
-  await page.goto(`${baseURL}${reservation!.to}`)
-  const instant = new Date().toISOString()
-  await expect(page.locator('#dashboard-panel-booking-details').getByRole('heading', { name: reservation!.starts_at <= instant && instant < reservation!.ends_at! ? 'Currently hosting' : 'Today', exact: true })).toBeVisible()
-  await expect(page.getByText(guestName, { exact: true }).first()).toBeVisible()
-  await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)
+  const recordPath = reservationPath(requestIds[0]!, bookingIds[0]!)
+  await page.goto(`${baseURL}${recordPath}`)
   const detailPanel = page.locator('#dashboard-panel-booking-details')
   const body = detailPanel.locator(':scope > [data-slot="body"]')
+  await expect(detailPanel.getByRole('heading', { name: 'Reservation', level: 1 })).toBeVisible()
+  await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)
   const summaryResponse = await page.request.get(`/api/dashboard/bookings/${bookingIds[0]}`, { params: { org: demoSlug() } })
   await expectStatus(summaryResponse, 200)
   const summary = (await summaryResponse.json() as { booking: DashboardBookingDetails }).booking
-  expect(summary).toMatchObject({ guest_name: guestName, guest_phone: '+12025550123', party_size: 2 })
-  expect(summary.resource_image_url, 'This reservation has its location’s actual authored picture').not.toBeNull()
-  expect(summary.conversation_id).not.toBeNull()
+  expect(summary).toMatchObject({ guest_name: guestName, guest_phone: '+12025550123', party_size: 2, conversation_id: requestIds[0] })
+  expect(summary.resource_photo_urls.length, 'The reservation has its location’s authored picture').toBeGreaterThan(0)
+  expect(summary.location_title).toBeTruthy()
+
   const priorViewport = page.viewportSize()!
-  let desktopCountWidth: number | undefined
   for (const width of [1728, 390]) {
-    await page.setViewportSize({ width, height: 940 })
-    const identity = detailPanel.getByRole('heading', { level: 2, name: `${firstName}’s group of ${summary.party_size}`, exact: true })
-    const message = detailPanel.getByRole('link', { name: 'Message guest', exact: true })
-    const call = detailPanel.getByRole('link', { name: 'Call', exact: true })
-    await expect(message).toHaveAttribute('href', `/dashboard/${demoSlug()}/messages/${encodeURIComponent(summary.conversation_id!)}`)
-    await expect(call).toHaveAttribute('href', `tel:${summary.guest_phone}`)
+    await page.setViewportSize({ width, height: 800 })
+    const identity = detailPanel.getByRole('heading', { level: 2, name: summary.location_title!, exact: true })
+    const picture = detailPanel.getByRole('img', { name: summary.location_title!, exact: true }).first()
     await expect(identity).toBeInViewport()
-    await expect(message).toBeInViewport()
-    await expect(call).toBeInViewport()
-    const otherGuests = detailPanel.getByLabel(`${summary.party_size! - 1} other ${summary.party_size === 2 ? 'guest' : 'guests'}`, { exact: true })
-    const guestGroup = otherGuests.locator('..')
-    const mainAvatar = guestGroup.locator(':scope > [data-slot="root"]')
-    await expect(guestGroup).toBeInViewport()
-    await expect(mainAvatar).toHaveCount(1)
-    if (summary.guest_image_url) await expect(guestGroup.getByAltText(summary.guest_name!, { exact: true })).toHaveAttribute('src', summary.guest_image_url)
-    else await expect(mainAvatar).toHaveText(summary.guest_name!.trim().slice(0, 1))
+    await expect(picture).toHaveAttribute('src', summary.resource_photo_urls[0]!)
+    await expect.poll(() => picture.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
     const bodyBounds = (await body.boundingBox())!
-    const guestBounds = (await guestGroup.boundingBox())!
-    const avatarBounds = (await mainAvatar.boundingBox())!
-    const countBounds = (await otherGuests.boundingBox())!
+    const pictureBounds = (await picture.boundingBox())!
     const identityBounds = (await identity.boundingBox())!
     const paneBounds = (await detailPanel.boundingBox())!
-    const paneCenter = paneBounds.x + paneBounds.width / 2
-    expect(avatarBounds.width, 'The guest is dominant within the group').toBeGreaterThan(countBounds.width)
-    expect(avatarBounds.height).toBeGreaterThan(countBounds.height)
-    expect(avatarBounds.height).toBe(avatarBounds.width)
-    expect(countBounds.height).toBe(countBounds.width)
-    expect(countBounds.y, 'The smaller guest count is raised beside the guest').toBeLessThan(avatarBounds.y)
-    expect(countBounds.x + countBounds.width / 2).toBeGreaterThan(avatarBounds.x + avatarBounds.width / 2)
-    if (width === 1728) desktopCountWidth = countBounds.width
-    else expect(desktopCountWidth, 'The desktop guest counter is larger than the phone counter').toBeGreaterThan(countBounds.width)
-    const picture = detailPanel.locator('img[alt=""]').first()
-    await expect(picture).toHaveAttribute('src', summary.resource_image_url!)
-    await expect.poll(() => picture.evaluate(image => (image as HTMLImageElement).naturalWidth), { message: 'The resource photo loads' }).toBeGreaterThan(0)
-    const pictureBounds = (await picture.boundingBox())!
-    expect(pictureBounds.y, 'The photo leads the record').toBeGreaterThanOrEqual(bodyBounds.y)
-    expect(pictureBounds.width, 'The photo leads as a substantial square').toBeGreaterThanOrEqual(280)
-    expect(pictureBounds.height).toBe(pictureBounds.width)
-    expect(Math.abs(pictureBounds.x + pictureBounds.width / 2 - paneCenter)).toBeLessThanOrEqual(1)
-    expect(guestBounds.y, 'The guests overlap the photo’s lower edge').toBeLessThan(pictureBounds.y + pictureBounds.height)
-    expect(guestBounds.y + guestBounds.height).toBeGreaterThan(pictureBounds.y + pictureBounds.height)
-    expect(identityBounds.y - guestBounds.y - guestBounds.height, 'The party title follows the guest cluster at the measured Airbnb spacing').toBe(width === 1728 ? 32 : 24)
-    expect(Math.abs(guestBounds.x + guestBounds.width / 2 - paneCenter)).toBeLessThanOrEqual(1)
-    expect(Math.abs(identityBounds.x + identityBounds.width / 2 - paneCenter), 'The record header centers in its visible pane').toBeLessThanOrEqual(1)
-    expect(await identity.evaluate(element => getComputedStyle(element).textAlign)).toBe('center')
+    expect(pictureBounds.width).toBeGreaterThanOrEqual(280)
+    expect(Math.abs(pictureBounds.height - pictureBounds.width * 3 / 4)).toBeLessThan(1)
+    expect(pictureBounds.y + pictureBounds.height).toBeLessThan(identityBounds.y)
+    expect(Math.abs(pictureBounds.x - identityBounds.x)).toBeLessThan(1)
+    await expect(detailPanel.getByLabel('1 other guest', { exact: true })).toHaveText('+1')
+
+    const guests = detailPanel.getByRole('link', { name: `${guestName} · 2 guests`, exact: true })
+    const support = detailPanel.getByRole('link', { name: 'Visit the Help Center', exact: true })
+    const call = detailPanel.getByRole('link', { name: 'Call guest', exact: true })
+    await expect(call).toHaveAttribute('href', 'tel:+12025550123')
+    await expect(detailPanel.getByRole('link', { name: 'Message guest', exact: true })).toHaveCount(0)
     const paymentInfo = detailPanel.getByRole('heading', { name: 'Payment info', exact: true })
-    await expect(paymentInfo).toHaveCount(summary.payments?.length ?? 0)
+    await expect(paymentInfo).toHaveCount(summary.payments?.length ? 1 : 0)
     const sections = [
       detailPanel.getByText('Date', { exact: true }),
+      detailPanel.getByRole('heading', { name: 'Reservation details', exact: true }),
+      guests,
+      detailPanel.getByRole('heading', { name: 'Cancellation policy', exact: true }),
       detailPanel.getByRole('heading', { name: 'Private note', exact: true }),
-      detailPanel.getByRole('link', { name: `Guests ${summary.guest_name} · ${summary.party_size} guests`, exact: true }),
-      detailPanel.getByRole('button', { name: /^Cancellation policy/ }),
+      detailPanel.getByRole('link', { name: 'Change reservation', exact: true }),
+      call,
       ...await paymentInfo.all(),
-      detailPanel.getByRole('button', { name: 'Manage reservation', exact: true }),
-      detailPanel.getByText('Booking date', { exact: true }),
+      support,
     ]
     for (let at = 1; at < sections.length; at++) {
       const previous = (await sections[at - 1]!.boundingBox())!
       const current = (await sections[at]!.boundingBox())!
-      expect(current.y, 'The reservation’s sections follow their reading order vertically').toBeGreaterThan(previous.y)
+      expect(current.y, 'Reservation sections follow reading order').toBeGreaterThan(previous.y)
     }
-    const date = (await detailPanel.getByText('Date', { exact: true }).boundingBox())!
     const time = (await detailPanel.getByText('Time', { exact: true }).boundingBox())!
-    expect(time.y).toBe(date.y)
-    const todayPanel = page.locator('#dashboard-panel-org-today')
+    expect(time.y).toBe((await sections[0]!.boundingBox())!.y)
+
+    const inbox = page.locator('#dashboard-panel-organization-messages')
+    const thread = page.locator('#dashboard-panel-organization-messages-thread')
     if (width === 1728) {
-      await expect(todayPanel).toBeVisible()
-      const agendaBounds = (await todayPanel.boundingBox())!
-      const detailBounds = (await detailPanel.boundingBox())!
-      expect(detailBounds.x).toBeGreaterThanOrEqual(agendaBounds.x + agendaBounds.width - 1)
-    } else await expect(todayPanel).toBeHidden()
+      await expect(inbox).toBeVisible()
+      await expect(thread).toBeVisible()
+      const inboxBounds = (await inbox.boundingBox())!
+      const threadBounds = (await thread.boundingBox())!
+      expect(threadBounds.x).toBeGreaterThanOrEqual(inboxBounds.x + inboxBounds.width - 1)
+      expect(paneBounds.x).toBeGreaterThanOrEqual(threadBounds.x + threadBounds.width - 1)
+    } else {
+      await expect(inbox).toBeHidden()
+      await expect(thread).toBeHidden()
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-    const footer = detailPanel.locator(':scope > div').filter({ has: page.getByRole('link', { name: 'Message guest', exact: true }) })
-    await expect(footer).toHaveCount(1)
-    const footerBounds = (await footer.boundingBox())!
-    const messageBefore = await message.boundingBox()
-    const callBefore = await call.boundingBox()
-    expect(Math.abs((messageBefore!.x + callBefore!.x + callBefore!.width) / 2 - paneCenter), 'Contact actions center in the same visible pane as the record header').toBeLessThanOrEqual(1)
     const maximum = await body.evaluate(element => element.scrollHeight - element.clientHeight)
-    // A short record may fit without scrolling; its native end must still
-    // expose the final metadata above the pinned contact actions.
-    await page.mouse.move(bodyBounds.x + 4, bodyBounds.y + bodyBounds.height / 2)
+    expect(maximum).toBeGreaterThan(0)
+    const beforeScroll = await page.evaluate(() => window.scrollY)
+    const reservationHeading = detailPanel.getByRole('heading', { name: 'Reservation', level: 1 })
+    const headingBefore = await reservationHeading.boundingBox()
+    await page.mouse.move(bodyBounds.x + 12, bodyBounds.y + bodyBounds.height / 2)
     await page.mouse.wheel(0, maximum + bodyBounds.height)
     await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
-    await expect(message).toBeInViewport({ ratio: 1 })
-    await expect(call).toBeInViewport({ ratio: 1 })
-    expect(await message.boundingBox()).toEqual(messageBefore)
-    expect(await call.boundingBox()).toEqual(callBefore)
-    const recordMade = detailPanel.getByText('Booking date', { exact: true }).locator('..')
-    await expect(recordMade).toBeInViewport({ ratio: 1 })
-    const madeBounds = (await recordMade.boundingBox())!
-    expect(madeBounds.y + madeBounds.height, 'The final metadata clears the pinned actions').toBeLessThanOrEqual(footerBounds.y + 1)
+    await expect(support).toBeInViewport({ ratio: 1 })
+    await expect(picture).not.toBeInViewport()
+    expect(await reservationHeading.boundingBox()).toEqual(headingBefore)
+    expect(await page.evaluate(() => window.scrollY)).toBe(beforeScroll)
     const endCapture = testInfo.outputPath(`reservation-details-end-${width}.png`)
     await page.screenshot({ path: endCapture, ...(width === 1728 ? { clip: paneBounds } : { fullPage: false }) })
     await testInfo.attach(`reservation-details-end-${width}`, { path: endCapture, contentType: 'image/png' })
     await page.mouse.wheel(0, -maximum - bodyBounds.height)
     await expect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0)
     const capture = testInfo.outputPath(`reservation-details-${width}.png`)
-    // Show the actual desktop detail pane without publishing copied
-    // conversations elsewhere in Today's local fixture. Mobile is this record.
-    const detailBounds = (await detailPanel.boundingBox())!
-    await page.screenshot({ path: capture, ...(width === 1728 ? { clip: detailBounds } : { fullPage: false }) })
+    await page.screenshot({ path: capture, ...(width === 1728 ? { clip: paneBounds } : { fullPage: false }) })
     await testInfo.attach(`reservation-details-${width}`, { path: capture, contentType: 'image/png' })
   }
   await page.setViewportSize(priorViewport)
-  await detailPanel.getByRole('link', { name: `Guests ${summary.guest_name} · ${summary.party_size} guests`, exact: true }).click()
+  await detailPanel.getByRole('link', { name: `${guestName} · 2 guests`, exact: true }).click()
   await expect(page.getByText(guestEmail, { exact: true })).toBeVisible()
-  await page.goBack()
 
   // The team's one private note lives on the booking, saved as a whole when the field is left; it never enters the conversation.
   const note = `Today page note ${Date.now()}`
   const noteContext = `?range=upcoming&location_id=${demoLocationId()}&kinds=booking`
-  const recordPath = `/dashboard/${demoSlug()}/bookings/${bookingIds[0]}`
   const noteEndpoint = `/api/dashboard/bookings/${bookingIds[0]}`
   const readBooking = async () => {
     const read = await page.request.get(`/api/dashboard/bookings/${bookingIds[0]}`, { params: { org: demoSlug() } })
@@ -756,16 +733,15 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
 
   // Change is one sheet beneath the record, as Airbnb's: the details are edited
   // in place and one footer commit sends the request the guest confirms.
-  await detailPanel.getByRole('button', { name: 'Manage reservation', exact: true }).click()
-  const manage = page.getByRole('dialog', { name: 'Manage reservation', exact: true })
-  await manage.getByRole('link', { name: 'Change reservation', exact: true }).click()
+  await detailPanel.getByRole('link', { name: 'Change reservation', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'What do you want to change?', exact: true })).toBeVisible()
   await expect(page.getByText(`Nothing changes until ${firstName} accepts.`)).toBeVisible()
   await expect(page.getByLabel('Date', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Send request', exact: true })).toBeVisible()
 
   const changeContext = `?range=upcoming&location_id=${demoLocationId()}&kinds=booking`
-  await page.goto(`${baseURL}/dashboard/${demoSlug()}/bookings/${upcomingBookingId}/change${changeContext}`)
+  const upcomingPath = reservationPath(requestIds[1]!, upcomingBookingId)
+  await page.goto(`${baseURL}${upcomingPath}/change${changeContext}`)
   const beforeResponse = await page.request.get(
     `/api/dashboard/bookings/${upcomingBookingId}`,
     { params: { org: demoSlug() } },
@@ -779,13 +755,13 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const requestedAt = new Date().toISOString()
   const requestCompleted = page.waitForResponse(response =>
     response.request().method() === 'POST'
-    && new URL(response.url()).pathname.endsWith(`/api/dashboard/bookings/${upcomingBookingId}/move`),
+    && new URL(response.url()).pathname.endsWith(`/api/dashboard/bookings/${upcomingBookingId}/change`),
   )
   await page.getByRole('button', { name: 'Send request', exact: true }).click()
   const changeResponse = await requestCompleted
   expect(changeResponse.status(), await changeResponse.text()).toBe(200)
-  await expect(page.getByRole('heading', { name: 'Coming up', exact: true })).toBeVisible({ timeout: 30_000 })
-  await expect(page).toHaveURL(`${baseURL}/dashboard/${demoSlug()}/bookings/${upcomingBookingId}${changeContext}`)
+  await expect(detailPanel.getByRole('heading', { name: 'Reservation', exact: true })).toBeVisible()
+  await expect(page).toHaveURL(`${baseURL}${upcomingPath}${changeContext}`)
 
   const detail = await loadThreadDetail(page.request, before.booking.conversation_id, demoOrganizationId())
   const requests = detail.stream.filter((item): item is StreamEvent => item.type === 'event' && item.sent_at >= requestedAt && item.text.startsWith('Requested '))
@@ -793,24 +769,28 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const pendingRecord = await page.request.get(`/api/dashboard/bookings/${upcomingBookingId}`, { params: { org: demoSlug() } })
   await expectStatus(pendingRecord, 200)
   expect(await pendingRecord.json()).toMatchObject({ booking: { pending_change: { message_id: requests[0]!.id, before: { party_size: before.booking.party_size }, after: { party_size: targetPartySize } } } })
-  await page.goto(`${baseURL}/dashboard/${demoSlug()}/messages/${before.booking.conversation_id}`)
-  const reservationLink = page.getByRole('link', { name: 'Show booking', exact: true })
-  await expect(reservationLink).toHaveAttribute('href', `/dashboard/${demoSlug()}/bookings/${upcomingBookingId}`)
+  await detailPanel.getByRole('link', { name: 'Close booking details', exact: true }).click()
+  const reservationLink = page.getByRole('link', { name: 'Show reservation', exact: true })
+  await expect(reservationLink).toHaveAttribute('href', upcomingPath)
   await expect(page.getByTestId('booking-change-request')).toHaveCount(0)
   await reservationLink.click()
   await expect(page.getByTestId('booking-change-request')).toContainText('Change requested')
-  const deliveryResponse = await page.request.get('/api/dev/notifications', {
-    headers: devLoginHeaders(),
-    params: { organization_id: demoOrganizationId(), since: requestedAt },
-  })
-  await expectStatus(deliveryResponse, 200)
-  const deliveries = (await deliveryResponse.json() as DeliveryList).deliveries.filter(row => row.message_id === requests[0]!.id)
-  expect(deliveries.some(row => row.purpose === 'status_update' && row.status === 'sent')).toBe(true)
-  expect(deliveries.some(row => row.purpose === 'owner_alert' && row.status === 'sent')).toBe(true)
+  await expect.poll(async () => {
+    const deliveryResponse = await page.request.get('/api/dev/notifications', {
+      headers: devLoginHeaders(),
+      params: { organization_id: demoOrganizationId(), since: requestedAt },
+    })
+    await expectStatus(deliveryResponse, 200)
+    return (await deliveryResponse.json() as DeliveryList).deliveries
+      .filter(row => row.message_id === requests[0]!.id && row.status === 'sent')
+      .map(row => row.purpose)
+  }).toEqual(expect.arrayContaining(['status_update', 'owner_alert']))
 
   if (local) {
     const request = requests[0]!
-    const token = createHmac('sha256', 'local-playwright-email-reply-secret')
+    const replySecret = process.env.EMAIL_REPLY_SECRET
+    if (!replySecret) throw new Error('The local email reply signing key is required')
+    const token = createHmac('sha256', replySecret)
       .update(`booking-change:v1:${before.booking.conversation_id}:${request.id}`)
       .digest('hex')
     await page.goto(`${baseURL}/booking-changes/${before.booking.conversation_id}/${request.id}#${token}`)
@@ -825,13 +805,14 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     await expectStatus(afterResponse, 200)
     expect(await afterResponse.json()).toMatchObject({ booking: { party_size: targetPartySize, pending_change: null } })
     const afterDetail = await loadThreadDetail(page.request, before.booking.conversation_id, demoOrganizationId())
-    expect(streamEvents(afterDetail, 'Your change was accepted')).toHaveLength(1)
+    expect(streamEvents(afterDetail, 'Priya Patel’s change was accepted')).toHaveLength(1)
   }
 })
 
 test('buyer opens the reservation from chat to decide a booking change', async ({ page, playwright }, testInfo) => {
   test.skip(!local, 'Buyer decisions and log-only delivery use disposable local data')
   releaseDemoLock = await acquireTenantMutationLock(testInfo, demoOrganizationId())
+  await page.setViewportSize({ width: 390, height: 800 })
   const owner = await playwright.request.newContext({ baseURL })
   let threadId: string | null = null
   let changeBookingId: string | null = null
@@ -859,12 +840,12 @@ test('buyer opens the reservation from chat to decide a booking change', async (
       return (await response.json() as { booking: { version: number; updated_at: string; booking_date: string; booking_time: string; party_size: number; location_id: string; product_session_id: string; pending_change: { message_id: string; before: { party_size: number }; after: { party_size: number } } | null } }).booking
     }
     const original = await read()
-    const movePath = `/api/dashboard/bookings/${booked.bookingId}/move`
-    const moveParams = { org: demoSlug() }
+    const changePath = `/api/dashboard/bookings/${booked.bookingId}/change`
+    const changeParams = { org: demoSlug() }
     const requestChange = async (partySize: number) => {
       const current = await read()
       const data = { apply: false, product_session_id: current.product_session_id, party_size: partySize, version: current.version, idempotency_key: crypto.randomUUID() }
-      const response = await owner.post(movePath, { params: moveParams, data })
+      const response = await owner.post(changePath, { params: changeParams, data })
       await expectStatus(response, 200)
       expect(await response.json()).toMatchObject({ change_status: 'awaiting_guest_acceptance', booking: { booking_id: booked.bookingId } })
       const proposal = (await read()).pending_change
@@ -873,12 +854,12 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     }
     const first = await requestChange(2)
     expect(await read()).toMatchObject({ party_size: 1, booking_date: original.booking_date, booking_time: original.booking_time })
-    const ownerPage = await page.context().browser()!.newPage({ baseURL })
+    const ownerPage = await page.context().browser()!.newPage({ baseURL, viewport: { width: 390, height: 800 } })
     try {
       await loginAs(ownerPage.request, baseURL, 'user-e2e-demo-owner')
       await ownerPage.goto(`${baseURL}/dashboard/${demoSlug()}/messages/${threadId}`)
-      const reservation = ownerPage.getByRole('link', { name: 'Show booking', exact: true })
-      await expect(reservation).toHaveAttribute('href', `/dashboard/${demoSlug()}/bookings/${booked.bookingId}`)
+      const reservation = ownerPage.getByRole('link', { name: 'Show reservation', exact: true })
+      await expect(reservation).toHaveAttribute('href', `/dashboard/${demoSlug()}/messages/${threadId}/reservation/${booked.bookingId}`)
       await expect(ownerPage.getByTestId('booking-change-request')).toHaveCount(0)
       await reservation.click()
       await expect(ownerPage.getByTestId('booking-change-request')).toContainText('Change requested')
@@ -893,8 +874,8 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     expect(await guestUnread(), 'Opening the conversation reads it').toBe(unreadBefore)
     await expect(page.getByText(/^Requested .+ for 2 guests/)).toBeVisible()
     await expect(page.getByRole('button', { name: /^(Accept|Decline)( changes)?$/ })).toHaveCount(0)
-    await page.getByRole('link', { name: 'Show booking', exact: true }).click()
-    await expect(page).toHaveURL(`${baseURL}/dashboard/account/activity/booking/${threadId}`)
+    await page.getByRole('link', { name: 'Show reservation', exact: true }).click()
+    await expect(page).toHaveURL(`${baseURL}/dashboard/account/messages/${threadId}/reservation`)
     const card = page.getByTestId('booking-change-request')
     await expect(card).toContainText('1 guest')
     await expect(card).toContainText('2 guests')
@@ -905,12 +886,13 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     expect(await read()).toMatchObject({ party_size: 1, booking_date: original.booking_date, booking_time: original.booking_time, pending_change: null })
     const afterDecline = await loadThreadDetail(owner, threadId, demoOrganizationId())
     expect(streamEvents(afterDecline, 'E2E Buyer’s change was declined')).toHaveLength(1)
-    const declinedReplay = await owner.post(movePath, { params: moveParams, data: first.data })
+    const declinedReplay = await owner.post(changePath, { params: changeParams, data: first.data })
     await expectStatus(declinedReplay, 200)
     expect(await declinedReplay.json()).toMatchObject({ change_status: 'declined', booking: { booking_id: booked.bookingId, party_size: 1 } })
 
     const second = await requestChange(2)
-    await expect(card).toHaveCount(1)
+    await expect(card).toBeVisible()
+    await expect(card).toContainText('2 guests')
     const accepted = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.startsWith(`/api/public/booking-changes/${threadId}/`))
     await card.getByRole('button', { name: 'Accept', exact: true }).click()
     await expectStatus(await accepted, 200)
@@ -918,7 +900,7 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     expect(await read()).toMatchObject({ party_size: 2, booking_date: original.booking_date, booking_time: original.booking_time, pending_change: null })
     const final = await loadThreadDetail(owner, threadId, demoOrganizationId())
     expect(streamEvents(final, 'E2E Buyer’s change was accepted')).toHaveLength(1)
-    const acceptedReplay = await owner.post(movePath, { params: moveParams, data: second.data })
+    const acceptedReplay = await owner.post(changePath, { params: changeParams, data: second.data })
     await expectStatus(acceptedReplay, 200)
     expect(await acceptedReplay.json()).toMatchObject({ change_status: 'accepted', booking: { booking_id: booked.bookingId, party_size: 2 } })
     const replay = await page.request.post(`/api/public/booking-changes/${threadId}/${second.id}`, {
@@ -928,9 +910,8 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     // The replayed answer is the same answer: still one acceptance in the conversation.
     const replayed = await loadThreadDetail(owner, threadId, demoOrganizationId())
     expect(streamEvents(replayed, 'E2E Buyer’s change was accepted')).toHaveLength(1)
-    await page.goto(`${baseURL}/dashboard/account/activity/booking/${threadId}`)
-    await page.getByRole('button', { name: 'Manage reservation', exact: true }).click()
-    await page.getByRole('link', { name: 'Send a change request', exact: true }).click()
+    await page.goto(`${baseURL}/dashboard/account/messages/${threadId}/reservation`)
+    await page.getByRole('link', { name: 'Change reservation', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}/dashboard/account/messages/${threadId}?intent=booking-change`)
     const changeMessage = 'Could we move this reservation later? Please send an available time.'
     await expect(page.getByText('Describe the dates, time or guest details you would like to change. The business will review your request before anything changes.', { exact: true })).toBeVisible()

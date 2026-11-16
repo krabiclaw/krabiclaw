@@ -211,6 +211,13 @@ export async function planHomeMessages(db: DbClient, organizationId: string, loc
   for (const row of rows) await planSourceMessages(db, organizationId, row.id, now)
 }
 
+/** A guide edit updates the home’s check-in message for upcoming visits. */
+export async function planStayCheckInMessages(db: DbClient, organizationId: string, productId: string, now = new Date().toISOString()): Promise<void> {
+  const stays = await queryAllPages<CheckInStay>(db, `${CHECK_IN_STAYS_SQL} AND br.organization_id = ? AND br.product_id = ?
+    AND br.status = 'confirmed' AND br.ends_at >= date(?, '-1 day') ORDER BY br.id`, [organizationId, productId, now])
+  for (const stay of stays) await planCheckInMessage(db, stay, now)
+}
+
 /** A send time is a future instant, at most a year ahead. */
 function validateDueAt(value: unknown, now: string): string {
   if (typeof value !== 'string' || !isValidInstant(value)) messagingError(422, 'INVALID_MESSAGING_FIELD', 'due_at must be an ISO 8601 instant', 'due_at')

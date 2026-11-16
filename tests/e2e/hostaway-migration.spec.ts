@@ -136,12 +136,12 @@ test('a host moves unpaid occupancy in batches, reviews manual-only homes and re
   const otaStayId = receipt.outcomes.find(outcome => outcome.source_id === '700006')!.booking_id!
   await page.goto(`/dashboard/${slug}/bookings/${otaStayId}`)
   await expect(page.getByText('Payments, changes and cancellations for this stay are managed on', { exact: false })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Record payment', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Cancel stay', exact: true })).toHaveCount(0)
+  await expect(page.getByTestId('stay-record-payment')).toHaveCount(0)
+  await expect(page.getByTestId('stay-cancel')).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Message guest', exact: true })).toHaveCount(0)
   await page.goto(`/dashboard/${slug}/bookings/${stayId}`)
-  await expect(page.getByRole('button', { name: 'Record payment', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Cancel stay', exact: true })).toBeVisible()
+  await expect(page.getByTestId('stay-record-payment')).toBeVisible()
+  await expect(page.getByTestId('stay-cancel')).toBeVisible()
 
   // A repeated source file is reconciled against the same canonical reservation identity.
   const replay = await page.request.post(`/api/dashboard/stays/migration/import?org=${slug}`, { headers, data: requestBody })

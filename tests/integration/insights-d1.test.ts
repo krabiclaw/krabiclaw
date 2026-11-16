@@ -4,6 +4,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import { H3Event } from 'h3'
 import * as schema from '../../server/db/schema.ts'
+import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { recordTenantPageview } from '../../server/utils/pageview-tracking.ts'
 import { createProductBooking } from '../../server/domain/product-bookings.ts'
 import { recordOrganizationConversionEvent } from '../../server/utils/organization-conversions.ts'
@@ -16,6 +17,7 @@ import { handleAnalyticsTools } from '../../server/utils/mcp-tools/analytics.ts'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
 import { createTables } from './support/table-product.ts'
 import { buyStay } from './support/stay-checkout.ts'
+import { captureEvents } from './support/events.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import type { InsightsPage } from '../../shared/insights.ts'
 
@@ -31,8 +33,10 @@ async function openDb(name: string) {
   const db = await runtime.getD1Database('DB')
   const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
   await db.batch(statements.map(statement => db.prepare(statement)))
-  const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://insights.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
+  const queue = captureEvents()
+  const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db, EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://insights.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
     NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://insights.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+  bindDatabaseEvents(db, env)
   return { runtime, db, env }
 }
 
@@ -191,7 +195,7 @@ test('Insights reads a home: occupancy, length of stay and nightly rate, and who
     await createStay(db, env, access, { product_id: home.id, idempotency_key: 'host-stay', check_in_date: addLocalDays(today, 5), check_out_date: addLocalDays(today, 8),
       adults: 2, guest_name: 'Bo', guest_email: 'bo@stays.example', total_minor: 36000 })
     const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
-    const bought = await buyStay(db, { id: 'bought', organizationId: 'org-stays', productId: home.id, locationId: 'loc-stays', timezone: TZ,
+    const bought = await buyStay(db, env, { id: 'bought', organizationId: 'org-stays', productId: home.id, locationId: 'loc-stays', timezone: TZ,
       checkIn: addLocalDays(today, 10), checkOut: addLocalDays(today, 12), adults: 2, nightlyMinor: 12000, currency: 'USD', buyerUserId: signed.response!.user.id,
       guest: { name: 'Ana', email: 'ana@stays.example', phone: null, notes: null } })
     await setStayNights(db, env, access, { product_id: home.id, from: addLocalDays(today, 15), to: addLocalDays(today, 17), closed: true })

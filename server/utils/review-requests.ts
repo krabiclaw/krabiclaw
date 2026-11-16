@@ -67,6 +67,7 @@ export interface ReviewBookingContext {
 
 /** How long an invitation's link works, and how long after a visit one is still sent. */
 export const REVIEW_REQUEST_TTL_DAYS = 30
+export const REVIEW_PUBLICATION_PENDING = 'The review invitation was sent and dashboard publication is pending'
 /** An invitation goes out this long after the visit ends. */
 export const REVIEW_REQUEST_DELAY_HOURS = 24
 
@@ -259,10 +260,10 @@ export async function markReviewRequestSendSuccess(
     UPDATE review_requests
     SET first_sent_at = COALESCE(first_sent_at, ?),
         send_count = CASE WHEN first_sent_at IS NULL THEN send_count + 1 ELSE send_count END,
-        last_error = NULL,
+        last_error = ?,
         updated_at = ?
     WHERE id = ?
-  `, [sentAt, sentAt, requestId])
+  `, [sentAt, REVIEW_PUBLICATION_PENDING, sentAt, requestId])
 }
 
 export async function markReviewRequestSendFailure(
@@ -274,7 +275,7 @@ export async function markReviewRequestSendFailure(
   await execute(db, `
     UPDATE review_requests
     SET last_error = ?, updated_at = ?
-    WHERE id = ?
+    WHERE id = ? AND first_sent_at IS NULL
   `, [message.slice(0, 1000), new Date().toISOString(), requestId])
 }
 

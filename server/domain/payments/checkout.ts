@@ -1,3 +1,4 @@
+import { publishEvent } from '~/server/events'
 import { STAY_BOOKED_POLICIES } from '~/shared/stay-cancellation'
 import { bookingPolicy, type BookingPolicy } from '~/server/utils/booking-policy-summary'
 import type Stripe from 'stripe'
@@ -80,8 +81,8 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   if (!Number.isSafeInteger(input.quantity) || input.quantity < 1 || input.quantity > 99 || !input.idempotencyKey.trim() || input.idempotencyKey.trim().length > 200) throw new HTTPError({ statusCode: 400, statusMessage: 'A quantity of 1–99 and an idempotency key of 1–200 characters are required' })
   const key = `checkout:${input.organizationId}:${input.idempotencyKey.trim()}`
   const approval = input.unit === 'nights' ? input.approval : undefined
-  const previous = await queryFirst<{id:string;stripe_payment_intent_id:string|null;checkout_expires_at:string;return_token:string;hold_status:string|null;hold_quantity:number|null;confirmation_in_flight:number}>(db,`
-    SELECT p.id,p.stripe_payment_intent_id,p.checkout_expires_at,p.return_token,h.status AS hold_status,h.quantity AS hold_quantity,
+  const previous = await queryFirst<{id:string;stripe_payment_intent_id:string|null;checkout_expires_at:string;return_token:string;hold_status:string|null;hold_expires_at:string|null;hold_quantity:number|null;confirmation_in_flight:number}>(db,`
+    SELECT p.id,p.stripe_payment_intent_id,p.checkout_expires_at,p.return_token,h.status AS hold_status,h.expires_at AS hold_expires_at,h.quantity AS hold_quantity,
       h.status='active' AND h.expires_at>? AND json_type(p.review_json,'$.confirmation_started_at')='text' AS confirmation_in_flight
     FROM payments p LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id
     WHERE p.idempotency_key=? AND p.organization_id=?`,[new Date().toISOString(),key,input.organizationId])
@@ -201,7 +202,16 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   if (approval && previous?.hold_status !== undefined && previous.hold_status !== 'active') {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Checkout is no longer available for this stay', data: { code: 'checkout_expired' } })
   }
+  const publishDirectHold = async () => {
+    if (!stay || approval || (previous && previous.hold_status !== 'active')) return
+    await publishEvent(env, {
+      type: 'stay.hold_changed', organization_id: input.organizationId, product_id: stay.product_id,
+      location_id: stay.location_id, range: [stay.check_in_date, stay.check_out_date],
+      checkout_expires_at: previous?.hold_expires_at ?? expiresAt,
+    })
+  }
   if (previous?.stripe_payment_intent_id) {
+    await publishDirectHold()
     await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,previous.id), null, input.origin)
     return handoff(previous.id)
   }
@@ -249,6 +259,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       throw error
     }
   }
+  await publishDirectHold()
   // A signed-in buyer's Customer at this business: the Payment Element offers, saves and removes their cards here only.
   const customer=input.buyerUserId?await connectedBuyerCustomer(db,stripe,input.buyerUserId,connected.stripe_account_id,connected.livemode):null
   const surcharge = await surchargeBasisPoints(db, input.organizationId, connected.stripe_account_id)
@@ -273,7 +284,10 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     // A prior attempt may have reached Stripe even when its response was lost.
     // Only a first-call content/auth rejection proves no intent was created.
     const rejected=!previous&&(error instanceof stripe.errors.StripeInvalidRequestError||error instanceof stripe.errors.StripeAuthenticationError||error instanceof stripe.errors.StripePermissionError)&&error.headers?.['stripe-should-retry']!=='true'
-    if(rejected)await execute(db,"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",[id])
+    if (rejected) {
+      await execute(db, "UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'", [id])
+      if (stay) await publishEvent(env, { type: 'business.wake', kind: 'checkout', organization_id: input.organizationId, due_at: Date.now() })
+    }
     throw error
   }
   await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,id), customer?.savedCards ?? 0, input.origin)

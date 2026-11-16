@@ -518,7 +518,7 @@ export async function cancelBookingRequest(db: DbClient, input: GuestCancellatio
           AND EXISTS (SELECT 1 FROM bookings WHERE id = ? AND organization_id = ? AND id = conversations.booking_id AND version = ? AND status = ?${input.buyerUserId ? ' AND user_id = ?' : ''}) RETURNING *`,
       params: [input.now, input.id, input.organizationId, input.kind, ...(input.buyerUserId ? [input.buyerUserId] : [input.tokenHash, input.now]), ...(refund.guard?.params ?? []), record.id, input.organizationId, record.version, record.status, ...(input.buyerUserId ? [input.buyerUserId] : [])],
     },
-    bookingStatusQuery({ organizationId: input.organizationId, bookingId: record.id, status: 'cancelled', reason: 'guest_cancelled', now: input.now,
+    bookingStatusQuery({ organizationId: input.organizationId, bookingId: record.id, status: 'cancelled', reason: 'guest_cancelled', now: input.now, calendar: true,
       guard: { query: `changes() = 1 AND version = ? AND status = ?${input.buyerUserId ? ' AND user_id = ?' : ''}
         AND EXISTS (SELECT 1 FROM conversations WHERE id = ? AND organization_id = ? AND booking_id = bookings.id
           AND json_extract(payload_json, '$.cancellation.used_at') = ?)`,

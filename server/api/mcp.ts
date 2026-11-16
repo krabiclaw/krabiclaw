@@ -43,7 +43,7 @@ async function logMcpEvent(event: H3Event, env: ReturnType<typeof cloudflareEnv>
     ? { organizationId: executionContext?.organizationId ?? null, locationId: executionContext?.locationId ?? null }
     : {};
   const toolName = MCP_TOOLS.find(tool => tool.name === input.toolName)?.name ?? null;
-  await enqueueMcpToolCallEvent(event, env, {
+  await enqueueMcpToolCallEvent(env, {
     ...input,
     ...attribution,
     toolName,

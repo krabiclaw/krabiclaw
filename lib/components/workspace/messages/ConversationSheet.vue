@@ -1,9 +1,19 @@
 <template>
-  <!-- Airbnb's "In this conversation": who is in it, its photos, then what can be done to it. -->
-  <UModal v-model:open="open" title="In this conversation" :ui="{ overlay: 'bg-black/35', content: 'max-w-2xl rounded-3xl', title: 'text-lg font-semibold', header: 'border-b-0 pb-0', body: 'pt-2' }">
+  <UModal
+    v-model:open="open"
+    title="In this conversation"
+    :ui="{
+      overlay: 'bg-black/32!',
+      content: 'max-w-[720px] rounded-[32px] divide-y-0 ring-0 sm:max-h-[calc(100dvh-80px)]',
+      header: 'relative min-h-0 px-6 pt-14 pb-0',
+      title: 'text-lg font-semibold',
+      close: 'top-4 end-4 rounded-full',
+      body: 'px-6 pt-4 pb-6',
+    }"
+  >
     <template #body>
       <!-- A phone's header has room for the title, Done and this sheet: the booking is opened from here. -->
-      <UButton v-if="bookingTo" :to="bookingTo" label="Show reservation" icon="i-lucide-calendar-days" color="neutral" variant="outline" block class="mb-4 sm:hidden" />
+      <UButton v-if="bookingTo" :to="bookingTo" label="Show reservation" icon="i-lucide-calendar-days" color="neutral" variant="outline" block class="mb-4 sm:hidden" @click="open = false" />
       <UForm v-if="page.capabilities.can_manage_participants" :state="{ name }" class="mb-3 flex items-end gap-2" @submit="operate({ action: 'rename', name: name.trim() || null })">
         <UFormField label="Conversation name" class="flex-1">
           <UInput v-model="name" :maxlength="100" class="w-full" />
@@ -11,10 +21,10 @@
         <UButton type="submit" label="Save name" :loading="groupSaving" :disabled="(name.trim() || null) === page.conversation.name" />
       </UForm>
       <ul>
-        <li v-for="(person, index) in page.conversation.participants" :key="person.id ?? index" class="flex flex-wrap items-center gap-4 py-3">
-          <UAvatar :src="person.image ?? undefined" :alt="person.name" size="2xl" class="bg-accented" />
-          <span class="min-w-0 flex-1 text-base font-medium text-highlighted">{{ person.id === userId ? 'You' : person.name }}<span class="block text-sm font-normal text-muted">{{ person.title }}</span></span>
-          <UButton v-if="(person.can_remove || (page.capabilities.can_manage_participants && person.id !== userId)) && person.id && removing !== person.id" label="Remove" color="error" variant="ghost" :aria-label="`Remove ${person.name}`" :disabled="savingRemoval" @click="removing = person.id; removalError = null" />
+        <li v-for="(person, index) in participants" :key="person.id ?? index" class="flex flex-wrap items-center gap-4 py-3">
+          <UAvatar :src="person.image ?? undefined" :alt="person.name" class="size-12 bg-accented" />
+          <span class="min-w-0 flex-1 text-base text-highlighted">{{ person.id === userId ? 'You' : person.name }}<span class="block text-sm font-normal text-muted">{{ person.title }}</span></span>
+          <UButton v-if="((manageGuests && person.can_remove) || (page.capabilities.can_manage_participants && person.id !== userId)) && person.id && removing !== person.id" label="Remove" color="error" variant="ghost" :aria-label="`Remove ${person.name}`" :disabled="savingRemoval" @click="removing = person.id; removalError = null" />
           <div v-if="person.id && removing === person.id" class="flex w-full flex-wrap items-center gap-2">
             <p class="w-full text-sm text-muted">Remove {{ person.name }} from this conversation?</p>
             <UButton label="Remove" color="error" :loading="savingRemoval || groupSaving" @click="removeParticipant(person.id)" />
@@ -26,6 +36,9 @@
           <span class="min-w-0 text-base text-highlighted">Airbnb Support</span>
         </li>
       </ul>
+      <button v-if="canManageGuests" type="button" :class="actionRowClass" :aria-expanded="manageGuests" @click="manageGuests = !manageGuests; removing = null; removalError = null">
+        <UIcon name="i-lucide-pencil" class="size-6 shrink-0" />Manage guests
+      </button>
       <div v-if="page.capabilities.can_manage_participants" class="mt-4">
         <UButton v-if="!pickingMembers" label="Add people" icon="i-lucide-user-plus" color="neutral" variant="outline" :loading="loadingMembers" @click="loadMembers" />
         <template v-else>
@@ -47,7 +60,7 @@
       <UAlert v-if="error" color="error" variant="soft" title="The conversation details could not be loaded" :description="getErrorMessage(error, 'Conversation details request failed')" />
       <p v-else-if="!details" role="status" class="text-sm text-muted">Loading…</p>
       <template v-if="details">
-        <div v-if="page.capabilities.can_invite_guest" class="mt-6">
+        <div v-if="manageGuests && page.capabilities.can_invite_guest" class="mt-2">
           <UButton label="Invite a guest" icon="i-lucide-user-plus" color="neutral" variant="outline" @click="inviting = !inviting" />
           <UForm v-if="inviting" :state="{ email: inviteEmail }" class="mt-3 space-y-3" @submit="createInvite">
             <UFormField label="Email address" required>
@@ -64,9 +77,29 @@
           </UForm>
         </div>
 
+        <section class="mt-8 space-y-2" aria-labelledby="conversation-actions-heading">
+          <h3 id="conversation-actions-heading" class="text-lg font-semibold text-highlighted">Conversation actions</h3>
+          <div class="flex flex-col">
+            <button v-for="action in actions" :key="action.label" type="button" :class="actionRowClass" :disabled="saving !== null" @click="action.run">
+              <UIcon :name="action.icon" class="size-6 shrink-0" />{{ action.label }}
+            </button>
+          </div>
+        </section>
+
+        <section class="mt-8 space-y-2" aria-labelledby="conversation-support-heading">
+          <h3 id="conversation-support-heading" class="text-lg font-semibold text-highlighted">Support</h3>
+          <NuxtLink to="/help" :class="actionRowClass">
+            <UIcon name="i-lucide-circle-help" class="size-6 shrink-0" />Visit the Help Center
+          </NuxtLink>
+          <button v-for="action in supportActions" :key="action.label" type="button" :class="[actionRowClass, action.danger ? 'text-error' : 'text-highlighted']" :disabled="saving !== null" @click="action.run">
+            <UIcon :name="action.icon" class="size-6 shrink-0" />{{ action.label }}
+          </button>
+        </section>
+        <UAlert v-if="moveError" class="mt-3" color="error" variant="soft" :description="moveError" />
+
         <template v-if="details.photos.length">
-          <div class="mb-2 mt-6 flex items-center justify-between">
-            <h3 class="text-base font-semibold text-highlighted">Gallery</h3>
+          <div class="mb-2 mt-8 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-highlighted">Gallery</h3>
             <UButton v-if="details.photos.length > 3" color="neutral" variant="link" class="p-0 text-sm font-medium text-highlighted" trailing-icon="i-lucide-chevron-right" @click="allPhotos = !allPhotos">{{ allPhotos ? 'Show less' : 'Show all' }}</UButton>
           </div>
           <div class="grid grid-cols-3 gap-2">
@@ -75,15 +108,6 @@
             </button>
           </div>
         </template>
-
-        <!-- What can be done to the conversation, as Airbnb lists it: one row each, with its mark. -->
-        <h3 class="mb-1 mt-8 text-lg font-semibold text-highlighted">Conversation actions</h3>
-        <div class="flex flex-col">
-          <button v-for="action in actions" :key="action.label" type="button" class="flex items-center gap-4 py-3.5 text-left text-base disabled:opacity-50" :class="action.danger ? 'text-error' : 'text-highlighted'" :disabled="saving !== null" @click="action.run">
-            <UIcon :name="action.icon" class="size-6 shrink-0" />{{ action.label }}
-          </button>
-        </div>
-        <UAlert v-if="moveError" class="mt-3" color="error" variant="soft" :description="moveError" />
       </template>
     </template>
   </UModal>
@@ -112,10 +136,19 @@ import { isConversationOperation, isThreadDetails, type ThreadDetails } from './
 import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'
 import ReportDialog from './ReportDialog.vue'
 
-const props = defineProps<{ page: ConversationPage; history: ReturnType<typeof useConversation>; onLeft: () => Promise<void>; bookingTo?: string | null }>()
+const props = defineProps<{ page: ConversationPage; history: ReturnType<typeof useConversation>; onLeft: () => Promise<void>; bookingTo?: string | null; canManageGuests: boolean }>()
 const emit = defineEmits<{ moved: [transition: 'archive' | 'unarchive' | 'report' | 'block' | 'unblock']; participantsChanged: [] }>()
 const threadId = computed(() => props.page.conversation.id)
 const open = defineModel<boolean>('open', { required: true })
+const manageGuests = defineModel<boolean>('manageGuests', { required: true })
+const actionRowClass = 'flex w-full items-center gap-4 py-3.5 text-left text-base text-highlighted disabled:opacity-50'
+const participantOrder = ['Host', 'Co-host', 'Booker', 'Guest', 'Team']
+const participants = computed(() => {
+  const people = props.page.conversation.participants
+  return props.page.conversation.booking_id
+    ? [...people].sort((a, b) => participantOrder.indexOf(a.title) - participantOrder.indexOf(b.title))
+    : people
+})
 const dashboard = useDashboardOrganization()
 const api = useDashboardApi(useDashboardRouteScope())
 const path = computed(() => `/api/dashboard/organizations/${dashboard.organizationId.value}/guest-threads/${encodeURIComponent(threadId.value)}`)
@@ -127,6 +160,8 @@ let reading = 0
 watch(open, async isOpen => {
   if (!isOpen) {
     reading++
+    manageGuests.value = false
+    allPhotos.value = false
     inviting.value = false
     inviteEmail.value = ''
     inviteUrl.value = ''
@@ -316,9 +351,16 @@ const actions = computed(() => {
   const can = details.value?.actions
   if (!can) return []
   return [
-    { label: 'Mark as unread', icon: 'i-lucide-message-square-dot', danger: false, run: () => void markUnread() },
-    ...(can.archive ? [{ label: 'Archive', icon: 'i-lucide-archive', danger: false, run: () => void move('archive') }] : []),
-    ...(can.unarchive ? [{ label: 'Move to Messages', icon: 'i-lucide-archive-restore', danger: false, run: () => void move('unarchive') }] : []),
+    { label: 'Mark as unread', icon: 'i-lucide-message-square-dot', run: () => void markUnread() },
+    ...(can.archive ? [{ label: 'Archive', icon: 'i-lucide-archive', run: () => void move('archive') }] : []),
+    ...(can.unarchive ? [{ label: 'Move to Messages', icon: 'i-lucide-archive-restore', run: () => void move('unarchive') }] : []),
+  ]
+})
+
+const supportActions = computed(() => {
+  const can = details.value?.actions
+  if (!can) return []
+  return [
     ...(can.report ? [{ label: 'Report', icon: 'i-lucide-flag', danger: false, run: () => { reporting.value = { block: false } } }] : []),
     ...(can.block ? [{ label: 'Block this guest', icon: 'i-lucide-ban', danger: true, run: () => { reporting.value = { block: true } } }] : []),
     ...(can.unblock ? [{ label: 'Unblock', icon: 'i-lucide-circle-check', danger: false, run: () => void move('unblock') }] : []),
@@ -326,8 +368,7 @@ const actions = computed(() => {
 })
 
 async function move(transition: 'archive' | 'unarchive' | 'report' | 'block' | 'unblock', reason?: string) {
-  // One key per attempt, kept until it succeeds, so a retry after a dropped response is the same request.
-  // One key per attempt at the same request; a report with different words is a new request.
+  // One key for the same attempt, including its report reason.
   const attempt = `${transition}:${reason ?? ''}`
   const idempotencyKey = attemptKeys.get(attempt) ?? crypto.randomUUID()
   attemptKeys.set(attempt, idempotencyKey)

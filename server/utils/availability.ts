@@ -359,6 +359,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
       ON CONFLICT (product_id) DO UPDATE SET
         ${fields.map(field => `${field}=excluded.${field}`).join(', ')}, questions=excluded.questions,
         updated_at=excluded.updated_at, updated_by=excluded.updated_by`,
+    ...(reassigned ? { event: { type: 'calendar.changed' as const, organization_id: input.organizationId, booking_id: null } } : {}),
     params: [input.productId, input.organizationId, unit, ...fields.map(field => stored(config, field)), JSON.stringify(questions), now,
       ...unchanged.params!, config.duration_minutes, input.productId, input.organizationId, config.scheduling_mode, config.assigned_member_id, input.organizationId,
       now, input.actorId, input.actorId],
@@ -1554,6 +1555,7 @@ export async function sessionMoveQuery(db: DbClient, input: SessionAllocationInp
         AND (NOT EXISTS (SELECT 1 FROM payments p WHERE p.organization_id=bookings.organization_id AND p.subject_type='booking' AND p.subject_id=bookings.id AND p.captured_amount>p.refunded_amount)
           OR (party_size=? AND (SELECT location_id FROM product_sessions WHERE id=bookings.product_session_id) IS (SELECT location_id FROM product_sessions WHERE id=? AND organization_id=bookings.organization_id)))`,
     params: [input.productId, input.productVariantId, input.sessionId, input.partySize, input.now, input.sessionId, input.sessionId, input.sessionId, input.sessionId, ...(input.writeGuard?.params ?? []), input.bookingId, input.organizationId, input.fromProductId, ...allocation.params!, input.partySize, input.sessionId],
+    event: { type: 'calendar.changed', organization_id: input.organizationId, booking_id: input.bookingId },
   }
 }
 
@@ -1625,6 +1627,7 @@ export async function sessionClaimQuery(db: DbClient, input: {
       input.userId ?? null, input.partySize, input.partySizeIsMinimum ?? false, JSON.stringify(input.answers ?? []), input.policyJson, input.replacingBookingId ?? null, input.productId, input.organizationId, input.websiteSource, input.now, input.now, input.now,
       ...allocation.params!, input.productVariantId,input.productId,input.organizationId,
     ],
+    event: { type: 'calendar.changed', organization_id: input.organizationId, booking_id: input.bookingId },
   }
 }
 

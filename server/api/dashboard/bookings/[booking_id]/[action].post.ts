@@ -6,7 +6,6 @@ import { executeBookingStatus } from '~/server/domain/guest-threads/operations'
 import { respondToStayChangeRequest } from '~/server/domain/guest-threads/stay-change-requests'
 import { assertConversationAccess } from '~/server/domain/conversations'
 import { roleAllows } from '~/server/utils/member-access'
-import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 
 export default defineHandler(async event => {
   const action = getRouterParam(event, 'action')
@@ -40,9 +39,6 @@ export default defineHandler(async event => {
   })
   if (result.kind === 'stay') return jsonResponse({ booking: nightBooking(result.stay) })
   const { outcome } = result
-  if (outcome.ok || outcome.reason === 'delivery_failed') {
-    await publishConversationEvent(env, db, { conversationId: booking.conversation_id, type: 'MESSAGE_CREATE' })
-  }
   if (outcome.ok) return jsonResponse(await dashboardBookingDetails(event))
   if (outcome.reason === 'delivery_failed') return jsonResponse({ ...outcome, error: outcome.message }, { status: outcome.status })
   const code = 'code' in outcome ? outcome.code : outcome.reason.toUpperCase()

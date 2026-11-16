@@ -6,7 +6,7 @@ import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { isAccountActivityResponse, isBuyerPaymentEntry, type BuyerPaymentEntry } from '../../shared/account-activity'
 import { paymentMoney } from '../../shared/payment-display'
-import { isBookingDetailsResponse } from '../../composables/useDashboardBooking'
+import { isAccountNightBooking, isBookingDetailsResponse } from '../../composables/useDashboardBooking'
 import type { DashboardArticleCategory } from '../../composables/useArticleCategories'
 import type { NotificationPreferenceMap } from '../../composables/useNotificationPreferences'
 import type { SessionAvailability } from '../../server/utils/availability'
@@ -1747,13 +1747,22 @@ test.describe('dashboard pane hierarchy', () => {
         const read = await page.request.get(path)
         expect(read.status(), await read.text()).toBe(200)
         const detail = await read.json()
+        if (isAccountNightBooking(detail)) {
+          const paymentId = detail.booking.online_payment?.payment_id
+          if (!paymentId) return { kind: item.kind, id: item.id, isStay: true, payments: [] }
+          const paymentRead = await page.request.get(`/api/account/bookings/payment/${encodeURIComponent(paymentId)}`)
+          expect(paymentRead.status(), await paymentRead.text()).toBe(200)
+          const payment = await paymentRead.json()
+          if (!isBookingDetailsResponse(payment)) throw new Error('Invalid account payment details response')
+          return { kind: item.kind, id: item.id, isStay: true, payments: payment.booking.payments ?? [] }
+        }
         expect(isBookingDetailsResponse(detail), 'the independent account detail read returns the owned record').toBe(true)
         if (!isBookingDetailsResponse(detail)) throw new Error('Invalid account booking details response')
-        return { kind: item.kind, id: item.id, booking: detail.booking }
+        return { kind: item.kind, id: item.id, isStay: false, payments: detail.booking.payments ?? [] }
       }))
       const expectedPaymentIds = new Set<string>()
       for (const detail of ownedDetails) {
-        for (const { payment, refunds } of detail.booking.payments ?? []) {
+        for (const { payment, refunds } of detail.payments) {
           if (payment.captured_amount <= 0) continue
           expectedPaymentIds.add(`paid:${payment.id}`)
           for (const refund of refunds) if (refund.status === 'succeeded') expectedPaymentIds.add(`refund:${refund.id}`)
@@ -1765,13 +1774,15 @@ test.describe('dashboard pane hierarchy', () => {
         const item = past[0]!
         // A visit and a purchase open the same record screen, on the account's own read.
         const detail = ownedDetails.find(read => read.kind === item.kind && read.id === item.id)!
-        const paymentCount = (detail.booking.payments ?? []).length
+        const isStay = detail.isStay
+        const isVisit = item.kind === 'booking' || item.kind === 'stay'
         await page.getByTestId(`account-activity-${item.kind}-${item.id}`).click()
         await expect(page).toHaveURL(`/dashboard/account/activity/${item.kind}/${item.id}`)
-        await expect(page.getByRole('heading', { name: item.title, exact: true })).toBeVisible()
-        await expect(page.getByRole('heading', { name: 'Payment info', exact: true })).toHaveCount(paymentCount)
+        const record = page.locator(isStay ? '#dashboard-panel-stay-details' : '#dashboard-panel-account-booking-details')
+        await expect(record.getByRole('heading', { name: isVisit ? 'Reservation' : item.title, level: 1, exact: true })).toBeVisible()
+        await expect(record.getByRole('heading', { name: 'Payment info', level: 2, exact: true })).toHaveCount(isStay || detail.payments.length ? 1 : 0)
         // The record opens beside Past activity; closing it returns to that list.
-        await page.locator('#dashboard-panel-account-booking-details').getByRole('link', { name: 'Close booking details', exact: true }).click()
+        await record.getByRole('link', { name: isStay ? 'Close stay details' : 'Close booking details', exact: true }).click()
         await expect(page).toHaveURL('/dashboard/account/activity')
       } else if (!cancelled.length) {
         await expect(page.getByText('No past activity yet', { exact: true })).toBeVisible()
@@ -1833,10 +1844,10 @@ test.describe('dashboard pane hierarchy', () => {
   test('booking Change is one sheet beside its record on desktop and over it below lg', async ({ page }) => {
     const agenda = await page.request.get('/api/dashboard/agenda', { params: { org: 'ember-slice-demo', from: '2000-01-01', to: '2100-01-01' } })
     expect(agenda.status()).toBe(200)
-    const { items } = await agenda.json() as { items: Array<{ kind: string; product_id: string | null; to: string }> }
-    const reservation = items.find(item => item.kind === 'booking' && item.product_id === seededTables().id && item.to.includes('/bookings/'))
+    const { items } = await agenda.json() as { items: Array<{ kind: string; product_id: string | null; booking_id: string | null; title: string }> }
+    const reservation = items.find(item => item.kind === 'booking' && item.product_id === seededTables().id && item.title === 'Maya Chen')
     expect(reservation, 'the demo fixture carries a table booking').toBeTruthy()
-    const change = `${reservation!.to}/change`
+    const change = `${ORG}/bookings/${reservation!.booking_id}/change`
 
     await page.setViewportSize(WIDE)
     await open(page, change)
@@ -1851,59 +1862,40 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page).toHaveURL(change)
   })
 
-  test('a booking opened from the calendar closes to its day, and from Today to Today', async ({ page }) => {
+  test('Calendar and Today open the reservation beside its conversation', async ({ page }) => {
     const agenda = await page.request.get('/api/dashboard/agenda', { params: { org: 'ember-slice-demo', from: '2000-01-01', to: '2100-01-01' } })
     expect(agenda.status()).toBe(200)
-    const { items } = await agenda.json() as { items: Array<{ kind: string; product_id: string | null; day_key: string; to: string }> }
-    const reservation = items.find(item => item.kind === 'booking' && item.product_id === seededTables().id && item.to.includes('/bookings/'))
+    const { items } = await agenda.json() as { items: Array<{ kind: string; product_id: string | null; booking_id: string | null; conversation_id: string | null; day_key: string; to: string; title: string }> }
+    const reservation = items.find(item => item.kind === 'booking' && item.product_id === seededTables().id && item.title === 'Maya Chen')
     expect(reservation, 'the demo fixture carries a table booking').toBeTruthy()
     const day = `${ORG}/calendar/${reservation!.day_key}`
-    const fromCalendar = `${day}/booking/${reservation!.to.split('/').at(-1)}`
-
-    // The same record, mounted under the day: Close is the day and Calendar is the lit tab.
-    await page.setViewportSize(NARROW)
-    await open(page, fromCalendar)
-    await expectPanes(page, ['booking-details'])
-    const close = page.locator('#dashboard-panel-booking-details').getByRole('link', { name: 'Close booking details', exact: true })
-    await expect(close).toHaveAttribute('href', day)
-    await expect(page.locator('[aria-current="page"]', { hasText: 'Calendar' }).first()).toBeVisible()
-    await expect(page.locator('[aria-current="page"]', { hasText: 'Today' })).toHaveCount(0)
-    await close.click()
-    await expect(page).toHaveURL(day)
-    await expectPanes(page, ['calendar-day'])
-
-    await open(page, reservation!.to)
-    await expect(close).toHaveAttribute('href', ORG)
-    await expect(page.locator('[aria-current="page"]', { hasText: 'Today' }).first()).toBeVisible()
-
-    // A direct link and reload retain Today as the actual parent, so the same
-    // range and filters remain beside the record and survive mobile Close.
-    const context = '?range=upcoming&kinds=booking'
+    const thread = `${ORG}/messages/${reservation!.conversation_id}`
+    const record = `${thread}/reservation/${reservation!.booking_id}`
+    expect(reservation!.to).toBe(thread)
     await page.setViewportSize(WIDE)
-    await open(page, `${reservation!.to}${context}`)
-    await expectPanes(page, ['org-today', 'booking-details'])
-    const today = page.locator('#dashboard-panel-org-today')
-    await expect(page.getByRole('link', { name: 'Close booking details', exact: true })).toHaveAttribute('href', `${ORG}${context}`)
-    await expect(today.getByRole('tab', { name: 'Upcoming', exact: true })).toHaveAttribute('aria-selected', 'true')
-    expect((await page.locator('#dashboard-panel-booking-details').boundingBox())!.x)
-      .toBeGreaterThanOrEqual((await today.boundingBox())!.width)
+    await open(page, day)
+    await page.locator(`#dashboard-panel-calendar-day a[href="${thread}"]`).click()
+    await expect(page).toHaveURL(record)
+    await expectPanes(page, ['organization-messages-thread', 'booking-details'])
+    const details = page.locator('#dashboard-panel-booking-details')
+    await expect(details.getByRole('heading', { name: 'Reservation', level: 1, exact: true })).toBeVisible()
+    const close = details.getByRole('link', { name: 'Close booking details', exact: true })
+    await expect(close).toHaveAttribute('href', thread)
+    await close.click()
+    await expect(page).toHaveURL(thread)
+    await page.getByTestId('conversation-show-reservation').click()
+    await expect(page).toHaveURL(record)
     await page.reload()
     await waitForNuxtHydration(page)
-    await expectPanes(page, ['org-today', 'booking-details'])
-    await page.getByRole('link', { name: 'Close booking details', exact: true }).click()
-    await expect(page).toHaveURL(`${ORG}${context}`)
-    await expectPanes(page, ['org-today'])
-    await open(page, `${reservation!.to}/change${context}`)
-    await expect(page).toHaveURL(`${reservation!.to}/change${context}`)
-    await page.locator('#dashboard-panel-booking-change').getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(page).toHaveURL(`${reservation!.to}${context}`)
-    await page.setViewportSize(PHONE)
-    await expectPanes(page, ['booking-details'])
-    await expect(close).toHaveAttribute('href', `${ORG}${context}`)
-    await close.click()
-    await expect(page).toHaveURL(`${ORG}${context}`)
-    await expectPanes(page, ['org-today'])
-    await expect(today.getByRole('tab', { name: 'Upcoming', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expectPanes(page, ['organization-messages-thread', 'booking-details'])
+
+    await open(page, `${ORG}?range=upcoming`)
+    const today = page.locator('#dashboard-panel-org-today')
+    const item = today.locator(`[data-item-id="booking:${reservation!.booking_id}"]`).getByRole('link')
+    await expect(item).toHaveAttribute('href', thread)
+    await item.click()
+    await expect(page).toHaveURL(record)
+    await expectPanes(page, ['organization-messages-thread', 'booking-details'])
   })
 
   test('Calendar can filter by a host and return to everyone', async ({ page }) => {

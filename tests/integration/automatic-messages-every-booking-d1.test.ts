@@ -6,12 +6,14 @@ import { H3Event } from 'h3'
 import * as schema from '../../server/db/schema.ts'
 import { guestThreadMessagingContext, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
-import { sendDueScheduledGuestMessages } from '../../server/domain/scheduled-guest-messages.ts'
+import { sendDueOutbox } from '../../server/domain/scheduled-guest-messages.ts'
 import { createProductBooking, quoteTimedBooking } from '../../server/domain/product-bookings.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { moveBooking } from '../../server/domain/guest-threads/booking-changes.ts'
 import { getGuestRequest } from '../../server/domain/requests.ts'
 import { listBookableSessions } from '../../server/utils/availability.ts'
+import { captureEvents } from './support/events.ts'
+import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createTables } from './support/table-product.ts'
 import type { GuestThreadRow } from '../../server/domain/guest-threads/types.ts'
 import type { StayAccess } from '../../server/domain/stays.ts'
@@ -37,8 +39,10 @@ test('consultations, classes and table bookings are sent their automatic message
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
+    const queue = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    bindDatabaseEvents(db, env)
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner', 'owner@proof.example', 1, 0, 0)").bind(OWNER).run()
     // Always open, so every requested time is inside opening hours.
@@ -129,7 +133,9 @@ test('consultations, classes and table bookings are sent their automatic message
     // A conversation names what it is about for whoever replies (suggested replies, MCP): the table, for how many, at its own local time.
     const context = await guestThreadMessagingContext(db, memberAccessPrincipal({ userId: OWNER, organizationId: bistro.organizationId, role: 'owner' }, { env }), dee.requestId)
     assert.deepEqual(context.record, { unit: 'slot', status: 'confirmed', name: 'Bistro tables', location: `${bistro.organizationId} main`, address: null, phone: null, party_size: 2,
-      timezone: 'Asia/Bangkok', starts: `${dinner.date} ${dinner.time}`, ends: `${dinner.date} 21:00`, no_show_at: null })
+      timezone: 'Asia/Bangkok', starts: `${dinner.date} ${dinner.time}`, ends: `${dinner.date} 21:00` })
+
+    await queue.drain(env, 'booking.created')
 
     // Each booking's plan, read from the table rather than from the planner that wrote it.
     const planned = (id: string, templateId: string) => db.prepare('SELECT * FROM scheduled_guest_messages WHERE booking_id = ? AND template_id = ?').bind(id, templateId).first<Record<string, string | null>>()
@@ -164,6 +170,7 @@ test('consultations, classes and table bookings are sent their automatic message
     const thread = async (organizationId: string, requestId: string) => (await getGuestRequest(db, requestId, organizationId)) as unknown as GuestThreadRow
     const cancelled = await executeGuestThreadOperation(db, { threadId: ben.requestId, organizationId: law.organizationId, action: 'cancel', actorUserId: OWNER, idempotencyKey: 'cancel-ben', env, financialWritesAllowed: false })
     assert.equal(cancelled.ok, true, JSON.stringify(cancelled))
+    await queue.drain(env, 'booking.status_changed')
     for (const template of [received, prepare]) {
       assert.deepEqual([(await planned(ben.bookingId, template.id))?.status, (await planned(ben.bookingId, template.id))?.reason], ['cancelled', 'The booking was cancelled.'])
     }
@@ -172,18 +179,22 @@ test('consultations, classes and table bookings are sent their automatic message
     // The studio moves Cy to the next day's class and the table to 20:30: their messages move with them.
     const version = (bookingId: string) => db.prepare('SELECT version FROM bookings WHERE id = ?').bind(bookingId).first<number>('version')
     await moveBooking(db, env, await thread(studio.organizationId, cy.requestId), { userId: OWNER }, { kind: 'booking', product_session_id: 'clay-2', party_size: 1, version: await version(cy.bookingId) }, 'move-cy')
+    await queue.runNext(env, 'booking.change')
     assert.equal(await db.prepare('SELECT product_session_id FROM bookings WHERE id = ?').bind(cy.bookingId).first('product_session_id'), 'clay-2')
     const nextClassDay = localDateAt(new Date(hourOn(6, 16)), 'America/Denver')
     assert.equal((await planned(cy.bookingId, reminder.id))?.due_at, localDateTimeToInstant(addLocalDays(nextClassDay, -1), '09:00', 'America/Denver', 'reject').toISOString())
     await moveBooking(db, env, await thread(bistro.organizationId, dee.requestId), { userId: OWNER }, { kind: 'booking', product_session_id: await seatingAt('20:30'), party_size: 2, version: await version(dee.reservationId) }, 'move-dee')
+    await queue.runNext(env, 'booking.change')
     const movedTable = await db.prepare('SELECT s.ends_at FROM bookings b JOIN product_sessions s ON s.id = b.product_session_id WHERE b.id = ?').bind(dee.reservationId).first<string>('ends_at')
     assert.equal(movedTable, plus(localDateTimeToInstant(dinner.date, '20:30', 'Asia/Bangkok', 'reject').toISOString(), 120))
     assert.deepEqual([(await planned(dee.reservationId, thanks.id))?.status, (await planned(dee.reservationId, thanks.id))?.due_at], ['pending', plus(movedTable!, 120)])
 
     // Ten days on, every due message has gone out, once, into its own conversation.
     const later = hourOn(10, 0)
-    assert.deepEqual(await sendDueScheduledGuestMessages(db, env, later), { sent: 4, failed: 0, needs_review: 0 })
-    assert.deepEqual(await sendDueScheduledGuestMessages(db, env, later), { sent: 0, failed: 0, needs_review: 0 })
+    for (const [organizationId, expected] of [[law.organizationId, 2], [studio.organizationId, 1], [bistro.organizationId, 1]] as const) {
+      assert.deepEqual(await sendDueOutbox(db, env, organizationId, later), { sent: expected, failed: 0, needs_review: 0, next: null })
+      assert.deepEqual(await sendDueOutbox(db, env, organizationId, later), { sent: 0, failed: 0, needs_review: 0, next: null })
+    }
     const conversation = async (organizationId: string, requestId: string) => (await db.prepare(`SELECT body FROM messages
       WHERE organization_id = ? AND conversation_id = ? AND event_name = 'thread.scheduled_message' ORDER BY sequence`).bind(organizationId, requestId).all<{ body: string }>()).results.map(row => row.body)
     assert.deepEqual((await conversation(law.organizationId, ana.requestId)).sort(), ['Please bring your lease and any notices.', 'We have your consultation request.'])

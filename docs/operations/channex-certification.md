@@ -104,7 +104,7 @@ The write path Channex will ask to see:
    host rows remain canonical; other night values and confirmations are preserved.
    Source read failures remain visible on the job and prevent the
    calendar push. Job status reads do not process jobs; an environment without
-   the normal cron must invoke the existing `airbnb-sync` task processor.
+   the EVENTS queue must advance the saved listing sync job.
 
 2. Register the webhook for the staging account, then check it again without
    `--apply`; it must report `unchanged`:

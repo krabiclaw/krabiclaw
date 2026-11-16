@@ -27,7 +27,8 @@ and activity through the foundation. The projection worker reads those committed
 rows and canonical Session instants/timezone and participant identities.
 It never calls MCP and never participates in a guest booking transaction. A
 provider failure cannot roll back a booking or alter the guest response.
-The scheduled task runs on the existing five-minute cron; the contextual **Retry** action also reconciles immediately. SQL selects at most 25 missing or changed
+Committed booking changes enqueue reconciliation for the affected booking. The
+contextual **Retry** action reconciles immediately. SQL selects at most 25 missing or changed
 subjects per invocation. Unchanged subjects receive no intent writes. Cleanup
 selects at most 25 stale identities at the database boundary, and each lifecycle
 fence reads only its operational identity. Later passes resume through the
@@ -115,12 +116,18 @@ The existing `cleanupOrganizationBeforeDelete` hook stages minimal
 `google_calendar_cleanup_jobs` before Better Auth physically deletes an
 organization. The outbox retains only original tenant/account/calendar/event
 identities and receipt state, without guest content, Booking IDs or tokens.
-No Google request blocks organization deletion. The orphan worker selects only
+No Google request blocks organization deletion. The deletion event selects only
 jobs whose organization is absent; staging alone cannot authorize deletion
 if the subsequent Better Auth deletion aborts. These jobs can only delete their captured managed event;
 they cannot re-enroll or project a deleted tenant, and no normal tenant API reads
-them. Lost credentials retain `state=error` and `last_error`; the scheduled task
-reports unresolved jobs instead of claiming successful external deletion.
+them. Lost credentials retain `state=error` and `last_error` and the queue
+reports the failed delivery.
+
+Connecting, disconnecting, and changes to the assigned member or plan enqueue
+reconciliation for the organization. The business alarm wakes when the earliest
+pending booking in Google reaches its end and enqueues cleanup. Staff busy
+availability reads intervals from Google's Freebusy query when evaluating a
+proposed visit. Calendar event bodies stay in Google. [Freebusy query](https://developers.google.com/workspace/calendar/api/v3/reference/freebusy/query)
 
 Operator inspection after tenant removal uses the retained outbox:
 

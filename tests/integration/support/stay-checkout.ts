@@ -9,7 +9,7 @@ import type { CloudflareEnv } from '../../../server/utils/auth.ts'
  * capture leaves it, then the real conversion that capture runs, which makes
  * the buyer's stay and its conversation. Nothing about the stay is written here.
  */
-export async function buyStay(db: D1Database, input: {
+export async function buyStay(db: D1Database, env: CloudflareEnv, input: {
   id: string
   organizationId: string
   productId: string
@@ -43,8 +43,7 @@ export async function buyStay(db: D1Database, input: {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', '2099-01-01T00:00:00.000Z', ?)`)
       .bind(holdId, input.organizationId, input.productId, input.locationId, input.timezone, input.buyerUserId, paymentId, input.adults, total, input.currency, input.checkIn, input.checkOut, now),
   ])
-  // A nights conversion claims no session, so it reads nothing from the environment.
-  const stayId = await commitBooking(db as never, { DB: db } as unknown as CloudflareEnv, await requirePayment(db as never, input.organizationId, paymentId), now)
+  const stayId = await commitBooking(db as never, env, await requirePayment(db as never, input.organizationId, paymentId), now)
   if (!stayId) throw new Error(`The checkout for ${input.id} did not convert into a stay`)
   const stay = await db.prepare("SELECT b.id, c.id AS conversation_id FROM bookings b LEFT JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.id = ? AND b.product_session_id IS NULL").bind(stayId).first<{ id: string; conversation_id: string | null }>()
   if (!stay?.conversation_id) throw new Error(`The stay bought by ${input.id} has no conversation`)

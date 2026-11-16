@@ -7,7 +7,7 @@ import { ChannexDataError, integer, nullableString, object, string, type Resourc
 
 import type { GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { notifyChannelStay } from '~/server/utils/notifications'
+import { publishEvent } from '~/server/events'
 
 /**
  * Channel bookings arriving through Channex. A revision is the booking as the
@@ -129,13 +129,9 @@ export async function landBookingRevision(db: DbClient, env: ChannexEnv & GuestI
     }
     const booking = revisedBooking(revision, propertyId)
     const stay = await applyChannelBooking(db, env, mapping.organization_id, mapping.product_id, booking)
-    // The owners hear what the revision changed before it is acknowledged, so
-    // an alert that could not be prepared leaves the revision in Channex's
-    // feed and its next delivery tells it; the alert's own keys make that
-    // replay send nothing twice. A reservation the import loaded is history,
-    // not news, and a superseded revision changes nothing to tell.
+    // Queue the host's notification before acknowledging the revision. Imports and superseded revisions have no announcement.
     if (stay.change && !booking.imported) {
-      await notifyChannelStay(env, db, mapping.organization_id, { stayId: stay.id, revisionId, ...stay.change })
+      await publishEvent(env, { type: 'stay.channel_revision', organization_id: mapping.organization_id, booking_id: stay.id, revision_id: revisionId, ...stay.change })
     }
     // The outcome is recorded before the acknowledgement: once Channex drops the
     // revision from its feed it cannot be recovered from there. The row reads

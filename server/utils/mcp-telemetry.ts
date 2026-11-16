@@ -1,4 +1,4 @@
-import type { H3Event } from "nitro";
+import { HTTPError } from "nitro";
 import { execute, executeBatch, type DbClient } from "~/server/db";
 import { describeErrorForTelemetry, redactErrorText } from "~/shared/error-telemetry";
 import { anonymizeId } from "~/server/utils/platform-telemetry";
@@ -200,7 +200,7 @@ export function prepareMcpToolCallEvent(input: LogMcpToolCallEventInput) {
 export type McpToolCallEvent = ReturnType<typeof prepareMcpToolCallEvent>;
 
 /** Publish only prepared telemetry. An enqueue failure is reported without replaying a tool. */
-export async function enqueueMcpToolCallEvent(event: H3Event, env: EventsEnv & NonNullable<LogMcpToolCallEventInput["env"]>, input: LogMcpToolCallEventInput): Promise<void> {
+export async function enqueueMcpToolCallEvent(env: EventsEnv & NonNullable<LogMcpToolCallEventInput["env"]>, input: LogMcpToolCallEventInput): Promise<void> {
   try {
     const message: DomainEvent = { type: 'mcp.telemetry', record: prepareMcpToolCallEvent({ ...input, env }) };
     if (encoder.encode(JSON.stringify(message)).byteLength > MAX_EVENT_BYTES) {
@@ -208,9 +208,13 @@ export async function enqueueMcpToolCallEvent(event: H3Event, env: EventsEnv & N
     }
     await publishEvent(env, message);
   } catch (cause) {
-    const { useNitroHooks } = await import('nitro/app');
-    const error = new Error(describeErrorForTelemetry(cause));
-    await useNitroHooks().callHook('error', error, { event, tags: ['mcp-telemetry', 'queue'] });
+    const actionCompleted = input.isMutating === true && input.status === 'success';
+    throw new HTTPError({
+      statusCode: 503,
+      message: actionCompleted ? 'The action completed, but its audit could not be queued. Read the resulting state before retrying.' : 'The request could not be queued for auditing.',
+      data: { code: 'MCP_AUDIT_QUEUE_FAILED', ...(actionCompleted ? { committed: true } : {}) },
+      cause: new Error(describeErrorForTelemetry(cause)),
+    });
   }
 }
 
@@ -264,12 +268,14 @@ export async function logMcpToolCallEvent(db: DbClient, record: McpToolCallEvent
   await executeBatch(db, [write, usage], { operation: 'Record MCP telemetry and usage' });
 }
 
-// The Privacy Policy's MCP telemetry limit: a row is deleted 180 days after it
-// was created. Runs in the daily analytics task beside the pageview cleanup.
+export const MCP_AUDIT_RETENTION_DAYS = 180;
+export const MCP_DIAGNOSTIC_RETENTION_DAYS = 7;
+
+// Diagnostics expire sooner than ordinary operational telemetry.
 export async function cleanupMcpToolCallEvents(db: DbClient, now = new Date()): Promise<number> {
-  const cutoff = new Date(now.getTime() - 180 * 86_400_000).toISOString();
-  const diagnosticCutoff = new Date(now.getTime() - 7 * 86_400_000).toISOString();
-  const result = await execute(db, `DELETE FROM mcp_tool_call_events WHERE created_at < ?
-    OR (created_at < ? AND json_extract(arguments_summary_json, '$._diagnostic') = 1)`, [cutoff, diagnosticCutoff]);
+  const cutoff = new Date(now.getTime() - MCP_AUDIT_RETENTION_DAYS * 86_400_000).toISOString();
+  const diagnosticCutoff = new Date(now.getTime() - MCP_DIAGNOSTIC_RETENTION_DAYS * 86_400_000).toISOString();
+  const result = await execute(db, `DELETE FROM mcp_tool_call_events WHERE created_at <= ?
+    OR (created_at <= ? AND json_extract(arguments_summary_json, '$._diagnostic') = 1)`, [cutoff, diagnosticCutoff]);
   return Number(result.meta.changes);
 }

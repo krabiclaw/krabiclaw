@@ -1,3 +1,4 @@
+import { captureEvents } from './support/events.ts'
 import assert from 'node:assert/strict'
 import { creationRequestHash } from '../../server/utils/organization-events.ts'
 import { createHmac } from 'node:crypto'
@@ -51,7 +52,8 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
 
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+    const queue = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
@@ -185,7 +187,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       startsAt: seating!.starts_at, timezone: 'Asia/Bangkok', partySize: 1, partySizeIsMinimum: false, answers: [] })
     const createdEmail=await db.prepare("SELECT d.status,d.email_json FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id WHERE e.conversation_id='change-proof' AND d.purpose='guest_acknowledgement'").first<{status:string;email_json:string}>()
     assert.equal(createdEmail?.status,'sent')
-    assert.match(JSON.parse(createdEmail!.email_json).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/activity\/booking\/change-proof"/)
+    assert.match(JSON.parse(createdEmail!.email_json).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/messages\/change-proof\/reservation"/)
     assert.equal(await buildBuyerRequestActivityUrl(env,db,{organizationId:'another-tenant',threadId:'change-proof'}),null,'another tenant cannot mint an account management link for this request')
     const propose = async (key: string, partySize: number) => {
       const current = await getGuestRequest(db, 'change-proof')
@@ -193,6 +195,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       const booked = await db.prepare("SELECT version FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id='change-proof')").first<number>('version')
       assert(booked)
       await requestBookingChange(db, env, current, 'user-proof', { kind: 'booking', product_session_id: seating!.id, party_size: partySize, version: booked }, key)
+      await queue.drain(env, 'booking.change')
       const requestId = await db.prepare('SELECT id FROM messages WHERE dedupe_key = ?').bind(`booking-change-request:change-proof:${key}`).first<string>('id')
       assert(requestId)
       return { threadId: 'change-proof', requestId, token: createHmac('sha256', env.EMAIL_REPLY_SECRET).update(`booking-change:v1:change-proof:${requestId}`).digest('hex'), decision: 'accept' as const }
@@ -205,7 +208,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     const proposalMessage = JSON.parse(proposalEmail!.email_json).message
     assert.equal(proposalMessage.to, 'guest@proof.example')
     assert.match(proposalMessage.html, new RegExp(`/booking-changes/change-proof/${proposal.requestId}`))
-    assert.match(proposalMessage.html,/href="https:\/\/proof\.example\/dashboard\/account\/activity\/booking\/change-proof"/,'review mail preserves its signed review action and adds account management')
+    assert.match(proposalMessage.html,/href="https:\/\/proof\.example\/dashboard\/account\/messages\/change-proof\/reservation"/,'review mail preserves its signed review action and adds account management')
     assert.equal(await db.prepare("SELECT party_size FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id='change-proof')").first('party_size'), 1, 'notification leaves the original booking unchanged while awaiting the buyer')
     const proposalThread = await getGuestRequest(db, 'change-proof')
     assert(proposalThread)
@@ -218,6 +221,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     // proposal projection must not reopen the completed conversation.
     const [accepted] = await Promise.all([respondToBookingChange(db, env, proposal), replayProposal()])
     assert.equal(accepted.status, 'accepted')
+    await queue.drain(env, 'booking.change')
     const acceptedThread = await getGuestRequest(db, 'change-proof')
     const acceptedDeliveries = (await db.prepare('SELECT d.* FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id WHERE e.conversation_id = ? ORDER BY d.id').bind('change-proof').all()).results
     assert.deepEqual(await replayProposal(), { changeStatus: 'accepted' })
@@ -226,7 +230,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     assert.equal((await respondToBookingChange(db, env, proposal)).status, 'accepted')
     const acceptedMail=await db.prepare("SELECT d.email_json FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id WHERE e.conversation_id='change-proof' AND e.event_name='booking_change.accepted' AND d.purpose='status_update'").first<string>('email_json')
     assert(acceptedMail)
-    assert.match(JSON.parse(acceptedMail).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/activity\/booking\/change-proof"/)
+    assert.match(JSON.parse(acceptedMail).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/messages\/change-proof\/reservation"/)
     assert.equal(await db.prepare("SELECT party_size FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id='change-proof')").first('party_size'), 2)
     assert.equal(await db.prepare("SELECT count(*) AS count FROM messages WHERE conversation_id = 'change-proof' AND event_name='booking_change.accepted'").first('count'), 1)
 
@@ -242,6 +246,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     // which side of the race failed in CI.
     assert.equal(cancellation.status, 'fulfilled', `cancel rejected: ${cancellation.status === 'rejected' ? String(cancellation.reason) : ''}`)
     if (cancellation.value.ok) {
+      await queue.drain(env, 'booking.status_changed')
       assert.equal(await db.prepare("SELECT status FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id='change-proof')").first('status'),'cancelled')
       assert.equal(await db.prepare("SELECT count(*) count FROM messages WHERE conversation_id = 'change-proof' AND event_name='booking.cancel'").first('count'),1)
       if (decision.status==='fulfilled') assert.equal(decision.value.status,'accepted')
@@ -250,7 +255,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       assert.equal(await db.prepare("SELECT party_size FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id='change-proof')").first('party_size'),cancellationSnapshot!.party_size,'a committed cancellation announces the actual source it cancelled')
       const cancellationDelivery=await db.prepare("SELECT d.status,d.email_json FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id WHERE e.conversation_id='change-proof' AND e.event_name='booking.cancel' AND d.purpose='status_update'").first<{status:string;email_json:string}>()
       assert.equal(cancellationDelivery?.status,'sent','a cancellation never commits with a superseded notification snapshot')
-      assert.match(JSON.parse(cancellationDelivery!.email_json).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/activity\/booking\/change-proof"/)
+      assert.match(JSON.parse(cancellationDelivery!.email_json).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/messages\/change-proof\/reservation"/)
     } else {
       assert.equal(cancellation.value.status,409)
       assert.equal(cancellation.value.reason,'invalid_transition')
@@ -358,8 +363,9 @@ test('a replayed status email sends its recorded content and refuses a supersede
   t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-01T10:00:00Z') })
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'status-retry-proof', compatibilityDate: '2024-11-01',
-    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
-    env: { DB: { type: 'd1' } },
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'status-retry-proof', exportName: 'Hub' } },
   } }] })
   const requests: { to: string[]; subject: string; text: string; html: string; headers?: Record<string, string> }[] = []
   let reject = true
@@ -370,7 +376,7 @@ test('a replayed status email sends its recorded content and refuses a supersede
     }
     assert.equal(url, 'https://api.resend.com/emails')
     requests.push(JSON.parse(String(init.body)))
-    return reject ? new Response('Provider rejected', { status: 503 }) : Response.json({ id: 'status-proof' })
+    return reject ? Response.json({ name: 'application_error', message: 'Provider rejected' }, { status: 503 }) : Response.json({ id: 'status-proof' })
   })
   try {
     const db = await runtime.getD1Database('DB')
@@ -395,23 +401,16 @@ test('a replayed status email sends its recorded content and refuses a supersede
     const opening = requestInsertQueries({ id: 'booking-status', kind: 'booking', organization_id: 'org-status', location_id: 'location-status', booking_id: 'reservation-status', user_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@provider-proof.com', phone: '123' }), created_at: now }, undefined, { opening: 'Table for 2', note: null })
     await db.batch(opening.map(write => db.prepare(write.query).bind(...write.params)))
 
+    const queue = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db, EVENTS: queue.binding, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>', EMAIL_REPLY_SECRET: 'status-retry-proof', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' }
     const input = {
       threadId: 'booking-status', organizationId: 'org-status', actorUserId: 'user-status',
-      env: { EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>', EMAIL_REPLY_SECRET: 'status-retry-proof', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' },
+      env,
     }
     const cancel = { ...input, action: 'cancel', idempotencyKey: 'cancel-status' }
-    assert.deepEqual(await executeGuestThreadOperation(db, cancel), {
-      ok: false, status: 502, reason: 'delivery_failed', code: 'DELIVERY_FAILED', field: 'delivery',
-      message: 'Booking is cancelled, but the guest email failed. Retry with the same idempotency key.',
-      mutation_applied: true, operation_completed: false, conversation_id: 'booking-status', retry_with_same_idempotency_key: true,
-      record: {
-        unit: 'slot', id: 'reservation-status', status: 'cancelled', version: 2, party_size: 2, party_size_is_minimum: false,
-        starts_at: '2098-10-01T11:00:00.000Z', ends_at: '2098-10-01T13:00:00.000Z', timezone: 'Asia/Bangkok',
-        location_id: 'location-status', product_id: 'table-status', product_kind: 'table', product_name: 'Dining room', product_internal_name: null, assigned_member_id: null, no_show_at: null, review_id: null, advance_notice_minutes: null,
-        respond_by: null, pay_by: null, payment_processing: false,
-        organization_id: 'org-status', user_id: null,
-      },
-    })
+    assert.equal((await executeGuestThreadOperation(db, cancel)).status, 200)
+    assert.equal(requests.length, 0, 'the booking mutation leaves email delivery to EVENTS')
+    await assert.rejects(queue.runNext(env, 'booking.status_changed'), /Provider rejected/)
     assert.equal(await db.prepare("SELECT status FROM bookings WHERE id='reservation-status'").first('status'), 'cancelled')
     assert.equal(requests.length, 1)
     const deliveryId = 'guest-thread-email:booking-status:cancel-status'
@@ -430,11 +429,11 @@ test('a replayed status email sends its recorded content and refuses a supersede
     assert.doesNotMatch(original.html, /unsubscribe|\/signup/i)
     assert.doesNotMatch(original.text, /unsubscribe|\/signup/i)
     assert.equal(original.headers, undefined, 'a cancellation is transactional and has no mailing-list headers')
-    assert.doesNotMatch(original.html,/dashboard\/account\/activity\//,'an unowned legacy request has no fabricated account management action')
+    assert.doesNotMatch(original.html,/dashboard\/account\/messages\//,'an unowned legacy request has no fabricated account management action')
     // A later display edit cannot change the copy already recorded for this
     // cancellation. Retrying sends the exact first email again.
     await db.prepare("UPDATE organization SET name='Changed after cancellation' WHERE id='org-status'").run()
-    assert.equal((await executeGuestThreadOperation(db, cancel)).status, 502)
+    await assert.rejects(queue.runNext(env, 'booking.status_changed'), /Provider rejected/)
     assert.deepEqual(requests[1], original)
     assert.equal((await getDeliveryById(db, deliveryId))!.email_json, frozenRequest)
 
@@ -442,17 +441,15 @@ test('a replayed status email sends its recorded content and refuses a supersede
     // carries no copy of the time to move. The booking holds its time as a move writes it.
     await db.prepare("UPDATE bookings SET starts_at = '2098-10-02T11:00:00.000Z', ends_at = '2098-10-02T13:00:00.000Z', version = version + 1 WHERE id = 'reservation-status'").run()
     const attemptsBefore = requests.length
-    assert.equal((await executeGuestThreadOperation(db, cancel)).status, 409)
+    await queue.runNext(env, 'booking.status_changed')
     assert.equal(requests.length, attemptsBefore)
     // Cancelling is the one transition, so a second one has nothing to move:
     // the record is already cancelled and the stale send stays refused.
     reject = false
     const afterCancellation = requests.length
-    for (const request of [{ ...input, action: 'cancel', idempotencyKey: 'cancel-again' }, cancel]) {
-      assert.equal((await executeGuestThreadOperation(db, request)).status, 409)
-    }
+    assert.equal((await executeGuestThreadOperation(db, { ...input, action: 'cancel', idempotencyKey: 'cancel-again' })).status, 409)
     assert.equal(requests.length, afterCancellation)
-    assert.equal((await getDeliveryById(db, deliveryId))!.status, 'failed')
+    assert.equal((await getDeliveryById(db, deliveryId))!.status, 'skipped')
     const entry = await db.prepare('SELECT body, payload_json FROM messages WHERE id = ?')
       .bind((await getDeliveryById(db, deliveryId))!.message_id).first<{ body: string; payload_json: string }>()
     assert.equal(entry!.body, guestBody)
@@ -481,7 +478,8 @@ test('a failed stay cancellation email retries its recorded content after displa
   })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+    const queue = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'provider', WHATSAPP_DELIVERY_MODE: 'log_only',
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>' }
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
@@ -502,12 +500,12 @@ test('a failed stay cancellation email retries its recorded content after displa
       adults: 2, guest_name: 'Bo', guest_email: 'walkin@provider-proof.com', total_minor: 30000 })
     assert(walkIn.conversation_id)
     // The guest of a host-entered stay is an anonymous Better Auth user; their verified sign-in with this email joins it, so the stay has its management link.
-    assert.equal(await buildBuyerRequestActivityUrl(env,db,{organizationId:access.organizationId,threadId:walkIn.conversation_id}),`https://proof.example/dashboard/account/activity/stay/${walkIn.conversation_id}`)
+    assert.equal(await buildBuyerRequestActivityUrl(env,db,{organizationId:access.organizationId,threadId:walkIn.conversation_id}),`https://proof.example/dashboard/account/messages/${walkIn.conversation_id}/reservation`)
     // The guest bought this one on the site; the real checkout conversion makes it theirs.
     const signed=await createAuth(env).api.signInAnonymous({headers:new Headers(),returnHeaders:true})
     const checkIn = addLocalDays(today, 14)
     const checkOut = addLocalDays(today, 16)
-    const stay = await buyStay(db, { id: 'stay-cancellation-email', organizationId: access.organizationId, productId: home.id, locationId: 'location-stay-cancel', timezone: 'Asia/Bangkok',
+    const stay = await buyStay(db, env, { id: 'stay-cancellation-email', organizationId: access.organizationId, productId: home.id, locationId: 'location-stay-cancel', timezone: 'Asia/Bangkok',
       checkIn, checkOut, adults: 2, nightlyMinor: 15000, currency: 'USD', buyerUserId: signed.response!.user.id,
       guest: { name: 'Ana', email: 'guest@provider-proof.com', phone: null, notes: null } })
     // The host cancels it, with the full refund they approved.
@@ -527,7 +525,7 @@ test('a failed stay cancellation email retries its recorded content after displa
     assert.equal(requests.length, 1)
     const original = requests[0]!
     assert.match(original.body.subject, /Original Cabin/u)
-    assert(original.body.html.includes(`href="https://proof.example/dashboard/account/activity/stay/${stay.conversation_id}"`),'a claimed direct stay cancellation opens the guest’s real account activity')
+    assert(original.body.html.includes(`href="https://proof.example/dashboard/account/messages/${stay.conversation_id}/reservation"`),'a claimed direct stay cancellation opens the guest’s reservation in Messages')
     for (const body of [original.body.text, original.body.html]) {
       assert.match(body, /Original Retreat/u)
       assert.match(body, /Original Cabin/u)
@@ -608,7 +606,8 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
     const db = await runtime.getD1Database('DB')
     const signingKey = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
     const pem = `-----BEGIN PRIVATE KEY-----\n${Buffer.from(await crypto.subtle.exportKey('pkcs8', signingKey.privateKey)).toString('base64')}\n-----END PRIVATE KEY-----\n`
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+    const queue = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'provider', WHATSAPP_DELIVERY_MODE: 'log_only',
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>',
       APNS_KEY_ID: 'PROOFKEY01', APNS_TEAM_ID: 'PROOFTEAM1', APNS_BUNDLE_ID: 'com.krabiclaw.app', APNS_PRIVATE_KEY: pem }
@@ -676,7 +675,8 @@ test('a booking move into a full session leaves the original booking exactly as 
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+    const queue = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
@@ -714,7 +714,7 @@ test('a booking move into a full session leaves the original booking exactly as 
     await notifyBookingCreated(env,db,{organizationId:'org-move',organizationName:'Move',bookingId:'move-proof',bookingRecordId:'booking-move',productId:'prod-move',productKind:'experience',productTitle:'Class',vertical:'experience',locationId:'loc-move',guestName:'Guest',email:'guest@move.example',startsAt:soon,timezone:'Asia/Bangkok',partySize:1,partySizeIsMinimum:false,status:'confirmed',answers:[]})
     const classMail=await db.prepare("SELECT d.status,d.email_json FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id WHERE e.conversation_id='move-proof' AND d.purpose='guest_acknowledgement'").first<{status:string;email_json:string}>()
     assert.equal(classMail?.status,'sent')
-    assert.match(JSON.parse(classMail!.email_json).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/activity\/booking\/move-proof"/)
+    assert.match(JSON.parse(classMail!.email_json).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/messages\/move-proof\/reservation"/)
     const current = await getGuestRequest(db, 'move-proof')
     assert(current)
     const booked = await db.prepare("SELECT version FROM bookings WHERE id='booking-move'").first<number>('version')
@@ -749,9 +749,10 @@ test('a booking move into a full session leaves the original booking exactly as 
     assert.equal(cancelled.ok,true,'an ordinary confirmed experience cancels through the same guarded operation')
     assert.equal(cancelled.status,200)
     assert.deepEqual(await db.prepare("SELECT id,status,party_size,product_session_id FROM bookings WHERE id='booking-move'").first(),{id:'booking-move',status:'cancelled',party_size:1,product_session_id:'session-to'})
+    await queue.drain(env, 'booking.status_changed')
     const cancellationEmail=await db.prepare("SELECT d.status,d.email_json FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id WHERE e.conversation_id='move-proof' AND e.event_name='booking.cancel' AND d.purpose='status_update'").first<{status:string;email_json:string}>()
     assert.equal(cancellationEmail?.status,'sent')
-    assert.match(JSON.parse(cancellationEmail!.email_json).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/activity\/booking\/move-proof"/)
+    assert.match(JSON.parse(cancellationEmail!.email_json).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/messages\/move-proof\/reservation"/)
 
 
   } finally { await runtime.dispose() }
@@ -766,7 +767,8 @@ test('a guest writing while the business edits a table booking does not refuse t
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+    const queue = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))

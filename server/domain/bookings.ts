@@ -13,6 +13,7 @@ interface BookingScope {
 export function bookingStatusQuery(input: BookingScope & {
   now: string
   guard: BatchQuery
+  calendar?: boolean
 } & ({ status: 'confirmed' | 'pending' } | { status: 'cancelled'; reason: string | null })): BatchQuery {
   const stamps = input.status === 'cancelled' ? ', cancelled_at = ?, cancellation_reason = ?' : ''
   const stampParams = input.status === 'cancelled' ? [input.now, input.reason] : []
@@ -20,6 +21,7 @@ export function bookingStatusQuery(input: BookingScope & {
     query: `UPDATE bookings SET status = ?, updated_at = ?, version = version + 1${stamps}
       WHERE organization_id = ? AND id = ? AND (${input.guard.query})`,
     params: [input.status, input.now, ...stampParams, input.organizationId, input.bookingId, ...(input.guard.params ?? [])],
+    ...(input.calendar ? { event: { type: 'calendar.changed' as const, organization_id: input.organizationId, booking_id: input.bookingId } } : {}),
   }
 }
 

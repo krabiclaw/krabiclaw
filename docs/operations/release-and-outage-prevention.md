@@ -745,7 +745,7 @@ At cutover, finish old invocations after the binding moves, then use each
 environment's explicit v22 source and its initial artifact for the verified
 final delta described above. Review changed/deleted keys before carrying updates;
 do not overwrite progress the replacement has made. After deployment, run the
-existing `airbnb-sync` task and inspect each listing's visible sync outcome.
+existing `airbnb.sync` queue event and inspect each listing's visible sync outcome.
 Staging schedules only the Channex queues, including this task every two minutes.
 Verify live Airbnb defaults and actual optional rules were
 read, host edits remained intact, Channex rolling defaults and calendar pushes

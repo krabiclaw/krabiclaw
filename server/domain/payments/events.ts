@@ -1,4 +1,4 @@
-import { changedTaskIds, publishChangedJobs, publishEvent } from '~/server/events'
+import { changedTaskIds, publishChangedJobs, publishEvent, type DomainEvent } from '~/server/events'
 import type Stripe from 'stripe'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { notifyProductBookingCreated } from '~/server/domain/product-bookings'
@@ -7,9 +7,9 @@ import { isRecord } from '~/server/utils/type-guards'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { assertBookingBatchWrite, sessionClaimQuery } from '~/server/utils/availability'
 import { processStripeWebhookEvent } from '~/server/utils/stripe-webhook-events'
-import { platformLivemode } from '~/server/utils/stripe-connect'
+import { paymentsStripe, platformLivemode } from '~/server/utils/stripe-connect'
 import { approvedStayBooking, executeRefund, reconcileRefundState, requirePayment, assertMinorAmount, type Payment } from './index'
-import { notifyPaymentFinancialEvent, reconcilePayoutEvent } from './notifications'
+import { notifyPaymentFinancialEvent, publishPaymentNotification, reconcilePayoutEvent } from './notifications'
 import { checkoutWebsiteSource, recordPaymentPaid } from '~/server/domain/booking-analytics'
 import { notifyStayBooked, raiseSettledFailures } from '~/server/utils/notifications'
 import { paymentsBillingBasis } from './fx'
@@ -25,46 +25,39 @@ interface Hold {
   id:string; organization_id:string; product_id:string|null; variant_id:string|null; session_id:string|null; location_id:string|null; timezone:string|null
   buyer_user_id:string|null; conversation_id:string|null; quantity:number; status:string; expires_at:string; converted_booking_id:string|null; starts_at:string; ends_at:string
 }
-/** Provider retrieval, account/mode and frozen money checks precede every conversion; the paid analytics event and usage billing follow it. */
-export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,intent:Stripe.PaymentIntent, env:CloudflareEnv):Promise<Stripe.PaymentIntent> {
-  const captured:{savedCard?:boolean}={}
-  const settled=await settlePaymentIntent(db,stripe,payment,intent,env,captured)
-  if(captured.savedCard===undefined)return settled
-  await recordPaymentPaid(db,await requirePayment(db,payment.organization_id,payment.id),intent.id,captured.savedCard)
-  // The capture's usage event is billed now. A failed delivery fails the webhook
-  // and Stripe redelivers; the capture itself is idempotent on replay.
-  await deliverPaymentsUsage(db,env,payment.organization_id)
-  return settled
-}
-async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,reported:Stripe.PaymentIntent, env:CloudflareEnv, captured:{savedCard?:boolean}):Promise<Stripe.PaymentIntent> {
+/** Provider retrieval, account/mode and frozen money checks precede every conversion. */
+export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,reported:Stripe.PaymentIntent, env:CloudflareEnv):Promise<Stripe.PaymentIntent> {
   if (reported.livemode !== Boolean(payment.livemode) || reported.currency.toUpperCase() !== payment.currency || reported.metadata.krabiclaw_payment_id !== payment.id || payment.stripe_payment_intent_id !== reported.id) throw new Error('Stripe PaymentIntent financial identity mismatch')
   // The intent is the one this purchase opened, on this account and mode; what it charged is Stripe's.
   const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
   if (!isRecord(snapshot)) throw new Error('Payment has no frozen purchase')
   const approval = approvedStayBooking(snapshot)
+  const stayCheckout = isStayPurchase(snapshot.stay)
   const now = new Date().toISOString()
   const intent = reported.status === 'requires_capture' ? await captureOnceBooked(db,stripe,env,payment,reported) : reported
   if (intent.status !== 'succeeded') {
     // A debit waiting on its bank verification or clearing keeps its capacity until Stripe says how it ended.
     if (intent.status === 'processing' || intent.next_action?.type === 'verify_with_microdeposits') {
-      await execute(db, "UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active'", [new Date(Date.now() + 14 * 86_400_000).toISOString(), payment.id])
+      const expiresAt = new Date(Date.now() + 14 * 86_400_000).toISOString()
+      const changed = await execute(db, "UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active'", [expiresAt, payment.id])
+      if (stayCheckout && changed.meta.changes) await publishEvent(env, { type: 'business.wake', kind: 'checkout', organization_id: payment.organization_id, due_at: Date.parse(expiresAt) })
     }
     // A declined confirmation can accept another method; only cancellation is terminal.
     if (intent.status === 'canceled') {
       await execute(db,"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",[payment.id])
-      // A nights hold's claims go back to the home's calendar and channel.
-      await publishEvent(env, { type: 'stay.hold_released', payment_id: payment.id })
+      if (stayCheckout) await publishEvent(env, { type: 'business.wake', kind: 'checkout', organization_id: payment.organization_id, due_at: Date.parse(now) })
       // Stripe cancelled the authorization a booking was committed on, so nothing was paid; the business decides what becomes of the booking.
-      if (payment.subject_id && payment.captured_amount === 0) await notifyPaymentFinancialEvent(db,stripe,env,payment,{kind:'payment_failed',nativeId:intent.id,status:intent.status,amount:intent.amount})
+      if (payment.subject_id && payment.captured_amount === 0) await publishPaymentNotification(env,payment,{kind:'payment_failed',nativeId:intent.id,status:intent.status,amount:intent.amount})
     }
     if (intent.status === 'requires_payment_method' && intent.last_payment_error) {
       // A bank debit that failed days later gives back the 14 days it was holding.
-      if (approval) await releaseApprovedStayConfirmation(db, payment)
+      if (approval) await releaseApprovedStayConfirmation(db, env, payment)
       else {
         const until=confirmationHoldUntil(payment)
         await execute(db,"UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active' AND expires_at>?",[until,payment.id,until])
+        if (stayCheckout) await publishEvent(env, { type: 'business.wake', kind: 'checkout', organization_id: payment.organization_id, due_at: Date.parse(until) })
       }
-      await notifyPaymentFinancialEvent(db,stripe,env,payment,{kind:'payment_failed',nativeId:intent.id,status:intent.status,amount:intent.amount})
+      await publishPaymentNotification(env,payment,{kind:'payment_failed',nativeId:intent.id,status:intent.status,amount:intent.amount})
     }
     return intent
   }
@@ -88,33 +81,60 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,rep
     })] : []),
   ],{operation:'Record authenticated capture and usage'})
   const recorded = await requirePayment(db,payment.organization_id,payment.id)
-  // A card offered from the buyer's saved ones existed before this intent did.
-  const methodId=typeof charge.payment_method==='string'?charge.payment_method:null
-  const method=intent.customer&&methodId?await stripe.paymentMethods.retrieve(methodId,{}, {stripeAccount:payment.stripe_account_id}):null
-  captured.savedCard=Boolean(method&&method.created<intent.created)
-  const capture={kind:'payment_captured' as const,nativeId:intent.id,status:intent.status,amount:intent.amount_received,email:charge.billing_details.email??null}
-  // Once this purchase has been sent back to the buyer, a redelivery finishes that and never books it.
-  if(await queryFirst(db,'SELECT 1 FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,unfulfillableKey(intent)])){await refundUnfulfillable(db,stripe,env,recorded,intent,capture);return intent}
-  if (recorded.refunded_amount > 0 || payment.subject_type !== 'booking') {await notifyPaymentFinancialEvent(db,stripe,env,recorded,capture);return intent}
-  const hold = await queryFirst<Hold>(db,'SELECT * FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?',[payment.id,payment.organization_id])
-  if (!hold || !hold.product_id) throw new Error('Captured booking payment has no durable hold')
-  const nights = hold.session_id === null
-  // A business deleted since the guest paid keeps the money record; nothing is booked for it.
-  if (nights && !await queryFirst(db,'SELECT id FROM organization WHERE id=?',[payment.organization_id])) {await notifyPaymentFinancialEvent(db,stripe,env,recorded,capture);return intent}
-  const bookingId = await commitBooking(db,env,payment,new Date(charge.created*1000).toISOString())
-  if(!bookingId){await refundUnfulfillable(db,stripe,env,recorded,intent,capture);return intent}
-  if(!await queryFirst(db,'SELECT id FROM organization WHERE id=?',[payment.organization_id])&&await queryFirst(db,'SELECT organization_id FROM payment_servicing_tenants WHERE organization_id=? AND stripe_account_id=? AND livemode=?',[payment.organization_id,payment.stripe_account_id,payment.livemode])){await notifyPaymentFinancialEvent(db,stripe,env,recorded,capture);return intent}
-  const paid = requirePayment(db,payment.organization_id,payment.id).then(current=>notifyPaymentFinancialEvent(db,stripe,env,current,capture))
-  if (nights) {
-    const outcomes=await Promise.allSettled([completeStayFromCheckout(db,env,payment.organization_id,bookingId),paid,notifyStayBooked(env,db,payment.organization_id,bookingId)])
-    raiseSettledFailures('Captured booking delivery',payment.id,outcomes,['channel and publication','capture notification','stay confirmation'])
+  const capture = { kind: 'payment_captured' as const, nativeId: intent.id, status: intent.status, amount: intent.amount_received, email: charge.billing_details.email ?? null }
+  const finish = async (booking: Extract<DomainEvent, { type: 'payment.captured' }>['booking'] = null) => {
+    await publishEvent(env, {
+      type: 'payment.captured', organization_id: payment.organization_id, payment_id: payment.id, notice: capture,
+      intent_created: intent.created, saved_method_id: intent.customer && typeof charge.payment_method === 'string' ? charge.payment_method : null,
+      booking,
+    })
     return intent
   }
+  const unfulfillable = async () => {
+    const outcomes = await Promise.allSettled([refundUnfulfillable(db, stripe, env, recorded, intent), finish()])
+    raiseSettledFailures('Unfulfillable payment refund', payment.id, outcomes, ['refund', 'capture event'])
+    return intent
+  }
+  // A redelivery of a refunded purchase finishes the refund and keeps it from booking.
+  if (await queryFirst(db, 'SELECT 1 FROM payment_refunds WHERE payment_id=? AND idempotency_key=?', [payment.id, unfulfillableKey(intent)])) return unfulfillable()
+  if (recorded.refunded_amount > 0 || payment.subject_type !== 'booking') return finish()
+  const hold = await queryFirst<Hold>(db, 'SELECT * FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id])
+  if (!hold || !hold.product_id) throw new Error('Captured booking payment has no durable hold')
+  const nights = hold.session_id === null
+  // A business deleted since the guest paid keeps the money record.
+  if (nights && !await queryFirst(db, 'SELECT id FROM organization WHERE id=?', [payment.organization_id])) return finish()
+  const bookingId = await commitBooking(db, env, payment, new Date(charge.created * 1000).toISOString())
+  if (!bookingId) return unfulfillable()
+  if (!await queryFirst(db, 'SELECT id FROM organization WHERE id=?', [payment.organization_id]) && await queryFirst(db, 'SELECT organization_id FROM payment_servicing_tenants WHERE organization_id=? AND stripe_account_id=? AND livemode=?', [payment.organization_id, payment.stripe_account_id, payment.livemode])) return finish()
+  if (nights) return finish({ unit: 'nights', id: bookingId })
   if (!hold.conversation_id) throw new Error('Captured visit payment has no guest conversation')
-  const outcomes=await Promise.allSettled([paid,notifyProductBookingCreated(env,db,hold.organization_id,hold.conversation_id)])
-  raiseSettledFailures('Captured booking delivery',payment.id,outcomes,['capture notification','booking creation notification'])
-  await execute(db,"UPDATE conversations SET payload_json=json_set(payload_json,'$.provenance.followups_completed',json('true')) WHERE id=? AND organization_id=? AND json_type(payload_json,'$.provenance')='object'",[hold.conversation_id,hold.organization_id])
-  return intent
+  return finish({ unit: 'slot', conversation_id: hold.conversation_id })
+}
+
+/** The committed processor state, audit and receipts are consumed independently of the checkout response. */
+export async function notifyRecordedPayment(env: CloudflareEnv, event: Extract<DomainEvent, { type: 'payment.financial' | 'payment.captured' }>): Promise<void> {
+  const db = env.DB
+  const payment = await requirePayment(db, event.organization_id, event.payment_id)
+  const stripe = paymentsStripe(env, Boolean(payment.livemode))
+  const notice = notifyPaymentFinancialEvent(db, stripe, env, payment, event.notice)
+  if (event.type === 'payment.financial') return notice
+  const capture = async () => {
+    const method = event.saved_method_id ? await stripe.paymentMethods.retrieve(event.saved_method_id, {}, { stripeAccount: payment.stripe_account_id }) : null
+    await recordPaymentPaid(db, payment, event.notice.nativeId, Boolean(method && method.created < event.intent_created))
+    await deliverPaymentsUsage(db, env, event.organization_id)
+  }
+  const confirm = async () => {
+    const { booking } = event
+    if (!booking) return
+    if (booking.unit === 'nights') {
+      await completeStayFromCheckout(db, env, event.organization_id, booking.id)
+      await notifyStayBooked(env, db, event.organization_id, booking.id)
+    } else {
+      await notifyProductBookingCreated(env, db, event.organization_id, booking.conversation_id)
+    }
+  }
+  const outcomes = await Promise.allSettled([notice, capture(), confirm()])
+  raiseSettledFailures('Captured booking delivery', payment.id, outcomes, ['capture notification', 'captured usage and analytics', 'booking follow-up'])
 }
 
 /**
@@ -143,11 +163,13 @@ async function captureOnceBooked(db:DbClient,stripe:Stripe,env:CloudflareEnv,pay
   const bookable = await approvedStayPaymentPredicate(db, { ...approval, organizationId: payment.organization_id,
    productId: purchase.product_id, checkIn: purchase.check_in_date, checkOut: purchase.check_out_date,
    conversationId: hold.conversation_id, buyerUserId: hold.buyer_user_id, through: now, allowInFlight: payment.id })
+  const expiresAt = confirmationHoldUntil(payment, now)
   const renewed = await execute(db, `UPDATE payment_checkout_holds SET expires_at=MAX(expires_at, ?)
     WHERE payment_id=? AND organization_id=? AND status='active' AND ${bookable.query}
       AND EXISTS (SELECT 1 FROM payments p WHERE p.id=payment_checkout_holds.payment_id AND json_type(p.review_json,'$.confirmation_started_at')='text')`,
-  [confirmationHoldUntil(payment, now), payment.id, payment.organization_id, ...bookable.params])
+  [expiresAt, payment.id, payment.organization_id, ...bookable.params])
   booked = renewed.meta.changes === 1
+  if (booked) await publishEvent(env, { type: 'business.wake', kind: 'checkout', organization_id: payment.organization_id, due_at: Date.parse(expiresAt) })
  } else if (!booked) {
   booked = await commitBooking(db, env, payment, new Date(charge.created * 1000).toISOString()) !== null
  }
@@ -261,7 +283,7 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
 
 const CONFIRMATION_HOLD_MS=60*60*1000
 
-export async function releaseApprovedStayConfirmation(db: DbClient, payment: Payment) {
+export async function releaseApprovedStayConfirmation(db: DbClient, env: CloudflareEnv, payment: Payment) {
  if (!payment.checkout_expires_at) throw new Error('Approved stay payment has no checkout window')
  await executeBatch(db, [
   { query: `UPDATE payments SET review_json=json_remove(review_json,'$.confirmation_started_at')
@@ -270,6 +292,7 @@ export async function releaseApprovedStayConfirmation(db: DbClient, payment: Pay
   { query: "UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND organization_id=? AND status='active' AND changes()=1",
   params: [payment.checkout_expires_at, payment.id, payment.organization_id] },
  ], { operation: 'Release failed approved-stay payment' })
+ await publishEvent(env, { type: 'business.wake', kind: 'checkout', organization_id: payment.organization_id, due_at: Date.now() })
 }
 
 /** When a hold on a payment that has begun confirming ends: an hour on, and never before the buyer's time to pay. */
@@ -283,10 +306,12 @@ export function confirmationHoldUntil(payment:Pick<Payment,'checkout_expires_at'
 function unfulfillableKey(intent:Pick<Stripe.PaymentIntent,'id'>):string{return `unfulfillable:${intent.id}`}
 
 /** A bank debit has no authorization to cancel, so one that cleared after its capacity went goes back through the ordinary refund; a redelivery repeats it idempotently. */
-async function refundUnfulfillable(db:DbClient,stripe:Stripe,env:CloudflareEnv,payment:Payment,intent:Stripe.PaymentIntent,capture:Parameters<typeof notifyPaymentFinancialEvent>[4]){
+async function refundUnfulfillable(db:DbClient,stripe:Stripe,env:CloudflareEnv,payment:Payment,intent:Stripe.PaymentIntent){
  await execute(db,"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",[payment.id])
- const outcomes=await Promise.allSettled([executeRefund(db,stripe,payment,null,unfulfillableKey(intent),'requested_by_customer',null,env),notifyPaymentFinancialEvent(db,stripe,env,payment,capture)])
- raiseSettledFailures('Unfulfillable payment refund',payment.id,outcomes,['refund','capture notification'])
+ if (isStayPurchase((JSON.parse(payment.price_snapshot_json) as Record<string, unknown>).stay)) {
+  await publishEvent(env, { type: 'business.wake', kind: 'checkout', organization_id: payment.organization_id, due_at: Date.now() })
+ }
+ await executeRefund(db, stripe, payment, null, unfulfillableKey(intent), 'requested_by_customer', null, env)
 }
 
 export function paymentEventKey(event:Pick<Stripe.Event,'id'|'account'|'livemode'>):string{return `payments:${event.account??'unscoped'}:${Number(event.livemode)}:${event.id}`}

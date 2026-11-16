@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:48e8d68dc375b754b6fa0a642b65ba499de1534fec4dfad949f94bc86661810a",
-  "documentationFingerprint": "sha256:8c70a74ef74f6f812d035489b0e5e6b30322bed527cb8a06f8411a463679857b",
+  "fingerprint": "sha256:694e9576972d719bcebfb0665dbd8d13d710a3d163de93ee7e9fe336b72fe7e7",
+  "documentationFingerprint": "sha256:d7c79863cc3dcf730c139136fcb11a22e80ba8d40311bf1482481e9cd5164f8c",
   "tools": [
     {
       "name": "add_organization_language",
@@ -64227,6 +64227,13 @@
                 "children": {
                   "type": "integer"
                 },
+                "conversation_id": {
+                  "description": "The reservation conversation if the caller has access to it.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "guest_name": {
                   "description": "The guest as their conversation names them; a member reads the first name.",
                   "type": [
@@ -64253,6 +64260,7 @@
               "required": [
                 "unit",
                 "booking_id",
+                "conversation_id",
                 "product_id",
                 "status",
                 "guest_name",
@@ -99922,6 +99930,13 @@
                 "children": {
                   "type": "integer"
                 },
+                "conversation_id": {
+                  "description": "The reservation conversation if the caller has access to it.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "guest_name": {
                   "description": "The guest as their conversation names them; a member reads the first name.",
                   "type": [
@@ -99948,6 +99963,7 @@
               "required": [
                 "unit",
                 "booking_id",
+                "conversation_id",
                 "product_id",
                 "status",
                 "guest_name",

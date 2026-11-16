@@ -76,7 +76,7 @@ const b = inject(bookingEditorKey)!
 const booking = computed(() => b.booking.value)
 const copy = computed(() => booking.value ? getVerticalCopy(booking.value.vertical) : null)
 const guestsLabel = computed(() => copy.value?.guestsLabelPlural.replace(/^./u, letter => letter.toUpperCase()) ?? 'Guests')
-const recordImage = computed(() => booking.value?.resource_image_url ?? booking.value?.locations.find(location => location.id === booking.value?.location_id)?.image_url ?? null)
+const recordImage = computed(() => booking.value?.resource_photo_urls[0] ?? booking.value?.locations.find(location => location.id === booking.value?.location_id)?.image_url ?? null)
 // The booked terms, as the guest read them: one line, not a setting here.
 const policyLine = computed(() => booking.value?.policy?.items.find(item => item.id === 'cancellation')?.text ?? null)
 

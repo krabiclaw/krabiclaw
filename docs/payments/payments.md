@@ -590,22 +590,21 @@ meeting, for 10% of its ad spend. Connecting a Google Ads account costs
 nothing and feeds Insights → Google Ads; the fee follows the business's
 agreement, recorded in `organization_services` (`managed_ads`, who agreed,
 when, which terms) from Plan and billing. Reporting days follow the
-connected Google Ads account's actual timezone, including daylight saving time;
-the day ends at its next local midnight. The daily
-`marketing:ad-spend-daily` task reads, for each business whose agreement was on
-as the billed day closed (agreed before its end, not ended by it) and whose
-account is connected, Google's cost for the day two calendar days back in that
-account's timezone (a day Google has
-finished counting), and queues it as an `ad_spend` usage event
-(`google_ads:<customer>:<date>`, USD cents) that the outbox reports to the
-`krabiclaw_ad_spend` meter. The usage event's source timestamp is the final
+connected account's actual Google Ads or Meta Ads timezone, including daylight
+saving time. A day becomes eligible at the start of the second following
+calendar day in that timezone. The business hub wakes at the next eligible
+reporting deadline. It reads spend for days that closed after both consent and
+the connection began and on or before the agreement ended. The outbox stores
+each provider's result in USD cents under
+`google_ads:<customer>:<date>` or `meta_ads:<account>:<date>` and reports that
+usage to the `krabiclaw_ad_spend` meter. The usage event's source timestamp is the final
 millisecond of that actual reporting day. Missing or invalid provider timezone
 stops activation/capture; there is no UTC default. Agreement eligibility
 compares the same actual day boundary with the recorded consent and connection
 instants. The Business subscription's ad-spend price bills it at the end of the
-period, and the plan screen reads it as `ad_spend_rate_percent`. A Google Ads account in a currency other than USD, or
-a day whose spend changed after it was queued, fails the task for that
-business rather than being converted or overwritten.
+period, and the plan screen reads it as `ad_spend_rate_percent`. A non-USD
+account or a day whose spend changed after it was queued stops capture for that
+business.
 
 **SEO and marketing strategy** is Julia's service: she leads the SEO strategy,
 hand-writes ranking blog posts, meets weekly and is on chat with the business,
@@ -632,11 +631,14 @@ ended before disconnecting Ads. Stripe's portal manages the card, so KrabiClaw
 does not guard its removal. Ending the service remains available when a provider cannot be
 read, and preserves its previously billable days. The connection remains until
 the intersecting managed days have actual daily spend receipts, including zero
-spend, in the usage outbox. The daily task revisits unrecorded days after
-Google's two-day reporting delay and sends pending events through the existing
-delivery operation, even after Ads is disconnected. `delivery_at` is written
-only after Stripe accepts the meter event; failed reads or deliveries remain
-failures to resolve.
+spend, in the usage outbox. The hub keeps the last eligible reporting deadline
+after the agreement ends and sends pending events through the usage outbox,
+including after Ads is disconnected. `delivery_at` is written after Stripe
+accepts the meter event. For cutover, publish one `ad_spend.backfill` message to
+`EVENTS` to arm hubs for existing agreements and undelivered ad-spend usage.
+
+Provider reporting contracts: [Google Ads reporting](https://developers.google.com/google-ads/api/docs/reporting/overview),
+[Meta Ads Insights](https://developers.facebook.com/documentation/ads-commerce/marketing-api/insights).
 
 ### Payments fees
 

@@ -7,11 +7,15 @@ import { assertConversationAccess, guestVisibleSql } from '~/server/domain/conve
 import { loadConversationPage } from '~/server/domain/conversation-history'
 import type { ConversationEntriesPage } from '~/shared/messages-contract'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
-import { guestInboxTarget, SCHEDULED_AUTHOR_HEADER } from '~/server/cloudflare/guest-inbox-events'
+import { BUSINESS_WAKE_KINDS, guestInboxTarget, SCHEDULED_AUTHOR_HEADER, type BusinessWakeKind } from '~/server/cloudflare/guest-inbox-events'
 import { sendDueOutbox } from '~/server/domain/scheduled-guest-messages'
 
 /** The business whose outbox this hub wakes for. */
 const OUTBOX_ORGANIZATION = 'outbox:organization'
+
+const BUSINESS_WAKES = 'outbox:wakes'
+type Wake = { at: number; revision: string }
+type BusinessWakes = Partial<Record<BusinessWakeKind, Wake | null>>
 
 type GuestInboxHubEnv = CloudflareEnv
 
@@ -120,6 +124,7 @@ async function guestAudience(env: GuestInboxHubEnv, event: DashboardInvalidation
 }
 
 export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
+  private readonly activeWakes = new Map<BusinessWakeKind, string>()
   constructor(ctx: DurableObjectState, env: GuestInboxHubEnv) {
     super(ctx, env)
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
@@ -139,6 +144,17 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     const url = new URL(request.url)
     if (url.pathname === '/broadcast' && request.method === 'POST') {
       return await this.handleBroadcast(request)
+    }
+
+    if (url.pathname === '/wake' && request.method === 'POST') {
+      const organizationId = request.headers.get('x-krabiclaw-organization-id')
+      const body: unknown = await request.json()
+      const kind = isRecord(body) ? BUSINESS_WAKE_KINDS.find(value => value === body.kind) : undefined
+      if (!organizationId || !kind || !isRecord(body) || typeof body.due_at !== 'number' || !Number.isSafeInteger(body.due_at)) {
+        return failure(400, 'INVALID_BUSINESS_DEADLINE', 'A business wake needs an organization, purpose and deadline', 'due_at')
+      }
+      await this.scheduleWake(organizationId, kind, body.due_at)
+      return new Response(null, { status: 204 })
     }
 
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
@@ -163,24 +179,101 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     return new Response(null, { status: 101, webSocket: client })
   }
 
-  /**
-   * The business's outbox: messages stored with a send time (a guest's
-   * automatic and send-later messages, a job's reminders). A write that may
-   * have added or changed one wakes it at once; each wake sends what is due and
-   * sets the next wake to the exact time of the next one. Nothing polls.
-   */
-  private async wakeOutbox(organizationId: string): Promise<void> {
-    await this.ctx.storage.put(OUTBOX_ORGANIZATION, organizationId)
-    await this.ctx.storage.setAlarm(Date.now())
+  private async scheduleWake(organizationId: string, kind: BusinessWakeKind, at: number): Promise<void> {
+    await this.ctx.storage.transaction(async (storage) => {
+      const scheduled = await storage.getAlarm()
+      // An existing alarm without a purpose belongs to the original message outbox.
+      const wakes = await storage.get<BusinessWakes>(BUSINESS_WAKES)
+        ?? (scheduled === null ? {} : { outbox: { at: scheduled, revision: crypto.randomUUID() } })
+      if ((kind === 'reviews' || kind === 'retention' || kind === 'checkout') && !Object.hasOwn(wakes, kind)) at = Date.now()
+      const previous = wakes[kind]
+      if (!previous || previous.revision === this.activeWakes.get(kind) || at < previous.at) {
+        wakes[kind] = { at, revision: crypto.randomUUID() }
+        await storage.put(BUSINESS_WAKES, wakes)
+      }
+      await storage.put(OUTBOX_ORGANIZATION, organizationId)
+      const pendingTimes = BUSINESS_WAKE_KINDS.flatMap(purpose => {
+        const wake = wakes[purpose]
+        return wake && wake.revision !== this.activeWakes.get(purpose) ? [wake.at] : []
+      })
+      const earliest = Math.min(...pendingTimes)
+      if (Number.isFinite(earliest) && (scheduled === null || earliest < scheduled)) await storage.setAlarm(earliest)
+    })
+  }
+
+  private async runWake(organizationId: string, kind: BusinessWakeKind, now: number): Promise<number | null> {
+    if (kind === 'outbox') {
+      const { next } = await sendDueOutbox(this.env.DB, this.env, organizationId)
+      return next === null ? null : Date.parse(next)
+    }
+    if (kind === 'checkout') {
+      const { dispatchStayCheckoutDeadlines } = await import('~/server/domain/stays')
+      return dispatchStayCheckoutDeadlines(this.env, organizationId, now)
+    }
+    if (kind === 'calendar') {
+      const { publishEvent } = await import('~/server/events')
+      await publishEvent(this.env, { type: 'calendar.changed', organization_id: organizationId, booking_id: null })
+      return null
+    }
+    if (kind === 'channex_ari') {
+      const { deliverPendingChannelNights } = await import('~/server/domain/stays')
+      return deliverPendingChannelNights(this.env, organizationId, now)
+    }
+    const { runDueBusinessWork } = await import('~/server/domain/due-business-work')
+    if (kind === 'reviews' || kind === 'retention' || kind === 'ad_spend') return (await runDueBusinessWork(this.env, organizationId, kind, now)).next
+    throw new Error(`Business wake ${kind} has no processor`)
   }
 
   override async alarm(): Promise<void> {
     const organizationId = await this.ctx.storage.get<string>(OUTBOX_ORGANIZATION)
-    if (!organizationId) throw new Error('The outbox alarm fired for a hub that holds no organization')
-    const { next } = await sendDueOutbox(this.env.DB, this.env, organizationId)
-    // A write that arrived while this ran has already set an earlier wake.
-    const scheduled = await this.ctx.storage.getAlarm()
-    if (next !== null && (scheduled === null || Date.parse(next) < scheduled)) await this.ctx.storage.setAlarm(Date.parse(next))
+    if (!organizationId) throw new Error('The alarm fired for a hub that holds no organization')
+    const now = Date.now()
+    const wakes = await this.ctx.storage.get<BusinessWakes>(BUSINESS_WAKES)
+      ?? { outbox: { at: now, revision: crypto.randomUUID() } }
+    const due = BUSINESS_WAKE_KINDS.flatMap(kind => {
+      const wake = wakes[kind]
+      return wake && wake.at <= now ? [{ kind, ...wake }] : []
+    })
+    const failures: unknown[] = []
+    for (const wake of due) this.activeWakes.set(wake.kind, wake.revision)
+    try {
+      for (const wake of due) {
+        let next: number | null
+        try {
+          next = await this.runWake(organizationId, wake.kind, now)
+        } catch (cause) {
+          failures.push(new Error(`Business wake ${wake.kind} failed for ${organizationId}`, { cause }))
+          await this.ctx.storage.transaction(async (storage) => {
+            const pending = await storage.get<BusinessWakes>(BUSINESS_WAKES) ?? wakes
+            const current = pending[wake.kind]
+            if (!current || wake.at < current.at) {
+              pending[wake.kind] = { at: wake.at, revision: wake.revision }
+              await storage.put(BUSINESS_WAKES, pending)
+            }
+          })
+          continue
+        }
+        await this.ctx.storage.transaction(async (storage) => {
+          const pending = await storage.get<BusinessWakes>(BUSINESS_WAKES) ?? wakes
+          const current = pending[wake.kind]
+          if (!current || current.revision === wake.revision) {
+            if (next === null) pending[wake.kind] = null
+            else pending[wake.kind] = { at: next, revision: crypto.randomUUID() }
+          } else if (next !== null && next < current.at) {
+            pending[wake.kind] = { at: next, revision: current.revision }
+          }
+          await storage.put(BUSINESS_WAKES, pending)
+        })
+      }
+      if (failures.length) throw new AggregateError(failures, 'One or more business deadlines failed')
+    } finally {
+      this.activeWakes.clear()
+    }
+    await this.ctx.storage.transaction(async (storage) => {
+      const pending = await storage.get<BusinessWakes>(BUSINESS_WAKES) ?? {}
+      const times = Object.values(pending).flatMap(wake => wake ? [wake.at] : [])
+      if (times.length) await storage.setAlarm(Math.min(...times))
+    })
   }
 
   override webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {
@@ -222,7 +315,7 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
       return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid scheduled message audience', SCHEDULED_AUTHOR_HEADER)
     }
     // A stay, booking or message write is announced this way; what it stored to send later is picked up at once.
-    if (event.type === 'stay.changed' || event.type === 'business.changed' || event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') await this.wakeOutbox(organizationId)
+    if (event.type === 'stay.changed' || event.type === 'business.changed' || event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') await this.scheduleWake(organizationId, 'outbox', Date.now())
 
     const accounts = !scheduleOnly && !('team' in event && event.team) ? await guestAudience(this.env, event) : []
     const namespace = this.env.GUEST_INBOX_HUBS

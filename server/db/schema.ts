@@ -2323,6 +2323,7 @@ export const mcp_tool_call_events = sqliteTable("mcp_tool_call_events", {
 	check("mcp_tool_call_events_result_summary_json_check", sql`result_summary_json IS NULL OR (json_valid(result_summary_json))`),
 	check("mcp_tool_call_events_duration_check", sql`duration_ms >= 0`),
 	index("idx_mcp_tool_call_events_created_at").on(table.created_at),
+	index("idx_mcp_tool_call_events_diagnostic_retention").on(table.created_at).where(sql`json_extract(arguments_summary_json, '$._diagnostic') = 1`),
 	index("idx_mcp_tool_call_events_tool_status").on(table.tool_name, table.status),
 	index("idx_mcp_tool_call_events_org").on(table.organization_id, table.created_at),
 	index("idx_mcp_tool_call_events_method_created").on(table.method, table.created_at),
@@ -2376,6 +2377,7 @@ export const stripe_ga4_subscription_intents = sqliteTable("stripe_ga4_subscript
 	index("stripe_ga4_subscription_intents_subscription_idx").on(table.stripe_subscription_id, table.status, table.created_at),
 	index("stripe_ga4_subscription_intents_organization_idx").on(table.organization_id, table.status, table.created_at),
 	index("stripe_ga4_subscription_intents_expiry_idx").on(table.status, table.expires_at),
+	index("stripe_ga4_subscription_intents_retention_idx").on(table.consumed_at).where(sql`status = 'consumed'`),
 ]);
 
 export const usage_events = sqliteTable("usage_events", {

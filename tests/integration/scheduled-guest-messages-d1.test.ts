@@ -7,11 +7,13 @@ import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { createStay, type StayAccess } from '../../server/domain/stays.ts'
 import { cancelScheduledGuestMessage, deleteMessageTemplate, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
-import { sendDueScheduledGuestMessages } from '../../server/domain/scheduled-guest-messages.ts'
+import { sendDueOutbox } from '../../server/domain/scheduled-guest-messages.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import type { DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
+import { bindDatabaseEvents } from '../../server/db/index.ts'
+import { captureEvents } from './support/events.ts'
 
-// The production cron sends what its plan made due, through each conversation's
+// The business alarm sends what its plan made due, through each conversation's
 // own address, and records every outcome on the scheduled message itself.
 
 const ORG = 'org'
@@ -19,7 +21,7 @@ const OWNER = 'owner-user'
 const manager: StayAccess = { organizationId: ORG, actorId: OWNER, manage: true }
 const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
 
-test('the cron sends due messages, leaves future ones pending and records failures and review outcomes', async () => {
+test('the business outbox sends due messages, leaves future ones pending and records failures and review outcomes', async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'scheduled-messages-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: `export class Hub {
@@ -35,8 +37,10 @@ test('the cron sends due messages, leaves future ones pending and records failur
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
+    const queue = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    bindDatabaseEvents(db, env)
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
@@ -58,6 +62,7 @@ test('the cron sends due messages, leaves future ones pending and records failur
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(11), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 15_000 })
     const cy = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cy', check_in_date: day(20), check_out_date: day(21), adults: 1, guest_name: 'Cy', guest_email: 'cy@example.test', total_minor: 15_000 })
     const eve = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'eve', check_in_date: day(30), check_out_date: day(31), adults: 1, guest_name: 'Eve', guest_email: 'eve@example.test', total_minor: 15_000 })
+    await queue.drain(env, 'stay.changed')
     const planned = (stayId: string, templateId: string) => db.prepare('SELECT * FROM scheduled_guest_messages WHERE booking_id = ? AND template_id = ?').bind(stayId, templateId).first<Record<string, string | null>>()
     for (const stay of [ana, dee, cy, eve]) {
       assert.equal((await planned(stay.id, welcome.id))?.status, 'pending')
@@ -88,7 +93,7 @@ test('the cron sends due messages, leaves future ones pending and records failur
     // Ten minutes later every welcome is due and no arrival note is.
     const later = new Date(Date.now() + 10 * 60_000).toISOString()
     try {
-      assert.deepEqual(await sendDueScheduledGuestMessages(db, channexEnv, later), { sent: 1, failed: 2, needs_review: 1 })
+      assert.partialDeepStrictEqual(await sendDueOutbox(db, channexEnv, ORG, later), { sent: 1, failed: 2, needs_review: 1 })
     } finally { globalThis.fetch = realFetch }
     assert.deepEqual(providerCalls.filter(call => call.startsWith('POST')), [])
     const providerFailed = (await planned(eve.id, welcome.id))!
@@ -111,7 +116,7 @@ test('the cron sends due messages, leaves future ones pending and records failur
     for (const stay of [ana, dee, cy, eve]) assert.equal((await planned(stay.id, arrival.id))?.status, 'pending')
 
     // A repeated run sends nothing again and changes no recorded outcome.
-    assert.deepEqual(await sendDueScheduledGuestMessages(db, channexEnv, later), { sent: 0, failed: 0, needs_review: 0 })
+    assert.deepEqual(await sendDueOutbox(db, channexEnv, ORG, later), { sent: 0, failed: 0, needs_review: 0, next: (await planned(ana.id, arrival.id))?.due_at })
     assert.equal(await db.prepare("SELECT count(*) AS n FROM messages WHERE event_name = 'thread.scheduled_message'").first('n'), 2)
 
     // A schedule saved after its event has passed records the miss instead of sending late.

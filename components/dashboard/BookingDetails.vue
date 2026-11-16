@@ -1,7 +1,7 @@
 <template>
   <DashboardIndexPanel :id="stay ? 'stay-details' : personalScope ? 'account-booking-details' : 'booking-details'" :title="pageTitle" column="record">
     <template #right>
-      <UButton v-if="recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" :aria-label="stay ? 'Close stay details' : 'Close booking details'" />
+      <UButton v-if="recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="soft" :aria-label="stay ? 'Close stay details' : 'Close booking details'" />
     </template>
     <UAlert v-if="error" color="error" variant="soft" title="Booking details could not be loaded" :description="getErrorMessage(error, 'Booking request failed')" />
     <div v-else class="min-w-0 [overflow-wrap:anywhere]">
@@ -66,16 +66,30 @@
         </UAlert>
 
         <section v-if="panel" data-testid="reservation-panel">
-          <img v-if="panel.image" :src="panel.image" alt="" class="mb-6 aspect-[4/3] w-full rounded-2xl bg-elevated object-cover">
+          <UCarousel
+            v-if="panel.photos.length"
+            v-slot="{ item }"
+            :items="panel.photos"
+            :arrows="panel.photos.length > 1"
+            :dots="panel.photos.length > 1"
+            :prev="photoArrow"
+            :next="photoArrow"
+            :ui="{ viewport: 'rounded-2xl', container: 'ms-0', item: 'ps-0', prev: 'start-4 sm:start-4', next: 'end-4 sm:end-4', dots: 'bottom-3 gap-1.5', dot: 'size-1.5 bg-white/55 data-[state=active]:bg-white' }"
+            aria-label="Listing photos"
+            class="mb-6"
+          >
+            <img :src="item" :alt="panel.title ?? ''" class="aspect-[4/3] w-full bg-elevated object-cover">
+          </UCarousel>
           <h2 class="text-[22px] font-semibold leading-7 tracking-tight text-highlighted">{{ panel.title }}</h2>
           <p v-if="panel.host" class="text-xs text-muted">Hosted by {{ panel.host.name }}</p>
           <p v-if="panel.purchaseDate" class="text-xs text-muted">{{ panel.purchaseDate }}</p>
-          <div v-if="recordGuestName" class="mt-4 flex items-center -space-x-2">
+          <div v-if="recordGuestName" class="mt-4 flex items-center">
             <span class="relative">
               <UAvatar :src="recordGuestImage || undefined" :alt="recordGuestName" :text="recordGuestName.slice(0, 1).toUpperCase()" size="lg" class="bg-accented ring-2 ring-default" :ui="{ fallback: 'font-semibold text-highlighted' }" />
               <ChannelMark v-if="detail" :channel="detail.channel" class="absolute -bottom-1 -right-1" />
             </span>
-            <span v-if="partySize > 1" class="flex size-8 items-center justify-center rounded-full bg-accented text-xs font-bold text-highlighted ring-2 ring-default" :aria-label="otherGuestLabel">+{{ partySize - 1 }}</span>
+            <span v-if="partySize > 1" class="-ms-2 flex size-8 items-center justify-center rounded-full bg-accented text-xs font-bold text-highlighted ring-2 ring-default" :aria-label="otherGuestLabel">+{{ partySize - 1 }}</span>
+            <UButton v-if="guestManagement?.available.value" type="button" aria-label="Manage guests" icon="i-lucide-pencil" color="neutral" variant="outline" size="sm" class="ms-1 size-8 justify-center rounded-full" @click="guestManagement.open()" />
           </div>
           <UBadge v-if="statusLabel" class="mt-3" color="neutral" variant="soft" :label="statusLabel" />
           <div v-if="manage && hostActions.includes('confirm')" class="mt-5 flex flex-wrap gap-3">
@@ -95,7 +109,7 @@
           <p v-if="arrivalTime" class="mt-3 text-xs text-muted">Arriving {{ arrivalTime }}</p>
 
           <div v-if="panel.rows.length" class="mt-3">
-            <component :is="row.to ? NuxtLink : 'a'" v-for="row in panel.rows" :key="row.label" :to="row.to" :href="row.href" class="flex items-start gap-4 py-3">
+            <component :is="row.to ? NuxtLink : row.href ? 'a' : 'button'" v-for="row in panel.rows" :key="row.label" :to="row.to" :href="row.href" :type="row.run ? 'button' : undefined" class="flex w-full items-start gap-4 py-3 text-left" @click="row.run?.()">
               <UIcon :name="row.icon" class="mt-0.5 size-5 shrink-0 text-highlighted" />
               <span class="min-w-0 flex-1"><span class="block text-sm font-medium text-highlighted">{{ row.label }}</span><span v-if="row.detail" class="block truncate text-xs text-muted">{{ row.detail }}</span></span>
             </component>
@@ -165,7 +179,8 @@
             <p v-if="panel.address" :class="panel.location ? 'mt-1' : 'mt-4'" class="text-sm text-muted">{{ panel.address }}</p>
             <template v-if="panel.guide?.directions">
               <h3 class="mt-5 text-sm font-semibold text-highlighted">Directions from your host</h3>
-              <p class="mt-1 whitespace-pre-wrap text-sm text-muted">{{ panel.guide.directions }}</p>
+              <p ref="directionsPreview" class="mt-1 line-clamp-6 whitespace-pre-wrap text-sm text-muted">{{ panel.guide.directions }}</p>
+              <button v-if="directionsClipped" type="button" class="mt-1 text-sm font-medium text-highlighted underline" @click="guideSection = 'directions'">Read more</button>
             </template>
             <div v-if="panel.address || panel.mapsUrl" class="mt-3">
               <button v-if="panel.address" type="button" :class="rowClass" @click="copyAddress(panel.address)">
@@ -183,38 +198,30 @@
               <h3 class="mt-5 text-sm font-semibold text-highlighted">Check-in method</h3>
               <p class="mt-1 text-sm text-muted">{{ panel.guide.method }}</p>
             </template>
-            <p v-if="panel.guide.instructions" class="mt-4 whitespace-pre-wrap text-sm text-muted">{{ panel.guide.instructions }}</p>
-            <template v-if="panel.guide.wifi">
-              <h3 class="mt-5 text-sm font-semibold text-highlighted">Wi-Fi</h3>
-              <p v-if="panel.guide.wifi.network" class="mt-1 text-sm text-muted">{{ panel.guide.wifi.network }}</p>
-              <p v-if="panel.guide.wifi.password" class="text-sm text-muted">{{ panel.guide.wifi.password }}</p>
-            </template>
+            <button v-if="panel.guide.instructions || panel.guide.wifi" type="button" :class="rowClass" class="mt-3" @click="guideSection = 'check-in'">
+              <UIcon name="i-lucide-key-round" class="size-4 shrink-0" /><span class="min-w-0 flex-1">How to get inside</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+            </button>
           </div>
 
-          <div v-if="panel.guide && (panel.guide.manual || panel.guide.rules.length || panel.guide.safety.length)" id="rules-and-instructions" :class="sectionClass">
+          <div v-if="panel.guide && (panel.guide.manual || panel.guide.rules.length || panel.guide.safety.length || panel.listingUrl)" id="rules-and-instructions" :class="sectionClass">
             <h2 class="text-lg font-semibold text-highlighted">Rules and instructions</h2>
             <template v-if="panel.guide.manual">
               <h3 class="mt-5 text-sm font-semibold text-highlighted">House manual</h3>
-              <p class="mt-1 whitespace-pre-wrap text-sm text-muted">{{ panel.guide.manual }}</p>
+              <p ref="manualPreview" class="mt-1 line-clamp-3 whitespace-pre-wrap text-sm text-muted">{{ panel.guide.manual }}</p>
+              <button v-if="manualClipped" type="button" class="mt-1 text-sm font-medium text-highlighted underline" @click="guideSection = 'manual'">Show more</button>
             </template>
             <template v-if="panel.guide.rules.length">
               <h3 class="mt-5 text-sm font-semibold text-highlighted">House rules</h3>
-              <ul class="mt-1 space-y-1 text-sm text-muted"><li v-for="rule in panel.guide.rules" :key="rule">{{ rule }}</li></ul>
+              <p ref="rulesPreview" class="mt-1 line-clamp-3 whitespace-pre-line text-sm text-muted">{{ panel.guide.rules.join('\n') }}</p>
+              <button v-if="rulesClipped" type="button" class="mt-1 text-sm font-medium text-highlighted underline" @click="guideSection = 'rules'">Show more</button>
             </template>
             <template v-if="panel.guide.safety.length">
               <h3 class="mt-5 text-sm font-semibold text-highlighted">Safety and property</h3>
               <ul class="mt-1 space-y-1 text-sm text-muted"><li v-for="line in panel.guide.safety" :key="line">{{ line }}</li></ul>
             </template>
-          </div>
-
-          <div v-if="panel.guide?.checkout.length" id="checkout-details" :class="sectionClass">
-            <h2 class="text-lg font-semibold text-highlighted">Checkout details</h2>
-            <ul class="mt-4 space-y-3">
-              <li v-for="instruction in panel.guide.checkout" :key="instruction.task" class="flex gap-4">
-                <UIcon :name="STAY_CHECKOUT_TASKS[instruction.task].icon" class="mt-0.5 size-4 shrink-0 text-highlighted" />
-                <span><span class="block text-sm text-highlighted">{{ STAY_CHECKOUT_TASKS[instruction.task].label }}</span><span v-if="instruction.details" class="block whitespace-pre-wrap text-xs text-muted">{{ instruction.details }}</span></span>
-              </li>
-            </ul>
+            <a v-if="panel.listingUrl" :href="panel.listingUrl" target="_blank" rel="noopener noreferrer" :class="rowClass" class="mt-3">
+              <UIcon name="i-lucide-store" class="size-4 shrink-0" /><span class="min-w-0 flex-1">Show listing</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+            </a>
           </div>
 
           <div v-if="panel.host || panel.contact.length" :class="sectionClass">
@@ -268,10 +275,41 @@
               </template>
             </PaymentDetails>
           </div>
+          <div v-if="!purchase" id="reservation-support" :class="sectionClass">
+            <h2 class="text-lg font-semibold text-highlighted">Get support anytime</h2>
+            <NuxtLink to="/help" :class="rowClass" class="mt-3">
+              <UIcon name="i-lucide-circle-help" class="size-4 shrink-0" /><span class="min-w-0 flex-1">Visit the Help Center</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+            </NuxtLink>
+          </div>
         </section>
       </template>
     </div>
   </DashboardIndexPanel>
+
+  <DashboardListItemDialog v-if="panel?.guide" v-model:open="guideOpen" :title="guideSection ? guideLabels[guideSection] : ''" :show-actions="false">
+    <p v-if="guideSection === 'directions'" class="whitespace-pre-wrap text-sm text-muted">{{ panel.guide.directions }}</p>
+    <p v-else-if="guideSection === 'manual'" class="whitespace-pre-wrap text-sm text-muted">{{ panel.guide.manual }}</p>
+    <ul v-else-if="guideSection === 'rules'" class="space-y-2 text-sm text-muted">
+      <li v-for="rule in panel.guide.rules" :key="rule">{{ rule }}</li>
+    </ul>
+    <div v-else-if="guideSection === 'check-in'" class="space-y-4 text-sm">
+      <p v-if="panel.guide.instructions" class="whitespace-pre-wrap text-muted">{{ panel.guide.instructions }}</p>
+      <div v-if="panel.guide.wifi">
+        <h3 class="mb-1 font-semibold">Wi-Fi</h3>
+        <p v-if="panel.guide.wifi.network" class="text-muted">{{ panel.guide.wifi.network }}</p>
+        <p v-if="panel.guide.wifi.password" class="text-muted">{{ panel.guide.wifi.password }}</p>
+      </div>
+    </div>
+    <template v-else-if="guideSection === 'checkout'">
+      <ul class="space-y-3">
+        <li v-for="instruction in panel.guide.checkout" :key="instruction.task" class="flex gap-4">
+          <UIcon :name="STAY_CHECKOUT_TASKS[instruction.task].icon" class="mt-0.5 size-4 shrink-0 text-highlighted" />
+          <span><span class="block text-sm text-highlighted">{{ STAY_CHECKOUT_TASKS[instruction.task].label }}</span><span v-if="instruction.details" class="block whitespace-pre-wrap text-xs text-muted">{{ instruction.details }}</span></span>
+        </li>
+      </ul>
+      <UButton v-if="panel.guide.checkoutEditor" :to="panel.guide.checkoutEditor" label="Edit" color="neutral" variant="outline" class="mt-5" />
+    </template>
+  </DashboardListItemDialog>
 
   <DashboardListItemDialog v-model:open="policyOpen" :title="booking?.policy?.heading || 'Cancellation policy'" :show-actions="false">
     <ul v-if="policy" class="space-y-3 text-sm text-muted">
@@ -344,6 +382,10 @@ export const bookingEditorKey = Symbol('booking-editor') as InjectionKey<Booking
 
 <script setup lang="ts">
 import type { RouteLocationRaw } from 'vue-router'
+import { useResizeObserver } from '@vueuse/core'
+import { manageReservationGuestsKey } from '~/lib/components/workspace/messages/guest-thread-client'
+import { STAY_PRESENTATION } from '~/utils/product-presentation'
+import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 import FormAnswersCard from '~/components/forms/FormAnswersCard.vue'
 import PaymentDetails from '~/components/dashboard/PaymentDetails.vue'
 import ChannelMark from '~/lib/components/workspace/messages/ChannelMark.vue'
@@ -375,12 +417,49 @@ const props = defineProps<{
 }>()
 const recordLevel = useRouteLevel()
 const route = useRoute()
+const runtimeConfig = useRuntimeConfig()
+const guestManagement = inject(manageReservationGuestsKey)
+const photoArrow = { color: 'neutral', variant: 'solid', size: 'sm', class: 'bg-white text-black hover:bg-white/90 disabled:opacity-0' } as const
+const guideLabels = {
+  directions: 'Directions from your host',
+  'check-in': 'How to get inside',
+  manual: 'House manual',
+  rules: 'House rules',
+  checkout: 'Checkout details',
+}
+const guideSection = ref<keyof typeof guideLabels | null>(null)
+const guideOpen = computed({
+  get: () => guideSection.value !== null,
+  set: open => { if (!open) guideSection.value = null },
+})
+
+function textPreview() {
+  const element = ref<HTMLElement | null>(null)
+  const clipped = ref(false)
+  useResizeObserver(element, () => {
+    const preview = element.value
+    clipped.value = preview !== null && preview.scrollHeight > preview.clientHeight
+  })
+  return { element, clipped }
+}
+const { element: directionsPreview, clipped: directionsClipped } = textPreview()
+const { element: manualPreview, clipped: manualClipped } = textPreview()
+const { element: rulesPreview, clipped: rulesClipped } = textPreview()
 
 interface PanelLink {
   label: string
   icon: string
   to: RouteLocationRaw
   testid?: string
+}
+
+type PanelShortcut = {
+  label: string
+  icon: string
+  detail: string | null | undefined
+  href?: string
+  to?: string
+  run?: () => void
 }
 
 type PanelAction = PanelLink | {
@@ -391,7 +470,7 @@ type PanelAction = PanelLink | {
   testid?: string
 }
 
-const sectionClass = 'mt-6 border-t border-default pt-6'
+const sectionClass = 'mt-8 border-t border-default pt-7'
 const rowClass = 'flex w-full items-center gap-3 py-2.5 text-left text-sm text-highlighted disabled:opacity-50'
 
 const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
@@ -432,7 +511,7 @@ const callTo = computed(() => {
 })
 const contactCallTo = computed(() => {
   if (!props.personalScope) return callTo.value
-  const phone = booking.value?.contact_phone
+  const phone = recordHome.value?.contact_phone ?? booking.value?.contact_phone
   return phone ? `tel:${phone}` : null
 })
 const guestDetailLink = computed(() => booking.value?.type === 'booking' && !props.personalScope ? { path: `${editorPath.value}/guest`, query: route.query } : undefined)
@@ -621,6 +700,9 @@ const recordHome = computed(() => accountStay.value?.home ?? dashboardStay.value
 
 const reservationActions = computed<PanelAction[]>(() => {
   const actions: PanelAction[] = []
+  if (guestManagement?.available.value) {
+    actions.push({ label: 'Manage guests', icon: 'i-lucide-users-round', run: guestManagement.open })
+  }
   if (stay.value) {
     if (props.personalScope) {
       if (canRequestChange.value && messageTo.value) {
@@ -698,18 +780,32 @@ const panel = computed(() => {
   const location = purchase ? null : record?.location_title
   const address = place?.location?.address ? formatPostalAddress(place.location.address) : record?.location_address
   const editor = value && `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/products/${encodeURIComponent(value.product_id)}`
-  const arrivalRow = (label: string, icon: string, detail: string, page: string, section: string) => props.personalScope
-    ? { label, icon, detail, to: undefined, href: `#${section}` }
-    : { label, icon, detail, to: `${editor}/${page}`, href: undefined }
-
   if (!value && !record) return null
 
-  const rows = value ? [
-    ...(address || guide?.directions || !props.personalScope ? [arrivalRow('Getting there', 'i-lucide-map-pin', address ?? '', 'directions', 'getting-there')] : []),
-    ...(method || guide?.check_in_instructions || guide?.wifi_network || guide?.wifi_password || !props.personalScope ? [arrivalRow('How to get inside', 'i-lucide-key-round', 'Details for an easy check-in', 'check-in-method', 'checking-in')] : []),
-    ...(guide?.house_manual || place?.house_rules.length || place?.safety.length || !props.personalScope ? [arrivalRow('House rules', 'i-lucide-book-open', 'Review these details for a smooth stay', 'house-rules', 'rules-and-instructions')] : []),
-    ...(guide?.checkout_instructions.length || !props.personalScope ? [arrivalRow('Checkout details', 'i-lucide-door-open', 'How to check out', 'checkout-instructions', 'checkout-details')] : []),
-  ] : location || address ? [{ label: 'Getting there', icon: 'i-lucide-map-pin', detail: address ?? location, href: '#getting-there', to: undefined }] : []
+  const rows: PanelShortcut[] = []
+  if (value) {
+    if (address || guide?.directions || !props.personalScope) {
+      rows.push({ label: 'Getting there', icon: 'i-lucide-map-pin', detail: address,
+        ...(props.personalScope ? { href: '#getting-there' } : { to: `${editor}/directions` }) })
+    }
+    if (guide?.check_in_instructions || guide?.wifi_network || guide?.wifi_password || !props.personalScope) {
+      rows.push({ label: 'How to get inside', icon: 'i-lucide-key-round', detail: 'Details for an easy check-in',
+        ...(props.personalScope ? { run: () => { guideSection.value = 'check-in' } } : { to: `${editor}/check-in-method` }) })
+    }
+    if (guide?.house_manual || place?.house_rules.length || place?.safety.length || !props.personalScope) {
+      rows.push({ label: 'House rules', icon: 'i-lucide-book-open', detail: 'Review these details for a smooth stay',
+        ...(props.personalScope ? { href: '#rules-and-instructions' } : { to: `${editor}/house-rules` }) })
+    }
+    if (guide?.checkout_instructions.length) {
+      rows.push({ label: 'Checkout details', icon: 'i-lucide-door-open', detail: 'How to check out',
+        run: () => { guideSection.value = 'checkout' } })
+    } else if (!props.personalScope) {
+      rows.push({ label: 'Checkout details', icon: 'i-lucide-door-open', detail: 'How to check out', to: `${editor}/checkout-instructions` })
+    }
+  } else if (location || address) {
+    rows.push({ label: 'Getting there', icon: 'i-lucide-map-pin', detail: address ?? location, href: '#getting-there' })
+  }
+  if (!purchase) rows.push({ label: 'Get help', icon: 'i-lucide-life-buoy', detail: 'Contact support', href: '#reservation-support' })
   const when = value ? [
     {
       label: 'Check-in',
@@ -726,7 +822,7 @@ const panel = computed(() => {
   const bookingId = value?.booking_id ?? record?.booking_id
 
   return {
-    image: place?.image_url ?? record?.resource_image_url,
+    photos: place?.photo_urls ?? record?.resource_photo_urls ?? [],
     title: place?.name ?? (record?.product_kind === 'table' ? record.location_title : record?.name),
     purchaseDate: purchase && record ? `${record.type === 'order' ? 'Ordered' : 'Paid'} ${formatCreatedAt(record.created_at)}` : null,
     host: value ? place?.host : record && !purchase ? { name: record.assigned_member_name ?? record.organization_name, image: null } : null,
@@ -740,6 +836,12 @@ const panel = computed(() => {
     address,
     mapEmbed: place?.location ? calculateMapEmbedUrl({ ...place.location, title: place.name }) : null,
     mapsUrl: place?.location?.maps_url,
+    listingUrl: place?.listing ? new URL(STAY_PRESENTATION.productPath('', place.listing.slug), tenantOrganizationOrigin({
+      platformDomain: String(runtimeConfig.public.platformDomain),
+      freeOrganizationDomain: String(runtimeConfig.public.freeOrganizationDomain),
+      subdomain: place.listing.subdomain,
+      canonicalDomain: place.listing.canonical_domain,
+    })).href : null,
     policy: policy.value ? `${policy.value.label} · ${policy.value.summary}` : cancellationSummary.value,
     guide: place ? {
       directions: guide?.directions,
@@ -750,6 +852,7 @@ const panel = computed(() => {
       wifi: guide && (guide.wifi_network || guide.wifi_password) ? { network: guide.wifi_network, password: guide.wifi_password } : null,
       safety: place.safety,
       checkout: guide?.checkout_instructions ?? [],
+      checkoutEditor: !props.personalScope && manage.value && editor ? `${editor}/checkout-instructions` : null,
     } : null,
   }
 })

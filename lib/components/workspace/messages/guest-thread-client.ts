@@ -1,4 +1,4 @@
-import type { InjectionKey } from 'vue'
+import type { ComputedRef, InjectionKey } from 'vue'
 import { isRecord } from '~/utils/api-clients'
 import { isMessageIdentity, type MessageIdentity } from '~/shared/dashboard-invalidations'
 import type { ConversationDetails, ConversationEntriesPage, ConversationEntry, ConversationPage } from '~/shared/messages-contract'
@@ -23,6 +23,8 @@ export type SubmissionType = GuestThreadSubmissionType
 export type ThreadListItem = InboxRow
 export type ThreadListPage = InboxListPage
 export type ThreadDetails = ConversationDetails
+
+export const manageReservationGuestsKey: InjectionKey<{ available: ComputedRef<boolean>; open: () => void }> = Symbol('manage-reservation-guests')
 
 export const removeInboxConversationKey: InjectionKey<(id: string) => void> = Symbol('remove-inbox-conversation')
 

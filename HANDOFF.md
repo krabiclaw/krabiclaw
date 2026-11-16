@@ -1,6 +1,6 @@
 # Handoff: branch `claude/jobs-always-assigned` (draft PR, do not merge)
 
-Checkout: `~/Repos2026/krabiclaw-today-speed`. Read `CLAUDE.md` first; it governs. Delete this file before the PR is marked ready.
+Checkout: `~/Repos2026/krabiclaw-today-speed`. Read the repository agent instructions and local development guide. Delete this file before the PR is marked ready.
 
 ## The owner's rules (all binding; each was stated after a failure)
 
@@ -45,17 +45,30 @@ Checkout: `~/Repos2026/krabiclaw-today-speed`. Read `CLAUDE.md` first; it govern
 - Removed the scheduled Channex backup feed. The booking and `non_acked_booking` webhooks use the same revision reader and acknowledgement. Configured Channex targets need the updated event mask before deployment.
 - Replaced the Stripe fee-report schedule with the platform `reporting.report_type.updated` webhook. The endpoint must explicitly subscribe before deployment and still needs signed availability and completion delivery verification.
 - Replaced MCP and public-help `waitUntil` telemetry publication with redacted EVENTS messages. Queue diagnostic payloads use an explicit size budget. Confirmed that a local tools/list returned 167 tools and persisted its queued audit row. The E2E Worker lacks the Cloudflare AI Search binding, so the public help request returned 500 and persisted its queued error row. Checkout hold inventory publication and cancelled payment hold release also use EVENTS.
-- The companion `claude/unread-dot` iOS branch now removes the retired iCal, no-show and Move guest paths and uses the timed change endpoints. Commit `a148d3b` is local in `~/Repos2026/bookyboo-ios-messages-release`. It built and opened the sign-in screen on an iPhone simulator.
+- The owner stopped iPhone verification. The server owns booking and conversation data, permissions, and actions. The native client renders those records with SwiftUI layouts.
+
+## Local runtime
+
+- Guest Messages auto-opens the reservation in the thread. The correct guest route is `/dashboard/account/messages/<conversation>/reservation`. Host routes retain the booking ID as the final segment.
+- Browser verified the two-photo carousel, reservation pane wheel scrolling with the outer page fixed, check-in Wi-Fi, checkout instructions, and opening a photo in Gallery. Opened the host stay, class, Family Law consultation and table panels.
+- The same offline stay write returned 201 with 33 D1 statements and four batch round trips. Its queue delivery persisted one assigned turnover, one team post, two pending reminders, and one pending guest message. Local upgrade applied migration 0013. `PRAGMA foreign_key_check` returned no violations.
+- Across targeted D1 runs, 124 cases passed after reruns. The optional live Resend transport test skipped. The table Calendar and buyer booking-change browser regressions passed.
+- Use `--local` to turn off remote bindings for local verification. In a runner without the repository's dev variables, pass the local auth, Stripe test and email reply fixture bindings explicitly. Email and WhatsApp stay in log-only mode.
+
+## Event cutover
+
+- Booking creation and status changes, timed changes, stay changes, checkout expiry, and Stripe and Channex follow-up delivery use scoped events. Business wakes cover checkouts, review invitations, Google Calendar pending expiry, Channex ARI, managed ad spend, and retention.
+- Cache and Calendar writes wake scoped consumers. Airbnb import jobs use their persisted job ID and queue continuation when Channex reports a provider step still pending. ARI retries the saved pending nights and schedules the next priced weekend date at the home's local midnight.
+- After deploying a consumer, send `business.deadlines_backfill`, `site.cache_backfill`, `calendar.backfill`, and `ad_spend.backfill` once. The draft did not send these to any deployed queue.
+- Before deployment, confirm Channex webhook event masks, Stripe platform report webhook subscription, and Vrbo reservations migrated from old iCal feeds. The old deployed queues and quiet backfill for the 21 existing production jobs require owner-directed operations.
 
 ## Open
 
-- The Airbnb comparison still differs on features such as the listing-photo carousel, guest management, visa PDF, and business-trip and support actions. Signed-in iPhone Messages and physical-device verification are open.
-- Complete the remaining event conversions for cache invalidation, Google Calendar, Channex ARI and Airbnb sync steps, checkout and pending-stay expiry, review invitations, Stripe GA4 and MCP retention, custom domains, and ad spend. Google Places ratings are the scheduled exception. Cloudflare documents certificate deployment events, and its readiness check separately requires hostname activation and customer DNS cutover. Google Ads and Meta document spend reporting reads, and equivalent delivered daily spend events have not been verified.
-- Check Channex reservation revision recovery and Airbnb withdrawal behavior with provider fixtures. Channex ARI and Airbnb sync job state do not store an exact retry time today. The current schedules still run.
-- The old deployed guest-delivery queues and quiet backfill for the 21 existing production jobs require owner-directed production operations. An existing-job backfill can use scoped `jobs.changed` messages with `task_ids` and `quiet: true`.
-- The remaining no-show reads protect historical review eligibility. The booking column is still part of a CHECK on a referenced D1 parent table. Use the existing replacement-database workflow and validate that historical stamps have the matching `booking.no_show`, `stay.no_show` or `reservation.no_show` transcript event before dropping the column and changing the review reader.
-- Timed visit notifications and some payment and provider notifications still run inline. Web checkout hold queueing, successful public-help delivery and telemetry redelivery need boundary verification. The draft's unit and E2E specs remain stale and have not been updated or run locally.
-- The web build, quality checks, migration lint and schema drift check passed locally. Keep this PR in draft. Delete `HANDOFF.md` before marking it ready.
+- Custom domain reconciliation remains on its ten-minute schedule. Cloudflare publishes certificate events and still requires hostname activation and the customer's DNS cutover. Google Places ratings retain the weekly scheduled exception.
+- Airbnb parity still lacks the visa PDF, business-trip designation, host bio and co-host directory, and dedicated safety escalation. Guest and host actions follow existing permissions and authored data.
+- Validate Channex and Stripe delivery with non-production provider fixtures before promotion.
+- Historical no-show reads still protect review eligibility. Dropping the column requires the existing replacement-database workflow and verification that historical stamps match their conversation events.
+- Keep the PR in draft. Delete this handoff before marking it ready.
 
 ## Retired routes
 

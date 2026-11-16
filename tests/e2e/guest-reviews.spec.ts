@@ -1,10 +1,6 @@
 import { expect, test, type APIResponse } from '@playwright/test'
-import type { InboxRow } from '../../server/domain/guest-threads/types'
-import type { ConversationPage } from '../../shared/messages-contract'
-import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 import type { InsightsPage } from '../../shared/insights'
 import { loginAs } from './helpers/auth'
-import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { seededTenant } from './seed/manifest'
 import { seededSiteHeaders, testBaseUrl } from './test-env'
@@ -13,58 +9,11 @@ const baseURL = testBaseUrl()
 // Clayhouse Studio: its seed leaves one instant class booking whose session has ended.
 const studio = () => seededTenant('experience')
 const ownerId = 'user-e2e-pottery-owner'
-const writable = ['localhost', '127.0.0.1'].includes(new URL(baseURL).hostname)
 
 async function body<T>(response: APIResponse, status: number): Promise<T> {
   expect(response.status(), await response.text()).toBe(status)
   return await response.json() as T
 }
-
-test('a guest who did not come is marked a no-show from the booking record, and that stops their review invitation', async ({ page }, testInfo) => {
-  test.skip(!writable, 'No-show writes require disposable local data')
-  const { organizationId, slug } = studio()
-  const release = await acquireTenantMutationLock(testInfo, organizationId)
-  try {
-    await loginAs(page.request, baseURL, ownerId)
-    // An ended, confirmed visit nobody has reviewed: the record says whether it may still be a no-show.
-    let target: { thread: InboxRow & { submissionType: 'booking' }; details: DashboardBookingDetails } | null = null
-    // An ended visit stays in current Messages until it has been quiet for 30 days, so both lists are read.
-    for (const [submissionType, mailbox] of [['booking', 'current'], ['booking', 'past']] as const) {
-      const listed = (await body<{ threads: InboxRow[] }>(await page.request.get('/api/messages', { params: { organization_id: organizationId, mailbox, type: submissionType } }), 200)).threads
-      for (const row of listed) {
-        const { conversation } = await body<ConversationPage>(await page.request.get(`/api/messages/${row.id}`), 200)
-        if (conversation.kind === 'team' || !conversation.booking_id) throw new Error('Booking conversation has no booking')
-        const { booking } = await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/${conversation.booking_id}`, { params: { org: slug } }), 200)
-        if (booking.can_mark_no_show) { target = { thread: { ...row, submissionType }, details: booking }; break }
-      }
-      if (target) break
-    }
-    expect(target, 'The studio\'s seed includes an ended, confirmed visit with no review').not.toBeNull()
-    const { thread, details } = target!
-
-    await page.goto(`/dashboard/${slug}/bookings/${details.booking_id}`)
-    await waitForNuxtHydration(page)
-    await page.getByRole('button', { name: /^Manage / }).click()
-    await page.getByRole('button', { name: 'Mark as a no-show', exact: true }).click()
-    const dialog = page.getByRole('dialog', { name: 'Mark as a no-show' })
-    await expect(dialog).toContainText('won’t be asked to review')
-    await dialog.getByRole('button', { name: 'Mark as a no-show', exact: true }).click()
-    await expect(page.getByTestId('booking-review-state')).toContainText('No-show')
-
-    // Read back through other paths: the record, the conversation, and a repeat refused.
-    const after = (await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/${details.booking_id}`, { params: { org: slug } }), 200)).booking
-    expect(after.no_show_at).not.toBeNull()
-    expect(after.can_mark_no_show).toBe(false)
-    expect(after.status).toBe(details.status)
-    // The conversation says it once, as the owner who marked it reads it.
-    const { entries } = await body<ConversationPage>(await page.request.get(`/api/messages/${thread.id}`), 200)
-    expect(entries.filter(item => item.type === 'event' && item.text === `You marked the ${thread.submissionType} as a no-show`)).toHaveLength(1)
-    const repeat = await page.request.post(`/api/dashboard/bookings/${details.booking_id}/no_show`, { params: { org: slug }, data: { version: after.version, idempotency_key: `repeat-${Date.now()}` } })
-    expect(repeat.status(), await repeat.text()).toBe(409)
-  } finally {
-    await release()
-  }
-})
 
 test('Quality reads guest feedback, private feedback included, for the range', async ({ page }) => {
   const { slug } = studio()

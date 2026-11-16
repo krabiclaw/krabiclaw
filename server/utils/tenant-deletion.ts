@@ -1,4 +1,5 @@
 import { retainPaymentsForTenantDeletion } from '~/server/domain/payments/retention'
+import { publishEvent } from '~/server/events'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -99,5 +100,6 @@ export async function deleteAbandonedDraftTenant(
     console.error('tenant_deletion_draft_cascade_incomplete', { organizationId })
     return { refused: 'delete_incomplete' }
   }
+  await publishEvent(env, { type: 'calendar.cleanup', organization_id: organizationId })
   return { removed: 'organization' }
 }

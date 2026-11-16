@@ -145,10 +145,10 @@ const calendarHomeProperties = { product_id: text, name: text, internal_name: te
   min_nights: { type: 'integer' }, calendar_rules: STAY_CALENDAR_RULES_SCHEMA, address: stayHomeObject.properties.address,
   cancellation_policy: STAY_LISTING_SCHEMA.cancellation_policy, long_term_cancellation_policy: STAY_LISTING_SCHEMA.long_term_cancellation_policy }
 const calendarHome = { type: 'object', properties: calendarHomeProperties, required: Object.keys(calendarHomeProperties), additionalProperties: false }
-const calendarStayProperties = { unit: { const: 'nights' }, booking_id: text, product_id: text, status: stayProperties.status,
+const calendarStayProperties = { unit: { const: 'nights' }, booking_id: text, conversation_id: { ...nullableText, description: 'The reservation conversation if the caller has access to it.' }, product_id: text, status: stayProperties.status,
   guest_name: { ...nullableText, description: 'The guest as their conversation names them; a member reads the first name.' }, adults: { type: 'integer' }, children: { type: 'integer' },
   check_in_date: day, check_out_date: day, channel: { ...stayProperties.channel, description: 'Where the stay was booked; owners and admins only.' } }
-const calendarStay = { type: 'object', properties: calendarStayProperties, required: ['unit', 'booking_id', 'product_id', 'status', 'guest_name', 'adults', 'children', 'check_in_date', 'check_out_date'], additionalProperties: false }
+const calendarStay = { type: 'object', properties: calendarStayProperties, required: ['unit', 'booking_id', 'conversation_id', 'product_id', 'status', 'guest_name', 'adults', 'children', 'check_in_date', 'check_out_date'], additionalProperties: false }
 const calendar = { type: 'object', properties: { home: calendarHome, nights: { type: 'array', items: night }, stays: { type: 'array', items: calendarStay }, channel_push: channelPush }, required: ['home', 'nights', 'stays'] }
 const nightReceiptProperties = { booking_id: text, unit: { const: 'nights' }, product_id: text, conversation_id: text, status: stayProperties.status, version: stayProperties.version, updated_at: text, check_in_date: day, check_out_date: day }
 export const nightBookingReceipt = { type: 'object', properties: nightReceiptProperties, required: Object.keys(nightReceiptProperties) }

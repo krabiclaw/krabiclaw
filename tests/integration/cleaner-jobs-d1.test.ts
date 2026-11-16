@@ -14,11 +14,12 @@ import { createTeamThread } from '../../server/domain/team-messages.ts'
 import { closeTask, jobKey, taskViewForUser, taskViewer, updateTask, type TaskRow } from '../../server/domain/tasks.ts'
 import { listConversations, conversationTaskQueries  } from '../../server/domain/guest-threads/repository.ts'
 import { markConversationRead, resolveConversationAccess } from '../../server/domain/conversations.ts'
-import { postJobs } from '../../server/domain/cleaner-jobs.ts'
-import { sendDueScheduledGuestMessages } from '../../server/domain/scheduled-guest-messages.ts'
+import { changedTaskIds, publishChangedJobs } from '../../server/events.ts'
+import { captureEvents } from './support/events.ts'
+import { sendDueOutbox } from '../../server/domain/scheduled-guest-messages.ts'
 import { claimSessionCapacity } from '../../server/utils/availability.ts'
 import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
-import { executeBatch } from '../../server/db/index.ts'
+import { bindDatabaseEvents, executeBatch } from '../../server/db/index.ts'
 import { localDateTimeToInstant } from '../../utils/timezone.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
@@ -33,11 +34,10 @@ const ZONE = 'America/Denver'
 const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
 const at = (date: string, time: string) => localDateTimeToInstant(date, time, ZONE, 'compatible')
 /** A job write and the outbox's sender at one moment: what the write posts now, and what was stored and has come due. `next` is the earliest send still waiting. */
-const runOrganizationJobs = async (env: CloudflareEnv, db: DbClient, organizationId: string, when = new Date()) => {
-  await postJobs(env, db, organizationId, when)
-  await sendDueScheduledGuestMessages(db, env as never, when.toISOString())
-  const next = await db.prepare("SELECT MIN(due_at) AS next FROM scheduled_guest_messages WHERE organization_id = ? AND task_id IS NOT NULL AND status = 'pending'").bind(organizationId).first<string | null>('next')
-  return { next: next ? new Date(next) : null, failures: [] as unknown[] }
+const runOrganizationJobs = async (queue: ReturnType<typeof captureEvents>, env: CloudflareEnv, db: DbClient, organizationId: string, when = new Date()) => {
+  await queue.drain(env, 'stay.changed')
+  await queue.drain(env, 'jobs.changed')
+  return (await sendDueOutbox(db, env, organizationId, when.toISOString())).next
 }
 const readTeamThread = async (db: DbClient, viewer: MemberAccessPrincipal, id: string) => {
   const { conversation } = await conversationPageFor(db, viewer, id)
@@ -65,8 +65,10 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), MEDIA_BASE_URL: 'https://media.example.test', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+    const queue = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding, MEDIA_BASE_URL: 'https://media.example.test', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    bindDatabaseEvents(db, env)
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Saltleaf', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', ?)`).bind(ORG, ZONE).run()
@@ -103,7 +105,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
 
     // Posting the job opens the conversation with the cleaner and every owner and admin.
     const now = new Date(checkout.getTime() - 2 * 86_400_000)
-    assert.deepEqual(await runOrganizationJobs(env, db, ORG, now).then(run => [run.next?.toISOString(), run.failures]), [at(day(2), '18:00').toISOString(), []], 'the next wake is the evening-before reminder')
+    assert.equal(await runOrganizationJobs(queue, env, db, ORG, now), at(day(2), '18:00').toISOString(), 'the next wake is the evening-before reminder')
     // Lee's own turnover is the cleaner's too, so they have one conversation per job.
     const threads = await teamThreads(cleaner)
     assert.deepEqual(threads.map(item => item.booking_id).sort(), [dee.id, lee.id].sort())
@@ -124,7 +126,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     // The app's "Message host" lands in the same conversation.
     assert.deepEqual(await createTeamThread(env, db, cleaner, { member_user_ids: ['owner', 'admin'], booking_id: dee.id }), { id: thread.id, created: false })
     // A second wake posts nothing twice.
-    await runOrganizationJobs(env, db, ORG, now)
+    await runOrganizationJobs(queue, env, db, ORG, now)
     assert.equal((await automatic(thread.id)).length, 1)
 
     // The evening before, the morning of, and the warning to the hosts two hours before Lee arrives; each once.
@@ -133,20 +135,20 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
       [at(day(3), '08:05'), `reminder:${turnover.id}:morning:${day(3)}`, /^Today: clean Cabin after the 10:00 AM checkout\.$/],
       [at(day(3), '13:05'), `warning:${turnover.id}:${turnover.due_at}`, /^Cabin is not marked done and the next guests arrive at 3:00 PM\.$/],
     ] as const) {
-      await runOrganizationJobs(env, db, ORG, when)
-      await runOrganizationJobs(env, db, ORG, when)
+      await runOrganizationJobs(queue, env, db, ORG, when)
+      await runOrganizationJobs(queue, env, db, ORG, when)
       const posted = await automatic(thread.id)
       assert.equal(posted.filter(message => message.key === key).length, 1, key)
       assert.match(posted.find(message => message.key === key)!.body, pattern)
     }
     const warningId = await db.prepare("SELECT id FROM messages WHERE conversation_id = ? AND json_extract(payload_json, '$.key') = ?").bind(thread.id, `warning:${turnover.id}:${turnover.due_at}`).first<string>('id')
     assert.equal(await alerted(warningId!), 2, 'both hosts are warned')
-    assert.deepEqual(await runOrganizationJobs(env, db, ORG, at(day(3), '13:05')).then(run => [run.next?.toISOString(), run.failures]), [at(day(4), '18:00').toISOString(), []], 'only Lee’s turnover is still pending')
+    assert.equal(await runOrganizationJobs(queue, env, db, ORG, at(day(3), '13:05')), at(day(4), '18:00').toISOString(), 'only Lee’s turnover is still pending')
 
     // The home is handed to the cook: the open job follows, the cleaner is told it is no longer theirs, the cook gets it.
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cook' })
     assert.equal((await taskRow(`turnover:${dee.id}`))!.assigned_member_id, 'm-cook')
-    await runOrganizationJobs(env, db, ORG, at(day(3), '13:10'))
+    await runOrganizationJobs(queue, env, db, ORG, at(day(3), '13:10'))
     assert.match((await automatic(thread.id)).find(message => message.key === `released:${turnover.id}`)!.body, /^No longer yours: turnover at Cabin, /)
     const cookThreads = (await teamThreads(cook)).filter(item => item.booking_id === dee.id)
     assert.equal(cookThreads.length, 1)
@@ -165,24 +167,24 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     await assert.rejects(readTeamThread(db, cleaner, cookThreads[0]!.id), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
     // A reminder is sent once for a job: the cook, given it at 13:10 after today's reminders went, was told the job itself; a closed job is told about no more.
     assert.deepEqual((await automatic(cookThreads[0]!.id)).map(message => message.key), [jobKey(turnover)])
-    await runOrganizationJobs(env, db, ORG, at(day(3), '14:00'))
+    await runOrganizationJobs(queue, env, db, ORG, at(day(3), '14:00'))
     assert.equal((await automatic(cookThreads[0]!.id)).length, 1, 'a job a person closed is not told about again')
 
     // A cancelled stay cancels its job in the conversation at once.
     const may = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'may', check_in_date: day(6), check_out_date: day(8), adults: 1, guest_name: 'May', total_minor: 30_000 })
-    await runOrganizationJobs(env, db, ORG, at(day(3), '14:00'))
+    await runOrganizationJobs(queue, env, db, ORG, at(day(3), '14:00'))
     const mayThread = (await teamThreads(cook)).find(item => item.booking_id === may.id)!
     assert.equal((await automatic(mayThread.id)).length, 1)
     await cancelStay(db, env, manager, may.id, { version: may.version, reason: 'Guest asked', financial_writes_allowed: false })
-    await runOrganizationJobs(env, db, ORG, at(day(3), '14:05'))
+    await runOrganizationJobs(queue, env, db, ORG, at(day(3), '14:05'))
     assert.deepEqual((await automatic(mayThread.id)).map(message => message.key), [jobKey({ id: (await taskRow(`turnover:${may.id}`))!.id, product_id: cabin.id }), `cancelled:${(await taskRow(`turnover:${may.id}`))!.id}`])
 
     // A job the owner takes for themselves has its conversation too, with the hosts alone: the job is posted there and its morning reminder follows, once.
     const leeTurnover = (await taskRow(`turnover:${lee.id}`))!
     const ownerViewer = await taskViewer(principal('owner', 'owner'))
     await updateTask(db, ownerViewer, leeTurnover.id, { version: leeTurnover.version, assigned_member_id: 'm-owner' })
-    await runOrganizationJobs(env, db, ORG, at(day(5), '08:05'))
-    await runOrganizationJobs(env, db, ORG, at(day(5), '08:06'))
+    await runOrganizationJobs(queue, env, db, ORG, at(day(5), '08:05'))
+    await runOrganizationJobs(queue, env, db, ORG, at(day(5), '08:06'))
     const leeThreads = (await teamThreads(owner)).filter(item => item.booking_id === lee.id)
     const ownThread = leeThreads.find(item => item.participants.every(person => person.id === 'owner' || person.id === 'admin'))!
     assert.deepEqual((await automatic(ownThread.id)).map(message => message.key).filter(key => !key.startsWith('reminder:') || key.includes(':morning:')), [jobKey(leeTurnover), `reminder:${leeTurnover.id}:morning:${day(5)}`])
@@ -209,7 +211,9 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    const queue = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    bindDatabaseEvents(db, env)
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Cedar Legal', 'cedar', 'cedar', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'service', '2026-10-15T00:00:00.000Z', 'America/New_York')`).bind(ORG).run()
@@ -226,7 +230,10 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     const booking = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1,
       following: bookingId => requestInsertQueries({ ...opening, booking_id: bookingId }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Consultation for 1', note: null }) })
     const jobs = async () => (await db.prepare("SELECT kind, subject_type, subject_id, assigned_member_id, starts_at, status FROM tasks WHERE kind IN ('consultation_prep', 'consultation_follow_up') ORDER BY kind").all<{ kind: string; status: string }>()).results
-    const recompute = () => executeBatch(db, conversationTaskQueries(opening.id, new Date().toISOString()), { operation: 'Recompute consultation jobs' })
+    const recompute = async (conversationId = opening.id) => {
+      const writes = await executeBatch(db, conversationTaskQueries(conversationId, new Date().toISOString()), { operation: 'Recompute consultation jobs' })
+      await publishChangedJobs(env, ORG, changedTaskIds(writes))
+    }
     await db.prepare("UPDATE bookings SET status = 'confirmed', cancelled_at = NULL WHERE id = ?").bind(booking.bookingId).run()
     await recompute()
     assert.deepEqual(await jobs(), [
@@ -243,9 +250,9 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     await db.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('partner','Pat Partner','partner@example.test',1)").run()
     await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES('partner-member',?,'partner','owner',1)").bind(ORG).run()
     const morning = localDateTimeToInstant('2099-10-01', '08:05', 'America/New_York', 'compatible')
-    const run = await runOrganizationJobs(env, db, ORG, morning)
-    assert.deepEqual([run.next?.toISOString(), run.failures], [localDateTimeToInstant('2099-10-01', '18:00', 'America/New_York', 'compatible').toISOString(), []])
-    await runOrganizationJobs(env, db, ORG, morning)
+    const run = await runOrganizationJobs(queue, env, db, ORG, morning)
+    assert.equal(run, localDateTimeToInstant('2099-10-01', '18:00', 'America/New_York', 'compatible').toISOString())
+    await runOrganizationJobs(queue, env, db, ORG, morning)
     const attorney = await memberAccessPrincipal({ userId: 'host', role: 'member', memberId: 'host-member', organizationId: ORG } as never, { env })
     const threads = await Promise.all((await db.prepare("SELECT id FROM conversations WHERE kind = 'team' AND booking_id = ?").bind(booking.bookingId).all<{ id: string }>()).results.map(row => readTeamThread(db, attorney, row.id)))
     assert.deepEqual(threads.map(thread => [thread.name, thread.booking_id]), [[null, booking.bookingId]])
@@ -260,14 +267,15 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
 
     // Any other assigned task with a start time gets its alert on the morning of.
     await db.prepare("INSERT INTO tasks (id, organization_id, kind, assigned_member_id, title, starts_at, timezone, status, dedupe_key, version, created_at, updated_at) VALUES ('plain', ?, 'custom', 'host-member', 'File the motion', '2099-10-01T15:00:00.000Z', 'America/New_York', 'open', 'plain', 1, ?, ?)").bind(ORG, NOW, NOW).run()
-    await runOrganizationJobs(env, db, ORG, morning)
+    await publishChangedJobs(env, ORG, ['plain'])
+    await runOrganizationJobs(queue, env, db, ORG, morning)
     assert.equal(await db.prepare("SELECT count(*) n FROM guest_thread_deliveries WHERE task_id = 'plain' AND id GLOB 'plain:owner_alert:*:task_starting:2099-10-01:*'").first('n'), 1)
 
     // Cancelling the consultation closes both jobs; confirming it again reopens them.
     await db.prepare("UPDATE bookings SET status = 'cancelled', cancelled_at = ? WHERE id = ?").bind(NOW, booking.bookingId).run()
     await recompute()
     assert.deepEqual((await jobs()).map(job => job.status), ['cancelled', 'cancelled'])
-    const runJobs = async () => assert.deepEqual((await runOrganizationJobs(env, db, ORG)).failures, [])
+    const runJobs = () => runOrganizationJobs(queue, env, db, ORG)
     const oldThread = threads[0]!.id
     const messages = async (threadId: string) => (await conversationPageFor(db, attorney, threadId)).entries.filter(entry => entry.type === 'message')
     await runJobs()
@@ -289,7 +297,7 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     const newBooking = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1,
       following: bookingId => requestInsertQueries({ ...replacement, booking_id: bookingId }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Consultation for 1', note: null }) })
     await db.prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?").bind(newBooking.bookingId).run()
-    await executeBatch(db, conversationTaskQueries(replacement.id, new Date().toISOString()), { operation: 'Recompute replacement consultation jobs' })
+    await recompute(replacement.id)
     await runJobs()
     const former = await messages(oldThread)
     assert.ok(former.some(message => message.body === 'No longer yours: prep for this session.'))

@@ -4,9 +4,11 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
+import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { applyChannelBooking, createStay } from '../../server/domain/stays.ts'
-import { applyBookingRevision, runRevisionFeed } from '../../server/integrations/channex/booking-revisions.ts'
+import { applyBookingRevision, landBookingRevision, pendingBookingRevisions } from '../../server/integrations/channex/booking-revisions.ts'
+import { captureEvents } from './support/events.ts'
 
 // Airbnb bookings landing as channel stays: acknowledged only after they
 // land, idempotent across repeated and out-of-order deliveries, overbooked
@@ -15,7 +17,7 @@ import { applyBookingRevision, runRevisionFeed } from '../../server/integrations
 const ORG = 'org'
 const OWNER = 'owner-user'
 const channexEnv = { CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k', BETTER_AUTH_SECRET: 'stay-billing-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
-  NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
+  NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-revision-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
 
 // A booking is its revisions: each carries the booking whole at its own time,
 // and only that time tells a later state from an earlier one.
@@ -27,18 +29,23 @@ class FakeChannex {
   acked: string[] = []
   /** Channex's revision reads (by id and the feed) answer 503. */
   failRevisions = false
+  availability: Array<{ date_from: string; date_to: string; availability: number }> = []
 
   fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url)
     const method = (init.method ?? 'GET').toUpperCase()
     const path = url.pathname.replace('/api/v1', '')
     const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200 })
-    if (method === 'POST' && (path === '/restrictions' || path === '/availability')) return json({ data: [{ id: crypto.randomUUID(), type: 'task' }], meta: { message: 'Success', warnings: [] } })
+    if (method === 'POST' && (path === '/restrictions' || path === '/availability')) {
+      if (path === '/availability') this.availability.push(...JSON.parse(String(init.body)).values)
+      return json({ data: [{ id: crypto.randomUUID(), type: 'task' }], meta: { message: 'Success', warnings: [] } })
+    }
     let match = path.match(/^\/booking_revisions\/([^/]+)\/ack$/)
     if (method === 'POST' && match) { this.acked.push(match[1]!); return json({ meta: { message: 'Success' } }) }
     if (method === 'GET' && path === '/booking_revisions/feed') {
       if (this.failRevisions) return new Response('upstream', { status: 503 })
-      const pending = [...this.revisions.keys()].filter(id => !this.acked.includes(id))
+      const property = url.searchParams.get('filter[property_id]')
+      const pending = [...this.revisions.keys()].filter(id => !this.acked.includes(id) && this.revisions.get(id)?.property_id === property)
       return json({ data: pending.map(id => ({ id, type: 'booking_revision', attributes: this.revisions.get(id) })), meta: { total: pending.length } })
     }
     match = path.match(/^\/booking_revisions\/([^/]+)$/)
@@ -74,7 +81,9 @@ async function boot() {
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), ...channexEnv }
+    const queue = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), ...channexEnv, DB: db, EVENTS: queue.binding }
+    bindDatabaseEvents(db, env)
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
@@ -89,7 +98,7 @@ async function boot() {
     } })
     await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
       VALUES (?, ?, 'channex', 'listing-1', 'chan-1', 'prop-1', 'room-1', 'rate-1', 'complete', 1)`).bind(ORG, home.id).run()
-    return { runtime, db, env, productId: home.id }
+    return { runtime, db, env, queue, productId: home.id }
   } catch (error) {
     await runtime.dispose()
     throw error
@@ -147,7 +156,7 @@ test('a reservation re-imported under a new Channex booking id updates its stay 
 })
 
 test('a channel booking lands, repeats and stale deliveries change nothing, an overlap is overbooked, a cancel frees its nights', { timeout: 120_000 }, async () => {
-  const { runtime, db, env, productId } = await boot()
+  const { runtime, db, env, queue, productId } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
@@ -162,6 +171,7 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
     assert.deepEqual(stored, { channel: 'airbnb', owner: 'channel', status: 'confirmed', overbooked: 0, total_minor: 45_050, currency: 'USD', guest_name: 'Lee Park', adults: 2, children: 1, version: 1, provider_updated_at: '2026-10-15T01:00:00Z' })
     assert.deepEqual(await nights(db, stayId), ['2027-01-10', '2027-01-11', '2027-01-12'])
     assert.deepEqual(channex.acked, ['rev-1'])
+    assert.deepEqual(queue.pending.flatMap(item => item.body.type === 'stay.channel_revision' ? [item.body.revision_id] : []), ['rev-1'])
 
     // The same revision again, and an older one delivered late, change nothing but are acknowledged:
     // each reads the booking's current state, ordered by its current revision.
@@ -182,7 +192,10 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
 
     // A host stay holds 2027-02-01..03; a channel booking over it still lands, flagged and holding nothing.
     const host = await createStay(db, env, { organizationId: ORG, actorId: OWNER, manage: true }, { product_id: productId, idempotency_key: 'host-1', check_in_date: '2027-02-01', check_out_date: '2027-02-03', adults: 1, guest_name: 'Host guest', total_minor: 10_000 })
-    assert.deepEqual(host.channel_push, { state: 'pushed', detail: null })
+    assert.deepEqual(await nights(db, host.id), ['2027-02-01', '2027-02-02'])
+    assert.deepEqual(channex.availability, [])
+    await queue.drain(env, 'stay.changed')
+    assert.deepEqual(channex.availability.map(entry => [entry.date_from, entry.date_to, entry.availability]), [['2027-02-01', '2027-02-02', 0]])
     channex.revise('rev-2', { ...booking, id: 'bk-2', arrival: '2027-02-02', departure: '2027-02-04' }, '2026-10-15T02:00:00Z')
     const overlap = await applyBookingRevision(db, env, 'rev-2')
     assert.deepEqual([overlap.status, (overlap as { overbooked: boolean }).overbooked], ['acknowledged', true])
@@ -200,7 +213,7 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
   }
 })
 
-test('an unknown home is logged and acknowledged; a failed read is not acknowledged and the feed lands it later', { timeout: 120_000 }, async () => {
+test('an unknown home is logged and acknowledged; the scoped feed recovers a failed read for a named booking', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
@@ -215,10 +228,13 @@ test('an unknown home is logged and acknowledged; a failed read is not acknowled
     channex.failRevisions = true
     await assert.rejects(applyBookingRevision(db, env, 'rev-y'), (error: unknown) => (error as { providerStatus?: number; status?: number }).providerStatus === 503 && (error as { status?: number }).status === 502)
     assert.deepEqual(channex.acked, ['rev-x'])
-    await assert.rejects(runRevisionFeed(db, env), (error: unknown) => (error as { providerStatus?: number }).providerStatus === 503)
+    await assert.rejects(pendingBookingRevisions(env, 'prop-1', 'bk-y'), (error: unknown) => (error as { providerStatus?: number }).providerStatus === 503)
 
     channex.failRevisions = false
-    assert.deepEqual(await runRevisionFeed(db, env), { acknowledged: 1, ignored: 0 })
+    channex.revise('rev-other', { id: 'bk-other', property_id: 'prop-1', status: 'new', arrival: '2027-05-05', departure: '2027-05-07', amount: '100', revision: '' }, '2026-10-15T01:00:00Z')
+    const pending = await pendingBookingRevisions(env, 'prop-1', 'bk-y')
+    assert.deepEqual(pending.map(revision => revision.id), ['rev-y'])
+    assert.equal((await landBookingRevision(db, env, pending[0]!)).status, 'acknowledged')
     assert.deepEqual(channex.acked, ['rev-x', 'rev-y'])
     assert.deepEqual(await logged(db), [
       { external_id: 'rev-x', status: 'ignored_disconnected' }, { external_id: 'rev-y', status: 'failed' }, { external_id: 'rev-y', status: 'acknowledged' },

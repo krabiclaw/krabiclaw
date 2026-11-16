@@ -32,6 +32,7 @@ export function isBookingDetailsResponse(value: unknown): value is { booking: Da
     && typeof value.booking.organization_id === 'string'
     && (value.booking.guest_name === null || typeof value.booking.guest_name === 'string')
     && (value.booking.notes === null || typeof value.booking.notes === 'string')
+    && Array.isArray(value.booking.resource_photo_urls) && value.booking.resource_photo_urls.every(url => typeof url === 'string')
     && Array.isArray(value.booking.answers)
     && (value.booking.policy === null || isRecord(value.booking.policy))
 }
@@ -41,7 +42,8 @@ export function isDashboardBooking(value: unknown): value is DashboardBooking {
   if (value.booking.unit === 'nights') {
     const home = value.home
     if (!isRecord(home) || typeof home.name !== 'string' || typeof home.internal_name !== 'string' || !home.internal_name.trim()
-      || ![home.check_in_time, home.check_in_end_time, home.check_out_time, home.image_url].every(field => field === null || typeof field === 'string')
+      || ![home.check_in_time, home.check_in_end_time, home.check_out_time].every(field => field === null || typeof field === 'string')
+      || !Array.isArray(home.photo_urls) || !home.photo_urls.every(url => typeof url === 'string')
       || !Array.isArray(home.house_rules) || !Array.isArray(home.safety)) return false
     if (!value.manage) return true
     const isTerms = (terms: unknown) => isRecord(terms) && typeof terms.dates === 'string' && Number.isInteger(terms.guests) && typeof terms.total === 'string'

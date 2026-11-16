@@ -241,6 +241,8 @@ export async function consumeStripeGa4Intent(
      WHERE id = ? AND status = 'pending'
   `, [now, eventId, now, intentId])
 }
+export const STRIPE_GA4_CONSUMED_RETENTION_DAYS = 90
+
 export async function expireStripeGa4Intents(
   db: DbClient,
   now = new Date(),
@@ -251,10 +253,10 @@ export async function expireStripeGa4Intents(
        SET status = 'expired', updated_at = ?
      WHERE status = 'pending' AND expires_at <= ?
   `, [nowIso, nowIso])
-  const retentionCutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString()
+  const retentionCutoff = new Date(now.getTime() - STRIPE_GA4_CONSUMED_RETENTION_DAYS * 86_400_000).toISOString()
   await execute(db, `
     DELETE FROM stripe_ga4_subscription_intents
-     WHERE status = 'consumed' AND consumed_at IS NOT NULL AND consumed_at < ?
+     WHERE status = 'consumed' AND consumed_at IS NOT NULL AND consumed_at <= ?
   `, [retentionCutoff])
 }
 

@@ -14,7 +14,7 @@ const SYSTEM_ACTOR = 'system'
  * A paid plan ended: Stripe deleted its subscription, or paused it when a
  * trial ended without a card. The organization is on Basic now, so its newest
  * live homes past what Basic includes go back to drafts: a home is taken off
- * the site and its Airbnb sync stopped (the airbnb-sync task runs the stop).
+ * the site and its Airbnb sync stopped (the EVENTS consumer runs the stop).
  * The oldest stay as they are. Locations are not counted, so none is turned
  * off. Nothing changes while another subscription still entitles a paid plan.
  */
@@ -38,5 +38,5 @@ export async function returnExtrasToDraftsForPlanEnd(env: CloudflareEnv, db: D1D
   for (const home of extraHomes.filter(row => row.published)) {
     await setProductPublication(db, { organizationId, productId: home.id, published: false, actor: { actorId: SYSTEM_ACTOR, actorType: 'system' }, env })
   }
-  await stopAirbnbSyncForPlanEnd(db, organizationId, extraHomes.filter(row => row.syncing).map(row => row.id))
+  await stopAirbnbSyncForPlanEnd(db, env, organizationId, extraHomes.filter(row => row.syncing).map(row => row.id))
 }

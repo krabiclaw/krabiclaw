@@ -1,5 +1,6 @@
 import { publishEvent } from '~/server/events'
-import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
+import { bookingReviewDueAt } from '~/server/utils/review-request-delivery'
+import { publishConversationEvent, scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
 import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
 import { CapacityUnavailableError, claimSessionCapacity, paidQuantity, partyPaysOnline, partySizeRefusal, requireBookingConfig, resolveBookingSession, sessionAllocationPredicate } from '~/server/utils/availability'
 import { cloudflareEnv, cleanString } from '~/server/utils/api-response'
@@ -30,7 +31,6 @@ import { paidOnline } from '~/server/domain/payments'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { isRecord } from '~/server/utils/type-guards'
 import { createStay, createStayRequest, publishStayRequest, quoteStay, readPublicStayHome, stayAccessFor, type StayQuote } from '~/server/domain/stays'
-import { requireChannelPush } from '~/server/integrations/channex/ari'
 import { readLodgingBookingPolicy } from '~/server/utils/lodging-booking-policy'
 import { requireStripeCheckoutAcceptance } from '~/server/utils/stripe-connect'
 import { accountActivityPath } from '~/shared/account-activity'
@@ -167,6 +167,7 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
   // The status the booking was created in, recorded on its conversation in the batch that claimed it.
   const creation = { status: request.payload.provenance?.creation_status }
   if (creation.status !== 'pending' && creation.status !== 'confirmed') throw new Error('Booking creation status is missing or invalid')
+  if (request.payload.provenance?.followups_completed === true) return creation.status
   const sourceLocale = await getSourceLocale(db, organizationId)
   const locale = request.payload.guest.locale ?? sourceLocale
   // The guest's note is their message in the conversation.
@@ -186,6 +187,10 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
   if (!booking) throw new Error(`Booking ${record.id} could not be read for its creation delivery`)
   // Its automatic messages are planned before the new conversation is announced, so it opens with them.
   await planSourceMessages(db, organizationId, record.id)
+  if (record.unit === 'slot' && record.status === 'confirmed') {
+    const dueAt = bookingReviewDueAt(record.ends_at)
+    if (dueAt !== null) await scheduleBusinessWake(env, organizationId, 'reviews', dueAt)
+  }
   const results = await Promise.allSettled([
     publishConversationEvent(env, db, { conversationId: requestId, type: 'MESSAGE_CREATE' }),
     notifyBookingCreated(env, db, {
@@ -200,6 +205,8 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
     }),
   ])
   raiseSettledFailures('booking creation delivery', `bookingId ${requestId}`, results, ['publishConversationEvent', 'notifyBookingCreated'])
+  await execute(db, `UPDATE conversations SET payload_json = json_set(payload_json, '$.provenance.followups_completed', json('true'))
+    WHERE id = ? AND organization_id = ? AND booking_id = ?`, [requestId, organizationId, record.id])
   return creation.status
 }
 
@@ -285,8 +292,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
       if (existing.status !== existing.creation_status || existing.product_session_id !== sessionId || (requestedVariantId && existing.product_variant_id !== requestedVariantId) || existing.party_size !== partySize) {
         return creationResult({ error: 'Booking changed before creation notifications completed. Read the current booking before continuing.', code: 'booking_changed', booking_id: existing.id, conversation_id: threadId, status: existing.status }, { status: 409 })
       }
-      await notifyProductBookingCreated(env, db, organizationId, threadId)
-      await db.prepare(`UPDATE conversations SET payload_json=json_set(payload_json,'$.provenance.followups_completed',json('true')) WHERE id=? AND organization_id=?`).bind(threadId, organizationId).run()
+      await publishEvent(env, { type: 'booking.created', organization_id: organizationId, conversation_id: threadId })
     }
     const record = await getThreadOperationalRecord(db, threadId)
     if (!record || record.organization_id !== organizationId || record.id !== existing.id) throw new Error('Committed booking is missing its operational receipt')
@@ -469,7 +475,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   }
 
   const followUps = await Promise.allSettled([
-    notifyProductBookingCreated(env, db, organization.id, threadId, cancellation.token),
+    publishEvent(env, { type: 'booking.created', organization_id: organization.id, conversation_id: threadId }),
     operator ? Promise.resolve({ recorded: false, reason: 'operator_creation', quotedValue: null })
       // A preview is the host looking at their own site, not a guest's conversion.
       : event.context.previewAuthorized === true ? Promise.resolve({ recorded: false, reason: 'preview', quotedValue: null })
@@ -478,8 +484,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   // Only the owner notification can fail the request. Measurement is reported beside the
   // committed result: a guest told a confirmed submission failed would submit again.
   raiseSettledFailures('booking follow-up', `bookingId ${threadId}`, followUps.slice(0, 1),
-    ['notifyProductBookingCreated'])
-  await db.prepare(`UPDATE conversations SET payload_json = json_set(payload_json, '$.provenance.followups_completed', json('true')) WHERE id = ? AND organization_id = ?`).bind(threadId, organizationId).run()
+    ['enqueue booking creation delivery'])
   const record = await getThreadOperationalRecord(db, threadId)
   if (!record || record.organization_id !== organizationId || record.id !== operationalBookingId) throw new Error('Created booking is missing its operational receipt')
   if (!operator && record.status === 'cancelled') return creationResult({ error: 'This booking has already been cancelled', code: 'booking_cancelled', booking_id: record.id, conversation_id: threadId }, { status: 409 })
@@ -519,12 +524,8 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
       throw new Error('The stay request has no operational receipt')
     }
     const progress = stayRequestProgress(current)
-    if (!followupsCompleted) {
-      if (progress.request_status === 'awaiting_approval') {
-        await notifyProductBookingCreated(env, db, organizationId, conversationId)
-      }
-      await execute(db, `UPDATE conversations SET payload_json=json_set(payload_json, '$.provenance.followups_completed', json('true'))
-        WHERE organization_id=? AND id=? AND booking_id=?`, [organizationId, conversationId, bookingId])
+    if (!followupsCompleted && progress.request_status === 'awaiting_approval') {
+      await publishEvent(env, { type: 'booking.created', organization_id: organizationId, conversation_id: conversationId })
     }
     const message = current.status === 'cancelled' ? 'This stay request was cancelled.'
       : current.status === 'confirmed' ? 'Your stay is confirmed.'
@@ -568,7 +569,6 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
     if (!retrying) quoted = await quoteStay(db, organizationId, home, request)
     const limited = !retrying && await bookingRateLimit(db, env, await hashClientIp(getClientIp(event)), email)
     if (limited) stayBookingError(429, 'RATE_LIMITED', limited, 'guest_email')
-    await requireChannelPush(db, env, organizationId, home.product_id)
     if (policy?.confirmation_mode === 'review') {
       if (!quoted) throw new Error('A new stay request needs its quote')
       await requireStripeCheckoutAcceptance(db, env, organizationId)
@@ -597,9 +597,6 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
     origin: { request: event.req, pageEventId: readPageEventId(body.page_event_id) },
     stay, guest, quote,
   })
-  // The committed hold closed these nights. Publish their current state to the channel.
-  await publishEvent(env, { type: 'stay.hold_changed', organization_id: organizationId,
-    product_id: home.product_id, location_id: home.location_id, range: [stay.check_in_date, stay.check_out_date] })
   return { body: { success: true, status: 'checkout', replayed: Boolean(retrying), ...checkout }, status: retrying ? 200 : 201 }
 }
 

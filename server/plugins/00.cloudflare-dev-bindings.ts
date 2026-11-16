@@ -8,7 +8,7 @@ async function loadWrangler() {
   return await import(/* @vite-ignore */ packageName) as typeof import('wrangler')
 }
 
-// `GUEST_INBOX_HUBS` reaches the Durable Object Worker that
+// `GUEST_INBOX_HUBS` and the consumer of `EVENTS` reach the Worker that
 // build/guest-inbox-hub-dev.ts keeps running for the whole `nuxt dev` process;
 // the proxy follows it through Wrangler's dev registry.
 async function createPlatformProxy() {
@@ -36,7 +36,6 @@ export default definePlugin((nitroApp) => {
       env: proxy.env,
       context: proxy.ctx as NonNullable<typeof request.runtime.cloudflare>['context'],
     }
-    request.waitUntil = proxy.ctx.waitUntil.bind(proxy.ctx)
     ;(request as unknown as { cf: PlatformProxy['cf'] }).cf = proxy.cf
   })
 

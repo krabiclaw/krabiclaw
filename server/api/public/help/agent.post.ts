@@ -3,6 +3,7 @@ import { getClientIp, hashClientIp, incrementHourlyRateLimit } from '~/server/ut
 import { enqueueMcpToolCallEvent } from '~/server/utils/mcp-telemetry'
 import { formatPublicSearchResultsForPrompt, searchPublicResources } from '~/server/utils/public-search'
 import { runWorkersAiText } from '~/server/utils/workers-ai'
+import { HTTPError } from 'nitro'
 
 interface HelpMessage {
   role?: 'user' | 'assistant'
@@ -128,14 +129,15 @@ export default defineHandler(async (event) => {
               topic: topic || null, results: results.slice(0, 5), }, }
         : null, }
 
-    await enqueueMcpToolCallEvent(event, env, {
+    await enqueueMcpToolCallEvent(env, {
       mcpSurface: 'public_help', method: 'help/chat', toolName: 'public_help_chowbot', toolDomain: 'support', arguments: {
         topic: topic || null, message_length: message.length, history_length: history.length, }, result: {
         escalation: shouldEscalate, suggested_links: suggested_links.length, citations: response.citations.length, }, status: 'success', durationMs: Date.now() - startedAt, })
 
     return jsonResponse(response)
   } catch (error) {
-    await enqueueMcpToolCallEvent(event, env, {
+    if (error instanceof HTTPError && error.data?.code === 'MCP_AUDIT_QUEUE_FAILED') throw error
+    await enqueueMcpToolCallEvent(env, {
       mcpSurface: 'public_help', method: 'help/chat', toolName: 'public_help_chowbot', toolDomain: 'support', arguments: {
         topic: topic || null, message_length: message.length, history_length: history.length, }, status: 'error', errorMessage: error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAt, })
     console.error('Public help agent failed:', error)

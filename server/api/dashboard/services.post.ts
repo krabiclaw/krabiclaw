@@ -23,7 +23,7 @@ export default defineHandler(async (event) => {
   } else {
     if (!isService(body.service)) throw new HTTPError({ statusCode: 400, statusMessage: 'A service and an action (agree or end) are required', data: { code: 'INVALID_SERVICE', field: 'service' } })
     if (body.action === 'agree') await agreeToService(db, env, organization.id, body.service, userId)
-    else await endService(db, organization.id, body.service, userId)
+    else await endService(db, env, organization.id, body.service, userId)
   }
   const [agreements, strategy] = await Promise.all([listServices(db, organization.id), readStrategy(env, db, organization.id)])
   return jsonResponse({ success: true, services: { ...agreements, strategy }, offers })

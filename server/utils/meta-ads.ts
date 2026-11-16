@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { linkedAccountAccessToken, type CloudflareEnv } from './auth'
 import { readIntegration, storeIntegration } from './organization-integrations'
-import { requireRecordedManagedSpend } from '~/server/domain/payments/ad-spend'
+import { publishManagedAdSpendWake, requireRecordedManagedSpend } from '~/server/domain/payments/ad-spend'
 import { formBody, metaGraphRequest } from './meta-graph'
 
 export const META_ADS_GRAPH_VERSION = 'v25.0'
@@ -142,11 +142,13 @@ export async function selectMetaAdAccount(
     throw new HTTPError({ statusCode: 422, message: 'That Meta Ad Account is not active or has been disabled.' })
   }
 
-  return await storeIntegration(env.DB, organizationId, 'meta_ads', {
+  const revision = await storeIntegration(env.DB, organizationId, 'meta_ads', {
     account_id: account_id,
     target_id: targetId,
     target_name: adAccountName || account.name,
   }, { revision: null })
+  await publishManagedAdSpendWake(env, organizationId)
+  return revision
 }
 
 /** Queries performance metrics for a given date range. */

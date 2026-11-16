@@ -652,7 +652,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     // Exactly the Turnovers fields, with the values the host saved.
     // The recorded arrival is the stay's start; the member reads the guest's first name.
     const turnoverFields = { product_id: productId, location_id: stay.location_id, timezone: stay.timezone, status: stay.status, starts_at: stay.starts_at, ends_at: stay.ends_at, check_in_date: localDay(0), check_out_date: localDay(2),
-      adults: 2, children: 1, infants: 0, guest_name: guestName, no_show_at: null }
+      adults: 2, children: 1, infants: 0, guest_name: guestName }
     expect(new Intl.DateTimeFormat('en-GB', { timeZone: stay.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(stay.starts_at))).toBe('15:30')
     const leaks = (body: unknown) => [surname, guestEmail, notes, stay.conversation_id!].filter(secret => JSON.stringify(body).includes(secret))
     const stayPath = api(`bookings/${stay.booking_id}`)
@@ -729,12 +729,12 @@ test('a responsible home member reads its stays as turnovers on every surface un
     await memberPage.goto(`/dashboard/${slug}/bookings/${stay.booking_id}`)
     await expectStatus(await stayRead, 200)
     const details = memberPage.locator('#dashboard-panel-stay-details')
-    await expect(details.getByRole('heading', { name: `${guestName}’s group of 3`, exact: true })).toBeVisible()
-    await expect(details.getByText('2 adults, 1 child', { exact: true })).toBeVisible()
+    await expect(details.getByRole('heading', { name: 'Reservation', level: 1, exact: true })).toBeVisible()
+    await expect(details.getByText(`${guestName} · 3 guests`, { exact: true })).toBeVisible()
     await expect(details.getByText(/^3:30\sPM$/u)).toBeVisible()
     await expect(details.getByText('Cliff Cabin', { exact: true })).toBeVisible()
     for (const hidden of [surname, guestEmail, notes]) await expect(memberPage.getByText(hidden)).toHaveCount(0)
-    await expect(details.getByRole('heading', { name: 'Payments', exact: true })).toHaveCount(0)
+    await expect(details.getByRole('heading', { name: 'Payment info', exact: true })).toHaveCount(0)
     await expect(memberPage.getByRole('link', { name: 'Message guest', exact: true })).toHaveCount(0)
     // Owners still read the whole stay.
     const ownerStay = await page.request.get(stayPath)
@@ -865,18 +865,22 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   const stay = await call<{ record: StayDetail }>('get_product_booking', { booking_id: createdReceipt.booking.booking_id })
   expect(stay.error).toBeNull()
   expect(stay.data!.record).toMatchObject({ product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: 'Ana Silva', guest_email: `ana-${slug}@playwright.example`, guest_image_url: null, adults: 2, children: 0, infants: 0, total_minor: 300_00, paid_minor: 0, payments: [] })
-  await expect(page.locator('#dashboard-panel-stay-details').getByText('A', { exact: true })).toHaveCount(2)
+  await expect(page.getByTestId('reservation-panel').getByText('A', { exact: true })).toBeVisible()
   await expect(page.locator('#dashboard-panel-stay-details img[alt="Ana Silva"]')).toHaveCount(0)
   const overlap = await call('create_product_booking', { product_slug: home.data!.product.slug, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1, guest_name: 'Bo', total_minor: 100_00, idempotency_key: `${slug}-b` })
   expect(overlap.error).toContain('Another stay or a linked calendar already holds one of these nights')
 
   // Calendar owns arrival/departure activity; Today is the actionable quest feed.
+  const thread = `/dashboard/${slug}/messages/${stay.data!.record.conversation_id}`
+  await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(`/dashboard/${slug}/calendar?view=list`)
-  const arrival = page.locator(`a[href="/dashboard/${slug}/calendar/${checkIn}/booking/${stay.data!.record.id}?view=list"]`)
+  const arrival = page.locator(`[data-day="${checkIn}"] a[href="${thread}"]`)
   await expect(arrival).toContainText('Ana')
   await arrival.click()
-  await expect(page.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
+  await expect(page).toHaveURL(`${thread}/reservation/${stay.data!.record.id}`)
+  await expect(page.getByTestId('reservation-panel').getByText('Ana Silva · 2 guests', { exact: true })).toBeVisible()
 
+  await page.getByRole('link', { name: 'Record a payment', exact: true }).click()
   await page.getByRole('textbox', { name: 'Amount (THB)' }).fill('100')
   await page.getByRole('button', { name: 'Record payment' }).click()
   // The recorded row, not the method picker: it names the amount with its method.
@@ -892,7 +896,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
     stay: { id: paid.data!.record.id, product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: paid.data!.record.guest_name, adults: paid.data!.record.adults, children: paid.data!.record.children, infants: paid.data!.record.infants },
     // The booked record every conversation names, a stay's at its home's check-in and checkout times.
     record: { unit: 'nights', status: 'confirmed', name: 'Cliff Cabin', location: 'Cliff Cabin location', address: expect.any(String), phone: null,
-      party_size: paid.data!.record.adults + paid.data!.record.children, timezone: TIME_ZONE, starts: expect.stringMatching(new RegExp(`^${checkIn}( |$)`)), ends: expect.stringMatching(new RegExp(`^${checkOut}( |$)`)), no_show_at: null },
+      party_size: paid.data!.record.adults + paid.data!.record.children, timezone: TIME_ZONE, starts: expect.stringMatching(new RegExp(`^${checkIn}( |$)`)), ends: expect.stringMatching(new RegExp(`^${checkOut}( |$)`)) },
   })
   const selectedStays = await call<{ bookings: Array<Record<string, unknown>> }>('list_product_bookings', { product_id: productId })
   expect(selectedStays.error).toBeNull()
@@ -1019,6 +1023,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   expect(cancelled.data!.record.status).toBe('cancelled')
   expect(cancelled.data!.record.cancelled_at).toBeTruthy()
 
+  await page.getByRole('link', { name: 'Record a payment', exact: true }).click()
   await page.getByLabel('Amount (THB)', { exact: true }).fill('-100')
   await page.getByLabel('Reference', { exact: true }).fill('Offline refund after cancellation')
   const [offlineRefund] = await Promise.all([
@@ -4159,7 +4164,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
     const homes = [assignedHome, { product_id: otherHome.id, location_id: locations.data!.locations[0]!.id }]
     const assigned = await call('update_product', { product_id: homes[0]!.product_id, stay: { assigned_member_id: memberId } })
     expect(assigned.error).toBeNull()
-    const stays: Array<Pick<NightBooking, 'booking_id' | 'ends_at' | 'timezone'>> = []
+    const stays: Array<Pick<NightBooking, 'booking_id' | 'conversation_id' | 'ends_at' | 'timezone'>> = []
     for (const [index, home] of homes.entries()) {
       const made = await page.request.post(api('bookings'), { data: { product_id: home.product_id, check_in_date: localDay(0), check_out_date: localDay(2), adults: 2,
         guest_name: index === 0 ? 'Ana Silva' : 'Private Silva', total_minor: 30_000, idempotency_key: crypto.randomUUID() } })
@@ -4816,20 +4821,21 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect(occupied.error).toBeNull()
       expect(occupied.data!.nights).toEqual([0, 1].map(offset => expect.objectContaining({ date: localDay(offset), booking_id: stays[0]!.booking_id, available: false, closed: false, source: null })))
       const calendarStay = inspector.getByRole('link', { name: 'View stay', exact: true })
-      const calendarStayURL = new URL((await calendarStay.getAttribute('href'))!, baseURL!)
-      expect(calendarStayURL.pathname).toBe(`/dashboard/${slug}/calendar/stay/${stays[0]!.booking_id}`)
-      expect(calendarStayURL.searchParams.get('product_id')).toBe(assignedHome.product_id)
-      expect(calendarStayURL.searchParams.get('month')).toBe(localDay(0).slice(0, 7))
+      const stayThread = `/dashboard/${slug}/messages/${stays[0]!.conversation_id}`
+      const stayRecord = `${stayThread}/reservation/${stays[0]!.booking_id}`
+      await expect(calendarStay).toHaveAttribute('href', stayThread)
+      const calendarReturn = page.url()
       await calendarStay.click()
-      await expect(page).toHaveURL(calendarStayURL.href)
+      await expect(page).toHaveURL(stayRecord)
       const calendarStayDetails = page.locator('#dashboard-panel-stay-details')
-      await expect(calendarStayDetails.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
+      await expect(calendarStayDetails.getByText('Ana Silva · 2 guests', { exact: true })).toBeVisible()
       await page.setViewportSize({ width: 390, height: 844 })
       const stayClose = calendarStayDetails.getByRole('link', { name: 'Close stay details', exact: true })
       await expect(stayClose).toBeVisible()
-      await expect(stayClose).toHaveAttribute('href', `/dashboard/${slug}/calendar${calendarStayURL.search}`)
+      await expect(stayClose).toHaveAttribute('href', stayThread)
       await stayClose.click()
-      await expect(page).toHaveURL(`/dashboard/${slug}/calendar${calendarStayURL.search}`)
+      await expect(page).toHaveURL(stayThread)
+      await page.goto(calendarReturn)
       await expect(inspector.getByText('Reserved', { exact: true })).toBeVisible()
       await page.setViewportSize({ width: 1440, height: 900 })
       await expect(calendar).toBeVisible()
@@ -4843,7 +4849,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(calendar.getByRole('button', { name: 'December', exact: true })).toBeVisible()
       await calendar.getByRole('button', { name: 'View: Year', exact: true }).click()
       await page.getByRole('menuitemcheckbox', { name: 'List', exact: true }).click()
-      await expect(calendar.getByRole('link', { name: /Ana Silva/ })).toHaveAttribute('href', new RegExp(`/calendar/stay/${stays[0]!.booking_id}\\?`))
+      await expect(calendar.getByRole('link', { name: /Ana Silva/ })).toHaveAttribute('href', stayThread)
       await calendar.getByRole('button', { name: 'View: List', exact: true }).click()
       await page.getByRole('menuitemcheckbox', { name: 'Month', exact: true }).click()
 
@@ -4959,18 +4965,19 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       })
       await cleanerPage.setViewportSize({ width: 390, height: 844 })
       expect((await cleanerPage.goto(`/dashboard/${slug}`))?.status()).toBe(200)
-      await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list`)
-      const arrival = cleanerPage.locator(`a[href="/dashboard/${slug}/calendar/${localDay(0)}/booking/${stays[0]!.booking_id}?view=list"]`)
+      await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list&month=${localDay(0).slice(0, 7)}`)
+      const stayRecord = `/dashboard/${slug}/bookings/${stays[0]!.booking_id}`
+      const arrival = cleanerPage.locator(`[data-day="${localDay(0)}"] a[href="${stayRecord}"]`)
       await expect(arrival).toContainText('Ana')
       await arrival.click()
-      await expect(cleanerPage.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
+      await expect(cleanerPage.getByText('Ana · 2 guests', { exact: true })).toBeVisible()
       await expect(cleanerPage.getByRole('button', { name: 'Cancel stay', exact: true })).toHaveCount(0)
-      await expect(cleanerPage.getByRole('button', { name: 'Record payment', exact: true })).toHaveCount(0)
-      await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list`)
-      const departure = cleanerPage.locator(`a[href="/dashboard/${slug}/calendar/${localDay(2)}/booking/${stays[0]!.booking_id}?view=list"]`)
+      await expect(cleanerPage.getByRole('link', { name: 'Record a payment', exact: true })).toHaveCount(0)
+      await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list&month=${localDay(2).slice(0, 7)}`)
+      const departure = cleanerPage.locator(`[data-day="${localDay(2)}"] a[href="${stayRecord}"]`)
       await expect(departure).toContainText('Ana')
       await departure.click()
-      await expect(cleanerPage.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
+      await expect(cleanerPage.getByText('Ana · 2 guests', { exact: true })).toBeVisible()
 
       // Another device's edit updates the assigned stay without navigation. An
       // ordered later event proves that the intervening other-home event was filtered.
@@ -4980,7 +4987,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const renamed = await call<NightBookingReceipt>('update_product_booking', { booking_id: stays[0]!.booking_id, version: current.data!.record.version, guest_name: 'Lia' })
       expect(renamed.error).toBeNull()
       expect(renamed.data).toMatchObject({ booking_id: stays[0]!.booking_id, unit: 'nights', version: current.data!.record.version + 1, channel_push: null })
-      await expect(cleanerPage.getByRole('heading', { name: 'Lia’s group of 2', level: 2, exact: true })).toBeVisible()
+      await expect(cleanerPage.getByText('Lia · 2 guests', { exact: true })).toBeVisible()
       await expect(cleanerPage.getByText('Silva')).toHaveCount(0)
       const privateStay = await call<{ record: { version: number } }>('get_product_booking', { booking_id: stays[1]!.booking_id })
       expect((await call('update_product_booking', { booking_id: stays[1]!.booking_id, version: privateStay.data!.record.version, private_notes: 'Other home only' })).error).toBeNull()
@@ -5183,8 +5190,9 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await page.goto(gridPath)
 
   // A bar opens its stay.
+  const stayThread = (id: string) => `/dashboard/${slug}/messages/${read.bookings.find(booking => booking.booking_id === id)!.conversation_id}`
   await grid.locator(`[data-stay="${stayIds[1]}"]`).click()
-  await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/calendar/stay/${stayIds[1]}`))
+  await expect(page).toHaveURL(`${stayThread(stayIds[1]!)}/reservation/${stayIds[1]}`)
   await page.goto(gridPath)
 
   // Search narrows rows by name or address.
@@ -5304,7 +5312,7 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   // A selection of booked nights alone says what holds them and offers no edit.
   await night(productId, 2).click({ position: { x: 20, y: 50 } })
   await expect(inspector.getByTestId('stay-night-held')).toHaveText('Booked nights belong to their reservations. Open the stay to manage it.')
-  await expect(inspector.getByRole('link', { name: 'View stay', exact: true })).toHaveAttribute('href', new RegExp(`/calendar/stay/${stayIds[0]}`))
+  await expect(inspector.getByRole('link', { name: 'View stay', exact: true })).toHaveAttribute('href', stayThread(stayIds[0]!))
   await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toBeDisabled()
   // A booked night in the selection leaves no stay to add.
   await expect(inspector.getByRole('link', { name: 'Add stay', exact: true })).toHaveCount(0)

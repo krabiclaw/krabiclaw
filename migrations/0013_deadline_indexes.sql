@@ -1,0 +1,2 @@
+CREATE INDEX `idx_mcp_tool_call_events_diagnostic_retention` ON `mcp_tool_call_events` (`created_at`) WHERE json_extract(arguments_summary_json, '$._diagnostic') = 1;--> statement-breakpoint
+CREATE INDEX `stripe_ga4_subscription_intents_retention_idx` ON `stripe_ga4_subscription_intents` (`consumed_at`) WHERE status = 'consumed';

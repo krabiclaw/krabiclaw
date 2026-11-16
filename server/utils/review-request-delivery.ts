@@ -1,6 +1,9 @@
 import { HTTPError } from 'nitro'
-import type { DbClient } from '~/server/db'
+import { execute, queryAll, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
+import { publishEvent, type EventsEnv } from '~/server/events'
+import { filterEntitledRows } from '~/server/utils/billing-access'
+import { wantsCategoryEmailSql } from '~/server/domain/notification-preferences'
 import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { notifyReviewRequest } from '~/server/utils/notifications'
@@ -12,7 +15,20 @@ import {
   markReviewRequestSendFailure,
   markReviewRequestSendSuccess,
   reviewInvitationDue,
+  REVIEW_PUBLICATION_PENDING,
+  REVIEW_REQUEST_DELAY_HOURS,
+  REVIEW_REQUEST_TTL_DAYS,
 } from '~/server/utils/review-requests'
+
+async function publishCompletedReviewInvitation(env: CloudflareEnv, db: DbClient, threadId: string, requestId: string): Promise<void> {
+  try {
+    await publishConversationEvent(env, db, { conversationId: threadId, type: 'MESSAGE_CREATE' })
+    await execute(db, 'UPDATE review_requests SET last_error = NULL WHERE id = ? AND last_error = ?', [requestId, REVIEW_PUBLICATION_PENDING])
+  } catch (cause) {
+    throw new HTTPError({ statusCode: 503, message: 'The review invitation was sent, but open apps could not be updated. Reload to see its saved status.',
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, request_id: requestId }, cause })
+  }
+}
 
 /**
  * Invite the guest of an ended visit to review it, in that visit's own
@@ -73,11 +89,63 @@ export async function sendReviewRequestForBooking(
   }
   // Delivery publishes before the invitation's success marker is written.
   // Open apps must read again after that write to clear its outstanding card.
-  try {
-    await publishConversationEvent(env, db, { conversationId: threadId, type: 'MESSAGE_CREATE' })
-  } catch (cause) {
-    throw new HTTPError({ statusCode: 503, message: 'The review invitation was sent, but open apps could not be updated. Reload to see its saved status.',
-      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, request_id: request.id }, cause })
-  }
+  await publishCompletedReviewInvitation(env, db, threadId, request.id)
   return { sent: true, requestId: request.id }
+}
+
+const REVIEW_DELAY_MS = REVIEW_REQUEST_DELAY_HOURS * 3_600_000
+
+export function bookingReviewDueAt(endsAt: string): number | null {
+  if (endsAt.length === 10) return null
+  const due = Date.parse(endsAt) + REVIEW_DELAY_MS
+  if (!Number.isFinite(due)) throw new Error('A timed booking needs a valid end instant for its review invitation')
+  return due
+}
+
+export async function scheduleBookingReview(env: EventsEnv, organizationId: string, endsAt: string): Promise<void> {
+  const due = bookingReviewDueAt(endsAt)
+  if (due !== null) await publishEvent(env, { type: 'business.wake', organization_id: organizationId, kind: 'reviews', due_at: due })
+}
+
+/** Send the business's due invitations and return the next booking's exact deadline. */
+export async function sendDueReviewInvitations(env: CloudflareEnv, organizationId: string, now: number): Promise<{ next: number | null }> {
+  const publications = await queryAll<{ request_id: string; conversation_id: string }>(env.DB, `
+    SELECT rr.id AS request_id, c.id AS conversation_id
+    FROM review_requests rr JOIN conversations c ON c.organization_id = rr.organization_id AND c.booking_id = rr.booking_id AND c.kind = 'booking'
+    WHERE rr.organization_id = ? AND rr.first_sent_at IS NOT NULL AND rr.last_error = ?
+  `, [organizationId, REVIEW_PUBLICATION_PENDING])
+  for (const publication of publications) {
+    await publishCompletedReviewInvitation(env, env.DB, publication.conversation_id, publication.request_id)
+  }
+  if (!(await filterEntitledRows(env, [{ organization_id: organizationId }], 'review_requests')).length) return { next: null }
+  const wantsReview = wantsCategoryEmailSql('r.user_id', 'review_requests')
+  const latestDue = new Date(now - REVIEW_DELAY_MS).toISOString()
+  const oldest = new Date(now - REVIEW_REQUEST_TTL_DAYS * 86_400_000).toISOString()
+  const rows = await queryAll<{ booking_id: string | null; ends_at: string | null }>(env.DB, `
+    WITH eligible AS (
+      SELECT b.id AS booking_id, b.ends_at
+      FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.organization_id = b.organization_id AND r.kind = 'booking'
+      WHERE b.organization_id = ? AND b.channel = 'direct' AND b.status = 'confirmed'
+        AND b.no_show_at IS NULL AND length(b.ends_at) > 10 AND b.ends_at > ?
+        AND NOT EXISTS (SELECT 1 FROM reviews rv WHERE rv.organization_id = b.organization_id AND rv.booking_id = b.id)
+        AND NOT EXISTS (SELECT 1 FROM review_requests rr WHERE rr.booking_id = b.id AND rr.first_sent_at IS NOT NULL)
+        AND json_type(r.payload_json, '$.guest.email') = 'text' AND r.user_id IS NOT NULL
+        AND ${wantsReview.sql}
+    )
+    SELECT booking_id, ends_at FROM eligible WHERE ends_at <= ?
+    UNION ALL SELECT NULL, MIN(ends_at) FROM eligible WHERE ends_at > ?
+  `, [organizationId, oldest, ...wantsReview.params, latestDue, latestDue])
+  const next = rows.find(row => row.booking_id === null)?.ends_at
+  const failures: Error[] = []
+  for (const row of rows) {
+    if (row.booking_id === null) continue
+    try {
+      const result = await sendReviewRequestForBooking(env, env.DB, row.booking_id)
+      if (!result.sent) throw new Error(result.error ?? 'Review invitation delivery failed')
+    } catch (cause) {
+      failures.push(new Error(`Booking ${row.booking_id}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause }))
+    }
+  }
+  if (failures.length) throw new AggregateError(failures, failures.map(error => error.message).join('. '))
+  return { next: next == null ? null : Date.parse(next) + REVIEW_DELAY_MS }
 }

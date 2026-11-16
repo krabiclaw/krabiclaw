@@ -45,6 +45,7 @@ export function isGuestStay(value: unknown): value is GuestStay {
   if (value.stay.guest_image_url !== null && typeof value.stay.guest_image_url !== 'string') return false
   const home = value.home
   return typeof home.name === 'string' && (home.location === null || isRecord(home.location))
+    && Array.isArray(home.photo_urls) && home.photo_urls.every(url => typeof url === 'string')
     && (home.arrival_guide === null || isStayArrivalGuide(home.arrival_guide))
     && [home.house_rules, home.safety].every(lines => Array.isArray(lines) && lines.every(line => typeof line === 'string'))
     && 'cancellation' in value && typeof value.payment_processing === 'boolean'

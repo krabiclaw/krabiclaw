@@ -6,7 +6,7 @@ import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { createStay, stayAccessFor, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { cancelScheduledGuestMessage, deleteMessageTemplate, listScheduledGuestMessages, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
-import { scheduleGuestReply, sendDueScheduledGuestMessages } from '../../server/domain/scheduled-guest-messages.ts'
+import { scheduleGuestReply, sendDueOutbox } from '../../server/domain/scheduled-guest-messages.ts'
 import { memberAccessPrincipal, resolveMembership, type MemberAccessPrincipal } from '../../server/utils/member-access.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import type { DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
@@ -16,6 +16,8 @@ import { setListingMessagingAccess } from '../../server/domain/conversation-part
 import { applyResendEmailEvent, createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { sendGuestThreadReply, operationDedupeKey } from '../../server/domain/guest-threads/operations.ts'
 import { creationRequestHash } from '../../server/utils/organization-events.ts'
+import { bindDatabaseEvents } from '../../server/db/index.ts'
+import { captureEvents } from './support/events.ts'
 
 // Every confirmed stay is sent its home's check-in instructions on its own, and
 // a member's send-later reply goes out as their reply at its time, visible only
@@ -54,8 +56,10 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
+    const queue = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    bindDatabaseEvents(db, env)
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
@@ -74,38 +78,41 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
 
     // A home with no instructions sends nothing.
     const ana = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'ana', check_in_date: day(5), check_out_date: day(7), adults: 2, guest_name: 'Ana', guest_email: 'ana@example.test', total_minor: 30_000 })
+    await queue.drain(env, 'stay.changed')
     assert.equal(await checkIn(ana.id), null)
 
     // Once the home has instructions, the next run plans them for Ana at 10:00
     // the day before arrival, and a later edit reaches the plan before it is sent.
     await updateStayHome(env, db, manager, cabin.id, { check_in_instructions: 'The key is in the lockbox.' })
-    await sendDueScheduledGuestMessages(db, env, minutes(1))
+    await queue.drain(env, 'stay.guide_changed')
     const planned = (await checkIn(ana.id))!
     assert.deepEqual([planned.status, planned.body, planned.due_at?.slice(0, 10)], ['pending', 'The key is in the lockbox.', day(4)])
     await updateStayHome(env, db, manager, cabin.id, { check_in_instructions: 'The lockbox code is 4821.' })
-    await sendDueScheduledGuestMessages(db, env, minutes(2))
+    await queue.drain(env, 'stay.guide_changed')
     assert.equal((await checkIn(ana.id))?.body, 'The lockbox code is 4821.')
 
     // Removing the instructions cancels the plan; bringing them back plans it again.
     await updateStayHome(env, db, manager, cabin.id, { check_in_instructions: null })
-    await sendDueScheduledGuestMessages(db, env, minutes(3))
+    await queue.drain(env, 'stay.guide_changed')
     assert.deepEqual([(await checkIn(ana.id))?.status, (await checkIn(ana.id))?.reason], ['cancelled', 'The home has no check-in instructions.'])
     await updateStayHome(env, db, manager, cabin.id, { check_in_instructions: 'The lockbox code is 4821.' })
-    await sendDueScheduledGuestMessages(db, env, minutes(4))
+    await queue.drain(env, 'stay.guide_changed')
     assert.deepEqual([(await checkIn(ana.id))?.status, (await checkIn(ana.id))?.body], ['pending', 'The lockbox code is 4821.'])
 
     // Booked after that time, Bo is sent them at once: arriving today before
     // 16:00 in Denver, or tomorrow once today's 10:00 there has passed.
     const boArrives = new Date().getUTCHours() < 21 ? 0 : 1
     const bo = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'bo', check_in_date: day(boArrives), check_out_date: day(boArrives + 1), adults: 1, guest_name: 'Bo', guest_email: 'bo@example.test', total_minor: 15_000 })
+    await queue.drain(env, 'stay.changed')
     const boPlan = (await checkIn(bo.id))!
     assert.equal(boPlan.status, 'pending')
     assert.ok(boPlan.due_at! <= minutes(1))
-    assert.deepEqual(await sendDueScheduledGuestMessages(db, env, minutes(3)), { sent: 1, failed: 0, needs_review: 0 })
+    assert.partialDeepStrictEqual(await sendDueOutbox(db, env, ORG, minutes(3)), { sent: 1, failed: 0, needs_review: 0 })
     assert.equal((await checkIn(bo.id))?.status, 'sent')
 
     // Every stay has its guest conversation to send them through.
     const cy = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cy', check_in_date: day(10), check_out_date: day(11), adults: 1, guest_name: 'Cy', guest_email: 'cy@example.test', total_minor: 15_000 })
+    await queue.drain(env, 'stay.changed')
     assert.equal((await checkIn(cy.id))?.status, 'pending')
 
     // The automatic message's name is reserved, and every automatic message needs a schedule.
@@ -113,7 +120,7 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     await assert.rejects(saveMessageTemplate(db, env, manager, null, { title: 'Hello', body: 'x', schedule: null }), { data: { code: 'MESSAGE_SCHEDULE_REQUIRED', field: 'schedule' } })
 
     // Ana's arrives on time through her conversation, as the business.
-    assert.deepEqual(await sendDueScheduledGuestMessages(db, env, `${day(4)}T23:59:00.000Z`), { sent: 1, failed: 0, needs_review: 0 })
+    assert.partialDeepStrictEqual(await sendDueOutbox(db, env, ORG, `${day(4)}T23:59:00.000Z`), { sent: 1, failed: 0, needs_review: 0 })
     const sent = (await checkIn(ana.id))!
     assert.equal(sent.status, 'sent')
     assert.deepEqual(await db.prepare('SELECT conversation_id, author_kind, author_user_id, body FROM messages WHERE id = ?').bind(sent.message_id).first(), {
@@ -167,9 +174,9 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     await db.prepare("DELETE FROM member WHERE userId = ?").bind(ADMIN).run()
 
     // Not yet due, nothing goes out; at its time the owner's goes out as the owner's own reply.
-    assert.deepEqual(await sendDueScheduledGuestMessages(db, env, minutes(10)), { sent: 0, failed: 0, needs_review: 0 })
+    assert.deepEqual(await sendDueOutbox(db, env, ORG, minutes(10)), { sent: 0, failed: 0, needs_review: 0, next: orphaned.due_at })
     const beforeSending = (await publications()).length
-    assert.deepEqual(await sendDueScheduledGuestMessages(db, env, minutes(31)), { sent: 1, failed: 1, needs_review: 0 })
+    assert.partialDeepStrictEqual(await sendDueOutbox(db, env, ORG, minutes(31)), { sent: 1, failed: 1, needs_review: 0 })
     const delivered = await db.prepare('SELECT * FROM scheduled_guest_messages WHERE id = ?').bind(edited.id).first<Record<string, string | null>>()
     assert.equal(delivered?.status, 'sent')
     assert.deepEqual(await db.prepare('SELECT conversation_id, author_kind, author_user_id, body FROM messages WHERE id = ?').bind(delivered?.message_id).first(), {
@@ -185,7 +192,7 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     assert.equal(await db.prepare('SELECT count(*) n FROM tasks WHERE subject_id = ?').bind(orphaned.id).first('n'), 0)
 
     // A repeated run sends nothing again.
-    assert.deepEqual(await sendDueScheduledGuestMessages(db, env, minutes(40)), { sent: 0, failed: 0, needs_review: 0 })
+    assert.partialDeepStrictEqual(await sendDueOutbox(db, env, ORG, minutes(40)), { sent: 0, failed: 0, needs_review: 0 })
 
     // Automatic schedule changes reach the outbox for their conversation.
     const threadChanges = (events: DashboardInvalidation[]) => events.flatMap(event => event.type === 'MESSAGE_UPDATE' && event.scheduled ? [event.conversation_id] : [])
@@ -236,7 +243,7 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     // When the note is due it goes out through each stay's own conversation: Ana's, Bo's and Cy's.
     const afterCheckout = await saveMessageTemplate(db, env, manager, null, { title: 'After checkout', body: 'We hope you enjoyed your stay.',
       schedule: { trigger: 'check_out', offset_days: 7, local_time: '11:00', product_ids: [cabin.id] } })
-    assert.deepEqual(await sendDueScheduledGuestMessages(db, env, `${day(18)}T23:59:00.000Z`), { sent: 3, failed: 0, needs_review: 0 })
+    assert.partialDeepStrictEqual(await sendDueOutbox(db, env, ORG, `${day(18)}T23:59:00.000Z`), { sent: 3, failed: 0, needs_review: 0 })
     const cySent = await db.prepare('SELECT status, message_id FROM scheduled_guest_messages WHERE booking_id = ? AND template_id = ?').bind(cy.id, afterCheckout.id).first<{ status: string; message_id: string }>()
     assert.equal(cySent?.status, 'sent')
     assert.deepEqual(await db.prepare('SELECT conversation_id, body FROM messages WHERE id = ?').bind(cySent!.message_id).first(), { conversation_id: cy.conversation_id, body: 'We hope you enjoyed your stay.' })
@@ -292,7 +299,7 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
 
     // Resend refuses the send: the job is failed with Resend's error and its exact entry, not left Sending.
     const reply = await schedule('Your request is handled.')
-    assert.deepEqual(await sendDueScheduledGuestMessages(db, env, minutes(2)), { sent: 0, failed: 1, needs_review: 0 })
+    assert.partialDeepStrictEqual(await sendDueOutbox(db, env, ORG, minutes(2)), { sent: 0, failed: 1, needs_review: 0 })
     const failed = (await saved(reply.id))!
     assert.equal(failed.status, 'failed')
     assert.match(failed.reason!, /Resend is unavailable/u)
@@ -302,7 +309,7 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
     assert.deepEqual(message, { author_user_id: OWNER, body: reply.body, dedupe_key: operationDedupeKey({ threadId: reply.threadId, idempotencyKey: `send-later:${reply.id}` }) })
     assert.equal((await ownReplies(db, owner, reply.threadId))[0]?.message_id, failed.message_id)
     assert.equal(posts.length, 0)
-    assert.deepEqual(await sendDueScheduledGuestMessages(db, env, minutes(3)), { sent: 0, failed: 0, needs_review: 0 })
+    assert.partialDeepStrictEqual(await sendDueOutbox(db, env, ORG, minutes(3)), { sent: 0, failed: 0, needs_review: 0 })
     assert.equal(posts.length, 0, 'a failed job is not resent by the next run')
 
     // Inbox Retry sends the same reply under the same key. Another admin can
@@ -358,12 +365,12 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
     // reason, the run reports the error, and a later cron does not resend it.
     await appendMessage(db, { conversationId: reply.threadId, authorKind: 'guest', authorUserId: null, channel: 'email', body: 'Bad metadata', payload: { email: { from: 'delivered@resend.dev', messageId: 'invalid-rfc-id', subject: 'Question' } } })
     const invalid = await schedule('Cannot use corrupt metadata.')
-    await assert.rejects(sendDueScheduledGuestMessages(db, env, minutes(2)), /Received conversation email has invalid threading metadata/u)
+    await assert.rejects(sendDueOutbox(db, env, ORG, minutes(2)), /Received conversation email has invalid threading metadata/u)
     const refused = (await saved(invalid.id))!
     assert.deepEqual([refused.status, refused.reason, refused.error_code], ['failed', 'Received conversation email has invalid threading metadata', 'SCHEDULED_MESSAGE_DELIVERY_FAILED'])
     assert.ok(refused.message_id)
     assert.equal(await db.prepare('SELECT body FROM messages WHERE id = ?').bind(refused.message_id).first('body'), invalid.body)
-    assert.deepEqual(await sendDueScheduledGuestMessages(db, env, minutes(3)), { sent: 0, failed: 0, needs_review: 0 })
+    assert.partialDeepStrictEqual(await sendDueOutbox(db, env, ORG, minutes(3)), { sent: 0, failed: 0, needs_review: 0 })
     assert.equal(posts.length, 2)
   } finally {
     await runtime.dispose()

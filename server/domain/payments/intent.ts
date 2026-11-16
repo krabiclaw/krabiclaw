@@ -1,3 +1,4 @@
+import { publishEvent } from '~/server/events'
 import { freeCancellationUntil } from '~/shared/availability-settings'
 import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
@@ -9,7 +10,7 @@ import { approvedStayBooking, requirePayment, type Payment } from './index'
 import { isStayPurchase, surchargeBasisPoints, type PaymentReview } from './checkout'
 import { PRICE_TAX_BEHAVIORS, type Price } from '~/shared/prices'
 import { reconcilePaymentIntent, confirmationHoldUntil, releaseApprovedStayConfirmation } from './events'
-import { notifyPaymentFinancialEvent } from './notifications'
+import { publishPaymentNotification } from './notifications'
 import { assertBookingBatchWrite, bookingBatchWriteRefused } from '~/server/utils/availability'
 import { approvedStayPaymentPredicate } from '~/server/domain/stays'
 import { accountActivityPath } from '~/shared/account-activity'
@@ -253,6 +254,7 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
   const started = new Date().toISOString()
   const expired = () => new HTTPError({ statusCode: 409, statusMessage: 'This payment can no longer be confirmed; start the booking again', data: { code: 'payment_expired' } })
   let confirmingPayment = payment
+  const expiresAt = confirmationHoldUntil(payment, approval ? started : undefined)
   if (approval) {
     const hold = await queryFirst<{ conversation_id: string | null; buyer_user_id: string | null }>(db, 'SELECT conversation_id,buyer_user_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, organizationId])
     if (!stay || !hold?.conversation_id || !hold.buyer_user_id) throw new Error('Approved stay payment has no stay or guest conversation')
@@ -268,7 +270,7 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
           RETURNING review_json`,
         params: [started, payment.id, organizationId, payment.review_json, ...bookable.params] },
         assertBookingBatchWrite({ query: 'changes() = 1', params: [] }),
-        { query: "UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active'", params: [confirmationHoldUntil(payment, started), payment.id] },
+        { query: "UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active'", params: [expiresAt, payment.id] },
       ], { operation: 'Begin payment for approved stay' })
       const updated = written?.results[0]
       if (!isRecord(updated) || typeof updated.review_json !== 'string') throw new Error('Approved stay confirmation has no saved payment review')
@@ -278,9 +280,10 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
       throw error
     }
   } else {
-    const held = await execute(db, "UPDATE payment_checkout_holds SET expires_at=MAX(expires_at,?) WHERE payment_id=? AND status='active' AND expires_at>?", [confirmationHoldUntil(payment), payment.id, started])
+    const held = await execute(db, "UPDATE payment_checkout_holds SET expires_at=MAX(expires_at,?) WHERE payment_id=? AND status='active' AND expires_at>?", [expiresAt, payment.id, started])
     if (held.meta.changes !== 1) throw expired()
   }
+  if (stay) await publishEvent(env, { type: 'business.wake', kind: 'checkout', organization_id: organizationId, due_at: Date.parse(expiresAt) })
   let confirmed: Stripe.PaymentIntent
   try {
     confirmed = await stripe.paymentIntents.confirm(current.id, {
@@ -299,7 +302,7 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
     } else if (approval && (error instanceof stripe.errors.StripeAuthenticationError || error instanceof stripe.errors.StripePermissionError ||
       (error instanceof stripe.errors.StripeInvalidRequestError && error.statusCode === 400 && error.code !== 'payment_intent_unexpected_state'
         && (error.param || error.code?.startsWith('parameter_')))) && error.headers?.['stripe-should-retry'] !== 'true') {
-      await releaseApprovedStayConfirmation(db, confirmingPayment)
+      await releaseApprovedStayConfirmation(db, env, confirmingPayment)
     }
     throw error
   }
@@ -375,6 +378,6 @@ export async function completePaymentReturn(db: DbClient, stripe: Stripe, env: C
   const owned = await requirePayment(db, organizationId, payment.id)
   const charge = typeof intent.latest_charge === 'string' ? null : intent.latest_charge
   // The capture alert names the buyer who has now proved the purchase; the event key makes it the same alert.
-  await notifyPaymentFinancialEvent(db, stripe, env, owned, { kind: 'payment_captured', nativeId: settled.id, status: settled.status, amount: settled.amount_received, email: charge?.billing_details.email ?? null })
+  await publishPaymentNotification(env, owned, { kind: 'payment_captured', nativeId: settled.id, status: settled.status, amount: settled.amount_received, email: charge?.billing_details.email ?? null })
   return paymentReceipt(db, env, owned)
 }

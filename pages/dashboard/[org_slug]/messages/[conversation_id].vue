@@ -13,7 +13,7 @@
 
     <UAlert v-if="doneError" color="error" variant="soft" title="Done could not be saved" :description="getErrorMessage(doneError, 'The request failed')" class="mx-4 mb-2" />
     <ConversationThread :key="threadId" :thread-id="threadId" :history="history" :personal-scope="personalScope" :reservation-to="reservationTo" :closing="closing" @done="done" />
-    <ConversationSheet v-if="data" v-model:open="sheetOpen" :page="data" :history="history" :on-left="left" :booking-to="reservationTo" @moved="moved" @participants-changed="refresh()" />
+    <ConversationSheet v-if="data" v-model:open="sheetOpen" v-model:manage-guests="manageGuests" :can-manage-guests="canManageGuests" :page="data" :history="history" :on-left="left" :booking-to="reservationTo" @moved="moved" @participants-changed="refresh()" />
   </DashboardIndexPanel>
 </template>
 
@@ -21,7 +21,7 @@
 import ConversationThread from '~/lib/components/workspace/messages/ConversationThread.vue'
 import ConversationSheet from '~/lib/components/workspace/messages/ConversationSheet.vue'
 import InboxAvatar from '~/lib/components/workspace/messages/InboxAvatar.vue'
-import { removeInboxConversationKey } from '~/lib/components/workspace/messages/guest-thread-client'
+import { manageReservationGuestsKey, removeInboxConversationKey } from '~/lib/components/workspace/messages/guest-thread-client'
 import { accountReservationPath, guestConversationPath } from '~/shared/messages-contract'
 import { getErrorMessage } from '~/utils/errors'
 
@@ -37,6 +37,15 @@ const history = useConversation(threadId, personalScope)
 const { data, refresh } = history.request
 const conversation = computed(() => data.value?.conversation)
 const sheetOpen = ref(false)
+const manageGuests = ref(false)
+const canManageGuests = computed(() => Boolean(data.value?.capabilities.can_invite_guest || conversation.value?.participants.some(person => person.can_remove)))
+provide(manageReservationGuestsKey, {
+  available: canManageGuests,
+  open: () => {
+    manageGuests.value = true
+    sheetOpen.value = true
+  },
+})
 const level = useRouteLevel()
 // The reservation's panel is this conversation's child, so the thread stays beside it.
 const reservationTo = computed(() => {

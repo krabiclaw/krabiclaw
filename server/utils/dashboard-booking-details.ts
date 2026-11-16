@@ -13,6 +13,9 @@ import { freeCancellationUntil, outsideNotice } from '~/shared/availability-sett
 import type { ProductKind } from '~/shared/product-details'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { loadOwnerPictures } from '~/server/notifications/hero'
+import { readMediaPlacements } from '~/server/utils/media-asset-manager'
+import { readProductPhotos } from '~/server/utils/media-placement'
+import { mediaStillUrl, resolveOwnerPicture } from '~/shared/media-placement-contract'
 import { addLocalDays, isValidCalendarDate, localDateTimeToInstant, localPartsAt } from '~/utils/timezone'
 import { listBookableSessions } from '~/server/utils/availability'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
@@ -94,7 +97,7 @@ export interface DashboardBookingDetails {
   location_title: string
   location_address: string | null
   name: string
-  resource_image_url: string | null
+  resource_photo_urls: string[]
   /** Null for a purchase made without an account. */
   guest_name: string | null
   guest_email: string | null
@@ -254,13 +257,18 @@ export async function loadDashboardBookingDetails(
  * request's current buyer, the team's private notes and scheduling stay with
  * the team, and the payments are the ones this account made.
  */
-// A booking shows its offering's picture and a table its location's. Organization artwork never stands in.
-async function loadResourceImage(db: DbClient, row: BookingRow) {
-  const [ownerType, ownerId] = row.product_kind === 'table'
-    ? ['business_location' as const, row.location_id]
-    : ['product' as const, row.product_id]
-  if (!ownerId) return null
-  return (await loadOwnerPictures(db, row.organization_id, ownerType, [ownerId], { organizationFallback: false })).get(ownerId)?.imageUrl ?? null
+// A reservation shows its offering's photos, or the location's photos for a table.
+async function loadResourcePhotos(db: DbClient, row: BookingRow): Promise<string[]> {
+  const { organization_id: organizationId, product_id: productId, location_id: locationId } = row
+  if (row.product_kind !== 'table') {
+    const photos = (await readProductPhotos(db, { organizationId, productIds: [productId] })).get(productId) ?? []
+    return photos.map(mediaStillUrl).filter((url): url is string => url !== null)
+  }
+  if (!locationId) return []
+  const photos = (await readMediaPlacements(db, { organizationId, ownerType: 'business_location', ownerIds: [locationId] })).get(locationId) ?? []
+  const cover = resolveOwnerPicture('business_location', photos, [])
+  const ordered = [cover, ...photos.filter(photo => photo.slot === 'gallery')]
+  return [...new Set(ordered.map(mediaStillUrl).filter((url): url is string => url !== null))]
 }
 
 export async function loadBuyerBookingDetails(
@@ -327,7 +335,7 @@ async function composeBookingDetails(
     type,
     location_title: row.location_id === null ? 'Online' : location_title!,
     location_address: location_address ? formatPostalAddress(parsePostalAddress(location_address)) || null : null,
-    resource_image_url: await loadResourceImage(db, row),
+    resource_photo_urls: await loadResourcePhotos(db, row),
     // The picture is the buyer's own account picture when they booked signed in; an emailed guest has none.
     // The screen shows a local date and time; the record holds one instant and
     // the zone it belongs to, so these are read off it rather than stored
@@ -451,7 +459,7 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     location_title: payment.location_id === null ? 'Online' : payment.location_title ?? 'Online',
     location_address: null,
     product_kind: null,
-    resource_image_url: resourceImageUrl,
+    resource_photo_urls: resourceImageUrl ? [resourceImageUrl] : [],
     name: snapshot.title,
     guest_name: payment.buyer_name,
     guest_email: payment.buyer_email,
