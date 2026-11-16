@@ -601,19 +601,18 @@ test('a home keeps its operator name independent from its public title across CM
   expect(savedClocks.data!.product.stay).toMatchObject({ check_in_time: null, check_out_time: null })
   await page.goto(`/dashboard/${slug}/bookings/${stay.booking_id}`)
   const stayPanel = page.locator('#dashboard-panel-stay-details')
-  await expect(stayPanel.getByText('Arriving', { exact: true })).toBeVisible()
-  await expect(stayPanel.getByText('6:30 PM', { exact: true })).toBeVisible()
+  await expect(stayPanel.getByText('Arriving 6:30 PM', { exact: true })).toBeVisible()
   const clearedArrival = await call<NightBookingReceipt>('update_product_booking', { booking_id: stay.booking_id, version: recordedArrival.data!.version, arrival_time: null })
   expect(clearedArrival.error).toBeNull()
   await page.reload()
-  await expect(stayPanel.getByRole('heading', { name: 'Check-in', exact: true })).toBeVisible()
-  await expect(stayPanel.getByText('Arriving', { exact: true })).toHaveCount(0)
+  await expect(stayPanel.locator('dt', { hasText: /^Check-in$/u })).toBeVisible()
+  await expect(stayPanel.getByText(/^Arriving /u)).toHaveCount(0)
 
   const cancelled = await call<{ status: string }>('cancel_product_booking', { booking_id: stay.booking_id, version: clearedArrival.data!.version, idempotency_key: crypto.randomUUID() })
   expect(cancelled.error).toBeNull()
   expect(cancelled.data!.status).toBe('cancelled')
   await page.reload()
-  await expect(stayPanel.getByRole('heading', { name: 'Cancelled', exact: true })).toBeVisible()
+  await expect(stayPanel.getByText('Cancelled', { exact: true })).toBeVisible()
 })
 
 // A member responsible for a home reads turnover details while owners and

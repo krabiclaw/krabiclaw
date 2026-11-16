@@ -10,13 +10,17 @@ import { bookedRecordsInRange, businessWideViewer, type BookedRecordInRange } fr
 import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
-import { calendarStays, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, readStayReservationHome, type StayReservationHome } from '~/server/domain/stays'
+import { calendarStays, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, readStayReservationHome, type StayHome, type StayReservationHome } from '~/server/domain/stays'
 import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
 import { loadDashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
+import { mediaStillUrl } from '~/shared/media-placement-contract'
+import { readProductPhotos } from '~/server/utils/media-placement'
 import { isValidCalendarDate, localDateAt } from '~/utils/timezone'
 
 export type BookingHome = StayReservationHome
+export type TurnoverBookingHome = Pick<StayHome, 'name' | 'internal_name' | 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'check_in_method' | 'check_in_instructions'>
+  & { image_url: string | null }
 
 export function nightBooking<T extends { id: string }>({ id, ...record }: T) {
   return { ...record, booking_id: id, unit: 'nights' as const }
@@ -48,11 +52,25 @@ export async function dashboardBookingDetails(event: H3Event) {
   if (booking.unit === 'slot') {
     return { booking: await loadDashboardBookingDetails(event, { type: 'booking', bookingId, lookup: 'booking' }), manage: access.manage }
   }
+  if (!access.manage) {
+    const [stay, house, photos] = await Promise.all([
+      getStay(db, access, bookingId),
+      queryFirst<Omit<TurnoverBookingHome, 'image_url'>>(db, `SELECT p.name, c.internal_name, b.check_in_time, b.check_in_end_time, b.check_out_time,
+        c.check_in_method, c.check_in_instructions
+        FROM product_stay_configs c
+        JOIN products p ON p.organization_id=c.organization_id AND p.id=c.product_id
+        JOIN product_booking_configs b ON b.organization_id=c.organization_id AND b.product_id=c.product_id
+        WHERE c.organization_id=? AND c.product_id=?`, [organization.id, booking.product_id]),
+      readProductPhotos(db, { organizationId: organization.id, productIds: [booking.product_id] }),
+    ])
+    if (!house) throw new Error('The booking has no home')
+    const home = { ...house, image_url: mediaStillUrl(photos.get(booking.product_id)?.[0]) }
+    return { booking: nightBooking(stay), manage: false as const, home }
+  }
   const [stay, home] = await Promise.all([
     getStay(db, access, bookingId),
     readStayReservationHome(db, { organizationId: organization.id, productId: booking.product_id, showLocation: true, showArrival: true }),
   ])
-  if (!('payments' in stay)) return { booking: nightBooking(stay), manage: false, home }
   const conversation = await getGuestRequest(db, booking.conversation_id, organization.id, 'booking')
   if (!conversation) throw new Error('The booking has no guest conversation')
   const [destination, record, pending_changes] = await Promise.all([

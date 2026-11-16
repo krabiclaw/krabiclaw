@@ -106,7 +106,7 @@
               <dd v-if="entry.detail" class="mt-0.5 text-xs text-muted">{{ entry.detail }}</dd>
             </div>
           </dl>
-          <p v-if="arrivalTime" class="mt-3 text-xs text-muted">Arriving {{ arrivalTime }}</p>
+          <p v-if="arrivalTime && !turnoverHome" class="mt-3 text-xs text-muted">Arriving {{ arrivalTime }}</p>
 
           <div v-if="panel.rows.length" class="mt-3">
             <component :is="row.to ? NuxtLink : row.href ? 'a' : 'button'" v-for="row in panel.rows" :key="row.label" :to="row.to" :href="row.href" :type="row.run ? 'button' : undefined" class="flex w-full items-start gap-4 py-3 text-left" @click="row.run?.()">
@@ -727,13 +727,22 @@ const accountStay = computed(() => isAccountNightBooking(data.value) ? data.valu
 const itineraryOpen = ref(false)
 const dashboardStay = computed(() => isDashboardBooking(data.value) && 'home' in data.value ? data.value : null)
 const managedStay = computed(() => dashboardStay.value?.manage ? dashboardStay.value : null)
+const turnoverHome = computed(() => dashboardStay.value?.manage === false ? dashboardStay.value.home : null)
 const stay = computed(() => accountStay.value?.booking ?? dashboardStay.value?.booking ?? null)
 const detail = computed(() => accountStay.value?.booking ?? managedStay.value?.booking ?? null)
 const pendingChanges = computed(() => managedStay.value?.booking.pending_changes ?? [])
 const channelManaged = computed(() => detail.value !== null && isChannelManagedStay(detail.value))
 const canPrintItinerary = computed(() => detail.value?.status === 'confirmed' && !channelManaged.value)
 const manage = computed(() => managedStay.value !== null)
-const recordHome = computed(() => accountStay.value?.home ?? dashboardStay.value?.home ?? null)
+const recordHome = computed(() => accountStay.value?.home ?? managedStay.value?.home ?? null)
+
+/** When the guest said they arrive, where that differs from the home's check-in clock. */
+const arrivalTime = computed(() => {
+  const value = stay.value
+  if (!value || value.starts_at.length === 10) return null
+  const local = new Intl.DateTimeFormat('en-GB', { timeZone: value.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value.starts_at))
+  return local === (recordHome.value ?? turnoverHome.value)?.check_in_time ? null : formatTime(local, 'en')
+})
 
 const reservationActions = computed<PanelAction[]>(() => {
   const actions: PanelAction[] = []
@@ -814,16 +823,19 @@ function reservationDay(date: string) {
 const panel = computed(() => {
   const value = stay.value
   const place = recordHome.value
+  const turnover = turnoverHome.value
+  const home = place ?? turnover
   const record = booking.value
   const guide = place?.arrival_guide
-  const method = guide?.check_in_method ? STAY_CHECK_IN_METHODS[guide.check_in_method].label : null
+  const checkInMethod = guide?.check_in_method ?? turnover?.check_in_method
+  const method = checkInMethod ? STAY_CHECK_IN_METHODS[checkInMethod].label : null
   const location = purchase ? null : record?.location_title
   const address = place?.location?.address ? formatPostalAddress(place.location.address) : record?.location_address
   const editor = value && `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/products/${encodeURIComponent(value.product_id)}`
   if (!value && !record) return null
 
   const rows: PanelShortcut[] = []
-  if (value) {
+  if (value && !turnover) {
     if (address || guide?.directions || !props.personalScope) {
       rows.push({ label: 'Getting there', icon: 'i-lucide-map-pin', detail: address,
         ...(props.personalScope ? { href: '#getting-there' } : { to: `${editor}/directions` }) })
@@ -842,7 +854,7 @@ const panel = computed(() => {
     } else if (!props.personalScope) {
       rows.push({ label: 'Checkout details', icon: 'i-lucide-door-open', detail: 'How to check out', to: `${editor}/checkout-instructions` })
     }
-  } else if (location || address) {
+  } else if (!value && (location || address)) {
     rows.push({ label: 'Getting there', icon: 'i-lucide-map-pin', detail: address ?? location, href: '#getting-there' })
   }
   if (!purchase) rows.push({ label: 'Get help', icon: 'i-lucide-life-buoy', detail: 'Contact support', href: '#reservation-support' })
@@ -850,10 +862,9 @@ const panel = computed(() => {
     {
       label: 'Check-in',
       value: reservationDay(value.check_in_date),
-      detail: place?.check_in_time
-        ? formatTime(place.check_in_time, 'en') : null,
+      detail: (turnover && arrivalTime.value) || (home?.check_in_time ? formatTime(home.check_in_time, 'en') : null),
     },
-    { label: 'Checkout', value: reservationDay(value.check_out_date), detail: place?.check_out_time ? formatTime(place.check_out_time, 'en') : null },
+    { label: 'Checkout', value: reservationDay(value.check_out_date), detail: home?.check_out_time ? formatTime(home.check_out_time, 'en') : null },
   ] : record && !purchase ? [
     { label: 'Date', value: reservationDay(record.booking_date), detail: null },
     { label: 'Time', value: formattedTime.value, detail: null },
@@ -861,8 +872,8 @@ const panel = computed(() => {
   const bookingId = value?.booking_id ?? record?.booking_id
 
   return {
-    photos: place?.photo_urls ?? record?.resource_photo_urls ?? [],
-    title: place?.name ?? (record?.product_kind === 'table' ? record.location_title : record?.name),
+    photos: place?.photo_urls ?? (turnover?.image_url ? [turnover.image_url] : record?.resource_photo_urls ?? []),
+    title: home?.name ?? (record?.product_kind === 'table' ? record.location_title : record?.name),
     purchaseDate: purchase && record ? `${record.type === 'order' ? 'Ordered' : 'Paid'} ${formatCreatedAt(record.created_at)}` : null,
     host: value ? place?.host : record?.host,
     coHosts: place?.co_hosts ?? [],
@@ -886,25 +897,18 @@ const panel = computed(() => {
       canonicalDomain: place.listing.canonical_domain,
     })).href : null,
     policy: policy.value ? (props.personalScope ? policy.value.terms[0] : `${policy.value.label} · ${policy.value.summary}`) : cancellationSummary.value,
-    guide: place ? {
+    guide: home ? {
       directions: guide?.directions,
       method,
-      instructions: guide?.check_in_instructions,
+      instructions: guide?.check_in_instructions ?? turnover?.check_in_instructions,
       manual: guide?.house_manual,
-      rules: place.house_rules,
+      rules: place?.house_rules ?? [],
       wifi: guide && (guide.wifi_network || guide.wifi_password) ? { network: guide.wifi_network, password: guide.wifi_password } : null,
-      safety: place.safety,
+      safety: place?.safety ?? [],
       checkout: guide?.checkout_instructions ?? [],
       checkoutEditor: !props.personalScope && manage.value && editor ? `${editor}/checkout-instructions` : null,
     } : null,
   }
-})
-/** When the guest said they arrive, where that is not the home's check-in time: the stay's stored start in the home's clock. */
-const arrivalTime = computed(() => {
-  const value = stay.value
-  if (!value || value.starts_at.length === 10) return null
-  const local = new Intl.DateTimeFormat('en-GB', { timeZone: value.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value.starts_at))
-  return local === recordHome.value?.check_in_time ? null : formatTime(local, 'en')
 })
 const cancellation = computed(() => accountStay.value?.cancellation ?? null)
 const canRequestChange = computed(() => props.personalScope && detail.value !== null && !isChannelManagedStay(detail.value) && Boolean(messageTo.value) && detail.value.status === 'confirmed'

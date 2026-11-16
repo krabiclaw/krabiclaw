@@ -514,7 +514,7 @@ for (const viewport of [
     await openConversation(threadId!, '?archived=')
     await sheetButton.click()
     await expect(sheet.getByRole('button', { name: 'Report', exact: true })).toBeVisible()
-    await expect(sheet.getByRole('button', { name: 'Block', exact: true })).toBeVisible()
+    await expect(sheet.getByRole('button', { name: 'Block this guest', exact: true })).toBeVisible()
     await expect(sheet.getByRole('button', { name: 'Archive', exact: true })).toHaveCount(0)
     const moved = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/messages/${threadId}/archive`))
     await sheet.getByRole('button', { name: 'Move to Messages', exact: true }).click()
