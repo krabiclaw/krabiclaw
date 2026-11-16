@@ -96,35 +96,68 @@ export async function ingestStripeFeeReport(db:DbClient,livemode:boolean,csv:str
  }
  return {attributed,unattributed,organizations}
 }
-/** Ask Stripe for the itemized fee report once a day; `reporting.report_run.*` events deliver it. */
-export async function requestStripeFeeReport(db:DbClient,stripe:Stripe,livemode:boolean) {
- // Stripe's all_fees reports contain live data only; sandbox costs are not simulated.
- if(!livemode)return {status:'test_mode_unavailable' as const}
- const now=new Date().toISOString()
- // Reports lag at least 96 hours. Revisit the last 35 days for late fee corrections.
- const reportType=await stripe.reporting.reportTypes.retrieve('all_fees.balance_transaction_created.itemized.2')
- if(reportType.livemode!==livemode)throw new Error('Stripe report type mode mismatch')
- const end=Math.min(Math.floor(Date.now()/86400000)*86400-4*86400,reportType.data_available_end-1),start=Math.max(end-35*86400,reportType.data_available_start),id=`fees:${Number(livemode)}:${end}`
- if(start>=end)return {status:'live_mode' as const}
- // A row still `creating` (the Worker died before Stripe answered) or `failed`
- // is requested again; Stripe's idempotency key makes the repeat safe.
- const existing=await queryFirst<{status:string}>(db,'SELECT status FROM payment_fee_reports WHERE id=?',[id])
- if(existing&&existing.status!=='creating'&&existing.status!=='failed')return {status:'live_mode' as const}
- if(!existing)await execute(db,"INSERT INTO payment_fee_reports(id,livemode,interval_start,interval_end,status,created_at,updated_at) VALUES(?,?,?,?,'creating',?,?)",[id,Number(livemode),start,end,now,now])
- try{
-  const report=await createFeeReport(stripe,id,start,end)
-  await execute(db,"UPDATE payment_fee_reports SET stripe_report_id=?,status='pending',error=NULL,updated_at=? WHERE id=?",[report.id,now,id])
- }catch(error){await execute(db,"UPDATE payment_fee_reports SET status='failed',error=?,updated_at=? WHERE id=?",[error instanceof Error?error.message:String(error),now,id]);throw error}
- return {status:'live_mode' as const}
+const STRIPE_FEE_REPORT_TYPE = 'all_fees.balance_transaction_created.itemized.2'
+const FEE_REPORT_LOOKBACK = 35 * 86_400
+
+function stripeFeeReportId(intervalEnd: number) {
+ return `fees:1:${intervalEnd}`
 }
 
-/** Stripe pushes a finished report run; a throw here returns non-2xx so Stripe redelivers it. */
-export async function ingestStripeFeeReportEvent(db:DbClient,stripe:Stripe,env:CloudflareEnv,event:Stripe.Event) {
- if(event.type!=='reporting.report_run.succeeded'&&event.type!=='reporting.report_run.failed')return
- if(event.account)return
- const run=event.data.object as Stripe.Reporting.ReportRun
- const report=await queryFirst<{id:string;livemode:number;status:string}>(db,'SELECT id,livemode,status FROM payment_fee_reports WHERE stripe_report_id=?',[run.id])
- if(!report||report.status==='processed')return
+/** Request the data Stripe just made available, including the lookback for late fee corrections. */
+async function requestStripeFeeReport(db: DbClient, stripe: Stripe, reportType: Stripe.Reporting.ReportType) {
+ const end = reportType.data_available_end - 1
+ const start = Math.max(end - FEE_REPORT_LOOKBACK, reportType.data_available_start + 1)
+ if (start >= end) return
+
+ const id = stripeFeeReportId(end)
+ const existing = await queryFirst<{ status: string }>(db, 'SELECT status FROM payment_fee_reports WHERE id=?', [id])
+ if (existing && existing.status !== 'creating' && existing.status !== 'failed') return
+
+ const now = new Date().toISOString()
+ if (!existing) {
+  await execute(db, "INSERT INTO payment_fee_reports(id,livemode,interval_start,interval_end,status,created_at,updated_at) VALUES(?,1,?,?,'creating',?,?) ON CONFLICT(id) DO NOTHING", [id, start, end, now, now])
+ }
+ let run: Stripe.Reporting.ReportRun
+ try {
+  run = await stripe.reporting.reportRuns.create({
+   report_type: STRIPE_FEE_REPORT_TYPE,
+   parameters: {
+    interval_start: start,
+    interval_end: end,
+    timezone: 'Etc/UTC',
+    columns: ['fee_transaction_id', 'incurred_by', 'currency', 'amount', 'tax', 'incurred_at'],
+   },
+  }, { idempotencyKey: id })
+ } catch (error) {
+  await execute(db, "UPDATE payment_fee_reports SET status='failed',error=?,updated_at=? WHERE id=? AND stripe_report_id IS NULL", [error instanceof Error ? error.message : String(error), now, id])
+  throw error
+ }
+ await execute(db, `UPDATE payment_fee_reports SET stripe_report_id=?,status='pending',error=NULL,updated_at=?
+   WHERE id=? AND status IN ('creating','failed') AND stripe_report_id IS NOT ?`, [run.id, now, id, run.id])
+}
+
+/** Stripe publishes report availability and the outcome of requested runs to the platform webhook. */
+export async function ingestStripeFeeReportEvent(db: DbClient, stripe: Stripe, env: CloudflareEnv, event: Stripe.Event) {
+ if (event.account) return
+ if (event.type === 'reporting.report_type.updated') {
+  const reportType = event.data.object
+  // Stripe's itemized fee data is live only.
+  if (reportType.id !== STRIPE_FEE_REPORT_TYPE || !event.livemode) return
+  if (!reportType.livemode || !stripeLivemodeFromKey(env.STRIPE_SECRET_KEY!)) throw new Error('Stripe fee report type mode mismatch')
+  await requestStripeFeeReport(db, stripe, reportType)
+  return
+ }
+ if (event.type !== 'reporting.report_run.succeeded' && event.type !== 'reporting.report_run.failed') return
+ const run = event.data.object
+ if (run.report_type !== STRIPE_FEE_REPORT_TYPE) return
+ const intervalEnd = run.parameters.interval_end
+ const requestId = intervalEnd === undefined ? null : stripeFeeReportId(intervalEnd)
+ const report = await queryFirst<{ id: string; livemode: number; status: string; stripe_report_id: string | null }>(db, `
+   SELECT id, livemode, status, stripe_report_id FROM payment_fee_reports
+   WHERE stripe_report_id=? OR (id=? AND livemode=1 AND stripe_report_id IS NULL)`, [run.id, requestId])
+ if (!report || report.status === 'processed') return
+ // A run can finish before the availability webhook saves Stripe's run ID.
+ if (report.stripe_report_id === null) throw new Error(`Stripe fee report ${run.id} has not been linked to request ${report.id}`)
  const livemode=Boolean(report.livemode),now=new Date().toISOString()
  if(run.livemode!==livemode||event.livemode!==livemode||livemode!==stripeLivemodeFromKey(env.STRIPE_SECRET_KEY!))throw new Error('Stripe fee report mode mismatch')
  if(run.status==='failed'){await execute(db,"UPDATE payment_fee_reports SET status='failed',error=?,updated_at=? WHERE id=?",[run.error??'Stripe report failed',now,report.id]);throw new Error(`Stripe fee report ${run.id} failed: ${run.error??'No provider reason returned'}`)}
@@ -137,8 +170,4 @@ export async function ingestStripeFeeReportEvent(db:DbClient,stripe:Stripe,env:C
  const {organizations}=await ingestStripeFeeReport(db,livemode,await response.text(),stripe)
  for(const organizationId of organizations)await deliverPaymentsUsage(db,env,organizationId)
  await execute(db,"UPDATE payment_fee_reports SET status='processed',error=NULL,updated_at=? WHERE id=?",[now,report.id])
-}
-
-function createFeeReport(stripe:Stripe,id:string,start:number,end:number) {
- return stripe.reporting.reportRuns.create({report_type:'all_fees.balance_transaction_created.itemized.2',parameters:{interval_start:start,interval_end:end,timezone:'Etc/UTC',columns:['fee_transaction_id','incurred_by','currency','amount','tax','incurred_at']}},{idempotencyKey:id})
 }

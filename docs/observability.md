@@ -167,7 +167,11 @@ Durable logging of ChatGPT MCP protocol requests for understanding tool discover
 
 ### What is captured
 
-MCP requests against `server/api/mcp.ts` write rows to `mcp_tool_call_events` (`server/db/schema.ts`) via `logMcpToolCallEvent()` in `server/utils/mcp-telemetry.ts`. Writes are fire-and-forget — wrapped in Cloudflare's `waitUntil` when available, or a detached promise otherwise — so telemetry can never add latency to, or fail, an MCP response.
+MCP and public help requests that record telemetry publish one redacted event
+to Cloudflare Queues. The consumer records it in `mcp_tool_call_events` and uses the same
+event ID on redelivery, so a duplicate delivery cannot count a tool call twice.
+Requests wait for the queue to accept the event. A publish failure is reported
+through Nitro's error hook without changing the tool result.
 
 Captured per row: surface, authorized organization/location/user id, request id, method, tool name + domain, HTTP status, JSON-RPC error code/message, protocol version, hashed session id, hashed OAuth client id, Cloudflare ray id, catalog fingerprint, operational summaries of arguments and result, unknown-tool fields, status (`success` / `error` / `auth_required` / `blocked`), and duration in ms.
 
@@ -188,10 +192,12 @@ The existing argument/result columns then contain `{ "_diagnostic": true,
 text, structured data and failure result. Actual errors replace the fixed label.
 The RPC request ID, Cloudflare ray, user and authorized site identify each call.
 Raw `_request` host metadata and user-agent text are omitted.
-Credentials, private `_meta`, and URL query strings and fragments are redacted. Each payload is
-bounded at 256,000 characters; oversized payloads explicitly record truncation
-and their original length. These diagnostic rows expire after seven days via the
-same daily cleanup, even after the flag is disabled. Normal operational rows
+Credentials, private `_meta`, and URL query strings and fragments are redacted before enqueueing.
+Each serialized argument or result field is limited to 48,000 bytes to fit
+the [Cloudflare Queue message limit](https://developers.cloudflare.com/queues/platform/limits/).
+Oversized diagnostics explicitly record truncation and their original length.
+Diagnostic rows expire after seven days via the same daily cleanup, even after
+the flag is disabled. Normal operational rows
 retain their 180-day limit. Staging has no scheduled retention task, so detailed
 capture remains disabled there. Local disposable-D1 tests exercise diagnostic mode.
 

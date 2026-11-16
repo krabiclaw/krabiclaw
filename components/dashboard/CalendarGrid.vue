@@ -97,15 +97,13 @@
                   :key="bar.key"
                   :to="bar.to"
                   class="z-10 mx-0.5 mt-1 flex h-5 min-w-0 items-center gap-1.5 self-start rounded-full px-2.5 text-xs font-medium text-white sm:mt-1.5 sm:h-7"
-                  :style="{ gridRow: 1, gridColumn: `${bar.column} / span ${bar.span}`, backgroundColor: CHANNEL_BARS[bar.channel ?? 'direct'].color }"
+                  :style="{ gridRow: 1, gridColumn: `${bar.column} / span ${bar.span}`, backgroundColor: STAY_CHANNEL_COLORS[bar.channel ?? 'direct'] }"
                   :title="bar.title"
                   :data-stay="bar.stayId"
                   :data-channel="bar.channel"
                   :data-booked="bar.date"
                 >
-                  <img v-if="bar.channel === 'direct'" src="/platform/krabiclaw-symbol.svg" alt="" class="size-3.5 shrink-0">
-                  <UIcon v-else-if="bar.channel === 'airbnb'" name="i-simple-icons-airbnb" class="size-3.5 shrink-0" />
-                  <span v-else-if="bar.channel" class="shrink-0 font-bold" aria-hidden="true">{{ CHANNEL_BARS[bar.channel].mark }}</span>
+                  <ChannelMark v-if="bar.channel" :channel="bar.channel" class="size-4 shrink-0 border-0" />
                   <span class="truncate">{{ bar.label }}</span>
                 </NuxtLink>
               </div>
@@ -146,9 +144,11 @@
 import { getLocalTimeZone, parseDate, today } from '@internationalized/date'
 import { useEventListener } from '@vueuse/core'
 import type { LocationQueryRaw, RouteLocationRaw } from 'vue-router'
-import type { Stay, StayHome, StayNight, StayTurnover } from '~/server/domain/stays'
+import type { StayCalendarStay, StayHome, StayNight } from '~/server/domain/stays'
 import type { Place, PlaceDay } from '~/server/domain/places'
-import { MAX_STAY_NIGHTS, STAY_CHANNEL_LABELS, parseStayCalendarRules, type StayChannel } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, STAY_CHANNEL_COLORS, STAY_CHANNEL_LABELS, parseStayCalendarRules, type StayChannel } from '~/shared/bookings'
+import { bookingConversationOrRecordPath } from '~/shared/messages-contract'
+import ChannelMark from '~/lib/components/workspace/messages/ChannelMark.vue'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount } from '~/shared/prices'
 import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidTimezone } from '~/utils/timezone'
@@ -158,7 +158,7 @@ import StayNightInspector from './StayNightInspector.vue'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'address'>
 // A manager reads each stay's channel; a member's turnover has none.
-type GridStay = { booking_id: string; unit: 'nights' } & Pick<StayTurnover, 'product_id' | 'guest_name' | 'adults' | 'children' | 'check_in_date' | 'check_out_date'> & Partial<Pick<Stay, 'channel'>>
+type GridStay = StayCalendarStay
 interface HomesPayload { from: string; to: string; homes: { home: Home; nights: StayNight[] }[]; bookings: GridStay[]; manage: boolean }
 interface PlacesPayload { from: string; to: string; places: { place: Place; days: PlaceDay[] }[]; manage: boolean }
 interface GridBar { key: string; date: string; column: number; span: number; label: string; title: string; to: RouteLocationRaw; stayId: string | null; channel: StayChannel | null }
@@ -224,7 +224,7 @@ const isWindow = (value: unknown): value is Record<string, unknown> & { manage: 
 const isHomesPayload = (value: unknown): value is HomesPayload => isWindow(value) && Array.isArray(value.homes) && Array.isArray(value.bookings)
   && value.homes.every(entry => isRecord(entry) && isHome(entry.home) && Array.isArray(entry.nights) && entry.nights.length === SPAN
     && entry.nights.every((night, index) => isStayNight(night) && night.date === dates.value[index]))
-  && value.bookings.every(stay => isRecord(stay) && stay.unit === 'nights' && typeof stay.booking_id === 'string' && typeof stay.product_id === 'string' && isText(stay.guest_name) && isCount(stay.adults) && isCount(stay.children)
+  && value.bookings.every(stay => isRecord(stay) && stay.unit === 'nights' && typeof stay.booking_id === 'string' && isText(stay.conversation_id) && typeof stay.product_id === 'string' && isText(stay.guest_name) && isCount(stay.adults) && isCount(stay.children)
     && (value.manage ? Object.hasOwn(STAY_CHANNEL_LABELS, String(stay.channel)) : !('channel' in stay)) && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date))
 const isPlacesPayload = (value: unknown): value is PlacesPayload => isWindow(value) && Array.isArray(value.places)
   && value.places.every(entry => isRecord(entry) && isPlace(entry.place) && Array.isArray(entry.days) && entry.days.length === SPAN && entry.days.every((day, index) => isPlaceDay(day) && day.date === dates.value[index]))
@@ -256,37 +256,28 @@ if (import.meta.client) {
   })
 }
 
-/** Each channel's bar colour and, where the build has no official mark, the mark it reads. */
-const CHANNEL_BARS: Record<StayChannel, { color: string; mark: string }> = {
-  airbnb: { color: '#FF385C', mark: '' }, vrbo: { color: '#245ABC', mark: 'V' }, booking_com: { color: '#003580', mark: 'B.' }, direct: { color: 'var(--kc-navy)', mark: '' },
-}
 const guestName = (stay: GridStay) => stay.guest_name || 'Guest name not provided'
 // Adults and children count as guests; infants do not, as Airbnb counts them.
 const guestCount = (stay: GridStay) => `${stay.adults + stay.children} ${stay.adults + stay.children === 1 ? 'guest' : 'guests'}`
 const addressOf = (home: Home) => home.address ? [home.address.address, home.address.city].filter(Boolean).join(', ') : 'No address'
 const matches = (name: string, detail: string) => !appliedSearch.value || `${name} ${detail}`.toLowerCase().includes(appliedSearch.value.toLowerCase())
+const staysById = computed(() => new Map((homesData.value?.bookings ?? []).map(stay => [stay.booking_id, stay])))
+const stayTo = (id: string) => bookingConversationOrRecordPath(orgSlug, id, staysById.value.get(id)?.conversation_id ?? null)
 // A stay's bar spans the run of nights it holds on screen; a run cut by the window's edge still names its guest.
-// A linked calendar's nights are a bar of their own, named for the channel.
 const homeRows = computed<GridRow[]>(() => {
-  const stays = new Map((homesData.value?.bookings ?? []).map(stay => [stay.booking_id, stay]))
   return (homesData.value?.homes ?? [])
     .filter(entry => matches(entry.home.internal_name, addressOf(entry.home)))
     .map(({ home, nights }) => {
       const bars: GridBar[] = []
       nights.forEach((night, index) => {
-        const holder = night.booking_id ?? (night.calendar ? `calendar:${night.calendar}` : null)
+        const holder = night.booking_id
         if (!holder) return
         const last = bars.at(-1)
         if (last?.key.startsWith(`${holder}:`) && last.column + last.span === index + 1) { last.span += 1; return }
-        if (!night.booking_id) {
-          const label = STAY_CHANNEL_LABELS[night.calendar!]
-          bars.push({ key: `${holder}:${night.date}`, date: night.date, stayId: null, channel: night.calendar, column: index + 1, span: 1, label, title: `Unavailable from ${label}`, to: homeTo(home.product_id, night.date) })
-          return
-        }
-        const stay = stays.get(night.booking_id)
+        const stay = staysById.value.get(holder)
         const label = stay ? `${guestName(stay)} · ${guestCount(stay)}` : 'Reserved'
-        bars.push({ key: `${holder}:${night.date}`, date: night.date, stayId: night.booking_id, channel: stay?.channel ?? null, column: index + 1, span: 1, label,
-          to: { path: `/dashboard/${orgSlug}/calendar/stay/${encodeURIComponent(night.booking_id)}`, query: route.query },
+        bars.push({ key: `${holder}:${night.date}`, date: night.date, stayId: holder, channel: stay?.channel ?? null, column: index + 1, span: 1, label,
+          to: stayTo(holder),
           title: stay ? `${[label, ...(stay.channel ? [STAY_CHANNEL_LABELS[stay.channel]] : [])].join(' · ')} · ${formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric' })}` : label })
       })
       const gaps = unbookableGaps(nights)
@@ -337,13 +328,12 @@ const windowLabel = computed(() => `${formatCalendarDate(from.value, 'en', { mon
 const price = (home: Home, night: StayNight) => night.price_minor === null ? 'No price' : formatMinorAmount(night.price_minor, home.currency).replace(/\.00$/, '')
 function freeLabel(home: Home, night: StayNight) {
   if (night.held_until) return 'Hold'
-  if (night.calendar) return STAY_CHANNEL_LABELS[night.calendar]
   return price(home, night)
 }
 /** A night the channel has not confirmed: still queued for it, or refused and needing review. */
 const channelState = (night: StayNight) => night.channel?.state === 'pending' || night.channel?.state === 'needs_review' ? night.channel.state : null
 function nightTitle(home: Home, night: StayNight, gap?: string) {
-  const state = night.booking_id ? 'Booked' : night.held_until ? 'Checkout hold' : night.calendar ? `Unavailable from ${STAY_CHANNEL_LABELS[night.calendar]}` : night.closed ? 'Blocked' : 'Available'
+  const state = night.booking_id ? 'Booked' : night.held_until ? 'Checkout hold' : night.closed ? 'Blocked' : 'Available'
   const note = channelNote(night)
   return `${home.internal_name} · ${formatCalendarDate(night.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${state} · ${price(home, night)}${gap ? ` · ${gap}` : ''}${note ? ` · ${note}` : night.channel?.state === 'pushed' ? ' · On Airbnb' : ''}`
 }
@@ -522,6 +512,7 @@ const inspectorProps = computed(() => ({
   blocker: blocker.value?.text ?? null,
   blockerAction: blocker.value?.action ?? null,
   ...editor.inspector.value,
+  stayTo,
   dateLabel: selectionLabel.value,
   scope: scopeLabel.value,
   calendarTo: selectedRows.value.length === 1 && span.value ? selectedRows.value[0]!.home ? homeTo(selectedRows.value[0]!.home!.product_id, dates.value[span.value.start]) : placeTo(selectedRows.value[0]!.place!, dates.value[span.value.start]!) : undefined,

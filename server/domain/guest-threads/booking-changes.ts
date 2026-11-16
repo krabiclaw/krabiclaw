@@ -1,3 +1,4 @@
+import { changedTaskIds, publishChangedJobs } from '~/server/events'
 import { recordBookingChangeAnswer } from '~/server/domain/booking-analytics'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { HTTPError } from 'nitro'
@@ -536,7 +537,8 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
     }, ...conversationTaskQueries(thread.id, now, before.sessionId),
     assertBookingBatchWrite({ query: 'EXISTS (SELECT 1 FROM messages WHERE id=?)', params: [id] })]
     try {
-      await executeBatch(db, queries, { operation: 'move booking' })
+      const writes = await executeBatch(db, queries, { operation: 'move booking' })
+      await publishChangedJobs(env, thread.organization_id, changedTaskIds(writes))
     } catch (error) {
       if (!bookingBatchWriteRefused(error)) throw error
       const raced = await findMessageByDedupeKey(db, dedupeKey)
@@ -649,7 +651,8 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
 
     if (destination) queries.push(assertBookingBatchWrite({ query: guard, params: [id] }))
     try {
-      await executeBatch(db, queries, { operation: 'respond to booking change' })
+      const writes = await executeBatch(db, queries, { operation: 'respond to booking change' })
+      await publishChangedJobs(env, thread.organization_id, changedTaskIds(writes))
     } catch (error) {
       if (!bookingBatchWriteRefused(error)) throw error
       result = await findMessageByDedupeKey(db, resultId)

@@ -7,7 +7,7 @@ import { bookingWelcomesQuery, bookingWelcomeViews, setupQueries, setupViews } f
 import { bookingDay } from '~/server/domain/requests'
 import { groupMediaPlacements, mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
 import { ownerPicture } from '~/server/notifications/hero'
-import { bookingEditorPath, guestConversationPath } from '~/server/utils/dashboard-links'
+import { bookingConversationOrRecordPath, guestConversationPath } from '~/shared/messages-contract'
 import { guestGroup, UPCOMING_RESERVATION_DAYS, type BusinessToday, type TodayItem } from '~/shared/dashboard-today'
 import { isChannelManagedStay, STAY_CHANNEL_LABELS } from '~/shared/bookings'
 import { currencyFractionDigits } from '~/shared/currencies'
@@ -83,7 +83,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   const dayTime = (instant: string, timezone: string) => `${formatTimestamp(instant, 'en', timezone, { weekday: 'short', month: 'short', day: 'numeric' })} · ${time(instant, timezone)}`
   const nights = (record: Pick<BookedRecordInRange, 'starts_at' | 'ends_at' | 'timezone'>) => formatCalendarRange(bookingDay(record.starts_at, record.timezone), bookingDay(record.ends_at, record.timezone), 'en-US')
   const visitWhen = (instant: string, timezone: string) => range === 'today' ? time(instant, timezone) : dayTime(instant, timezone)
-  const recordPath = (bookingId: string, conversationId: string | null, seated: number) => conversationId && seated ? guestConversationPath(viewer.slug, conversationId) : bookingEditorPath(viewer.slug, bookingId)
+  const recordPath = (bookingId: string, conversationId: string | null, seated: number) => bookingConversationOrRecordPath(viewer.slug, bookingId, seated ? conversationId : null)
   const first = (name: string | null) => name?.trim().split(/\s+/)[0] || null
 
   const cards: Card[] = []

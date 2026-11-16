@@ -1,6 +1,6 @@
 <template>
   <!-- Airbnb's "In this conversation": who is in it, its photos, then what can be done to it. -->
-  <UModal v-model:open="open" title="In this conversation" :ui="{ content: 'max-w-2xl rounded-3xl', title: 'text-lg font-semibold', header: 'border-b-0 pb-0', body: 'pt-2' }">
+  <UModal v-model:open="open" title="In this conversation" :ui="{ overlay: 'bg-black/35', content: 'max-w-2xl rounded-3xl', title: 'text-lg font-semibold', header: 'border-b-0 pb-0', body: 'pt-2' }">
     <template #body>
       <!-- A phone's header has room for the title, Done and this sheet: the booking is opened from here. -->
       <UButton v-if="bookingTo" :to="bookingTo" label="Show reservation" icon="i-lucide-calendar-days" color="neutral" variant="outline" block class="mb-4 sm:hidden" />

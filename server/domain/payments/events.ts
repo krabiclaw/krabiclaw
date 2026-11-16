@@ -1,3 +1,4 @@
+import { changedTaskIds, publishChangedJobs, publishEvent } from '~/server/events'
 import type Stripe from 'stripe'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { notifyProductBookingCreated } from '~/server/domain/product-bookings'
@@ -18,7 +19,7 @@ import { turnoverTaskQueries } from '~/server/domain/tasks'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { stayRequestConfirmationKey } from '~/server/domain/requests'
-import { approvedStayPaymentPredicate, completeStayFromCheckout, isStayNightConflict, readStayHome, releaseLapsedStayHolds, stayFromCheckoutQueries } from '~/server/domain/stays'
+import { approvedStayPaymentPredicate, completeStayFromCheckout, isStayNightConflict, readStayHome, stayFromCheckoutQueries } from '~/server/domain/stays'
 
 interface Hold {
   id:string; organization_id:string; product_id:string|null; variant_id:string|null; session_id:string|null; location_id:string|null; timezone:string|null
@@ -52,7 +53,7 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,rep
     if (intent.status === 'canceled') {
       await execute(db,"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",[payment.id])
       // A nights hold's claims go back to the home's calendar and channel.
-      await releaseLapsedStayHolds(db, env, payment.id)
+      await publishEvent(env, { type: 'stay.hold_released', payment_id: payment.id })
       // Stripe cancelled the authorization a booking was committed on, so nothing was paid; the business decides what becomes of the booking.
       if (payment.subject_id && payment.captured_amount === 0) await notifyPaymentFinancialEvent(db,stripe,env,payment,{kind:'payment_failed',nativeId:intent.id,status:intent.status,amount:intent.amount})
     }
@@ -229,8 +230,9 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
    ]
   }
  }
+ let taskIds:string[]=[]
  try{
-  await executeBatch(db,[...claim,
+  const writes=await executeBatch(db,[...claim,
    {query:`UPDATE payment_checkout_holds SET status='converted',converted_booking_id=? WHERE id=? AND organization_id=? AND status IN ('active','released') AND ${bookingExists.query}`,params:[bookingId,hold.id,payment.organization_id,...bookingExists.params]},
    {query:`UPDATE payments SET subject_id=?,updated_at=? WHERE id=? AND organization_id=? AND ${bookingExists.query}`,params:[bookingId,now,payment.id,payment.organization_id,...bookingExists.params]},
    // A refused inventory claim changes nothing. A committed booking requires
@@ -241,6 +243,7 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
      WHERE h.id=? AND h.organization_id=? AND h.status='converted' AND h.converted_booking_id=? AND p.subject_id=h.converted_booking_id
        AND (h.conversation_id IS NULL OR c.id=h.conversation_id))`, params:[...bookingExists.params,hold.id,payment.organization_id,bookingId] }),
   ],{operation:'Convert paid booking hold'})
+  taskIds=changedTaskIds(writes)
  }catch(error){
   // A night someone else holds by now refuses the batch: the guest is refunded in full. Any other failure is raised unless a concurrent conversion landed.
   const message=error instanceof Error?error.message:String(error)
@@ -252,6 +255,7 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
  const current=await queryFirst<{status:string;converted_booking_id:string|null}>(db,'SELECT status,converted_booking_id FROM payment_checkout_holds WHERE id=?',[hold.id])
  if(current?.status!=='converted')return null
  if(!current.converted_booking_id)throw new Error('Converted hold has no booking')
+ await publishChangedJobs(env,payment.organization_id,taskIds)
  return current.converted_booking_id
 }
 

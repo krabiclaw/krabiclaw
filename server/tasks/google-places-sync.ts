@@ -6,6 +6,7 @@ import { defineScheduledTask } from '~/server/utils/scheduled-task'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { filterEntitledRows } from '~/server/utils/billing-access'
 
+// Google Places ratings are the scheduled exception. Do not copy this pattern for other providers.
 // The routine Google Maps sync: for every location connected to a place, what
 // Google owns about it — rating, review count, the Maps link and the review
 // snapshot. The tenant's own details (address, phone, hours, timezone) are

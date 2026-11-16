@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:075b5fd2291b73afd24a331cae648304f8575ffd1f0e438b6d1840bd588e4d40",
-  "documentationFingerprint": "sha256:ef05379cd5187f89e11bd2e4c810d438d7f28aedf45487fc2c86ea0926a5509c",
+  "fingerprint": "sha256:48e8d68dc375b754b6fa0a642b65ba499de1534fec4dfad949f94bc86661810a",
+  "documentationFingerprint": "sha256:8c70a74ef74f6f812d035489b0e5e6b30322bed527cb8a06f8411a463679857b",
   "tools": [
     {
       "name": "add_organization_language",
@@ -13069,48 +13069,6 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "channel_push": {
-                "anyOf": [
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "type": "null"
-                      },
-                      "state": {
-                        "const": "pushed"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "state": {
-                        "const": "pending"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
-                  }
-                ],
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
               "status": {
                 "const": "cancelled"
               },
@@ -13127,8 +13085,7 @@
               "status",
               "version",
               "cancelled_at",
-              "cancellation_reason",
-              "channel_push"
+              "cancellation_reason"
             ],
             "type": "object"
           }
@@ -28984,49 +28941,6 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "channel_push": {
-                "anyOf": [
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "type": "null"
-                      },
-                      "state": {
-                        "const": "pushed"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "state": {
-                        "const": "pending"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
-                  }
-                ],
-                "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
               "check_in_date": {
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                 "type": "string"
@@ -29075,7 +28989,6 @@
               "updated_at",
               "check_in_date",
               "check_out_date",
-              "channel_push",
               "success"
             ],
             "type": "object"
@@ -47693,12 +47606,6 @@
                   "null"
                 ]
               },
-              "no_show_at": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "party_size": {
                 "type": "integer"
               },
@@ -47739,8 +47646,7 @@
               "party_size",
               "timezone",
               "starts",
-              "ends",
-              "no_show_at"
+              "ends"
             ],
             "type": [
               "object",
@@ -53915,49 +53821,6 @@
                           "null"
                         ]
                       },
-                      "channel_push": {
-                        "anyOf": [
-                          {
-                            "type": "null"
-                          },
-                          {
-                            "properties": {
-                              "detail": {
-                                "type": "null"
-                              },
-                              "state": {
-                                "const": "pushed"
-                              }
-                            },
-                            "required": [
-                              "state",
-                              "detail"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "properties": {
-                              "detail": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "state": {
-                                "const": "pending"
-                              }
-                            },
-                            "required": [
-                              "state",
-                              "detail"
-                            ],
-                            "type": "object"
-                          }
-                        ],
-                        "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
-                        "type": [
-                          "object",
-                          "null"
-                        ]
-                      },
                       "check_in_date": {
                         "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                         "type": "string"
@@ -54029,13 +53892,6 @@
                       "location_id": {
                         "minLength": 1,
                         "type": "string"
-                      },
-                      "no_show_at": {
-                        "description": "When the host recorded that the guest never arrived; null otherwise.",
-                        "type": [
-                          "string",
-                          "null"
-                        ]
                       },
                       "online_payment": {
                         "description": "The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.",
@@ -54263,7 +54119,6 @@
                       "cancelled_at",
                       "cancellation_reason",
                       "cancellation_policy",
-                      "no_show_at",
                       "answers",
                       "version",
                       "created_at",
@@ -54317,13 +54172,6 @@
                         "minLength": 1,
                         "type": "string"
                       },
-                      "no_show_at": {
-                        "description": "When the host recorded that the guest never arrived; null otherwise.",
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
                       "product_id": {
                         "minLength": 1,
                         "type": "string"
@@ -54359,8 +54207,7 @@
                       "adults",
                       "children",
                       "infants",
-                      "guest_name",
-                      "no_show_at"
+                      "guest_name"
                     ],
                     "type": "object"
                   }
@@ -64257,17 +64104,6 @@
                     "null"
                   ]
                 },
-                "calendar": {
-                  "description": "The linked calendar (Vrbo) that shows this night taken; null when none does. Such a night is not available.",
-                  "enum": [
-                    "vrbo",
-                    null
-                  ],
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "channel": {
                   "properties": {
                     "detail": {
@@ -64353,7 +64189,6 @@
                 "closed_to_departure",
                 "source",
                 "held_until",
-                "calendar",
                 "channel"
               ],
               "type": "object"
@@ -95994,49 +95829,6 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "channel_push": {
-                "anyOf": [
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "type": "null"
-                      },
-                      "state": {
-                        "const": "pushed"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "state": {
-                        "const": "pending"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
-                  }
-                ],
-                "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
               "check_in_date": {
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                 "type": "string"
@@ -96081,8 +95873,7 @@
               "version",
               "updated_at",
               "check_in_date",
-              "check_out_date",
-              "channel_push"
+              "check_out_date"
             ],
             "type": "object"
           }
@@ -100008,17 +99799,6 @@
                     "null"
                   ]
                 },
-                "calendar": {
-                  "description": "The linked calendar (Vrbo) that shows this night taken; null when none does. Such a night is not available.",
-                  "enum": [
-                    "vrbo",
-                    null
-                  ],
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "channel": {
                   "properties": {
                     "detail": {
@@ -100104,7 +99884,6 @@
                 "closed_to_departure",
                 "source",
                 "held_until",
-                "calendar",
                 "channel"
               ],
               "type": "object"
@@ -116520,49 +116299,6 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "channel_push": {
-                "anyOf": [
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "type": "null"
-                      },
-                      "state": {
-                        "const": "pushed"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "state": {
-                        "const": "pending"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
-                  }
-                ],
-                "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
               "check_in_date": {
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                 "type": "string"
@@ -116607,8 +116343,7 @@
               "version",
               "updated_at",
               "check_in_date",
-              "check_out_date",
-              "channel_push"
+              "check_out_date"
             ],
             "type": "object"
           },
@@ -125514,10 +125249,10 @@
         "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_conversations pages (guests, Airbnb Support and team conversations, with unread counts) and get_conversation for full contact messages, booking details (classes, consultations and restaurant tables), proposals and delivery receipts. Select actual teammates with list_conversation_recipients. start_conversation reuses direct and explicit stay/location team conversations; manual groups of at least three people are distinct and require a stable idempotency_key. update_conversation_group changes only manual team groups: obey can_manage/can_leave; preserve stay/location participants. New members can read group history; removal and leaving end access while retaining messages. Reading does not mark a conversation read; mark_conversation_read and mark_conversation_unread change only the caller’s read position. Summarize unanswered messages and pending bookings. Use send_message with a stable idempotency_key only for the message or photo the user requests, then read it back. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change for table reservations, classes, consultations and stays. A proposal emails the guest and keeps the existing allocation until accepted. Consultations always require client acceptance. An allowed move with apply: true changes the allocation immediately; use the returned change_status and read back the booking before reporting the outcome. Financial actions requiring the dashboard remain incomplete; report the returned handoff. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
       },
       "toolContracts": {
-        "cancel_product_booking": "sha256:117436c3b77b52e28d4c7baa8f2a7b128c044f4265fc20d038ef5a8e72ddd0f6",
+        "cancel_product_booking": "sha256:4649ba23b5d73655c2ba9b2f26ef92757c2c7a809b1dceda3e7caed8ff49b08a",
         "confirm_product_booking": "sha256:44be0ae50ae38e0e7f9610cd8eff82af1212af3eb160c66d082804673dafd71e",
         "get_conversation": "sha256:5007b5cc2485f51db503b10ae92e88691fe6d2ffa56dafced5194e41abd1fd3f",
-        "get_product_booking": "sha256:b140d7060e1d7083c969bccd8f6b7b8b0d0e8922d6f3de39aa3b933cf2cceb0a",
+        "get_product_booking": "sha256:4e30cd5e821e090ab6c79b8ba38f884ace34d17f80b0ff022e8a706cf8b004be",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
         "list_conversations": "sha256:563552eb6b0af82a762e138edf26711d2560e62fdb2cee2a757e19106704fbad",
@@ -125526,7 +125261,7 @@
         "mark_conversation_read": "sha256:4284ca380f9c4245e346ef2952bbb3d0e49719491d6a3ada129bf55a681672a4",
         "mark_conversation_unread": "sha256:93abd5acbb4e271d1a1bf843bc1c9a3ef04a44e20b3252461c089d612ab69161",
         "reject_product_booking": "sha256:3b265f1588dfdd8d008d243b0a93e298afb2bc7ac7ff265afe72de2aebfd475f",
-        "request_product_booking_change": "sha256:e20d2d6560a958fffbed04e12d794cdf0476133dd14ba3433abd07e60bfad2ee",
+        "request_product_booking_change": "sha256:be7531261e77cdbfb01096373e0d10b267c954ffada45a57bde6c4c148c155a8",
         "send_message": "sha256:4cac8008e1434c5ec878d41deec75950ca99aad5e6f94092a3e5fdf0731a85ec",
         "start_conversation": "sha256:a39d46341c069673d967628f78638bb7ddbcf94a8689796860962531e8d2192d",
         "update_conversation_group": "sha256:9e592077c678b7f3e11eb78535391b0d8ae3cff57f58e5ba78923e20710142c5"

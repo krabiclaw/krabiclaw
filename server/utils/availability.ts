@@ -1,4 +1,4 @@
-import { publishEvent } from '~/server/events'
+import { changedTaskIds, publishChangedJobs } from '~/server/events'
 import { createHash } from 'node:crypto'
 import { assertResponsibleMember } from '~/server/utils/member-access'
 import { jobAssigneeSql, sessionPrepTaskQueries } from '~/server/domain/tasks'
@@ -348,7 +348,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
       query: `UPDATE tasks SET assigned_member_id = ${jobAssigneeSql('tasks.organization_id', '?')}, version = version + 1, updated_at = ?
         WHERE organization_id = ? AND product_id = ? AND status = 'open'
           AND (kind = 'turnover' OR (kind = 'consultation_follow_up' AND assigned_member_id IS NULL))
-          AND EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id = ? AND c.product_id = ? AND c.assigned_member_id IS ?)`,
+          AND EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id = ? AND c.product_id = ? AND c.assigned_member_id IS ?) RETURNING id AS changed_task_id`,
       params: [config.assigned_member_id, now, input.organizationId, input.productId, input.organizationId, input.productId, current!.assigned_member_id],
     }] : []), {
     query: `INSERT INTO product_booking_configs (product_id, organization_id, unit, ${fields.join(', ')}, questions, created_at, updated_at, created_by, updated_by)
@@ -392,13 +392,12 @@ export async function setProductBookingConfig(db: DbClient, input: Omit<Paramete
   const paymentEnabled = input.patch.online_payment_required === true
   const queries = [...configQueries, publicResourceCacheInvalidationQuery(input.organizationId, 'product-booking-config')]
   if (queries.length > MAX_D1_BATCH_STATEMENTS) badRequest('This schedule exceeds one atomic update; reduce the requested times')
-  await executeBatch(db, queries, { operation: 'Set product booking config' }).catch(error => { throw bookingConfigurationWriteError(error) })
+  const writes = await executeBatch(db, queries, { operation: 'Set product booking config' }).catch(error => { throw bookingConfigurationWriteError(error) })
   if (input.patch.assigned_member_id !== undefined) {
     if (!input.env) throw new HTTPError({ statusCode: 503, message: 'The saved responsibility requires its organization environment', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true } })
     await publishAccessInvalidation(input.env, { organizationId: input.organizationId })
   }
-  // A new member's jobs are in their conversations before the write answers.
-  if (input.patch.assigned_member_id !== undefined) await publishEvent(input.env!, { type: 'jobs.changed', organization_id: input.organizationId })
+  if (input.patch.assigned_member_id !== undefined) await publishChangedJobs(input.env!, input.organizationId, changedTaskIds(writes))
   if (paymentEnabled || input.patch.assigned_member_id !== undefined) await publishBusinessInvalidation(input.env!, input.organizationId)
   return requireBookingConfig(db, input.organizationId, input.productId)
 }
@@ -1674,13 +1673,15 @@ export async function claimSessionCapacity(db: DbClient, input: {
   const bookingId = crypto.randomUUID()
   const claim = await sessionClaimQuery(db, { ...input, resolved, bookingId, now })
   const preceding = resolved?.preceding ?? []
+  let writes: Awaited<ReturnType<typeof executeBatch>>
   try {
-    await executeBatch(db, [...preceding, claim, assertBookingBatchWrite({ query: 'changes() = 1' }),
+    writes = await executeBatch(db, [...preceding, claim, assertBookingBatchWrite({ query: 'changes() = 1' }),
       ...(input.following?.(bookingId) ?? [])], { operation: 'Claim session capacity' })
   } catch (error) {
     if (bookingBatchWriteRefused(error)) throw new CapacityUnavailableError()
     throw error
   }
+  await publishChangedJobs(input.env, input.organizationId, changedTaskIds(writes))
   return { bookingId }
 }
 

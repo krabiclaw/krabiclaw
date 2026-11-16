@@ -1,4 +1,5 @@
 import type { InsightsPageId } from '~/shared/insights'
+export { bookingEditorPath, guestConversationPath } from '~/shared/messages-contract'
 // Shared registry for dashboard deep-links, used by both the client/tenant
 // MCP (server/utils/mcp-tools) and ChowBot's own tool executor
 // (server/utils/chowbot-agent.ts) — two otherwise-separate tool-calling
@@ -144,14 +145,6 @@ export function insightsPath(orgSlug: string, page: InsightsPageId, query?: Part
   const path = `${organizationBase(orgSlug)}/insights/${page}`
   const search = new URLSearchParams(Object.entries(query ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
   return search.size ? `${path}?${search}` : path
-}
-
-export function bookingEditorPath(orgSlug: string, bookingId: string): string {
-  return `${organizationBase(orgSlug)}/bookings/${encodeURIComponent(bookingId)}`
-}
-
-export function guestConversationPath(orgSlug: string, requestId: string): string {
-  return `${organizationBase(orgSlug)}/messages/${encodeURIComponent(requestId)}`
 }
 
 export function articleCategoryEditorPath(orgSlug: string, categoryId: string): string {

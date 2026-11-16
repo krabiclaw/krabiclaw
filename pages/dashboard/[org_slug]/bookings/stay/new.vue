@@ -49,7 +49,6 @@ import type { StayHome } from '~/server/domain/stays'
 import { MAX_STAY_NIGHTS, STAY_PAYMENT_METHODS, STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
 import { isCurrencyCode } from '~/shared/currencies'
 import { majorAmountToMinor } from '~/shared/prices'
-import { isSuccessfulChannelPush } from '~/shared/channel-push'
 import { isValidCalendarDate, isValidTimezone, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { toE164 } from '~/utils/phone'
 import { ApiClientError } from '~/utils/api-clients'
@@ -137,7 +136,7 @@ async function commit() {
       guest_email: draft.value.guest_email.trim() || null, guest_phone: draft.value.guest_phone.trim() || null, total_minor: amount(draft.value.total), private_notes: draft.value.private_notes.trim() || null, idempotency_key: draft.value.key,
       ...(draft.value.record_payment ? { payment: { amount_minor: amount(draft.value.payment_amount), method: draft.value.payment_method, paid_on: draft.value.payment_date, reference: draft.value.payment_reference.trim() || null } } : {}),
     }
-    const result = await api('/api/dashboard/bookings', { method: 'POST', body: draft.value.attempt, signal: mutation.signal, validate: (value): value is { booking: { booking_id: string } } => isRecord(value) && isRecord(value.booking) && typeof value.booking.booking_id === 'string' && Boolean(value.booking.booking_id) && Object.hasOwn(value.booking, 'channel_push') && isSuccessfulChannelPush(value.booking.channel_push) })
+    const result = await api('/api/dashboard/bookings', { method: 'POST', body: draft.value.attempt, signal: mutation.signal, validate: (value): value is { booking: { booking_id: string } } => isRecord(value) && isRecord(value.booking) && typeof value.booking.booking_id === 'string' && Boolean(value.booking.booking_id) })
     if (mutation.signal.aborted) return
     const { payment, idempotency_key: _key, arrival_time, ...fields } = draft.value.attempt
     const selectedHome = home.value!

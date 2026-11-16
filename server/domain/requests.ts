@@ -116,7 +116,6 @@ export interface ThreadOperationalRecord {
   organization_id: string
   user_id: string | null
   /** Staff recorded the guest did not come. */
-  no_show_at: string | null
   /** The review the thread's guest submitted, if any. */
   review_id: string | null
   /** The advance notice the booking was made under (its frozen policy), which closes the guest's own cancellation; null for no notice. */
@@ -220,7 +219,7 @@ export const BOOKING_RECORDS_SQL = `(
     SELECT b.id, (SELECT conv.id FROM conversations conv WHERE conv.booking_id = b.id AND conv.kind = 'booking') AS conversation_id, b.organization_id, b.status, b.party_size, b.party_size_is_minimum, b.starts_at, b.ends_at, b.timezone,
            b.location_id, b.product_id, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit,
            p.kind AS product_kind, b.product_id AS offering_id, p.name AS product_name, sc.internal_name AS product_internal_name, c.assigned_member_id, b.user_id,
-           b.no_show_at, b.created_at, b.received_at, b.updated_at, b.version, ${stayRequestRespondBySql('b')} AS respond_by,
+           b.created_at, b.received_at, b.updated_at, b.version, ${stayRequestRespondBySql('b')} AS respond_by,
            json_extract(b.policy_json, '$.advance_notice_minutes') AS advance_notice_minutes,
            json_array(b.version, b.status, b.product_id, b.product_session_id, b.starts_at, b.ends_at, b.timezone, b.updated_at) AS fingerprint
       FROM bookings b
@@ -271,7 +270,7 @@ export async function getThreadOperationalRecord(db: DbClient, requestId: string
   const now = new Date().toISOString()
   const record = authorized?.booking_id === null ? null : await queryFirst<Omit<ThreadOperationalRecord, 'party_size_is_minimum' | 'payment_processing'> & { party_size_is_minimum: number; payment_processing: number }>(db, `
     SELECT br.unit, br.id, br.status, br.party_size, br.party_size_is_minimum, br.starts_at, br.ends_at, br.timezone, br.location_id, br.product_id, br.product_kind, br.product_name, br.product_internal_name,
-           br.assigned_member_id, br.organization_id, br.user_id, br.no_show_at, br.version, br.respond_by, ${stayRequestPayBySql(conversationRef)} AS pay_by,
+           br.assigned_member_id, br.organization_id, br.user_id, br.version, br.respond_by, ${stayRequestPayBySql(conversationRef)} AS pay_by,
            CASE WHEN br.status='pending' AND br.respond_by IS NOT NULL THEN NOT (${noStayRequestPaymentInFlightSql(conversationRef)}) ELSE 0 END AS payment_processing,
            (SELECT rv.id FROM reviews rv WHERE rv.organization_id = br.organization_id AND rv.booking_id = br.id ORDER BY rv.created_at LIMIT 1) AS review_id, br.advance_notice_minutes
       FROM ${authorized ? `${BOOKING_RECORDS_SQL} br` : `conversations owner JOIN ${BOOKING_RECORDS_SQL} br ON br.id = owner.booking_id AND br.organization_id = owner.organization_id`}

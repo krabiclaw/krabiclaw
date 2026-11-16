@@ -45,7 +45,7 @@ export async function completeChannelPush<T extends object>(outcome: ChannelPush
  * what Channex last confirmed for each (sent_json), contiguous nights with
  * the same change as one date range: at most one restrictions call and one
  * availability call per home. Availability is the room's inventory: 0 while a
- * booking, a checkout hold or a linked calendar takes the night, else 1. A
+ * booking or a checkout hold takes the night, else 1. A
  * host closing a night is stop_sell on the rate plan alone, and opening it
  * stop_sell false alone; neither touches availability (docs.channex.io ARI
  * and its certification: a stop sell is one restrictions update). Airbnb's
@@ -94,6 +94,8 @@ interface OutboxRow { date: string; state: 'pending' | 'pushed' | 'needs_review'
 type Outcome = { state: 'pending' | 'needs_review'; detail: string }
 
 /** Reads a home's nights over [from, to) as they are now. */
+type AriHome = Pick<StayHome, 'product_id' | 'timezone' | 'currency'>
+
 export type StayNightReader = (from: string, to: string) => Promise<StayNight[]>
 
 function rate(minor: number, currency: CurrencyCode): string {
@@ -114,9 +116,9 @@ function clock(instant: string): string {
   return `${instant.slice(11, 16)} UTC`
 }
 
-function ariValues(night: StayNight, home: StayHome): AriValues {
+function ariValues(night: StayNight, home: AriHome): AriValues {
   return {
-    availability: night.booking_id !== null || night.held_until !== null || night.calendar !== null ? 0 : 1,
+    availability: night.booking_id !== null || night.held_until !== null ? 0 : 1,
     rate: night.price_minor === null ? null : rate(night.price_minor, home.currency),
     min_stay_arrival: night.min_stay_arrival,
     max_stay: night.max_stay ?? 0,
@@ -312,7 +314,7 @@ export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organ
  * take past dates. The outcome is these nights' state after delivery: pending
  * while Channex's rate limit or an unconfirmed call holds them.
  */
-export async function pushStayNights(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, dates: readonly string[], read: StayNightReader): Promise<ChannelPush | null> {
+export async function pushStayNights(db: DbClient, env: ChannexEnv, organizationId: string, home: AriHome, dates: readonly string[], read: StayNightReader): Promise<ChannelPush | null> {
   const mapping = await connectedMapping(db, env, organizationId, home.product_id)
   if (!mapping) return null
   return queueAndDeliver(db, env, organizationId, home, mapping, dates, read)
@@ -325,7 +327,7 @@ export async function pushStayNights(db: DbClient, env: ChannexEnv, organization
  * last confirmed is what the outbox holds; a caller resending the whole
  * calendar clears those confirmations first.
  */
-export async function pushStayCalendar(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: ChannexMapping, read: StayNightReader): Promise<ChannelPush> {
+export async function pushStayCalendar(db: DbClient, env: ChannexEnv, organizationId: string, home: AriHome, mapping: ChannexMapping, read: StayNightReader): Promise<ChannelPush> {
   const from = today(home.timezone)
   const outcome = await queueAndDeliver(db, env, organizationId, home, mapping, Array.from({ length: STAY_CALENDAR_DAYS }, (_, offset) => addDays(from, offset)), read)
   if (!outcome) throw new Error(`The calendar of ${home.product_id} has no night from ${from} to send`)
@@ -341,7 +343,7 @@ function addDays(date: string, count: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + count * 86_400_000).toISOString().slice(0, 10)
 }
 
-async function queueAndDeliver(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: Mapping, dates: readonly string[], read: StayNightReader): Promise<ChannelPush | null> {
+async function queueAndDeliver(db: DbClient, env: ChannexEnv, organizationId: string, home: AriHome, mapping: Mapping, dates: readonly string[], read: StayNightReader): Promise<ChannelPush | null> {
   const from = today(home.timezone)
   const queued = [...new Set(dates.filter(date => date >= from))].sort()
   if (!queued.length) return null
@@ -361,7 +363,7 @@ async function queueAndDeliver(db: DbClient, env: ChannexEnv, organizationId: st
 }
 
 /** Deliver one home's pending nights now. A home with no enabled mapping has nothing to deliver. */
-export async function deliverStayNights(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, read: StayNightReader): Promise<void> {
+export async function deliverStayNights(db: DbClient, env: ChannexEnv, organizationId: string, home: AriHome, read: StayNightReader): Promise<void> {
   const mapping = await connectedMapping(db, env, organizationId, home.product_id)
   if (mapping) await deliver(db, env, organizationId, home, mapping, read)
 }
@@ -372,7 +374,7 @@ export async function deliverStayNights(db: DbClient, env: ChannexEnv, organizat
  * A night changed again since this delivery read it stays pending for the
  * next; two deliveries of the same home send the same absolute values.
  */
-async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: Mapping, read: StayNightReader): Promise<void> {
+async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, home: AriHome, mapping: Mapping, read: StayNightReader): Promise<void> {
   const due = await queryAll<OutboxRow>(db, `SELECT date, state, detail, sent_json, updated_at FROM channel_night_pushes
     WHERE product_id = ? AND provider = 'channex' AND state = 'pending' ORDER BY date`, [home.product_id])
   if (!due.length) return

@@ -10,21 +10,13 @@ import { bookedRecordsInRange, businessWideViewer, type BookedRecordInRange } fr
 import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
-import { calendarStays, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, type GuestStay, type StayCheckoutInstruction, type StayHome } from '~/server/domain/stays'
+import { calendarStays, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, readStayReservationHome, type StayReservationHome } from '~/server/domain/stays'
 import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
 import { loadDashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
-import { isValidCalendarDate, localDateAt, formatTime  } from '~/utils/timezone'
-import { readProductPhotos } from '~/server/utils/media-placement'
-import { mediaStillUrl } from '~/shared/media-placement-contract'
-import { parsePostalAddress } from '~/utils/postal-address'
-import { calculateMapUrl } from '~/utils/location-map'
-import { staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
-import { parseStayAmenityAnswers } from '~/shared/stay-listing'
-import { stayHouseRuleLines, type ProductDetails } from '~/shared/product-details'
+import { isValidCalendarDate, localDateAt } from '~/utils/timezone'
 
-/** The home of a stay as its reservation shows it: what the guest's own reservation carries, and the name the business knows it by. */
-export type BookingHome = GuestStay['home'] & Pick<StayHome, 'internal_name' | 'check_in_end_time'>
+export type BookingHome = StayReservationHome
 
 export function nightBooking<T extends { id: string }>({ id, ...record }: T) {
   return { ...record, booking_id: id, unit: 'nights' as const }
@@ -56,35 +48,10 @@ export async function dashboardBookingDetails(event: H3Event) {
   if (booking.unit === 'slot') {
     return { booking: await loadDashboardBookingDetails(event, { type: 'booking', bookingId, lookup: 'booking' }), manage: access.manage }
   }
-  const [stay, house, pictures] = await Promise.all([
+  const [stay, home] = await Promise.all([
     getStay(db, access, bookingId),
-    queryFirst<Pick<StayHome, 'name' | 'internal_name' | 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'check_in_method' | 'check_in_instructions' | 'wifi_network' | 'wifi_password' | 'directions' | 'house_manual'>
-      & { checkout_instructions: string; amenity_answers: string; details_json: string; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; host_name: string | null; host_image: string | null }>(db, `SELECT p.name, s.internal_name, b.check_in_time, b.check_in_end_time, b.check_out_time,
-      s.check_in_method, s.check_in_instructions, s.wifi_network, s.wifi_password, s.directions, s.house_manual, s.checkout_instructions, s.amenity_answers, p.details_json,
-      l.address, l.latitude, l.longitude, l.maps_url, u.name AS host_name, u.image AS host_image
-      FROM product_stay_configs s
-      JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
-      JOIN product_booking_configs b ON b.organization_id = s.organization_id AND b.product_id = s.product_id
-      JOIN business_locations l ON l.organization_id = s.organization_id AND l.id = s.location_id
-      LEFT JOIN member m ON m.organizationId = b.organization_id AND m.id = b.assigned_member_id
-      LEFT JOIN user u ON u.id = m.userId
-      WHERE s.organization_id = ? AND s.product_id = ?`, [organization.id, booking.product_id]),
-    readProductPhotos(db, { organizationId: organization.id, productIds: [booking.product_id] }),
+    readStayReservationHome(db, { organizationId: organization.id, productId: booking.product_id, showLocation: true, showArrival: true }),
   ])
-  if (!house) throw new Error('The booking has no home')
-  const details = JSON.parse(house.details_json) as ProductDetails
-  const address = parsePostalAddress(house.address)
-  const home: BookingHome = {
-    name: house.name, internal_name: house.internal_name, organization_name: organization.name,
-    check_in_time: house.check_in_time, check_in_end_time: house.check_in_end_time, check_out_time: house.check_out_time,
-    image_url: mediaStillUrl(pictures.get(booking.product_id)?.[0]),
-    location: { address, latitude: house.latitude, longitude: house.longitude, maps_url: calculateMapUrl({ title: '', address, latitude: house.latitude, longitude: house.longitude, maps_url: house.maps_url }) },
-    arrival_guide: { product_id: booking.product_id, check_in_method: house.check_in_method, check_in_instructions: house.check_in_instructions, wifi_network: house.wifi_network, wifi_password: house.wifi_password,
-      directions: house.directions, house_manual: house.house_manual, checkout_instructions: JSON.parse(house.checkout_instructions) as StayCheckoutInstruction[] },
-    house_rules: stayHouseRuleLines(details, value => formatTime(value, 'en')),
-    safety: [...staySafetyLines(details), ...stayAlarmLines(parseStayAmenityAnswers(JSON.parse(house.amenity_answers)), details, { includeUnknown: true })],
-    host: house.host_name === null ? null : { name: house.host_name, image: house.host_image },
-  }
   if (!('payments' in stay)) return { booking: nightBooking(stay), manage: false, home }
   const conversation = await getGuestRequest(db, booking.conversation_id, organization.id, 'booking')
   if (!conversation) throw new Error('The booking has no guest conversation')

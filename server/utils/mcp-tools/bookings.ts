@@ -12,7 +12,6 @@ import { localDateAt } from '~/utils/timezone'
 import { stayGuestFirstName } from '~/shared/bookings'
 import { getStay, stayAccessFor, updateStay } from '~/server/domain/stays'
 import { nightBookingFields, nightBookingMutation, nightBookingReceipt, stayDetail, stayTurnover } from './stays'
-import { CHANNEL_PUSH_SCHEMA } from '~/shared/channel-push'
 import { executeBookingStatus } from '~/server/domain/guest-threads/operations'
 import { changeBooking } from '~/server/domain/guest-threads/booking-changes'
 import { setBookingNote } from '~/server/domain/bookings'
@@ -34,7 +33,7 @@ const record = { type: 'object', properties: { id: text, kind: { type: 'string',
 const booking = { type: 'object', properties: { booking_id: text, conversation_id: nullableText, product_id: text, product_kind: productKind, product_variant_id: nullableText, product_session_id: { ...nullableText, description: 'The session a slot booking holds; null for a stay, which holds nights.' }, unit: { type: 'string', enum: ['slot', 'nights'], description: 'What the booking holds: a session\'s places (slot) or a home\'s nights (nights).' }, status: { type: 'string', enum: [...BOOKING_STATUSES] }, is_complete: { type: 'boolean' }, party_size: { type: 'integer' }, version, updated_at: text, assigned_member_id: nullableText, location_id: nullableText, starts_at: text, ends_at: text, timezone: text, guest: { type: ['object', 'null'], properties: { name: nullableText }, required: ['name'], additionalProperties: false }, provenance: { type: ['object', 'null'], properties: { source: text, external_reference: nullableText, guest_acknowledgement: { type: 'boolean' } }, required: ['source', 'external_reference', 'guest_acknowledgement'] } }, required: ['booking_id', 'conversation_id', 'product_id', 'product_kind', 'product_variant_id', 'product_session_id', 'unit', 'status', 'is_complete', 'party_size', 'version', 'updated_at', 'assigned_member_id', 'location_id', 'starts_at', 'ends_at', 'timezone', 'guest', 'provenance'] }
 const session = { type: 'object', properties: { id: text, organization_id: text, product_id: text, location_id: nullableText, timezone: text, starts_at: text, ends_at: text, updated_at: nullableText, capacity: { type: ['integer', 'null'] }, status: text, claimed: { type: 'integer' }, remaining: { type: ['integer', 'null'] }, is_full: { type: 'boolean' } }, required: ['id', 'organization_id', 'product_id', 'location_id', 'starts_at', 'ends_at', 'timezone', 'capacity', 'status', 'claimed', 'remaining', 'is_full', 'updated_at'] }
 const operationResult = { type: 'object', properties: { ok: { const: true }, status: { const: 200 }, conversation_id: text, record, available_actions: { type: 'array', items: text }, thread: { type: 'object', properties: { id: text, kind: { type: 'string', enum: ['booking'] } }, required: ['id', 'kind'] } }, required: ['ok', 'status', 'conversation_id', 'record', 'available_actions', 'thread'] }
-const nightsCancelResult = { type: 'object', properties: { booking_id: text, unit: { const: 'nights' }, status: { const: 'cancelled' }, version: { type: 'integer' }, cancelled_at: text, cancellation_reason: nullableText, channel_push: { ...CHANNEL_PUSH_SCHEMA } }, required: ['booking_id', 'unit', 'status', 'version', 'cancelled_at', 'cancellation_reason', 'channel_push'], additionalProperties: false }
+const nightsCancelResult = { type: 'object', properties: { booking_id: text, unit: { const: 'nights' }, status: { const: 'cancelled' }, version: { type: 'integer' }, cancelled_at: text, cancellation_reason: nullableText }, required: ['booking_id', 'unit', 'status', 'version', 'cancelled_at', 'cancellation_reason'], additionalProperties: false }
 const changeResult = { type: 'object', properties: { success: { const: true }, conversation_id: text, change_status: { type: 'string', enum: ['awaiting_guest_acceptance', 'accepted', 'declined', 'moved'] }, record }, required: ['success', 'conversation_id', 'change_status', 'record'] }
 
 function mcpBookingRecord(record: ThreadOperationalRecord) {
@@ -258,7 +257,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
   if (result.kind === 'stay') {
     const { stay } = result
     if (stay.cancelled_at === null) throw new Error(`Cancelled booking ${id} has no cancellation time`)
-    return { booking_id: id, unit: 'nights', status: 'cancelled', version: stay.version, cancelled_at: stay.cancelled_at, cancellation_reason: stay.cancellation_reason, channel_push: stay.channel_push }
+    return { booking_id: id, unit: 'nights', status: 'cancelled', version: stay.version, cancelled_at: stay.cancelled_at, cancellation_reason: stay.cancellation_reason }
   }
   const { outcome } = result
   if (outcome.ok || outcome.reason === 'delivery_failed') await publishConversationEvent(env, db, { conversationId: thread.id, type: 'MESSAGE_CREATE' })

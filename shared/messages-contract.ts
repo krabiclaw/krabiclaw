@@ -2,6 +2,23 @@ import type { GuestThreadDeliveryChannel, GuestThreadDeliveryStatus, InboxPhoto,
 
 export type ConversationViewerRole = 'guest' | 'member'
 
+export function guestConversationPath(orgSlug: string, conversationId: string): string {
+  return `/dashboard/${encodeURIComponent(orgSlug)}/messages/${encodeURIComponent(conversationId)}`
+}
+
+export function accountReservationPath(conversationId: string): string {
+  return `${guestConversationPath('account', conversationId)}/reservation`
+}
+
+export function bookingEditorPath(orgSlug: string, bookingId: string): string {
+  return `/dashboard/${encodeURIComponent(orgSlug)}/bookings/${encodeURIComponent(bookingId)}`
+}
+
+/** A scheduling role can read a reservation without having a seat in its conversation. */
+export function bookingConversationOrRecordPath(orgSlug: string, bookingId: string, readableConversationId: string | null): string {
+  return readableConversationId === null ? bookingEditorPath(orgSlug, bookingId) : guestConversationPath(orgSlug, readableConversationId)
+}
+
 export interface ConversationDelivery {
   id: string
   channel: GuestThreadDeliveryChannel

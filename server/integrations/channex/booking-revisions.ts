@@ -149,26 +149,3 @@ export async function landBookingRevision(db: DbClient, env: ChannexEnv & GuestI
     throw error
   }
 }
-
-/**
- * Channex's unacknowledged revisions, oldest first: the required backup for a
- * webhook that never arrived or failed. Every revision is tried; the run fails
- * naming the ones that did not land.
- */
-export async function runRevisionFeed(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv): Promise<{ acknowledged: number; ignored: number }> {
-  const revisions = await channexList(env, '/booking_revisions/feed', 'booking_revision', { 'order[inserted_at]': 'asc' })
-  let acknowledged = 0
-  let ignored = 0
-  const failures: string[] = []
-  for (const revision of revisions) {
-    try {
-      const outcome = await landBookingRevision(db, env, revision)
-      if (outcome.status === 'acknowledged') acknowledged += 1
-      else ignored += 1
-    } catch (error) {
-      failures.push(`${revision.id}: ${describeErrorForTelemetry(error)}`)
-    }
-  }
-  if (failures.length) throw new Error(`${failures.length} Channex booking revision(s) did not land: ${failures.join('; ')}`)
-  return { acknowledged, ignored }
-}

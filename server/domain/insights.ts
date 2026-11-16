@@ -347,7 +347,7 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
           WHERE p.organization_id = ? AND p.kind = 'stay' AND p.active = 1 ${locationId ? 'AND c.location_id = ?' : ''}`,
       params: [reader.organizationId, ...homeParams] },
       { query: `SELECT n.product_id, n.date, n.booking_id IS NOT NULL AS booked FROM stay_nights n ${home}
-          WHERE n.organization_id = ? AND n.date BETWEEN ? AND ? AND (n.booking_id IS NOT NULL OR n.calendar_link_id IS NOT NULL)`,
+          WHERE n.organization_id = ? AND n.date BETWEEN ? AND ? AND n.booking_id IS NOT NULL`,
       params: [...homeParams, reader.organizationId, context.range.startDate, context.range.endDate] },
       { query: `SELECT n.product_id, n.date FROM product_nights n ${home} WHERE n.organization_id = ? AND n.date BETWEEN ? AND ? AND n.closed = 1`,
       params: [...homeParams, reader.organizationId, context.range.startDate, context.range.endDate] },

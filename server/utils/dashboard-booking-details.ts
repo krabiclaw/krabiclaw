@@ -1,5 +1,4 @@
 import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
-import { memberBusyIntervals } from '~/server/domain/member-scheduling'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { getGuestRequest, getThreadOperationalRecord, requestActions } from '~/server/domain/requests'
 import { CURRENT_GUEST_SQL, GUEST_NOTE_EVENT, type MessageRow } from '~/server/domain/conversations'
@@ -69,7 +68,6 @@ interface BookingRow {
   product_kind: ProductKind
   /** The offering's advance notice, which also closes the guest's own cancellation; null is no notice. */
   advance_notice_minutes: number | null
-  no_show_at: string | null
   review_id: string | null
   private_notes: string | null
 }
@@ -79,7 +77,6 @@ export interface DashboardBookingDetails {
   payment_id: string | null
   assigned_member_id: string | null
   assigned_member_name: string | null
-  provider_conflict: boolean
   /** A future provider occurrence the caller may reassign through Better Auth. */
   updated_at: string
   booking_id: string | null
@@ -146,7 +143,6 @@ export interface DashboardBookingDetails {
   /** The business's phone for this booking, as the guest reaches it. */
   contact_phone: string | null
   /** When staff recorded the guest did not come. */
-  no_show_at: string | null
   /** Where the visit's review invitation stands, for the team; null before one is sent. */
   review_invitation: { state: 'sent' | 'submitted' | 'revoked' | 'expired'; at: string } | null
 }
@@ -192,11 +188,11 @@ async function loadBookingRow(
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status,
     (SELECT m.body FROM messages m WHERE m.conversation_id = r.id AND m.event_name = '${GUEST_NOTE_EVENT}' ORDER BY m.sequence LIMIT 1) AS notes,
     record.product_id, record.name, record.product_session_id,
-    r.id AS conversation_id, record.answers AS answers_json, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, record.created_at, record.updated_at, record.no_show_at, (SELECT rv.id FROM reviews rv WHERE rv.organization_id = record.organization_id AND rv.booking_id = record.id ORDER BY rv.created_at LIMIT 1) AS review_id, record.private_notes
+    r.id AS conversation_id, record.answers AS answers_json, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, record.created_at, record.updated_at, (SELECT rv.id FROM reviews rv WHERE rv.organization_id = record.organization_id AND rv.booking_id = record.id ORDER BY rv.created_at LIMIT 1) AS review_id, record.private_notes
     FROM conversations r
     JOIN organization s ON s.id = r.organization_id
     JOIN (
-      SELECT b.id, b.version, b.organization_id, b.status, b.party_size, b.starts_at, b.ends_at, b.timezone, b.location_id, b.product_id, p.name, b.product_session_id, cfg.assigned_member_id, b.created_at, b.updated_at, b.policy_json, p.kind AS product_kind, cfg.advance_notice_minutes, b.no_show_at, b.answers, b.private_notes
+      SELECT b.id, b.version, b.organization_id, b.status, b.party_size, b.starts_at, b.ends_at, b.timezone, b.location_id, b.product_id, p.name, b.product_session_id, cfg.assigned_member_id, b.created_at, b.updated_at, b.policy_json, p.kind AS product_kind, cfg.advance_notice_minutes, b.answers, b.private_notes
         FROM bookings b JOIN products p ON p.id = b.product_id
         LEFT JOIN product_booking_configs cfg ON cfg.product_id = b.product_id AND cfg.organization_id = b.organization_id
     ) record ON record.id = r.booking_id AND record.organization_id = r.organization_id
@@ -308,10 +304,6 @@ async function composeBookingDetails(
   const provider=!reader.buyerUserId&&row.assigned_member_id?await queryFirst<{name:string|null}>(db,`SELECT ${MEMBER_NAME_SQL} name FROM member m LEFT JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.id=? AND m.organizationId=?`,[row.assigned_member_id,row.organization_id]):null
   const now = new Date().toISOString()
   const complete = isBookingComplete({ status: row.status as BookingStatus, ends_at: row.ends_at }, now)
-  // A live booking's provider calendar is asked about its time when the team reads it; a past or cancelled one has nothing to conflict with.
-  const providerConflict=!reader.buyerUserId && row.assigned_member_id && !complete && row.status!=='cancelled'
-    ? (await memberBusyIntervals(db,reader.env,row.organization_id,row.assigned_member_id,{from:row.starts_at,until:row.ends_at})).some(busy=>busy.start<row.ends_at&&busy.end>row.starts_at)
-    : false
   const paymentIds=reader.buyerUserId
     ?await queryAll<{id:string}>(db,"SELECT id FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND buyer_user_id=? ORDER BY created_at,id",[row.organization_id,row.booking_id,reader.buyerUserId])
     :reader.canReadPayments?await queryAll<{id:string}>(db,"SELECT id FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? ORDER BY created_at,id",[row.organization_id,row.booking_id]):[]
@@ -332,7 +324,6 @@ async function composeBookingDetails(
     ],
     payment_id: null,
     assigned_member_name: provider?.name ?? null,
-    provider_conflict: providerConflict,
     type,
     location_title: row.location_id === null ? 'Online' : location_title!,
     location_address: location_address ? formatPostalAddress(parsePostalAddress(location_address)) || null : null,
@@ -443,7 +434,7 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
   if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error('Purchase has no immutable title')
   const contact = payment.location_id ? await resolveLocationContact(db, payment.organization_id, payment.location_id) : { contactPhone: payment.contact_phone }
   return {
-    assigned_member_id: null, assigned_member_name: null, provider_conflict: false,
+    assigned_member_id: null, assigned_member_name: null,
     // A purchase asks no questions.
     answers: [],
     payment_id: paymentId,
@@ -490,7 +481,6 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     guest_can_cancel: false,
     guest_can_retry_cancellation: false,
     guest_cancel_refunds: false,
-    no_show_at: null,
     review_invitation: null,
     contact_phone: contact?.contactPhone ?? null,
   }

@@ -1,6 +1,5 @@
-// A booking opens beneath Today, its calendar context or its conversation. The same detail
-// subtree keeps its parent beside it on desktop and returns to that parent on
-// mobile. Its Back and active tab come from that route tree, not history.
+// The reservation opens under its conversation. Staff with access to the record
+// can also open it directly if they are not participants in the conversation.
 
 export interface PageNode {
   name?: string
@@ -11,16 +10,9 @@ export interface PageNode {
 }
 
 const BOOKING_PATH = '/dashboard/:org_slug()/bookings/:booking_type()/:record_id()'
-const TODAY_PATH = '/dashboard/:org_slug()'
-const CALENDAR_PATH = '/dashboard/:org_slug()/calendar'
-const DAY_PATH = `${CALENDAR_PATH}/:day()`
 const CONVERSATION_PATH = '/dashboard/:org_slug()/messages/:conversation_id()'
-// The account's own record lives under Past activity. Today opens it at
-// `/dashboard/account/bookings` beneath Today, and its calendar day mounts
-// it a third time, as the business's does.
 const ACCOUNT_RECORD_PATH = '/dashboard/account/activity/:kind()/:id()'
-const ACCOUNT_BOOKING_PATH = '/dashboard/account/bookings/:kind()/:id()'
-const ACCOUNT_DAY_PATH = '/dashboard/account/calendar/:day()'
+const ACCOUNT_CONVERSATION_PATH = '/dashboard/account/messages/:conversation_id()'
 
 /** The node at a full path in Nuxt's nested page tree, whose children carry paths relative to their parent. */
 export function nodeAt(nodes: readonly PageNode[], target: string, parent = ''): PageNode | undefined {
@@ -44,41 +36,22 @@ export function renamed(node: PageNode, from: string, to: string): PageNode {
 
 export function mountBookingRoutes(pages: PageNode[]): void {
   const booking = nodeAt(pages, BOOKING_PATH)
-  const today = nodeAt(pages, TODAY_PATH)
-  const calendar = nodeAt(pages, CALENDAR_PATH)
-  const day = nodeAt(pages, DAY_PATH)
-  if (!booking || !today || !calendar || !day) throw new Error('The booking, Today, calendar and calendar day pages were not all found; bookings cannot open in their context')
-  const canonical = renamed(booking, 'dashboard-org_slug-bookings-booking_type', 'dashboard-org_slug-bookings')
-  canonical.path = 'bookings/:record_id()'
-  const clone = renamed(canonical, 'dashboard-org_slug-bookings', 'dashboard-org_slug-calendar-day')
-  clone.path = 'booking/:record_id()'
-  day.children = [...(day.children ?? []), clone]
-  // A home's occupied night opens its stay directly: its parent is the nightly
-  // Calendar, rather than an agenda day whose state belongs to a location.
-  const night = renamed(canonical, 'dashboard-org_slug-bookings', 'dashboard-org_slug-calendar-night')
-  night.path = 'stay/:record_id()'
-  calendar.children = [...(calendar.children ?? []), night]
-  // A conversation's reservation opens beside it, as Airbnb's does: the thread stays the parent.
   const conversation = nodeAt(pages, CONVERSATION_PATH)
-  if (!conversation) throw new Error('The conversation page was not found; its reservation cannot open beside it')
+  const record = nodeAt(pages, ACCOUNT_RECORD_PATH)
+  const accountConversation = nodeAt(pages, ACCOUNT_CONVERSATION_PATH)
+  if (!booking || !conversation || !record || !accountConversation) throw new Error('The booking and conversation pages could not be mounted')
+  const canonical = renamed(booking, 'dashboard-org_slug-bookings-booking_type', 'dashboard-org_slug-bookings')
+  canonical.path = '/dashboard/:org_slug()/bookings/:record_id()'
+  booking.path = '/dashboard/:org_slug()/bookings/:booking_type(order|payment)/:record_id()'
+  pages.push(canonical)
+
   const reservation = renamed(canonical, 'dashboard-org_slug-bookings', 'dashboard-org_slug-messages-conversation_id-reservation')
   reservation.path = 'reservation/:record_id()'
   reservation.meta = { ...reservation.meta, dashboardThirdPane: true }
   conversation.children = [...(conversation.children ?? []), reservation]
-  const bookingIndex = pages.indexOf(booking)
-  if (bookingIndex === -1) throw new Error('The booking subtree must be a root before it is mounted beneath Today')
-  pages.splice(bookingIndex, 1)
-  booking.path = 'bookings/:booking_type(order|payment)/:record_id()'
-  today.children = [...(today.children ?? []), canonical, booking]
+  canonical.meta = { ...canonical.meta, tab: 'today', back: 'dashboard-org_slug' }
+  booking.meta = { ...booking.meta, tab: 'today', back: 'dashboard-org_slug' }
 
-  const record = nodeAt(pages, ACCOUNT_RECORD_PATH)
-  const accountDay = nodeAt(pages, ACCOUNT_DAY_PATH)
-  const accountToday = nodeAt(pages, '/dashboard/account')
-  if (!record || !accountDay || !accountToday) throw new Error('The account activity record, Today and calendar day pages were not all found; account bookings cannot open in their context')
-  const accountClone = renamed(record, 'dashboard-account-activity', 'dashboard-account-calendar-day')
-  accountClone.path = ':kind()/:id()'
-  accountDay.children = [...(accountDay.children ?? []), accountClone]
-  const accountBooking = renamed(record, 'dashboard-account-activity', 'dashboard-account-bookings')
-  accountBooking.path = ACCOUNT_BOOKING_PATH.slice('/dashboard/account/'.length)
-  accountToday.children = [...(accountToday.children ?? []), accountBooking]
+  const accountReservation = { ...record, name: 'dashboard-account-messages-conversation_id-reservation', path: 'reservation', meta: { ...record.meta, dashboardThirdPane: true } }
+  accountConversation.children = [...(accountConversation.children ?? []), accountReservation]
 }

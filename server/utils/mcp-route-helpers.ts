@@ -92,12 +92,6 @@ export function describeMcpAuthTelemetryError(
   return `${prefix}: ${fallback}`
 }
 
-export function getCloudflareWaitUntil(event: H3Event): ((_promise: Promise<unknown>) => void) | undefined {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ctx = (event.req.runtime?.cloudflare as any)?.context as { waitUntil?: (_p: Promise<unknown>) => void } | undefined
-  return ctx?.waitUntil?.bind(ctx)
-}
-
 export function isMcpMutatingTool(tool: { annotations?: { readOnlyHint?: boolean } } | undefined | null) {
   return tool?.annotations?.readOnlyHint === false
 }

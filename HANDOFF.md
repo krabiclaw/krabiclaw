@@ -31,43 +31,33 @@ Checkout: `~/Repos2026/krabiclaw-today-speed`. Read `CLAUDE.md` first; it govern
 
 ## Local run
 
-- `corepack yarn build`, then the built worker: `wrangler dev .output/server/index.mjs --env e2e --persist-to .wrangler/e2e-state-3478 --port 3478` (`yarn dev` fails with a D1 session-token error). Do not start a second worker if port 3478 is in use.
-- Sign in by `POST /api/auth/sign-in/email` as `lodging-host@playwright.example` (owner of `e2e-stays-483c853d`) or `buyer@playwright.example` (guest), with the E2E fixtures' shared password.
-- Local data: home "Assigned Cabin" (`b3d94a99-…`) has a flexible cancellation policy and a full arrival guide. Stay `1e79ee14-16bf-4a41-8eac-d3fba709b2f0`, conversation `d0792f73-7dff-4562-991a-a020380ce04a`, was made before the policy change, so make a new stay to see the policy. The buyer is invited to that conversation.
-- Scripts: `.wrangler/setup.mjs` (fill home, create stay), `.wrangler/shots.mjs` (host and guest screenshots plus panel text).
+- Build with `corepack yarn build`. Run the built Worker with `corepack yarn wrangler dev .output/server/index.mjs --env e2e --assets .output/public --persist-to .wrangler/e2e-state-3478 --port 3478`. Use the localhost URL overrides in `playwright.config.ts` for port 3478. The Better Auth, platform and media URL overrides are needed for this port.
+- Use the existing `lodging-host@playwright.example` and `buyer@playwright.example` fixtures with the fixture password. The Assigned Cabin fixture has a cover image, Flexible cancellation and a full arrival guide.
+- Use stay `a91eb383-eead-40b5-95e3-00a2bd04be35`, conversation `cb05c00c-9493-400e-99e1-5dac8234383e`. As host, open `/dashboard/e2e-stays-483c853d/messages/<conversation>/reservation/<stay>`. As guest, open `/dashboard/account/messages/<conversation>`. The guest can close the panel and reopen it from Show reservation in the thread. This thread contains a Gallery photo.
 
-## Done on the branch (seen locally unless marked)
+## Done
 
-- Range caps, Move guest, calendar city/"No upcoming stays" filters, "All activity" picker deleted; Insights charts are bars.
-- Jobs always assigned; job card in the team conversation with Done; job reminders stored in the outbox (`scheduled_guest_messages.task_id`, migration 0011) and sent by the hub alarm; the 2-minute cron deleted.
-- `jobs.changed` queue event replaces inline job posting in booking writes.
-- Conversation in three panes with the reservation beside it (`reservation/:record_id` under the conversation); In this conversation sheet; ChannelMark on avatars.
-- Reservation panel for a stay in Airbnb's order (`components/dashboard/BookingDetails.vue`, `v-if="stay && panel"`); Payment info wording; Change reservation and Record a payment step pages.
-- No-show action deleted for every vertical (server, routes, MCP, UI).
-- NOT YET BUILT OR SEEN (last commit): host and guest read one home shape (`BookingHome = GuestStay['home'] & …`), same "Hosted by", Wi-Fi, safety, checkout list; host-entered stays book under the home's cancellation policy; "Confirmed" badge and floating Message button removed for stays; title "Reservation" for the guest.
+- Jobs default to the owner. The queue consumer receives task IDs from the write and loads only those jobs and the conversations they concern. A local booking produced one assigned turnover with a team message and two reminders. The same booking produced pending check-in instructions.
+- Offline stay writes pass guest-message planning and Channex inventory publication to EVENTS. Matched three-night local dashboard POSTs returned 201 before and after. D1 statements fell from 54 to 33 and batch round trips from 7 to 4.
+- Host and guest use the same stored home reader. Fixed the host detail query's missing-column error and removed the timed panel's live Google free/busy lookup. The shared layout rendered on both sides for the stay and on the host side for a class, a Family Law consultation and a table. The same guest stay read fell from 41 to 15 D1 statements and from 6 to 0 batch round trips. Both stay panels showed the cover, assigned host, Flexible policy and Wi-Fi. The conversation Gallery rendered and opened the uploaded photo.
+- Today and Calendar links open the reservation's conversation for participants. Staff with reservation permission retain a standalone reservation route when they have no conversation seat. Calendar uses ChannelMark. A local calendar reservation link opened the conversation and its panel.
+- Removed the Vrbo iCal storage, poll, calendar overlays and endpoints. Local upgrade applied migration 0012 and `PRAGMA foreign_key_check` returned no violations. Booking and checkout night claims survive the migration. Before applying this to a deployed database, verify that any future iCal-only claims have corresponding Vrbo reservations through Channex.
+- Removed the scheduled Channex backup feed. The booking and `non_acked_booking` webhooks use the same revision reader and acknowledgement. Configured Channex targets need the updated event mask before deployment.
+- Replaced the Stripe fee-report schedule with the platform `reporting.report_type.updated` webhook. The endpoint must explicitly subscribe before deployment and still needs signed availability and completion delivery verification.
+- Replaced MCP and public-help `waitUntil` telemetry publication with redacted EVENTS messages. Queue diagnostic payloads use an explicit size budget. Confirmed that a local tools/list returned 167 tools and persisted its queued audit row. The E2E Worker lacks the Cloudflare AI Search binding, so the public help request returned 500 and persisted its queued error row. Checkout hold inventory publication and cancelled payment hold release also use EVENTS.
+- The companion `claude/unread-dot` iOS branch now removes the retired iCal, no-show and Move guest paths and uses the timed change endpoints. Commit `a148d3b` is local in `~/Repos2026/bookyboo-ios-messages-release`. It built and opened the sign-in screen on an iPhone simulator.
 
-## Not done (all required in this branch)
+## Open
 
-Reservation panel parity
-1. Rebuild, screenshot host and guest beside the Airbnb reference, compare line by line.
-2. Text sizes are larger than Airbnb's (Airbnb: title 22px, section heading 18px, labels 14px, sub-lines 12px).
-3. Add a home photo locally and check the photo block.
-4. Guest: `/dashboard/account/messages/:conversation` redirects to `/dashboard/account/activity/stay/:id` and shows Past activity on the left. The guest must get the conversation with the reservation beside it, as the host does (mount in `build/booking-routes.ts`).
-5. The line "This conversation is about a reservation. Show reservation" sits under the header; Airbnb's is a line in the thread.
-6. Classes, consultations and tables still use the old card layout (`v-else` block). Move them onto the same panel block.
-7. Gallery in In this conversation never seen rendered.
-8. Calendar grid should use `ChannelMark`; remove the booking mount beside Today and point Today/Calendar/notification links at the conversation.
-9. `bookings.no_show_at` column and its readers remain (dropping it rebuilds the bookings table).
+- The Airbnb comparison still differs on features such as the listing-photo carousel, guest management, visa PDF, and business-trip and support actions. Signed-in iPhone Messages and physical-device verification are open.
+- Complete the remaining event conversions for cache invalidation, Google Calendar, Channex ARI and Airbnb sync steps, checkout and pending-stay expiry, review invitations, Stripe GA4 and MCP retention, custom domains, and ad spend. Google Places ratings are the scheduled exception. Cloudflare documents certificate deployment events, and its readiness check separately requires hostname activation and customer DNS cutover. Google Ads and Meta document spend reporting reads, and equivalent delivered daily spend events have not been verified.
+- Check Channex reservation revision recovery and Airbnb withdrawal behavior with provider fixtures. Channex ARI and Airbnb sync job state do not store an exact retry time today. The current schedules still run.
+- The old deployed guest-delivery queues and quiet backfill for the 21 existing production jobs require owner-directed production operations. An existing-job backfill can use scoped `jobs.changed` messages with `task_ids` and `quiet: true`.
+- The remaining no-show reads protect historical review eligibility. The booking column is still part of a CHECK on a referenced D1 parent table. Use the existing replacement-database workflow and validate that historical stamps have the matching `booking.no_show`, `stay.no_show` or `reservation.no_show` transcript event before dropping the column and changing the review reader.
+- Timed visit notifications and some payment and provider notifications still run inline. Web checkout hold queueing, successful public-help delivery and telemetry redelivery need boundary verification. The draft's unit and E2E specs remain stale and have not been updated or run locally.
+- The web build, quality checks, migration lint and schema drift check passed locally. Keep this PR in draft. Delete `HANDOFF.md` before marking it ready.
 
-Speed and events
-10. The `jobs.changed` consumer re-reads the whole business; it should handle only the job that changed. Existing open jobs must be posted quietly on first pass.
-11. A stay write still plans guest messages and pushes nights to Channex inline (`publishCreatedStay`). Move both to the queue; measure a booking write before and after.
-12. Delete Vrbo iCal calendar links entirely (`stay_calendar_links`, calendar-link routes); Vrbo is Channex only.
-13. Delete the Channex backup feed poll (`channex-revision-feed`) and the old `krabiclaw-guest-delivery*` queues.
-14. Move to webhooks: Stripe fee report (report-run webhooks), Cloudflare custom-domain status (check Cloudflare for SaaS webhook docs), ad spend (Meta ad-account webhooks; verify Google Ads). Google ratings stay scheduled with a comment saying never to copy the method.
-15. Remaining timers to replace with events or exact-time wakes: public-resource-cache-invalidation, google-calendar-sync, channex-ari-delivery, airbnb-sync, stay-checkout-holds, review-request-automation, domain-reconciliation, stripe-ga4-intent-retention, marketing-ad-spend-daily. Replace `waitUntil` handoffs with the queue.
+## Retired routes
 
-Last
-16. Tests are stale and have not been run since the queue change (`cleaner-jobs-d1`, `stays-d1`, `team-messages-d1`, `today-reservations-d1`, E2E `stays`, `dashboard-layout`, `native-consultations`; anything asserting no-show). Update once, after the code is finished.
-17. iPhone branch `claude/unread-dot` in `~/Repos2026/bookyboo-ios-messages-release` compiles but has never been run; it ships with this change.
-18. Production has 21 open jobs with no job conversation; nothing is written to production without the owner's instruction.
+- `GET`, `PUT` and `DELETE /api/dashboard/stay-homes/<product>/calendar-link` return 404. Vrbo uses Channex.
+- `GET /api/public/stay-calendars/<token>.ics` returns 404. The iCal feed is retired.

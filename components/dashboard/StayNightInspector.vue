@@ -54,7 +54,7 @@
         <p v-else-if="!nights.length" class="mt-3 text-sm">No selected {{ nouns.unit }} falls on the chosen weekdays.</p>
         <p v-if="heldLine" class="mt-3 text-sm" data-testid="stay-night-booked">{{ heldLine }}</p>
         <p v-for="expiry in holdExpiries" :key="expiry.at" class="mt-3 text-sm">Checkout hold expires {{ formatTimestamp(expiry.at, 'en', expiry.timezone) }} ({{ expiry.timezone }}).</p>
-        <UButton v-for="id in stayIds" :key="id" :to="{ path: `/dashboard/${orgSlug}/calendar/stay/${encodeURIComponent(id)}`, query: route.query }" label="View stay" color="neutral" variant="outline" class="mt-3" />
+        <UButton v-for="id in stayIds" :key="id" :to="stayTo(id)" label="View stay" color="neutral" variant="outline" class="mt-3" />
       </UCard>
       <UButton v-if="addStayTo" :to="addStayTo" label="Add stay" icon="i-lucide-plus" color="neutral" variant="outline" class="w-full justify-center rounded-full" :disabled="busy" />
       <UButton v-if="pricing" label="Nightly price" color="neutral" class="w-full flex-col items-start rounded-3xl p-6 text-left" :disabled="busy || !manage || !nights.length" @click="$emit('edit', 'price')">
@@ -137,7 +137,7 @@ import { formatTimestamp } from '~/utils/timezone'
 import { isStayNight, type CalendarSlot, type EditorNouns, type NightConcern, type NightDraft, type NightEditField, type NightEditorHome, type NightPriceMode } from '~/composables/useStayNightEditor'
 
 const props = defineProps<{
-  orgSlug: string
+  stayTo: (bookingId: string) => string
   /** The selected homes, when the rows are homes; a place's days carry no home. */
   homes: NightEditorHome[]
   /** The homes' one currency; null when they differ. */
@@ -184,7 +184,6 @@ const props = defineProps<{
   priceMode: NightPriceMode
   dirty: boolean
 }>()
-const route = useRoute()
 const emit = defineEmits<{
   clear: []
   dates: []

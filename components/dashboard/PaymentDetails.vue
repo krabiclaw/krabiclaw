@@ -1,37 +1,35 @@
 <template>
-  <!-- Airbnb's reservation page: what was bought, then "Payment info" with the amount paid and a receipt row. -->
-  <UCard v-if="order" as="section" variant="record">
-    <h2 class="text-base font-semibold text-highlighted">Order details</h2>
-    <div v-for="line in order.lines" :key="line.id" class="mt-4 flex items-start justify-between gap-4 text-base">
+  <div v-if="order" class="mt-5">
+    <h3 class="text-sm font-semibold text-highlighted">Order details</h3>
+    <div v-for="line in order.lines" :key="line.id" class="mt-4 flex items-start justify-between gap-4 text-sm">
       <span class="text-highlighted">{{ line.title }} <span class="text-muted">× {{ line.quantity }}</span></span>
       <span class="shrink-0 text-muted">{{ paymentMoney(line.quantity * line.unit_amount, line.currency) }}</span>
     </div>
-  </UCard>
-  <UCard as="section" variant="record">
-    <h2 class="text-base font-semibold text-highlighted">Payment info</h2>
+  </div>
+  <div class="mt-5">
     <div class="mt-4">
-      <p class="text-base font-medium text-highlighted">{{ amountLabel }}</p>
-      <p class="mt-1 text-base text-muted">{{ paymentMoney(payment.captured_amount, payment.currency) }}</p>
-      <p v-if="payment.surcharge_amount" class="mt-1 text-base text-muted" data-payment-surcharge>Includes a {{ paymentMoney(payment.surcharge_amount, payment.currency) }} card surcharge</p>
+      <p class="text-sm font-medium text-highlighted">{{ amountLabel }}</p>
+      <p class="mt-1 text-sm text-muted">{{ paymentMoney(payment.captured_amount, payment.currency) }}</p>
+      <p v-if="payment.surcharge_amount" class="mt-1 text-sm text-muted" data-payment-surcharge>Includes a {{ paymentMoney(payment.surcharge_amount, payment.currency) }} card surcharge</p>
     </div>
     <div v-if="payment.refunded_amount" class="mt-4">
-      <p class="text-base font-medium text-highlighted">Refunded</p>
-      <p class="mt-1 text-base text-muted">{{ paymentMoney(payment.refunded_amount, payment.currency) }}</p>
+      <p class="text-sm font-medium text-highlighted">Refunded</p>
+      <p class="mt-1 text-sm text-muted">{{ paymentMoney(payment.refunded_amount, payment.currency) }}</p>
     </div>
     <div v-for="refund in shownRefunds" :key="refund.id" class="mt-4">
-      <p class="text-base font-medium text-highlighted">{{ refundLabel(refund.status) }}</p>
-      <p class="mt-1 text-base text-muted">{{ refund.amount === null ? 'Everything still held for this payment' : paymentMoney(refund.amount, payment.currency) }}</p>
-      <p v-if="refund.note" class="mt-1 text-base text-muted">“{{ refund.note }}”</p>
+      <p class="text-sm font-medium text-highlighted">{{ refundLabel(refund.status) }}</p>
+      <p class="mt-1 text-sm text-muted">{{ refund.amount === null ? 'Everything still held for this payment' : paymentMoney(refund.amount, payment.currency) }}</p>
+      <p v-if="refund.note" class="mt-1 text-sm text-muted">“{{ refund.note }}”</p>
     </div>
     <div class="mt-4">
-      <NuxtLink v-if="payment.receipt_url" :to="payment.receipt_url" target="_blank" rel="noopener noreferrer" class="flex items-center gap-4 border-t border-default py-4">
-        <UIcon name="i-lucide-receipt" class="size-5 shrink-0 text-highlighted" />
-        <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Get receipt</span>
-        <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
+      <NuxtLink v-if="payment.receipt_url" :to="payment.receipt_url" target="_blank" rel="noopener noreferrer" class="flex items-center gap-3 py-2.5 text-sm text-highlighted">
+        <UIcon name="i-lucide-receipt" class="size-4 shrink-0 text-highlighted" />
+        <span class="min-w-0 flex-1 text-sm font-medium text-highlighted">Get receipt</span>
+        <UIcon name="i-lucide-chevron-right" class="size-4 shrink-0 text-muted" />
       </NuxtLink>
       <slot name="actions" />
     </div>
-  </UCard>
+  </div>
 </template>
 
 <script setup lang="ts">

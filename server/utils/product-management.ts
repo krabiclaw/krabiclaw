@@ -1,4 +1,4 @@
-import { publishEvent } from '~/server/events'
+import { changedTaskIds, publishChangedJobs } from '~/server/events'
 import { isStayAmenityCodes, NEW_HOME_CANCELLATION_POLICIES, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { assertResponsibleMember, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
@@ -1903,8 +1903,6 @@ export async function updateProduct(db: DbClient, input: {
     if ((product.kind === 'stay' && input.patch.stay?.assigned_member_id !== undefined)
       || input.booking?.data.assigned_member_id !== undefined) {
       await publishAccessInvalidation(env, { organizationId: input.organizationId })
-      // The member's jobs are in their conversations before the write answers.
-      await publishEvent(env, { type: 'jobs.changed', organization_id: input.organizationId })
       if (product.kind !== 'stay') await publishBusinessInvalidation(env, input.organizationId)
     }
     let channelPush: ChannelPushCompletion = null
@@ -2105,6 +2103,7 @@ export async function updateProduct(db: DbClient, input: {
     conflict(`${raced.join(', ')} was booked while you were editing, so nothing was changed. Turn it off instead of removing it.`)
   })
   if (input.stayImport && (!results || !results[importWrittenIndex] || results[importWrittenIndex].meta.changes !== 1)) throw new HTTPError({ statusCode: 409, statusMessage: 'The import changed. Refresh and try again.', data: { code: 'IMPORT_CHANGED', committed: true, product_id: input.productId } })
+  if (results) await publishChangedJobs(env, input.organizationId, changedTaskIds(results))
   return complete(await getProduct(db, input.organizationId, input.productId))
 }
 

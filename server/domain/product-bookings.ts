@@ -29,7 +29,7 @@ import { createPaymentCheckout } from '~/server/domain/payments/checkout'
 import { paidOnline } from '~/server/domain/payments'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { isRecord } from '~/server/utils/type-guards'
-import { createStay, createStayRequest, publishStayRequest, pushStayHoldNights, quoteStay, readPublicStayHome, stayAccessFor, type StayQuote } from '~/server/domain/stays'
+import { createStay, createStayRequest, publishStayRequest, quoteStay, readPublicStayHome, stayAccessFor, type StayQuote } from '~/server/domain/stays'
 import { requireChannelPush } from '~/server/integrations/channex/ari'
 import { readLodgingBookingPolicy } from '~/server/utils/lodging-booking-policy'
 import { requireStripeCheckoutAcceptance } from '~/server/utils/stripe-connect'
@@ -432,8 +432,6 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   }
 
   if (!operationalBookingId) throw new Error('Booking allocation did not produce an operational ID')
-  // A booking's follow-up and prep are in their conversations before it answers.
-  await publishEvent(env, { type: 'jobs.changed', organization_id: organization.id })
   // One instant, one zone: the message the guest reads and the record the
   // host sees are formatted from the same session row.
   // Telling the owner and recording the conversion are independent, so both are
@@ -599,8 +597,9 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
     origin: { request: event.req, pageEventId: readPageEventId(body.page_event_id) },
     stay, guest, quote,
   })
-  // The held nights close on the home's channel now, not when the payment lands.
-  await pushStayHoldNights(db, env, organizationId, home.product_id, stay.check_in_date, stay.check_out_date)
+  // The committed hold closed these nights. Publish their current state to the channel.
+  await publishEvent(env, { type: 'stay.hold_changed', organization_id: organizationId,
+    product_id: home.product_id, location_id: home.location_id, range: [stay.check_in_date, stay.check_out_date] })
   return { body: { success: true, status: 'checkout', replayed: Boolean(retrying), ...checkout }, status: retrying ? 200 : 201 }
 }
 

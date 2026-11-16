@@ -655,16 +655,25 @@ basis, and one without it remains visibly undelivered rather than being
 converted on the fly.
 
 Actual fees come from native platform all_fees itemized reports, including tax.
-Connected balance_transaction.fee alone is insufficient. Itemization can lag 96+
-hours; a daily task requests the report covering the last 35 days for late
-corrections, and Stripe's `reporting.report_run.succeeded` event on the platform
-webhook ingests it and bills the usage. A revised cost is billed as the
+Connected balance_transaction.fee alone is insufficient. Stripe publishes fee
+data within 96 hours and publishes `reporting.report_type.updated` when the
+report type's data availability changes. The platform webhook requests the
+last 35 available days for late corrections. Stripe sends
+`reporting.report_run.succeeded` when the report is ready to ingest and
+`reporting.report_run.failed` when it fails. A revised cost is billed as the
 difference, negative when Stripe lowered it. Unattributed items remain durable
 and are never charged to a tenant. A business deleted before its late costs
 arrive has no customer left to bill; those events stay in the outbox with that
 reason.
 
+On the live platform Stripe endpoint at `/api/auth/stripe/webhook`, explicitly
+select `reporting.report_type.updated` alongside
+`reporting.report_run.succeeded` and `reporting.report_run.failed`. Stripe
+generates the report type event only when at least one endpoint explicitly
+subscribes to it.
+
 Primary contracts: [Stripe fees reports](https://docs.stripe.com/reports/all-fees),
+[Stripe event types](https://docs.stripe.com/api/events/types#event_types-reporting.report_type.updated),
 [usage-based billing with meters](https://docs.stripe.com/billing/subscriptions/usage-based),
 [recording usage](https://docs.stripe.com/billing/subscriptions/usage-based/recording-usage-api),
 [meter aggregation formulas](https://docs.stripe.com/api/billing/meter/create).

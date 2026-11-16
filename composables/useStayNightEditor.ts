@@ -1,7 +1,7 @@
 import type { StayHome, StayNight } from '~/server/domain/stays'
 import type { PlaceDay, PlaceKind } from '~/server/domain/places'
 import type { CurrencyCode } from '~/shared/currencies'
-import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CHANNEL_LABELS, changeNightPrice, resolveStayNightPolicy } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, changeNightPrice, resolveStayNightPolicy } from '~/shared/bookings'
 import { majorAmountToMinor, minorAmountToMajor } from '~/shared/prices'
 import { addLocalDays, isValidCalendarDate, isValidInstant } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
@@ -27,7 +27,7 @@ export interface EditorNouns { unit: string; units: string; row: string; rows: s
  */
 export interface EditorSource<R extends { name: string }, S extends CalendarSlot> {
   id: (row: R) => string
-  /** A slot held by a guest, another calendar or the hours: shown, never written. */
+  /** A slot held by a guest or the hours: shown, never written. */
   held: (slot: S) => boolean
   /** What a slot reads as: "Reserved", "Blocked by you", "Available". */
   label: (slot: S) => string
@@ -51,7 +51,6 @@ const nullableText = (value: unknown) => value === null || typeof value === 'str
 export function isStayNight(item: unknown): item is StayNight {
   return isRecord(item) && isValidCalendarDate(item.date)
     && typeof item.available === 'boolean' && typeof item.closed === 'boolean' && nullableText(item.booking_id) && nullableAmount(item.price_minor)
-    && (item.calendar === null || item.calendar === 'vrbo')
     && typeof item.min_stay_arrival === 'number' && nullableRule(item.min_stay_arrival) && nullableRule(item.max_stay)
     && typeof item.closed_to_arrival === 'boolean' && typeof item.closed_to_departure === 'boolean'
     && [null, 'host', 'import'].includes(item.source as string | null) && (item.held_until === null || isValidInstant(item.held_until))
@@ -67,8 +66,8 @@ export function isPlaceDay(item: unknown): item is PlaceDay {
     && (item.places_left === null || typeof item.places_left === 'number' && Number.isInteger(item.places_left) && item.places_left >= 0)
 }
 
-/** A night a guest or another calendar holds: a stay, a checkout hold or a linked-calendar night. A selection never writes one. */
-export const isBookedNight = (night: StayNight) => Boolean(night.booking_id || night.held_until || night.calendar)
+/** A night held by a booking or a checkout. A selection never writes one. */
+export const isBookedNight = (night: StayNight) => Boolean(night.booking_id || night.held_until)
 
 /** 0 Sunday to 6 Saturday, as the nights write reads weekdays. */
 export const nightWeekday = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay()
@@ -88,14 +87,12 @@ export function stayNightSource(api: ReturnType<typeof useDashboardApi>, signal:
   return {
     id: home => home.product_id,
     held: isBookedNight,
-    label: night => night.booking_id ? 'Reserved' : night.held_until ? 'Checkout hold' : night.calendar ? `Unavailable from ${STAY_CHANNEL_LABELS[night.calendar]}` : night.closed ? 'Blocked by you' : 'Available',
-    // What holds nights a selection cannot change: a reservation is managed from its stay, a linked calendar from its channel, a hold by its guest's checkout.
+    label: night => night.booking_id ? 'Reserved' : night.held_until ? 'Checkout hold' : night.closed ? 'Blocked by you' : 'Available',
+    // What holds nights a selection cannot change: a reservation is managed from its stay and a hold by its guest's checkout.
     heldExplanation: booked => booked.some(night => night.booking_id)
       ? 'Booked nights belong to their reservations. Open the stay to manage it.'
-      : booked.some(night => night.calendar)
-        ? `${STAY_CHANNEL_LABELS[booked.find(night => night.calendar)!.calendar!]}'s calendar holds these nights. Change them there.`
-        : 'A guest is checking out these nights. The hold ends on its own if they do not pay.',
-    heldLine: booked => `${booked.length} booked ${booked.length === 1 ? 'night is' : 'nights are'} left out. Reservations, checkout holds and linked-calendar nights keep their settings.`,
+      : 'A guest is checking out these nights. The hold ends on its own if they do not pay.',
+    heldLine: booked => `${booked.length} booked ${booked.length === 1 ? 'night is' : 'nights are'} left out. Reservations and checkout holds keep their settings.`,
     async write(home, range, weekdays, patch) {
       await api(`/api/dashboard/stay-homes/${encodeURIComponent(home.product_id)}/nights`, {
         method: 'PUT', body: { ...range, ...(weekdays ? { weekdays } : {}), ...patch }, signal,

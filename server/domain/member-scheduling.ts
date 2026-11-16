@@ -186,12 +186,6 @@ export async function memberBusy(env: CloudflareEnv, row: Pick<MemberScheduling,
  return chunks.flat()
 }
 
-/** The busy times one member's selected Google calendars report for a span; none when they check no calendar. */
-export async function memberBusyIntervals(db: DbClient, env: CloudflareEnv, organizationId: string, memberId: string, span: { from: string; until: string }): Promise<SchedulingInterval[]> {
- const row = await queryFirst<MemberScheduling>(db, 'SELECT * FROM member_scheduling WHERE organization_id=? AND member_id=?', [organizationId, memberId])
- return row ? await memberBusy(env, row, span) : []
-}
-
 /**
  * The availability `providerUnavailableSql` reads for sessions inside a span:
  * each provider's working windows from their hours and their busy times from

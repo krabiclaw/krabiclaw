@@ -1,4 +1,4 @@
-import { publishEvent } from '~/server/events'
+import { publishChangedJobs } from '~/server/events'
 import { HTTPError } from 'nitro'
 import type { ProductKind } from '~/shared/product-details'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -177,7 +177,7 @@ export async function turnoverTaskQueries(db: DbClient, input: { organizationId:
           assigned_member_id = CASE WHEN product_id IS ? AND assigned_member_id IS NOT NULL THEN assigned_member_id ELSE ${jobAssigneeSql('organization_id', '?')} END,
           version = version + 1, updated_at = ?
         WHERE dedupe_key = ? AND status = 'open' AND (${guard.query})
-          AND (product_id IS NOT ? OR starts_at IS NOT ? OR due_at IS NOT ?)`,
+          AND (product_id IS NOT ? OR starts_at IS NOT ? OR due_at IS NOT ?) RETURNING id AS changed_task_id`,
       params: [home.product_id, home.location_id, home.timezone, startsAt, dueAt, home.product_id, home.assigned_member_id, now, key, ...guard.params!, home.product_id, startsAt, dueAt],
     })
     // A stay that checked out before today at its home is history, not work.
@@ -186,7 +186,7 @@ export async function turnoverTaskQueries(db: DbClient, input: { organizationId:
         query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id,
             starts_at, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
           SELECT ?, ?, 'turnover', 'booking', ?, ?, ?, ${jobAssigneeSql('?', '?')}, ?, ?, ?, 'open', ?, 1, ?, ? WHERE (${guard.query})
-          ON CONFLICT (dedupe_key) DO NOTHING`,
+          ON CONFLICT (dedupe_key) DO NOTHING RETURNING id AS changed_task_id`,
         params: [crypto.randomUUID(), organizationId, stay.id, home.product_id, home.location_id, home.assigned_member_id, organizationId,
           startsAt, dueAt, home.timezone, key, now, now, ...guard.params!],
       })
@@ -195,7 +195,7 @@ export async function turnoverTaskQueries(db: DbClient, input: { organizationId:
   if (after.status !== 'confirmed') {
     queries.push({
       query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ?
-        WHERE dedupe_key = ? AND status = 'open' AND (${guard.query})`,
+        WHERE dedupe_key = ? AND status = 'open' AND (${guard.query}) RETURNING id AS changed_task_id`,
       params: [now, now, `turnover:${after.id}`, ...guard.params!],
     })
   }
@@ -236,13 +236,13 @@ export function messageDeliveryTaskQueries(messageId: string, now: string): Batc
  */
 export function sessionPrepTaskQueries(sessions: BatchQuery, now: string): BatchQuery[] {
   const confirmed = `EXISTS (SELECT 1 FROM bookings b WHERE b.organization_id = s.organization_id
-    AND b.product_session_id = s.id AND b.status = 'confirmed' AND b.no_show_at IS NULL)`
+    AND b.product_session_id = s.id AND b.status = 'confirmed')`
   return [{
     query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = ?
       FROM product_sessions s JOIN product_booking_configs cfg ON cfg.organization_id = s.organization_id AND cfg.product_id = s.product_id
       WHERE tasks.kind = 'consultation_prep' AND tasks.subject_type = 'product_session' AND tasks.subject_id = s.id
         AND tasks.organization_id = s.organization_id AND tasks.status = 'open' AND s.id IN (${sessions.query})
-        AND (s.status <> 'scheduled' OR NOT ${confirmed})`,
+        AND (s.status <> 'scheduled' OR NOT ${confirmed}) RETURNING id AS changed_task_id`,
     params: [now, now, ...(sessions.params ?? [])],
   }, {
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, starts_at, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
@@ -254,7 +254,7 @@ export function sessionPrepTaskQueries(sessions: BatchQuery, now: string): Batch
         assigned_member_id = excluded.assigned_member_id, starts_at = excluded.starts_at, due_at = excluded.due_at, timezone = excluded.timezone,
         version = tasks.version + 1, updated_at = excluded.updated_at
       WHERE tasks.status = 'cancelled' OR (tasks.status = 'open' AND (tasks.assigned_member_id IS NOT excluded.assigned_member_id
-        OR tasks.starts_at IS NOT excluded.starts_at OR tasks.timezone IS NOT excluded.timezone))`,
+        OR tasks.starts_at IS NOT excluded.starts_at OR tasks.timezone IS NOT excluded.timezone)) RETURNING id AS changed_task_id`,
     params: [now, now, ...(sessions.params ?? []), now],
   }]
 }
@@ -885,7 +885,6 @@ async function assigneeUsers(db: DbClient, organizationId: string, memberId: str
 async function afterWrite(db: DbClient, viewer: TaskViewer, taskId: string, assigned?: string): Promise<TaskView> {
   const env = viewer.principal.env as CloudflareEnv
   if (assigned) {
-    // A job given to a cleaner is posted in the stay's conversation when the business change below wakes the organization's jobs.
     const row = await queryFirst<Pick<TaskRow, 'kind' | 'dedupe_key'>>(db, 'SELECT kind, dedupe_key FROM tasks WHERE organization_id = ? AND id = ?', [viewer.principal.organizationId, taskId])
     if (!row) throw new Error(`Task ${taskId} disappeared after its write`)
     // A job is told in its conversation; any other task by the task alert.
@@ -896,8 +895,7 @@ async function afterWrite(db: DbClient, viewer: TaskViewer, taskId: string, assi
       await notifyTaskAssigned(env, db, { organizationId: viewer.principal.organizationId, taskId, actorUserId: viewer.principal.userId, recipientUserIds: recipients })
     }
   }
-  // A job given out is in its conversation before the write answers.
-  await publishEvent(env, { type: 'jobs.changed', organization_id: viewer.principal.organizationId })
+  await publishChangedJobs(env, viewer.principal.organizationId, [taskId])
   await publishBusinessInvalidation(env, viewer.principal.organizationId)
   return getTask(db, viewer, taskId)
 }

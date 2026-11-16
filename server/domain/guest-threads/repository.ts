@@ -368,7 +368,7 @@ function bookingFollowUpQueries(conversationId: string, now: string): BatchQuery
   return [{
     query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = ?
       FROM ${BOOKING_RECORDS_SQL} br WHERE br.conversation_id = ? AND br.unit = 'slot' AND br.status <> 'confirmed' AND tasks.status = 'open'
-        AND tasks.subject_type = 'booking' AND tasks.subject_id = br.id AND tasks.kind = 'consultation_follow_up'`,
+        AND tasks.subject_type = 'booking' AND tasks.subject_id = br.id AND tasks.kind = 'consultation_follow_up' RETURNING id AS changed_task_id`,
     params: [now, now, conversationId],
   }, {
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, starts_at, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
@@ -380,7 +380,7 @@ function bookingFollowUpQueries(conversationId: string, now: string): BatchQuery
         starts_at = excluded.starts_at, due_at = excluded.due_at, assigned_member_id = excluded.assigned_member_id, version = tasks.version + 1, updated_at = excluded.updated_at
         WHERE tasks.status = 'cancelled' OR (tasks.status = 'open' AND (tasks.starts_at IS NOT excluded.starts_at
           OR tasks.assigned_member_id IS NOT excluded.assigned_member_id OR tasks.product_id IS NOT excluded.product_id
-          OR tasks.location_id IS NOT excluded.location_id OR tasks.timezone IS NOT excluded.timezone))`,
+          OR tasks.location_id IS NOT excluded.location_id OR tasks.timezone IS NOT excluded.timezone)) RETURNING id AS changed_task_id`,
     params: [crypto.randomUUID(), now, now, conversationId, now],
   }]
 }

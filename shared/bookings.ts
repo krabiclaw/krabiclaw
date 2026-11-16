@@ -99,6 +99,7 @@ export function isChannelManagedStay(stay: { owner: 'app' | 'channel'; channel: 
   return stay.owner === 'channel' || stay.channel !== 'direct'
 }
 export const STAY_CHANNEL_LABELS: Record<StayChannel, string> = { airbnb: 'Airbnb', vrbo: 'Vrbo', booking_com: 'Booking.com', direct: 'Direct' }
+export const STAY_CHANNEL_COLORS: Record<StayChannel, string> = { airbnb: '#FF385C', vrbo: '#245ABC', booking_com: '#003580', direct: 'var(--kc-navy)' }
 
 /**
  * The guest's first name, as a member looking after the home reads it. A

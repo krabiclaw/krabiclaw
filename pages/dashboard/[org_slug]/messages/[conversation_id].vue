@@ -1,5 +1,5 @@
 <template>
-  <DashboardIndexPanel id="organization-messages-thread" :title="conversation?.title ?? 'Conversation'" fill :auto-open="reservationTo">
+  <DashboardIndexPanel id="organization-messages-thread" :title="conversation?.title ?? 'Conversation'" fill :auto-open="reservationOpened ? null : reservationTo">
     <!-- Airbnb's thread header: who is in it, what it is about, and one way into "In this conversation". No row of buttons. -->
     <template v-if="conversation" #center>
       <button type="button" class="me-auto flex min-w-0 items-center gap-3 overflow-hidden rounded-full py-1 pe-2 text-left hover:bg-elevated" :data-thread-id="conversation.id" aria-label="In this conversation" @click="sheetOpen = true">
@@ -11,17 +11,8 @@
       </button>
     </template>
 
-    <!-- The reservation opens beside the conversation; its way in sits right of the title, as Airbnb's does, while the panel is closed. -->
-    <template v-if="reservationTo && !level.child.value" #right>
-      <UButton :to="reservationTo" :label="data?.work?.type === 'review' ? 'Review' : 'Show reservation'" color="neutral" variant="soft" class="rounded-full" data-testid="conversation-show-reservation" />
-    </template>
-
-    <!-- Airbnb's line in the thread: what the conversation is about, and the way to it. -->
-    <p v-if="reservationTo && !personalScope" class="shrink-0 px-4 pt-3 text-center text-sm text-muted">
-      This conversation is about a reservation. <NuxtLink :to="reservationTo" class="font-medium text-highlighted underline underline-offset-4">Show reservation</NuxtLink>
-    </p>
     <UAlert v-if="doneError" color="error" variant="soft" title="Done could not be saved" :description="getErrorMessage(doneError, 'The request failed')" class="mx-4 mb-2" />
-    <ConversationThread :key="threadId" :thread-id="threadId" :history="history" :personal-scope="personalScope" :closing="closing" @done="done" />
+    <ConversationThread :key="threadId" :thread-id="threadId" :history="history" :personal-scope="personalScope" :reservation-to="reservationTo" :closing="closing" @done="done" />
     <ConversationSheet v-if="data" v-model:open="sheetOpen" :page="data" :history="history" :on-left="left" :booking-to="reservationTo" @moved="moved" @participants-changed="refresh()" />
   </DashboardIndexPanel>
 </template>
@@ -31,9 +22,10 @@ import ConversationThread from '~/lib/components/workspace/messages/Conversation
 import ConversationSheet from '~/lib/components/workspace/messages/ConversationSheet.vue'
 import InboxAvatar from '~/lib/components/workspace/messages/InboxAvatar.vue'
 import { removeInboxConversationKey } from '~/lib/components/workspace/messages/guest-thread-client'
+import { accountReservationPath, guestConversationPath } from '~/shared/messages-contract'
 import { getErrorMessage } from '~/utils/errors'
 
-definePageMeta({ layout: 'dashboard', tab: 'messages', key: route => route.path })
+definePageMeta({ layout: 'dashboard', tab: 'messages', key: route => `${route.params.org_slug ?? 'account'}:${route.params.conversation_id}` })
 
 const route = useRoute()
 const router = useRouter()
@@ -47,8 +39,15 @@ const conversation = computed(() => data.value?.conversation)
 const sheetOpen = ref(false)
 const level = useRouteLevel()
 // The reservation's panel is this conversation's child, so the thread stays beside it.
-const reservationTo = computed(() => personalScope ? conversation.value?.activity_path ?? null
-  : conversation.value?.booking_id ? `${listPath}/${encodeURIComponent(threadId.value)}/reservation/${encodeURIComponent(conversation.value.booking_id)}` : null)
+const reservationTo = computed(() => {
+  const bookingId = conversation.value?.booking_id
+  if (!bookingId) return null
+  if (personalScope) return accountReservationPath(threadId.value)
+  const thread = guestConversationPath(String(route.params.org_slug), threadId.value)
+  return `${thread}/reservation/${encodeURIComponent(bookingId)}`
+})
+const reservationOpened = ref(false)
+watch(level.child, child => { if (child !== null) reservationOpened.value = true }, { immediate: true })
 
 // A job is done in one tap; its conversation then shows "Done" as the person's own message.
 const closing = ref(false)

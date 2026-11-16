@@ -1,7 +1,7 @@
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { isOrganizationWideRole } from '~/server/utils/member-access'
 import { jobThreadParticipantsKey, postAutomaticTeamMessage, reseatAutomaticThread } from '~/server/domain/team-messages'
-import { JOB_TASK_SQL, SUPPORTED_TASK_KINDS, isJobTask, jobBookingIdSql, jobEndKeys, jobKey, jobSubject, taskViewForUser, type JobSubject, type TaskRow, type TaskView } from '~/server/domain/tasks'
+import { isJobTask, jobBookingIdSql, jobEndKeys, jobKey, jobSubject, taskViewForUser, type JobSubject, type TaskRow, type TaskView } from '~/server/domain/tasks'
 import { notifyTaskStarting } from '~/server/utils/notifications'
 import { addLocalDays, formatTimestamp, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -14,10 +14,9 @@ import type { CloudflareEnv } from '~/server/utils/auth'
   move or a cancellation is told there at once. Every post has its own key, so
   a wake that runs twice sends nothing twice.
 
-  The write that creates, moves, gives out or closes a job runs this before it
-  answers. What a job says now is posted then; what it says later (its
-  reminders) is stored then as rows of the one outbox, each with its time and
-  its words, and the outbox's sender sends them when they are due. Nothing here
+  The write queues the IDs of the tasks it changed. The consumer posts what a
+  job says now and stores what it says later as rows of the one outbox. The
+  business hub sends those rows when they are due. Nothing here
   runs on a timer. Every job has a conversation, a job an owner keeps for
   themselves too. A group session's prep has no booking to talk about; its
   morning-of reminder is the task alert, as it is for every other assigned
@@ -27,8 +26,6 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 const EVENING_BEFORE = '18:00'
 const MORNING_OF = '08:00'
 const WARNING_BEFORE_ARRIVAL_MS = 2 * 3_600_000
-/** How long a closed or cancelled job is still told about in its conversation. */
-const RECENT_MS = 7 * 86_400_000
 
 interface Member { id: string; userId: string; role: string }
 
@@ -94,26 +91,19 @@ function plannedSendQueries(task: Pick<TaskRow, 'id' | 'organization_id' | 'time
   }))]
 }
 
-/**
- * The write that creates, moves, gives out or closes a job runs this before it
- * answers: the job's conversation and its first message exist, and its
- * reminders are stored, when the write returns. A job that could not be told
- * about fails the write.
- */
-export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId: string, options: { quiet?: boolean; now?: Date } = {}): Promise<void> {
+/** Post and schedule only the tasks recorded by the write. */
+export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId: string, taskIds: string[], options: { quiet?: boolean; now?: Date } = {}): Promise<void> {
   const now = options.now ?? new Date()
-  const organization = await queryFirst<{ name: string }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
-  if (!organization) throw new Error(`Organization ${organizationId} is missing`)
-  const [members, tasks] = await Promise.all([
+  const tasks = await queryAll<TaskRow & { job_booking_id: string | null; private_prep: number }>(db, `SELECT t.*, ${jobBookingIdSql('t')} AS job_booking_id,
+    (t.subject_type = 'product_session' AND EXISTS (SELECT 1 FROM products p WHERE p.organization_id = t.organization_id AND p.id = t.product_id AND p.kind = 'service')) AS private_prep
+    FROM tasks t WHERE t.organization_id = ? AND t.id IN (SELECT value FROM json_each(?))`,
+  [organizationId, d1JsonStringSet(taskIds)])
+  if (!tasks.length) return
+  const [organization, members] = await Promise.all([
+    queryFirst<{ name: string }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId]),
     queryAll<Member>(db, 'SELECT id, userId, role FROM member WHERE organizationId = ?', [organizationId]),
-    // Every open job, and a job closed or changed lately (its release or cancellation is told once).
-    queryAll<TaskRow & { job_booking_id: string | null; private_prep: number }>(db, `SELECT t.*, ${jobBookingIdSql('t')} AS job_booking_id,
-      (t.subject_type = 'product_session' AND EXISTS (SELECT 1 FROM products p WHERE p.organization_id = t.organization_id AND p.id = t.product_id AND p.kind = 'service')) AS private_prep
-      FROM tasks t WHERE t.organization_id = ? AND t.kind IN (SELECT value FROM json_each(?)) AND (${JOB_TASK_SQL('t')} OR t.starts_at IS NOT NULL)
-      AND (t.status = 'open' OR t.updated_at >= ?)
-      AND (t.assigned_member_id IS NOT NULL OR ${JOB_TASK_SQL('t')}) ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id`,
-    [organizationId, SUPPORTED_TASK_KINDS, new Date(now.getTime() - RECENT_MS).toISOString()]),
   ])
+  if (!organization) throw new Error(`Organization ${organizationId} is missing`)
   const subjectIds = [...new Set(tasks.flatMap(task => task.job_booking_id && (isJobTask(task) || task.subject_type === 'product_session') ? [task.job_booking_id] : []))]
   const prepKeys = tasks.filter(task => task.private_prep).map(task => jobKey(task))
   const posted = subjectIds.length || prepKeys.length ? await queryAll<{ message_id: string; thread_id: string; subject_id: string; participants_key: string; idempotency_key: string }>(db, `
@@ -144,7 +134,7 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
   }
   const hostUsers = members.filter(member => isOrganizationWideRole(member.role)).map(member => member.userId)
   const post = async (subject: JobSubject, seats: readonly string[], key: string, body: string, alertUserIds: readonly string[], threadId?: string) => {
-    const result = await postAutomaticTeamMessage(env, db, { organizationId, subject, seatMemberIds: seats, body, idempotencyKey: key, alertUserIds, senderName: organization.name, threadId })
+    const result = await postAutomaticTeamMessage(env, db, { organizationId, subject, seatMemberIds: seats, body, idempotencyKey: key, alertUserIds: options.quiet ? [] : alertUserIds, senderName: organization.name, threadId })
     postsByThread.set(result.threadId, (postsByThread.get(result.threadId) ?? new Map()).set(key, result.messageId))
     return result
   }
@@ -179,7 +169,7 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
       }
       const view = roster || task.status === 'open' ? await taskViewForUser(db, organizationId, task.id, roster?.cleaners[0] ?? hostUsers[0] ?? null, now) : null
       // A booking may have changed while loading the card. Re-read on the
-      // next alarm instead of using a new client's card in an old thread.
+      // next queue delivery instead of using a new client's card in an old thread.
       if (prep && view && view.version !== task.version) throw new Error(`Prep task ${task.id} changed while its job was being posted`)
       if (prep && view && view.booking_id !== (subject?.id ?? null)) throw new Error(`Prep task ${task.id} does not match its booking conversation`)
       const about = subject?.unit === 'nights' ? 'at' : 'with'
@@ -230,7 +220,7 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
         ? last && (last[0] === baseKey || last[0].startsWith(`${baseKey}:after:`))
         : postsByThread.get(heldIn)?.has(baseKey))
       if (!postedForAssignment) {
-        const result = await post(subject, roster.seats, jobKey(task, prep ? last?.[1] : undefined), lines(view), options.quiet ? [] : roster.cleaners, heldIn ?? undefined)
+        const result = await post(subject, roster.seats, jobKey(task, prep ? last?.[1] : undefined), lines(view), roster.cleaners, heldIn ?? undefined)
         threads.set(result.threadId, { subject_id: subject.id, participants_key: targetKey! })
         heldIn = result.threadId
       }

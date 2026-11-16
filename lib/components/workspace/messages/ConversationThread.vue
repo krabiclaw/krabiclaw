@@ -23,6 +23,10 @@
 
             <p v-else-if="item.type === 'event'" class="my-2 text-center text-xs text-muted">{{ item.text }}</p>
 
+            <p v-else-if="item.type === 'reservation'" class="my-2 text-center text-xs text-muted">
+              This conversation is about a reservation. <NuxtLink :to="item.to" class="font-medium text-highlighted underline underline-offset-4" data-testid="conversation-show-reservation">Show reservation</NuxtLink>
+            </p>
+
             <!-- What KrabiClaw says in a team conversation sits in the middle, as Airbnb's own lines and cards do: a job is a card with its Done, a reminder is a line. -->
             <div v-else-if="thread.kind === 'team' && item.runs.every(message => message.automatic)" class="my-2 flex w-full flex-col items-center gap-2" :data-message="item.key">
               <template v-for="message in item.runs" :key="message.id">
@@ -131,7 +135,7 @@ import ReportDialog from './ReportDialog.vue'
 import { isScheduledMessageResponse, isSuggestedReplies, useSuggestedReplies } from './guest-messaging-client'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
-const props = withDefaults(defineProps<{ threadId: string; personalScope?: boolean; history: ReturnType<typeof useConversation>; closing?: boolean }>(), { personalScope: false, closing: false })
+const props = withDefaults(defineProps<{ threadId: string; personalScope?: boolean; history: ReturnType<typeof useConversation>; reservationTo?: string | null; closing?: boolean }>(), { personalScope: false, closing: false })
 const emit = defineEmits<{ done: [] }>()
 
 const dashboard = useDashboardOrganization()
@@ -269,6 +273,7 @@ const failedDeliveries = (message: MessageItem) => message.deliveries.filter(del
 type Row =
   | { type: 'day'; key: string; label: string }
   | { type: 'event'; key: string; text: string }
+  | { type: 'reservation'; key: string; to: string }
   | { type: 'run'; key: string; mine: boolean; runs: MessageItem[] }
 
 /*
@@ -356,6 +361,10 @@ const rows = computed<Row[]>(() => {
       if (item.time === null && last?.type === 'run' && last.mine === mine && last.runs[0]!.author === item.author) last.runs.push(item)
       else out.push({ type: 'run', key, mine, runs: [item] })
     }
+  }
+  if (props.reservationTo) {
+    const firstExchange = out.findIndex(row => row.type === 'run')
+    out.splice(firstExchange < 0 ? out.length : firstExchange + 1, 0, { type: 'reservation', key: 'reservation', to: props.reservationTo })
   }
   return out
 })

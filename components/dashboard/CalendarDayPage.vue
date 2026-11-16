@@ -1,8 +1,4 @@
 <template>
-  <!--
-    A day is a level with children: the bookings on it open as leaves of the
-    day, so Back from one is the day and the Calendar tab stays lit.
-  -->
   <DashboardIndexPanel :id="personalScope ? 'account-calendar-day' : 'calendar-day'" :title="title" column="leaf">
     <template v-if="sessionProduct" #right>
       <UButton v-if="!calendarSessions?.providerHours.value && calendarSessions?.canCreate.value" label="Add availability" icon="i-lucide-plus" :to="calendarSessions.addTo(day)" />
@@ -50,7 +46,7 @@
       <p v-if="sessionProduct && status === 'loading'" role="status" class="text-sm text-muted">Loading scheduled times…</p>
 
       <div v-if="items.length" class="divide-y divide-default border-y border-default">
-        <AgendaRow v-for="item in items" :key="item.id" :item="item" :to="openHere(item)" />
+        <AgendaRow v-for="item in items" :key="item.id" :item="item" />
       </div>
       <div v-else-if="!errorMessage && (status === 'success' || status === 'ready')" class="py-6 text-center">
         <img
@@ -73,13 +69,12 @@ import { addLocalDays, formatCalendarDate } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
-import { calendarLocationKey, calendarRecordPath, calendarSessionsKey, type CalendarItem } from './CalendarPage.vue'
+import { calendarLocationKey, calendarSessionsKey } from './CalendarPage.vue'
 
 // The business's day can be blocked or opened; the account's day only lists its visits.
 const props = defineProps<{ personalScope?: boolean }>()
 
 const route = useRoute()
-const level = useRouteLevel()
 const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const apiBase = props.personalScope ? '/api/account' : '/api/dashboard'
 const organizationId = props.personalScope ? null : useDashboardOrganizationId()
@@ -123,11 +118,6 @@ if (!props.personalScope) {
   watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
 }
 
-// A booking opens as a leaf of this day; a post keeps its own screen. The
-// item id is `kind:record`, which is how the agenda names a row; a stay's two rows name their stay.
-function openHere(item: CalendarItem): string | undefined {
-  return props.personalScope ? undefined : calendarRecordPath(level.path.value, item)
-}
 const items = computed(() => sessionProduct.value ? calendarSessions!.itemsOn(day.value) : data.value?.items ?? [])
 const status = computed(() => sessionProduct.value ? calendarSessions!.status.value : agendaStatus.value)
 const saveError = ref<unknown>(null)
