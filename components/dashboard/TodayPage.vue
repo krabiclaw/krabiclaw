@@ -55,7 +55,7 @@ import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
 import { addLocalDays, localDateAt } from '~/utils/timezone'
 
-useSeoMeta({ title: 'Today | Blawby', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Today | KrabiClaw', robots: 'noindex, nofollow' })
 
 const props = defineProps<{ personalScope?: boolean }>()
 type Range = 'today' | 'upcoming'

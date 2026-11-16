@@ -194,5 +194,5 @@ async function saveBlogLocalization(locale: string, submitted: Record<string, un
   }
 }
 
-useSeoMeta({ title: () => `${isNew ? 'New article' : postResource.value?.post.title || 'Article'} | Blawby Dashboard`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${isNew ? 'New article' : postResource.value?.post.title || 'Article'} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 </script>

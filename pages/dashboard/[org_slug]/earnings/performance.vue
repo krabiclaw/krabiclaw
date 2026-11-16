@@ -70,7 +70,7 @@ import { isEarningsPerformance, type EarningsPerformance } from '~/shared/earnin
 import { formatCalendarDate } from '~/utils/timezone'
 
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Performance | Blawby', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Performance | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const dashboard = useDashboardOrganization()

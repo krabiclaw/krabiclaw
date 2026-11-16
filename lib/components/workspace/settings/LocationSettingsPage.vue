@@ -478,5 +478,5 @@ const dashboardLocation = useDashboardLocation()
 const organizationId = useDashboardOrganizationId()
 const editor = await useLocationEditor(organizationId, dashboardLocation.currentLocationId, null, level.path)
 
-useSeoMeta({ title: 'Settings | Blawby', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Settings | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

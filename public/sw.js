@@ -13,8 +13,8 @@ self.addEventListener('push', (event) => {
   const alert = event.data.json()
   event.waitUntil(self.registration.showNotification(alert.title, {
     body: alert.body,
-    icon: '/platform/blawby-512.png',
-    badge: '/platform/blawby-192.png',
+    icon: '/krabi-claw-logo.png',
+    badge: '/krabi-claw-logo-192.png',
     ...(alert.tag ? { tag: alert.tag } : {}),
     ...(alert.image ? { image: alert.image } : {}),
     data: { url: alert.url },

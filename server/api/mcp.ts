@@ -55,8 +55,8 @@ async function logMcpEvent(event: H3Event, env: ReturnType<typeof cloudflareEnv>
   });
 }
 
-const TENANT_AUTH_DESCRIPTION = "Connect Blawby to continue.";
-const TENANT_AUTH_REQUIRED_TEXT = "Authentication required: connect Blawby to continue.";
+const TENANT_AUTH_DESCRIPTION = "Connect KrabiClaw to continue.";
+const TENANT_AUTH_REQUIRED_TEXT = "Authentication required: connect KrabiClaw to continue.";
 
 function resourceUrl(baseUrl: string) {
   return `${baseUrl}/api/mcp`;
@@ -67,14 +67,13 @@ function resolveTenantToolMeta(toolName: string | null): McpToolMeta {
   return { domain: tool?.domain ?? null, isMutating: isMcpMutatingTool(tool) };
 }
 
-const mcpInstructions = (baseUrl: string) => `Manage the selected business. Read current state and preserve unrelated values. Read existing facts before asking questions. Ask only for missing required inputs needed for the requested action; leave unrelated optional settings unchanged. Never invent prices or booking details. Finish website changes and verify returned public URLs. When designing or improving a website: ensure high-impact hero imagery or video, proactively ask the owner for missing branding assets (logo, favicon, social card via set_media; colors and fonts via update_organization_settings), feature bookable offerings or places to stay directly on the homepage (product_grid) rather than bare location cards, include the host or founder's story and portrait on the about page, and add guest reviews (testimonial_grid) and FAQs (faq). Keep menu sections and order; experiences need bookings. Use revision and retry keys, and follow pagination. Publish or message only requested destinations. Payment reports are read-only; financial_action_required means the action remains incomplete. Report tool errors and partial outcomes plainly. Use only tools present in this client's catalog. A missing tool can mean the saved catalog needs refreshing or the selected business lacks access; do not invent a call or claim its action succeeded. Check the active business and permissions. When the client's catalog is stale, ask the user to refresh or reconnect Blawby in the client's connector settings; in ChatGPT, follow ${baseUrl}/docs/refresh-krabiclaw-tools-in-chatgpt in a desktop browser. To report a Blawby bug or request a feature, do not email Blawby: give the user a prefilled ${KRABICLAW_BUG_REPORT_URL} link (fields title, surface, site, what_happened, expected, tool_error) or ${KRABICLAW_FEATURE_REQUEST_URL} link (title, need, today, site) to open. Issues are public; leave out guest names, contact details and payment data. Account, billing and private matters go to ${baseUrl}/help.`;
+const MCP_INSTRUCTIONS = `Manage the selected business. Read current state and preserve unrelated values. Read existing facts before asking questions. Ask only for missing required inputs needed for the requested action; leave unrelated optional settings unchanged. Never invent prices or booking details. Finish website changes and verify returned public URLs. When designing or improving a website: ensure high-impact hero imagery or video, proactively ask the owner for missing branding assets (logo, favicon, social card via set_media; colors and fonts via update_organization_settings), feature bookable offerings or places to stay directly on the homepage (product_grid) rather than bare location cards, include the host or founder's story and portrait on the about page, and add guest reviews (testimonial_grid) and FAQs (faq). Keep menu sections and order; experiences need bookings. Use revision and retry keys, and follow pagination. Publish or message only requested destinations. Payment reports are read-only; financial_action_required means the action remains incomplete. Report tool errors and partial outcomes plainly. Use only tools present in this client's catalog. A missing tool can mean the saved catalog needs refreshing or the selected business lacks access; do not invent a call or claim its action succeeded. Check the active business and permissions. When the client's catalog is stale, ask the user to refresh or reconnect KrabiClaw in the client's connector settings; in ChatGPT, follow https://krabiclaw.com/docs/refresh-krabiclaw-tools-in-chatgpt in a desktop browser. To report a KrabiClaw bug or request a feature, do not email KrabiClaw: give the user a prefilled ${KRABICLAW_BUG_REPORT_URL} link (fields title, surface, site, what_happened, expected, tool_error) or ${KRABICLAW_FEATURE_REQUEST_URL} link (title, need, today, site) to open. Issues are public; leave out guest names, contact details and payment data. Account, billing and private matters go to https://krabiclaw.com/help.`;
 
 // H3's request context follows the SDK's original requestInfo into the factory.
 interface McpFactoryContext {
   event: H3Event;
   mcpUser?: McpUserContext;
   cfEnv: ReturnType<typeof cloudflareEnv>;
-  baseUrl: string;
   requestId: JsonRpcId | undefined;
   toolResult?: CallToolResult;
 }
@@ -88,13 +87,12 @@ function factoryContextFrom(ctx: McpRequestContext): McpFactoryContext {
 
 // A fresh SDK registry per exchange keeps schemas and execution together.
 function createTenantMcpServer(ctx: McpRequestContext): McpServer {
-  const context = factoryContextFrom(ctx);
-  const instructions = mcpInstructions(context.baseUrl);
   const mcpServer = new McpServer(
-    { name: "krabiclaw-mcp", title: "Blawby", version: "phase-5" },
-    { capabilities: { tools: {}, prompts: {} }, instructions },
+    { name: "krabiclaw-mcp", version: "phase-5" },
+    { capabilities: { tools: {}, prompts: {} }, instructions: MCP_INSTRUCTIONS },
   );
   const server = mcpServer.server;
+  const context = factoryContextFrom(ctx);
   const toolResult = context.toolResult;
   if (toolResult) {
     server.setRequestHandler("tools/call", async () => toolResult);
@@ -200,7 +198,6 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
           ORGANIZATION_CACHE: env.ORGANIZATION_CACHE,
           GUEST_INBOX_HUBS: env.GUEST_INBOX_HUBS,
           NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN,
-          NUXT_PUBLIC_PLATFORM_DOMAIN: env.NUXT_PUBLIC_PLATFORM_DOMAIN,
         }, resolvedOrganizationId);
       } catch (purgeError) {
         console.error({ event: "mcp_public_cache_purge_failed", tool: toolName, organization_id: resolvedOrganizationId, request_id: requestId, error: describeErrorForTelemetry(purgeError) });
@@ -276,7 +273,7 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
     const domains = [...new Set(tools.map((tool) => tool._meta["krabiclaw/toolInfo"].domain))];
     await logMcpEvent(event, cfEnv, {
       organizationId: organizationCtx?.organizationId ?? null, userId: mcpUser.userId, requestId, method: "tools/list", arguments: { organization_id: organizationIdHeader },
-      result: { count: tools.length, domains, instructions, tools: tools.map(tool => ({
+      result: { count: tools.length, domains, instructions: MCP_INSTRUCTIONS, tools: tools.map(tool => ({
         name: tool.name, title: tool.title, description: tool.description,
         annotations: tool.annotations, securitySchemes: tool.securitySchemes,
         contract_fingerprint: catalogFingerprint([tool]),
@@ -355,7 +352,7 @@ export default defineHandler(async (event) => {
     requestMethod = peekMcpMethod(event, body);
     requestId = peekMcpId(body);
     const respondWithToolResult = (toolResult: CallToolResult) => {
-      event.context.mcpFactoryContext = { event, cfEnv, baseUrl, requestId, toolResult } satisfies McpFactoryContext;
+      event.context.mcpFactoryContext = { event, cfEnv, requestId, toolResult } satisfies McpFactoryContext;
       return mcpHandler.fetch(webRequest, { parsedBody: body });
     };
     // Return 401 with WWW-Authenticate before any protocol parsing so OAuth
@@ -410,7 +407,7 @@ export default defineHandler(async (event) => {
       }
     }
 
-    event.context.mcpFactoryContext = { event, mcpUser, cfEnv, baseUrl, requestId } satisfies McpFactoryContext;
+    event.context.mcpFactoryContext = { event, mcpUser, cfEnv, requestId } satisfies McpFactoryContext;
     const response = await mcpHandler.fetch(webRequest, { parsedBody: body });
     if (requestMethod === 'tools/call') {
       type Wire = { id?: JsonRpcId; result?: { isError?: boolean; content?: Array<{ type: string; text?: string }> }; error?: { code: number; message: string } };

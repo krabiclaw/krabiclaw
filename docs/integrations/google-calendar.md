@@ -169,11 +169,9 @@ minimal title, guest name, status and canonical interval. The Manage link does
 not add Google attendees or invitations to those verticals.
 
 Google's `source` URL is visible only to the event creator, so the shared Manage
-link belongs in its description. Lodging does not gain a Google projection:
-its buyer activity details and notifications provide management. Its existing
-Vrbo iCal feed is an anonymous home-occupancy calendar grouping contiguous taken
-nights, possibly across several stays or holds. It retains **Not available**
-events without guest identities or per-stay account links.
+link belongs in its description. Lodging guests manage their stays from buyer
+activity and their booking notifications. Eligible connected homes sync
+reservations and availability through Channex.
 
 Creates, meaningful updates and cancellations use `sendUpdates=all`, asking
 Google to send invitations/updates to all actual participants. Retained

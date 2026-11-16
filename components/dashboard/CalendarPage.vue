@@ -290,7 +290,7 @@ import { getErrorMessage } from '~/utils/errors'
 import { isSessionsResponse, sessionCalendarMonth } from '~/utils/session-contract'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 
-useSeoMeta({ title: 'Calendar | Blawby', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Calendar | KrabiClaw', robots: 'noindex, nofollow' })
 
 // One calendar for both readers. Personal scope reads the account agenda,
 // has no branch to filter, block or configure, and opens a day the same way.

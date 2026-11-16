@@ -614,5 +614,5 @@ watch(addModalOpen, (open) => {
   if (!open) resetAddModal()
 })
 
-useSeoMeta({ title: 'Domains | Blawby Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Domains | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

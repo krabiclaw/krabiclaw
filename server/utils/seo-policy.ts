@@ -118,7 +118,7 @@ export function resolveRuntimeSeoConfig(input: {
 
   if (input.tenantType === TENANT_TYPES.PLATFORM) {
     return {
-      name: 'Blawby',
+      name: 'KrabiClaw',
       url: input.origin,
       indexable: true,
     }

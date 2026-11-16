@@ -20,7 +20,7 @@ import TenantPageList from '~/components/dashboard/TenantPageList.vue'
 
 definePageMeta({ layout: 'dashboard' })
 
-useSeoMeta({ title: 'Pages | Blawby Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Pages | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 
 const level = useRouteLevel()
 const newPagePath = computed(() => `${level.path.value}/new`)

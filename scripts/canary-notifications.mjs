@@ -66,7 +66,7 @@ async function main() {
     const { sessions } = await request(url, 200)
     const session = sessions.find(session => !session.is_full && (session.remaining === null || session.remaining >= 2)
       && Date.parse(session.starts_at) > Date.now() + 7 * 86_400_000)
-    if (session) { available = { slug, session_id: session.id }; break }
+    if (session) { available = { slug, product_session_id: session.id }; break }
   }
   if (!available) throw new Error('The canary workspace has no table a party of two can book without paying')
 
@@ -77,39 +77,39 @@ async function main() {
   const name = `Notification canary ${key.slice(0, 8)}`
   const contact = await post('/api/public/contact', { name, email, message: 'Dedicated notification delivery check.' }, 201)
   const reservation = await post(`/api/public/products/${encodeURIComponent(available.slug)}/book`, {
-    session_id: available.session_id, party_size: 2, guest_name: name, guest_email: email, guest_phone: phone, idempotency_key: key,
+    product_session_id: available.product_session_id, party_size: 2, guest_name: name, guest_email: email, guest_phone: phone, idempotency_key: key,
   }, 201)
-  if (!reservation.request_id || !reservation.cancellation_token) throw new Error('The canary table booking did not return its cancellation capability')
-  const cancelled = await request(new URL(`/api/public/booking-requests/${encodeURIComponent(reservation.request_id)}/cancel`, origin), 200, {
+  if (!reservation.conversation_id || !reservation.cancellation_token) throw new Error('The canary table booking did not return its cancellation capability')
+  const cancelled = await request(new URL(`/api/public/booking-requests/${encodeURIComponent(reservation.conversation_id)}/cancel`, origin), 200, {
     method: 'POST', headers: { authorization: `Bearer ${reservation.cancellation_token}` },
   })
   if (cancelled.success !== true || cancelled.kind !== 'booking') throw new Error('The canary table booking did not confirm cancellation')
-  if (!contact.request_id) throw new Error('The canary contact did not return its request ID')
+  if (!contact.conversation_id) throw new Error('The canary contact did not return its conversation ID')
 
   const requiredReceipts = [
-    ['contact_email', contact.request_id, 'email', 'resend', 'guest_acknowledgement', 'contact_customer_received', email],
-    ['reservation_email', reservation.request_id, 'email', 'resend', 'guest_acknowledgement', 'booking_customer_received', email],
-    ['reservation_whatsapp', reservation.request_id, 'whatsapp', 'meta', 'owner_alert', 'new_reservation', phone],
-    ['cancellation_email', reservation.request_id, 'email', 'resend', 'status_update', 'booking_customer_cancelled', email],
-    ['cancellation_whatsapp', reservation.request_id, 'whatsapp', 'meta', 'owner_alert', 'reservation_cancelled', phone],
+    ['contact_email', contact.conversation_id, 'email', 'resend', 'guest_acknowledgement', 'contact_customer_received', email],
+    ['reservation_email', reservation.conversation_id, 'email', 'resend', 'guest_acknowledgement', 'booking_customer_received', email],
+    ['reservation_whatsapp', reservation.conversation_id, 'whatsapp', 'meta', 'owner_alert', 'new_reservation', phone],
+    ['cancellation_email', reservation.conversation_id, 'email', 'resend', 'status_update', 'booking_customer_cancelled', email],
+    ['cancellation_whatsapp', reservation.conversation_id, 'whatsapp', 'meta', 'owner_alert', 'reservation_cancelled', phone],
   ]
   const deadline = Date.now() + 45_000
   let missing
   do {
     const rows = read(`
-      SELECT d.id, m.conversation_id AS request_id, d.channel, d.provider, d.purpose, d.status, d.provider_message_id
+      SELECT d.id, m.conversation_id, d.channel, d.provider, d.purpose, d.status, d.provider_message_id
       FROM guest_thread_deliveries d JOIN messages m ON m.id = d.message_id
-      WHERE m.organization_id = ${quote(organization)} AND m.conversation_id IN (${quote(contact.request_id)}, ${quote(reservation.request_id)})
+      WHERE m.organization_id = ${quote(organization)} AND m.conversation_id IN (${quote(contact.conversation_id)}, ${quote(reservation.conversation_id)})
     `)
-    const evidence = Object.fromEntries(requiredReceipts.map(([label, requestId, channel, provider, purpose, template, recipient]) => {
+    const evidence = Object.fromEntries(requiredReceipts.map(([label, conversationId, channel, provider, purpose, template, recipient]) => {
       const suffix = `:${purpose}:${channel}:${template}:${recipientHash(recipient)}`
-      return [label, rows.find(row => row.request_id === requestId && row.provider === provider
+      return [label, rows.find(row => row.conversation_id === conversationId && row.provider === provider
         && ['accepted', 'sent', 'delivered', 'read'].includes(row.status)
         && row.provider_message_id && row.id.endsWith(suffix))?.provider_message_id]
     }))
     missing = Object.keys(evidence).filter(label => !evidence[label])
     if (!missing.length) {
-      console.log(JSON.stringify({ status: 'pass', contact_id: contact.request_id, reservation_id: reservation.request_id, provider_message_ids: evidence }, null, 2))
+      console.log(JSON.stringify({ status: 'pass', contact_id: contact.conversation_id, reservation_id: reservation.conversation_id, provider_message_ids: evidence }, null, 2))
       return
     }
     await new Promise(resolve => setTimeout(resolve, 1500))

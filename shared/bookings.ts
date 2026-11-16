@@ -111,7 +111,7 @@ export function stayGuestFirstName(name: string | null): string | null {
 }
 export const STAY_PAYMENT_METHODS = ['cash', 'bank_transfer', 'card_external', 'other'] as const
 export type StayPaymentMethod = typeof STAY_PAYMENT_METHODS[number]
-export const STAY_PAYMENT_METHOD_LABELS: Record<StayPaymentMethod, string> = { cash: 'Cash', bank_transfer: 'Bank transfer', card_external: 'Card (outside Blawby)', other: 'Other' }
+export const STAY_PAYMENT_METHOD_LABELS: Record<StayPaymentMethod, string> = { cash: 'Cash', bank_transfer: 'Bank transfer', card_external: 'Card (outside KrabiClaw)', other: 'Other' }
 
 /** Pending review requests and confirmed bookings both hold capacity. */
 export function bookingConsumesCapacity(booking: { status: BookingStatus }): boolean {

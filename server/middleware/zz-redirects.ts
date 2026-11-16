@@ -155,8 +155,7 @@ export default defineHandler(async (event) => {
   if (
     normalizedPathname === '/api/mcp' &&
     event.req.method === 'GET' &&
-    ((event.req.headers.get('accept')) ?? '').includes('text/html') &&
-    url.origin === cloudflareEnv(event).BETTER_AUTH_URL?.replace(/\/$/, '')
+    ((event.req.headers.get('accept')) ?? '').includes('text/html')
   ) {
     return redirect('/docs/mcp-setup', 302)
   }

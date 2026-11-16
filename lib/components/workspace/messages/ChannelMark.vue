@@ -8,7 +8,7 @@
     :aria-label="`Booked through ${STAY_CHANNEL_LABELS[channel]}`"
   >
     <UIcon v-if="channel === 'airbnb'" name="i-simple-icons-airbnb" :class="large ? 'size-4' : 'size-3'" />
-    <img v-else-if="channel === 'direct'" src="/platform/blawby.svg" alt="" class="brightness-0 invert" :class="large ? 'size-4' : 'size-3'">
+    <img v-else-if="channel === 'direct'" src="/platform/krabiclaw-symbol.svg" alt="" class="brightness-0 invert" :class="large ? 'size-4' : 'size-3'">
     <span v-else aria-hidden="true">{{ channel === 'vrbo' ? 'V' : 'B.' }}</span>
   </span>
 </template>
