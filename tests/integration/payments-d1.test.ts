@@ -1298,12 +1298,12 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
     const originalHold = await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first()
     await reconcilePaymentIntent(db, stripe, await requirePayment(db, ORG, 'ach-payment'), declinedIntent, env)
     assert.equal((await requirePayment(db, ORG, 'ach-payment')).captured_amount, 0)
-    const handoff = await paymentHandoff(db, stripe, 'pk_test_local_boundary', ORG, 'ach-payment', claim)
+    const handoff = await paymentHandoff(db, { ...env, NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_local_boundary' }, ORG, 'ach-payment', claim)
     assert.equal(handoff.state, 'open')
     assert.deepEqual(handoff.billing_details, { name: 'Guest', email: 'guest@example.com', phone: '+12025550114' })
     assert.deepEqual(await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first(), originalHold)
 
-    const review = await reviewPayment(db, stripe, ORG, 'ach-payment', claim, 'pm_achproof123', null)
+    const review = await reviewPayment(db, env, ORG, 'ach-payment', claim, 'pm_achproof123', null)
     assert.equal(review.surcharge, 0)
     assert.equal(review.tax, 0)
     assert.equal(review.total, 10000)
@@ -1311,7 +1311,7 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
     assert.equal(review.method.bank_name, 'STRIPE TEST BANK')
     assert.equal(review.method.last4, '6789')
 
-    const confirm = await confirmPayment(db, stripe, env, ORG, 'ach-payment', claim, { payment_method_id: 'pm_achproof123', total: 10000 }, 'https://payments.proof.example')
+    const confirm = await confirmPayment(db, env, ORG, 'ach-payment', claim, { payment_method_id: 'pm_achproof123', total: 10000 }, 'https://payments.proof.example')
     assert.deepEqual(confirm, { status: 'processing', client_secret: null, requires_action: false, bank_verification_url: null })
 
     // Capacity hold should be extended by 14 days rather than expiring immediately
@@ -1346,7 +1346,7 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
     achIntentStatus = 'canceled'
     await reconcilePaymentIntent(db, stripe, await requirePayment(db, ORG, 'ach-payment'), { ...failedIntent, status: 'canceled', last_payment_error: null }, env)
     assert.equal((await requirePayment(db, ORG, 'ach-payment')).captured_amount, 0)
-    assert.equal((await requireClaimedPayment(db, stripe, ORG, 'ach-payment', claim)).state, 'failed')
+    assert.equal((await requireClaimedPayment(db, env, ORG, 'ach-payment', claim)).state, 'failed')
     const releasedHold = await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='ach-payment'").first<{ status: string }>()
     assert.equal(releasedHold?.status, 'released')
   } finally {
@@ -1392,9 +1392,7 @@ test('a business registered for Stripe Tax has tax calculated by Stripe from the
       }
       throw new Error(`Unexpected Stripe request: ${init?.method} ${url.pathname}`)
     })
-    const stripe = getStripe(env)
-
-    const review = await reviewPayment(db, stripe, ORG, 'taxed', claim, 'pm_cardUS', '203.0.113.9')
+    const review = await reviewPayment(db, env, ORG, 'taxed', claim, 'pm_cardUS', '203.0.113.9')
     // Stripe Tax located the buyer by the card's billing address, for the purchase's own amount, tax code and behavior.
     assert.equal(calculations, 1)
     assert.equal(sent.calculation!.get('currency'), 'usd')
@@ -1416,9 +1414,9 @@ test('a business registered for Stripe Tax has tax calculated by Stripe from the
     assert.deepEqual({ tax: stored.tax, total: stored.total }, { tax: 1025, total: 11355 })
 
     // A total other than the one reviewed is not confirmed.
-    await assert.rejects(confirmPayment(db, stripe, env, ORG, 'taxed', claim, { payment_method_id: 'pm_cardUS', total: 10330 }, 'https://payments.proof.example'), /Review the payment again/u)
+    await assert.rejects(confirmPayment(db, env, ORG, 'taxed', claim, { payment_method_id: 'pm_cardUS', total: 10330 }, 'https://payments.proof.example'), /Review the payment again/u)
     assert.equal(sent.confirm, undefined)
-    const confirmed = await confirmPayment(db, stripe, env, ORG, 'taxed', claim, { payment_method_id: 'pm_cardUS', total: 11355 }, 'https://payments.proof.example')
+    const confirmed = await confirmPayment(db, env, ORG, 'taxed', claim, { payment_method_id: 'pm_cardUS', total: 11355 }, 'https://payments.proof.example')
     assert.equal(confirmed.status, 'processing')
     assert.equal(sent.confirm!.get('amount_to_confirm'), '11355')
     assert.equal(sent.confirm!.get('amount_details[surcharge][amount]'), '330')
@@ -1554,7 +1552,7 @@ test('a card is authorized, booked, then captured, and a hold that has lapsed st
    return null
   }, statuses)
   const stripe = getStripe(env)
-  const confirm = (id: string, claim: string) => confirmPayment(db, stripe, env, ORG, id, claim, { payment_method_id: 'pm_proof', total: 10000 }, 'https://payments.proof.example')
+  const confirm = (id: string, claim: string) => confirmPayment(db, env, ORG, id, claim, { payment_method_id: 'pm_proof', total: 10000 }, 'https://payments.proof.example')
 
   // The buyer's window is open; only the hold has gone. Stripe is never asked.
   const lapsed = await confirmable(db, 'lapsed', inMinutes(-1))
@@ -1683,16 +1681,16 @@ test('a bank debit waiting on microdeposits keeps its capacity, sends the buyer 
   }, {})
   const stripe = getStripe(env)
   const claim = await confirmable(db, 'bank', inMinutes(30), inMinutes(1))
-  assert.deepEqual(await confirmPayment(db, stripe, env, ORG, 'bank', claim, { payment_method_id: 'pm_proof', total: 10000 }, 'https://payments.proof.example'), { status: 'requires_action', client_secret: null, requires_action: false, bank_verification_url: page })
+  assert.deepEqual(await confirmPayment(db, env, ORG, 'bank', claim, { payment_method_id: 'pm_proof', total: 10000 }, 'https://payments.proof.example'), { status: 'requires_action', client_secret: null, requires_action: false, bank_verification_url: page })
   assert.ok(Date.parse((await holdOf(db, 'bank'))!.expires_at) >= Date.now() + 13 * 86_400_000)
-  assert.equal((await requireClaimedPayment(db, stripe, ORG, 'bank', claim)).state, 'verifying')
+  assert.equal((await requireClaimedPayment(db, env, ORG, 'bank', claim)).state, 'verifying')
   assert.equal((await requirePayment(db, ORG, 'bank')).captured_amount, 0)
 
   // Verification moves it to processing: still not paid, and the capacity is still held.
   stage = 'processing'
   const event = (id: string, type: string) => ({ id, type, account: 'acct_seller', livemode: false, data: { object: { id: 'pi_bank', metadata: { krabiclaw_payment_id: 'bank' } } } }) as unknown as Stripe.Event
   await processPaymentEvent(db, stripe, event('evt_bank_processing', 'payment_intent.processing'), env)
-  assert.equal((await requireClaimedPayment(db, stripe, ORG, 'bank', claim)).state, 'processing')
+  assert.equal((await requireClaimedPayment(db, env, ORG, 'bank', claim)).state, 'processing')
   assert.equal((await requirePayment(db, ORG, 'bank')).captured_amount, 0)
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 0)
 

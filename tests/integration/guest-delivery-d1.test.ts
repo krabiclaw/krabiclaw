@@ -560,7 +560,7 @@ test('a failed stay cancellation email retries its recorded content after displa
     assert.equal(await env.ORGANIZATION_CACHE.get(pageKey(renamedRevision)), null)
     await (await organizationAdapter(env)).updateOrganization(access.organizationId, { name: 'Renamed Retreat' })
     const renamed = await getProduct(db, access.organizationId, home.id)
-    assert.equal((await readPublicStayHome(db, access.organizationId, renamed.slug)).name, 'Renamed Cabin')
+    assert.equal((await readPublicStayHome(db, access.organizationId, renamed.id)).name, 'Renamed Cabin')
     assert.equal(await db.prepare('SELECT name FROM organization WHERE id = ?').bind(access.organizationId).first('name'), 'Renamed Retreat')
     reject = false
     await notifyStayCancelled(env, db, access.organizationId, stay.id, 'host', 0)

@@ -13,7 +13,7 @@ import { paymentsStripe, requireStripeCheckoutAcceptance, type StripeConnectedAc
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { tokenHash } from './buyer'
 import { connectedBuyerCustomer } from '~/server/utils/billing-customer'
-import { approvedStayBooking, assertMinorAmount, requirePayment, type ApprovedStayBooking } from './index'
+import { approvedStayBooking, assertMinorAmount, type ApprovedStayBooking, type Payment } from './index'
 import { recordCheckoutStarted } from '~/server/domain/booking-analytics'
 import { isCurrencyCode } from '~/shared/currencies'
 import { quotePaymentsBillingFx, requireBillingFxQuote } from './fx'
@@ -27,6 +27,7 @@ interface CheckoutInputBase {
   requestFingerprint: string
   quantity: number
   idempotencyKey: string
+  previous: CheckoutAttempt | undefined
   following: (paymentId: string) => BatchQuery[]
   /**
    * The guest's own browser request and the pageview it came from, which say
@@ -76,16 +77,32 @@ export function isStayPurchase(value: unknown): value is StayPurchase {
  */
 export interface PaymentReview { payment_method_id: string; subtotal: number; tax: number; tax_included: number; surcharge: number; total: number; reviewed_at: string }
 export interface PaymentHandoff { payment_id: string; pay_path: string; purchase_claim: string; expires_at: string }
+
+type CheckoutAttempt = Payment & {
+  hold_status: string | null; hold_expires_at: string | null; hold_quantity: number | null
+  hold_conversation_id: string | null; hold_fingerprint: string | null; confirmation_in_flight: number | null
+}
+
+function checkoutKey(organizationId: string, idempotencyKey: string): string {
+  return `checkout:${organizationId}:${idempotencyKey.trim()}`
+}
+
+export function readCheckoutAttempt(db: DbClient, organizationId: string, idempotencyKey: string) {
+  return queryFirst<CheckoutAttempt>(db, `
+    SELECT p.*, h.status AS hold_status, h.expires_at AS hold_expires_at, h.quantity AS hold_quantity,
+      r.id AS hold_conversation_id, json_extract(r.payload_json, '$.provenance.fingerprint') AS hold_fingerprint,
+      h.status='active' AND h.expires_at>? AND json_type(p.review_json,'$.confirmation_started_at')='text' AS confirmation_in_flight
+    FROM payments p LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id
+    LEFT JOIN conversations r ON r.id=h.conversation_id AND r.organization_id=p.organization_id
+    WHERE p.idempotency_key=? AND p.organization_id=?`, [new Date().toISOString(), checkoutKey(organizationId, idempotencyKey), organizationId])
+}
+
 /** Stripe's PaymentIntent owns payment; one atomic batch owns the guest request, expiring capacity hold and immutable purchase. */
 export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, input: CheckoutInput, retry = false) {
   if (!Number.isSafeInteger(input.quantity) || input.quantity < 1 || input.quantity > 99 || !input.idempotencyKey.trim() || input.idempotencyKey.trim().length > 200) throw new HTTPError({ statusCode: 400, statusMessage: 'A quantity of 1–99 and an idempotency key of 1–200 characters are required' })
-  const key = `checkout:${input.organizationId}:${input.idempotencyKey.trim()}`
+  const key = checkoutKey(input.organizationId, input.idempotencyKey)
   const approval = input.unit === 'nights' ? input.approval : undefined
-  const previous = await queryFirst<{id:string;stripe_payment_intent_id:string|null;checkout_expires_at:string;return_token:string;hold_status:string|null;hold_expires_at:string|null;hold_quantity:number|null;confirmation_in_flight:number}>(db,`
-    SELECT p.id,p.stripe_payment_intent_id,p.checkout_expires_at,p.return_token,h.status AS hold_status,h.expires_at AS hold_expires_at,h.quantity AS hold_quantity,
-      h.status='active' AND h.expires_at>? AND json_type(p.review_json,'$.confirmation_started_at')='text' AS confirmation_in_flight
-    FROM payments p LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id
-    WHERE p.idempotency_key=? AND p.organization_id=?`,[new Date().toISOString(),key,input.organizationId])
+  const previous = input.previous
   // Stripe refused this request outright: it has no intent and gave its capacity back.
   if(previous&&!previous.stripe_payment_intent_id&&previous.hold_status==='released')throw new HTTPError({statusCode:409,statusMessage:'Checkout was rejected; start a new request',data:{code:'checkout_failed'}})
   const now = new Date().toISOString()
@@ -103,7 +120,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   let methodConfigurationId: string | undefined
   let session: {id:string;location_id:string|null;starts_at:string;ends_at:string;timezone:string} | null = null
   if (previous) {
-    const frozen = await requirePayment(db,input.organizationId,previous.id)
+    const frozen = previous
     const snapshot: unknown = JSON.parse(frozen.price_snapshot_json)
     if (frozen.subject_type !== 'booking' || !isRecord(snapshot) || isRecord(snapshot.stay) !== (input.unit === 'nights') || typeof snapshot.title !== 'string' || !snapshot.title.trim()
       || (snapshot.tax_code !== null && (typeof snapshot.tax_code !== 'string' || !snapshot.tax_code.trim()))
@@ -212,7 +229,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   }
   if (previous?.stripe_payment_intent_id) {
     await publishDirectHold()
-    await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,previous.id), null, input.origin)
+    await recordCheckoutStarted(db, previous, null, input.origin)
     return handoff(previous.id)
   }
   if (!previous) {
@@ -252,8 +269,8 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       ...input.following(id),
     ],{operation:'Reserve payment checkout'})
     } catch(error) {
-      const raced=await queryFirst(db,'SELECT id FROM payments WHERE idempotency_key=?',[key])
-      if(raced && !retry) return await createPaymentCheckout(db,env,input,true)
+      const raced = retry ? undefined : await readCheckoutAttempt(db, input.organizationId, input.idempotencyKey)
+      if (raced) return await createPaymentCheckout(db, env, { ...input, previous: raced }, true)
       if (input.unit === 'nights' && (isStayNightConflict(error) || bookingBatchWriteRefused(error))) throw new HTTPError({ statusCode: 409, statusMessage: 'Some of these nights are no longer available', data: { code: 'STAY_NIGHTS_UNAVAILABLE', field: 'check_in_date' }, cause: error })
       if (input.unit === 'slot' && bookingBatchWriteRefused(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'This time no longer has capacity for your party', data: { code: 'capacity_unavailable' }, cause: error })
       throw error
@@ -263,6 +280,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   // A signed-in buyer's Customer at this business: the Payment Element offers, saves and removes their cards here only.
   const customer=input.buyerUserId?await connectedBuyerCustomer(db,stripe,input.buyerUserId,connected.stripe_account_id,connected.livemode):null
   const surcharge = await surchargeBasisPoints(db, input.organizationId, connected.stripe_account_id)
+  let linked: Payment
   try {
     const intent = await stripe.paymentIntents.create({
       amount, currency: price.currency.toLowerCase(),
@@ -279,7 +297,9 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       ...(surcharge !== null ? { amount_details: { surcharge: { enforce_validation: 'enabled' } } } : {}),
     } as Stripe.PaymentIntentCreateParams, { stripeAccount: connected.stripe_account_id, idempotencyKey: key })
     if (intent.livemode !== connected.livemode || !intent.client_secret) throw new Error('Stripe returned a PaymentIntent outside the connected mode')
-    await execute(db,'UPDATE payments SET stripe_payment_intent_id=?,updated_at=? WHERE id=?',[intent.id,new Date().toISOString(),id])
+    const payment = await queryFirst<Payment>(db, 'UPDATE payments SET stripe_payment_intent_id=?,updated_at=? WHERE id=? AND organization_id=? RETURNING *', [intent.id, new Date().toISOString(), id, input.organizationId])
+    if (!payment) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
+    linked = payment
   } catch(error) {
     // A prior attempt may have reached Stripe even when its response was lost.
     // Only a first-call content/auth rejection proves no intent was created.
@@ -290,7 +310,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     }
     throw error
   }
-  await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,id), customer?.savedCards ?? 0, input.origin)
+  await recordCheckoutStarted(db, linked, customer?.savedCards ?? 0, input.origin)
   return handoff(id)
 }
 

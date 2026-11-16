@@ -12,6 +12,7 @@ import { runAlterationRequestFeed } from '../../server/domain/guest-threads/stay
 import { sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
 import { getConversationDetails } from '../../server/domain/guest-threads/inbox.ts'
 import { conversationPageFor } from '../integration/support/conversation-page.ts'
+import { captureEvents } from '../integration/support/events.ts'
 import { scheduleGuestReply } from '../../server/domain/scheduled-guest-messages.ts'
 import { suggestGuestReplies } from '../../server/domain/suggested-reply.ts'
 import { memberInbox } from '../../server/utils/dashboard-guest-threads.ts'
@@ -126,7 +127,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('owner-member', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
       VALUES ('location', ?, 'sky', '74 D · Sky', 'active', 'America/Denver', ?, ?)`).bind(ORG, NOW, NOW).run()
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), MEDIA_BASE_URL: 'https://media.example.test', CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k',
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: captureEvents().binding, MEDIA_BASE_URL: 'https://media.example.test', CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k',
       BETTER_AUTH_SECRET: 'inbox-contract-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
       EMAIL_REPLY_DOMAIN: 'reply.proof.example',
       STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', EMAIL_REPLY_SECRET: 'contract-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',

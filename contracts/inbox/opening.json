@@ -21,17 +21,31 @@
         "can_remove": false,
         "id": "site-guest",
         "image": null,
-        "name": "Anonymous",
-        "role": "guest"
+        "name": "Ana Ruiz",
+        "role": "guest",
+        "title": "Booker"
       },
       {
         "can_remove": false,
         "id": "owner-contract",
         "image": null,
         "name": "Skyler Baird",
-        "role": "member"
+        "role": "member",
+        "title": "Host"
       }
     ],
+    "reservation": {
+      "at": "2026-11-05T19:00:00.000Z",
+      "confirmation": {
+        "message_id": null,
+        "text": "Reservation confirmed for 2 guests on Nov 20 – 23."
+      },
+      "day": {
+        "id": "day:2026-11-05",
+        "label": "Today",
+        "type": "day"
+      }
+    },
     "title": "Ana Ruiz"
   },
   "entries": [
@@ -47,6 +61,7 @@
       "body": "74 D · Sky from Fri, Nov 20 to Mon, Nov 23 for 2 guests. Ana Ruiz, +1 303 555 0123.",
       "deliveries": [],
       "id": "00000000-0000-4000-8000-000000000013",
+      "job": false,
       "photos": [],
       "receipt": null,
       "retryable": false,
@@ -64,6 +79,7 @@
       "body": "We arrive late, around 9 PM.",
       "deliveries": [],
       "id": "00000000-0000-4000-8000-000000000014",
+      "job": false,
       "photos": [],
       "receipt": null,
       "retryable": false,

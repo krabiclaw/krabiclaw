@@ -2812,12 +2812,8 @@ async function storedStay(db: DbClient, organizationId: string, stayId: string):
  */
 
 /** A home a guest can book on the site: active, published on the site and at its active location. */
-export async function readPublicStayHome(db: DbClient, organizationId: string, slug: string): Promise<StayHome> {
-  const row = await queryFirst<{ id: string }>(db, `SELECT p.id FROM products p
-      JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
-     WHERE p.organization_id = ? AND p.slug = ? AND ${PUBLIC_STAY_SQL}`, [organizationId, slug])
-  if (!row) fail(404, 'STAY_NOT_FOUND', 'That place to stay is not open for booking', 'slug')
-  const [home] = await stayHomesWhere(db, organizationId, row.id, { sql: '1 = 1', params: [] })
+export async function readPublicStayHome(db: DbClient, organizationId: string, productId: string): Promise<StayHomeCore> {
+  const [home] = await stayHomeRows(db, organizationId, productId, { sql: PUBLIC_STAY_SQL, params: [] })
   if (!home) fail(404, 'STAY_NOT_FOUND', 'That place to stay is not open for booking', 'slug')
   return home
 }
@@ -2858,8 +2854,7 @@ function publicNight(night: Omit<StayNight, 'channel'>, today: string, lastDepar
 
 /** The bookable nights of [from, to), plus `to` so the guest can select that departure. No claims are shown. */
 export async function readPublicStayCalendar(db: DbClient, organizationId: string, productId: string, input: { from: unknown; to: unknown }): Promise<PublicStayCalendar> {
-  const [home] = await stayHomeRows(db, organizationId, productId, { sql: PUBLIC_STAY_SQL, params: [] })
-  if (!home) fail(404, 'STAY_NOT_FOUND', 'That place to stay is not open for booking', 'slug')
+  const home = await readPublicStayHome(db, organizationId, productId)
   const { from, to } = range(input)
   const today = homeToday(home.timezone)
   const lastDeparture = addDays(today, STAY_CALENDAR_DAYS)
@@ -2919,7 +2914,7 @@ function stayNightRestriction(stayed: readonly StayNight[], departure: StayNight
   return null
 }
 
-export async function quoteStay(db: DbClient, organizationId: string, home: StayHome, input: StayQuoteInput): Promise<StayQuote> {
+export async function quoteStay(db: DbClient, organizationId: string, home: StayHomeCore, input: StayQuoteInput): Promise<StayQuote> {
   const checkIn = date(input.check_in_date, 'check_in_date')
   const checkOut = date(input.check_out_date, 'check_out_date')
   const today = homeToday(home.timezone)
@@ -3089,7 +3084,7 @@ export async function approvedStayPaymentPredicate(db: DbClient, input: {
 
 /** The guest's request and price are one booking, with the same night claim used for every other stay. */
 export async function createStayRequest(db: DbClient, env: StayMutationEnv, input: {
-  organizationId: string; buyerUserId: string; key: string; fingerprint: string; home: StayHome; quote: StayQuote;
+  organizationId: string; buyerUserId: string; key: string; fingerprint: string; home: StayHomeCore; quote: StayQuote;
   guest: CheckoutStay['guest']; locale: string; ipHash: string
   /** How the guest arrived on the website (bookings.website_source). */
   websiteSource: string | null

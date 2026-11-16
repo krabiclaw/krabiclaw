@@ -22,16 +22,30 @@
         "id": "airbnb-guest-account",
         "image": null,
         "name": "Mililani Garcia",
-        "role": "guest"
+        "role": "guest",
+        "title": "Booker"
       },
       {
         "can_remove": false,
         "id": "owner-contract",
         "image": null,
         "name": "Skyler Baird",
-        "role": "member"
+        "role": "member",
+        "title": "Host"
       }
     ],
+    "reservation": {
+      "at": "2026-11-05T19:00:00.000Z",
+      "confirmation": {
+        "message_id": null,
+        "text": "Reservation confirmed for 2 guests on Nov 8 – 12."
+      },
+      "day": {
+        "id": "day:2026-11-05",
+        "label": "Today",
+        "type": "day"
+      }
+    },
     "title": "Mililani"
   },
   "entries": [
@@ -47,6 +61,7 @@
       "body": "¿En invierno dejan aparcar en la calle?",
       "deliveries": [],
       "id": "00000000-0000-4000-8000-000000000004",
+      "job": false,
       "photos": [],
       "receipt": null,
       "retryable": false,
@@ -64,6 +79,7 @@
       "body": null,
       "deliveries": [],
       "id": "00000000-0000-4000-8000-000000000005",
+      "job": false,
       "photos": [
         {
           "height": 3,
@@ -89,6 +105,7 @@
       "body": "Yes, the street facing downhill is easiest.",
       "deliveries": [],
       "id": "00000000-0000-4000-8000-000000000007",
+      "job": false,
       "photos": [],
       "receipt": null,
       "retryable": false,
@@ -106,6 +123,7 @@
       "body": "Thank you! What time is check-in?",
       "deliveries": [],
       "id": "00000000-0000-4000-8000-000000000008",
+      "job": false,
       "photos": [],
       "receipt": null,
       "retryable": false,
@@ -128,6 +146,7 @@
       "body": "Your door code is 1106. Garage D is unlocked.",
       "deliveries": [],
       "id": "automatic-contract",
+      "job": false,
       "photos": [],
       "receipt": null,
       "retryable": false,
@@ -159,6 +178,7 @@
       "body": "Check-in is from 4 PM.",
       "deliveries": [],
       "id": "00000000-0000-4000-8000-000000000011",
+      "job": false,
       "photos": [],
       "receipt": "Not delivered",
       "retryable": true,

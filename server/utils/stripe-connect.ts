@@ -198,14 +198,16 @@ export function deriveStripeConnectStatus(input: {
   return 'pending_review'
 }
 
+const CONNECTED_ACCOUNT_COLUMNS = `id, organization_id, stripe_account_id, country, livemode, status,
+  card_payments_status, surcharge_basis_points, requirements_json, stripe_refreshed_at,
+  last_error, created_at, updated_at`
+
 export async function getStripeConnectedAccount(
   db: DbClient,
   organizationId: string,
 ): Promise<StripeConnectedAccount | null> {
   const row = await queryFirst<StripeConnectedAccountRow>(db, `
-    SELECT id, organization_id, stripe_account_id, country, livemode, status,
-           card_payments_status, surcharge_basis_points, requirements_json, stripe_refreshed_at,
-           last_error, created_at, updated_at
+    SELECT ${CONNECTED_ACCOUNT_COLUMNS}
     FROM stripe_connected_accounts
     WHERE organization_id = ?
     LIMIT 1
@@ -319,13 +321,14 @@ export async function projectStripeConnectedAccount(
   input: StripeConnectProjection,
 ): Promise<StripeConnectedAccount> {
   const status = input.financialContractSupported === false ? 'restricted' : deriveStripeConnectStatus(input)
-  const updated = await execute(db, `
+  const updated = await queryFirst<StripeConnectedAccountRow>(db, `
     UPDATE stripe_connected_accounts
     SET stripe_account_id = ?, country = ?, status = ?, card_payments_status = ?,
         requirements_json = ?, stripe_refreshed_at = ?, last_error = NULL,
         updated_at = ?
     WHERE id = ? AND organization_id = ? AND livemode = ?
       AND (stripe_account_id IS NULL OR stripe_account_id = ?)
+    RETURNING ${CONNECTED_ACCOUNT_COLUMNS}
   `, [
     input.stripeAccountId,
     input.country,
@@ -339,10 +342,8 @@ export async function projectStripeConnectedAccount(
     input.livemode ? 1 : 0,
     input.stripeAccountId,
   ])
-  if (Number(updated.meta.changes) !== 1) throw new Error('Stripe Connect account projection did not match its reservation')
-  const row = await getStripeConnectedAccount(db, input.organizationId)
-  if (!row) throw new Error('Projected Stripe Connect account is missing')
-  return row
+  if (!updated) throw new Error('Stripe Connect account projection did not match its reservation')
+  return mapConnectedAccount(updated)
 }
 
 function normalizeAccountRequirements(account: Stripe.V2.Core.Account): StripeConnectRequirement[] {

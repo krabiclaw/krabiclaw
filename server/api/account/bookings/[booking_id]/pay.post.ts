@@ -1,6 +1,6 @@
 import { defineHandler, HTTPError } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
-import { createPaymentCheckout } from '~/server/domain/payments/checkout'
+import { createPaymentCheckout, readCheckoutAttempt } from '~/server/domain/payments/checkout'
 import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
 import { readApprovedStayCheckout } from '~/server/domain/stays'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
@@ -27,7 +27,7 @@ export default defineHandler(async event => {
   const key = `approved-stay:${bookingId}:${approved.version}`
   const checkout = await createPaymentCheckout(env.DB, env, {
     unit: 'nights', organizationId, buyerUserId, requestId: approved.conversationId,
-    requestFingerprint: key, idempotencyKey: key, quantity: 1, following: () => [],
+    requestFingerprint: key, idempotencyKey: key, previous: await readCheckoutAttempt(env.DB, organizationId, key), quantity: 1, following: () => [],
     origin: { request: event.req, pageEventId: null },
     stay: approved.quote, guest: approved.guest, quote: async () => approved.quote,
     approval: { bookingId, buyerUserId, version: approved.version, conversationId: approved.conversationId, expiresAt: approved.expiresAt, policy: approved.policy },

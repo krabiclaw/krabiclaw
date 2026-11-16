@@ -26,7 +26,7 @@ import { GUEST_NOTE_EVENT, openingSentence } from '~/server/domain/guest-threads
 import { DEFAULT_EMAIL_DAILY_LIMIT as EMAIL_DAILY_LIMIT, DEFAULT_IP_HOURLY_LIMIT as IP_HOURLY_LIMIT, getClientIp, hashClientIp, hashIdentifier, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { HTTPError, type H3Event } from 'nitro'
-import { createPaymentCheckout } from '~/server/domain/payments/checkout'
+import { createPaymentCheckout, readCheckoutAttempt } from '~/server/domain/payments/checkout'
 import { paidOnline } from '~/server/domain/payments'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { isRecord } from '~/server/utils/type-guards'
@@ -34,7 +34,7 @@ import { createStay, createStayRequest, publishStayRequest, quoteStay, readPubli
 import { readLodgingBookingPolicy } from '~/server/utils/lodging-booking-policy'
 import { requireStripeCheckoutAcceptance } from '~/server/utils/stripe-connect'
 import { accountActivityPath } from '~/shared/account-activity'
-import { acceptFormAnswers, localizeStoredFormQuestions, validateFormAnswers } from '~/server/domain/form-questions'
+import { localizeStoredFormQuestions, validateFormAnswers } from '~/server/domain/form-questions'
 import { formAnswerSnapshotsSchema, formAnswersFingerprint } from '~/shared/form-questions'
 import type { ProductKind } from '~/shared/product-details'
 import { assignedMemberSql, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
@@ -285,7 +285,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     if (operator || context.financialWritesAllowed === false) {
       throw new HTTPError({ statusCode: 409, statusMessage: 'Book these nights through the business’s payment workflow', data: { code: 'financial_action_required' } })
     }
-    return createNightBooking(event, env, db, context, { name: guestName, email: guestEmail, phone: normalizedGuestPhone, notes, locale, idempotencyKey })
+    return createNightBooking(event, env, db, context, offering.id, { name: guestName, email: guestEmail, phone: normalizedGuestPhone, notes, locale, idempotencyKey })
   }
 
   const selection = readTimedSelection(body)
@@ -324,16 +324,12 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const existing = await replay()
   if (existing) return existing
 
-  const checkoutAttempt = await queryFirst<{ price_snapshot_json: string; fingerprint: string | null; party_size: number }>(db, `
-    SELECT p.price_snapshot_json, json_extract(r.payload_json,'$.provenance.fingerprint') AS fingerprint, h.quantity AS party_size
-    FROM payments p JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id
-    JOIN conversations r ON r.id=h.conversation_id AND r.id=? AND r.organization_id=p.organization_id
-    WHERE p.idempotency_key=? AND p.organization_id=?`, [threadId, `checkout:${organizationId}:${idempotencyKey}`, organizationId])
-  if (checkoutAttempt) {
-    if (checkoutAttempt.fingerprint !== fingerprint) return creationResult({ error: 'This key already identifies a different checkout request. Read its purchase before continuing.', code: 'idempotency_conflict' }, { status: 409 })
+  const checkoutAttempt = await readCheckoutAttempt(db, organizationId, idempotencyKey)
+  if (checkoutAttempt?.hold_conversation_id === threadId) {
+    if (checkoutAttempt.hold_fingerprint !== fingerprint) return creationResult({ error: 'This key already identifies a different checkout request. Read its purchase before continuing.', code: 'idempotency_conflict' }, { status: 409 })
     const snapshot: unknown = JSON.parse(checkoutAttempt.price_snapshot_json)
     if (!isRecord(snapshot) || typeof snapshot.product_id !== 'string' || typeof snapshot.variant_id !== 'string'
-      || snapshot.session_id !== sessionId || checkoutAttempt.party_size !== partySize || requestedVariantId && snapshot.variant_id !== requestedVariantId) {
+      || snapshot.session_id !== sessionId || checkoutAttempt.hold_quantity !== partySize || requestedVariantId && snapshot.variant_id !== requestedVariantId) {
       return creationResult({ error: 'Checkout retry does not match its saved purchase', code: 'idempotency_conflict' }, { status: 409 })
     }
     if (context.financialWritesAllowed === false) throw new HTTPError({ statusCode: 409, statusMessage: 'Continue this purchase through the business’s payment workflow', data: { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(organization.slug)}/products/${encodeURIComponent(snapshot.product_id)}/booking` } })
@@ -341,7 +337,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
       // A retry is held to the answers its purchase froze; it does not read them again.
       unit: 'slot', organizationId, buyerUserId: operator ? null : await ensureInteractionUser(event, env), productId: snapshot.product_id, variantId: snapshot.variant_id,
       sessionId, answers: null, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize,
-      idempotencyKey, following: () => [], origin: operator ? null : { request: event.req, pageEventId },
+      idempotencyKey, previous: checkoutAttempt, following: () => [], origin: operator ? null : { request: event.req, pageEventId },
     })
     return creationResult({ success: true, status: 'checkout', replayed: true, ...checkout }, { status: 200 })
   }
@@ -399,6 +395,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     const checkout = await createPaymentCheckout(db, env, {
       unit: 'slot', organizationId, buyerUserId: userId, productId: product.id, variantId: productVariantId,
       sessionId: session.id, resolved, answers, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize, idempotencyKey: checkoutKey,
+      previous: checkoutAttempt,
       origin: operator ? null : { request: event.req, pageEventId },
       following: paymentId => requestInsertQueries({
         kind: 'booking', id: threadId, organization_id: organizationId, location_id: session.location_id,
@@ -514,11 +511,11 @@ function stayBookingError(statusCode: number, code: string, message: string, fie
  * channel closes them at once, and capture confirms the stay. A retry with the
  * same key returns the same checkout without quoting the nights it holds.
  */
-async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClient, context: BookingCreationContext, contact: BookingContact) {
+async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClient, context: BookingCreationContext, productId: string, contact: BookingContact) {
   const { organizationId, slug, body } = context
   const { name, email, phone, notes, locale, idempotencyKey } = contact
 
-  const home = await readPublicStayHome(db, organizationId, slug)
+  const home = await readPublicStayHome(db, organizationId, productId)
   const request = { product_id: home.product_id, check_in_date: body.check_in_date, check_out_date: body.check_out_date, adults: body.adults, children: body.children ?? 0, infants: body.infants ?? 0 }
   const fingerprint = await hashIdentifier(JSON.stringify({ slug, ...request, guest: { name, email, phone, notes }, answers: formAnswersFingerprint(body.answers) }))
 
@@ -556,7 +553,7 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
   }
   const existing = await replayRequest()
   if (existing) return existing
-  const retrying = await queryFirst(db, 'SELECT 1 FROM payments WHERE idempotency_key = ? AND organization_id = ?', [`checkout:${organizationId}:${idempotencyKey}`, organizationId])
+  const retrying = await readCheckoutAttempt(db, organizationId, idempotencyKey)
   const policy = retrying ? null : await readLodgingBookingPolicy(db, organizationId)
   if (policy && (body.confirmation_mode !== undefined || policy.confirmation_mode === 'review') && body.confirmation_mode !== policy.confirmation_mode) {
     stayBookingError(409, 'STAY_BOOKING_MODE_CHANGED', 'Refresh this listing to see the host’s current booking settings.', 'confirmation_mode')
@@ -564,7 +561,9 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
   // A new checkout checks and freezes the answers with the purchase; a retry is
   // held to the purchase it froze, answers included, and does not read the
   // questions again (createPaymentCheckout reads `guest` only for a new checkout).
-  const answers = retrying ? [] : await acceptFormAnswers(db, { kind: 'booking', organizationId, productId: home.product_id }, { locale, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
+  const translatedLocale = !retrying && home.questions.length && body.locale !== undefined && locale !== await getSourceLocale(db, organizationId) ? locale : null
+  const questions = retrying ? null : await localizeStoredFormQuestions(db, { kind: 'booking', organizationId, productId }, translatedLocale, home)
+  const answers = questions ? validateFormAnswers(questions, { answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false }) : []
   const guest = { name, email, phone, notes, answers }
   // The quote's refusals name the rule a guest's choice breaks; they come before rate limits and payment setup.
   let quoted: StayQuote | null = null
@@ -597,7 +596,7 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
     : { product_id: home.product_id, check_in_date: String(request.check_in_date), check_out_date: String(request.check_out_date), adults: Number(request.adults), children: Number(request.children), infants: Number(request.infants) }
   const checkout = await createPaymentCheckout(db, env, {
     unit: 'nights', organizationId, buyerUserId: await ensureInteractionUser(event, env), requestId: null, requestFingerprint: fingerprint,
-    quantity: stay.adults + stay.children, idempotencyKey, following: () => [],
+    quantity: stay.adults + stay.children, idempotencyKey, previous: retrying, following: () => [],
     origin: { request: event.req, pageEventId: readPageEventId(body.page_event_id) },
     stay, guest, quote,
   })

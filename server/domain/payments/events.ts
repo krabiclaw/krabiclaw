@@ -19,11 +19,36 @@ import { turnoverHomeSql, turnoverTaskQueries, type TurnoverHome } from '~/serve
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { stayRequestConfirmationKey } from '~/server/domain/requests'
-import { approvedStayPaymentPredicate, completeStayFromCheckout, isStayNightConflict, readStayHome, stayFromCheckoutQueries } from '~/server/domain/stays'
+import { approvedStayPaymentPredicate, completeStayFromCheckout, isStayNightConflict, stayFromCheckoutQueries } from '~/server/domain/stays'
 
 interface Hold {
   id:string; organization_id:string; product_id:string|null; variant_id:string|null; session_id:string|null; location_id:string|null; timezone:string|null
   buyer_user_id:string|null; conversation_id:string|null; quantity:number; status:string; expires_at:string; converted_booking_id:string|null; starts_at:string; ends_at:string
+}
+
+async function checkoutHold(db: DbClient, payment: Payment) {
+  const hold = await queryFirst<Hold & {
+    turnover_home: string | null
+    home_name: string | null
+    home_variant_ids: string | null
+    organization_exists: number
+    retained_for_servicing: number
+  }>(db, `
+    SELECT h.*,
+           CASE WHEN h.session_id IS NULL AND h.status <> 'converted'
+             THEN ${turnoverHomeSql('h.organization_id', 'h.product_id', 'h.starts_at')} END AS turnover_home,
+           CASE WHEN h.session_id IS NULL AND h.status <> 'converted'
+             THEN (SELECT name FROM products WHERE id=h.product_id AND organization_id=h.organization_id) END AS home_name,
+           CASE WHEN h.session_id IS NULL AND h.status <> 'converted'
+             THEN (SELECT json_group_array(id) FROM product_variants WHERE product_id=h.product_id AND organization_id=h.organization_id) END AS home_variant_ids,
+           EXISTS (SELECT 1 FROM organization o WHERE o.id=h.organization_id) AS organization_exists,
+           EXISTS (SELECT 1 FROM payment_servicing_tenants s WHERE s.organization_id=h.organization_id
+             AND s.stripe_account_id=? AND s.livemode=?) AS retained_for_servicing
+      FROM payment_checkout_holds h WHERE h.payment_id=? AND h.organization_id=?`,
+  [payment.stripe_account_id, payment.livemode, payment.id, payment.organization_id])
+  if (!hold?.product_id) throw new Error('Booking payment has no durable hold')
+  if (hold.status === 'converted' && !hold.converted_booking_id) throw new Error('Converted hold has no booking')
+  return { ...hold, product_id: hold.product_id }
 }
 /** Provider retrieval, account/mode and frozen money checks precede every conversion. */
 export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,reported:Stripe.PaymentIntent, env:CloudflareEnv):Promise<Stripe.PaymentIntent> {
@@ -70,9 +95,12 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
   const taxCalculation=intent.hooks?.inputs?.tax?.calculation
   const calculation=taxCalculation?await stripe.tax.calculations.retrieve(taxCalculation,{},{stripeAccount:payment.stripe_account_id}):null
   const taxAmount=calculation?calculation.tax_amount_exclusive+calculation.tax_amount_inclusive:0
-  await executeBatch(db,[
-    {query:'UPDATE payments SET stripe_charge_id=?,receipt_url=?,surcharge_amount=? WHERE id=?',params:[charge.id,charge.receipt_url,(intent as Stripe.PaymentIntent&{amount_details?:{surcharge?:{amount?:number}}}).amount_details?.surcharge?.amount??0,payment.id]},
-    {query:"UPDATE payments SET stripe_payment_intent_id=?,captured_amount=?,tax_amount=?,updated_at=? WHERE id=? AND organization_id=?",params:[intent.id,intent.amount_received,taxAmount,now,payment.id,payment.organization_id]},
+  const [captureWrite] = await executeBatch(db,[
+    { query: `UPDATE payments SET stripe_charge_id=?,receipt_url=?,surcharge_amount=?,captured_amount=?,tax_amount=?,updated_at=?
+       WHERE id=? AND organization_id=?
+       RETURNING *, EXISTS (SELECT 1 FROM payment_refunds r WHERE r.payment_id=payments.id AND r.idempotency_key=?) AS unfulfillable_refund`,
+    params: [charge.id, charge.receipt_url, (intent as Stripe.PaymentIntent & { amount_details?: { surcharge?: { amount?: number } } }).amount_details?.surcharge?.amount ?? 0,
+      intent.amount_received, taxAmount, now, payment.id, payment.organization_id, unfulfillableKey(intent)] },
     // Usage is billed in the platform's mode only: a demo's test-mode capture on a live platform is never billable volume.
     ...(Boolean(payment.livemode) === platformLivemode(env) ? [paymentUsageEventQuery({
       organizationId: payment.organization_id, paymentId: payment.id, kind: 'captured_volume', currency: payment.currency,
@@ -80,7 +108,8 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
       occurredAt: new Date(charge.created * 1000).toISOString(), createdAt: now,
     })] : []),
   ],{operation:'Record authenticated capture and usage'})
-  const recorded = await requirePayment(db,payment.organization_id,payment.id)
+  const recorded = captureWrite?.results[0] as (Payment & { unfulfillable_refund: number }) | undefined
+  if (!recorded) throw new Error('Captured payment is missing')
   const capture = { kind: 'payment_captured' as const, nativeId: intent.id, status: intent.status, amount: intent.amount_received, email: charge.billing_details.email ?? null }
   const finish = async (booking: Extract<DomainEvent, { type: 'payment.captured' }>['booking'] = null) => {
     await publishEvent(env, {
@@ -96,16 +125,17 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
     return intent
   }
   // A redelivery of a refunded purchase finishes the refund and keeps it from booking.
-  if (await queryFirst(db, 'SELECT 1 FROM payment_refunds WHERE payment_id=? AND idempotency_key=?', [payment.id, unfulfillableKey(intent)])) return unfulfillable()
+  if (recorded.unfulfillable_refund) return unfulfillable()
   if (recorded.refunded_amount > 0 || payment.subject_type !== 'booking') return finish()
-  const hold = await queryFirst<Hold>(db, 'SELECT * FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id])
-  if (!hold || !hold.product_id) throw new Error('Captured booking payment has no durable hold')
+  const hold = await checkoutHold(db, recorded)
   const nights = hold.session_id === null
   // A business deleted since the guest paid keeps the money record.
-  if (nights && !await queryFirst(db, 'SELECT id FROM organization WHERE id=?', [payment.organization_id])) return finish()
-  const bookingId = await commitBooking(db, env, payment, new Date(charge.created * 1000).toISOString())
+  if (!hold.organization_exists && (nights || hold.retained_for_servicing && hold.status === 'converted')) return finish()
+  const bookingId = await convertCheckoutHold(db, env, recorded, hold, new Date(charge.created * 1000).toISOString())
   if (!bookingId) return unfulfillable()
-  if (!await queryFirst(db, 'SELECT id FROM organization WHERE id=?', [payment.organization_id]) && await queryFirst(db, 'SELECT organization_id FROM payment_servicing_tenants WHERE organization_id=? AND stripe_account_id=? AND livemode=?', [payment.organization_id, payment.stripe_account_id, payment.livemode])) return finish()
+  if (hold.status !== 'converted' && await queryFirst(db, `SELECT 1 FROM payment_servicing_tenants s
+    WHERE s.organization_id=? AND s.stripe_account_id=? AND s.livemode=?
+      AND NOT EXISTS (SELECT 1 FROM organization o WHERE o.id=s.organization_id)`, [payment.organization_id, payment.stripe_account_id, payment.livemode])) return finish()
   if (nights) return finish({ unit: 'nights', id: bookingId })
   if (!hold.conversation_id) throw new Error('Captured visit payment has no guest conversation')
   return finish({ unit: 'slot', conversation_id: hold.conversation_id })
@@ -198,16 +228,11 @@ function frozenAnswers(snapshot: Record<string, unknown>): FormAnswerSnapshot[] 
 }
 
 export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Payment,chargedAt:string):Promise<string|null>{
- const hold=await queryFirst<Hold & { turnover_home: string | null; organization_exists: number }>(db,`
-   SELECT h.*, CASE WHEN h.session_id IS NULL AND h.status <> 'converted'
-                    THEN ${turnoverHomeSql('h.organization_id', 'h.product_id', 'h.starts_at')} END AS turnover_home,
-          EXISTS (SELECT 1 FROM organization o WHERE o.id=h.organization_id) AS organization_exists
-     FROM payment_checkout_holds h WHERE h.payment_id=? AND h.organization_id=?`, [payment.id,payment.organization_id])
- if(!hold||!hold.product_id)throw new Error('Booking payment has no durable hold')
- if(hold.status==='converted'){
-  if(!hold.converted_booking_id)throw new Error('Converted hold has no booking')
-  return hold.converted_booking_id
- }
+ return convertCheckoutHold(db, env, payment, await checkoutHold(db, payment), chargedAt)
+}
+
+async function convertCheckoutHold(db: DbClient, env: CloudflareEnv, payment: Payment, hold: Awaited<ReturnType<typeof checkoutHold>>, chargedAt: string): Promise<string | null> {
+ if (hold.status === 'converted') return hold.converted_booking_id
  const now=new Date().toISOString()
  const snapshot:unknown=JSON.parse(payment.price_snapshot_json)
  if(!isRecord(snapshot)||!isRecord(snapshot.policy))throw new Error('Booking payment has no frozen booking policy')
@@ -233,8 +258,9 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
   const buyerUserId=payment.buyer_user_id??hold.buyer_user_id
   if(!buyerUserId)throw new Error('Stay payment has no guest account')
   if (!hold.turnover_home) throw new Error(`Home ${purchase.product_id} has no stay settings`)
+  const turnoverHome = JSON.parse(hold.turnover_home) as TurnoverHome
   const turnover = turnoverTaskQueries({ organizationId: payment.organization_id, now, before: null,
-   homes: [JSON.parse(hold.turnover_home) as TurnoverHome],
+   homes: [turnoverHome],
    after: { id: bookingId, product_id: purchase.product_id, status: 'confirmed', check_in_date: purchase.check_in_date, check_out_date: purchase.check_out_date } })
   if (approval) {
    if (!hold.conversation_id || hold.buyer_user_id !== buyerUserId || !hold.location_id) throw new Error('Approved stay payment has no guest conversation')
@@ -251,7 +277,10 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
     ...conversationTaskQueries(hold.conversation_id, now),
    ]
   } else {
-   const home = await readStayHome(db, { organizationId: payment.organization_id, actorId: 'system', manage: true }, purchase.product_id)
+   if (hold.home_name === null || hold.home_variant_ids === null) throw new Error(`Home ${purchase.product_id} is incomplete`)
+   const variants = JSON.parse(hold.home_variant_ids) as string[]
+   if (variants.length !== 1) throw new Error(`Home ${purchase.product_id} has ${variants.length} variants; a home has exactly one`)
+   const home = { ...turnoverHome, name: hold.home_name, variant_id: variants[0]! }
    claim = [
     ...stayFromCheckoutQueries({ organizationId: payment.organization_id, stayId: bookingId, holdId: hold.id, paymentId: payment.id, buyerUserId, now, stay: { quote: purchase, guest: purchase.guest }, home, policy, websiteSource: await checkoutWebsiteSource(db, payment, hold.conversation_id ?? null) }),
     ...turnover,
@@ -259,9 +288,11 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
   }
  }
  let taskIds:string[]=[]
+ let convertedBookingId: string | undefined
  try{
   const writes=await executeBatch(db,[...claim,
-   {query:`UPDATE payment_checkout_holds SET status='converted',converted_booking_id=? WHERE id=? AND organization_id=? AND status IN ('active','released') AND ${bookingExists.query}`,params:[bookingId,hold.id,payment.organization_id,...bookingExists.params]},
+   {query:`UPDATE payment_checkout_holds SET status='converted',converted_booking_id=? WHERE id=? AND organization_id=? AND status IN ('active','released') AND ${bookingExists.query}
+    RETURNING converted_booking_id`,params:[bookingId,hold.id,payment.organization_id,...bookingExists.params]},
    {query:`UPDATE payments SET subject_id=?,updated_at=? WHERE id=? AND organization_id=? AND ${bookingExists.query}`,params:[bookingId,now,payment.id,payment.organization_id,...bookingExists.params]},
    // A refused inventory claim changes nothing. A committed booking requires
    // its conversation and its checkout association in the same transaction.
@@ -272,6 +303,8 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
        AND (h.conversation_id IS NULL OR c.id=h.conversation_id))`, params:[...bookingExists.params,hold.id,payment.organization_id,bookingId] }),
   ],{operation:'Convert paid booking hold'})
   taskIds=changedTaskIds(writes)
+  const converted = writes[claim.length]?.results[0] as { converted_booking_id?: string } | undefined
+  if (converted?.converted_booking_id === bookingId) convertedBookingId = bookingId
  }catch(error){
   // A night someone else holds by now refuses the batch: the guest is refunded in full. Any other failure is raised unless a concurrent conversion landed.
   const message=error instanceof Error?error.message:String(error)
@@ -280,11 +313,14 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
    if(raced?.status!=='converted')throw error
   }
  }
- const current=await queryFirst<{status:string;converted_booking_id:string|null}>(db,'SELECT status,converted_booking_id FROM payment_checkout_holds WHERE id=?',[hold.id])
- if(current?.status!=='converted')return null
- if(!current.converted_booking_id)throw new Error('Converted hold has no booking')
+ if (!convertedBookingId) {
+  const current=await queryFirst<{status:string;converted_booking_id:string|null}>(db,'SELECT status,converted_booking_id FROM payment_checkout_holds WHERE id=?',[hold.id])
+  if(current?.status!=='converted')return null
+  if(!current.converted_booking_id)throw new Error('Converted hold has no booking')
+  convertedBookingId = current.converted_booking_id
+ }
  await publishChangedJobs(env,payment.organization_id,taskIds)
- return current.converted_booking_id
+ return convertedBookingId
 }
 
 const CONFIRMATION_HOLD_MS=60*60*1000
