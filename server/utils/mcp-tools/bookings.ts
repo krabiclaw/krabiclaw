@@ -184,11 +184,8 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
   }
   if (toolName === 'create_product_booking') {
     if (!event) throw new HTTPError({ statusCode: 500, message: 'Booking creation requires the request context' })
-    const slug = requiredString(args, 'product_slug')
-    const product = await queryFirst<{ id: string }>(db, 'SELECT id FROM products WHERE organization_id=? AND slug=?', [organizationId, slug])
-    if (!product) throw new HTTPError({ statusCode: 404, message: 'Bookable offering not found' })
     const result = await createMemberBooking(event, {
-      principal, productId: product.id, body: args, financialWritesAllowed: false,
+      principal, slug: requiredString(args, 'product_slug'), body: args, financialWritesAllowed: false,
       operator: { idempotencyKey: requiredString(args, 'idempotency_key'), source: optionalString(args, 'source') ?? 'operator',
         externalReference: optionalString(args, 'external_reference') ?? null, guestAcknowledgement: args.guest_acknowledgement === true },
     })

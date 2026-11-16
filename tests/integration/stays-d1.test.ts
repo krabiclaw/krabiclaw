@@ -63,7 +63,7 @@ import { buyStay } from './support/stay-checkout.ts'
 import { captureEvents } from './support/events.ts'
 
 // A stay write posts its cleaning job and alerts the person doing it, so every environment here can send: logged, never delivered.
-const JOB_ALERT_ENV = { MEDIA_BASE_URL: 'https://media.example.test', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
+const JOB_ALERT_ENV = { MEDIA_BASE_URL: 'https://media.example.test', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
 
 
 

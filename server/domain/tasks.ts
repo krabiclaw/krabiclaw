@@ -124,12 +124,22 @@ function stayIs(organizationId: string, stay: StayWindow, timezone: string): Bat
     params: [organizationId, stay.id, stay.product_id, stay.status, ...starts.params!, ...ends.params!] }
 }
 
-/** The confirmed stays at one home other than this one, checking out on or after a day (read wide, kept by their own days). */
-async function confirmedStaysAt(db: DbClient, organizationId: string, productId: string, exceptId: string, checkOutOnOrAfter: string): Promise<StayWindow[]> {
-  const rows = await queryAll<StoredStay>(db, `SELECT id, product_id, status, starts_at, ends_at, timezone FROM bookings
-    WHERE organization_id = ? AND product_id = ? AND product_session_id IS NULL AND status = 'confirmed' AND id <> ? AND ends_at >= ?`, [organizationId, productId, exceptId, addLocalDays(checkOutOnOrAfter, -1)])
-  return rows.map(stayWindowOf).filter(stay => stay.check_out_date >= checkOutOnOrAfter)
+function confirmedStaysAtSql(organization: string, product: string, firstCheckout: string): string {
+  return `organization_id = ${organization} AND product_id = ${product} AND product_session_id IS NULL AND status = 'confirmed' AND ends_at >= date(${firstCheckout}, '-1 day')`
 }
+
+/** Include the turnover's neighbouring bookings in the home projection for a new stay. */
+export function turnoverNeighboursSql(home: string, checkIn: string): string {
+  return `(SELECT json_group_array(json_object('id', id, 'product_id', product_id, 'status', status,
+    'starts_at', starts_at, 'ends_at', ends_at, 'timezone', timezone))
+    FROM (SELECT id, product_id, status, starts_at, ends_at, timezone FROM bookings
+      WHERE ${confirmedStaysAtSql(`${home}.organization_id`, `${home}.product_id`, `date(${checkIn}, '-400 days')`)}
+      ORDER BY id))`
+}
+
+type TurnoverSource =
+  | { before: Pick<StayWindow, 'product_id' | 'check_in_date'> | null; home?: never; neighbours?: never }
+  | { before: null; home: HomeClock; neighbours: string }
 
 /**
  * The turnover tasks one stay write changes: the stay's own (opened when it is
@@ -138,10 +148,10 @@ async function confirmedStaysAt(db: DbClient, organizationId: string, productId:
  * the next arrival.
  * `before` is the stay as it was, null when the write creates it.
  */
-export async function turnoverTaskQueries(db: DbClient, input: { organizationId: string; after: StayWindow; before: Pick<StayWindow, 'product_id' | 'check_in_date'> | null; now: string }): Promise<BatchQuery[]> {
+export async function turnoverTaskQueries(db: DbClient, input: { organizationId: string; after: StayWindow; now: string } & TurnoverSource): Promise<BatchQuery[]> {
   const { organizationId, after, before, now } = input
   const homes = [...new Set([after.product_id, ...(before ? [before.product_id] : [])])]
-  const clocks = await queryAll<HomeClock>(db, `SELECT c.product_id, c.location_id, l.timezone, b.check_in_time, b.check_out_time, b.assigned_member_id
+  const clocks = input.home ? [input.home] : await queryAll<HomeClock>(db, `SELECT c.product_id, c.location_id, l.timezone, b.check_in_time, b.check_out_time, b.assigned_member_id
     FROM product_stay_configs c JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
     JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id
     WHERE c.organization_id = ? AND c.product_id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(homes)])
@@ -155,7 +165,12 @@ export async function turnoverTaskQueries(db: DbClient, input: { organizationId:
     if (!home) throw new Error(`Home ${productId} has no stay settings`)
     const anchors = [after.product_id === productId ? after.check_in_date : null, before?.product_id === productId ? before.check_in_date : null].filter((value): value is string => value !== null)
     const earliest = anchors.reduce((min, value) => value < min ? value : min, anchors[0]!)
-    const others = await confirmedStaysAt(db, organizationId, productId, after.id, addLocalDays(earliest, -400))
+    // An instant can be stored on a different UTC day than the stay's local checkout.
+    const firstCheckout = addLocalDays(earliest, -400)
+    const rows = input.home ? JSON.parse(input.neighbours) as StoredStay[] : await queryAll<StoredStay>(db, `
+      SELECT id, product_id, status, starts_at, ends_at, timezone FROM bookings WHERE ${confirmedStaysAtSql('?', '?', '?')} ORDER BY id`,
+    [organizationId, productId, firstCheckout])
+    const others = rows.filter(row => row.id !== after.id).map(stayWindowOf).filter(stay => stay.check_out_date >= firstCheckout)
     const confirmed = [...others, ...(after.product_id === productId && after.status === 'confirmed' ? [after] : [])]
     const nextArrival = (stay: StayWindow) => confirmed.filter(other => other.id !== stay.id && other.check_in_date >= stay.check_out_date)
       .reduce<string | null>((min, other) => min === null || other.check_in_date < min ? other.check_in_date : min, null)

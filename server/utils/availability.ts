@@ -627,7 +627,7 @@ export async function replaceWeeklySchedule(db: DbClient, input: {
   if ((await requireOrganizationProduct(db, input)).kind === 'table') badRequest(TABLE_HOURS_ONLY)
   const config = await requireBookingConfig(db, input.organizationId, input.productId)
   const locationId = input.locationId
-  const locationRows = await queryAll<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, locationId])
+  const locationRows = await queryAll<SessionLocation>(db, 'SELECT id,title,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, locationId])
   const location = locationRows[0]
   if (!location) throw new HTTPError({ statusCode: 404, statusMessage: 'Location not found' })
   const timezone = location.timezone
@@ -708,7 +708,7 @@ export async function prepareProductBookingSetup(db: DbClient, input: {
     if (weeklySlots?.length || oneOffSessions?.length) badRequest('An online offering is booked in its provider\'s working hours; it takes no weekly times or dated sessions')
     if (!provider) badRequest('Set working hours for whoever provides this offering before it can be booked online')
   } else {
-    const location = await queryFirst<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, locationId])
+    const location = await queryFirst<SessionLocation>(db, 'SELECT id,title,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, locationId])
     if (!location || location.status !== 'active') badRequest('Choose an active location in this business')
     queries.push({
       query: `INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_at, updated_at, created_by, updated_by)
@@ -765,7 +765,7 @@ export function sessionHeldCapacitySql(sessionAlias: string, convertingPaymentSq
       AND h.payment_id IS NOT ${convertingPaymentSql}), 0)`
 }
 
-type SessionLocation = { id: string; timezone: string; status: string; opening_hours: string | null; special_hours: string | null }
+type SessionLocation = { id: string; title: string; timezone: string; status: string; opening_hours: string | null; special_hours: string | null }
 
 /** The provider a scheduled session names, so a write's guard asks Google about that member only; none for a cancelled or business-scheduled session. */
 async function sessionProviderIds(db: DbClient, organizationId: string, sessionId: string): Promise<string[]> {
@@ -778,7 +778,7 @@ async function sessionLocationGuard(db: DbClient, input: SessionAllocationInput)
   if (!session) return { query: '0', params: [] }
   const facts: BatchQuery = { query: 's.starts_at=? AND s.ends_at=?', params: [session.starts_at, session.ends_at] }
   if (!session.location_id) return facts
-  const location = await queryFirst<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE id=? AND organization_id=?', [session.location_id, input.organizationId])
+  const location = await queryFirst<SessionLocation>(db, 'SELECT id,title,timezone,status,opening_hours,special_hours FROM business_locations WHERE id=? AND organization_id=?', [session.location_id, input.organizationId])
   if (!location || !locationAllowsBooking(session, location)) return { query: '0', params: [] }
   return { query: `${facts.query} AND EXISTS (SELECT 1 FROM business_locations l WHERE l.id=s.location_id AND l.organization_id=s.organization_id AND l.status='active' AND l.timezone IS ? AND l.opening_hours IS ? AND l.special_hours IS ?)`, params: [...facts.params!, location.timezone, location.opening_hours, location.special_hours] }
 }
@@ -1009,7 +1009,7 @@ export function slotReadQueries(read: SlotRead): BatchQuery[] {
     query: `SELECT product_id, location_id, active, published FROM product_locations WHERE organization_id=${org.query} AND product_id IN (${products.query})`,
     params: [...org.params!, ...products.params!],
   }, {
-    query: `SELECT l.id, l.timezone, l.status, l.opening_hours, l.special_hours FROM business_locations l
+    query: `SELECT l.id, l.title, l.timezone, l.status, l.opening_hours, l.special_hours FROM business_locations l
       WHERE l.organization_id=${org.query} AND (l.id IN (SELECT location_id FROM product_locations WHERE organization_id=l.organization_id AND product_id IN (${products.query}))
         OR l.id IN (SELECT location_id FROM product_sessions WHERE organization_id=l.organization_id AND product_id IN (${products.query}) AND starts_at>=? AND starts_at<?)
         OR l.id IS ?)`,
@@ -1265,6 +1265,8 @@ export async function firstBookableOpening(db: DbClient, env: CloudflareEnv, inp
 
 export interface ResolvedBookingSession {
   session: SessionFacts
+  config: ProductBookingConfigRecord
+  locationTitle: string | null
   preceding: BatchQuery[]
   guard: BatchQuery
   previewGuard: BatchQuery
@@ -1437,7 +1439,9 @@ function prepareResolvedOpening(schedule: SlotSchedule, opening: ScheduledOpenin
       AND stored.product_id=s.product_id AND stored.updated_at=? ${refresh ? `AND NOT ${historySql('stored')}` : ''} )`,
     params: [session.updated_at],
   }
-  return { session, preceding, guard, previewGuard, observedAt: now, providerAvailability }
+  const location = session.location_id === null ? null : schedule.locations.get(session.location_id)
+  if (session.location_id !== null && !location) throw new HTTPError({ statusCode: 404, message: 'The session location does not exist' })
+  return { session, config: schedule.config, locationTitle: location?.title ?? null, preceding, guard, previewGuard, observedAt: now, providerAvailability }
 }
 
 /** Abort a D1 batch when its guarded hold, booking or move affected no row. */
@@ -1665,16 +1669,17 @@ export async function claimSessionCapacity(db: DbClient, input: {
    * after it unconditionally — commits into a booking that does not exist.
    */
   following?: (_bookingId: string) => BatchQuery[]
-}): Promise<{ bookingId: string }> {
+}) {
   if (!Number.isSafeInteger(input.partySize) || input.partySize < 1) badRequest('party_size must be a positive integer')
 
-  await requireBookingConfig(db, input.organizationId, input.productId)
   const now = new Date().toISOString()
   const resolved = input.resolved ?? (projectedIdPattern.test(input.sessionId)
     ? await resolveBookingSession(db, { ...input, actorId: input.userId ?? 'system', now })
     : undefined)
+  if (!resolved) await requireBookingConfig(db, input.organizationId, input.productId)
   const bookingId = crypto.randomUUID()
   const claim = await sessionClaimQuery(db, { ...input, resolved, bookingId, now })
+  claim.query += ' RETURNING id, status, location_id, starts_at, ends_at, timezone'
   const preceding = resolved?.preceding ?? []
   let writes: Awaited<ReturnType<typeof executeBatch>>
   try {
@@ -1685,7 +1690,13 @@ export async function claimSessionCapacity(db: DbClient, input: {
     throw error
   }
   await publishChangedJobs(input.env, input.organizationId, changedTaskIds(writes))
-  return { bookingId }
+  const booking = writes[preceding.length]?.results[0] as {
+    id: string; status: string; location_id: string | null; starts_at: string; ends_at: string; timezone: string
+  } | undefined
+  if (!booking || booking.id !== bookingId || (booking.status !== 'pending' && booking.status !== 'confirmed')) {
+    throw new Error('Capacity claim did not return its created booking')
+  }
+  return { bookingId, booking }
 }
 
 export async function createSession(db: DbClient, input: {
@@ -1708,7 +1719,7 @@ export async function createSession(db: DbClient, input: {
   if (earlier) return earlier
   if ((await requireOrganizationProduct(db, input)).kind === 'table') badRequest(TABLE_HOURS_ONLY)
   const config = await requireBookingConfig(db, input.organizationId, input.productId)
-  const location = await queryFirst<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, input.locationId])
+  const location = await queryFirst<SessionLocation>(db, 'SELECT id,title,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, input.locationId])
   if (!location) badRequest('Choose a location in this business')
   const instants = sessionInstants(input.startsAt, input.endsAt)
   const now = new Date().toISOString()
@@ -1770,7 +1781,7 @@ export async function updateSession(db: DbClient, input: {
     if (claimed > input.capacity) throw new HTTPError({ statusCode: 409, statusMessage: `This session already has ${claimed} seats claimed; cancel bookings before reducing capacity to ${input.capacity}` })
   }
 
-  const location = session.location_id ? await queryFirst<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, session.location_id]) : null
+  const location = session.location_id ? await queryFirst<SessionLocation>(db, 'SELECT id,title,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, session.location_id]) : null
   const moved = startsAt !== session.starts_at || endsAt !== session.ends_at
   // Only a move needs the provider's availability at the new time; a capacity or status change asks no calendar.
   const availability = moved ? await memberAvailabilityJson(db, input.env, input.organizationId, { from: startsAt, until: endsAt }, await sessionProviderIds(db, input.organizationId, input.sessionId)) : null

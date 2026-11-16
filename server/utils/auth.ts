@@ -365,6 +365,8 @@ const NEW_PASSWORD_FIELD: Record<string, 'password' | 'newPassword'> = {
   '/admin/set-user-password': 'newPassword',
 }
 
+const anonymousEmail = () => `anon-${crypto.randomUUID()}@customers.krabiclaw.local`
+
 export function createAuth(env: CloudflareEnv) {
   if (!env?.DB) throw new HTTPError({ statusCode: 503, statusMessage: 'Database unavailable' })
   const d1 = unwrapInstrumentedD1(env.DB)
@@ -735,7 +737,7 @@ function buildAuth(env: CloudflareEnv) {
         },
       }),
       anonymous({
-        generateRandomEmail: () => `anon-${crypto.randomUUID()}@customers.krabiclaw.local`,
+        generateRandomEmail: anonymousEmail,
         // The anonymous user is deleted by the plugin right after this returns,
         // and every domain FK to it is ON DELETE SET NULL. Everything that
         // identifies the person moves to the real user first, in one batch.
@@ -1156,18 +1158,14 @@ export async function ensureInteractionUser(event: H3Event, env: CloudflareEnv):
 }
 
 /**
- * The Better Auth user of a guest the business knows only by what a host or a
- * channel gave it: Better Auth's anonymous user, carrying that name. Nobody is
- * signed in as it, so the session the sign-in opens is closed at once. The
- * guest's own verified sign-in later joins it to their account
- * (server/utils/guest-accounts.ts).
+ * The Better Auth anonymous identity a business records for a guest. No one
+ * signs in as this user. A later verified sign-in can claim its bookings.
  */
 export async function createGuestUser(env: CloudflareEnv, name: string): Promise<string> {
-  const auth = createAuth(env)
-  const { response } = await auth.api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
-  if (!response?.user?.id || !response.token) throw new Error('Better Auth did not return an anonymous user')
-  const context = await auth.$context
-  await context.internalAdapter.updateUser(response.user.id, { name })
-  await context.internalAdapter.deleteSession(response.token)
-  return response.user.id
+  const { internalAdapter } = await createAuth(env).$context
+  const user = await internalAdapter.createUser({
+    name, email: anonymousEmail(), emailVerified: false, isAnonymous: true,
+  }, { method: 'anonymous' })
+  if (!user?.id) throw new Error('Better Auth did not return an anonymous user')
+  return user.id
 }
