@@ -1,6 +1,6 @@
 <template>
   <!-- Airbnb's "In this conversation": who is in it, its photos, then what can be done to it. -->
-  <UModal v-model:open="open" title="In this conversation" :ui="{ content: 'max-w-lg rounded-2xl', title: 'text-2xl font-semibold' }">
+  <UModal v-model:open="open" title="In this conversation" :ui="{ content: 'max-w-2xl rounded-3xl', title: 'text-lg font-semibold', header: 'border-b-0 pb-0', body: 'pt-2' }">
     <template #body>
       <!-- A phone's header has room for the title, Done and this sheet: the booking is opened from here. -->
       <UButton v-if="bookingTo" :to="bookingTo" label="Show reservation" icon="i-lucide-calendar-days" color="neutral" variant="outline" block class="mb-4 sm:hidden" />
@@ -11,9 +11,9 @@
         <UButton type="submit" label="Save name" :loading="groupSaving" :disabled="(name.trim() || null) === page.conversation.name" />
       </UForm>
       <ul>
-        <li v-for="(person, index) in page.conversation.participants" :key="person.id ?? index" class="flex flex-wrap items-center gap-3 border-b border-default py-3">
-          <UAvatar :src="person.image ?? undefined" :alt="person.name" />
-          <span class="min-w-0 flex-1 text-base text-highlighted">{{ person.name }}<span class="block text-sm text-muted">{{ person.role === 'guest' ? 'Guest' : page.conversation.kind === 'team' ? 'Member' : 'Host' }}</span></span>
+        <li v-for="(person, index) in page.conversation.participants" :key="person.id ?? index" class="flex flex-wrap items-center gap-4 py-3">
+          <UAvatar :src="person.image ?? undefined" :alt="person.name" size="2xl" class="bg-accented" />
+          <span class="min-w-0 flex-1 text-base font-medium text-highlighted">{{ person.id === userId ? 'You' : person.name }}<span class="block text-sm font-normal text-muted">{{ person.title }}</span></span>
           <UButton v-if="(person.can_remove || (page.capabilities.can_manage_participants && person.id !== userId)) && person.id && removing !== person.id" label="Remove" color="error" variant="ghost" :aria-label="`Remove ${person.name}`" :disabled="savingRemoval" @click="removing = person.id; removalError = null" />
           <div v-if="person.id && removing === person.id" class="flex w-full flex-wrap items-center gap-2">
             <p class="w-full text-sm text-muted">Remove {{ person.name }} from this conversation?</p>
@@ -76,12 +76,12 @@
           </div>
         </template>
 
-        <div class="mt-6 flex flex-col border-t border-default">
-          <button v-if="details.actions.archive" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" :disabled="saving !== null" @click="move('archive')">Archive</button>
-          <button v-if="details.actions.unarchive" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" :disabled="saving !== null" @click="move('unarchive')">Move to Messages</button>
-          <button v-if="details.actions.report" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" :disabled="saving !== null" @click="reporting = { block: false }">Report</button>
-          <button v-if="details.actions.block" type="button" class="border-b border-default py-4 text-left text-base font-medium text-error" :disabled="saving !== null" @click="reporting = { block: true }">Block</button>
-          <button v-if="details.actions.unblock" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" :disabled="saving !== null" @click="move('unblock')">Unblock</button>
+        <!-- What can be done to the conversation, as Airbnb lists it: one row each, with its mark. -->
+        <h3 class="mb-1 mt-8 text-lg font-semibold text-highlighted">Conversation actions</h3>
+        <div class="flex flex-col">
+          <button v-for="action in actions" :key="action.label" type="button" class="flex items-center gap-4 py-3.5 text-left text-base disabled:opacity-50" :class="action.danger ? 'text-error' : 'text-highlighted'" :disabled="saving !== null" @click="action.run">
+            <UIcon :name="action.icon" class="size-6 shrink-0" />{{ action.label }}
+          </button>
         </div>
         <UAlert v-if="moveError" class="mt-3" color="error" variant="soft" :description="moveError" />
       </template>
@@ -296,6 +296,35 @@ const reporting = ref<{ block: boolean } | null>(null)
 const saving = ref<string | null>(null)
 const moveError = ref<string | null>(null)
 const attemptKeys = new Map<string, string>()
+/** Mark the conversation unread for this member and leave it: it is waiting in the list again. */
+async function markUnread() {
+  saving.value = 'unread'
+  moveError.value = null
+  try {
+    await applicationFetch(`/api/messages/${encodeURIComponent(threadId.value)}/unread`, { method: 'POST', validate: (value: unknown): value is { read: boolean } => isRecord(value) && value.read === false })
+    open.value = false
+    await props.onLeft()
+  } catch (cause) {
+    moveError.value = getErrorMessage(cause, 'The conversation could not be marked as unread')
+  } finally {
+    saving.value = null
+  }
+}
+
+/** The rows of "Conversation actions": what this member can do to the conversation now. */
+const actions = computed(() => {
+  const can = details.value?.actions
+  if (!can) return []
+  return [
+    { label: 'Mark as unread', icon: 'i-lucide-message-square-dot', danger: false, run: () => void markUnread() },
+    ...(can.archive ? [{ label: 'Archive', icon: 'i-lucide-archive', danger: false, run: () => void move('archive') }] : []),
+    ...(can.unarchive ? [{ label: 'Move to Messages', icon: 'i-lucide-archive-restore', danger: false, run: () => void move('unarchive') }] : []),
+    ...(can.report ? [{ label: 'Report', icon: 'i-lucide-flag', danger: false, run: () => { reporting.value = { block: false } } }] : []),
+    ...(can.block ? [{ label: 'Block this guest', icon: 'i-lucide-ban', danger: true, run: () => { reporting.value = { block: true } } }] : []),
+    ...(can.unblock ? [{ label: 'Unblock', icon: 'i-lucide-circle-check', danger: false, run: () => void move('unblock') }] : []),
+  ]
+})
+
 async function move(transition: 'archive' | 'unarchive' | 'report' | 'block' | 'unblock', reason?: string) {
   // One key per attempt, kept until it succeeds, so a retry after a dropped response is the same request.
   // One key per attempt at the same request; a report with different words is a new request.

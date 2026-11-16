@@ -40,6 +40,8 @@ export interface ConversationParticipant {
   name: string
   image: string | null
   role: ConversationViewerRole
+  /** What the person is here, as the conversation names them: Guest, Host, Co-host or Team. */
+  title: string
   can_remove: boolean
 }
 

@@ -66,7 +66,8 @@
             class="mt-5" color="neutral" size="lg" :label="t(paymentProcessing ? 'payment.view_payment' : 'payment.continue_to_pay')" :loading="busy === 'pay'" @click="payForStay" />
         </div>
 
-        <div class="space-y-4">
+        <!-- A business's reservation reads as Airbnb's panel does: flat sections under one another, a rule between them. -->
+        <div :class="personalScope || purchase ? 'space-y-4' : flatSections">
           <p v-if="changeResult" class="text-sm text-highlighted" role="status">{{ changeResult }}</p>
           <UAlert
             v-if="booking?.pending_change"
@@ -113,11 +114,17 @@
             </div>
             <p v-if="stay?.no_show_at && !detail" class="mt-6 border-t border-default pt-4 text-base text-muted" data-testid="stay-no-show">No-show recorded {{ formatCalendarDate(stay.no_show_at.slice(0, 10), 'en') }}.</p>
           </UCard>
-          <UCard v-if="!personalScope && hostHome && (hostHome.check_in_method || hostHome.check_in_instructions)" variant="record">
-            <h3 class="text-base font-semibold text-highlighted">{{ t('stay.check_in_method') }}</h3>
-            <p v-if="hostHome.check_in_method" class="mt-3 text-base text-muted">{{ STAY_CHECK_IN_METHODS[hostHome.check_in_method].label }}</p>
-            <p v-if="hostHome.check_in_instructions" class="mt-3 whitespace-pre-wrap text-base text-muted">{{ hostHome.check_in_instructions }}</p>
+          <!-- What the guest is told about arriving and leaving, each opening the home's own page for it, as Airbnb's rows do. -->
+          <UCard v-if="!personalScope && hostHome && detail" variant="record">
+            <div class="divide-y divide-default">
+              <NuxtLink v-for="row in homeRows" :key="row.label" :to="row.to" class="flex items-center gap-4 py-3.5">
+                <UIcon :name="row.icon" class="size-6 shrink-0 text-highlighted" />
+                <span class="min-w-0 flex-1"><span class="block text-base font-medium text-highlighted">{{ row.label }}</span><span class="block truncate text-sm text-muted">{{ row.detail }}</span></span>
+                <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
+              </NuxtLink>
+            </div>
           </UCard>
+          <h2 v-if="!personalScope && stay" class="pb-1 pt-8 text-xl font-semibold text-highlighted">Reservation details</h2>
 
           <UCard v-if="personalScope && home?.location && (guestAddress || home.location.maps_url)" variant="record">
             <h2 class="text-base font-semibold text-highlighted">{{ t('stay.where_youll_be') }}</h2>
@@ -162,7 +169,7 @@
 
           <UCard v-if="stay || (personalScope && !purchase) || (!personalScope && recordGuestName)" variant="record">
             <component :is="guestDetailLink ? NuxtLink : 'div'" :to="guestDetailLink" :aria-label="guestDetailLink ? `${guestHeading} ${recordGuestName} · ${guestCountLabel}` : undefined" class="block">
-              <h3 class="text-base font-semibold text-highlighted">{{ personalScope ? 'Who’s coming' : purchase ? 'Buyer' : guestHeading }}</h3>
+              <h3 class="text-base font-semibold text-highlighted">{{ personalScope || stay ? 'Who’s coming' : purchase ? 'Buyer' : guestHeading }}</h3>
               <div v-if="recordGuestName && (stay || !personalScope)" class="mt-4 flex items-center gap-4">
                 <UAvatar :src="recordGuestImage || undefined" :alt="recordGuestName" :text="recordGuestName.slice(0, 1).toUpperCase()" size="xl" class="size-12 bg-muted" aria-hidden="true" />
                 <span class="min-w-0 flex-1 text-base text-highlighted">{{ recordGuestName }}</span>
@@ -279,11 +286,20 @@
               </NuxtLink>
             </div>
             <p v-if="!personalScope && detail.no_show_at" class="mt-6 text-sm text-muted" data-testid="stay-no-show">No-show recorded {{ formatCalendarDate(detail.no_show_at.slice(0, 10), 'en') }}. No review invitation is sent.</p>
-            <UButton v-else-if="canMarkNoShow" class="mt-4 ms-2" color="neutral" variant="soft" label="Mark as a no-show" :loading="busy === 'no_show'" @click="markNoShow" />
           </template>
           </UCard>
-          <UButton v-if="manage && !personalScope && !channelManaged && hostActions.includes('cancel')" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" :disabled="busy !== null" @click="cancelStay" />
-          <UCard variant="record">
+          <!-- What the host can do to the stay, one row each, as Airbnb lists Change and Cancel reservation. -->
+          <UCard v-if="!personalScope && (canMarkNoShow || (manage && !channelManaged && hostActions.includes('cancel')))" variant="record">
+            <div class="divide-y divide-default">
+              <button v-if="canMarkNoShow" type="button" class="flex w-full items-center gap-4 py-4 text-left disabled:opacity-50" :disabled="busy !== null" data-testid="stay-mark-no-show" @click="markNoShow">
+                <UIcon name="i-lucide-user-x" class="size-5 shrink-0 text-highlighted" /><span class="min-w-0 flex-1 text-base text-highlighted">Mark as a no-show</span><UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+              </button>
+              <button v-if="manage && !channelManaged && hostActions.includes('cancel')" type="button" class="flex w-full items-center gap-4 py-4 text-left disabled:opacity-50" :disabled="busy !== null" data-testid="stay-cancel" @click="cancelStay">
+                <UIcon name="i-lucide-ban" class="size-5 shrink-0 text-highlighted" /><span class="min-w-0 flex-1 text-base text-highlighted">Cancel reservation</span><UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+              </button>
+            </div>
+          </UCard>
+          <UCard v-if="detail.channel_booking_id || (!personalScope && channelManaged)" variant="record">
           <dl class="space-y-4">
             <div v-if="detail.channel_booking_id" class="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-4">
               <dt class="text-base text-muted">{{ STAY_CHANNEL_LABELS[detail.channel] }} confirmation</dt>
@@ -713,6 +729,18 @@ const channelManaged = computed(() => detail.value !== null && isChannelManagedS
 const manage = computed(() => managedStay.value !== null)
 const home = computed(() => accountStay.value?.home ?? null)
 const hostHome = computed(() => dashboardStay.value?.home ?? null)
+/** The home's arrival and departure pages, as the rows of a reservation: what each says now, and where it is written. */
+const homeRows = computed(() => {
+  const home = hostHome.value, value = detail.value
+  if (!home || !value) return []
+  const editor = `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/products/${encodeURIComponent(value.product_id)}`
+  return [
+    { label: 'Getting there', icon: 'i-lucide-map-pin', detail: 'Directions for your guests', to: `${editor}/directions` },
+    { label: 'How to get inside', icon: 'i-lucide-key-round', detail: home.check_in_method ? STAY_CHECK_IN_METHODS[home.check_in_method].label : 'Choose a check-in method', to: `${editor}/check-in-method` },
+    { label: 'House rules', icon: 'i-lucide-book-open', detail: 'What guests agree to', to: `${editor}/house-rules` },
+    { label: 'Checkout details', icon: 'i-lucide-door-open', detail: home.check_out_time ? `By ${formatTime(home.check_out_time, 'en')}` : 'How to check out', to: `${editor}/checkout-instructions` },
+  ]
+})
 const recordHome = computed(() => home.value ?? hostHome.value)
 const checkInTime = computed(() => recordHome.value?.check_in_time
   ? stayCheckInWindow(formatTime(recordHome.value.check_in_time, 'en'), hostHome.value?.check_in_end_time ? formatTime(hostHome.value.check_in_end_time, 'en') : null)
@@ -760,6 +788,8 @@ const guestCount = computed(() => stay.value ? stay.value.adults + stay.value.ch
 const paymentProcessing = computed(() => accountStay.value?.payment_processing === true)
 const requestStatus = computed(() => detail.value?.request_status)
 const hostActions = computed(() => managedStay.value?.booking.available_actions ?? [])
+/** A business's panel: the record cards lose their surface and sit under one another with a rule between them. */
+const flatSections = 'divide-y divide-default [&>[data-slot=root]]:rounded-none [&>[data-slot=root]]:bg-transparent [&>[data-slot=root]]:shadow-none [&>[data-slot=root]]:ring-0 [&>[data-slot=root]>[data-slot=body]]:px-0 [&>[data-slot=root]>[data-slot=body]]:py-6'
 const pageTitle = computed(() => stay.value ? props.personalScope ? 'Your stay' : 'Reservation' : timedTitle.value)
 const statusLabel = computed(() => {
   if (!stay.value) return 'Stay'

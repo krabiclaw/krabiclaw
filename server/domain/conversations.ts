@@ -28,7 +28,8 @@ export type ConversationParticipantRow = Omit<ConversationParticipant, 'can_remo
 /** Only the live roster is shown. Guests never receive internal account or member IDs. */
 export function conversationParticipantsSql(conversation: string, viewerRole: string): string {
   return `SELECT CASE WHEN ${viewerRole} = 'member' OR seat.user_id = ? THEN u.id END AS id,
-           u.name, CASE WHEN ${viewerRole} = 'member' OR seat.user_id = ? THEN u.image END AS image, seat.role
+           u.name, CASE WHEN ${viewerRole} = 'member' OR seat.user_id = ? THEN u.image END AS image, seat.role,
+           CASE WHEN seat.role = 'guest' THEN 'Guest' WHEN m.role = 'owner' THEN 'Host' WHEN m.role = 'admin' THEN 'Co-host' ELSE 'Team' END AS title
       FROM conversation_participants seat
       JOIN user u ON u.id = seat.user_id
       LEFT JOIN member m ON m.organizationId = seat.organization_id AND m.userId = seat.user_id

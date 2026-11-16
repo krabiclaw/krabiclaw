@@ -163,7 +163,7 @@ export async function loadConversationPage(
           ELSE 0 END AS airbnb,
         ${head ? `CASE WHEN c.viewer_role = 'guest' AND b.owner = 'app' AND b.user_id = ? AND c.user_id = ?
           THEN CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END END` : 'NULL'} AS booking_type,
-        ${head ? `(SELECT json_group_array(json_object('id', p.id, 'name', p.name, 'image', p.image, 'role', p.role))
+        ${head ? `(SELECT json_group_array(json_object('id', p.id, 'name', p.name, 'image', p.image, 'role', p.role, 'title', p.title))
           FROM (${conversationParticipantsSql('c', 'c.viewer_role')}) p)` : 'NULL'} AS roster,
         -- What a team conversation about a booking is titled by: the home or offering, as its row in the list is.
         ${head ? `CASE WHEN c.kind = 'team' THEN (SELECT COALESCE(sc.internal_name, p.name) FROM bookings about JOIN products p ON p.organization_id = about.organization_id AND p.id = about.product_id

@@ -16,6 +16,10 @@
       <UButton :to="reservationTo" :label="data?.work?.type === 'review' ? 'Review' : 'Show reservation'" color="neutral" variant="soft" class="rounded-full" data-testid="conversation-show-reservation" />
     </template>
 
+    <!-- Airbnb's line in the thread: what the conversation is about, and the way to it. -->
+    <p v-if="reservationTo && !personalScope" class="shrink-0 px-4 pt-3 text-center text-sm text-muted">
+      This conversation is about a reservation. <NuxtLink :to="reservationTo" class="font-medium text-highlighted underline underline-offset-4">Show reservation</NuxtLink>
+    </p>
     <UAlert v-if="doneError" color="error" variant="soft" title="Done could not be saved" :description="getErrorMessage(doneError, 'The request failed')" class="mx-4 mb-2" />
     <ConversationThread :key="threadId" :thread-id="threadId" :history="history" :personal-scope="personalScope" :closing="closing" @done="done" />
     <ConversationSheet v-if="data" v-model:open="sheetOpen" :page="data" :history="history" :on-left="left" :booking-to="reservationTo" @moved="moved" @participants-changed="refresh()" />
