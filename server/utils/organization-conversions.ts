@@ -130,16 +130,16 @@ export function websiteSourceOf(touch: Pick<AttributionTouch, 'source' | 'medium
  * booking's conversion event reads it: the attribution of the visit the booking was made on, else
  * the session's last touch. A request without this site's analytics session has none recorded.
  */
-export async function readWebsiteSource(db: DbClient, organizationId: string, origin: { headers: Headers }, originEventId: string | null): Promise<AttributionChannel> {
+export async function readWebsiteSource(db: DbClient, organizationId: string, origin: { headers: Headers }, originEventId: string | null): Promise<AttributionChannel | null> {
   const cookies = parseCookies(origin.headers.get('cookie') ?? '')
   const sessionId = cookies.get(SESSION_COOKIE)
   const visitorId = cookies.get(VISITOR_COOKIE)
-  if (!isCanonicalEventId(sessionId) || !isCanonicalEventId(visitorId)) return 'Not recorded'
+  if (!isCanonicalEventId(sessionId) || !isCanonicalEventId(visitorId)) return null
   const visit = await verifiedOriginEvent(db, organizationId, { sessionId, visitorId }, originEventId)
   if (visit) return websiteSourceOf(visit.attribution)
   const session = await queryFirst<{ attribution: string }>(db, `SELECT json_extract(payload_json, '$.attribution') AS attribution FROM analytics_summaries
     WHERE organization_id = ? AND kind = 'session' AND date = '' AND key = ?`, [organizationId, sessionId])
-  return session ? websiteSourceOf(JSON.parse(session.attribution) as AttributionTouch) : 'Not recorded'
+  return session ? websiteSourceOf(JSON.parse(session.attribution) as AttributionTouch) : null
 }
 
 /** The pageview a form submission says it came from, or null when the claim is not even shaped like one. Whether it is believed is decided when the event is recorded. */

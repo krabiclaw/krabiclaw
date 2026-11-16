@@ -154,7 +154,8 @@ test('Insights reads a restaurant from visit to payment: sources, bookings, valu
     assert.deepEqual(rows(top), [['/', '2'], ['/reservations/loc-beach', '1'], ['/reservations/loc-town', '1']])
     const sources = await read('conversion/sources')
     assert.deepEqual(metrics(sources), { visits: '2', website_bookings: '2', search_bookings: '0' })
-    assert.deepEqual(rows(sources), [['Google Ads', '1', '1'], ['Direct', '1', '1'], ['Added by you', '0', '1']])
+    // A booking someone added is not a website visitor's: Sources lists only where visitors came from.
+    assert.deepEqual(rows(sources), [['Google Ads', '1', '1'], ['Direct', '1', '1']])
 
     // A page reads only the filters it has; a kind it does not describe is refused.
     await assert.rejects(read('conversion/page-views', { kind: 'table' }), (error: { statusCode?: number }) => error.statusCode === 400)
@@ -194,9 +195,9 @@ test('Insights reads a home: occupancy, length of stay and nightly rate, and who
       checkIn: addLocalDays(today, 10), checkOut: addLocalDays(today, 12), adults: 2, nightlyMinor: 12000, currency: 'USD', buyerUserId: signed.response!.user.id,
       guest: { name: 'Ana', email: 'ana@stays.example', phone: null, notes: null } })
     await setStayNights(db, env, access, { product_id: home.id, from: addLocalDays(today, 15), to: addLocalDays(today, 17), closed: true })
-    // A checkout guest with no analytics session arrived from a source nobody recorded; the host's stay has none.
+    // A checkout guest with no analytics session has no recorded source, and neither has the host's stay.
     assert.deepEqual((await db.prepare('SELECT id, website_source FROM bookings').all<{ id: string; website_source: string | null }>()).results.map(row => [row.id === bought.id, row.website_source]).sort(),
-      [[false, null], [true, 'Not recorded']])
+      [[false, null], [true, null]])
 
     const reader: InsightsReader = { organizationId: 'org-stays', slug: 'retreat', timezone: TZ, defaultCurrency: 'USD', userId: 'stays-owner', analytics: true }
     const read = (page: string) => readInsightsPage(db as never, reader, page, { start_date: today, end_date: addLocalDays(today, 19) }, env)
@@ -211,9 +212,11 @@ test('Insights reads a home: occupancy, length of stay and nightly rate, and who
     assert.deepEqual(metrics(await read('rates/length-of-stay')), { average_nights: '2.5 nights', longest: '3 nights' })
     assert.deepEqual(metrics(await read('rates/nightly-rate')), { nightly_rate: '$120.00', income: '$600.00' })
     const sources = await read('conversion/sources')
-    assert.deepEqual(rows(sources), [['Not recorded', '0', '1'], ['Added by you', '0', '1']])
+    // Sources are where website visitors came from: neither booking was made on a recorded visit, and the host's is not a source.
+    assert.deepEqual([rows(sources), metrics(sources)], [[], { visits: '0', website_bookings: '0', search_bookings: '0' }])
     assert.equal((await read('conversion/returning')).title, 'Returning guests')
-    // A home's site lists a phone but has no consultation button or order link: only calls are counted beside its bookings.
-    assert.deepEqual(metrics(await read('conversion/booking-conversion')), { conversion: '—', views: '0', bookings: '1', clicked_to_call: '0' })
+    // A home's site lists a phone but has no consultation button or order link: only calls are counted beside its bookings,
+    // and a booking with no recorded visit is not counted as the website's.
+    assert.deepEqual(metrics(await read('conversion/booking-conversion')), { conversion: '—', views: '0', bookings: '0', clicked_to_call: '0' })
   } finally { await runtime.dispose() }
 })

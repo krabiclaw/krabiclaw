@@ -633,19 +633,18 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
       { query: `SELECT date, (key ->> '$[1]') AS source, CAST(payload_json ->> '$.page_views' AS INTEGER) AS visits FROM analytics_summaries
           WHERE organization_id = ? AND kind = 'dimension_day' AND date BETWEEN ? AND ? AND (key ->> '$[0]') = 'visit_source'`,
       params: [reader.organizationId, range.startDate, range.endDate] },
-      bookingsQuery(context, 'received'),
+      bookingsQuery(context, 'received', 'AND b.website_source IS NOT NULL'),
     ])
-    // A website booking's source is how its guest arrived; a member's own is theirs; a channel's is the channel.
-    const sourceOf = (row: BookingRow) => row.website_source ?? (row.channel === 'direct' ? 'Added by you' : CHANNEL_LABELS[row.channel] ?? row.channel)
+    // Where website visitors came from, and the bookings those visits made. A booking with no recorded visit is not a website booking here.
     const facts = [
       ...visits!.map(row => ({ date: String(row.date), source: String(row.source), visits: num(row.visits), bookings: 0, website: false })),
-      ...rows!.map(bookingRow).map(row => ({ date: receivedDay(context)(row), source: sourceOf(row), visits: 0, bookings: 1, website: row.website_source !== null })),
+      ...rows!.map(bookingRow).map(row => ({ date: receivedDay(context)(row), source: row.website_source!, visits: 0, bookings: 1, website: true })),
     ]
     const day = days(context.dates)
     const sum = (group: typeof facts, field: 'visits' | 'bookings') => group.reduce((total, row) => total + row[field], 0)
     const website = facts.filter(row => row.website && row.bookings)
     const search = website.filter(row => row.source === 'Organic search')
-    const order: string[] = [...ATTRIBUTION_CHANNELS, 'Added by you', ...Object.values(CHANNEL_LABELS)]
+    const order: string[] = [...ATTRIBUTION_CHANNELS]
     const sources = [...new Set(facts.map(row => row.source))].sort((a, b) => (order.indexOf(a) + 1 || order.length + 1) - (order.indexOf(b) + 1 || order.length + 1) || a.localeCompare(b))
     return {
       metrics: [

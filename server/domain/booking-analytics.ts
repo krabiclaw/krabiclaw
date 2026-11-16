@@ -71,7 +71,7 @@ export async function checkoutWebsiteSource(db: DbClient, payment: Payment, conv
   const started = await queryFirst<{ touch: string | null; session_id: string | null }>(db, `SELECT json_extract(payload_json, '$.attribution') AS touch, session_id FROM analytics_events
     WHERE organization_id = ? AND kind = 'interaction' AND json_extract(payload_json, '$.event_name') = 'payment_checkout_started'
       AND json_extract(payload_json, '$.entity_type') = 'payment' AND json_extract(payload_json, '$.entity_id') = ?`, [payment.organization_id, payment.id])
-  if (!started?.session_id) return 'Not recorded'
+  if (!started?.session_id) return null
   return websiteSourceOf(started.touch ? JSON.parse(started.touch) as AttributionTouch : null)
 }
 

@@ -3004,7 +3004,7 @@ export async function createStayRequest(db: DbClient, env: StayMutationEnv, inpu
   organizationId: string; buyerUserId: string; key: string; fingerprint: string; home: StayHome; quote: StayQuote;
   guest: CheckoutStay['guest']; locale: string; ipHash: string
   /** How the guest arrived on the website (bookings.website_source). */
-  websiteSource: string
+  websiteSource: string | null
 }) {
   const { organizationId, buyerUserId, key, fingerprint, home, quote, guest } = input
   const bookingId = crypto.randomUUID()
