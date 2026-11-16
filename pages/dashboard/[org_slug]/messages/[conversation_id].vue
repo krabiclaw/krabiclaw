@@ -1,5 +1,5 @@
 <template>
-  <DashboardIndexPanel id="organization-messages-thread" :title="conversation?.title ?? 'Conversation'" fill :auto-open="reservationOpened ? null : reservationTo">
+  <DashboardIndexPanel id="organization-messages-thread" :title="conversation?.title ?? 'Conversation'" fill :auto-open="reservationOpened || route.query.intent === 'booking-change' ? null : reservationTo">
     <!-- Airbnb's thread header: who is in it, what it is about, and one way into "In this conversation". No row of buttons. -->
     <template v-if="conversation" #center>
       <button type="button" class="me-auto flex min-w-0 items-center gap-3 overflow-hidden rounded-full py-1 pe-2 text-left hover:bg-elevated" :data-thread-id="conversation.id" aria-label="In this conversation" @click="sheetOpen = true">
