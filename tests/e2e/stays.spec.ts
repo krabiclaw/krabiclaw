@@ -803,12 +803,6 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const thread = await memberContext.request.get(`/api/messages/${jobThreadId}`)
     await expectStatus(thread, 200)
     expect((await thread.json() as ConversationPage).entries.filter(entry => entry.type === 'message' && !entry.automatic && entry.body === 'Done').length).toBe(1)
-    // The host can move the guest; this business has no other home to move them to.
-    await page.goto(`/dashboard/${slug}/bookings/${stay.booking_id}`)
-    await page.getByTestId('stay-move').click()
-    await expect(page).toHaveURL(new RegExp(`/bookings/${stay.booking_id}/move$`))
-    await expect(page.locator('#dashboard-panel-stay-move').getByText('You have no other homes to move this guest to.', { exact: true })).toBeVisible()
-    await expect(page.locator('#dashboard-panel-stay-move').getByRole('button', { name: 'Move guest', exact: true })).toBeDisabled()
 
     // Handing the home back to its owner takes it away from the member.
     const removed = await page.request.patch(`/api/editor/organizations/${organizationId}/products/${productId}`, { data: { stay: { assigned_member_id: ownerMemberId } } })
@@ -5196,13 +5190,7 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/calendar/stay/${stayIds[1]}`))
   await page.goto(gridPath)
 
-  // City narrows rows to the homes' address city; Search by name or address; No upcoming stays keeps homes with no booked night on screen.
-  await page.getByRole('combobox', { name: 'City' }).click()
-  await page.getByRole('option', { name: 'Ao Nang (1)', exact: true }).click()
-  await expect(grid.locator('[data-home]')).toHaveCount(1)
-  await expect(grid.locator(`[data-home="${sea}"]`)).toBeVisible()
-  await page.getByRole('combobox', { name: 'City' }).click()
-  await page.getByRole('option', { name: 'All cities (3)', exact: true }).click()
+  // Search narrows rows by name or address.
   await expect(grid.locator('[data-home]')).toHaveCount(3)
   await page.getByRole('textbox', { name: 'Search homes' }).fill('sea road')
   await expect(grid.locator('[data-home]')).toHaveCount(1)
@@ -5218,11 +5206,6 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(agenda.locator('[data-day]').first()).toBeVisible()
   await expect(agenda.getByText(/Grid/).first()).toBeVisible()
   await page.goto(gridPath)
-  await page.getByRole('button', { name: 'No upcoming stays', exact: true }).click()
-  await expect(grid.locator('[data-home]')).toHaveCount(2)
-  await expect(grid.locator(`[data-home="${productId}"]`)).toHaveCount(0)
-  await page.getByRole('button', { name: 'No upcoming stays', exact: true }).click()
-  await expect(grid.locator('[data-home]')).toHaveCount(3)
 
   // Dragging across the three gap nights between two stays sets a 3-night minimum on them alone.
   const drag = async (start: import('@playwright/test').Locator, end: import('@playwright/test').Locator) => {

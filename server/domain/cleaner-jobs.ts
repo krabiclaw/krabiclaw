@@ -16,9 +16,9 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 
   The organization's hub Durable Object wakes this on every stay or business
   change and at the next reminder it reports, and re-arms itself to that time.
-  A job an owner or admin gives themselves has no conversation; its morning-of
-  reminder is the task alert, as it is for every other assigned task with a
-  start time, an attorney's consultation jobs among them.
+  Every job has a conversation, a job an owner keeps for themselves too. A
+  group session's prep has no booking to talk about; its morning-of reminder
+  is the task alert, as it is for every other assigned task with a start time.
 */
 
 const EVENING_BEFORE = '18:00'
@@ -42,8 +42,9 @@ interface Roster {
 
 function rosterFor(task: TaskRow, members: Member[]): Roster | null {
   const hosts = members.filter(member => isOrganizationWideRole(member.role))
+  // Whoever has the job, an owner who keeps it for themselves too, hears about it in its conversation.
   const cleaner = members.find(member => member.id === task.assigned_member_id)
-  if (!cleaner || isOrganizationWideRole(cleaner.role)) return null
+  if (!cleaner) return null
   return {
     seats: [...new Set([cleaner, ...hosts].map(member => member.id))].sort(),
     cleaners: [cleaner.userId],
@@ -71,6 +72,17 @@ function reminders(task: TaskRow): Array<{ key: string; at: Date; until: Date; k
   // Only a stay has guests arriving at a home that must be ready.
   if (task.due_at !== null && isJobTask(task) && jobSubject(task).unit === 'nights') out.push({ kind: 'warning', key: `warning:${task.id}:${task.due_at}`, at: new Date(Date.parse(task.due_at) - WARNING_BEFORE_ARRIVAL_MS), until: new Date(task.due_at) })
   return out
+}
+
+/**
+ * The write that creates, moves or gives out a job runs this before it
+ * answers: the job's conversation and its first message exist when the write
+ * returns, so a job is in Messages without waiting for the hub's alarm. A job
+ * that could not be told about fails the write.
+ */
+export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<void> {
+  const { failures } = await runOrganizationJobs(env, db, organizationId)
+  if (failures.length) throw new AggregateError(failures, `${failures.length} jobs of ${organizationId} could not be posted in their conversations`)
 }
 
 /**

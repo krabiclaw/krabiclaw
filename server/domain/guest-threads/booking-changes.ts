@@ -249,22 +249,15 @@ export async function changeBooking(db: DbClient, env: CloudflareEnv, input: {
     if (input.stayAccess?.organizationId !== input.organizationId || input.stayAccess.actorId !== input.actorUserId) {
       throw new HTTPError({ statusCode: 403, message: 'Organization access required' })
     }
-    if (!input.apply || input.body.product_session_id !== undefined) {
-      throw new HTTPError({ statusCode: 422, message: 'A stay can be moved by the business to new dates or a different home' })
+    if (!input.apply || input.body.product_session_id !== undefined || input.body.product_id !== undefined) {
+      throw new HTTPError({ statusCode: 422, message: 'A stay is changed by the business to new dates' })
     }
-    const { moveStay, updateStay } = await import('~/server/domain/stays')
-    if (input.body.product_id !== undefined && input.body.product_id !== record.product_id) {
-      if (input.body.check_in_date !== undefined || input.body.check_out_date !== undefined) {
-        throw new HTTPError({ statusCode: 422, message: 'Choose either new dates or a different home' })
-      }
-      const stay = await moveStay(db, env, input.stayAccess, input.bookingId, { version: input.body.version, product_id: input.body.product_id })
-      return { kind: 'stay' as const, stay, scheduledMessageId: stay.scheduled_message_id }
-    }
+    const { updateStay } = await import('~/server/domain/stays')
     if (input.body.check_in_date === undefined && input.body.check_out_date === undefined) {
-      throw new HTTPError({ statusCode: 422, message: 'Choose new dates or a different home' })
+      throw new HTTPError({ statusCode: 422, message: 'Choose new dates' })
     }
     const stay = await updateStay(db, env, input.stayAccess, input.bookingId, { ...input.body, version: input.body.version })
-    return { kind: 'stay' as const, stay, scheduledMessageId: null }
+    return { kind: 'stay' as const, stay }
   }
   const key = input.idempotencyKey?.trim()
   if (!key || key.length > 100) throw new HTTPError({ statusCode: 400, message: 'Request key is required' })

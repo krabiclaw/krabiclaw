@@ -3,7 +3,7 @@ import { bookChannelConversationGuest, reconcileGuestListingParticipants } from 
 import { HTTPError } from 'nitro'
 import { bookingStatusQuery } from '~/server/domain/bookings'
 import { CURRENT_GUEST_SQL, messageQueries, readGuestConversation } from '~/server/domain/conversations'
-import { notifyStayReady, stayReadyRevisionQueries, stayReadyTaskQueries, turnoverTaskQueries } from '~/server/domain/tasks'
+import { turnoverTaskQueries } from '~/server/domain/tasks'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevision, parseStoredFormQuestions, type FormAnswerSnapshot, type FormQuestion } from '~/shared/form-questions'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
@@ -26,7 +26,7 @@ import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LI
 import { stayNightlyGroups, AIRBNB_CANCELLATION_CATEGORIES, AIRBNB_LONG_TERM_CANCELLATION_IDS, isStayAmenity, parseStayAmenityAnswers, parseStayMapSharing, STAY_ALARM_DETAIL_KEYS, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, type StayAmenityAnswer, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { validateProductDetails, validateStayAlarmDetails, stayHouseRuleLines } from '~/shared/product-details'
 import { staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
-import { formatCalendarDate, formatTime, formatTimestamp, isValidInstant, isValidTimezone, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
+import { formatTime, isValidInstant, isValidTimezone, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { createProduct, getProduct, readStayCalendarRules, setProductPublication, stayImportWrittenQuery, stayWeekendPriceSql, updateProduct, type StayImportWrite } from '~/server/utils/product-management'
 import type { Product, ProductStayConfig, UpdateProductInput } from '~/server/types/products'
 import { createGuestUser, type CloudflareEnv } from '~/server/utils/auth'
@@ -41,7 +41,7 @@ import { assertBookingBatchWrite, bookingBatchWriteRefused, requireBookingConfig
 import { GUEST_NOTE_EVENT, openingMessageQueries, openingSentence } from '~/server/domain/guest-threads/opening'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
-import { publishAccessInvalidation, publishBusinessInvalidation, publishConversationEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { publishBusinessInvalidation, publishConversationEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planSourceMessages } from '~/server/domain/scheduled-guest-messages'
 import { listingCalendar } from '~/server/integrations/channex/airbnb-listing'
 import { joinBookingConversationQueries } from '~/server/domain/guest-threads/channel-messages'
@@ -81,10 +81,6 @@ export const STAY_STATUSES = ['pending', 'confirmed', 'cancelled'] as const
 
 /** A nights booking: a booking at a home, read with its check-in and checkout days in the home's clock. */
 export interface Stay {
-  /** The listing a channel reservation is booked on when the host moved the guest elsewhere; null when they sleep where they booked. */
-  booked_product_id: string | null
-  /** That listing's name for the host; null when they sleep where they booked. */
-  booked_home_name: string | null
   id: string
   product_id: string
   location_id: string
@@ -399,7 +395,7 @@ function amount(value: unknown, field: string, allowNegative = false): number {
 /** A nights booking at its home, with its conversation's guest contact: `s` is the booking. */
 const STAY_FROM = `bookings s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
   JOIN conversations r ON r.organization_id = s.organization_id AND r.booking_id = s.id AND r.kind = 'booking'`
-const STAY_COLUMNS = `s.id, s.product_id, s.booked_product_id, (SELECT b.internal_name FROM product_stay_configs b WHERE b.organization_id = s.organization_id AND b.product_id = s.booked_product_id) AS booked_home_name, s.location_id, s.timezone, s.channel, s.owner, s.status, s.overbooked, s.starts_at, s.ends_at,
+const STAY_COLUMNS = `s.id, s.product_id, s.location_id, s.timezone, s.channel, s.owner, s.status, s.overbooked, s.starts_at, s.ends_at,
   s.adults, s.children, s.infants, s.party_size, json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
   s.user_id, s.total_minor, s.currency, s.private_notes, s.provider, s.external_booking_id, s.channel_booking_id, r.id AS conversation_id, s.cancelled_at, s.cancellation_reason,
   json_extract(s.policy_json, '$.cancellation') AS cancellation_policy, s.no_show_at, s.answers, s.version, s.created_at, s.updated_at,
@@ -1397,15 +1393,10 @@ function homeNightsQueries(organization: BatchQuery, products: BatchQuery, from:
       WHERE stay_nights.organization_id = ${org} AND stay_nights.product_id IN (${ids}) AND stay_nights.date >= ? AND stay_nights.date < ? AND NOT (${LAPSED_HOLD_CLAIM_SQL})`,
     params: [...organization.params!, ...products.params!, from, to],
   }, {
-    // A reservation stays on the listing it was booked on after its guest moved: the channel still holds those nights, the nights it claims at the home it moved to.
-    query: `SELECT s.id, s.booked_product_id, n.date FROM bookings s JOIN stay_nights n ON n.organization_id = s.organization_id AND n.booking_id = s.id
-      WHERE s.organization_id = ${org} AND s.booked_product_id IN (${ids}) AND s.status <> 'cancelled' AND n.date >= ? AND n.date < ?`,
-    params: [...organization.params!, ...products.params!, from, to],
-  }, {
-    query: `SELECT id, product_id, booked_product_id, starts_at, ends_at, timezone FROM bookings s
+    query: `SELECT id, product_id, starts_at, ends_at, timezone FROM bookings s
       WHERE organization_id = ${org} AND owner = 'channel' AND status = 'confirmed' AND overbooked = 1 AND ${window.sql}
-        AND (product_id IN (${ids}) OR booked_product_id IN (${ids}))`,
-    params: [...organization.params!, ...window.params, ...products.params!, ...products.params!],
+        AND product_id IN (${ids})`,
+    params: [...organization.params!, ...window.params, ...products.params!],
   }, ...(channel ? [{
     query: `SELECT product_id, date, state, detail FROM channel_night_pushes WHERE organization_id = ${org} AND product_id IN (${ids}) AND date >= ? AND date < ?`,
     params: [...organization.params!, ...products.params!, from, to],
@@ -1424,30 +1415,22 @@ async function homesOpenNights(db: DbClient, organizationId: string, homes: read
 
 /** The nights of each home, from `homeNightsQueries`' results; with the channel statement, each night carries what its channel last took. */
 function homeNightsFrom(homes: ReadonlyArray<Pick<StayHomeCore, 'product_id' | 'min_nights' | 'base_price_minor' | 'calendar_rules'>>, results: Array<{ results: unknown[] }>, from: string, to: string): Array<Array<Omit<StayNight, 'channel'> & Partial<Pick<StayNight, 'channel'>>>> {
-  const [overrides, claims, movedAway, overbooked, pushes] = results.map(result => result.results) as [
+  const [overrides, claims, overbooked, pushes] = results.map(result => result.results) as [
     Array<Record<string, unknown>>,
     Array<{ product_id: string; date: string; booking_id: string | null; held_until: string | null; calendar: StayCalendarChannel | null }>,
-    Array<{ id: string; booked_product_id: string; date: string }>,
-    Array<{ id: string; product_id: string; booked_product_id: string | null; starts_at: string; ends_at: string; timezone: string }>,
+    Array<{ id: string; product_id: string; starts_at: string; ends_at: string; timezone: string }>,
     Array<{ product_id: string; date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null }> | undefined,
   ]
   const pushByNight = pushes && new Map(pushes.map(row => [`${row.product_id} ${row.date}`, { state: row.state, detail: row.detail }]))
   const overrideByNight = new Map(overrides.map(row => [`${String(row.product_id)} ${String(row.date)}`, row]))
   const claimByNight = new Map(claims.map(row => [`${row.product_id} ${row.date}`, row]))
-  for (const night of movedAway) {
-    const key = `${night.booked_product_id} ${night.date}`
-    if (!claimByNight.has(key)) claimByNight.set(key, { product_id: night.booked_product_id, date: night.date, booking_id: night.id, held_until: null, calendar: null })
-  }
   // The channel's confirmed booking still occupies its dates while the host resolves the overlap.
   for (const stay of overbooked) {
     const starts = bookingDay(stay.starts_at, stay.timezone)
     const ends = bookingDay(stay.ends_at, stay.timezone)
-    for (const productId of [stay.product_id, stay.booked_product_id]) {
-      if (!productId) continue
-      for (let day = starts < from ? from : starts; day < ends && day < to; day = addDays(day, 1)) {
-        const key = `${productId} ${day}`
-        if (!claimByNight.has(key)) claimByNight.set(key, { product_id: productId, date: day, booking_id: stay.id, held_until: null, calendar: null })
-      }
+    for (let day = starts < from ? from : starts; day < ends && day < to; day = addDays(day, 1)) {
+      const key = `${stay.product_id} ${day}`
+      if (!claimByNight.has(key)) claimByNight.set(key, { product_id: stay.product_id, date: day, booking_id: stay.id, held_until: null, calendar: null })
     }
   }
   return homes.map((home) => {
@@ -1725,42 +1708,6 @@ function reconcileNightsQueries(organizationId: string, stayId: string, written:
   }]
 }
 
-/**
- * A listing whose guest was moved elsewhere keeps its nights for that stay: the
- * channel still sells it as taken, and its nights carry no claim rows at the
- * listing because a claim names the home the guest sleeps in. Those nights
- * are the moved booking's claims at its new home. This statement refuses the
- * batch, in the same transaction as the write it follows, when the home takes
- * a stay over nights another booking holds as its booked listing. `json()` of
- * plain text is the batch's one way to fail on a read.
- */
-function bookedListingGuardQuery(organizationId: string, productId: string, stayId: string, checkIn: string, checkOut: string): BatchQuery {
-  return {
-    query: `SELECT CASE WHEN EXISTS (SELECT 1 FROM bookings b JOIN stay_nights n ON n.organization_id = b.organization_id AND n.booking_id = b.id
-              WHERE b.organization_id = ? AND b.booked_product_id = ? AND b.id <> ? AND b.status <> 'cancelled' AND n.date >= ? AND n.date < ?) THEN json('STAY_BOOKED_LISTING_HELD') ELSE NULL END`,
-    params: [organizationId, productId, stayId, checkIn, checkOut],
-  }
-}
-
-/**
- * The guards for the nights a write newly takes on a home: none when the stay
- * already held every night there, otherwise the stretch before and the stretch
- * after what it held. A stay that already overlapped a reservation later moved
- * off its listing keeps its own nights and is edited freely within them.
- */
-function bookedListingGuardQueries(organizationId: string, productId: string, stayId: string, held: { product_id: string; check_in_date: string; check_out_date: string } | null, next: { check_in_date: string; check_out_date: string }): BatchQuery[] {
-  if (!held || held.product_id !== productId) return [bookedListingGuardQuery(organizationId, productId, stayId, next.check_in_date, next.check_out_date)]
-  const guards: BatchQuery[] = []
-  if (next.check_in_date < held.check_in_date) guards.push(bookedListingGuardQuery(organizationId, productId, stayId, next.check_in_date, held.check_in_date < next.check_out_date ? held.check_in_date : next.check_out_date))
-  if (next.check_out_date > held.check_out_date) guards.push(bookedListingGuardQuery(organizationId, productId, stayId, held.check_out_date > next.check_in_date ? held.check_out_date : next.check_in_date, next.check_out_date))
-  return guards
-}
-
-/** The booked-listing guard above is the only `json()` of plain text in a stay batch. */
-function isBookedListingHeld(error: unknown): boolean {
-  return /malformed JSON/.test(error instanceof Error ? error.message : String(error))
-}
-
 export function isStayNightConflict(error: unknown): boolean {
   return /UNIQUE constraint failed: stay_nights\./.test(error instanceof Error ? error.message : String(error))
 }
@@ -1919,7 +1866,6 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
         params: [id, access.organizationId, guestUserId, home.product_id, home.variant_id, home.location_id, window.starts_at, window.ends_at, home.timezone, fields.adults + fields.children, fields.adults, fields.children, fields.infants,
           JSON.stringify(answers), fields.private_notes, policy, fields.total_minor, home.currency, key, channel, channelBookingId, imported ? null : now, now, now],
       },
-      ...bookedListingGuardQueries(access.organizationId, home.product_id, id, null, fields),
       ...reconcileNightsQueries(access.organizationId, id, { updated_at: now, version: 1, product_id: home.product_id, ...window, check_in_date: fields.check_in_date, check_out_date: fields.check_out_date }),
       ...bookingConversationQueries({ organizationId: access.organizationId, bookingId: id, requestId: crypto.randomUUID(), locationId: home.location_id, userId: guestUserId, now,
         guest: { name: fields.guest_name, email: fields.guest_email, phone: fields.guest_phone } }),
@@ -1929,7 +1875,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
       ...turnovers,
     ], { operation: 'Create stay' })
   } catch (error) {
-    if (isStayNightConflict(error) || isBookedListingHeld(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
+    if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
     if (/UNIQUE constraint failed: bookings\.organization_id, bookings\.idempotency_key/.test(error instanceof Error ? error.message : String(error))) {
       const concurrent = await replay()
       if (concurrent) return pushed(concurrent)
@@ -1986,12 +1932,11 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
       },
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.updated', entityType: 'stay', entityId: stayId, onlyIfPreviousChangedOneRow: true }),
       bookingContactQuery({ organizationId: access.organizationId, bookingId: stayId, version: next, updatedAt: now, locationId: home.location_id, guest: { name: fields.guest_name, email: fields.guest_email, phone: fields.guest_phone } }),
-      ...bookedListingGuardQueries(access.organizationId, current.product_id, stayId, current, fields),
       ...reconcileNightsQueries(access.organizationId, stayId, { updated_at: now, version: next, product_id: current.product_id, ...window, check_in_date: fields.check_in_date, check_out_date: fields.check_out_date }),
       ...turnovers,
     ], { operation: 'Update stay' })
   } catch (error) {
-    if (isStayNightConflict(error) || isBookedListingHeld(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
+    if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
     throw error
   }
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
@@ -2004,163 +1949,6 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
   return completeChannelPush(channelPush, { product_id: stay.product_id, booking_id: stayId, version: stay.version, ranges: changed }, async () => {
     await publishStayChange(env, db, access.organizationId, stay, changed.length > 0)
     return getStay(db, access, stayId)
-  })
-}
-
-export interface StayMoveOption {
-  product_id: string
-  name: string
-  internal_name: string
-  same_address: boolean
-  /** Straight-line distance from where the stay is now; null until both homes have a map pin. */
-  distance_meters: number | null
-  /** The [from, to) ranges of this stay's nights the home cannot give it. Empty means it is free for the whole stay. */
-  taken: Array<{ from: string; to: string }>
-  /** Whether the home has the check-in instructions the guest must be sent. */
-  has_instructions: boolean
-}
-
-function distanceMeters(a: StayHome, b: StayHome): number | null {
-  if (a.latitude === null || a.longitude === null || b.latitude === null || b.longitude === null) return null
-  const radians = (value: number) => value * Math.PI / 180
-  const h = Math.sin(radians(b.latitude - a.latitude) / 2) ** 2 + Math.cos(radians(a.latitude)) * Math.cos(radians(b.latitude)) * Math.sin(radians(b.longitude - a.longitude) / 2) ** 2
-  return Math.round(2 * 6_371_000 * Math.asin(Math.sqrt(h)))
-}
-
-/** The nights a home cannot give this stay; the stay's own hold on its booked listing does not count. */
-function nightsTaken(nights: readonly StayNight[], stayId: string): Array<{ from: string; to: string }> {
-  const ranges: Array<{ from: string; to: string }> = []
-  for (const night of nights) {
-    if (night.available || night.booking_id === stayId) continue
-    const next = addDays(night.date, 1)
-    const last = ranges.at(-1)
-    if (last?.to === night.date) last.to = next
-    else ranges.push({ from: night.date, to: next })
-  }
-  return ranges
-}
-
-/** The host's other homes for this stay's nights, free ones first and nearest first. */
-export async function listStayMoveOptions(db: DbClient, access: StayAccess, stayId: string): Promise<StayMoveOption[]> {
-  requireManager(access)
-  const stay = await getStay(db, access, stayId)
-  if (stay.request_status) fail(409, 'STAY_REQUEST_PENDING', 'A stay request can be moved once the guest has paid.', 'booking_id')
-  const homes = await listStayHomes(db, access)
-  const current = homes.find(home => home.product_id === stay.product_id)
-  if (!current) fail(404, 'STAY_HOME_NOT_FOUND', 'The stay’s home was not found', 'product_id')
-  const others = homes.filter(home => home.product_id !== stay.product_id)
-  const [nights, instructions] = await Promise.all([
-    homesNights(db, access.organizationId, others, stay.check_in_date, stay.check_out_date),
-    queryAll<{ product_id: string }>(db, `SELECT product_id FROM product_stay_configs WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))
-      AND trim(COALESCE(check_in_instructions, '')) <> ''`, [access.organizationId, d1JsonStringSet(others.map(home => home.product_id))]),
-  ])
-  const ready = new Set(instructions.map(row => row.product_id))
-  return others.map((home, index) => ({
-    product_id: home.product_id, name: home.name, internal_name: home.internal_name,
-    same_address: home.address !== null && home.address.address === current.address?.address,
-    distance_meters: distanceMeters(current, home), taken: nightsTaken(nights[index]!, stayId), has_instructions: ready.has(home.product_id),
-  })).sort((a, b) => Number(a.taken.length > 0) - Number(b.taken.length > 0) || Number(b.same_address) - Number(a.same_address)
-    || (a.distance_meters ?? Infinity) - (b.distance_meters ?? Infinity) || a.internal_name.localeCompare(b.internal_name))
-}
-
-const STAY_MOVED_MESSAGE_TITLE = 'Your stay has moved'
-
-function stayMovedMessage(stay: Stay, from: StayHome, to: StayHome, instructions: string): string {
-  const first = stayGuestFirstName(stay.guest_name)
-  const day = (date: string) => formatCalendarDate(date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })
-  const at = (date: string, time: string | null) => time === null ? day(date) : `${day(date)}, ${formatTimestamp(localDateTimeToInstant(date, time, to.timezone, 'compatible'), 'en', to.timezone, { hour: 'numeric', minute: '2-digit' })}`
-  const address = to.address && [to.address.address, to.address.city, to.address.state].filter(Boolean).join(', ')
-  return [`${first ? `Hi ${first}, your` : 'Your'} stay has moved to ${to.name}. Your dates and price don’t change.`,
-    [address && `Address: ${address}`, `Check-in: ${at(stay.check_in_date, to.check_in_time)}`, `Checkout: ${at(stay.check_out_date, to.check_out_time)}`].filter(Boolean).join('\n'),
-    instructions.trim(), `Please use these details instead of any you received for ${from.name}.`].join('\n\n')
-}
-
-/**
- * The host moves a guest to another of their homes. The stay's nights, turnover
- * and later messages follow it; a channel reservation stays on the listing it
- * was booked on, which keeps those nights. The new home gets a job to be made
- * ready before arrival, and the guest is told in their conversation. Moving
- * back to the booked listing undoes the move.
- */
-export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: { version: unknown; product_id: unknown }): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null; scheduled_message_id: string }> {
-  requireManager(access)
-  const current = await getStay(db, access, stayId)
-  if (current.status === 'cancelled') fail(409, 'STAY_NOT_EDITABLE', 'This stay is cancelled')
-  if (current.request_status) fail(409, 'STAY_REQUEST_PENDING', 'A stay request can be moved once the guest has paid.', 'booking_id')
-  if (input.version !== current.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
-  if (typeof input.product_id !== 'string' || !input.product_id) fail(422, 'INVALID_STAY_FIELD', 'Choose the home to move this stay to', 'product_id')
-  if (input.product_id === current.product_id) fail(422, 'STAY_MOVE_SAME_HOME', 'The guest is already staying in this home', 'product_id')
-  const [from, to] = await Promise.all([readStayHome(db, access, current.product_id), readStayHome(db, access, input.product_id)])
-  if (current.check_out_date < localDateAt(new Date(), to.timezone)) fail(409, 'STAY_MOVE_ENDED', 'This stay has already ended', 'product_id')
-  if (current.adults + current.children > to.max_guests) fail(422, 'STAY_MOVE_TOO_SMALL', `${to.internal_name} sleeps ${to.max_guests}; this party is ${current.adults + current.children}`, 'product_id')
-  const config = await queryFirst<{ check_in_instructions: string | null; assigned_member_id: string | null }>(db,
-    `SELECT c.check_in_instructions, b.assigned_member_id FROM product_stay_configs c JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id
-      WHERE c.organization_id = ? AND c.product_id = ?`, [access.organizationId, to.product_id])
-  if (!config?.check_in_instructions?.trim()) fail(422, 'STAY_MOVE_NEEDS_INSTRUCTIONS', `Add check-in instructions to ${to.internal_name} before moving a guest there, so they can be told how to get in`, 'product_id')
-  if (nightsTaken(await homeNights(db, access.organizationId, to, current.check_in_date, current.check_out_date), stayId).length) fail(409, 'STAY_MOVE_NIGHTS_TAKEN', `${to.internal_name} is not free for every night of this stay`, 'product_id')
-  await Promise.all([requireChannelPush(db, env, access.organizationId, from.product_id), requireChannelPush(db, env, access.organizationId, to.product_id)])
-  const listing = isChannelManagedStay(current) ? current.booked_product_id ?? current.product_id : null
-  const backOnListing = to.product_id === listing
-  const booked = backOnListing ? null : listing
-  const next = current.version + 1
-  const now = new Date().toISOString()
-  const scheduledMessageId = crypto.randomUUID()
-  const body = stayMovedMessage(current, from, to, config.check_in_instructions)
-  if (body.length > 5000) fail(422, 'STAY_MOVE_MESSAGE_TOO_LONG', `The check-in instructions for ${to.internal_name} are too long to send in one message`, 'product_id')
-  // The guest keeps their dates; the times are the new home's, or the arrival they said.
-  const movedWindow = { starts_at: nightsBoundary(current.check_in_date, recordedArrival(current, from) ?? to.check_in_time, to.timezone), ends_at: nightsBoundary(current.check_out_date, to.check_out_time, to.timezone) }
-  const moved = `EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND version = ? AND product_id = ?)`
-  const movedParams = [access.organizationId, stayId, next, to.product_id]
-  const turnovers = await turnoverTaskQueries(db, { organizationId: access.organizationId, now, before: current,
-    after: { id: stayId, product_id: to.product_id, status: current.status, check_in_date: current.check_in_date, check_out_date: current.check_out_date } })
-  let results: Awaited<ReturnType<typeof executeBatch>>
-  try {
-    results = await executeBatch(db, [
-      // The claims' composite FK names the stay's home: release them before it changes.
-      { query: 'DELETE FROM stay_nights WHERE organization_id = ? AND booking_id = ? AND EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND version = ?)',
-        params: [access.organizationId, stayId, access.organizationId, stayId, current.version] },
-      { query: `UPDATE bookings SET product_id = ?, product_variant_id = ?, location_id = ?, timezone = ?, starts_at = ?, ends_at = ?, booked_product_id = ?, overbooked = 0, version = ?, updated_at = ?
-                WHERE organization_id = ? AND id = ? AND product_id = ? AND version = ? AND status <> 'cancelled' AND product_session_id IS NULL`,
-        params: [to.product_id, to.variant_id, to.location_id, to.timezone, movedWindow.starts_at, movedWindow.ends_at,
-          booked, next, now, access.organizationId, stayId, from.product_id, current.version] },
-      organizationEventQuery({ organizationId: access.organizationId, locationId: to.location_id, actorId: access.actorId, eventType: 'stay.moved', entityType: 'stay', entityId: stayId, onlyIfPreviousChangedOneRow: true,
-        metadata: { from_product_id: from.product_id, to_product_id: to.product_id, booked_product_id: booked } }),
-      ...bookedListingGuardQueries(access.organizationId, to.product_id, stayId, current, current),
-      ...reconcileNightsQueries(access.organizationId, stayId, { updated_at: now, version: next, product_id: to.product_id, ...movedWindow, check_in_date: current.check_in_date, check_out_date: current.check_out_date }),
-      { query: `UPDATE scheduled_guest_messages SET product_id = ?, updated_at = ? WHERE organization_id = ? AND booking_id = ? AND status <> 'sent' AND ${moved}`,
-        params: [to.product_id, now, access.organizationId, stayId, ...movedParams] },
-      bookingContactQuery({ organizationId: access.organizationId, bookingId: stayId, version: next, updatedAt: now, locationId: to.location_id, guest: { name: current.guest_name, email: current.guest_email, phone: current.guest_phone } }),
-      ...reconcileGuestListingParticipants(access.organizationId, { query: `c.booking_id = ? AND ${moved}`, params: [stayId, ...movedParams] }),
-      ...turnovers,
-      ...stayReadyTaskQueries({ organizationId: access.organizationId, stayId, now, previousProductId: from.product_id, guard: { query: moved, params: movedParams },
-        home: backOnListing ? null : { product_id: to.product_id, location_id: to.location_id, timezone: to.timezone, check_in_time: to.check_in_time, internal_name: to.internal_name, assigned_member_id: config.assigned_member_id },
-        guestName: stayGuestFirstName(current.guest_name), checkInDate: current.check_in_date }),
-      {
-        query: `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, booking_id, template_id, template_title, template_version, body, due_at, timezone, status, created_at, updated_at)
-                SELECT ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?, 'pending', ?, ? WHERE ${moved}`,
-        params: [scheduledMessageId, access.organizationId, to.product_id, stayId, STAY_MOVED_MESSAGE_TITLE, body, now, to.timezone, now, now, ...movedParams],
-      },
-    ], { operation: 'Move stay' })
-  } catch (error) {
-    if (isStayNightConflict(error) || isBookedListingHeld(error)) fail(409, 'STAY_MOVE_NIGHTS_TAKEN', `${to.internal_name} is not free for every night of this stay`, 'product_id')
-    throw error
-  }
-  if (results[1]?.meta.changes !== 1) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
-  if (results.at(-1)?.meta.changes !== 1) throw new Error('The stay moved without its queued guest message')
-  await planSourceMessages(db, access.organizationId, stayId)
-  const range = [[current.check_in_date, current.check_out_date]] as const
-  const released = await pushNights(db, env, access, from.product_id, range)
-  const held = await pushNights(db, env, access, to.product_id, range)
-  const channelPush = released instanceof Error || released?.state === 'needs_review' ? released : held
-  return completeChannelPush(channelPush, { product_id: to.product_id, booking_id: stayId, version: next, ranges: range }, async () => {
-    const stay = await getStay(db, access, stayId)
-    if (listing === null) await publishAccessInvalidation(env, { organizationId: access.organizationId })
-    await publishStayChange(env, db, access.organizationId, stay, true)
-    const released = { organization_id: access.organizationId, location_id: from.location_id, product_id: from.product_id, booking_id: stayId }
-    await publishStayInvalidation(env, { ...released, type: 'stay.changed' }, { version: next })
-    await publishStayInvalidation(env, { ...released, type: 'nights.changed' }, { version: next })
-    if (!backOnListing) await notifyStayReady(env as CloudflareEnv, db, { organizationId: access.organizationId, stayId, productId: to.product_id, actorUserId: access.actorId })
-    return { ...stay, scheduled_message_id: scheduledMessageId }
   })
 }
 
@@ -2204,8 +1992,6 @@ export async function cancelStay(db: DbClient, env: StayMutationEnv, access: Sta
     ...reconcileNightsQueries(access.organizationId, stayId, { updated_at: now, version: next, product_id: current.product_id, starts_at: current.starts_at, ends_at: current.ends_at, check_in_date: current.check_in_date, check_out_date: current.check_out_date }),
     ...refund.queries,
     ...turnovers,
-    ...stayReadyRevisionQueries({ organizationId: access.organizationId, stayId, now, cancelled: true,
-      guard: { query: "EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND status = 'cancelled' AND version = ?)", params: [access.organizationId, stayId, next] } }),
   ], { operation: 'Cancel stay' })
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
   return complete(next)
@@ -2709,18 +2495,18 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   if (booking.check_out_date <= booking.check_in_date) throw new Error(`Channel booking ${booking.external_booking_id} ends before it starts`)
   if (booking.adults < 1) throw new Error(`Channel booking ${booking.external_booking_id} has no adult guest`)
   if (!/^[A-Z]{3}$/.test(booking.currency)) throw new Error(`Channel booking ${booking.external_booking_id} has an invalid currency`)
-  type ChannelStayRow = { id: string; product_id: string; booked_product_id: string | null; provider_updated_at: string | null; revision_id: string | null; external_booking_id: string | null; user_id: string | null; conversation_id: string | null }
+  type ChannelStayRow = { id: string; product_id: string; provider_updated_at: string | null; revision_id: string | null; external_booking_id: string | null; user_id: string | null; conversation_id: string | null }
   const currentChannelStay = () => queryFirst<ChannelStayRow>(db,
-    `SELECT id, product_id, booked_product_id, provider_updated_at, revision_id, external_booking_id, user_id, (SELECT c.id FROM conversations c WHERE c.booking_id = bookings.id AND c.kind = 'booking') AS conversation_id FROM bookings WHERE provider = ? AND external_booking_id = ?`, [booking.provider, booking.external_booking_id])
+    `SELECT id, product_id, provider_updated_at, revision_id, external_booking_id, user_id, (SELECT c.id FROM conversations c WHERE c.booking_id = bookings.id AND c.kind = 'booking') AS conversation_id FROM bookings WHERE provider = ? AND external_booking_id = ?`, [booking.provider, booking.external_booking_id])
   // The same reservation under a new provider booking id (a re-import after a
   // new Channex account) is the stay it already is: the revision's write moves
   // it onto the new id, when that revision is newer than the stay.
   const existing = await currentChannelStay() ?? (booking.channel_booking_id === null ? null : await queryFirst<ChannelStayRow>(db,
-    `SELECT id, product_id, booked_product_id, provider_updated_at, revision_id, external_booking_id, user_id, (SELECT c.id FROM conversations c WHERE c.booking_id = bookings.id AND c.kind = 'booking') AS conversation_id FROM bookings WHERE organization_id = ? AND channel = ? AND channel_booking_id = ?
+    `SELECT id, product_id, provider_updated_at, revision_id, external_booking_id, user_id, (SELECT c.id FROM conversations c WHERE c.booking_id = bookings.id AND c.kind = 'booking') AS conversation_id FROM bookings WHERE organization_id = ? AND channel = ? AND channel_booking_id = ?
       AND ((provider = ? AND external_booking_id <> ?) OR owner = 'app')`,
     [organizationId, booking.channel, booking.channel_booking_id, booking.provider, booking.external_booking_id]))
-  // A revision names the listing it was booked on. A guest the host moved stays where they sleep; a revision for another listing is a real re-map.
-  const landing = existing?.booked_product_id === productId ? existing.product_id : productId
+  // A revision names the listing it was booked on; a revision for another listing is a re-map.
+  const landing = productId
   if (existing?.external_booking_id === null && existing.product_id !== landing) fail(409, 'CHANNEL_MIGRATION_HOME_CONFLICT', 'This reservation was imported into a different occupied home. Resolve its property assignment before accepting the channel revision.', 'product_id')
   const reimported = existing && existing.external_booking_id !== booking.external_booking_id ? existing.external_booking_id : null
   const conversation = await queryFirst<{ organization_id: string; product_id: string; conversation_id: string }>(db,
@@ -2800,15 +2586,6 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   const now = new Date().toISOString()
   const turnovers = await turnoverTaskQueries(db, { organizationId, now, before: previous,
     after: { id, product_id: landing, status: booking.cancelled ? 'cancelled' : 'confirmed', check_in_date: booking.check_in_date, check_out_date: booking.check_out_date } })
-  // A moved guest's make-ready job follows the reservation's revisions: its home is where they sleep, not the listing the revision names.
-  const landingHome = existing?.booked_product_id === productId && !booking.cancelled ? await queryFirst<{ check_in_time: string | null; timezone: string }>(db,
-    `SELECT b.check_in_time, l.timezone FROM product_stay_configs c JOIN business_locations l ON l.id = c.location_id AND l.organization_id = c.organization_id
-      JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id WHERE c.organization_id = ? AND c.product_id = ?`,
-    [organizationId, landing]) : null
-  const readyJob = existing?.booked_product_id === productId ? stayReadyRevisionQueries({ organizationId, stayId: id, now, cancelled: booking.cancelled,
-    guard: { query: 'EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND revision_id = ?)', params: [organizationId, id, booking.revision_id] },
-    dueAt: landingHome ? (landingHome.check_in_time === null ? null : localDateTimeToInstant(booking.check_in_date, landingHome.check_in_time, landingHome.timezone, 'compatible').toISOString()) : undefined,
-    checkInDate: booking.check_in_date, guestName: stayGuestFirstName(booking.guest_name) }) : []
   const write = (overbooked: 0 | 1): BatchQuery[] => [...(existing?.external_booking_id === null ? [{
     // An imported OTA confirmation becomes channel-owned when its real revision arrives; keep its one stay and night claims.
     query: `UPDATE bookings SET owner = 'channel', provider = ?, external_booking_id = ? WHERE organization_id = ? AND id = ?
@@ -2829,8 +2606,8 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   }, {
     query: `INSERT INTO bookings (id, organization_id, user_id, product_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, adults, children, infants,
               channel, owner, status, overbooked, policy_json, total_minor, currency, provider, external_booking_id, channel_booking_id, revision_id,
-              provider_updated_at, cancelled_at, received_at, version, created_at, updated_at, booked_product_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'channel', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+              provider_updated_at, cancelled_at, received_at, version, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'channel', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
             ON CONFLICT (provider, external_booking_id) WHERE external_booking_id IS NOT NULL DO UPDATE SET
               product_id = excluded.product_id, product_variant_id = excluded.product_variant_id, location_id = excluded.location_id, timezone = excluded.timezone,
               starts_at = excluded.starts_at, ends_at = excluded.ends_at, channel = excluded.channel, status = excluded.status, overbooked = excluded.overbooked,
@@ -2838,18 +2615,15 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
               total_minor = excluded.total_minor, currency = excluded.currency, channel_booking_id = excluded.channel_booking_id,
               revision_id = excluded.revision_id, provider_updated_at = excluded.provider_updated_at,
               cancelled_at = CASE WHEN excluded.status = 'cancelled' THEN COALESCE(bookings.cancelled_at, excluded.cancelled_at) ELSE NULL END,
-              version = bookings.version + 1, updated_at = excluded.updated_at, booked_product_id = excluded.booked_product_id
+              version = bookings.version + 1, updated_at = excluded.updated_at
             WHERE bookings.organization_id = excluded.organization_id AND bookings.id = ? AND bookings.product_id = ? AND bookings.version IS ?
               AND (bookings.provider_updated_at IS NULL OR bookings.provider_updated_at < excluded.provider_updated_at)`,
     params: [id, organizationId, guestUserId, landing, home.variant_id, home.location_id, window.starts_at, window.ends_at, home.timezone,
       booking.adults + booking.children, booking.adults, booking.children, booking.infants, booking.channel, booking.cancelled ? 'cancelled' : 'confirmed', overbooked, policy,
       booking.total_minor, booking.currency, booking.provider, booking.external_booking_id, booking.channel_booking_id, booking.revision_id,
       // A booking received as it happened starts the new-reservation messages; the import's history never does. An update keeps the first answer.
-      booking.provider_updated_at, booking.cancelled ? now : null, booking.imported || booking.cancelled ? null : now, now, now, landing === productId ? null : productId, existing?.id ?? null, previous?.product_id ?? null, previous?.version ?? null],
+      booking.provider_updated_at, booking.cancelled ? now : null, booking.imported || booking.cancelled ? null : now, now, now, existing?.id ?? null, previous?.product_id ?? null, previous?.version ?? null],
   },
-  // A listing whose guest was moved elsewhere still holds its nights: a second reservation landing on them is an overbooking, like one landing on claimed nights.
-  // A stay that was cancelled or overbooked held no nights, so a revision that brings it back takes every night anew.
-  ...(overbooked === 0 && !booking.cancelled ? bookedListingGuardQueries(organizationId, landing, id, previous && previous.status !== 'cancelled' && !previous.overbooked ? previous : null, booking) : []),
   organizationEventQuery({ organizationId, locationId: home.location_id, actorId: null, eventType: existing ? 'stay.updated' : 'stay.created', entityType: 'stay', entityId: id,
     dedupeKey: revisionKey, onlyIfPreviousChangedOneRow: true, metadata: { channel: booking.channel, overbooked: overbooked === 1,
       provider: booking.provider, external_booking_id: booking.external_booking_id, revision_id: booking.revision_id, provider_updated_at: booking.provider_updated_at,
@@ -2863,7 +2637,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   {
     query: `UPDATE conversations SET booking_id = b.id, user_id = b.user_id, location_id = b.location_id FROM bookings b JOIN channel_threads t
         ON t.provider = b.provider AND t.external_booking_id = b.external_booking_id
-        AND t.organization_id = b.organization_id AND t.product_id = COALESCE(b.booked_product_id, b.product_id)
+        AND t.organization_id = b.organization_id AND t.product_id = b.product_id
       WHERE b.id = ? AND b.organization_id = ? AND b.product_id = ? AND b.version = ?
         AND conversations.id = t.conversation_id AND conversations.organization_id = b.organization_id AND conversations.kind = 'booking' AND conversations.booking_id IS NULL
         AND NOT EXISTS (SELECT 1 FROM conversations booked WHERE booked.booking_id = b.id AND booked.kind = 'booking')`,
@@ -2875,13 +2649,12 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   bookingContactQuery({ organizationId, bookingId: id, version, updatedAt: now, locationId: home.location_id, guest: { name: guestName, email: booking.guest_email, phone: booking.guest_phone } }),
   ...reconcileGuestListingParticipants(organizationId, { query: 'c.booking_id = ?', params: [id] }),
   ...turnovers,
-  ...readyJob,
   ]
   let writes: Awaited<ReturnType<typeof executeBatch>>
   try {
     writes = await executeBatch(db, write(0), { operation: 'Apply channel booking' })
   } catch (error) {
-    if (!isStayNightConflict(error) && !isBookedListingHeld(error)) throw error
+    if (!isStayNightConflict(error)) throw error
     // Rule 1: another stay holds one of these nights. The channel stay still lands, flagged and holding none.
     writes = await executeBatch(db, write(1), { operation: 'Apply overbooked channel booking' })
   }
@@ -2902,6 +2675,8 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
 }
 
 async function publishStayChange(env: GuestInboxPublicationEnv, db: DbClient, organizationId: string, stay: Stay, nightsChanged: boolean): Promise<void> {
+  // The stay's clean is in its conversation before the write answers.
+  await (await import('~/server/domain/cleaner-jobs')).postJobs(env as CloudflareEnv, db, organizationId)
   const input = { organization_id: organizationId, location_id: stay.location_id, product_id: stay.product_id, booking_id: stay.id }
   await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { version: stay.version })
   if (nightsChanged) await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { version: stay.version })
@@ -3179,8 +2954,8 @@ export function stayRequestDeadline(now: string, startsAt: string, timezone: str
 /** Channel stays normally have local-date claims. An overbooking has no claims, so read its dates in its own saved timezone and guard the observation in the write. */
 export async function stayChannelAvailability(db: DbClient, input: { organizationId: string; productId: string; checkIn: string; checkOut: string }) {
   const { organizationId, productId, checkIn, checkOut } = input
-  const scope = "s.organization_id=? AND s.owner='channel' AND s.status='confirmed' AND (s.product_id=? OR s.booked_product_id=?)"
-  const scopeParams = [organizationId, productId, productId]
+  const scope = "s.organization_id=? AND s.owner='channel' AND s.status='confirmed' AND s.product_id=?"
+  const scopeParams = [organizationId, productId]
   const window = stayOverlapSql(checkIn, checkOut)
   const candidates = await queryAll<{ id: string; version: number; starts_at: string; ends_at: string; timezone: string }>(db, `
     SELECT s.id, s.version, s.starts_at, s.ends_at, s.timezone FROM bookings s
@@ -3191,11 +2966,11 @@ export async function stayChannelAvailability(db: DbClient, input: { organizatio
   return {
     query: `NOT EXISTS (SELECT 1 FROM bookings s JOIN stay_nights n ON n.organization_id=s.organization_id AND n.booking_id=s.id
       WHERE s.organization_id=? AND s.status<>'cancelled' AND n.date>=? AND n.date<?
-        AND (s.booked_product_id=? OR (s.product_id=? AND s.owner='channel' AND s.status='confirmed')))
+        AND s.product_id=? AND s.owner='channel' AND s.status='confirmed')
       AND NOT EXISTS (SELECT 1 FROM bookings s WHERE ${scope} AND s.overbooked=1 AND ${window.sql}
         AND NOT EXISTS (SELECT 1 FROM json_each(?) observed
           WHERE json_extract(observed.value,'$[0]')=s.id AND json_extract(observed.value,'$[1]')=s.version))`,
-    params: [organizationId, checkIn, checkOut, productId, productId, ...scopeParams, ...window.params, JSON.stringify(candidates.map(({ id, version }) => [id, version]))],
+    params: [organizationId, checkIn, checkOut, productId, ...scopeParams, ...window.params, JSON.stringify(candidates.map(({ id, version }) => [id, version]))],
   }
 }
 

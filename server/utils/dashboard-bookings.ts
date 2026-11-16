@@ -76,7 +76,7 @@ export async function dashboardBookingDetails(event: H3Event) {
   const actions = requestActions(record, new Date().toISOString())
   const available_actions = stay.request_status ? actions : [
     ...actions.filter(action => action === 'no_show' && !channelOwned),
-    ...(stay.status === 'cancelled' ? [] : ['move', ...(!channelOwned ? ['edit', 'cancel'] : [])]),
+    ...(stay.status === 'cancelled' || channelOwned ? [] : ['edit', 'cancel']),
   ]
   return { booking: { ...nightBooking(stay), available_actions, pending_changes }, manage: true, home, can_message_guest: destination.channel !== null && !conversation.blocked_at }
 }

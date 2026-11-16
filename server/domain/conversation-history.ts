@@ -166,7 +166,7 @@ export async function loadConversationPage(
           FROM (${conversationParticipantsSql('c', 'c.viewer_role')}) p)` : 'NULL'} AS roster,
         -- The job this conversation is about that the viewer closes here: in its team conversation, or in the guest's when it is theirs or nobody's.
         ${head ? `CASE WHEN c.viewer_role = 'member' AND c.booking_id IS NOT NULL THEN (SELECT json_object('task_id', t.id, 'version', t.version) FROM tasks t
-          WHERE t.organization_id = c.organization_id AND t.status = 'open' AND t.kind IN ('turnover', 'stay_ready', 'consultation_follow_up', 'consultation_prep')
+          WHERE t.organization_id = c.organization_id AND t.status = 'open' AND t.kind IN ('turnover', 'consultation_follow_up', 'consultation_prep')
             AND (${jobBookingIdSql('t')}) = c.booking_id
             AND (c.kind = 'team' OR EXISTS (SELECT 1 FROM member vm WHERE vm.organizationId = c.organization_id AND vm.userId = ?
               AND (vm.id = t.assigned_member_id OR (t.assigned_member_id IS NULL AND vm.role IN ('owner', 'admin')))))

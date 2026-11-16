@@ -14,6 +14,7 @@ import { freeCancellationUntil } from '~/shared/availability-settings'
 import { defineHandler } from 'nitro'
 import { getQuery, getRouterParam } from 'nitro/h3'
 import { buildBuyerRequestActivityUrl } from '~/server/utils/dashboard-notification-links'
+import { conversationIdParam } from '~/server/utils/conversation-request'
 
 /**
  * What a guest's cancellation link refers to.
@@ -25,7 +26,7 @@ import { buildBuyerRequestActivityUrl } from '~/server/utils/dashboard-notificat
  */
 export default defineHandler(async (event) => {
   const organizationId = event.context.organizationId as string | null | undefined
-  const requestId = getRouterParam(event, 'conversation_id')
+  const requestId = conversationIdParam(event)
   const token = readBearerToken(event.req.headers.get('authorization'))
   if (!organizationId || !requestId || !token) {
     return jsonResponse({ error: 'Missing required parameters' }, { status: 400 })

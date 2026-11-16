@@ -470,6 +470,8 @@ async function executeSourceMutation(
   const applied = await findMessageByDedupeKey(db, dedupeKey)
   if (!applied) return conflict(`"${input.action}" is not a valid action for the current state`)
   if (!entryMatchesRequest(applied, eventName)) return conflict()
+  // A confirmed visit's follow-up and prep are in their conversations before the operation answers.
+  await (await import('~/server/domain/cleaner-jobs')).postJobs(input.env, db, input.organizationId)
   // A confirmed, declined or cancelled visit's automatic messages follow it.
   if (stay) await stay.publishStayRequest(db, input.env, input.organizationId, context.record.id)
   else await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, context.thread.organization_id, context.record.id)

@@ -31,7 +31,7 @@ const key = { type: 'string', minLength: 1, maxLength: 200, description: 'Caller
 const payment = { type: 'object', properties: { id: text, booking_id: text, amount_minor: { type: 'integer' }, currency: text, method: { type: 'string', enum: [...STAY_PAYMENT_METHODS] }, paid_on: day, reference: nullableText, note: nullableText, created_at: text, created_by: text },
   required: ['id', 'booking_id', 'amount_minor', 'currency', 'method', 'paid_on', 'reference', 'note', 'created_at', 'created_by'] }
 const stayProperties = {
-  id: text, product_id: text, booked_product_id: { ...nullableText, description: 'The listing a channel reservation is booked on when the host moved the guest to another home; null when they sleep where they booked.' }, booked_home_name: nullableText, location_id: text, timezone: text, channel: { type: 'string', enum: [...STAY_CHANNELS] }, owner: { type: 'string', enum: ['app', 'channel'] },
+  id: text, product_id: text, location_id: text, timezone: text, channel: { type: 'string', enum: [...STAY_CHANNELS] }, owner: { type: 'string', enum: ['app', 'channel'] },
   status: { type: 'string', enum: [...STAY_STATUSES] }, overbooked: { type: 'boolean' },
   starts_at: { ...text, description: 'Check-in: an ISO instant at the home\'s check-in time (or the arrival the host recorded), or the day alone when the home has no check-in time.' },
   ends_at: { ...text, description: 'Checkout: an ISO instant at the home\'s checkout time, or the day alone when the home has no checkout time.' },

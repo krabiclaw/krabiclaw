@@ -400,7 +400,11 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, d
   let changed = false
   for (const [table, key] of [['product_booking_configs', 'product_id'], ['tasks', 'id']] as const) {
     // A closed task keeps who did it; only open work is reassigned away from a departed member.
+    // A job always has someone: it goes to the owner; a task someone added and an offering are left with nobody.
     const open = table === 'tasks' ? " AND status = 'open'" : ''
+    const released = table === 'tasks'
+      ? `CASE WHEN kind IN ('turnover', 'consultation_follow_up', 'consultation_prep') THEN (SELECT owner.id FROM member owner WHERE owner.organizationId = tasks.organization_id AND owner.role = 'owner' ORDER BY owner.createdAt, owner.id LIMIT 1) END`
+      : 'NULL'
     const memberMissing = `${table}.assigned_member_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM member m WHERE m.id = ${table}.assigned_member_id AND m.organizationId = ${table}.organization_id)`
     const rows = await queryAll<{ resource_id: string; assigned_member_id: string }>(db,
       `SELECT ${key} AS resource_id, assigned_member_id FROM ${table} WHERE organization_id = ?${open} AND ${memberMissing}`,
@@ -408,12 +412,12 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, d
     for (let offset = 0; offset < rows.length; offset += 400) {
       const chunk = rows.slice(offset, offset + 400)
       const results = await executeBatch(db, chunk.flatMap(row => [{
-        query: `UPDATE ${table} SET assigned_member_id = NULL, updated_at = ?${table === 'tasks' ? ', version = version + 1' : ", updated_by = 'system'"}
+        query: `UPDATE ${table} SET assigned_member_id = ${released}, updated_at = ?${table === 'tasks' ? ', version = version + 1' : ", updated_by = 'system'"}
           WHERE organization_id = ? AND ${key} = ? AND assigned_member_id = ? AND ${memberMissing}`,
         params: [now, input.organizationId, row.resource_id, row.assigned_member_id],
       }, organizationEventQuery({ organizationId: input.organizationId, actorType: 'system', eventType: 'member.access_scope_revoked', entityType: table, entityId: row.resource_id,
         beforeState: { assigned_member_id: row.assigned_member_id },
-        afterState: { assigned_member_id: null },
+        afterState: { assigned_member_id: table === 'tasks' ? 'the owner for a job, else nobody' : null },
         onlyIfPreviousChangedOneRow: true,
       })]), { operation: 'Reconcile departed responsibility targets' })
       if (chunk.some((_row, index) => results[index * 2]?.meta.changes === 1)) changed = true

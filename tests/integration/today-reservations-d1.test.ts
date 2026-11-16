@@ -13,7 +13,6 @@ import { createTables } from './support/table-product.ts'
 import { createStay, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
 import { resolveOrganizationMembership } from '../../server/utils/member-access.ts'
-import { stayReadyTaskQueries } from '../../server/domain/tasks.ts'
 import { handleTaskTools } from '../../server/utils/mcp-tools/tasks.ts'
 import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
@@ -166,10 +165,6 @@ test('Today shows every booking type as one card for its own business, with the 
       { id: `task:${turnover}`, headline: 'Clean up after Diana’s group of 2', line: 'Seaview Cottage', action: { title: 'Tap Done when it’s finished', detail: 'In Diana’s conversation' }, to: `/dashboard/inn/messages/${stay.conversation_id}` },
     ])
     assert.equal(inn.title, 'You have 1 upcoming reservation and 1 upcoming home to clean')
-    // A make-ready job at a home with no check-in time is the arrival's work: it is the action of Diana's card, not a card on her checkout day.
-    await db.batch(stayReadyTaskQueries({ organizationId: 'inn', stayId: stay.id, now: new Date().toISOString(), previousProductId: home.id, guard: { query: '1', params: [] }, guestName: 'Diana Lee', checkInDate: inTwoDays,
-      home: { product_id: home.id, location_id: 'inn-site', timezone: ZONE, check_in_time: null, internal_name: 'Seaview Cottage', assigned_member_id: 'inn-owner' } }).map(query => db.prepare(query.query).bind(...query.params ?? [])))
-    assert.deepEqual((await today('inn', 'upcoming')).cards.map(card => [card.id, card.action.title]), [[`booking:${stay.id}`, 'You’re cleaning'], [`task:${turnover}`, 'Tap Done when it’s finished']])
     assert.equal(inn.cards[0]!.when, `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).formatRange(new Date(`${inTwoDays}T00:00:00Z`), new Date(`${addLocalDays(inTwoDays, 3)}T00:00:00Z`)).replace(/[\u2009\u202f]/g, ' ')}`)
     // A restaurant has no host-written preparation, so its reservation has no welcome.
     assert.deepEqual(bistro.cards.map(shape), [

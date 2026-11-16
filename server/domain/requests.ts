@@ -203,7 +203,7 @@ export async function validateGuestRequest(db: DbClient, row: Record<string, unk
       WHERE r.id = ? AND r.organization_id = ? AND (
         (ct.conversation_id IS NULL AND b.owner = 'channel')
         OR (c.product_id IS NOT NULL AND (CASE WHEN b.id IS NULL THEN c.location_id = r.location_id
-          ELSE ct.product_id = coalesce(b.booked_product_id, b.product_id) END))
+          ELSE ct.product_id = b.product_id END))
       )`, [request.id, request.organization_id])
     if (!mapped) throw new HTTPError({ statusCode: 500, message: 'Channel conversation has no matching home mapping', data: { code: 'CHANNEL_THREAD_MAPPING_INVALID', field: 'conversation_id' } })
   }

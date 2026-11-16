@@ -1902,6 +1902,9 @@ export async function updateProduct(db: DbClient, input: {
     if ((product.kind === 'stay' && input.patch.stay?.assigned_member_id !== undefined)
       || input.booking?.data.assigned_member_id !== undefined) {
       await publishAccessInvalidation(env, { organizationId: input.organizationId })
+      // The member's jobs are in their conversations before the write answers.
+      await (await import('~/server/domain/cleaner-jobs')).postJobs(env, db, input.organizationId)
+      if (product.kind !== 'stay') await publishBusinessInvalidation(env, input.organizationId)
     }
     let channelPush: ChannelPushCompletion = null
     if (product.kind === 'stay' && (reprice || settings !== null) && !input.deferStayNightPush) {
@@ -2116,8 +2119,8 @@ export async function deleteProduct(db: DbClient, input: {
   // off both would go with them — silently for a booking with no thread, and
   // as a raw foreign-key error for one that has a thread holding it.
   const booked = await queryFirst<{ n: number }>(db, `
-    SELECT count(*) AS n FROM bookings WHERE organization_id = ? AND (product_id = ? OR booked_product_id = ?)
-  `, [input.organizationId, input.productId, input.productId])
+    SELECT count(*) AS n FROM bookings WHERE organization_id = ? AND product_id = ?
+  `, [input.organizationId, input.productId])
   if ((booked?.n ?? 0) > 0) {
     conflict('This product has bookings or stays. Cancel them, or turn the product off instead of deleting it.')
   }
@@ -2137,10 +2140,10 @@ export async function deleteProduct(db: DbClient, input: {
   // A home deleted is one fewer home, and its location, if still active, is a
   // location again: guarded as one, since Basic may already have the locations it includes.
   await executeProductWrites(db, input.env, input.organizationId, [
-    { query: `UPDATE products SET updated_at=NULL WHERE organization_id=? AND id=? AND (EXISTS(SELECT 1 FROM bookings WHERE organization_id=? AND (product_id=? OR booked_product_id=?))
+    { query: `UPDATE products SET updated_at=NULL WHERE organization_id=? AND id=? AND (EXISTS(SELECT 1 FROM bookings WHERE organization_id=? AND product_id=?)
       OR EXISTS(SELECT 1 FROM channel_threads WHERE organization_id=? AND product_id=?)
       OR EXISTS(SELECT 1 FROM message_templates t, json_each(t.schedule_json, '$.productIds') home WHERE t.organization_id=? AND t.schedule_json IS NOT NULL AND home.value=?)
-      OR EXISTS(SELECT 1 FROM payment_checkout_holds WHERE organization_id=? AND product_id=? AND status='active' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')))`, params: [input.organizationId, input.productId, input.organizationId, input.productId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId] },
+      OR EXISTS(SELECT 1 FROM payment_checkout_holds WHERE organization_id=? AND product_id=? AND status='active' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')))`, params: [input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId] },
     ...pages.flatMap(page => page.queries),
     ...resourceLocalizationDeletionQueries('product', { query: 'SELECT ?', params: [input.productId] }),
     ...invalidations,

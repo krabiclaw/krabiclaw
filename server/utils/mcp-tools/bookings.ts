@@ -93,9 +93,8 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
     name: `${action}_product_booking`, outputSchema: action === 'cancel' ? { type: 'object', anyOf: [operationResult, nightsCancelResult] } : operationResult, domain: 'bookings', minimumRole: 'member', description: purpose,
     inputSchema: { booking_id: bookingId, idempotency_key: key, version, ...(action === 'cancel' ? { reason: { type: 'string', maxLength: 500, description: 'For a stay: why it was cancelled, kept with it.' } } : {}) }, required: ['booking_id', 'version', 'idempotency_key'],
   })),
-  organizationTool({ name: 'request_product_booking_change', outputSchema: { type: 'object', anyOf: [changeResult, { ...nightBookingReceipt,
-    properties: { ...nightBookingReceipt.properties, scheduled_message_id: text }, required: [...nightBookingReceipt.required, 'scheduled_message_id'] }] }, domain: 'bookings', minimumRole: 'member',
-    description: 'Propose a different session or party size to the guest, or apply the move now when allowed. A proposal emails the guest a link to accept or decline and the booking stays as it is until they accept; send no separate message about it. Legal consultation time changes require client acceptance. Give product_id for a table move to a different offering, or to move a stay to another home. For a stay, apply must be true; the guest receives the new arrival instructions.',
+  organizationTool({ name: 'request_product_booking_change', outputSchema: { type: 'object', anyOf: [changeResult, nightBookingReceipt] }, domain: 'bookings', minimumRole: 'member',
+    description: 'Propose a different session or party size to the guest, or apply the move now when allowed. A proposal emails the guest a link to accept or decline and the booking stays as it is until they accept; send no separate message about it. Legal consultation time changes require client acceptance. Give product_id for a table move to a different offering. For a stay, give new dates with apply true.',
     inputSchema: { booking_id: bookingId, product_session_id: text, product_id: text, party_size: { type: 'integer', minimum: 1, maximum: 99 }, version,
       apply: { type: 'boolean' }, idempotency_key: key, anyOf: [{ required: ['product_session_id'] }, { required: ['product_id', 'apply'], properties: { apply: { const: true } } }] },
     required: ['booking_id', 'version', 'idempotency_key'],
@@ -249,7 +248,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     const proposal = await changeBooking(db, env, {
       organizationId, bookingId: id, actorUserId: organization.userId, body: args, apply: args.apply === true, idempotencyKey: key, stayAccess: access,
     })
-    if (proposal.kind === 'stay') return { ...nightBookingMutation(proposal.stay), scheduled_message_id: proposal.scheduledMessageId }
+    if (proposal.kind === 'stay') return nightBookingMutation(proposal.stay)
     operationalRecord = await getThreadOperationalRecord(db, proposal.conversationId)
     if (!operationalRecord || operationalRecord.id !== id || operationalRecord.organization_id !== organizationId) throw new HTTPError({ statusCode: 404, message: 'Operational booking record not found in this organization' })
     return { success: true, conversation_id: proposal.conversationId, change_status: proposal.changeStatus, record: mcpBookingRecord(operationalRecord) }

@@ -431,6 +431,8 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   }
 
   if (!operationalBookingId) throw new Error('Booking allocation did not produce an operational ID')
+  // A booking's follow-up and prep are in their conversations before it answers.
+  await (await import('~/server/domain/cleaner-jobs')).postJobs(env, db, organization.id)
   // One instant, one zone: the message the guest reads and the record the
   // host sees are formatted from the same session row.
   // Telling the owner and recording the conversion are independent, so both are

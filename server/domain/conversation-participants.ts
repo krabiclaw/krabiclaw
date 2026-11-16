@@ -10,7 +10,7 @@ const GUEST_THREAD = "c.kind IN ('contact', 'booking')"
 
 /** A channel conversation belongs to the listing where the guest booked. */
 const listingOfConversation = `COALESCE(
-  (SELECT COALESCE(b.booked_product_id, b.product_id) FROM bookings b WHERE b.organization_id = c.organization_id
+  (SELECT b.product_id FROM bookings b WHERE b.organization_id = c.organization_id
     AND b.id = c.booking_id AND b.product_session_id IS NULL),
   (SELECT t.product_id FROM channel_threads t WHERE t.organization_id = c.organization_id AND t.conversation_id = c.id)
 )`

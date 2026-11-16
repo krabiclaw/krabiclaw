@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import type { ProductKind } from '~/shared/product-details'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertRoleAllows, assignedMemberSql, isOrganizationWideRole, locationMemberSql, roleAllows, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
+import { assertRoleAllows, assignedMemberSql, locationMemberSql, roleAllows, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
 import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { publishBusinessInvalidation, publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { messageQueries, participantGuard } from '~/server/domain/conversations'
@@ -22,7 +22,7 @@ import { guestGroup } from '~/shared/dashboard-today'
   reopen them here, from the dashboard, MCP and the app alike.
 */
 
-export const TASK_KINDS = ['turnover', 'message_delivery', 'booking_review', 'booking_change', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up'] as const
+export const TASK_KINDS = ['turnover', 'message_delivery', 'booking_review', 'booking_change', 'custom', 'consultation_prep', 'consultation_follow_up'] as const
 export const SUPPORTED_TASK_KINDS = d1JsonStringSet(TASK_KINDS)
 export type TaskKind = typeof TASK_KINDS[number]
 export type TaskStatus = 'open' | 'done' | 'skipped' | 'cancelled'
@@ -51,10 +51,10 @@ function fail(statusCode: number, code: string, message: string, field?: string)
 // keeps the task alert instead.
 // ---------------------------------------------------------------------------
 
-export const JOB_TASK_SQL = (alias: string) => `${alias}.kind IN ('turnover', 'stay_ready', 'consultation_follow_up')`
+export const JOB_TASK_SQL = (alias: string) => `${alias}.kind IN ('turnover', 'consultation_follow_up')`
 
 export function isJobTask(row: Pick<TaskRow, 'kind'>): boolean {
-  return row.kind === 'turnover' || row.kind === 'stay_ready' || row.kind === 'consultation_follow_up'
+  return row.kind === 'turnover' || row.kind === 'consultation_follow_up'
 }
 
 // A private legal appointment's prep can be discussed in the one client's
@@ -80,7 +80,7 @@ export type JobSubject = { id: string; unit: 'slot' | 'nights' }
 /** The booking a job is about, which its conversation is tied to. */
 export function jobSubject(row: Pick<TaskRow, 'dedupe_key' | 'kind' | 'subject_type' | 'subject_id'>): JobSubject {
   if (!row.subject_id || row.subject_type !== 'booking') throw new Error(`Job task ${row.dedupe_key} names no booking`)
-  return { id: row.subject_id, unit: row.kind === 'turnover' || row.kind === 'stay_ready' ? 'nights' : 'slot' }
+  return { id: row.subject_id, unit: row.kind === 'turnover' ? 'nights' : 'slot' }
 }
 
 /** The key of a job's post in its team conversation (messages.payload_json $.key): the one place it is built. */
@@ -88,12 +88,13 @@ export const jobKey = (task: Pick<TaskRow, 'id' | 'product_id'>, after?: string)
 const JOB_END_STATES = ['released', 'cancelled', 'closed'] as const
 export const jobEndKeys = (taskId: string) => JOB_END_STATES.map(state => `${state}:${taskId}`)
 
-/** Whether a job's member hears about it in a team conversation: a member who is not an owner or admin. */
-export async function jobHasConversation(db: DbClient, organizationId: string, memberId: string | null): Promise<boolean> {
-  if (!memberId) return false
-  const member = await queryFirst<{ role: string }>(db, 'SELECT role FROM member WHERE organizationId = ? AND id = ?', [organizationId, memberId])
-  return member !== null && !isOrganizationWideRole(member.role)
-}
+/**
+ * Who a job is given when it is written: the offering's or home's member, else
+ * the organization's owner (the first, by when they joined). A job is never
+ * stored with nobody; the one place the fallback is written.
+ */
+export const jobAssigneeSql = (organizationSql: string, memberSql: string) =>
+  `COALESCE(${memberSql}, (SELECT owner.id FROM member owner WHERE owner.organizationId = ${organizationSql} AND owner.role = 'owner' ORDER BY owner.createdAt, owner.id LIMIT 1))`
 
 // ---------------------------------------------------------------------------
 // Subject writes. Each returns statements for the batch that changes the
@@ -172,7 +173,7 @@ export async function turnoverTaskQueries(db: DbClient, input: { organizationId:
     const key = `turnover:${stay.id}`
     queries.push({
       query: `UPDATE tasks SET product_id = ?, location_id = ?, timezone = ?, starts_at = ?, due_at = ?,
-          assigned_member_id = CASE WHEN product_id IS ? THEN assigned_member_id ELSE ? END,
+          assigned_member_id = CASE WHEN product_id IS ? AND assigned_member_id IS NOT NULL THEN assigned_member_id ELSE ${jobAssigneeSql('organization_id', '?')} END,
           version = version + 1, updated_at = ?
         WHERE dedupe_key = ? AND status = 'open' AND (${guard.query})
           AND (product_id IS NOT ? OR starts_at IS NOT ? OR due_at IS NOT ?)`,
@@ -183,9 +184,9 @@ export async function turnoverTaskQueries(db: DbClient, input: { organizationId:
       queries.push({
         query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id,
             starts_at, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
-          SELECT ?, ?, 'turnover', 'booking', ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ? WHERE (${guard.query})
+          SELECT ?, ?, 'turnover', 'booking', ?, ?, ?, ${jobAssigneeSql('?', '?')}, ?, ?, ?, 'open', ?, 1, ?, ? WHERE (${guard.query})
           ON CONFLICT (dedupe_key) DO NOTHING`,
-        params: [crypto.randomUUID(), organizationId, stay.id, home.product_id, home.location_id, home.assigned_member_id,
+        params: [crypto.randomUUID(), organizationId, stay.id, home.product_id, home.location_id, organizationId, home.assigned_member_id,
           startsAt, dueAt, home.timezone, key, now, now, ...guard.params!],
       })
     }
@@ -229,7 +230,7 @@ export function messageDeliveryTaskQueries(messageId: string, now: string): Batc
 // ---------------------------------------------------------------------------
 
 /**
- * One prep task for the session's assigned member while any confirmed booking
+ * One prep task for the session's assigned member (else the owner) while any confirmed booking
  * still holds it. The caller supplies the affected session IDs in its write batch.
  */
 export function sessionPrepTaskQueries(sessions: BatchQuery, now: string): BatchQuery[] {
@@ -240,14 +241,14 @@ export function sessionPrepTaskQueries(sessions: BatchQuery, now: string): Batch
       FROM product_sessions s JOIN product_booking_configs cfg ON cfg.organization_id = s.organization_id AND cfg.product_id = s.product_id
       WHERE tasks.kind = 'consultation_prep' AND tasks.subject_type = 'product_session' AND tasks.subject_id = s.id
         AND tasks.organization_id = s.organization_id AND tasks.status = 'open' AND s.id IN (${sessions.query})
-        AND (s.status <> 'scheduled' OR cfg.assigned_member_id IS NULL OR NOT ${confirmed})`,
+        AND (s.status <> 'scheduled' OR NOT ${confirmed})`,
     params: [now, now, ...(sessions.params ?? [])],
   }, {
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, starts_at, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
       SELECT 'session-prep:' || s.id, s.organization_id, 'consultation_prep', 'product_session', s.id, s.product_id, s.location_id,
-        cfg.assigned_member_id, s.starts_at, s.starts_at, s.timezone, 'open', 'consultation_prep:session:' || s.id, 1, ?, ?
+        ${jobAssigneeSql('s.organization_id', 'cfg.assigned_member_id')}, s.starts_at, s.starts_at, s.timezone, 'open', 'consultation_prep:session:' || s.id, 1, ?, ?
       FROM product_sessions s JOIN product_booking_configs cfg ON cfg.organization_id = s.organization_id AND cfg.product_id = s.product_id
-      WHERE s.id IN (${sessions.query}) AND s.status = 'scheduled' AND s.starts_at > ? AND cfg.assigned_member_id IS NOT NULL AND ${confirmed}
+      WHERE s.id IN (${sessions.query}) AND s.status = 'scheduled' AND s.starts_at > ? AND ${confirmed}
       ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL,
         assigned_member_id = excluded.assigned_member_id, starts_at = excluded.starts_at, due_at = excluded.due_at, timezone = excluded.timezone,
         version = tasks.version + 1, updated_at = excluded.updated_at
@@ -383,7 +384,7 @@ function taskContextQueries(organizationId: string, listed: { sql: string; param
   const org = '(SELECT organization_id FROM scope)'
   const subjects = (type: string) => `(SELECT subject_id FROM listed WHERE subject_type = '${type}')`
   // The bookings the cards show: a booking task's own, a failed message's, a private consultation's.
-  const bookingIds = `(SELECT subject_id FROM listed WHERE subject_type = 'booking' AND kind NOT IN ('turnover', 'stay_ready')
+  const bookingIds = `(SELECT subject_id FROM listed WHERE subject_type = 'booking' AND kind <> 'turnover'
     UNION SELECT m.booking_id FROM scheduled_guest_messages m WHERE m.organization_id = ${org} AND m.id IN ${subjects('scheduled_guest_message')}
     UNION SELECT ${consultationBookingSql('candidate.id', 'candidate.organization_id')} FROM product_sessions candidate WHERE candidate.organization_id = ${org} AND candidate.id IN ${subjects('product_session')})`
   const stayIds = `(SELECT subject_id FROM listed WHERE kind = 'turnover' UNION SELECT * FROM ${bookingIds})`
@@ -609,7 +610,6 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       break
     }
     case 'custom':
-    case 'stay_ready':
       status_line = ['Task', place].filter(Boolean).join(' · ')
       title = row.title!
       detail = row.notes
@@ -667,8 +667,8 @@ export function parseTaskListQuery(query: Record<string, unknown>, defaults: Par
 
 /** Today's open work in the owner's order: failed deliveries, turnovers, then everything else. */
 /** Work a person does and closes themselves: they Skip it, and say what they found when they finish. Everything else is Dismissed. */
-const PERSON_WORK: ReadonlySet<TaskKind> = new Set(['turnover', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up'])
-const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, booking_review: 2, booking_change: 2, consultation_prep: 2, custom: 3, stay_ready: 1, consultation_follow_up: 3 }
+const PERSON_WORK: ReadonlySet<TaskKind> = new Set(['turnover', 'custom', 'consultation_prep', 'consultation_follow_up'])
+const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, booking_review: 2, booking_change: 2, consultation_prep: 2, custom: 3, consultation_follow_up: 3 }
 
 /** Today: open work due or starting today or earlier, or with no date; then what was closed today. Upcoming: open work later than today, by day. */
 export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskListQuery, now = new Date()): Promise<{ sections: TaskSection[]; resolved_at: string }> {
@@ -766,8 +766,8 @@ export interface OpenWorkRow {
  * undated task whenever). A booking's
  * review is its pending booking.
  */
-/** An untimed job's day is its booking's: a home made ready for an arrival, a clean after a checkout. */
-const UNTIMED_JOB_DAY_SQL = "CASE WHEN x.kind = 'stay_ready' THEN b.starts_at ELSE b.ends_at END"
+/** An untimed job's day is its booking's: a clean after the checkout. */
+const UNTIMED_JOB_DAY_SQL = 'b.ends_at'
 
 export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
   const wideTo = `${addLocalDays(to, 1)}T23:59:59.999Z`
@@ -790,7 +790,7 @@ export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
           CASE t.kind WHEN 'message_delivery' THEN (SELECT g.template_title FROM scheduled_guest_messages g WHERE g.organization_id = t.organization_id AND g.id = t.subject_id) END AS message_title
         FROM tasks t
         WHERE t.organization_id = ${viewer.organization} AND t.status = 'open'
-          AND t.kind IN ('turnover', 'stay_ready', 'consultation_follow_up', 'consultation_prep', 'message_delivery', 'booking_change', 'custom')
+          AND t.kind IN ('turnover', 'consultation_follow_up', 'consultation_prep', 'message_delivery', 'booking_change', 'custom')
           AND ${taskScopeSql('t', () => viewer)}) x
       LEFT JOIN bookings b ON b.organization_id = x.organization_id AND b.id = x.booking_id
       LEFT JOIN products p ON p.organization_id = b.organization_id AND p.id = b.product_id
@@ -881,77 +881,22 @@ async function assigneeUsers(db: DbClient, organizationId: string, memberId: str
   return (await queryAll<{ userId: string }>(db, 'SELECT userId FROM member WHERE organizationId = ? AND id = ?', [organizationId, memberId])).map(row => row.userId)
 }
 
-/** A job a guest's move creates: the home they moved to may have no earlier stay to clean after. */
-const stayReadyKey = (stayId: string, productId: string) => `stay-ready:${stayId}:${productId}`
-
-export function stayReadyTaskQueries(input: {
-  organizationId: string; stayId: string; now: string; previousProductId: string; guard: BatchQuery; guestName: string | null; checkInDate: string
-  /** The home to make ready; null when the guest moved back to the listing they booked. */
-  home: { product_id: string; location_id: string; timezone: string; check_in_time: string | null; internal_name: string; assigned_member_id: string | null } | null
-}): BatchQuery[] {
-  const { organizationId, stayId, now, previousProductId, guard, home } = input
-  const queries: BatchQuery[] = [{
-    query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ? WHERE dedupe_key = ? AND status = 'open' AND ${guard.query}`,
-    params: [now, now, stayReadyKey(stayId, previousProductId), ...guard.params!],
-  }]
-  if (!home) return queries
-  const dueAt = home.check_in_time === null ? null : localDateTimeToInstant(input.checkInDate, home.check_in_time, home.timezone, 'compatible').toISOString()
-  queries.push({
-    query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, title, notes, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT ?, ?, 'stay_ready', 'booking', ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ? WHERE ${guard.query}
-      ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL, due_at = excluded.due_at, title = excluded.title, notes = excluded.notes,
-        assigned_member_id = excluded.assigned_member_id, version = tasks.version + 1, updated_at = excluded.updated_at`,
-    params: [crypto.randomUUID(), organizationId, stayId, home.product_id, home.location_id, home.assigned_member_id, `Get ${home.internal_name} ready`.slice(0, 200),
-      `${input.guestName ?? 'A guest'} was moved here and arrives ${formatCalendarDate(input.checkInDate, 'en', { weekday: 'short', month: 'short', day: 'numeric' })}.`,
-      dueAt, home.timezone, stayReadyKey(stayId, home.product_id), now, now, ...guard.params!],
-  })
-  return queries
-}
-
-/** A stay's revision reaches its open make-ready job: a cancellation calls it off, new dates move its due time and note. */
-export function stayReadyRevisionQueries(input: { organizationId: string; stayId: string; now: string; guard: BatchQuery; cancelled: boolean; dueAt?: string | null; checkInDate?: string; guestName?: string | null }): BatchQuery[] {
-  const { organizationId, stayId, now, guard } = input
-  if (input.cancelled) return [{
-    query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ?
-      WHERE organization_id = ? AND kind = 'stay_ready' AND subject_type = 'booking' AND subject_id = ? AND status = 'open' AND ${guard.query}`,
-    params: [now, now, organizationId, stayId, ...guard.params!],
-  }]
-  if (input.dueAt === undefined || !input.checkInDate) return []
-  return [{
-    query: `UPDATE tasks SET due_at = ?, notes = ?, version = version + 1, updated_at = ?
-      WHERE organization_id = ? AND kind = 'stay_ready' AND subject_type = 'booking' AND subject_id = ? AND status = 'open' AND due_at IS NOT ? AND ${guard.query}`,
-    params: [input.dueAt, `${input.guestName ?? 'A guest'} was moved here and arrives ${formatCalendarDate(input.checkInDate, 'en', { weekday: 'short', month: 'short', day: 'numeric' })}.`, now,
-      organizationId, stayId, input.dueAt, ...guard.params!],
-  }]
-}
-
-export async function notifyStayReady(env: CloudflareEnv, db: DbClient, input: { organizationId: string; stayId: string; productId: string; actorUserId: string | null }): Promise<void> {
-  const task = await queryFirst<{ id: string; assigned_member_id: string | null }>(db,
-    'SELECT id, assigned_member_id FROM tasks WHERE organization_id = ? AND dedupe_key = ?', [input.organizationId, stayReadyKey(input.stayId, input.productId)])
-  if (!task) throw new Error(`The move of stay ${input.stayId} left no job to make its home ready`)
-  const assigned = task.assigned_member_id
-  // A cleaner's job is posted in the stay's conversation when the business change below wakes the organization's jobs.
-  const recipients = !assigned || await jobHasConversation(db, input.organizationId, assigned) ? [] : (await assigneeUsers(db, input.organizationId, assigned)).filter(userId => userId !== input.actorUserId)
-  if (recipients.length) {
-    const { notifyTaskAssigned } = await import('~/server/utils/notifications')
-    await notifyTaskAssigned(env, db, { organizationId: input.organizationId, taskId: task.id, actorUserId: input.actorUserId, recipientUserIds: recipients })
-  }
-  await publishBusinessInvalidation(env, input.organizationId)
-}
-
 async function afterWrite(db: DbClient, viewer: TaskViewer, taskId: string, assigned?: string): Promise<TaskView> {
   const env = viewer.principal.env as CloudflareEnv
   if (assigned) {
     // A job given to a cleaner is posted in the stay's conversation when the business change below wakes the organization's jobs.
     const row = await queryFirst<Pick<TaskRow, 'kind' | 'dedupe_key'>>(db, 'SELECT kind, dedupe_key FROM tasks WHERE organization_id = ? AND id = ?', [viewer.principal.organizationId, taskId])
     if (!row) throw new Error(`Task ${taskId} disappeared after its write`)
-    const recipients = isJobTask(row) && await jobHasConversation(db, viewer.principal.organizationId, assigned) ? []
+    // A job is told in its conversation; any other task by the task alert.
+    const recipients = isJobTask(row) ? []
       : (await assigneeUsers(db, viewer.principal.organizationId, assigned)).filter(userId => userId !== viewer.principal.userId)
     if (recipients.length) {
       const { notifyTaskAssigned } = await import('~/server/utils/notifications')
       await notifyTaskAssigned(env, db, { organizationId: viewer.principal.organizationId, taskId, actorUserId: viewer.principal.userId, recipientUserIds: recipients })
     }
   }
+  // A job given out is in its conversation before the write answers.
+  await (await import('~/server/domain/cleaner-jobs')).postJobs(env, db, viewer.principal.organizationId)
   await publishBusinessInvalidation(env, viewer.principal.organizationId)
   return getTask(db, viewer, taskId)
 }
@@ -1017,6 +962,7 @@ export async function updateTask(db: DbClient, viewer: TaskViewer, taskId: strin
   if (body.version !== current.version) fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'version')
   if (current.status !== 'open') fail(409, 'TASK_CLOSED', 'Reopen the task before changing it', 'status')
   const assigned = touchesAssignee ? await readTaskAssignee(db, viewer.principal.organizationId, body) : current.assigned_member_id
+  if (assigned === null && (isJobTask(current) || current.kind === 'consultation_prep')) fail(422, 'JOB_ASSIGNEE_REQUIRED', 'A job always has someone doing it: choose a member', 'assigned_member_id')
   const startsAt = body.starts_at === undefined ? current.starts_at : instant(body.starts_at, 'starts_at')
   const dueAt = body.due_at === undefined ? current.due_at : instant(body.due_at, 'due_at')
   if (startsAt && dueAt && startsAt > dueAt) fail(422, 'INVALID_TASK_FIELD', 'starts_at must not be after due_at', 'starts_at')
@@ -1049,8 +995,7 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
   // A job closes in its conversation too: "Done" is the person's own message there, and nobody is alerted.
   // The conversation that carries this job is the one its automatic post went to, and the closer must still sit in it.
   const privatePrep = current.subject_type === 'product_session'
-  const hasThread = view.booking_id && (isJobTask(current) || (privatePrep
-    && await jobHasConversation(db, organizationId, current.assigned_member_id)))
+  const hasThread = view.booking_id && (isJobTask(current) || privatePrep)
   const thread = hasThread ? await queryFirst<{ id: string }>(db, `SELECT c.id FROM conversations c
       JOIN messages m ON m.conversation_id = c.id AND m.author_kind = 'krabiclaw'
       JOIN conversation_participants seat ON seat.conversation_id = c.id AND seat.role = 'member' AND seat.user_id = ?

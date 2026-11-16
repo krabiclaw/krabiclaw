@@ -9,11 +9,6 @@
     and stay rules, places take open or block.
   -->
   <div class="flex min-h-0 flex-1 flex-col">
-    <!-- On a phone the filters and the window share one row each, so the rows start higher. -->
-    <div class="mb-4 flex items-center gap-3 sm:flex-wrap">
-      <USelect v-if="homesView" :model-value="city" :items="cityItems" icon="i-lucide-building-2" aria-label="City" class="min-w-0 flex-1 sm:min-w-44 sm:flex-none" :ui="{ base: 'rounded-full' }" @update:model-value="setQuery({ city: $event === ALL_CITIES ? undefined : String($event) })" />
-      <UButton :label="words.free" :aria-pressed="freeOnly" color="neutral" :variant="freeOnly ? 'solid' : 'outline'" class="shrink-0 rounded-full" @click="setQuery({ free: freeOnly ? undefined : '1' })" />
-    </div>
     <div class="min-h-0 flex-1" :class="selection && pane ? 'grid grid-cols-[minmax(0,1fr)_24rem] grid-rows-[minmax(0,1fr)] gap-6' : 'flex flex-col'">
       <div class="flex min-h-0 min-w-0 flex-col">
         <header class="flex items-center justify-between gap-3 py-2">
@@ -38,7 +33,7 @@
             </div>
           </div>
         </div>
-        <p v-else-if="data && !rows.length" class="py-10 text-center text-sm text-muted">{{ search || freeOnly || city !== ALL_CITIES ? words.noMatch : words.none }}</p>
+        <p v-else-if="data && !rows.length" class="py-10 text-center text-sm text-muted">{{ search ? words.noMatch : words.none }}</p>
         <!-- The grid is its own scroller on both axes: the day header pins to its top and the home column to its left, the corner over both. -->
         <div v-else-if="data" class="min-h-0 overflow-auto rounded-xl shadow-sm ring ring-default" :aria-busy="status === 'pending'" :data-testid="`${words.testId}-grid`">
           <div
@@ -175,8 +170,8 @@ interface GridRow { id: string; name: string; detail: string; to: RouteLocationR
 const props = defineProps<{ view: 'homes' | 'places' }>()
 const homesView = props.view === 'homes'
 const words = homesView
-  ? { rows: 'homes', span: 'nights', unit: 'night', units: 'nights', free: 'No upcoming stays', none: 'No homes yet.', noMatch: 'No homes match these filters.', gridLabel: 'Nights at every home', loadError: 'The homes calendar could not be loaded', testId: 'stay-homes' }
-  : { rows: 'places', span: 'dates', unit: 'date', units: 'dates', free: 'No upcoming bookings', none: 'No places yet.', noMatch: 'No places match these filters.', gridLabel: 'Days at every place', loadError: 'The places calendar could not be loaded', testId: 'places' }
+  ? { rows: 'homes', span: 'nights', unit: 'night', units: 'nights', none: 'No homes yet.', noMatch: 'No homes match these filters.', gridLabel: 'Nights at every home', loadError: 'The homes calendar could not be loaded', testId: 'stay-homes' }
+  : { rows: 'places', span: 'dates', unit: 'date', units: 'dates', none: 'No places yet.', noMatch: 'No places match these filters.', gridLabel: 'Days at every place', loadError: 'The places calendar could not be loaded', testId: 'places' }
 
 // Today and thirty days after it, paged by a week or a month; the URL keeps where you were and what is selected.
 const SPAN = 31
@@ -191,13 +186,8 @@ const from = computed(() => typeof route.query.from === 'string' ? route.query.f
 const to = computed(() => parseDate(from.value).add({ days: SPAN }).toString())
 const dates = computed(() => Array.from({ length: SPAN }, (_, index) => parseDate(from.value).add({ days: index }).toString()))
 const search = computed(() => typeof route.query.q === 'string' ? route.query.q : '')
-const freeOnly = computed(() => route.query.free === '1')
 // The page's search narrows the rows, but not under a save that is reading back the homes it wrote.
 const appliedSearch = ref(search.value)
-// A city from the homes' addresses; NO_CITY is the homes without one.
-const ALL_CITIES = '*'
-const NO_CITY = '-'
-const city = computed(() => homesView && typeof route.query.city === 'string' && route.query.city ? route.query.city : ALL_CITIES)
 
 /** The selection: the same days, [from, to), at each named row, narrowed to weekdays when any are named. */
 const selection = computed(() => {
@@ -269,24 +259,13 @@ const guestName = (stay: GridStay) => stay.guest_name || 'Guest name not provide
 // Adults and children count as guests; infants do not, as Airbnb counts them.
 const guestCount = (stay: GridStay) => `${stay.adults + stay.children} ${stay.adults + stay.children === 1 ? 'guest' : 'guests'}`
 const addressOf = (home: Home) => home.address ? [home.address.address, home.address.city].filter(Boolean).join(', ') : 'No address'
-const cityOf = (home: Home) => home.address?.city?.trim() || null
-const cityItems = computed(() => {
-  const homes = homesData.value?.homes ?? []
-  const counts = new Map<string, number>()
-  for (const { home } of homes) counts.set(cityOf(home) ?? NO_CITY, (counts.get(cityOf(home) ?? NO_CITY) ?? 0) + 1)
-  return [
-    { label: `All cities (${homes.length})`, value: ALL_CITIES },
-    ...[...counts].filter(([name]) => name !== NO_CITY).sort(([a], [b]) => a.localeCompare(b)).map(([name, count]) => ({ label: `${name} (${count})`, value: name })),
-    ...(counts.has(NO_CITY) ? [{ label: `No city (${counts.get(NO_CITY)})`, value: NO_CITY }] : []),
-  ]
-})
 const matches = (name: string, detail: string) => !appliedSearch.value || `${name} ${detail}`.toLowerCase().includes(appliedSearch.value.toLowerCase())
 // A stay's bar spans the run of nights it holds on screen; a run cut by the window's edge still names its guest.
 // A linked calendar's nights are a bar of their own, named for the channel.
 const homeRows = computed<GridRow[]>(() => {
   const stays = new Map((homesData.value?.bookings ?? []).map(stay => [stay.booking_id, stay]))
   return (homesData.value?.homes ?? [])
-    .filter(entry => (city.value === ALL_CITIES || (cityOf(entry.home) ?? NO_CITY) === city.value) && matches(entry.home.internal_name, addressOf(entry.home)) && (!freeOnly.value || !entry.nights.some(isBookedNight)))
+    .filter(entry => matches(entry.home.internal_name, addressOf(entry.home)))
     .map(({ home, nights }) => {
       const bars: GridBar[] = []
       nights.forEach((night, index) => {
@@ -315,7 +294,7 @@ const homeRows = computed<GridRow[]>(() => {
 })
 // A place's day: its reservations or booked sessions as a bar that opens the day; what is free, blocked or closed in the cell.
 const placeRows = computed<GridRow[]>(() => (placesData.value?.places ?? [])
-  .filter(entry => matches(entry.place.name, entry.place.detail) && (!freeOnly.value || !entry.days.some(day => day.booked > 0)))
+  .filter(entry => matches(entry.place.name, entry.place.detail))
   .map(({ place, days }) => {
     const id = `${place.kind}:${place.id}`
     const scope = place.kind === 'location' ? { location_id: place.id } : { product_id: place.id }
