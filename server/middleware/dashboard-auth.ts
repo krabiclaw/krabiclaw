@@ -3,7 +3,7 @@ import { redirect } from 'nitro/h3'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { buildLoginUrl } from '~/shared/auth/return-target'
-import { isNonProductionHost, isPlatformHost, normalizeHost } from '~/server/utils/tenant-hosts'
+import { isNonProductionHost, normalizeHost } from '~/server/utils/tenant-hosts'
 
 // Keep authentication at the private dashboard boundary so external deep links survive sign-in.
 export default defineHandler(async (event) => {
@@ -12,7 +12,7 @@ export default defineHandler(async (event) => {
   const path = pathname === '/' ? '/' : pathname.replace(/\/$/, '')
   const dashboard = path === '/dashboard' || path.startsWith('/dashboard/')
   const browserEntry = method === 'HEAD' || (method === 'GET' && headers.get('accept')?.includes('text/html'))
-  if (browserEntry && (dashboard || path === '/login' || path === '/signin' || path === '/signup'
+  if (browserEntry && (dashboard || path === '/login' || path === '/signup'
     || path === '/forgot-password' || /^\/accept-invitation\/[^/]+$/.test(path))) {
     const env = cloudflareEnv(event)
     const authOrigin = env.BETTER_AUTH_URL && new URL(env.BETTER_AUTH_URL)
@@ -21,7 +21,6 @@ export default defineHandler(async (event) => {
       // Start login on the host that receives the OAuth callback and owns the state cookie.
       return redirect(`${authOrigin.origin}${pathname}${search}`, 302)
     }
-    if (path === '/signin' && isPlatformHost(hostname, env)) return redirect(`/login${search}`, 302)
   }
 
   if (method !== 'GET' || !dashboard) return
