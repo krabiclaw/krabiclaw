@@ -868,7 +868,9 @@ const panel = computed(() => {
     coHosts: place?.co_hosts ?? [],
     when,
     rows,
-    guests: value ? `${guestCount.value} ${guestCount.value === 1 ? 'guest' : 'guests'}` : record && presentation.value?.formatCount(record.party_size),
+    guests: value
+      ? `${guestCount.value} ${guestCount.value === 1 ? 'guest' : 'guests'}`
+      : record?.party_size != null ? presentation.value?.formatCount(record.party_size) : null,
     code: detail.value?.channel_booking_id ?? bookingId?.slice(0, 8).toUpperCase(),
     actions: reservationActions.value,
     contact: contact.value,
