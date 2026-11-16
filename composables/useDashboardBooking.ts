@@ -2,7 +2,7 @@ import type { DashboardBookingDetails } from '~/server/utils/dashboard-booking-d
 import type { GuestStay, StayDetail, StayTurnover } from '~/server/domain/stays'
 import type { BookingHome } from '~/server/utils/dashboard-bookings'
 import type { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
-import { isGuestStay, isStayCheckInMethod } from '~/shared/stay-arrival'
+import { isGuestStay } from '~/shared/stay-arrival'
 import { isRecord } from '~/utils/api-clients'
 
 type NightBooking<T> = Omit<T, 'id'> & { booking_id: string; unit: 'nights' }
