@@ -13,7 +13,7 @@ test('formatPlatformTitle returns canonical brand title when no title is provide
   assert.equal(formatPlatformTitle('   '), PLATFORM_DEFAULT_TITLE)
 })
 
-test('formatPlatformTitle preserves existing brand-prefixed titles without stutter', () => {
+test('formatPlatformTitle preserves titles with an existing brand without stutter', () => {
   assert.equal(
     formatPlatformTitle('Blawby | Open-Source Websites, Bookings & Payments'),
     'Blawby | Open-Source Websites, Bookings & Payments',
@@ -23,6 +23,7 @@ test('formatPlatformTitle preserves existing brand-prefixed titles without stutt
     'Blawby — Open-Source Websites',
   )
   assert.equal(formatPlatformTitle('Blawby'), 'Blawby')
+  assert.equal(formatPlatformTitle('Lodging | Blawby'), 'Lodging | Blawby')
 })
 
 test('formatPlatformTitle appends brand suffix for normal page titles', () => {
