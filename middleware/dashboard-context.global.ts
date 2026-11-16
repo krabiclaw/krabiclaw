@@ -6,6 +6,14 @@
  * still completes the navigation; the layout shows its error.
  */
 export default defineNuxtRouteMiddleware(async (to, from) => {
+  if (to.name === 'dashboard-org_slug-payments' && to.query.stripe_connect === 'returned') {
+    return navigateTo({
+      name: 'dashboard-org_slug-payments-payout-method',
+      params: to.params,
+      query: to.query,
+      hash: to.hash,
+    }, { replace: true })
+  }
   if (to.path.startsWith('/dashboard/')) {
     const preferenceMatch = to.path.match(/^\/dashboard\/([^/]+)\/website\/(status|domains|localization|currency)(\/.*)?$/)
     if (preferenceMatch) {
