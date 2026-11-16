@@ -1,20 +1,24 @@
 <template>
-  <DashboardIndexPanel id="organization-messages-thread" :title="conversation?.title ?? 'Conversation'" fill>
+  <DashboardIndexPanel id="organization-messages-thread" :title="conversation?.title ?? 'Conversation'" fill :auto-open="reservationTo">
+    <!-- Airbnb's thread header: who is in it, what it is about, and one way into "In this conversation". No row of buttons. -->
     <template v-if="conversation" #center>
-      <div class="flex min-w-0 items-center gap-4 overflow-hidden" :data-thread-id="conversation.id">
-        <InboxAvatar :name="conversation.title" :initial="conversation.title.slice(0, 1)" :support="conversation.kind === 'support'" />
-        <p class="truncate text-2xl font-semibold text-highlighted">{{ conversation.title }}</p>
-      </div>
+      <button type="button" class="flex min-w-0 items-center gap-3 overflow-hidden rounded-full py-1 pe-2 text-left hover:bg-elevated" :data-thread-id="conversation.id" aria-label="In this conversation" @click="sheetOpen = true">
+        <span class="flex shrink-0 -space-x-3">
+          <InboxAvatar v-for="person in conversation.participants.slice(0, 3)" :key="person.id ?? person.name" :name="person.name" :initial="person.name.slice(0, 1)" :support="conversation.kind === 'support'" size="sm" class="ring-2 ring-default" />
+        </span>
+        <span class="truncate text-xl font-semibold text-highlighted">{{ conversation.title }}</span>
+        <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
+      </button>
     </template>
-    <template v-if="conversation" #right>
-      <UButton v-if="data?.work?.type === 'done'" label="Done" color="neutral" class="rounded-full" :loading="closing" data-testid="conversation-job-done" @click="done" />
-      <UButton v-if="bookingTo" :to="bookingTo" :label="data?.work?.type === 'review' ? 'Review' : 'Show booking'" :icon="data?.work?.type === 'review' ? undefined : 'i-lucide-calendar-days'" color="neutral" :variant="data?.work?.type === 'review' ? 'solid' : 'soft'" class="rounded-full" :class="{ 'max-sm:hidden': data?.work?.type !== 'review' }" :ui="data?.work?.type === 'review' ? undefined : { label: 'max-sm:sr-only' }" />
-      <UButton icon="i-lucide-info" color="neutral" variant="ghost" aria-label="In this conversation" @click="sheetOpen = true" />
+
+    <!-- The reservation opens beside the conversation; its way in sits right of the title, as Airbnb's does, while the panel is closed. -->
+    <template v-if="reservationTo && !level.child.value" #right>
+      <UButton :to="reservationTo" :label="data?.work?.type === 'review' ? 'Review' : 'Show reservation'" color="neutral" variant="soft" class="rounded-full" data-testid="conversation-show-reservation" />
     </template>
 
     <UAlert v-if="doneError" color="error" variant="soft" title="Done could not be saved" :description="getErrorMessage(doneError, 'The request failed')" class="mx-4 mb-2" />
-    <ConversationThread :key="threadId" :thread-id="threadId" :history="history" :personal-scope="personalScope" />
-    <ConversationSheet v-if="data" v-model:open="sheetOpen" :page="data" :history="history" :on-left="left" :booking-to="bookingTo" @moved="moved" @participants-changed="refresh()" />
+    <ConversationThread :key="threadId" :thread-id="threadId" :history="history" :personal-scope="personalScope" :closing="closing" @done="done" />
+    <ConversationSheet v-if="data" v-model:open="sheetOpen" :page="data" :history="history" :on-left="left" :booking-to="reservationTo" @moved="moved" @participants-changed="refresh()" />
   </DashboardIndexPanel>
 </template>
 
@@ -37,10 +41,10 @@ const history = useConversation(threadId, personalScope)
 const { data, refresh } = history.request
 const conversation = computed(() => data.value?.conversation)
 const sheetOpen = ref(false)
-const bookingTo = computed(() => personalScope ? conversation.value?.activity_path
-  : conversation.value?.booking_id
-    ? `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/bookings/${encodeURIComponent(conversation.value.booking_id)}`
-    : null)
+const level = useRouteLevel()
+// The reservation's panel is this conversation's child, so the thread stays beside it.
+const reservationTo = computed(() => personalScope ? conversation.value?.activity_path ?? null
+  : conversation.value?.booking_id ? `${listPath}/${encodeURIComponent(threadId.value)}/reservation/${encodeURIComponent(conversation.value.booking_id)}` : null)
 
 // A job is done in one tap; its conversation then shows "Done" as the person's own message.
 const closing = ref(false)

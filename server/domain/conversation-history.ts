@@ -18,7 +18,7 @@ import { jobBookingIdSql } from './tasks'
 
 type TranscriptViewer = { conversationId: string; userId: string; organizationId?: string }
 type MessageContext = Pick<ConversationHistory, 'photos' | 'deliveriesByMessage'>
-type HistoryContext = { organization_name: string; timezone: string; booking_type: 'booking' | 'stay' | null; support: number; airbnb: number; roster: string | null; job: string | null; review: number | null }
+type HistoryContext = { organization_name: string; timezone: string; record_title: string | null; booking_type: 'booking' | 'stay' | null; support: number; airbnb: number; roster: string | null; job: string | null; review: number | null }
 
 function presentMessage(message: Pick<MessageRow, 'id' | 'sequence' | 'event_name'>, context: MessageContext, input: {
   author: string; viewerRole: ConversationViewerRole; guestName: string; authorUserId: string | null
@@ -130,6 +130,7 @@ function presentEntries(
     const sentAt = mirrored && typeof payload.provider_inserted_at === 'string' ? providerInstant(payload.provider_inserted_at) : message.occurred_at
     const projected = presentMessage(message, history, { author, viewerRole: role, guestName, authorUserId, side, sentAt, body,
       automatic, showAlerts: conversation.kind === 'team', unshownFiles })
+    projected.job = message.author_kind === 'krabiclaw' && typeof payload.key === 'string' && payload.key.startsWith('job:')
     if (side === 'business') {
       if (newestBusiness && newestBusiness.receipt !== 'Not delivered') newestBusiness.receipt = null
       newestBusiness = projected
@@ -164,6 +165,10 @@ export async function loadConversationPage(
           THEN CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END END` : 'NULL'} AS booking_type,
         ${head ? `(SELECT json_group_array(json_object('id', p.id, 'name', p.name, 'image', p.image, 'role', p.role))
           FROM (${conversationParticipantsSql('c', 'c.viewer_role')}) p)` : 'NULL'} AS roster,
+        -- What a team conversation about a booking is titled by: the home or offering, as its row in the list is.
+        ${head ? `CASE WHEN c.kind = 'team' THEN (SELECT COALESCE(sc.internal_name, p.name) FROM bookings about JOIN products p ON p.organization_id = about.organization_id AND p.id = about.product_id
+          LEFT JOIN product_stay_configs sc ON sc.organization_id = p.organization_id AND sc.product_id = p.id
+          WHERE about.organization_id = c.organization_id AND about.id = c.booking_id) END` : 'NULL'} AS record_title,
         -- The job this conversation is about that the viewer closes here: in its team conversation, or in the guest's when it is theirs or nobody's.
         ${head ? `CASE WHEN c.viewer_role = 'member' AND c.booking_id IS NOT NULL THEN (SELECT json_object('task_id', t.id, 'version', t.version) FROM tasks t
           WHERE t.organization_id = c.organization_id AND t.status = 'open' AND t.kind IN ('turnover', 'consultation_follow_up', 'consultation_prep')
@@ -200,7 +205,7 @@ export async function loadConversationPage(
   const bookingHost = role === 'member' && conversation.kind === 'booking' && conversation.booking_id !== null
   const activityPath = context.booking_type ? accountActivityPath(context.booking_type, conversation.id) : null
   const groupCapabilities = await conversationGroupCapabilities(membership, conversation)
-  const title = role === 'guest' ? context.organization_name : conversation.name || (conversation.kind === 'team' ? null : guestName)
+  const title = role === 'guest' ? context.organization_name : conversation.name || (conversation.kind === 'team' ? context.record_title : guestName)
     || roster.filter(person => person.id !== userId).map(person => person.name).join(', ') || 'You'
   return {
     conversation: {

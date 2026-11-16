@@ -18,6 +18,8 @@ export interface ConversationMessage {
   side: 'guest' | 'business'
   author: string
   automatic: boolean
+  /** KrabiClaw's post of a job: the card the job's Done is on. */
+  job: boolean
   sent_at: string
   time: string | null
   body: string | null

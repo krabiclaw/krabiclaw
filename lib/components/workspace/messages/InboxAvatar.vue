@@ -7,19 +7,12 @@
     role="img"
   >
     <span :class="support ? sizes[size].support : undefined" aria-hidden="true">{{ support ? 'Airbnb' : initial }}</span>
-    <span
-      v-if="channel && size === 'lg'"
-      class="absolute -bottom-1 -right-1 flex size-[22px] items-center justify-center rounded-full border-2 border-(--ui-bg)"
-      :class="channel === 'airbnb' ? 'bg-[#ff385c] text-white' : 'bg-(--kc-navy) text-white'"
-      aria-hidden="true"
-    >
-      <UIcon v-if="channel === 'airbnb'" name="i-simple-icons-airbnb" class="size-3" />
-      <img v-else src="/platform/krabiclaw-symbol.svg" alt="" class="size-3 brightness-0 invert">
-    </span>
+    <ChannelMark v-if="channel && size === 'lg'" :channel="channel" class="absolute -bottom-1 -right-1" />
   </span>
 </template>
 
 <script setup lang="ts">
+import ChannelMark from './ChannelMark.vue'
 withDefaults(defineProps<{ name: string; initial: string; support?: boolean; channel?: 'airbnb' | 'direct' | null; size?: 'sm' | 'lg' }>(), { support: false, channel: null, size: 'lg' })
 // 56px in the list and the header, 32px at the foot of a guest's run, as the cards draw them.
 const sizes = {

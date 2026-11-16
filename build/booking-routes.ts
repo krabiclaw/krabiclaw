@@ -1,4 +1,4 @@
-// A booking opens beneath Today or its calendar context. The same detail
+// A booking opens beneath Today, its calendar context or its conversation. The same detail
 // subtree keeps its parent beside it on desktop and returns to that parent on
 // mobile. Its Back and active tab come from that route tree, not history.
 
@@ -14,6 +14,7 @@ const BOOKING_PATH = '/dashboard/:org_slug()/bookings/:booking_type()/:record_id
 const TODAY_PATH = '/dashboard/:org_slug()'
 const CALENDAR_PATH = '/dashboard/:org_slug()/calendar'
 const DAY_PATH = `${CALENDAR_PATH}/:day()`
+const CONVERSATION_PATH = '/dashboard/:org_slug()/messages/:conversation_id()'
 // The account's own record lives under Past activity. Today opens it at
 // `/dashboard/account/bookings` beneath Today, and its calendar day mounts
 // it a third time, as the business's does.
@@ -57,6 +58,12 @@ export function mountBookingRoutes(pages: PageNode[]): void {
   const night = renamed(canonical, 'dashboard-org_slug-bookings', 'dashboard-org_slug-calendar-night')
   night.path = 'stay/:record_id()'
   calendar.children = [...(calendar.children ?? []), night]
+  // A conversation's reservation opens beside it, as Airbnb's does: the thread stays the parent.
+  const conversation = nodeAt(pages, CONVERSATION_PATH)
+  if (!conversation) throw new Error('The conversation page was not found; its reservation cannot open beside it')
+  const reservation = renamed(canonical, 'dashboard-org_slug-bookings', 'dashboard-org_slug-messages-conversation_id-reservation')
+  reservation.path = 'reservation/:record_id()'
+  conversation.children = [...(conversation.children ?? []), reservation]
   const bookingIndex = pages.indexOf(booking)
   if (bookingIndex === -1) throw new Error('The booking subtree must be a root before it is mounted beneath Today')
   pages.splice(bookingIndex, 1)

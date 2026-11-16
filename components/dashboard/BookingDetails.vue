@@ -40,8 +40,9 @@
         <div class="flex flex-col items-center pb-12 text-center" :class="recordImage ? 'pt-2' : 'pt-10'">
           <img v-if="recordImage" :src="recordImage" alt="" class="aspect-square w-full max-w-80 rounded-2xl bg-elevated object-cover" :class="!personalScope && !purchase && recordGuestName ? '' : 'mb-6'">
           <div v-if="!personalScope && !purchase && recordGuestName" class="relative mx-auto mb-6 shrink-0 md:mb-8" :class="[recordImage ? '-mt-12 md:-mt-14' : '', partySize && partySize > 1 ? 'h-30 w-35 md:h-40 md:w-46' : 'size-27 md:size-36']">
-            <UAvatar :src="recordGuestImage || undefined" :alt="recordGuestName" :text="recordGuestName.slice(0, 1).toUpperCase()" size="3xl" class="absolute bottom-0 left-0" :class="partySize && partySize > 1 ? 'size-21 md:size-28' : 'size-27 md:size-36'" :ui="{ fallback: 'text-[30px] font-semibold text-highlighted md:text-4xl' }" />
-            <span v-if="partySize > 1" class="absolute right-0 top-0 flex size-16 items-center justify-center rounded-full bg-elevated text-[9px] font-bold text-highlighted md:size-21 md:text-xs" :aria-label="otherGuestLabel">+{{ partySize - 1 }}</span>
+            <UAvatar :src="recordGuestImage || undefined" :alt="recordGuestName" :text="recordGuestName.slice(0, 1).toUpperCase()" size="3xl" class="absolute bottom-0 left-0 bg-accented" :class="partySize && partySize > 1 ? 'size-21 md:size-28' : 'size-27 md:size-36'" :ui="{ fallback: 'text-[30px] font-semibold text-highlighted md:text-4xl' }" />
+            <ChannelMark v-if="detail" :channel="detail.channel" large class="absolute bottom-0" :class="partySize && partySize > 1 ? 'left-15 md:left-21' : 'right-0'" />
+            <span v-if="partySize > 1" class="absolute right-0 top-0 flex size-16 items-center justify-center rounded-full bg-accented text-[9px] font-bold text-highlighted md:size-21 md:text-xs" :aria-label="otherGuestLabel">+{{ partySize - 1 }}</span>
           </div>
           <h2 class="max-w-full break-words text-[32px] font-semibold leading-9 tracking-tight text-highlighted">{{ heroTitle }}</h2>
           <p v-if="heroDate" class="mt-4 break-words text-base text-muted">{{ heroDate }}</p>
@@ -260,23 +261,13 @@
             </ul>
             <p v-else class="mt-4 text-base text-muted">No payments recorded.</p>
 
-            <UForm v-if="manage" :state="draft" class="mt-6 space-y-4" @submit="recordPayment">
-              <div class="grid gap-4 sm:grid-cols-2">
-                <UFormField :label="`Amount (${detail.currency})`" name="amount" description="Negative for a refund." required>
-                  <UInput v-model="draft.amount" inputmode="decimal" class="w-full" />
-                </UFormField>
-                <UFormField label="Method" name="method" required>
-                  <USelect v-model="draft.method" :items="methods" class="w-full" />
-                </UFormField>
-                <UFormField label="Date" name="paid_on" required>
-                  <UInput v-model="draft.paid_on" type="date" class="w-full" />
-                </UFormField>
-                <UFormField label="Reference" name="reference">
-                  <UInput v-model="draft.reference" class="w-full" />
-                </UFormField>
-              </div>
-              <UButton type="submit" label="Record payment" :loading="busy === 'record'" :disabled="!draft.amount.trim() || !draft.paid_on" />
-            </UForm>
+            <!-- Recording a payment is its own step, as every change to a reservation is. -->
+            <div v-if="manage" class="mt-4 divide-y divide-default border-y border-default">
+              <NuxtLink :to="{ path: `${editorPath}/payment`, query: route.query }" class="flex items-center gap-4 py-4" data-testid="stay-record-payment">
+                <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Record a payment</span>
+                <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+              </NuxtLink>
+            </div>
             <p v-if="!personalScope && detail.no_show_at" class="mt-6 text-sm text-muted" data-testid="stay-no-show">No-show recorded {{ formatCalendarDate(detail.no_show_at.slice(0, 10), 'en') }}. No review invitation is sent.</p>
             <UButton v-else-if="canMarkNoShow" class="mt-4 ms-2" color="neutral" variant="soft" label="Mark as a no-show" :loading="busy === 'no_show'" @click="markNoShow" />
           </template>
@@ -287,10 +278,6 @@
             <div v-if="detail.channel_booking_id" class="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-4">
               <dt class="text-base text-muted">{{ STAY_CHANNEL_LABELS[detail.channel] }} confirmation</dt>
               <dd class="break-words text-right text-base text-highlighted">{{ detail.channel_booking_id }}</dd>
-            </div>
-            <div class="flex items-start justify-between gap-4">
-              <dt class="text-base text-muted">Booked through</dt>
-              <dd class="text-right text-base text-highlighted">{{ STAY_CHANNEL_LABELS[detail.channel] }}</dd>
             </div>
           </dl>
           <p v-if="!personalScope && channelManaged" class="mt-4 text-base text-muted">
@@ -402,6 +389,8 @@ export interface BookingEditor {
   callTo: ComputedRef<string | null>
   firstName: (name: string) => string
   formatCreatedAt: (value: string) => string
+  /** A stay's offline payment step: its currency, today at the home, and the write. */
+  stayPayment: { currency: ComputedRef<string | null>; today: () => string; record: (input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; idempotency_key: string }) => Promise<void> }
 }
 
 export const bookingEditorKey = Symbol('booking-editor') as InjectionKey<BookingEditor>
@@ -410,6 +399,7 @@ export const bookingEditorKey = Symbol('booking-editor') as InjectionKey<Booking
 <script setup lang="ts">
 import FormAnswersCard from '~/components/forms/FormAnswersCard.vue'
 import PaymentDetails from '~/components/dashboard/PaymentDetails.vue'
+import ChannelMark from '~/lib/components/workspace/messages/ChannelMark.vue'
 import { paymentMoney } from '~/shared/payment-display'
 import { authClient } from '~/lib/auth-client'
 import { NuxtLink } from '#components'
@@ -730,7 +720,6 @@ const canRequestChange = computed(() => props.personalScope && detail.value !== 
   && (detail.value.ends_at.length === 10 ? detail.value.check_out_date >= localDateAt(new Date(), detail.value.timezone) : Date.parse(detail.value.ends_at) > Date.now()))
 const policy = computed(() => detail.value?.cancellation_policy ? bookedPolicyTerms(detail.value.cancellation_policy) : null)
 const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.org_slug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
-const methods = Object.entries(STAY_PAYMENT_METHOD_LABELS).map(([value, label]) => ({ value, label }))
 const channelName = computed(() => detail.value ? detail.value.channel === 'direct' ? 'You' : STAY_CHANNEL_LABELS[detail.value.channel] : '')
 /**
  * Who the stay is for. A stay made here always names its guest, so one without
@@ -780,8 +769,6 @@ function methodLabel(method: StayPaymentMethod) { return STAY_PAYMENT_METHOD_LAB
 const changeRetry = ref<{ messageId: string; decision: 'accept' | 'decline' } | null>(null)
 // The payment day defaults to today where the home is; one key per payment being entered, kept across retries.
 const homeToday = () => stay.value ? localDateAt(new Date(), stay.value.timezone) : ''
-const draft = reactive({ amount: '', method: 'cash' as StayPaymentMethod, paid_on: homeToday(), reference: '', key: crypto.randomUUID() })
-watch(stay, () => { if (!draft.paid_on) draft.paid_on = homeToday() })
 
 async function run(key: string, action: () => Promise<unknown>, failure: string, reload = true) {
   if (busy.value) return
@@ -835,21 +822,18 @@ async function answerStayChange(messageId: string, decision: 'accept' | 'decline
   }, t('booking.change_failed'))
 }
 
-async function recordPayment() {
+/** The payment step's write: money the host received or refunded outside KrabiClaw, recorded on the stay. */
+async function recordStayPayment(input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; idempotency_key: string }) {
   const value = detail.value
-  if (!value || isChannelManagedStay(value) || !isCurrencyCode(value.currency)) return
-  const typed = draft.amount.trim()
+  if (!value || isChannelManagedStay(value) || !isCurrencyCode(value.currency)) throw new Error('This stay records no payments here')
+  const typed = input.amount.trim()
   const negative = typed.startsWith('-')
-  await run('record', async () => {
-    const minor = majorAmountToMinor(negative ? typed.slice(1) : typed, value.currency as Parameters<typeof majorAmountToMinor>[1])
-    await dashboardApi(`${dashboardBookingPath(value.booking_id)}/payments`, {
-      method: 'POST', validate: isNightBooking,
-      body: { amount_minor: negative ? -minor : minor, method: draft.method, paid_on: draft.paid_on, reference: draft.reference || undefined, idempotency_key: draft.key },
-    })
-    draft.amount = ''
-    draft.reference = ''
-    draft.key = crypto.randomUUID()
-  }, 'The payment could not be recorded')
+  const minor = majorAmountToMinor(negative ? typed.slice(1) : typed, value.currency as Parameters<typeof majorAmountToMinor>[1])
+  await dashboardApi(`${dashboardBookingPath(value.booking_id)}/payments`, {
+    method: 'POST', validate: isNightBooking,
+    body: { amount_minor: negative ? -minor : minor, method: input.method, paid_on: input.paid_on, reference: input.reference || undefined, idempotency_key: input.idempotency_key },
+  })
+  await refreshDetails()
 }
 
 async function deletePayment(paymentId: string) {
@@ -935,5 +919,6 @@ provide(bookingEditorKey, {
   callTo,
   firstName,
   formatCreatedAt,
+  stayPayment: { currency: computed(() => detail.value?.currency ?? null), today: homeToday, record: recordStayPayment },
 })
 </script>

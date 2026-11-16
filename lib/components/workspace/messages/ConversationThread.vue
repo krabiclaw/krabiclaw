@@ -39,8 +39,13 @@
                     <img :src="photo.thumbnail_url" alt="" :width="photo.width ?? undefined" :height="photo.height ?? undefined" loading="lazy" class="size-full object-cover" :class="message.photos.length > 1 ? 'aspect-square' : 'max-h-80'">
                   </button>
                 </div>
+                <!-- A job is a card in the thread with its Done on it, as Airbnb's requests are. -->
+                <div v-if="message.job && message.body" class="w-full min-w-64 max-w-sm rounded-3xl bg-elevated p-4" data-testid="conversation-job-card">
+                  <p class="whitespace-pre-wrap break-words text-base font-medium text-highlighted">{{ message.body }}</p>
+                  <UButton v-if="data?.work?.type === 'done'" label="Done" color="neutral" block class="mt-3 rounded-xl" :loading="closing" data-testid="conversation-job-done" @click="emit('done')" />
+                </div>
                 <div
-                  v-if="message.body"
+                  v-else-if="message.body"
                   class="max-w-full whitespace-pre-wrap break-words rounded-[18px] px-3.5 py-2.5 text-base [overflow-wrap:anywhere]"
                   :class="[item.mine ? 'rounded-br-md bg-inverted text-inverted' : 'rounded-bl-md bg-elevated text-default', message.sending ? 'opacity-60' : '']"
                 >{{ message.body }}</div>
@@ -117,7 +122,8 @@ import ReportDialog from './ReportDialog.vue'
 import { isScheduledMessageResponse, isSuggestedReplies, useSuggestedReplies } from './guest-messaging-client'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
-const props = withDefaults(defineProps<{ threadId: string; personalScope?: boolean; history: ReturnType<typeof useConversation> }>(), { personalScope: false })
+const props = withDefaults(defineProps<{ threadId: string; personalScope?: boolean; history: ReturnType<typeof useConversation>; closing?: boolean }>(), { personalScope: false, closing: false })
+const emit = defineEmits<{ done: [] }>()
 
 const dashboard = useDashboardOrganization()
 const route = useRoute()
@@ -325,7 +331,7 @@ const rows = computed<Row[]>(() => {
   }
   if (attempt.value && sending.value && !items.some(item => item.type === 'message' && settledKeys.value[item.id] === `pending:${attempt.value?.key}`)) {
     items.push({
-      type: 'message', id: `pending:${attempt.value.key}`, sequence: Number.MAX_SAFE_INTEGER, side: mineSide.value, author: 'You', author_user_id: userId.value ?? null, automatic: false, deliveries: [], sent_at: new Date().toISOString(),
+      type: 'message', id: `pending:${attempt.value.key}`, sequence: Number.MAX_SAFE_INTEGER, side: mineSide.value, author: 'You', author_user_id: userId.value ?? null, automatic: false, job: false, deliveries: [], sent_at: new Date().toISOString(),
       time: 'Sending', body: attempt.value.body || null, receipt: null, retryable: false, unshown_files: 0, sending: true,
       photos: attempt.value.photos.map((photo, at) => ({ id: `${attempt.value!.key}:${at}`, url: photo.url, thumbnail_url: photo.url, width: null, height: null })),
     })
