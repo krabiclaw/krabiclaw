@@ -95,7 +95,7 @@ const SOCIAL_CARD_RENDERER_VERSION = 'social-card-v2'
 export type SocialCardEnv = UploadResolvedMediaInput['env'] & { IMAGES?: ImagesBinding; NUXT_PUBLIC_PLATFORM_DOMAIN?: string }
 
 export const SOCIAL_CARD_REFRESH_PREFIX = 'social-card-refresh:'
-const SOCIAL_CARD_REFRESH_LEASE_MS = 5 * 60 * 1000
+export const SOCIAL_CARD_REFRESH_LEASE_SECONDS = 5 * 60
 type SocialCardRefreshClaim = { id: string; claimedAt: string }
 type SocialCardRefreshWork = { cursor: string | null; displaced: string | null }
 const SOCIAL_CARD_REFRESH_WORK_START = SOCIAL_CARD_REFRESH_PREFIX.length + 1
@@ -109,7 +109,7 @@ function cardRefreshWork(reason: string): SocialCardRefreshWork {
 }
 
 export function expiredSocialCardRefreshClaim(now = new Date()): string {
-  return new Date(now.getTime() - SOCIAL_CARD_REFRESH_LEASE_MS).toISOString()
+  return new Date(now.getTime() - SOCIAL_CARD_REFRESH_LEASE_SECONDS * 1000).toISOString()
 }
 
 function socialCardClaimGuard(claim?: SocialCardRefreshClaim): BatchQuery {
@@ -213,17 +213,16 @@ export async function advanceOrganizationSocialCardRefresh(input: {
     error = errorMessage(cause)
   }
   const status = error ? 'failed' : next_cursor ? 'pending' : 'processed'
-  const finished = await execute(db, `
-    UPDATE public_resource_cache_invalidations
-    SET status = ?, reason = COALESCE(?, reason), processed_at = ?, last_error = ?
-    WHERE id = ? AND status = 'processing' AND processed_at = ?
-  `, [
-    status, error ? null : socialCardRefreshReason(next_cursor),
-    new Date().toISOString(), error?.slice(0, 2000) ?? null,
-    claim.id, claim.claimedAt,
-  ])
+  const [finished] = await executeBatch(db, [{
+    query: `UPDATE public_resource_cache_invalidations
+      SET status = ?, reason = COALESCE(?, reason), processed_at = ?, last_error = ?
+      WHERE id = ? AND status = 'processing' AND processed_at = ?`,
+    params: [status, error ? null : socialCardRefreshReason(next_cursor),
+      new Date().toISOString(), error?.slice(0, 2000) ?? null, claim.id, claim.claimedAt],
+    ...(status === 'pending' ? { event: { type: 'site.cache_changed' as const, organization_id: organizationId, invalidation_id: claim.id } } : {}),
+  }], { operation: 'Advance social-card refresh' })
   const current = await loadOrganizationSocialCardRefresh(db, organizationId)
-  if (finished.meta?.changes !== 1) return { refresh: current, results: [], next_cursor: null }
+  if (finished?.meta.changes !== 1) return { refresh: current, results: [], next_cursor: null }
   return { refresh: current, results, next_cursor }
 }
 

@@ -1,8 +1,9 @@
 <template>
-  <DashboardIndexPanel id="stay-night-calendar" title="Calendar" fill>
+  <DashboardIndexPanel id="stay-night-calendar" :title="homeOption?.internal_name ?? 'Calendar'" fill>
     <template #right>
       <div class="flex w-[calc(100vw-2rem)] flex-wrap items-center gap-2 sm:w-auto">
-        <CalendarOfferingFilter :items="offeringItems" :disabled="busy || Boolean(level.child.value)" />
+        <!-- One home's nights go back to every home's calendar. -->
+        <UButton label="Calendar" icon="i-lucide-arrow-left" color="neutral" variant="outline" :to="`/dashboard/${route.params.org_slug}/calendar`" :disabled="busy" />
         <UButton v-if="manage" label="Add stay" icon="i-lucide-plus" :to="addStayTo" :disabled="busy || Boolean(level.child.value)" />
         <UButton v-if="data && level.mode.value === 'index'" label="Select nights" color="neutral" variant="outline" class="hidden sm:inline-flex" :disabled="busy" @click="openDates" />
         <UDropdownMenu :items="viewItems" :content="{ align: 'end' }">
@@ -51,7 +52,7 @@
                 <span class="block text-sm sm:text-base" :class="night(day)?.available === false ? 'line-through' : ''">{{ day.day }}</span>
                 <UIcon v-if="channelState(day)" :name="CHANNEL_MARKS[channelState(day)!]" class="size-3.5 shrink-0" :class="channelState(day) === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-night-channel-${channelState(day)}`" aria-hidden="true" />
               </span>
-              <span v-if="night(day)?.booking_id || night(day)?.held_until || night(day)?.calendar" class="hidden truncate text-xs sm:block">{{ stayLabel(day) }}</span>
+              <span v-if="night(day)?.booking_id" class="hidden truncate text-xs sm:block">{{ stayLabel(day) }}</span>
               <span class="block break-all text-[10px] leading-tight tabular-nums sm:hidden">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : compactMoney(night(day)!.price_minor!) : '…' }}</span>
               <span class="hidden truncate text-sm sm:block">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : money(night(day)!.price_minor!) : '…' }}</span>
             </span>
@@ -88,12 +89,12 @@
           </div>
           <div v-else-if="data" class="divide-y divide-default border-y border-default">
             <p v-if="!listedStays.length" class="py-10 text-center text-sm text-muted">No stays in {{ placeholder?.year }}.</p>
-            <NuxtLink v-for="stay in listedStays" :key="stay.booking_id" :to="{ path: `/dashboard/${route.params.org_slug}/calendar/stay/${encodeURIComponent(stay.booking_id)}`, query: route.query }" class="flex items-center justify-between gap-4 py-5">
+            <NuxtLink v-for="stay in listedStays" :key="stay.booking_id" :to="stayTo(stay.booking_id)" class="flex items-center justify-between gap-4 py-5">
               <div>
                 <p class="font-medium text-highlighted">{{ stay.guest_name || 'Guest name not provided' }}</p>
                 <p class="mt-1 text-sm text-muted">{{ formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' }) }} – {{ formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric', year: 'numeric' }) }}</p>
               </div>
-              <span v-if="stay.channel" class="text-sm text-muted">{{ channels[stay.channel] }}</span>
+              <span v-if="stay.channel" class="text-sm text-muted">{{ STAY_CHANNEL_LABELS[stay.channel] }}</span>
             </NuxtLink>
           </div>
         </template>
@@ -140,11 +141,11 @@
 
 <script setup lang="ts">
 import { parseDate, today, type DateValue } from '@internationalized/date'
-import type { Stay, StayHome, StayNight, StayTurnover } from '~/server/domain/stays'
+import type { StayCalendarStay, StayHome, StayNight } from '~/server/domain/stays'
+import { bookingConversationOrRecordPath } from '~/shared/messages-contract'
 import { MAX_STAY_NIGHTS, STAY_CHANNEL_LABELS, parseStayCalendarRules } from '~/shared/bookings'
 import StayNightInspector from './StayNightInspector.vue'
 import EditorNavigationList from './EditorNavigationList.vue'
-import CalendarOfferingFilter from './CalendarOfferingFilter.vue'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, minorAmountToMajor } from '~/shared/prices'
 import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
@@ -155,9 +156,9 @@ import { getErrorMessage } from '~/utils/errors'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'cancellation_policy' | 'long_term_cancellation_policy'>
 // A manager reads each stay's channel; a member's turnover has none.
-type CalendarStay = { booking_id: string; unit: 'nights' } & Pick<StayTurnover, 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'status'> & Partial<Pick<Stay, 'channel'>>
+type CalendarStay = StayCalendarStay
 interface CalendarPayload { home: Home; nights: StayNight[]; bookings: CalendarStay[]; channel_push?: SuccessfulChannelPush | null }
-const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone'>[]; manage: boolean; homeError: string; offeringItems: { label: string; value: string }[]; offeringsError?: string }>()
+const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone'>[]; manage: boolean; homeError: string; offeringsError?: string }>()
 const route = useRoute()
 const level = useRouteLevel()
 const router = useRouter()
@@ -180,7 +181,6 @@ const view = computed<CalendarView>(() => {
   if (typeof route.query.view !== 'string' || !Object.hasOwn(views, route.query.view)) throw createError({ statusCode: 400, statusMessage: 'Choose Month, Year or List.' })
   return route.query.view as CalendarView
 })
-const channels = STAY_CHANNEL_LABELS
 const viewItems = computed(() => [Object.entries(views).map(([key, value]) => ({ ...value, type: 'checkbox' as const, checked: view.value === key, onSelect: () => changeView(key as CalendarView) }))])
 const selectedDates = shallowRef<DateValue[]>(requestedDate ? [requestedDate] : [])
 const selectedRanges = computed(() => {
@@ -223,9 +223,9 @@ function isCalendar(value: unknown): value is CalendarPayload {
     || !(home.long_term_cancellation_policy === null || typeof home.long_term_cancellation_policy === 'string' && Object.hasOwn(STAY_LONG_TERM_CANCELLATION_POLICIES, home.long_term_cancellation_policy))) return false
   if (!isValidTimezone(home.timezone)) return false
   parseStayCalendarRules(home.calendar_rules)
-  if (!value.bookings.every(stay => isRecord(stay) && stay.unit === 'nights' && typeof stay.booking_id === 'string' && stay.product_id === props.productId
+  if (!value.bookings.every(stay => isRecord(stay) && stay.unit === 'nights' && typeof stay.booking_id === 'string' && nullableText(stay.conversation_id) && stay.product_id === props.productId
     && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date) && stay.check_out_date > stay.check_in_date
-    && nullableText(stay.guest_name) && (props.manage ? Object.hasOwn(channels, String(stay.channel)) : !('channel' in stay)) && typeof stay.status === 'string')) return false
+    && nullableText(stay.guest_name) && (props.manage ? Object.hasOwn(STAY_CHANNEL_LABELS, String(stay.channel)) : !('channel' in stay)) && typeof stay.status === 'string')) return false
   return (value.channel_push === undefined || isSuccessfulChannelPush(value.channel_push)) && value.nights.every(isStayNight)
 }
 const { data, error, status, refresh } = await useAsyncData(
@@ -235,19 +235,15 @@ const { data, error, status, refresh } = await useAsyncData(
     if (initialError.value || !ranges.length) return null
     const chunks: CalendarPayload[] = []
     for (const range of ranges) {
-      for (let from = range.from; from < range.to;) {
-        const limit = addLocalDays(from, 62)
-        const to = limit < range.to ? limit : range.to
-        const result = await api('/api/dashboard/bookings/calendar', { query: { unit: 'nights', product_id: props.productId, from, to }, signal,
-          validate: (value): value is { homes: [{ home: Home; nights: StayNight[] }]; bookings: CalendarStay[] } =>
-            isRecord(value) && Array.isArray(value.homes) && value.homes.length === 1 && isRecord(value.homes[0])
-              && isCalendar({ ...value.homes[0], bookings: value.bookings }),
-        })
-        const payload = { ...result.homes[0], bookings: result.bookings }
-        if (payload.nights.length !== parseDate(to).compare(parseDate(from)) || payload.nights.some((night, index) => night.date !== addLocalDays(from, index))) throw new Error('The calendar did not return every requested night in order.')
-        chunks.push(payload)
-        from = to
-      }
+      const { from, to } = range
+      const result = await api('/api/dashboard/bookings/calendar', { query: { unit: 'nights', product_id: props.productId, from, to }, signal,
+        validate: (value): value is { homes: [{ home: Home; nights: StayNight[] }]; bookings: CalendarStay[] } =>
+          isRecord(value) && Array.isArray(value.homes) && value.homes.length === 1 && isRecord(value.homes[0])
+            && isCalendar({ ...value.homes[0], bookings: value.bookings }),
+      })
+      const payload = { ...result.homes[0], bookings: result.bookings }
+      if (payload.nights.length !== parseDate(to).compare(parseDate(from)) || payload.nights.some((night, index) => night.date !== addLocalDays(from, index))) throw new Error('The calendar did not return every requested night in order.')
+      chunks.push(payload)
     }
     return { home: chunks[0]!.home, nights: chunks.flatMap(chunk => chunk.nights), bookings: [...new Map(chunks.flatMap(chunk => chunk.bookings).map(stay => [stay.booking_id, stay])).values()] }
   },
@@ -269,14 +265,12 @@ if (import.meta.client) {
 }
 const nightsByDate = computed(() => new Map((data.value?.nights ?? []).map(night => [night.date, night])))
 const staysById = computed(() => new Map((data.value?.bookings ?? []).map(stay => [stay.booking_id, stay])))
+const stayTo = (id: string) => bookingConversationOrRecordPath(orgSlug, id, staysById.value.get(id)?.conversation_id ?? null)
 const night = (day: DateValue) => nightsByDate.value.get(day.toString())
 function stayLabel(day: DateValue) {
-  const value = night(day)
-  if (value?.booking_id) {
-    const stay = staysById.value.get(value.booking_id)
-    return stay ? [stay.guest_name || 'Guest name not provided', ...(stay.channel ? [channels[stay.channel]] : [])].join(' · ') : 'Reserved'
-  }
-  return value?.calendar ? `Unavailable from ${channels[value.calendar]}` : 'Checkout hold'
+  const bookingId = night(day)?.booking_id
+  const stay = bookingId ? staysById.value.get(bookingId) : undefined
+  return stay ? [stay.guest_name || 'Guest name not provided', ...(stay.channel ? [STAY_CHANNEL_LABELS[stay.channel]] : [])].join(' · ') : 'Reserved'
 }
 const selectedNights = computed(() => selectedDates.value.flatMap(day => nightsByDate.value.get(day.toString()) ?? []))
 const selected = (day: DateValue) => selectedDates.value.some(date => date.toString() === day.toString())
@@ -291,7 +285,7 @@ const channelState = (day: DateValue) => {
 function nightTitle(day: DateValue) {
   const value = night(day)
   const note = value ? channelNote(value) : null
-  return value ? `${day.toString()} · ${value.booking_id ? stayLabel(day) : value.held_until ? 'Checkout hold' : value.calendar ? `Unavailable from ${channels[value.calendar]}` : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${note ? ` · ${note}` : ''}` : day.toString()
+  return value ? `${day.toString()} · ${value.booking_id ? stayLabel(day) : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${note ? ` · ${note}` : ''}` : day.toString()
 }
 const dateLabel = computed(() => {
   const range = selectedRange.value
@@ -319,7 +313,7 @@ const editor = useStayNightEditor({
   },
 })
 const { busy, error: writeError } = editor
-const inspectorProps = computed(() => ({ ...editor.inspector.value, dateLabel: dateLabel.value, scope: data.value ? `${data.value.home.timezone} · ${data.value.home.currency}` : '', selectDates: true }))
+const inspectorProps = computed(() => ({ ...editor.inspector.value, stayTo, dateLabel: dateLabel.value, scope: data.value ? `${data.value.home.timezone} · ${data.value.home.currency}` : '', selectDates: true }))
 const overviewGroups = computed(() => [{ id: 'home', items: [
   { id: 'price', label: 'Pricing', summary: data.value?.home.base_price_minor == null ? 'No base nightly price set' : `${money(data.value.home.base_price_minor)} per night`, to: `/dashboard/${String(route.params.org_slug)}/products/${props.productId}/price` },
   { id: 'availability', label: 'Availability', summary: data.value ? `${data.value.home.min_nights} night minimum` : 'Loading availability…', to: `/dashboard/${String(route.params.org_slug)}/products/${props.productId}/availability` },

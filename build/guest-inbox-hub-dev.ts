@@ -26,6 +26,9 @@ export default defineNuxtModule({
         config: resolve(rootDir, 'server/cloudflare/dev/wrangler.toml'),
         envFiles: [resolve(rootDir, '.env')],
         persistTo: resolve(rootDir, '.wrangler/state'),
+        vars: config.vars,
+        kv: config.kv_namespaces,
+        r2: config.r2_buckets,
         local: true,
         logLevel: 'warn',
         experimental: {

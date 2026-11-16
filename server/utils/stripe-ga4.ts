@@ -1,3 +1,5 @@
+import { RETENTION_HUB, retentionWakeAt } from '~/server/domain/due-business-work'
+import { publishEvent } from '~/server/events'
 import type Stripe from 'stripe'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -12,6 +14,7 @@ import {
 } from '~/server/utils/stripe-invoice-lines'
 import {
   consumeStripeGa4Intent,
+  STRIPE_GA4_CONSUMED_RETENTION_DAYS,
   findConsumedStripeGa4CancellationIntent,
   findPendingInitialStripeGa4Intent,
   findStripeGa4CheckoutAttribution,
@@ -313,6 +316,8 @@ async function recordStripePurchase(
 
   if (context.intent && (purchaseType === 'upgrade' || purchaseType === 'downgrade' || purchaseType === 'initial_subscription' || purchaseType === 'resubscription')) {
     await consumeStripeGa4Intent(db, context.intent.id, event.id)
+    await publishEvent(env, { type: 'business.wake', organization_id: RETENTION_HUB, kind: 'retention',
+      due_at: retentionWakeAt(Date.now() + STRIPE_GA4_CONSUMED_RETENTION_DAYS * 86_400_000) })
   }
   await clearInteractiveStripeMetadata(stripe, subscription)
 }
@@ -412,6 +417,8 @@ async function sendStripeGa4Lifecycle(
   if (intent) {
     await markStripeGa4IntentLifecycleSent(db, intent.id)
     await consumeStripeGa4Intent(db, intent.id, event.id)
+    await publishEvent(env, { type: 'business.wake', organization_id: RETENTION_HUB, kind: 'retention',
+      due_at: retentionWakeAt(Date.now() + STRIPE_GA4_CONSUMED_RETENTION_DAYS * 86_400_000) })
   }
 }
 

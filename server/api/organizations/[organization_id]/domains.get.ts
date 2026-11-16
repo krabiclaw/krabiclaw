@@ -1,6 +1,7 @@
 import { jsonResponse } from '~/server/utils/api-response'
 import { GROWTH_PLAN_ID } from '~/shared/billing-model'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
+import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { roleAllows } from '~/server/utils/member-access'
 import { getOrganizationDomainsDashboardPayload } from '~/server/utils/domain-read-model'
 import { requireOrganizationAccess } from '~/server/utils/location-access'

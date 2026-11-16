@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import test from 'node:test'
+import { captureEvents } from './support/events.ts'
 import { Miniflare } from 'miniflare'
 import { H3 } from 'nitro/h3'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
@@ -184,7 +185,7 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
   const originalFetch = globalThis.fetch
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: captureEvents().binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof',
       EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'provider', WHATSAPP_PHONE_NUMBER_ID: 'local-proof-phone-id', WHATSAPP_ACCESS_TOKEN: 'local-proof-no-live-token',
       WHATSAPP_APP_SECRET: 'whatsapp-secret' } as CloudflareEnv

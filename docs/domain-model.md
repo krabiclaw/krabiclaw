@@ -26,9 +26,9 @@ extend that model. Never add a second one beside it.
 | How a product is booked, and who handles it (a session's seats, a table's seatings or a home's nights; party limits, guest terms and what online payment is charged for) | `product_booking_configs` | server/utils/availability.ts | KrabiClaw |
 | Home description and arrival guide | `product_stay_configs` | server/domain/stays.ts | KrabiClaw |
 | When a product can be booked (a class's weekly start times; a table has none, its open time is its location's hours) | `product_availability_rules` | server/utils/availability.ts | KrabiClaw |
-| Timed inventory (a time someone booked, held, edited or cancelled; the open times themselves are computed, not stored) | `product_sessions` | server/utils/availability.ts | KrabiClaw |
+| Timed inventory (a time someone booked, edited or cancelled; open times are computed) | `product_sessions` | server/utils/availability.ts | KrabiClaw |
 | Night inventory | `product_nights` | server/domain/stays.ts | KrabiClaw |
-| Night claim (the nights a booking, a checkout hold or a linked calendar holds at a home, as a session's seats are a slot booking's claim) | `stay_nights` | server/domain/stays.ts | KrabiClaw |
+| Night claim (one booking's claim to one night at a home) | `stay_nights` | server/domain/stays.ts | KrabiClaw |
 | Home rooms and accessibility | `product_stay_photo_rooms` `product_stay_photo_room_amenities` `product_stay_room_accessibility` `product_stay_accessibility` | server/domain/stays.ts | KrabiClaw |
 | Booked record (a class seat, a consultation, a table or a stay at a home, with the terms frozen when it was made) | `bookings` | server/domain/product-bookings.ts | KrabiClaw |
 | Conversation, its participant roster, each participant's read position and archive, and its messages from people and from KrabiClaw | `conversations` `conversation_participants` `messages` | server/domain/conversations.ts | KrabiClaw |
@@ -37,7 +37,7 @@ extend that model. Never add a second one beside it.
 | Audit log (who changed what in an organization) | `activity_entries` | server/utils/organization-events.ts | KrabiClaw |
 | Delivery of a message, an audited event or a task to a person (email, WhatsApp, Airbnb, push) | `guest_thread_deliveries` | server/domain/guest-threads/deliveries.ts | KrabiClaw |
 | Guest message template | `message_templates` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
-| Future guest message, one outbox (a booking's automatic messages and a member's own send-later replies, one status machine) | `scheduled_guest_messages` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
+| Future message, one outbox (a booking's automatic messages, a member's own send-later replies, and a job's reminders or a task's start alert by `task_id`; one status machine, one sender) | `scheduled_guest_messages` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
 | Reported content | `content_reports` | server/domain/content-reports.ts | KrabiClaw |
 | Work (one prep per assigned slot session, one follow-up per booking) | `tasks` | server/domain/tasks.ts | KrabiClaw |
 | Provider working hours | `member_scheduling` | server/domain/member-scheduling.ts | KrabiClaw |
@@ -51,7 +51,7 @@ extend that model. Never add a second one beside it.
 | Reviews | `reviews` `review_requests` `review_category_ratings` | server/utils/review-requests.ts | KrabiClaw |
 | Payments | `payments` `payment_refunds` `payment_disputes` `payment_orders` `payment_order_lines` `payment_authorizations` `payment_checkout_holds` `offline_payments` `payment_fee_reports` `payment_cost_snapshots` `payment_servicing_tenants` `stripe_connected_accounts` `stripe_connected_customers` `stripe_webhook_events` | server/domain/payments | Stripe |
 | Channex channel | `channex_connections` `product_channel_mappings` `channel_threads` `channel_night_pushes` `channel_sync_log` `airbnb_sync_jobs` | server/integrations/channex | Channex |
-| Imported iCal calendar | `stay_calendar_links` | server/domain/stays.ts | KrabiClaw |
+| Retired Vrbo iCal link retained through the Worker cutover | `stay_calendar_links` | server/domain/due-business-work.ts | KrabiClaw |
 | Google Calendar event delivery | `google_calendar_event_links` `google_calendar_cleanup_jobs` | server/utils/google-calendar.ts | Google |
 | Connected provider selection | `organization_integrations` | server/utils/organization-integrations.ts | Better Auth linked accounts |
 | Service agreement | `organization_services` | server/utils/organization-services.ts | KrabiClaw |
@@ -102,18 +102,16 @@ means something the others do not.
 | Offering | Its open time |
 |---|---|
 | A class or an in-person consultation | its weekly start times (`product_availability_rules`) and dated sessions, inside its location's hours |
-| A restaurant's tables | its location's `opening_hours` and `special_hours`, seated every `seating_interval_minutes` while `duration_minutes` still ends by closing (`tableSeatings` in server/utils/availability.ts). Seatings are computed from the hours on every read and never stored ahead, so an hours change needs no other write; a seating someone booked or holds is a `product_sessions` row and keeps its time |
+| A restaurant's tables | its location's `opening_hours` and `special_hours`, seated every `seating_interval_minutes` while `duration_minutes` still ends by closing (`tableSeatings` in server/utils/availability.ts). Open seatings are computed from the hours. A booked seating has a `product_sessions` row and keeps its time. |
 | An online offering | its provider's working hours (`member_scheduling.weekly_json`) |
 | A home | every night, at its nightly price, unless a `product_nights` row says otherwise |
 
 One reader answers "what is open and how many places are left" for every
 offering booked by time: `readSlots` in server/utils/availability.ts. In one D1
 batch it reads, for the offerings and the requested window only, the rules and
-hours above, the saved sessions with the places their bookings and unexpired
-checkout holds take, and the provider's other bookings and holds; it computes
-the open times and places left from those rows. Places left are capacity less
-pending and confirmed bookings less holds whose `expires_at` is still ahead, so
-a lapsed hold stops counting with no write. When the offering's member checks a
+hours above, the saved sessions and their bookings, and the provider's other
+bookings. Places left are capacity less the places used by pending and
+confirmed bookings. When the offering's member checks a
 Google calendar, Google's freeBusy is asked once per read: Google does not tell
 KrabiClaw when that calendar changes. The booking page, the product page, the
 host Calendar, the offering editor, the MCP session tools and the move options
@@ -126,4 +124,14 @@ which the Google Maps import also goes through.
 | `product_nights.closed` (and closed to arrival or departure) | A home's night is not offered to guests or channels. It is the home's night inventory, not its location's hours |
 | `member_scheduling.time_off_json` | A person is away. No online slot of theirs is offered in that time |
 | `product_sessions.status = 'cancelled'` | One occurrence of a class or consultation was cancelled. A table's seating is never cancelled by hand: it stops being offered when its location's hours stop covering it |
-| `stay_nights` with `calendar_link_id` | Another site's calendar holds the night. It is a claim on the night, not a rule about it |
+| `stay_nights.booking_id` | A booking claims the night. Only one booking can claim each home and date. |
+
+An existing channel reservation whose guest moved to another home still
+occupies its booked listing. `bookings.booked_product_id` identifies that
+listing and its dates come from the stay's claims at the guest's actual home.
+
+Paid checkout keeps the conversation, party size, conversion status and the
+approved stay's payment lock in `payment_checkout_holds`. At Pay, the batch
+that saves the booking claims its nights or places before the payment is
+captured. A stay request already owns its nights while the host reviews it and
+while the guest has time to pay after approval.

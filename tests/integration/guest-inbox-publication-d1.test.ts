@@ -3,6 +3,7 @@ import test from 'node:test'
 import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import * as schema from '../../server/db/schema.ts'
+import { captureEvents } from './support/events.ts'
 import { publishConversationEvent, publishDashboardInvalidation } from '../../server/cloudflare/guest-inbox-events.ts'
 import { createProductBooking } from '../../server/domain/product-bookings.ts'
 import { listBookableSessions } from '../../server/utils/availability.ts'
@@ -17,6 +18,7 @@ test('inbox publication failures are visible and table booking receipts reflect 
       export class FaultHub {
         constructor(ctx, env) { this.ctx = ctx; this.env = env }
         async fetch(request) {
+          if (new URL(request.url).pathname === '/wake') return new Response(null, { status: 204 })
           if (new URL(request.url).pathname === '/observed') return Response.json(await this.ctx.storage.get('observed'))
           if (new URL(request.url).pathname === '/arm') {
             await this.ctx.storage.put('bookingAction', await request.text())
@@ -92,7 +94,7 @@ test('inbox publication failures are visible and table booking receipts reflect 
 
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     await db.prepare("INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('healthy','Healthy','healthy', 'USD', 'UTC')").run()
-    // Creation and retry receipts follow the saved occurrence after delivery.
+    // The creation receipt reports the committed claim. A replay follows the saved occurrence after delivery.
     await db.batch([
       "INSERT INTO user (id,name,email) VALUES ('reservation-owner','Owner','owner@proof.example')",
       "INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES ('reservation-en','healthy','en',1,'published')",
@@ -100,7 +102,8 @@ test('inbox publication failures are visible and table booking receipts reflect 
       "INSERT INTO organization_domains (id,organization_id,domain,type,role,status) VALUES ('reservation-domain','healthy','proof.example','custom','canonical','active')",
       "INSERT INTO business_locations (id,organization_id,slug,title,status,timezone,opening_hours) VALUES ('reservation-location','healthy','dining','Dining','active','Asia/Bangkok','{\"periods\":[{\"open\":{\"day\":1,\"hour\":16,\"minute\":0},\"close\":{\"day\":1,\"hour\":22,\"minute\":0}}]}')",
     ].map(statement => db.prepare(statement)))
-    const reservationEnv = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+    const queue = captureEvents()
+    const reservationEnv = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     // The dining room's tables: Monday seatings every half hour from 16:00 to 20:00.
@@ -120,20 +123,25 @@ test('inbox publication failures are visible and table booking receipts reflect 
     const hub = namespace.get(namespace.idFromName('healthy'))
     const arm = (action: string) => hub.fetch('https://guest-inbox.internal/arm', { method: 'POST', body: action })
     await arm('cancel')
-    const cancelled = await create('cancel-during-creation')
-    const persistedCancelled = await db.prepare('SELECT status FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id=?)').bind(cancelled.body.conversation_id).first('status')
-    assert.equal(cancelled.status, 201)
+    const created = await create('cancel-during-creation')
+    assert.equal(created.status, 201)
+    assert.equal(created.body.status, 'confirmed')
+    await queue.runNext(reservationEnv, 'booking.created')
+    const persistedCancelled = await db.prepare('SELECT status FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id=?)').bind(created.body.conversation_id).first('status')
     assert.equal(persistedCancelled, 'cancelled')
+    const cancelled = await create('cancel-during-creation')
+    assert.equal(cancelled.status, 200)
+    assert.equal(cancelled.body.replayed, true)
     assert.equal(cancelled.body.status, persistedCancelled)
-    assert.equal(cancelled.body.message, 'This booking was cancelled.')
 
     const later = seatings.find(session => session.starts_at === laterStart(seating.starts_at))
     assert(later)
     assert.equal((await create('later-seating-guest', later.id)).status, 201)
+    await queue.runNext(reservationEnv, 'booking.created')
     const movable = await create('move-during-replay')
     assert.equal(movable.status, 201)
-    await db.prepare("UPDATE conversations SET payload_json=json_set(payload_json,'$.provenance.followups_completed',json('false')) WHERE id=?").bind(movable.body.conversation_id).run()
     await arm('move')
+    await queue.runNext(reservationEnv, 'booking.created')
     const moved = await create('move-during-replay')
     const persistedMoved = await db.prepare('SELECT s.starts_at,s.ends_at,s.timezone,b.status FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id WHERE b.id=(SELECT booking_id FROM conversations WHERE id=?)').bind(movable.body.conversation_id).first()
     assert.equal(moved.status, 200)

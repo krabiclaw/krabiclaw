@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { captureEvents } from './support/events.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
@@ -58,7 +59,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     // the thread is written only where that claim landed. Exactly as the public
     // booking route writes it — claim first, thread conditional on it, then the
     // booking takes the thread's id.
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db } as CloudflareEnv
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db, EVENTS: captureEvents().binding } as CloudflareEnv
     const policyJson = JSON.stringify({ advance_notice_minutes: null, party_size_min: null, party_size_max: null, minimum_guest_age: null, accessibility_contact_required: false, payment: null, cancellation: null })
     async function bookSession(id: string, sessionId = 'session-proof', cancellation: { token_hash: string | null; expires_at: string | null; used_at: null } = { token_hash: null, expires_at: null, used_at: null }) {
       return claimSessionCapacity(db, { websiteSource: null, 
@@ -97,7 +98,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     // A booking arrives confirmed and is complete once its end passes, so
     // cancelling is the only transition a person makes.
     await db.prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?").bind(record!.id).run()
-    const operation = { threadId: winner, organizationId: ORG, action: 'cancel', actorUserId: ACTOR, idempotencyKey: 'cancel-proof', env: { NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } }
+    const operation = { threadId: winner, organizationId: ORG, action: 'cancel', actorUserId: ACTOR, idempotencyKey: 'cancel-proof', env: { ...env, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } }
     assert.equal((await executeGuestThreadOperation(db, operation)).ok, true)
     assert.equal((await executeGuestThreadOperation(db, operation)).ok, true)
     const bookingStatus = (conversationId: string) => db.prepare('SELECT b.status FROM bookings b JOIN conversations c ON c.booking_id = b.id WHERE c.id = ?').bind(conversationId).first('status')

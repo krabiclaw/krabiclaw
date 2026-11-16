@@ -1,6 +1,6 @@
 // H3 middleware wraps dashboard editor handlers, so a cache purge failure changes
 // the write's HTTP result before it can report success. The search index follows
-// from the scheduled drain of the change the write recorded.
+// from the committed invalidation event.
 import { onResponse } from 'nitro/h3'
 import type { DbClient } from '~/server/db'
 import type { TenantHostEnv } from '~/server/utils/tenant-hosts'

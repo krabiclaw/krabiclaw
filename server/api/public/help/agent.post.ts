@@ -1,9 +1,9 @@
 import { cloudflareEnv, jsonResponse, readRequiredBody } from '~/server/utils/api-response'
 import { getClientIp, hashClientIp, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
-import { logMcpToolCallEvent } from '~/server/utils/mcp-telemetry'
-import { getCloudflareWaitUntil } from '~/server/utils/mcp-route-helpers'
+import { enqueueMcpToolCallEvent } from '~/server/utils/mcp-telemetry'
 import { formatPublicSearchResultsForPrompt, searchPublicResources } from '~/server/utils/public-search'
 import { runWorkersAiText } from '~/server/utils/workers-ai'
+import { HTTPError } from 'nitro'
 
 interface HelpMessage {
   role?: 'user' | 'assistant'
@@ -13,14 +13,6 @@ interface HelpMessage {
 const DEFAULT_DISCOVERY_PROMPTS = [
   'How do I connect my own domain?', 'How do I add or update menu items?', 'Do I need technical skills to use Blawby?', ]
 const IP_HOURLY_LIMIT = 30
-
-function logPublicHelpEventDetached(
-  event: Parameters<typeof getCloudflareWaitUntil>[0], db: D1Database | undefined, input: Parameters<typeof logMcpToolCallEvent>[1], ) {
-  if (!db) return
-  const waitUntil = getCloudflareWaitUntil(event)
-  if (!waitUntil) throw new Error('Help telemetry requires the Worker execution context')
-  waitUntil(logMcpToolCallEvent(db, { ...input, mcpSurface: 'public_help' }))
-}
 
 function parseAgentEnvelope(raw: string) {
   const escalateMatch = raw.match(/ESCALATE:\s*(yes|no)/i)
@@ -50,6 +42,7 @@ export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
   const db = env.db
   if (!db) return jsonResponse({ error: 'Database not available' }, { status: 500 })
+  if (!env.EVENTS) return jsonResponse({ error: 'Support assistant unavailable' }, { status: 503 })
 
   let body: { message?: string; history?: HelpMessage[]; topic?: string | null }
   try {
@@ -136,15 +129,16 @@ export default defineHandler(async (event) => {
               topic: topic || null, results: results.slice(0, 5), }, }
         : null, }
 
-    logPublicHelpEventDetached(event, env.DB, {
-      method: 'help/chat', toolName: 'public_help_chowbot', toolDomain: 'support', arguments: {
+    await enqueueMcpToolCallEvent(env, {
+      mcpSurface: 'public_help', method: 'help/chat', toolName: 'public_help_chowbot', toolDomain: 'support', arguments: {
         topic: topic || null, message_length: message.length, history_length: history.length, }, result: {
         escalation: shouldEscalate, suggested_links: suggested_links.length, citations: response.citations.length, }, status: 'success', durationMs: Date.now() - startedAt, })
 
     return jsonResponse(response)
   } catch (error) {
-    logPublicHelpEventDetached(event, env.DB, {
-      method: 'help/chat', toolName: 'public_help_chowbot', toolDomain: 'support', arguments: {
+    if (error instanceof HTTPError && error.data?.code === 'MCP_AUDIT_QUEUE_FAILED') throw error
+    await enqueueMcpToolCallEvent(env, {
+      mcpSurface: 'public_help', method: 'help/chat', toolName: 'public_help_chowbot', toolDomain: 'support', arguments: {
         topic: topic || null, message_length: message.length, history_length: history.length, }, status: 'error', errorMessage: error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAt, })
     console.error('Public help agent failed:', error)
     return jsonResponse({ error: 'Failed to answer support question' }, { status: 500 })

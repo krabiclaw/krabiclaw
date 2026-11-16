@@ -1,11 +1,12 @@
-import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { purgeOrganizationKvCache } from '~/server/utils/edge-cache'
 import { syncOrganizationSearchIndex } from '~/server/utils/public-search'
 import { isNonProductionHost, normalizeHost, type TenantHostEnv } from '~/server/utils/tenant-hosts'
 import { PLATFORM_THEME_ID } from '~/utils/site-routing'
 import { publishBusinessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
-import { advanceOrganizationSocialCardRefresh, expiredSocialCardRefreshClaim, SOCIAL_CARD_REFRESH_PREFIX, type SocialCardEnv } from '~/server/utils/social-card'
+import { publishEvent, type EventsEnv } from '~/server/events'
+import { advanceOrganizationSocialCardRefresh, SOCIAL_CARD_REFRESH_LEASE_SECONDS, SOCIAL_CARD_REFRESH_PREFIX, type SocialCardEnv } from '~/server/utils/social-card'
 
 // KV read-through cache for public shell and page resource queries.
 // Mirrors edge-cache.ts's HTML cache shape, but keyed by organizationId + resource
@@ -23,7 +24,7 @@ import { advanceOrganizationSocialCardRefresh, expiredSocialCardRefreshClaim, SO
 export const PUBLIC_RESOURCE_CACHE_TTL_SECONDS = 300
 
 const SEARCH_SYNC_CONTINUE = 'search-sync-continue'
-const CACHE_INVALIDATION_TERMINAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
+export const CACHE_INVALIDATION_TERMINAL_RETENTION_DAYS = 7
 
 /**
  * "This site changed." One row per write, in the write's own batch, so the
@@ -36,28 +37,27 @@ export function publicResourceCacheInvalidationQuery(
   reason: string,
   guard: BatchQuery = { query: '1', params: [] },
 ): BatchQuery {
-  const values = [crypto.randomUUID(), organizationId, reason, new Date().toISOString()]
+  const id = crypto.randomUUID()
   return {
     query: `INSERT INTO public_resource_cache_invalidations
       (id, organization_id, reason, status, created_at)
       SELECT ?, ?, ?, 'pending', ? WHERE (${guard.query})`,
-    params: [...values, ...guard.params!],
+    params: [id, organizationId, reason, new Date().toISOString(), ...guard.params!],
+    event: { type: 'site.cache_changed', organization_id: organizationId, invalidation_id: id },
   }
 }
 
-export type OrganizationChangeDrainEnv = SocialCardEnv & Pick<CloudflareEnv, 'AI_SEARCH' | 'AI_SEARCH_INSTANCE_ID' | 'NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN' | 'NUXT_PUBLIC_PLATFORM_DOMAIN'>
+export type OrganizationChangeDrainEnv = SocialCardEnv & EventsEnv & Pick<CloudflareEnv, 'AI_SEARCH' | 'AI_SEARCH_INSTANCE_ID' | 'NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN' | 'NUXT_PUBLIC_PLATFORM_DOMAIN'>
 
 /**
- * The scheduled drainer. A write purges its site's caches itself and records
- * the change; this brings each changed site's slice of the search index up to
- * date afterwards, so no write waits on AI Search. A row is processed, or it
- * failed with its reason, and the failure is reported by the task.
+ * Drain one site's committed changes. On redelivery include the failed row
+ * that woke the consumer. Older rows without a message are enrolled at cutover.
  */
 export async function drainPublicResourceCacheInvalidations(
   db: DbClient,
   kv: KVNamespace,
   env: OrganizationChangeDrainEnv,
-  options: { limit?: number; now?: Date } = {},
+  options: { organizationId: string; invalidationId: string | null; now?: Date },
 ): Promise<number> {
   const freeOrganizationDomain = normalizeHost(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
   if (!freeOrganizationDomain) throw new Error('NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN is required')
@@ -66,73 +66,45 @@ export async function drainPublicResourceCacheInvalidations(
   if (productionSearch && !env.AI_SEARCH_INSTANCE_ID?.trim()) throw new Error('AI_SEARCH_INSTANCE_ID is required to drain site changes')
   const now = options.now ?? new Date()
   const nowIso = now.toISOString()
+  const { organizationId, invalidationId } = options
   const socialCardReason = `${SOCIAL_CARD_REFRESH_PREFIX}%`
-  const terminalRetentionCutoff = new Date(now.getTime() - CACHE_INVALIDATION_TERMINAL_RETENTION_MS).toISOString()
-  // A row is processed after it is created, so the created_at bound removes
-  // nothing the processed_at one keeps; it lets the status index range-scan
-  // instead of reading every retained row on each two-minute run.
-  await execute(db, `
-    DELETE FROM public_resource_cache_invalidations
-     WHERE status IN ('processed', 'failed') AND created_at < ? AND processed_at < ? AND reason NOT LIKE ?
-  `, [terminalRetentionCutoff, terminalRetentionCutoff, socialCardReason])
-  const rows = await queryAll<{ id: string; organization_id: string }>(db, `
-    SELECT id, organization_id FROM public_resource_cache_invalidations
-     WHERE status = 'pending' AND reason NOT LIKE ? ORDER BY created_at ASC LIMIT ?
-  `, [socialCardReason, options.limit ?? 50])
+  const eligible = "organization_id = ? AND reason NOT LIKE ? AND (status = 'pending' OR (status = 'failed' AND (? IS NULL OR id = ?)))"
+  const scope = [organizationId, socialCardReason, invalidationId, invalidationId]
+  const work = await queryFirst<{ latest: number | null; social_card_id: string | null }>(db, `
+    SELECT (SELECT MAX(rowid) FROM public_resource_cache_invalidations WHERE ${eligible}) AS latest,
+           (SELECT id FROM public_resource_cache_invalidations WHERE organization_id = ? AND reason LIKE ?
+             AND (? IS NULL OR id = ?) AND status IN ('pending', 'processing')
+             ORDER BY rowid DESC LIMIT 1) AS social_card_id
+  `, [...scope, organizationId, socialCardReason, invalidationId, invalidationId])
   let processed = 0
-  const failures: Error[] = []
-  const failedOrganizations = new Map<string, string>()
-  // Several rows for one site in one drain are one change to converge on: the
-  // site's slice is listed and diffed once, and the rest of its rows ride along.
-  const drainedOrganizations = new Set<string>()
-  const finish = async (id: string, status: 'processed' | 'failed', error: string | null) => {
-    const finalized = await execute(db, `
-      UPDATE public_resource_cache_invalidations SET status = ?, processed_at = ?, last_error = ?
-       WHERE id = ? AND status = 'pending'
-    `, [status, nowIso, error, id])
-    if (status === 'processed' && Number(finalized.meta?.changes ?? 0) === 1) processed += 1
-  }
-  for (const row of rows) {
-    const earlier = failedOrganizations.get(row.organization_id)
-    if (earlier !== undefined) {
-      // The same site's change failed a moment ago in this drain; this row is that change.
-      await finish(row.id, 'failed', earlier)
-      continue
-    }
+  if (work?.latest != null) {
+    const finish = (status: 'processed' | 'failed', error: string | null): BatchQuery => ({
+      query: `UPDATE public_resource_cache_invalidations SET status = ?, processed_at = ?, last_error = ?
+         WHERE ${eligible} AND rowid <= ?`,
+      params: [status, nowIso, error, ...scope, work.latest],
+    })
+    let more = false
     try {
-      const firstForOrganization = !drainedOrganizations.has(row.organization_id)
-      if (firstForOrganization) await purgeOrganizationCaches(db, kv, row.organization_id, env)
-      if (productionSearch && firstForOrganization) {
-        const synced = await syncOrganizationSearchIndex(env as CloudflareEnv, db, row.organization_id)
-        // A bounded run that left uploads behind is more of the same change, so it goes back on the queue as a new row.
-        if (synced.pending > 0) {
-          const more = publicResourceCacheInvalidationQuery(row.organization_id, SEARCH_SYNC_CONTINUE)
-          await execute(db, more.query, more.params ?? [])
-        }
-      }
-      drainedOrganizations.add(row.organization_id)
-      await finish(row.id, 'processed', null)
+      await purgeOrganizationCaches(db, kv, organizationId, env)
+      if (productionSearch) more = (await syncOrganizationSearchIndex(env as CloudflareEnv, db, organizationId)).pending > 0
     } catch (error) {
-      const message = (error instanceof Error ? error.message : String(error)).slice(0, 2000)
-      await finish(row.id, 'failed', message)
-      failures.push(error instanceof Error ? error : new Error(String(error)))
-      failedOrganizations.set(row.organization_id, message)
+      await executeBatch(db, [finish('failed', (error instanceof Error ? error.message : String(error)).slice(0, 2000))])
+      throw error
     }
+    const [finalized] = await executeBatch(db, [
+      finish('processed', null),
+      ...(more ? [publicResourceCacheInvalidationQuery(organizationId, SEARCH_SYNC_CONTINUE)] : []),
+    ], { operation: 'Finish public site changes' })
+    processed = Number(finalized?.meta.changes ?? 0)
   }
-  const cardRefresh = await queryFirst<{ id: string; organization_id: string }>(db, `
-    SELECT id, organization_id FROM public_resource_cache_invalidations
-    WHERE reason LIKE ? AND (status = 'pending' OR (status = 'processing' AND processed_at < ?))
-    ORDER BY COALESCE(processed_at, created_at), rowid LIMIT 1
-  `, [socialCardReason, expiredSocialCardRefreshClaim(now)])
-  if (cardRefresh) {
-    const { refresh } = await advanceOrganizationSocialCardRefresh({ db, env, organizationId: cardRefresh.organization_id, id: cardRefresh.id })
-    if (refresh?.status === 'failed' && refresh.error) {
-      failedOrganizations.set(cardRefresh.organization_id, refresh.error)
-      failures.push(new Error(refresh.error))
+  if (work?.social_card_id) {
+    const id = work.social_card_id
+    const { refresh, next_cursor } = await advanceOrganizationSocialCardRefresh({ db, env, organizationId, id })
+    if (refresh?.id === id && refresh.status === 'failed' && refresh.error) throw new Error(refresh.error)
+    if (refresh?.id === id && refresh.status === 'pending' && next_cursor === null) {
+      // A redelivery can find a render still claimed. Recheck after its lease can expire.
+      await publishEvent(env, { type: 'site.cache_changed', organization_id: organizationId, invalidation_id: id }, { delaySeconds: SOCIAL_CARD_REFRESH_LEASE_SECONDS + 1 })
     }
-  }
-  if (failures.length > 0) {
-    throw new AggregateError(failures, `Failed to drain site changes for ${failedOrganizations.size} organization(s): ${failures.map(error => error.message).join('; ')}`)
   }
   return processed
 }
@@ -254,10 +226,9 @@ export async function purgePublicResourceCacheNow(
   // read back stale. Everything else — the retention sweep, retry bookkeeping,
   // claiming, the domain and site reads — belongs to the drainer, which runs
   // on its own schedule rather than inside a mutation's response time. The
-  // queued row is what makes every other worker converge.
-  const invalidation = publicResourceCacheInvalidationQuery(organizationId, 'write-through-purge')
+  // queued row also marks the site for search indexing.
   await Promise.all([
-    execute(db, invalidation.query, invalidation.params),
+    executeBatch(db, [publicResourceCacheInvalidationQuery(organizationId, 'write-through-purge')]),
     purgeOrganizationCaches(db, kv, organizationId, maybeEnv),
   ])
   await publishBusinessInvalidation(maybeEnv, organizationId)

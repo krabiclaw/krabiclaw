@@ -27,7 +27,7 @@ upstream_protocol = "http"
 [triggers]
 # Every expression is dispatched through Nitro's cloudflare:scheduled hook.
 # Keep this list in sync with SCHEDULED_TASKS in server/scheduled-tasks.ts.
-crons = ["*/5 * * * *", "*/2 * * * *", "*/10 * * * *", "0 3 * * *", "0 0 * * SUN", "0 * * * *"]
+crons = ["0 0 * * SUN"]
 
 [[routes]]
 pattern = "*.krabiclaw.com/*"
@@ -128,6 +128,18 @@ new_sqlite_classes = ["GuestThreadCommandObject", "GuestInboxHubObject"]
 tag = "v2_delete_guest_thread_command"
 deleted_classes = ["GuestThreadCommandObject"]
 
+# What a write announces, delivered by Cloudflare to whatever reacts (server/events.ts). No timer looks for it.
+[[queues.producers]]
+binding = "EVENTS"
+queue = "krabiclaw-events"
+
+[[queues.consumers]]
+queue = "krabiclaw-events"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
+dead_letter_queue = "krabiclaw-events-dlq"
+
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
 bucket_name = "krabiclaw-media"
@@ -206,6 +218,11 @@ name = "GUEST_INBOX_HUBS"
 class_name = "GuestInboxHubObject"
 script_name = "krabiclaw-guest-inbox-hub"
 
+# The platform proxy uses the dev registry to reach the queue consumer in the local inbox hub Worker.
+[[env.dev.queues.producers]]
+binding = "EVENTS"
+queue = "krabiclaw-events-local"
+
 [[env.dev.r2_buckets]]
 binding = "MEDIA_BUCKET"
 bucket_name = "krabiclaw-media"
@@ -239,10 +256,7 @@ region = "aws:us-west-2"
 # data: scanning a growing, never-cleaned non-production database every few
 # minutes once drove a 93B-row D1 billing spike.
 [env.staging.triggers]
-# Only the Channex queues run on staging, on expressions production does not use
-# (see SCHEDULED_TASKS): airbnb_sync_jobs, channel_night_pushes and the Channex
-# revision feed, which Channex certification requires. Nothing scans tenant data.
-crons = ["1-59/2 * * * *", "3-59/10 * * * *"]
+crons = []
 
 [env.staging.vars]
 # Channex staging, where the Airbnb test accounts live. CHANNEX_API_KEY is a secret.
@@ -295,6 +309,18 @@ new_sqlite_classes = ["GuestThreadCommandObject", "GuestInboxHubObject"]
 [[env.staging.migrations]]
 tag = "v2_delete_guest_thread_command"
 deleted_classes = ["GuestThreadCommandObject"]
+
+# What a write announces, delivered by Cloudflare to whatever reacts (server/events.ts). No timer looks for it.
+[[env.staging.queues.producers]]
+binding = "EVENTS"
+queue = "krabiclaw-events-staging"
+
+[[env.staging.queues.consumers]]
+queue = "krabiclaw-events-staging"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
+dead_letter_queue = "krabiclaw-events-staging-dlq"
 
 [[env.staging.r2_buckets]]
 binding = "MEDIA_BUCKET"
@@ -373,6 +399,17 @@ new_sqlite_classes = ["GuestThreadCommandObject", "GuestInboxHubObject"]
 [[env.e2e.migrations]]
 tag = "v2_delete_guest_thread_command"
 deleted_classes = ["GuestThreadCommandObject"]
+
+# What a write announces, delivered by Cloudflare to whatever reacts (server/events.ts). No timer looks for it.
+[[env.e2e.queues.producers]]
+binding = "EVENTS"
+queue = "krabiclaw-events-local"
+
+[[env.e2e.queues.consumers]]
+queue = "krabiclaw-events-local"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
 
 [[env.e2e.r2_buckets]]
 binding = "MEDIA_BUCKET"

@@ -1,6 +1,7 @@
 import { putPublicResourceCache } from '../../server/utils/public-resource-cache.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { captureEvents } from './support/events.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { H3 } from 'nitro/h3'
@@ -55,7 +56,7 @@ test('a home authors room details and manages its product photos through authent
       await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES (?, ?, 'credential', ?, ?, 0, 0)").bind(`a-${id}`, id, id, await hashPassword(PASSWORD)).run()
     }
     const env = {
-      ...await runtime.getBindings<CloudflareEnv>(), DB: db, BETTER_AUTH_SECRET: 'stay-home-photos-secret-long-enough-for-auth', BETTER_AUTH_URL: BASE, NUXT_PUBLIC_PLATFORM_DOMAIN: BASE,
+      ...await runtime.getBindings<CloudflareEnv>(), DB: db, EVENTS: captureEvents().binding, BETTER_AUTH_SECRET: 'stay-home-photos-secret-long-enough-for-auth', BETTER_AUTH_URL: BASE, NUXT_PUBLIC_PLATFORM_DOMAIN: BASE,
       STRIPE_SECRET_KEY: 'sk_test_stay_home_photos_no_provider_requests', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
       MEDIA_BASE_URL: 'https://media.proof.example',
     } as CloudflareEnv

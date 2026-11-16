@@ -78,17 +78,22 @@ export async function storeIntegration(
   const revision = crypto.randomUUID()
   const fields = [selection.account_id, selection.target_id, selection.target_name, selection.measurement_id ?? null,
     selection.verified === undefined || selection.verified === null ? null : Number(selection.verified), selection.verification_token ?? null, revision]
-  const replace = `account_id = ?, target_id = ?, target_name = ?, measurement_id = ?, verified = ?, verification_token = ?, revision = ?, updated_at = ?`
+  // A different Ads account cannot inherit the dates of the previous
+  // connection when managed-spend eligibility is calculated.
+  const ads = provider === 'google_ads' || provider === 'meta_ads'
+  const replace = `account_id = ?, target_id = ?, target_name = ?, measurement_id = ?, verified = ?, verification_token = ?, revision = ?, updated_at = ?
+    ${ads ? ', created_at = CASE WHEN target_id IS NOT ? THEN ? ELSE created_at END' : ''}`
   const insert = `INSERT INTO organization_integrations (account_id, target_id, target_name, measurement_id, verified, verification_token, revision, updated_at, id, organization_id, provider, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   const statement = expected?.revision
-    ? { query: `UPDATE organization_integrations SET ${replace} WHERE organization_id = ? AND provider = ? AND revision = ?`, params: [...fields, now, organizationId, provider, expected.revision] }
+    ? { query: `UPDATE organization_integrations SET ${replace} WHERE organization_id = ? AND provider = ? AND revision = ?`, params: [...fields, now, ...(ads ? [selection.target_id, now] : []), organizationId, provider, expected.revision] }
     : expected
       // Only where nothing is connected: a row already there is a conflict.
       ? { query: `${insert} ON CONFLICT (organization_id, provider) DO NOTHING`, params: [...fields, now, crypto.randomUUID(), organizationId, provider, now] }
       : { query: `${insert} ON CONFLICT (organization_id, provider) DO UPDATE SET account_id = excluded.account_id, target_id = excluded.target_id, target_name = excluded.target_name,
           measurement_id = excluded.measurement_id, verified = excluded.verified, verification_token = excluded.verification_token,
-          revision = excluded.revision, updated_at = excluded.updated_at`, params: [...fields, now, crypto.randomUUID(), organizationId, provider, now] }
+          revision = excluded.revision, updated_at = excluded.updated_at
+          ${ads ? ', created_at = CASE WHEN organization_integrations.target_id IS NOT excluded.target_id THEN excluded.created_at ELSE organization_integrations.created_at END' : ''}`, params: [...fields, now, crypto.randomUUID(), organizationId, provider, now] }
   let changes: number | undefined
   try {
     changes = (await execute(db, statement.query, statement.params)).meta?.changes

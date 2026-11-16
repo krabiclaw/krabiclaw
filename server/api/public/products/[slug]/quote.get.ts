@@ -14,10 +14,10 @@ export default defineHandler(async (event) => {
   const db = env.DB
   const query = getQuery(event)
   const whole = (value: unknown) => typeof value === 'string' && /^\d{1,2}$/.test(value) ? Number(value) : value
-  const product = await queryFirst<{ kind: string }>(db, 'SELECT kind FROM products WHERE organization_id=? AND slug=?', [organizationId, slug])
+  const product = await queryFirst<{ id: string; kind: string }>(db, 'SELECT id, kind FROM products WHERE organization_id=? AND slug=?', [organizationId, slug])
   if (!product) throw new HTTPError({ statusCode: 404, message: 'Product not found' })
   const quote = product.kind === 'stay'
-    ? { unit: 'nights' as const, ...await quoteStay(db, organizationId, await readPublicStayHome(db, organizationId, slug), {
+    ? { unit: 'nights' as const, ...await quoteStay(db, organizationId, await readPublicStayHome(db, organizationId, product.id), {
       check_in_date: query.check_in_date, check_out_date: query.check_out_date,
       adults: whole(query.adults), children: query.children === undefined ? 0 : whole(query.children), infants: query.infants === undefined ? 0 : whole(query.infants),
     }) }

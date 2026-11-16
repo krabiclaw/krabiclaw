@@ -31,7 +31,7 @@ import type { InboxRow } from '../../server/domain/guest-threads/types'
 const TIME_ZONE = 'Asia/Bangkok'
 
 type NightBooking = Omit<StayDetail, 'id'> & { booking_id: string; unit: 'nights' }
-type NightBookingReceipt = Pick<NightBooking, 'booking_id' | 'unit' | 'version'> & { channel_push: unknown }
+type NightBookingReceipt = Pick<NightBooking, 'booking_id' | 'unit' | 'version'>
 
 function nightCalendarPath(from: string, to: string, productId?: string) {
   const query = new URLSearchParams({ unit: 'nights', from, to })
@@ -171,6 +171,9 @@ test('listing messaging grants and verified trip invites use the live conversati
     const currentGrants = await page.request.get(grants, { params: { organization_id: organizationId } })
     await expectStatus(currentGrants, 200)
     expect(await currentGrants.json()).toEqual({ member_ids: [memberId] })
+    const cohostTranscript = await cohost.request.get(path)
+    await expectStatus(cohostTranscript, 200)
+    expect(await cohostTranscript.json()).toMatchObject({ conversation: { booking_id: null }, viewer_role: 'member' })
     const cohostPage = await cohost.newPage()
     // Release the first open after the transcript is on screen.
     // A real reconnect is tested below, with a message written while offline.
@@ -197,6 +200,7 @@ test('listing messaging grants and verified trip invites use the live conversati
     await socketCapture
     await expect(cohostPage.getByText(reply, { exact: true })).toBeVisible()
     await expect(cohostPage.getByRole('textbox', { name: 'Write a message…' })).toBeVisible()
+    await expect(cohostPage.getByRole('link', { name: 'Show reservation', exact: true })).toHaveCount(0)
     await waitForNuxtHydration(cohostPage)
     await expect(cohostPage.locator('html')).toHaveAttribute('data-dashboard-socket-ready', 'true')
     expect(transcriptReads).toBe(1)
@@ -299,14 +303,13 @@ test('listing messaging grants and verified trip invites use the live conversati
     await expectStatus(await traveler.request.post('/api/messages/invites/accept', { headers, data: { token: otherToken } }), 200)
     await otherAppears
     await expect(otherRow).toContainText(otherReply)
-    const disconnected = travelerSocket.waitForEvent('close')
-    await travelerPage.evaluate(() => window.dispatchEvent(new Event('offline')))
-    await disconnected
+    await traveler.setOffline(true)
     const reconnectText = 'Your second arrival guide was updated.'
     await expectStatus(await page.request.post(otherPath, { headers, data: { body: reconnectText, idempotency_key: crypto.randomUUID() } }), 200)
+    await expect(otherRow).toContainText(otherReply)
     const reconnectedSocket = travelerPage.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).searchParams.get('scope') === 'account' })
     const reconnectedTranscript = travelerPage.waitForResponse(response => transcriptRequest(response.request()))
-    await travelerPage.evaluate(() => window.dispatchEvent(new Event('online')))
+    await traveler.setOffline(false)
     const activeTravelerSocket = await reconnectedSocket
     await expectStatus(await reconnectedTranscript, 200)
     await expect(otherRow).toContainText(reconnectText)
@@ -384,6 +387,7 @@ test('listing messaging grants and verified trip invites use the live conversati
     await page.goto(`/dashboard/${slug}/messages/${booking.conversation_id}`)
     await page.getByRole('button', { name: 'In this conversation', exact: true }).click()
     const sheet = page.getByRole('dialog', { name: 'In this conversation', exact: true })
+    await sheet.getByRole('button', { name: 'Manage guests', exact: true }).click()
     await sheet.getByRole('button', { name: `Remove ${findE2eAuthFixture(travelerId).name}`, exact: true }).click()
     const removal = page.waitForResponse(response => response.request().method() === 'DELETE' && new URL(response.url()).pathname === participant)
     await sheet.getByRole('button', { name: 'Remove', exact: true }).click()
@@ -597,19 +601,18 @@ test('a home keeps its operator name independent from its public title across CM
   expect(savedClocks.data!.product.stay).toMatchObject({ check_in_time: null, check_out_time: null })
   await page.goto(`/dashboard/${slug}/bookings/${stay.booking_id}`)
   const stayPanel = page.locator('#dashboard-panel-stay-details')
-  await expect(stayPanel.getByText('Arriving', { exact: true })).toBeVisible()
-  await expect(stayPanel.getByText('6:30 PM', { exact: true })).toBeVisible()
+  await expect(stayPanel.getByText('Arriving 6:30 PM', { exact: true })).toBeVisible()
   const clearedArrival = await call<NightBookingReceipt>('update_product_booking', { booking_id: stay.booking_id, version: recordedArrival.data!.version, arrival_time: null })
   expect(clearedArrival.error).toBeNull()
   await page.reload()
-  await expect(stayPanel.getByRole('heading', { name: 'Check-in', exact: true })).toBeVisible()
-  await expect(stayPanel.getByText('Arriving', { exact: true })).toHaveCount(0)
+  await expect(stayPanel.locator('dt', { hasText: /^Check-in$/u })).toBeVisible()
+  await expect(stayPanel.getByText(/^Arriving /u)).toHaveCount(0)
 
   const cancelled = await call<{ status: string }>('cancel_product_booking', { booking_id: stay.booking_id, version: clearedArrival.data!.version, idempotency_key: crypto.randomUUID() })
   expect(cancelled.error).toBeNull()
   expect(cancelled.data!.status).toBe('cancelled')
   await page.reload()
-  await expect(stayPanel.getByRole('heading', { name: 'Cancelled', exact: true })).toBeVisible()
+  await expect(stayPanel.getByText('Cancelled', { exact: true })).toBeVisible()
 })
 
 // A member responsible for a home reads turnover details while owners and
@@ -652,7 +655,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     // Exactly the Turnovers fields, with the values the host saved.
     // The recorded arrival is the stay's start; the member reads the guest's first name.
     const turnoverFields = { product_id: productId, location_id: stay.location_id, timezone: stay.timezone, status: stay.status, starts_at: stay.starts_at, ends_at: stay.ends_at, check_in_date: localDay(0), check_out_date: localDay(2),
-      adults: 2, children: 1, infants: 0, guest_name: guestName, no_show_at: null }
+      adults: 2, children: 1, infants: 0, guest_name: guestName }
     expect(new Intl.DateTimeFormat('en-GB', { timeZone: stay.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(stay.starts_at))).toBe('15:30')
     const leaks = (body: unknown) => [surname, guestEmail, notes, stay.conversation_id!].filter(secret => JSON.stringify(body).includes(secret))
     const stayPath = api(`bookings/${stay.booking_id}`)
@@ -666,7 +669,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     await expectStatus(memberList, 200)
     // The bookings list, the host Calendar and the calendar tool draw a member's stay as its days, status, party and the guest's first name.
     const { product_id, status, guest_name, adults, children, check_in_date, check_out_date } = turnoverFields
-    const calendarRow = { unit: 'nights', booking_id: stay.booking_id, product_id, status, guest_name, adults, children, check_in_date, check_out_date }
+    const calendarRow = { unit: 'nights', booking_id: stay.booking_id, conversation_id: null, product_id, status, guest_name, adults, children, check_in_date, check_out_date }
     expect(await memberList.json()).toEqual({ bookings: [{ ...calendarRow, name: 'Cliff Cabin' }], manage: false })
     for (const product of [undefined, productId]) {
       const calendar = await memberContext.request.get(api(nightCalendarPath(localDay(0), localDay(3), product)))
@@ -729,12 +732,13 @@ test('a responsible home member reads its stays as turnovers on every surface un
     await memberPage.goto(`/dashboard/${slug}/bookings/${stay.booking_id}`)
     await expectStatus(await stayRead, 200)
     const details = memberPage.locator('#dashboard-panel-stay-details')
-    await expect(details.getByRole('heading', { name: `${guestName}’s group of 3`, exact: true })).toBeVisible()
-    await expect(details.getByText('2 adults, 1 child', { exact: true })).toBeVisible()
-    await expect(details.getByText(/^3:30\sPM$/u)).toBeVisible()
+    await expect(details.getByRole('heading', { name: 'Reservation', level: 1, exact: true })).toBeVisible()
+    await expect(details.getByText('3 guests', { exact: true })).toBeVisible()
+    await expect(details.getByText(guestName[0]!, { exact: true })).toBeVisible()
+    await expect(details.getByText(/^Arriving 3:30\sPM$/u)).toBeVisible()
     await expect(details.getByText('Cliff Cabin', { exact: true })).toBeVisible()
     for (const hidden of [surname, guestEmail, notes]) await expect(memberPage.getByText(hidden)).toHaveCount(0)
-    await expect(details.getByRole('heading', { name: 'Payments', exact: true })).toHaveCount(0)
+    await expect(details.getByRole('heading', { name: 'Payment info', exact: true })).toHaveCount(0)
     await expect(memberPage.getByRole('link', { name: 'Message guest', exact: true })).toHaveCount(0)
     // Owners still read the whole stay.
     const ownerStay = await page.request.get(stayPath)
@@ -778,10 +782,10 @@ test('a responsible home member reads its stays as turnovers on every surface un
     // KrabiClaw's job message is news to the member until they open the conversation.
     expect((await teamRows()).find(row => row.id === jobThreadId)).toMatchObject({ kind: 'team', unread: true })
     await memberPage.goto(`/dashboard/${slug}/messages/${jobThreadId}?kind=team`)
-    await expect(memberPage.getByText('Sent automatically')).toBeVisible()
-    await expect.poll(async () => (await teamRows()).find(row => row.id === jobThreadId)?.unread).toBe(false)
     const turnoverPost = memberPage.locator('[data-team-message][data-automatic]').filter({ hasText: cleanPost })
     await expect(turnoverPost).toHaveCount(1)
+    await expect(turnoverPost.getByText('Job', { exact: true })).toBeVisible()
+    await expect.poll(async () => (await teamRows()).find(row => row.id === jobThreadId)?.unread).toBe(false)
     // The member's Upcoming is the clean, one card that opens this conversation; nothing of the guest but their first name.
     const upcoming = await memberContext.request.get(api('today?range=upcoming'))
     await expectStatus(upcoming, 200)
@@ -792,7 +796,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
       headline: `Clean up after ${guestName}’s group of 3`, line: 'Cliff Cabin', action: { title: 'Message the host', detail: 'Ask anything before the day' }, to: `/dashboard/${slug}/messages/${jobThreadId}`, draft: null })
     expect(leaks(upcomingBody)).toEqual([])
     // The conversation has Done: one tap closes the job, and "Done" is the member's own message in it.
-    const done = memberPage.getByTestId('conversation-job-done')
+    const done = turnoverPost.getByTestId('conversation-job-done')
     const closed = memberPage.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/organizations/${organizationId}/tasks/${clean!.id.slice('task:'.length)}/complete`)
     await done.click()
     await expectStatus(await closed, 200)
@@ -803,12 +807,6 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const thread = await memberContext.request.get(`/api/messages/${jobThreadId}`)
     await expectStatus(thread, 200)
     expect((await thread.json() as ConversationPage).entries.filter(entry => entry.type === 'message' && !entry.automatic && entry.body === 'Done').length).toBe(1)
-    // The host can move the guest; this business has no other home to move them to.
-    await page.goto(`/dashboard/${slug}/bookings/${stay.booking_id}`)
-    await page.getByTestId('stay-move').click()
-    await expect(page).toHaveURL(new RegExp(`/bookings/${stay.booking_id}/move$`))
-    await expect(page.locator('#dashboard-panel-stay-move').getByText('You have no other homes to move this guest to.', { exact: true })).toBeVisible()
-    await expect(page.locator('#dashboard-panel-stay-move').getByRole('button', { name: 'Move guest', exact: true })).toBeDisabled()
 
     // Handing the home back to its owner takes it away from the member.
     const removed = await page.request.patch(`/api/editor/organizations/${organizationId}/products/${productId}`, { data: { stay: { assigned_member_id: ownerMemberId } } })
@@ -866,23 +864,29 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
     page.getByRole('button', { name: 'Create stay', exact: true }).click(),
   ])
   await expectStatus(stayCreated, 201)
-  const createdReceipt = await stayCreated.json() as { booking: NightBooking & { channel_push: unknown } }
+  const createdReceipt = await stayCreated.json() as { booking: NightBooking }
   await expect(page).toHaveURL(new RegExp(`/bookings/${createdReceipt.booking.booking_id}$`))
   const stay = await call<{ record: StayDetail }>('get_product_booking', { booking_id: createdReceipt.booking.booking_id })
   expect(stay.error).toBeNull()
   expect(stay.data!.record).toMatchObject({ product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: 'Ana Silva', guest_email: `ana-${slug}@playwright.example`, guest_image_url: null, adults: 2, children: 0, infants: 0, total_minor: 300_00, paid_minor: 0, payments: [] })
-  await expect(page.locator('#dashboard-panel-stay-details').getByText('A', { exact: true })).toHaveCount(2)
+  await expect(page.getByTestId('reservation-panel').getByText('A', { exact: true })).toBeVisible()
   await expect(page.locator('#dashboard-panel-stay-details img[alt="Ana Silva"]')).toHaveCount(0)
   const overlap = await call('create_product_booking', { product_slug: home.data!.product.slug, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1, guest_name: 'Bo', total_minor: 100_00, idempotency_key: `${slug}-b` })
-  expect(overlap.error).toContain('Another stay or a linked calendar already holds one of these nights')
+  expect(JSON.parse(overlap.error!)).toEqual({
+    status: 409, code: 'STAY_OVERLAP', field: 'check_in_date', message: 'Another stay already holds one of these nights',
+  })
 
   // Calendar owns arrival/departure activity; Today is the actionable quest feed.
+  const thread = `/dashboard/${slug}/messages/${stay.data!.record.conversation_id}`
+  await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(`/dashboard/${slug}/calendar?view=list`)
-  const arrival = page.locator(`a[href="/dashboard/${slug}/calendar/${checkIn}/booking/${stay.data!.record.id}?view=list"]`)
+  const arrival = page.locator(`[data-day="${checkIn}"] a[href="${thread}"]`)
   await expect(arrival).toContainText('Ana')
   await arrival.click()
-  await expect(page.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
+  await expect(page).toHaveURL(`${thread}/reservation/${stay.data!.record.id}`)
+  await expect(page.getByTestId('reservation-panel').getByText('2 guests', { exact: true })).toBeVisible()
 
+  await page.getByRole('link', { name: 'Record a payment', exact: true }).click()
   await page.getByRole('textbox', { name: 'Amount (THB)' }).fill('100')
   await page.getByRole('button', { name: 'Record payment' }).click()
   // The recorded row, not the method picker: it names the amount with its method.
@@ -890,7 +894,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   const paid = await call<{ record: StayDetail }>('get_product_booking', { booking_id: stay.data!.record.id })
   expect(paid.error).toBeNull()
   expect(paid.data!.record).toMatchObject({ paid_minor: 100_00, payment_status: 'partial', payments: [{ method: 'cash', amount_minor: 100_00 }] })
-  expect(createdReceipt.booking).toMatchObject({ booking_id: paid.data!.record.id, unit: 'nights', product_id: productId, conversation_id: paid.data!.record.conversation_id, status: 'confirmed', version: 1, check_in_date: checkIn, check_out_date: checkOut, channel_push: null })
+  expect(createdReceipt.booking).toMatchObject({ booking_id: paid.data!.record.id, unit: 'nights', product_id: productId, conversation_id: paid.data!.record.conversation_id, status: 'confirmed', version: 1, check_in_date: checkIn, check_out_date: checkOut })
   const messagingContext = await call<{ conversation_id: string; home: Record<string, unknown>; stay: Record<string, unknown>; record: Record<string, unknown> }>('get_guest_messaging_context', { conversation_id: paid.data!.record.conversation_id })
   expect(messagingContext.error).toBeNull()
   expect(messagingContext.data).toEqual({ conversation_id: paid.data!.record.conversation_id,
@@ -898,7 +902,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
     stay: { id: paid.data!.record.id, product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: paid.data!.record.guest_name, adults: paid.data!.record.adults, children: paid.data!.record.children, infants: paid.data!.record.infants },
     // The booked record every conversation names, a stay's at its home's check-in and checkout times.
     record: { unit: 'nights', status: 'confirmed', name: 'Cliff Cabin', location: 'Cliff Cabin location', address: expect.any(String), phone: null,
-      party_size: paid.data!.record.adults + paid.data!.record.children, timezone: TIME_ZONE, starts: expect.stringMatching(new RegExp(`^${checkIn}( |$)`)), ends: expect.stringMatching(new RegExp(`^${checkOut}( |$)`)), no_show_at: null },
+      party_size: paid.data!.record.adults + paid.data!.record.children, timezone: TIME_ZONE, starts: expect.stringMatching(new RegExp(`^${checkIn}( |$)`)), ends: expect.stringMatching(new RegExp(`^${checkOut}( |$)`)) },
   })
   const selectedStays = await call<{ bookings: Array<Record<string, unknown>> }>('list_product_bookings', { product_id: productId })
   expect(selectedStays.error).toBeNull()
@@ -993,20 +997,25 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
     expect(toAccount.headers().location).toBe('/dashboard/account')
     await expectStatus(await tableGuest.request.get(`${baseURL}/api/post-login?plan=business`, { maxRedirects: 0 }), 409)
     const personal = await tableGuest.newPage()
+    await personal.setViewportSize({ width: 1440, height: 900 })
     const landed = await personal.goto(`${baseURL}/api/post-login`)
     expect(landed?.status()).toBe(200)
     await expect(personal).toHaveURL(`${baseURL}/dashboard/account`)
     await waitForNuxtHydration(personal)
     // The guest's own reservation, its conversation and calendar: the Personal pages that hold something.
-    for (const path of ['/dashboard/account/activity', `/dashboard/account/activity/booking/${reservationId}`, `/dashboard/account/messages/${reservationId}`, `/dashboard/account/calendar/${slot!.date}`]) {
+    for (const path of ['/dashboard/account/activity', `/dashboard/account/activity/booking/${reservationId}`, `/dashboard/account/calendar/${slot!.date}`]) {
       const response = await personal.goto(`${baseURL}${path}`)
       expect(response?.status(), path).toBe(200)
       await waitForNuxtHydration(personal)
       await expect(personal).toHaveURL(`${baseURL}${path}`)
     }
     expect((await personal.goto(`${baseURL}/dashboard/account/notifications`))?.status()).toBe(404)
-    await personal.goto(`${baseURL}/dashboard/account/messages/${reservationId}`)
-    await expect(personal.getByText(/Table for 2 on /u).first()).toBeVisible()
+    const conversationPath = `/dashboard/account/messages/${reservationId}`
+    expect((await personal.goto(`${baseURL}${conversationPath}`))?.status()).toBe(200)
+    await waitForNuxtHydration(personal)
+    await expect(personal).toHaveURL(`${baseURL}${conversationPath}/reservation`)
+    await expect(personal.locator('#dashboard-panel-organization-messages-thread').getByText(/^Table for 2 on /u)).toBeVisible()
+    await expect(personal.getByTestId('reservation-panel')).toBeVisible()
   } finally {
     await tableGuest.close()
   }
@@ -1016,7 +1025,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   // A guest's own account and receipt reads of a stay they bought are covered in stays-d1: only a checkout gives a stay its guest's account.
   await page.goto(`/dashboard/${slug}/bookings/${stay.data!.record.id}`)
 
-  await page.getByRole('button', { name: 'Cancel stay' }).click()
+  await page.getByTestId('reservation-panel').getByRole('button', { name: 'Cancel reservation', exact: true }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel stay' }).click()
   await expect(page.getByText('Cancelled', { exact: true })).toBeVisible()
   const calendar = await call<{ nights: Array<{ date: string; available: boolean }> }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
@@ -1025,6 +1034,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   expect(cancelled.data!.record.status).toBe('cancelled')
   expect(cancelled.data!.record.cancelled_at).toBeTruthy()
 
+  await page.getByRole('link', { name: 'Record a payment', exact: true }).click()
   await page.getByLabel('Amount (THB)', { exact: true }).fill('-100')
   await page.getByLabel('Reference', { exact: true }).fill('Offline refund after cancellation')
   const [offlineRefund] = await Promise.all([
@@ -1087,7 +1097,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   expect(cancelledRead.status()).toBe(200)
   const savedCancellation = (await cancelledRead.json() as { booking: NightBooking }).booking
   expect(cancelledByMcp.data).toEqual({ booking_id: native.booking_id, unit: 'nights', status: 'cancelled', version: savedCancellation.version,
-    cancelled_at: savedCancellation.cancelled_at, cancellation_reason: 'Contract cancellation', channel_push: null })
+    cancelled_at: savedCancellation.cancelled_at, cancellation_reason: 'Contract cancellation' })
   expect(savedCancellation).toMatchObject({ booking_id: native.booking_id, unit: 'nights', product_id: productId, status: 'cancelled', conversation_id: native.conversation_id,
     check_in_date: later[0], check_out_date: later[1], cancellation_reason: 'Contract cancellation' })
 })
@@ -4165,7 +4175,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
     const homes = [assignedHome, { product_id: otherHome.id, location_id: locations.data!.locations[0]!.id }]
     const assigned = await call('update_product', { product_id: homes[0]!.product_id, stay: { assigned_member_id: memberId } })
     expect(assigned.error).toBeNull()
-    const stays: Array<Pick<NightBooking, 'booking_id' | 'ends_at' | 'timezone'>> = []
+    const stays: Array<Pick<NightBooking, 'booking_id' | 'conversation_id' | 'ends_at' | 'timezone'>> = []
     for (const [index, home] of homes.entries()) {
       const made = await page.request.post(api('bookings'), { data: { product_id: home.product_id, check_in_date: localDay(0), check_out_date: localDay(2), adults: 2,
         guest_name: index === 0 ? 'Ana Silva' : 'Private Silva', total_minor: 30_000, idempotency_key: crypto.randomUUID() } })
@@ -4663,13 +4673,12 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect(configuredHome.data!.product.stay!.calendar_rules).toBeNull()
       const calendarPath = `/dashboard/${slug}/calendar?product_id=${assignedHome.product_id}`
       await page.goto(`/dashboard/${slug}/calendar?product_id=missing-home`)
-      await expect(page.getByText('That offering is not available in this organization.', { exact: true })).toBeVisible()
+      await expect(page.getByText('Product not found', { exact: true })).toBeVisible()
       await expect(page.getByTestId('stay-night-inspector')).toHaveCount(0)
-      await expect(page.getByRole('combobox', { name: 'Calendar', exact: true })).toHaveCount(0)
       await page.goto(calendarPath)
       const calendar = page.locator('#dashboard-panel-stay-night-calendar')
       const inspector = page.getByTestId('stay-night-inspector')
-      await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText('Availability: Assigned Cabin')
+      await expect(calendar.getByRole('heading', { name: 'Assigned Cabin', exact: true })).toBeVisible()
       await expect(calendar.getByText(`${TIME_ZONE} · THB`, { exact: true })).toBeVisible()
       await calendar.locator(`[data-reka-calendar-cell-trigger][data-value="${localDay(0)}"]:not([data-outside-view])`).click()
       await expect(inspector.getByText('Reserved', { exact: true })).toBeVisible()
@@ -4823,24 +4832,30 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect(occupied.error).toBeNull()
       expect(occupied.data!.nights).toEqual([0, 1].map(offset => expect.objectContaining({ date: localDay(offset), booking_id: stays[0]!.booking_id, available: false, closed: false, source: null })))
       const calendarStay = inspector.getByRole('link', { name: 'View stay', exact: true })
-      const calendarStayURL = new URL((await calendarStay.getAttribute('href'))!, baseURL!)
-      expect(calendarStayURL.pathname).toBe(`/dashboard/${slug}/calendar/stay/${stays[0]!.booking_id}`)
-      expect(calendarStayURL.searchParams.get('product_id')).toBe(assignedHome.product_id)
-      expect(calendarStayURL.searchParams.get('month')).toBe(localDay(0).slice(0, 7))
+      const stayThread = `/dashboard/${slug}/messages/${stays[0]!.conversation_id}`
+      const stayRecord = `${stayThread}/reservation/${stays[0]!.booking_id}`
+      await expect(calendarStay).toHaveAttribute('href', stayThread)
+      const calendarReturn = page.url()
       await calendarStay.click()
-      await expect(page).toHaveURL(calendarStayURL.href)
+      await expect(page).toHaveURL(stayRecord)
       const calendarStayDetails = page.locator('#dashboard-panel-stay-details')
-      await expect(calendarStayDetails.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
+      await expect(calendarStayDetails.getByText('2 guests', { exact: true })).toBeVisible()
       await page.setViewportSize({ width: 390, height: 844 })
       const stayClose = calendarStayDetails.getByRole('link', { name: 'Close stay details', exact: true })
       await expect(stayClose).toBeVisible()
-      await expect(stayClose).toHaveAttribute('href', `/dashboard/${slug}/calendar${calendarStayURL.search}`)
+      await expect(stayClose).toHaveAttribute('href', stayThread)
       await stayClose.click()
-      await expect(page).toHaveURL(`/dashboard/${slug}/calendar${calendarStayURL.search}`)
+      await expect(page).toHaveURL(stayThread)
+      await page.goto(calendarReturn)
+      // The selected nights are local to the Calendar pane. Reselect them after returning from Messages.
+      await page.getByRole('button', { name: 'Select nights', exact: true }).click()
+      await dates.getByLabel('Start night', { exact: true }).fill(localDay(0))
+      await dates.getByLabel('End night (optional)', { exact: true }).fill(localDay(1))
+      await dates.getByRole('button', { name: 'Edit selected nights', exact: true }).click()
       await expect(inspector.getByText('Reserved', { exact: true })).toBeVisible()
       await page.setViewportSize({ width: 1440, height: 900 })
       await expect(calendar).toBeVisible()
-      await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText('Availability: Assigned Cabin')
+      await expect(calendar.getByRole('heading', { name: 'Assigned Cabin', exact: true })).toBeVisible()
 
       // The home's overview and agenda read the same stays as its nightly grid.
       await calendar.getByRole('button', { name: 'View: Month', exact: true }).click()
@@ -4850,7 +4865,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(calendar.getByRole('button', { name: 'December', exact: true })).toBeVisible()
       await calendar.getByRole('button', { name: 'View: Year', exact: true }).click()
       await page.getByRole('menuitemcheckbox', { name: 'List', exact: true }).click()
-      await expect(calendar.getByRole('link', { name: /Ana Silva/ })).toHaveAttribute('href', new RegExp(`/calendar/stay/${stays[0]!.booking_id}\\?`))
+      await expect(calendar.getByRole('link', { name: /Ana Silva/ })).toHaveAttribute('href', stayThread)
       await calendar.getByRole('button', { name: 'View: List', exact: true }).click()
       await page.getByRole('menuitemcheckbox', { name: 'Month', exact: true }).click()
 
@@ -4906,13 +4921,11 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       ])
       const denied = await cleaner.request.get(api(`bookings/${stays[1]!.booking_id}`))
       expect(denied.status()).toBe(404)
-      // The host takes the turnover back and gives it to the cleaner again. A cleaner's job is a team
-      // conversation with the owners: the organization's jobs post it there as KrabiClaw's message once
-      // they wake, that message is the cleaner's alert (push, email, WhatsApp), and it is unread until read.
+      // A job always has someone: the host cannot leave the turnover with nobody. A cleaner's job is a team
+      // conversation with the owners: the job is posted there as KrabiClaw's message, that message is the
+      // cleaner's alert (push, email, WhatsApp), and it is unread until read.
       const unassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, version: turnover.version, assigned_member_id: null })
-      expect(unassigned.error).toBeNull()
-      const reassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, version: unassigned.data!.task.version, assigned_member_id: memberId })
-      expect(reassigned.error).toBeNull()
+      expect(JSON.parse(unassigned.error!)).toMatchObject({ status: 422, code: 'JOB_ASSIGNEE_REQUIRED', field: 'assigned_member_id' })
       const cleanerTeamRows = async () => {
         const response = await cleaner.request.get(`/api/messages?organization_id=${organizationId}&kind=team&org=${encodeURIComponent(slug)}`)
         await expectStatus(response, 200)
@@ -4950,7 +4963,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const hostTurnovers = await call<{ sections: TaskSection[] }>('list_tasks', { range: 'today', kind: 'turnover' })
       expect(hostTurnovers.error).toBeNull()
       expect(hostTurnovers.data!.sections.flatMap(section => section.tasks).filter(task => task.id === turnover.id))
-        .toEqual([expect.objectContaining({ status: 'done', booking_id: stays[0]!.booking_id, version: reassigned.data!.task.version + 1, can: { complete: false, skip: false, reopen: true, assign: false, edit: false } })])
+        .toEqual([expect.objectContaining({ status: 'done', booking_id: stays[0]!.booking_id, version: turnover.version + 1, can: { complete: false, skip: false, reopen: true, assign: false, edit: false } })])
 
       const cleanerPage = await cleaner.newPage()
       let deliveringSocket: WebSocket | undefined
@@ -4968,34 +4981,39 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       })
       await cleanerPage.setViewportSize({ width: 390, height: 844 })
       expect((await cleanerPage.goto(`/dashboard/${slug}`))?.status()).toBe(200)
-      await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list`)
-      const arrival = cleanerPage.locator(`a[href="/dashboard/${slug}/calendar/${localDay(0)}/booking/${stays[0]!.booking_id}?view=list"]`)
+      await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list&month=${localDay(0).slice(0, 7)}`)
+      const arrival = cleanerPage.locator(`[data-day="${localDay(0)}"] a[href="${arrivalPath}"]`)
       await expect(arrival).toContainText('Ana')
       await arrival.click()
-      await expect(cleanerPage.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
-      await expect(cleanerPage.getByRole('button', { name: 'Cancel stay', exact: true })).toHaveCount(0)
-      await expect(cleanerPage.getByRole('button', { name: 'Record payment', exact: true })).toHaveCount(0)
-      await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list`)
-      const departure = cleanerPage.locator(`a[href="/dashboard/${slug}/calendar/${localDay(2)}/booking/${stays[0]!.booking_id}?view=list"]`)
+      const reservationPanel = cleanerPage.getByTestId('reservation-panel')
+      await expect(reservationPanel.getByText('2 guests', { exact: true })).toBeVisible()
+      await expect(reservationPanel.getByText('A', { exact: true })).toBeVisible()
+      await expect(cleanerPage.getByRole('button', { name: 'Cancel reservation', exact: true })).toHaveCount(0)
+      await expect(cleanerPage.getByRole('link', { name: 'Record a payment', exact: true })).toHaveCount(0)
+      await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list&month=${localDay(2).slice(0, 7)}`)
+      const departure = cleanerPage.locator(`[data-day="${localDay(2)}"] a[href="${arrivalPath}"]`)
       await expect(departure).toContainText('Ana')
       await departure.click()
-      await expect(cleanerPage.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
+      await expect(reservationPanel.getByText('2 guests', { exact: true })).toBeVisible()
+      await expect(reservationPanel.getByText('A', { exact: true })).toBeVisible()
 
       // Another device's edit updates the assigned stay without navigation. An
       // ordered later event proves that the intervening other-home event was filtered.
-      // The cleaner reads the stay as its turnover: the first name and arrival
-      // change in place, while the surname and the host's notes never reach them.
+      // The turnover's guest initial and arrival time update in place. The
+      // cleaner's view protects the surname and the host's notes.
       const current = await call<{ record: { version: number } }>('get_product_booking', { booking_id: stays[0]!.booking_id })
       const renamed = await call<NightBookingReceipt>('update_product_booking', { booking_id: stays[0]!.booking_id, version: current.data!.record.version, guest_name: 'Lia' })
       expect(renamed.error).toBeNull()
-      expect(renamed.data).toMatchObject({ booking_id: stays[0]!.booking_id, unit: 'nights', version: current.data!.record.version + 1, channel_push: null })
-      await expect(cleanerPage.getByRole('heading', { name: 'Lia’s group of 2', level: 2, exact: true })).toBeVisible()
+      expect(renamed.data).toMatchObject({ booking_id: stays[0]!.booking_id, unit: 'nights', version: current.data!.record.version + 1 })
+      expect(renamed.data).not.toHaveProperty('channel_push')
+      await expect(reservationPanel.getByText('L', { exact: true })).toBeVisible()
+      await expect(reservationPanel.getByText('2 guests', { exact: true })).toBeVisible()
       await expect(cleanerPage.getByText('Silva')).toHaveCount(0)
       const privateStay = await call<{ record: { version: number } }>('get_product_booking', { booking_id: stays[1]!.booking_id })
       expect((await call('update_product_booking', { booking_id: stays[1]!.booking_id, version: privateStay.data!.record.version, private_notes: 'Other home only' })).error).toBeNull()
       const noted = await call<NightBookingReceipt>('update_product_booking', { booking_id: stays[0]!.booking_id, version: renamed.data!.version, arrival_time: '18:30', private_notes: 'Host-only live note' })
       expect(noted.error).toBeNull()
-      await expect(cleanerPage.getByText(/^6:30\sPM$/u).first()).toBeVisible()
+      await expect(cleanerPage.getByText(/^Arriving 6:30\sPM$/u)).toBeVisible()
       await expect(cleanerPage.getByText('Host-only live note')).toHaveCount(0)
       // The page can render the note before the socket's frame is recorded here.
       await expect.poll(() => liveEvents.filter(event => 'booking_id' in event).length).toBe(2)
@@ -5079,7 +5097,9 @@ test('a stay socket in a service organization closes when Better Auth removes it
     const openedRead = cleanerPage.waitForResponse(response => response.request().method() === 'GET'
       && new URL(response.url()).pathname === `/api/dashboard/bookings/${stay.booking_id}`)
     expect((await cleanerPage.goto(`/dashboard/${slug}/bookings/${stay.booking_id}`))?.status()).toBe(200)
-    await expect(cleanerPage.getByRole('heading', { name: 'Membership', level: 2, exact: true })).toBeVisible()
+    const reservationPanel = cleanerPage.getByTestId('reservation-panel')
+    await expect(reservationPanel.getByText('1 guest', { exact: true })).toBeVisible()
+    await expect(reservationPanel.getByText('M', { exact: true })).toBeVisible()
     // The real first-open reconciliation read proves the app socket completed
     // its upgrade before the other device publishes the event under assertion.
     expect((await openedRead).status()).toBe(200)
@@ -5087,9 +5107,10 @@ test('a stay socket in a service organization closes when Better Auth removes it
     const renamed = await page.request.patch(api(`bookings/${stay.booking_id}`), { data: { version: stay.version, arrival_time: '18:30' } })
     await expectStatus(renamed, 200)
     const version = (await renamed.json() as { booking: NightBooking }).booking.version
-    await expect(cleanerPage.getByRole('heading', { name: 'Membership', level: 2, exact: true })).toBeVisible()
-    await expect(cleanerPage.getByText(/^6:30\sPM$/u).first()).toBeVisible()
-    await expect.poll(() => liveEvents.filter(event => event.type === 'stay.changed').length).toBe(1)
+    await expect(reservationPanel.getByText('1 guest', { exact: true })).toBeVisible()
+    await expect(cleanerPage.getByText(/^Arriving 6:30\sPM$/u)).toBeVisible()
+    // The queued creation can also arrive after the socket opens. The live panel above proves it read the edited arrival.
+    await expect.poll(() => liveEvents.some(event => event.type === 'stay.changed' && event.booking_id === stay.booking_id)).toBe(true)
     const socket = sockets.find(socket => !socket.isClosed())
     expect(socket).toBeDefined()
     const closed = socket!.waitForEvent('close')
@@ -5192,17 +5213,12 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await page.goto(gridPath)
 
   // A bar opens its stay.
+  const stayThread = (id: string) => `/dashboard/${slug}/messages/${read.bookings.find(booking => booking.booking_id === id)!.conversation_id}`
   await grid.locator(`[data-stay="${stayIds[1]}"]`).click()
-  await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/calendar/stay/${stayIds[1]}`))
+  await expect(page).toHaveURL(`${stayThread(stayIds[1]!)}/reservation/${stayIds[1]}`)
   await page.goto(gridPath)
 
-  // City narrows rows to the homes' address city; Search by name or address; No upcoming stays keeps homes with no booked night on screen.
-  await page.getByRole('combobox', { name: 'City' }).click()
-  await page.getByRole('option', { name: 'Ao Nang (1)', exact: true }).click()
-  await expect(grid.locator('[data-home]')).toHaveCount(1)
-  await expect(grid.locator(`[data-home="${sea}"]`)).toBeVisible()
-  await page.getByRole('combobox', { name: 'City' }).click()
-  await page.getByRole('option', { name: 'All cities (3)', exact: true }).click()
+  // Search narrows rows by name or address.
   await expect(grid.locator('[data-home]')).toHaveCount(3)
   await page.getByRole('textbox', { name: 'Search homes' }).fill('sea road')
   await expect(grid.locator('[data-home]')).toHaveCount(1)
@@ -5218,11 +5234,6 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(agenda.locator('[data-day]').first()).toBeVisible()
   await expect(agenda.getByText(/Grid/).first()).toBeVisible()
   await page.goto(gridPath)
-  await page.getByRole('button', { name: 'No upcoming stays', exact: true }).click()
-  await expect(grid.locator('[data-home]')).toHaveCount(2)
-  await expect(grid.locator(`[data-home="${productId}"]`)).toHaveCount(0)
-  await page.getByRole('button', { name: 'No upcoming stays', exact: true }).click()
-  await expect(grid.locator('[data-home]')).toHaveCount(3)
 
   // Dragging across the three gap nights between two stays sets a 3-night minimum on them alone.
   const drag = async (start: import('@playwright/test').Locator, end: import('@playwright/test').Locator) => {
@@ -5324,7 +5335,7 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   // A selection of booked nights alone says what holds them and offers no edit.
   await night(productId, 2).click({ position: { x: 20, y: 50 } })
   await expect(inspector.getByTestId('stay-night-held')).toHaveText('Booked nights belong to their reservations. Open the stay to manage it.')
-  await expect(inspector.getByRole('link', { name: 'View stay', exact: true })).toHaveAttribute('href', new RegExp(`/calendar/stay/${stayIds[0]}`))
+  await expect(inspector.getByRole('link', { name: 'View stay', exact: true })).toHaveAttribute('href', stayThread(stayIds[0]!))
   await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toBeDisabled()
   // A booked night in the selection leaves no stay to add.
   await expect(inspector.getByRole('link', { name: 'Add stay', exact: true })).toHaveCount(0)

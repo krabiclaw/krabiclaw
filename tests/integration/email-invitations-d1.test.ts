@@ -4,6 +4,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { hashPassword } from 'better-auth/crypto'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
+import { captureEvents } from './support/events.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 
 const BASE = 'https://invitation-proof.example'
@@ -20,7 +21,7 @@ test('an email invitation is private, uses normal sign-in, and creates a members
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'invitation-proof-secret-long-enough', BETTER_AUTH_URL: BASE,
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: captureEvents().binding, BETTER_AUTH_SECRET: 'invitation-proof-secret-long-enough', BETTER_AUTH_URL: BASE,
       NUXT_PUBLIC_PLATFORM_DOMAIN: BASE, STRIPE_SECRET_KEY: 'sk_test_invitation_no_provider_requests', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)

@@ -1,3 +1,5 @@
+import { bookingReviewDueAt } from '~/server/utils/review-requests'
+import { changedTaskIds, publishChangedJobs, publishEvent, type DomainEvent } from '~/server/events'
 import { recordBookingChangeAnswer } from '~/server/domain/booking-analytics'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { HTTPError } from 'nitro'
@@ -14,7 +16,7 @@ import { guestPresentation, notifyBookingChangeOwner } from '~/server/utils/noti
 import { platformLocale } from '~/shared/platform-locales'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
-import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
+import { publishConversationEvent, scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
 import { CURRENT_GUEST_SQL, MessageStateConflictError, appendMessage, findMessageByDedupeKey, getMessage, messageQueries, type MessageRow } from '~/server/domain/conversations'
 import { createDeliveryReceipt, deliverGuestThreadEmail, isDeliverySent } from './deliveries'
 import { getEmailDeliveryMode } from '~/server/utils/email-delivery'
@@ -249,22 +251,15 @@ export async function changeBooking(db: DbClient, env: CloudflareEnv, input: {
     if (input.stayAccess?.organizationId !== input.organizationId || input.stayAccess.actorId !== input.actorUserId) {
       throw new HTTPError({ statusCode: 403, message: 'Organization access required' })
     }
-    if (!input.apply || input.body.product_session_id !== undefined) {
-      throw new HTTPError({ statusCode: 422, message: 'A stay can be moved by the business to new dates or a different home' })
+    if (!input.apply || input.body.product_session_id !== undefined || input.body.product_id !== undefined) {
+      throw new HTTPError({ statusCode: 422, message: 'A stay is changed by the business to new dates' })
     }
-    const { moveStay, updateStay } = await import('~/server/domain/stays')
-    if (input.body.product_id !== undefined && input.body.product_id !== record.product_id) {
-      if (input.body.check_in_date !== undefined || input.body.check_out_date !== undefined) {
-        throw new HTTPError({ statusCode: 422, message: 'Choose either new dates or a different home' })
-      }
-      const stay = await moveStay(db, env, input.stayAccess, input.bookingId, { version: input.body.version, product_id: input.body.product_id })
-      return { kind: 'stay' as const, stay, scheduledMessageId: stay.scheduled_message_id }
-    }
+    const { updateStay } = await import('~/server/domain/stays')
     if (input.body.check_in_date === undefined && input.body.check_out_date === undefined) {
-      throw new HTTPError({ statusCode: 422, message: 'Choose new dates or a different home' })
+      throw new HTTPError({ statusCode: 422, message: 'Choose new dates' })
     }
     const stay = await updateStay(db, env, input.stayAccess, input.bookingId, { ...input.body, version: input.body.version })
-    return { kind: 'stay' as const, stay, scheduledMessageId: null }
+    return { kind: 'stay' as const, stay }
   }
   const key = input.idempotencyKey?.trim()
   if (!key || key.length > 100) throw new HTTPError({ statusCode: 400, message: 'Request key is required' })
@@ -273,7 +268,6 @@ export async function changeBooking(db: DbClient, env: CloudflareEnv, input: {
   const change = input.apply
     ? await moveBooking(db, env, thread, { userId: input.actorUserId }, input.body, key)
     : await requestBookingChange(db, env, thread, input.actorUserId, input.body, key)
-  await publishConversationEvent(env, db, { conversationId: thread.id, type: 'MESSAGE_CREATE' })
   return { kind: 'booking' as const, conversationId: thread.id, ...change }
 }
 
@@ -325,6 +319,55 @@ async function changePresentation(db: DbClient, thread: GuestThreadRow, proposal
     location_title: guest.locationName?.trim() || labels['booking.online']!, original_location_title: original.locationName?.trim() || labels['booking.online']!,
     afterStartsAt: startsAt, afterTimezone: timezone,
   }
+}
+
+const changeDeliveries = {
+  'booking_change.requested': 'requested',
+  'booking_change.moved': 'moved',
+  'booking_change.accepted': 'accepted',
+  'booking_change.declined': 'declined',
+} as const
+
+/** Deliver the immutable change and reconcile the record it moved. */
+export async function deliverBookingChange(env: CloudflareEnv, event: Extract<DomainEvent, { type: 'booking.change' }>): Promise<void> {
+  const db = env.DB
+  const [thread, entry, proposed] = await Promise.all([
+    getGuestRequest(db, event.conversation_id, event.organization_id, 'booking'),
+    getMessage(db, event.entry_id),
+    event.proposal_id === event.entry_id ? null : getMessage(db, event.proposal_id),
+  ])
+  const proposalEntry = event.proposal_id === event.entry_id ? entry : proposed
+  if (!thread || thread.kind !== 'booking' || entry?.conversation_id !== thread.id || proposalEntry?.id !== event.proposal_id
+      || proposalEntry.conversation_id !== thread.id || !proposalEntry.payload_json) {
+    throw new Error('Booking change delivery requires its conversation and recorded proposal')
+  }
+  const status = changeDeliveries[entry.event_name as keyof typeof changeDeliveries]
+  if (!status) throw new Error(`Message ${entry.id} is not a booking change`)
+  const proposal = proposalSchema.parse(JSON.parse(proposalEntry.payload_json))
+  if (status === 'requested') {
+    const state = (await bookingChangeStates(db, [entry.id])).get(entry.id)
+    if (!state) throw new Error('The booking change proposal disappeared')
+    if (state.status !== 'pending') return
+  }
+  if (status === 'accepted' || status === 'moved') {
+    const { planSourceMessages } = await import('~/server/domain/scheduled-guest-messages')
+    await planSourceMessages(db, thread.organization_id, proposal.before.recordId)
+    const record = await getThreadOperationalRecord(db, thread.id)
+    if (!record) throw new Error('The changed booking disappeared')
+    if (record.status === 'confirmed') {
+      const dueAt = bookingReviewDueAt(record.ends_at)
+      if (dueAt !== null) await scheduleBusinessWake(env, thread.organization_id, 'reviews', dueAt)
+    }
+  }
+  await reconcileConversationTasks(db, thread.id)
+  if (status === 'accepted' || status === 'declined') {
+    if (!entry.payload_json) throw new Error('A booking change answer has no recorded payload')
+    const answered = JSON.parse(entry.payload_json) as { booking_id?: unknown }
+    if (typeof answered.booking_id !== 'string') throw new Error('A booking change answer has no booking ID')
+    await recordBookingChangeAnswer(db, { organizationId: thread.organization_id, bookingId: answered.booking_id, changeRequestId: proposalEntry.id, accepted: status === 'accepted' })
+  }
+  await publishConversationEvent(env, db, { conversationId: thread.id, type: 'MESSAGE_CREATE', message: { id: entry.id, sequence: entry.sequence } })
+  await deliverEmail(db, env, thread, entry.id, proposalEntry.id, status, proposal, await bookingNoun(db, thread))
 }
 
 async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow, entryId: string, proposalEntryId: string, status: 'requested' | 'accepted' | 'declined' | 'moved', proposal: z.infer<typeof proposalSchema>, noun: string) {
@@ -469,20 +512,11 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
       throw error
     })
   }
-  const noun = await bookingNoun(db, thread)
-  const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
   const state = (await bookingChangeStates(db, [entry.id])).get(entry.id)
   if (!state) throw new Error('The booking change proposal disappeared')
   if (state.status === 'accepted' || state.status === 'declined') return { changeStatus: state.status }
   if (state.status === 'stale' || state.status === 'expired') throw new HTTPError({ statusCode: state.status === 'expired' ? 410 : 409, message: state.message })
-  await deliverEmail(db, env, thread, entry.id, entry.id, 'requested', proposal, noun)
-  await reconcileConversationTasks(db, thread.id)
-  const decision = await findMessageByDedupeKey(db, `booking-change-decision:${entry.id}`)
-  if (decision) {
-    if (decision.event_name === 'booking_change.accepted') return { changeStatus: 'accepted' as const }
-    if (decision.event_name === 'booking_change.declined') return { changeStatus: 'declined' as const }
-    throw new HTTPError({ statusCode: 500, message: 'Booking change decision is invalid' })
-  }
+  await publishEvent(env, { type: 'booking.change', organization_id: thread.organization_id, conversation_id: thread.id, entry_id: entry.id, proposal_id: entry.id })
   return { changeStatus: 'awaiting_guest_acceptance' as const }
 }
 
@@ -543,7 +577,8 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
     }, ...conversationTaskQueries(thread.id, now, before.sessionId),
     assertBookingBatchWrite({ query: 'EXISTS (SELECT 1 FROM messages WHERE id=?)', params: [id] })]
     try {
-      await executeBatch(db, queries, { operation: 'move booking' })
+      const writes = await executeBatch(db, queries, { operation: 'move booking' })
+      await publishChangedJobs(env, thread.organization_id, changedTaskIds(writes))
     } catch (error) {
       if (!bookingBatchWriteRefused(error)) throw error
       const raced = await findMessageByDedupeKey(db, dedupeKey)
@@ -554,11 +589,7 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
     entry = await findMessageByDedupeKey(db, dedupeKey)
     if (!entry) throw new HTTPError({ statusCode: 409, message: 'That session filled up or the booking changed; it has not moved' })
   }
-  // Its automatic messages move with it.
-  await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, thread.organization_id, before.recordId)
-  const noun = await bookingNoun(db, thread)
-  await deliverEmail(db, env, thread, entry.id, entry.id, 'moved', proposalSchema.parse(JSON.parse(entry.payload_json || '{}')), noun)
-  await reconcileConversationTasks(db, thread.id)
+  await publishEvent(env, { type: 'booking.change', organization_id: thread.organization_id, conversation_id: thread.id, entry_id: entry.id, proposal_id: entry.id })
   return { changeStatus: 'moved' as const }
 }
 
@@ -656,7 +687,8 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
 
     if (destination) queries.push(assertBookingBatchWrite({ query: guard, params: [id] }))
     try {
-      await executeBatch(db, queries, { operation: 'respond to booking change' })
+      const writes = await executeBatch(db, queries, { operation: 'respond to booking change' })
+      await publishChangedJobs(env, thread.organization_id, changedTaskIds(writes))
     } catch (error) {
       if (!bookingBatchWriteRefused(error)) throw error
       result = await findMessageByDedupeKey(db, resultId)
@@ -668,22 +700,8 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
     }
   }
 
-  // Resolved once and returned, so the guest-facing page names the booking with
-  // the same word as the email it arrived from.
-  const noun = await bookingNoun(db, thread as GuestThreadRow)
   if (result && input.decision) {
-    const accepted = result.event_name === 'booking_change.accepted'
-    // An accepted move takes its automatic messages with it.
-    if (accepted) await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, thread.organization_id, current.recordId)
-    await reconcileConversationTasks(db, thread.id)
-    if (!result.payload_json) throw new Error('A booking change answer has no recorded payload')
-    const answered = JSON.parse(result.payload_json) as { booking_id?: unknown }
-    if (thread.kind === 'booking' && typeof answered.booking_id === 'string') {
-      await recordBookingChangeAnswer(db, { organizationId: thread.organization_id, bookingId: answered.booking_id, changeRequestId: entry.id, accepted })
-    }
-    // Told once the answer and its analytics are recorded, so a send that fails cannot skip them.
-    await deliverEmail(db, env, thread as GuestThreadRow, result.id, entry.id, accepted ? 'accepted' : 'declined', proposal, noun)
-    await publishConversationEvent(env, db, { conversationId: thread.id, type: 'MESSAGE_CREATE', message: { id: result.id, sequence: result.sequence } })
+    await publishEvent(env, { type: 'booking.change', organization_id: thread.organization_id, conversation_id: thread.id, entry_id: result.id, proposal_id: entry.id })
   }
   const finalState = (await bookingChangeStates(db, [entry.id])).get(entry.id)
   if (!finalState) throw new Error('The booking change proposal disappeared')

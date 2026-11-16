@@ -23,6 +23,24 @@
 
             <p v-else-if="item.type === 'event'" class="my-2 text-center text-xs text-muted">{{ item.text }}</p>
 
+            <p v-else-if="item.type === 'reservation'" class="my-2 text-center text-xs text-muted">
+              {{ item.text ? `${item.text} ` : '' }}<NuxtLink :to="item.to" class="font-medium text-highlighted underline underline-offset-4" data-testid="conversation-show-reservation">Show reservation</NuxtLink>
+            </p>
+
+            <!-- What KrabiClaw says in a team conversation sits in the middle, as Airbnb's own lines and cards do: a job is a card with its Done, a reminder is a line. -->
+            <div v-else-if="thread.kind === 'team' && item.runs.every(message => message.automatic)" class="my-2 flex w-full flex-col items-center gap-2" :data-message="item.key">
+              <template v-for="message in item.runs" :key="message.id">
+                <div v-if="message.job" class="w-full max-w-md rounded-[28px] bg-accented/50 p-2" :data-team-message="message.id" data-automatic data-testid="conversation-job-card">
+                  <div class="rounded-3xl bg-default p-4 shadow-sm">
+                    <p class="text-sm text-muted">Job</p>
+                    <p class="mt-0.5 whitespace-pre-wrap break-words text-base font-semibold text-highlighted">{{ message.body }}</p>
+                    <UButton v-if="data?.job_actions?.[message.id]" label="Done" color="neutral" variant="soft" block class="mt-3 rounded-xl" :loading="closing" data-testid="conversation-job-done" @click="emit('done', message.id)" />
+                  </div>
+                </div>
+                <p v-else class="max-w-md whitespace-pre-wrap text-center text-sm text-muted" :data-team-message="message.id" data-automatic>{{ message.body }}</p>
+              </template>
+            </div>
+
             <div v-else class="flex min-w-0 max-w-[76%] flex-col gap-0.5" :class="item.mine ? 'items-end self-end' : 'relative items-start self-start pl-10'" :data-message="item.key">
               <span v-if="!item.mine" class="absolute bottom-0 left-0"><InboxAvatar :name="item.runs[0]!.author" :initial="initialOf(item.runs[0]!.author)" :support="thread.kind === 'support'" size="sm" /></span>
               <p class="mb-1 mt-2.5 text-sm text-muted"><span class="text-highlighted">{{ item.runs[0]!.author }}</span> {{ item.runs[0]!.time }}</p>
@@ -117,7 +135,8 @@ import ReportDialog from './ReportDialog.vue'
 import { isScheduledMessageResponse, isSuggestedReplies, useSuggestedReplies } from './guest-messaging-client'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
-const props = withDefaults(defineProps<{ threadId: string; personalScope?: boolean; history: ReturnType<typeof useConversation> }>(), { personalScope: false })
+const props = withDefaults(defineProps<{ threadId: string; personalScope?: boolean; history: ReturnType<typeof useConversation>; reservationTo?: string | null; closing?: boolean }>(), { personalScope: false, closing: false })
+const emit = defineEmits<{ done: [messageId: string] }>()
 
 const dashboard = useDashboardOrganization()
 const route = useRoute()
@@ -254,6 +273,7 @@ const failedDeliveries = (message: MessageItem) => message.deliveries.filter(del
 type Row =
   | { type: 'day'; key: string; label: string }
   | { type: 'event'; key: string; text: string }
+  | { type: 'reservation'; key: string; to: string; text: string | null }
   | { type: 'run'; key: string; mine: boolean; runs: MessageItem[] }
 
 /*
@@ -325,16 +345,41 @@ const rows = computed<Row[]>(() => {
   }
   if (attempt.value && sending.value && !items.some(item => item.type === 'message' && settledKeys.value[item.id] === `pending:${attempt.value?.key}`)) {
     items.push({
-      type: 'message', id: `pending:${attempt.value.key}`, sequence: Number.MAX_SAFE_INTEGER, side: mineSide.value, author: 'You', author_user_id: userId.value ?? null, automatic: false, deliveries: [], sent_at: new Date().toISOString(),
+      type: 'message', id: `pending:${attempt.value.key}`, sequence: Number.MAX_SAFE_INTEGER, side: mineSide.value, author: 'You', author_user_id: userId.value ?? null, automatic: false, job: false, deliveries: [], sent_at: new Date().toISOString(),
       time: 'Sending', body: attempt.value.body || null, receipt: null, retryable: false, unshown_files: 0, sending: true,
       photos: attempt.value.photos.map((photo, at) => ({ id: `${attempt.value!.key}:${at}`, url: photo.url, thumbnail_url: photo.url, width: null, height: null })),
     })
   }
   const out: Row[] = []
-  for (const item of items) {
+  const { reservation } = current
+  const oldest = items.find(item => item.type !== 'day')
+  const to = props.reservationTo
+  let reservationPending = Boolean(to && reservation && (!before.value || (oldest && oldest.sent_at <= reservation.at)))
+  let day: string | undefined
+  function placeReservation() {
+    if (!reservationPending || !reservation || !to) return
+    reservationPending = false
+    if (day !== reservation.day.id) {
+      day = reservation.day.id
+      out.push({ type: 'day', key: day, label: reservation.day.label })
+    }
+    out.push({ type: 'reservation', key: 'reservation', to, text: reservation.confirmation?.text ?? null })
+  }
+  for (const [index, item] of items.entries()) {
     const key = settledKeys.value[item.id] ?? item.id
-    if (item.type === 'day') out.push({ type: 'day', key, label: item.label })
-    else if (item.type === 'event') out.push({ type: 'event', key, text: item.text })
+    if (item.type === 'day') {
+      const next = items[index + 1]
+      if (reservation && item.id !== reservation.day.id && next && next.type !== 'day' && next.sent_at > reservation.at) placeReservation()
+      if (day !== item.id) out.push({ type: 'day', key, label: item.label })
+      day = item.id
+      continue
+    }
+    if (reservationPending && item.id === reservation?.confirmation?.message_id) {
+      placeReservation()
+      continue
+    }
+    if (reservation && item.sent_at > reservation.at) placeReservation()
+    if (item.type === 'event') out.push({ type: 'event', key, text: item.text })
     else {
       const last = out.at(-1)
       const mine = item.author === 'You' || (userId.value != null && item.author_user_id === userId.value)
@@ -342,6 +387,7 @@ const rows = computed<Row[]>(() => {
       else out.push({ type: 'run', key, mine, runs: [item] })
     }
   }
+  placeReservation()
   return out
 })
 

@@ -23,7 +23,6 @@ import { addLocalDays, isValidCalendarDate, localDateAt } from '~/utils/timezone
  * cancelling them and opened by restoring them.
  */
 
-export const PLACES_CALENDAR_DAYS = 62
 
 export type PlaceKind = 'location' | 'offering'
 
@@ -70,7 +69,6 @@ function fail(statusCode: number, message: string, field?: string): never {
 export function placesWindow(input: { from: unknown; to: unknown }): { from: string; to: string } {
   if (!isValidCalendarDate(input.from) || !isValidCalendarDate(input.to)) fail(400, 'from and to must be calendar dates', 'from')
   if (input.to <= input.from) fail(400, 'to must be after from', 'to')
-  if (days(input.from, input.to) > PLACES_CALENDAR_DAYS) fail(400, `Read at most ${PLACES_CALENDAR_DAYS} days at once`, 'to')
   return { from: input.from, to: input.to }
 }
 const days = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)

@@ -1,7 +1,8 @@
 import { HTTPError } from 'nitro';
 import type { H3Event } from 'nitro';
 import {  getRequestHost, readBody  } from 'nitro/h3';
-import { createDb, type AppDb } from '~/server/db'
+import { bindDatabaseEvents, createDb, type AppDb } from '~/server/db'
+import type { EventsEnv } from '~/server/events'
 import type { CloudflareEnv } from './auth'
 import { isNonProductionHost } from '~/server/utils/tenant-hosts'
 import { getRequestDataMetrics, instrumentD1 } from '~/server/utils/request-metrics'
@@ -191,6 +192,10 @@ export const cloudflareEnv = (event: H3Event): CloudflareEnv => {
     throw error
   }
   const db = d1 ? createDb(d1) : undefined
+  if (d1 && rawD1) {
+    bindDatabaseEvents(d1, runtimeEnv as EventsEnv)
+    bindDatabaseEvents(rawD1, runtimeEnv as EventsEnv)
+  }
 
   // Apply E2E delivery-mode overrides only for approved dev/E2E requests
   const devMode = import.meta.dev

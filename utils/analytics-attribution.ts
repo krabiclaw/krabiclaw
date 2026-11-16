@@ -110,13 +110,12 @@ export function observeAttribution(params: AttributionParams, referrerHost: stri
 }
 
 /** The channel a touch's source and medium belong to, as an owner reads them. Raw values stay on the event. */
-export const ATTRIBUTION_CHANNELS = ['Google Ads', 'Instagram', 'Facebook', 'Organic search', 'Direct', 'Referral', 'Other', 'Not recorded'] as const
+export const ATTRIBUTION_CHANNELS = ['Google Ads', 'Instagram', 'Facebook', 'Organic search', 'Direct', 'Referral', 'Other'] as const
 export type AttributionChannel = typeof ATTRIBUTION_CHANNELS[number]
 const PAID_MEDIA = new Set(['paid', 'cpc', 'ppc', 'paid_social', 'paidsocial'])
 const SEARCH_HOST = /(^|\.)(google|bing|yahoo|duckduckgo|kagi|ecosia|baidu|yandex|startpage)\.[a-z.]+$|^search\.brave\.com$/
 
-export function attributionChannel(source: string | null, medium: string | null): AttributionChannel {
-  if (!source || !medium) return 'Not recorded'
+export function attributionChannel(source: string, medium: string): AttributionChannel {
   const s = source.toLowerCase()
   const m = medium.toLowerCase()
   if (s === 'instagram' || s === 'ig' || s.endsWith('instagram.com')) return 'Instagram'

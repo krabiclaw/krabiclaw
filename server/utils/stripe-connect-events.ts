@@ -5,6 +5,7 @@ import { processStripeWebhookEvent } from '~/server/utils/stripe-webhook-events'
 import { publishBusinessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 
 const CONNECT_ACCOUNT_EVENT_TYPES = new Set([
+  'v2.core.account.closed',
   'v2.core.account.updated',
   'v2.core.account[configuration.merchant].capability_status_updated',
   'v2.core.account[configuration.merchant].updated',

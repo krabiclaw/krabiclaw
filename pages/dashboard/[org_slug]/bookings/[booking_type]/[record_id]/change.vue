@@ -76,7 +76,7 @@ const b = inject(bookingEditorKey)!
 const booking = computed(() => b.booking.value)
 const copy = computed(() => booking.value ? getVerticalCopy(booking.value.vertical) : null)
 const guestsLabel = computed(() => copy.value?.guestsLabelPlural.replace(/^./u, letter => letter.toUpperCase()) ?? 'Guests')
-const recordImage = computed(() => booking.value?.resource_image_url ?? booking.value?.locations.find(location => location.id === booking.value?.location_id)?.image_url ?? null)
+const recordImage = computed(() => booking.value?.resource_photo_urls[0] ?? booking.value?.locations.find(location => location.id === booking.value?.location_id)?.image_url ?? null)
 // The booked terms, as the guest read them: one line, not a setting here.
 const policyLine = computed(() => booking.value?.policy?.items.find(item => item.id === 'cancellation')?.text ?? null)
 
@@ -112,7 +112,7 @@ const { data: sessionData, error: sessionsError, status: sessionsStatus } = awai
   () => {
     const record = booking.value
     if (!record || !record.product_id || !/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) return Promise.resolve(null)
-    return api<{ options: SessionRow[] }>(`${dashboardBookingPath(record.booking_id!)}/move-options`, {
+    return api<{ options: SessionRow[] }>(`${dashboardBookingPath(record.booking_id!)}/change-options`, {
       query: { from: draft.date, to: addLocalDays(draft.date, 1), ...(movesBetweenLocations.value ? { location_id: draft.locationId } : {}) }, validate: isSessionList,
     })
   },
@@ -159,7 +159,7 @@ async function send() {
   saving.value = true
   error.value = null
   try {
-    await api(`${dashboardBookingPath(record.booking_id!)}/move`, {
+    await api(`${dashboardBookingPath(record.booking_id!)}/change`, {
       method: 'POST',
       body: { ...proposal, version: record.version, idempotency_key: attempt.key },
       validate: isRecord,

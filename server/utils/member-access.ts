@@ -6,6 +6,7 @@ import { parsePhoneOrThrow } from '~/utils/phone'
 import { oncePerRequest } from '~/server/utils/request-scope'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publishAccessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { changedTaskIds, publishChangedJobs, type EventsEnv } from '~/server/events'
 import type { H3Event } from 'nitro'
 import type { CloudflareEnv, organizationOptions } from '~/server/utils/auth'
 import type { OrganizationPermissions } from '~/utils/organization-access'
@@ -395,12 +396,17 @@ export async function assertResponsibleMember(db: DbClient, organizationId: stri
 }
 
 /** Clear only departed/dangling current targets; booked-person history stays. */
-export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, db: DbClient, input: { organizationId: string }): Promise<void> {
+export async function reconcileResponsibilities(env: GuestInboxPublicationEnv & EventsEnv, db: DbClient, input: { organizationId: string }): Promise<void> {
   const now = new Date().toISOString()
   let changed = false
+  const taskIds: string[] = []
   for (const [table, key] of [['product_booking_configs', 'product_id'], ['tasks', 'id']] as const) {
     // A closed task keeps who did it; only open work is reassigned away from a departed member.
+    // A job always has someone: it goes to the owner; a task someone added and an offering are left with nobody.
     const open = table === 'tasks' ? " AND status = 'open'" : ''
+    const released = table === 'tasks'
+      ? `CASE WHEN kind IN ('turnover', 'consultation_follow_up', 'consultation_prep') THEN (SELECT owner.id FROM member owner WHERE owner.organizationId = tasks.organization_id AND owner.role = 'owner' ORDER BY owner.createdAt, owner.id LIMIT 1) END`
+      : 'NULL'
     const memberMissing = `${table}.assigned_member_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM member m WHERE m.id = ${table}.assigned_member_id AND m.organizationId = ${table}.organization_id)`
     const rows = await queryAll<{ resource_id: string; assigned_member_id: string }>(db,
       `SELECT ${key} AS resource_id, assigned_member_id FROM ${table} WHERE organization_id = ?${open} AND ${memberMissing}`,
@@ -408,23 +414,29 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, d
     for (let offset = 0; offset < rows.length; offset += 400) {
       const chunk = rows.slice(offset, offset + 400)
       const results = await executeBatch(db, chunk.flatMap(row => [{
-        query: `UPDATE ${table} SET assigned_member_id = NULL, updated_at = ?${table === 'tasks' ? ', version = version + 1' : ", updated_by = 'system'"}
-          WHERE organization_id = ? AND ${key} = ? AND assigned_member_id = ? AND ${memberMissing}`,
+        query: `UPDATE ${table} SET assigned_member_id = ${released}, updated_at = ?${table === 'tasks' ? ', version = version + 1' : ", updated_by = 'system'"}
+          WHERE organization_id = ? AND ${key} = ? AND assigned_member_id = ? AND ${memberMissing}
+          ${table === 'tasks' ? 'RETURNING id AS changed_task_id' : ''}`,
         params: [now, input.organizationId, row.resource_id, row.assigned_member_id],
       }, organizationEventQuery({ organizationId: input.organizationId, actorType: 'system', eventType: 'member.access_scope_revoked', entityType: table, entityId: row.resource_id,
         beforeState: { assigned_member_id: row.assigned_member_id },
-        afterState: { assigned_member_id: null },
+        afterStateQuery: {
+          query: `SELECT json_object('assigned_member_id', assigned_member_id) FROM ${table} WHERE organization_id = ? AND ${key} = ?`,
+          params: [input.organizationId, row.resource_id],
+        },
         onlyIfPreviousChangedOneRow: true,
       })]), { operation: 'Reconcile departed responsibility targets' })
       if (chunk.some((_row, index) => results[index * 2]?.meta.changes === 1)) changed = true
+      taskIds.push(...changedTaskIds(results))
     }
   }
   if (changed) {
     const { sessionPrepTaskQueries } = await import('~/server/domain/tasks')
-    await executeBatch(db, sessionPrepTaskQueries({
+    const results = await executeBatch(db, sessionPrepTaskQueries({
       query: "SELECT subject_id FROM tasks WHERE organization_id = ? AND kind = 'consultation_prep' AND subject_type = 'product_session' AND status = 'open'",
       params: [input.organizationId],
     }, now), { operation: 'Reconcile session prep after member departure' })
+    taskIds.push(...changedTaskIds(results))
   }
   // Someone who left the organization leaves its conversations: their seats in
   // the team's, and their read positions in the guests'. A guest keeps their own.
@@ -435,6 +447,7 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, d
     params: [input.organizationId],
   }], { operation: 'Remove departed members from conversations' })
   if (Number(left?.meta.changes ?? 0) > 0) changed = true
+  await publishChangedJobs(env, input.organizationId, taskIds)
   if (changed) await publishAccessInvalidation(env, { organizationId: input.organizationId })
 }
 
@@ -451,13 +464,31 @@ export const BATCH_VIEWER: ViewerTerms = {
   member: '(SELECT member_id FROM viewer)', organizationWide: '(SELECT organization_wide FROM viewer)',
 }
 
-/** The caller's Better Auth member row in the organization a route names by slug, with the organization's own columns a page needs. No row: not a member. */
-export function membershipBySlugQuery(slug: string, userId: string): BatchQuery {
+export const DASHBOARD_ORGANIZATION_COLUMNS = `o.theme_id, o.vertical, o.subdomain,
+  (SELECT domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS custom_domain,
+  (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active') AS public_url,
+  o.status, o.onboarding_status, o.default_currency, o.timezone`
+
+function membershipQuery(field: 'slug' | 'id', value: string, userId: string): BatchQuery {
   return {
-    query: `SELECT o.id AS organization_id, o.slug, o.vertical, m.id AS member_id, m.userId AS user_id, m.role, m.role IN ('owner', 'admin') AS organization_wide
-      FROM organization o JOIN member m ON m.organizationId = o.id AND m.userId = ? WHERE o.slug = ?`,
-    params: [userId, slug],
+    query: `SELECT o.id AS organization_id, o.name, o.slug, m.id AS member_id, m.userId AS user_id, m.role,
+        m.role IN ('owner', 'admin') AS organization_wide, ${DASHBOARD_ORGANIZATION_COLUMNS}
+      FROM organization o JOIN member m ON m.organizationId = o.id AND m.userId = ? WHERE o.${field} = ?`,
+    params: [userId, value],
   }
+}
+
+/** The viewer's current Better Auth membership and the tenant it names. */
+export function membershipBySlugQuery(slug: string, userId: string): BatchQuery {
+  return membershipQuery('slug', slug, userId)
+}
+
+export function membershipByIdQuery(id: string, userId: string): BatchQuery {
+  return membershipQuery('id', id, userId)
+}
+
+export function joinedMembership(row: { organization_id: string; member_id: string; user_id: string; role: string }): ResolvedMembership {
+  return resolvedMembershipOf({ organizationId: row.organization_id, memberId: row.member_id, userId: row.user_id, role: row.role })
 }
 
 /** A statement that reads BATCH_VIEWER, with the membership row it reads in front. */
@@ -518,10 +549,17 @@ export function assignedGuestThreadScope(alias: string, user: string | { /** Tru
   return { sql, params: typeof user === 'string' ? Array(sql.match(/\?/g)?.length ?? 0).fill(user) : [] }
 }
 
+/** Workspace operators see all bookings; members see bookings for their assigned products. */
+export async function bookingOperationsScope(input: Pick<MemberAccessPrincipal, 'organizationId' | 'role'>): Promise<'manage' | 'assigned' | null> {
+  if (await roleAllows({ ...input, permissions: { operations: ['update'] } })) return 'manage'
+  return await roleAllows({ ...input, permissions: { operations: ['assigned'] } }) ? 'assigned' : null
+}
+
 /** A booking is its product's assigned member's. Who sees a conversation is conversations.ts conversationAccessSql. */
 export async function assertAssignedBookingAccess(db: DbClient, input: MemberAccessPrincipal & { bookingId: string }): Promise<void> {
-  if (await roleAllows({ ...input, permissions: { operations: ['update'] } })) return
-  await assertRoleAllows({ ...input, permissions: { operations: ['assigned'] } })
+  const scope = await bookingOperationsScope(input)
+  if (scope === 'manage') return
+  if (scope === null) await assertRoleAllows({ ...input, permissions: { operations: ['assigned'] } })
   const assigned = await queryFirst(db, `SELECT b.id FROM bookings b
       JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
       WHERE b.organization_id = ? AND b.id = ? AND ${assignedMemberSql('c')}`,

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { captureEvents } from './support/events.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { hashPassword } from 'better-auth/crypto'
 import { Miniflare } from 'miniflare'
@@ -39,7 +40,7 @@ test('every way a member leaves clears their homes and tables and publishes acce
   try {
     const db = await runtime.getD1Database('DB')
     const cache = await runtime.getKVNamespace('ORGANIZATION_CACHE')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), MEDIA_BASE_URL: 'https://media.example.test', BETTER_AUTH_SECRET: 'departure-proof-secret-long-enough', BETTER_AUTH_URL: BASE,
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: captureEvents().binding, MEDIA_BASE_URL: 'https://media.example.test', BETTER_AUTH_SECRET: 'departure-proof-secret-long-enough', BETTER_AUTH_URL: BASE,
       NUXT_PUBLIC_PLATFORM_DOMAIN: BASE, STRIPE_SECRET_KEY: 'sk_test_departure_no_provider_requests', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)

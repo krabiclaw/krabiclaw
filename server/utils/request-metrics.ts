@@ -8,6 +8,7 @@ export interface RequestDataMetrics {
   auditContext?: Record<string, unknown>
   statementCount: number
   batchRoundTrips: number
+  singleStatementRoundTrips: number
   rowsRead: number
   rowsWritten: number
   d1DurationMs: number
@@ -49,6 +50,7 @@ export function getRequestDataMetrics(event: HTTPEvent): RequestDataMetrics {
       requestId: (event.req.headers.get('x-request-id')) || crypto.randomUUID(),
       statementCount: 0,
       batchRoundTrips: 0,
+      singleStatementRoundTrips: 0,
       rowsRead: 0,
       rowsWritten: 0,
       d1DurationMs: 0,
@@ -218,6 +220,7 @@ function wrapStatement(statement: object, metrics: RequestDataMetrics, event: H3
       if (['first', 'all', 'run', 'raw'].includes(String(property)) && typeof value === 'function') {
         return async (...args: unknown[]) => {
           metrics.statementCount += 1
+          metrics.singleStatementRoundTrips += 1
           const startedAt = performance.now()
           if (metrics.transcript) metrics.transcript.firstAppD1Ms ??= startedAt - metrics.startedAt
           let queryDurationMs = 0
@@ -376,6 +379,8 @@ function applyMetricHeaders(
   setHeader(event, 'x-attempt-count', '1')
   setHeader(event, 'x-d1-query-count', String(metrics.statementCount))
   setHeader(event, 'x-d1-batch-count', String(metrics.batchRoundTrips))
+  setHeader(event, 'x-d1-single-count', String(metrics.singleStatementRoundTrips))
+  setHeader(event, 'x-d1-round-trip-count', String(metrics.batchRoundTrips + metrics.singleStatementRoundTrips))
   setHeader(event, 'x-d1-rows-read', String(metrics.rowsRead))
   setHeader(event, 'x-d1-rows-written', String(metrics.rowsWritten))
   setHeader(event, 'x-d1-duration-ms', metrics.d1DurationMs.toFixed(2))
@@ -423,6 +428,8 @@ export async function flushRequestMetrics(event: HTTPEvent, response: Response) 
       response.headers.set('x-request-id', metrics.requestId)
       response.headers.set('x-d1-query-count', String(metrics.statementCount))
       response.headers.set('x-d1-batch-count', String(metrics.batchRoundTrips))
+      response.headers.set('x-d1-single-count', String(metrics.singleStatementRoundTrips))
+      response.headers.set('x-d1-round-trip-count', String(metrics.batchRoundTrips + metrics.singleStatementRoundTrips))
       response.headers.set('x-d1-duration-ms', metrics.d1DurationMs.toFixed(2))
       response.headers.set('x-total-duration-ms', totalDuration.toFixed(2))
     } catch (error) {
@@ -446,6 +453,8 @@ export async function flushRequestMetrics(event: HTTPEvent, response: Response) 
     attemptCount: 1,
     statementCount: metrics.statementCount,
     batchRoundTrips: metrics.batchRoundTrips,
+    singleStatementRoundTrips: metrics.singleStatementRoundTrips,
+    d1RoundTrips: metrics.batchRoundTrips + metrics.singleStatementRoundTrips,
     rowsRead: metrics.rowsRead,
     rowsWritten: metrics.rowsWritten,
     d1DurationMs: Number(metrics.d1DurationMs.toFixed(2)),

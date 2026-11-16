@@ -184,7 +184,7 @@ async function adoptThread(db: DbClient, env: ChannelEnv, home: HomeMapping, thr
     query: `INSERT INTO channel_threads (provider, external_thread_id, organization_id, product_id, conversation_id, external_booking_id, provider_updated_at, created_at, updated_at)
       SELECT 'channex', ?, ?, ?, r.id, ?, ?, ?, ? FROM conversations r WHERE r.id = ? AND r.organization_id = ? AND r.kind = 'booking'
         AND (CASE WHEN r.booking_id IS NULL THEN r.location_id = ?
-          ELSE EXISTS (SELECT 1 FROM bookings b WHERE b.id = r.booking_id AND b.organization_id = r.organization_id AND coalesce(b.booked_product_id, b.product_id) = ?) END)
+          ELSE EXISTS (SELECT 1 FROM bookings b WHERE b.id = r.booking_id AND b.organization_id = r.organization_id AND b.product_id = ?) END)
       ON CONFLICT (provider, external_thread_id) DO UPDATE SET external_booking_id = excluded.external_booking_id,
         provider_updated_at = excluded.provider_updated_at, updated_at = excluded.updated_at
       WHERE channel_threads.organization_id = excluded.organization_id AND channel_threads.product_id = excluded.product_id

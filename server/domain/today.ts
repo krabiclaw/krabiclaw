@@ -7,7 +7,7 @@ import { bookingWelcomesQuery, bookingWelcomeViews, setupQueries, setupViews } f
 import { bookingDay } from '~/server/domain/requests'
 import { groupMediaPlacements, mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
 import { ownerPicture } from '~/server/notifications/hero'
-import { bookingEditorPath, guestConversationPath } from '~/server/utils/dashboard-links'
+import { bookingConversationOrRecordPath, guestConversationPath } from '~/shared/messages-contract'
 import { guestGroup, UPCOMING_RESERVATION_DAYS, type BusinessToday, type TodayItem } from '~/shared/dashboard-today'
 import { isChannelManagedStay, STAY_CHANNEL_LABELS } from '~/shared/bookings'
 import { currencyFractionDigits } from '~/shared/currencies'
@@ -83,7 +83,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   const dayTime = (instant: string, timezone: string) => `${formatTimestamp(instant, 'en', timezone, { weekday: 'short', month: 'short', day: 'numeric' })} · ${time(instant, timezone)}`
   const nights = (record: Pick<BookedRecordInRange, 'starts_at' | 'ends_at' | 'timezone'>) => formatCalendarRange(bookingDay(record.starts_at, record.timezone), bookingDay(record.ends_at, record.timezone), 'en-US')
   const visitWhen = (instant: string, timezone: string) => range === 'today' ? time(instant, timezone) : dayTime(instant, timezone)
-  const recordPath = (bookingId: string, conversationId: string | null, seated: number) => conversationId && seated ? guestConversationPath(viewer.slug, conversationId) : bookingEditorPath(viewer.slug, bookingId)
+  const recordPath = (bookingId: string, conversationId: string | null, seated: number) => bookingConversationOrRecordPath(viewer.slug, bookingId, seated ? conversationId : null)
   const first = (name: string | null) => name?.trim().split(/\s+/)[0] || null
 
   const cards: Card[] = []
@@ -162,11 +162,11 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   }
 
   for (const work of workResult!.results as OpenWorkRow[]) {
-    const job = work.kind === 'turnover' || work.kind === 'stay_ready' || work.kind === 'consultation_follow_up' || work.kind === 'consultation_prep'
+    const job = work.kind === 'turnover' || work.kind === 'consultation_follow_up' || work.kind === 'consultation_prep'
     const bookingZone = work.booking_timezone ?? work.timezone
     const at = work.starts_at ?? work.due_at
-    // An untimed job is on its booking's day: a make-ready on the arrival, a clean on the checkout.
-    const untimed = work.kind === 'stay_ready' ? work.booking_starts_at : work.booking_ends_at
+    // An untimed job is on its booking's day: a clean on the checkout.
+    const untimed = work.booking_ends_at
     const day = at ? localDateAt(new Date(at), work.timezone) : untimed ? bookingDay(untimed, bookingZone) : null
     const guest = first(work.guest_name)
     const group = work.party_size === null ? 'a guest' : guestGroup(work.guest_name, work.party_size)
@@ -204,29 +204,27 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     if (day === null || (range === 'today' ? day > today(work.timezone) : !shows(day, work.timezone))) continue
     // A follow-up is due the day after its visit: it is work on the day it is due, and Upcoming already shows the visit.
     if (work.kind === 'consultation_follow_up' && range === 'upcoming') continue
-    const mine = work.assigned_to_viewer === 1 || (work.assigned_member_id === null && manage)
-    // A job is the strip of its booking's card when the list has one.
-    const held = (work.booking_id ? byBooking.get(work.booking_id) : undefined) ?? (work.subject_type === 'product_session' && work.subject_id ? byClass.get(work.subject_id)?.card : undefined)
-    const card = held?.day === day ? held : undefined
-    if (card) {
-      // Prep and a follow-up are the host's own; their Done is in the conversation the card opens.
-      if (work.kind === 'consultation_prep' || work.kind === 'consultation_follow_up') continue
-      const someone = work.assigned_member_id !== null && !work.assigned_to_viewer ? first(work.assignee_name) ?? 'A teammate' : null
-      card.action = someone ? { title: `${someone} is cleaning`, detail: guest && work.viewer_seated ? `Message ${guest}` : card.action.detail }
-        : { title: work.assigned_to_viewer ? 'You’re cleaning' : 'Nobody is cleaning yet', detail: 'Tap Done in the conversation when it’s finished' }
+    // A job always has someone. Another person's clean is the action of its booking's card on that day ("Casey is cleaning");
+    // the viewer's own job is its own card, which opens the job's conversation, where its Done is.
+    if (!work.assigned_to_viewer) {
+      const held = work.kind === 'turnover' && work.booking_id ? byBooking.get(work.booking_id) : undefined
+      if (held?.day === day) held.action = { title: `${first(work.assignee_name) ?? 'A teammate'} is cleaning`, detail: guest && work.viewer_seated ? `Message ${guest}` : held.action.detail }
       continue
     }
-    if (!mine || work.kind === 'consultation_prep' || !work.booking_id || !to) continue
-    const headline = work.kind === 'turnover' ? `Clean up after ${group}` : work.kind === 'stay_ready' ? `Get ${work.product_name ?? 'the home'} ready for ${group}` : `Follow up with ${group}`
+    // Prep is the host's own preparation for a visit already on their list.
+    if (work.kind === 'consultation_prep') continue
+    const headline = work.kind === 'turnover' ? `Clean up after ${group}` : `Follow up with ${group}`
     const team = work.team_conversation_id
     add({
       id: `task:${work.id}`, noun: work.kind === 'consultation_follow_up' ? 'follow_up' : 'clean', order: [0, at ?? untimed ?? ''], bookings: [], day,
       when: at ? visitWhen(at, work.timezone) : range === 'today' ? 'Today' : formatTimestamp(`${day}T12:00:00.000Z`, 'en', 'UTC', { weekday: 'short', month: 'short', day: 'numeric' }),
       image_url: picture('product', work.product_id), icon: iconOf(work.product_kind), headline: headline.charAt(0).toUpperCase() + headline.slice(1),
       line: work.booking_unit === 'nights' ? work.product_name : work.location_id === null ? 'Online' : work.location_title,
-      action: team ? { title: 'Message the host', detail: range === 'today' ? 'Send photos when you’re done' : 'Ask anything before the day' }
-        : { title: 'Tap Done when it’s finished', detail: guest && work.viewer_seated ? `In ${guest}’s conversation` : 'On the reservation' },
-      to: team ? guestConversationPath(viewer.slug, team) : to, draft: null,
+      // The host's own job has nobody to message: it opens the job, where its Done is.
+      action: manage ? { title: 'Open the job', detail: 'Tap Done when it’s finished' }
+        : { title: 'Message the host', detail: range === 'today' ? 'Send photos when you’re done' : 'Ask anything before the day' },
+      // The job's conversation is written with the job; a job read before it exists is not linked anywhere else.
+      to: team ? guestConversationPath(viewer.slug, team) : null, draft: null,
     })
   }
 

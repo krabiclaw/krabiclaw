@@ -52,9 +52,8 @@ export default defineHandler(async (event) => {
     if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > 5) return jsonResponse({ error: 'Each category rating must be between 1 and 5.' }, { status: 400 })
   }
 
-  // The emailed token is the proof of who is writing: it was minted for the
-  // booking's Better Auth user, and the review belongs to that user whatever
-  // browser the link is opened in.
+  // The emailed token authorizes the review. If the booking has a linked user,
+  // the review belongs to that user regardless of which browser opens the link.
   const reviewUserId = result.request.user_id
   const mediaRows = await queryAll<{ asset_id: string; kind: string; asset_status: string }>(db, `
     SELECT mp.asset_id, ma.kind, ma.status AS asset_status

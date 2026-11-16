@@ -3,7 +3,8 @@ import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { hashReservationCancelToken, readBearerToken } from '~/server/utils/reservation-cancel-token'
 import { getClientIp, hashClientIp, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
 import { defineHandler } from 'nitro'
-import { getRouterParam } from 'nitro/h3'
+
+import { conversationIdParam } from '~/server/utils/conversation-request'
 
 const IP_HOURLY_LIMIT = 20
 const REQUEST_HOURLY_LIMIT = 5
@@ -11,7 +12,7 @@ const REQUEST_HOURLY_LIMIT = 5
 /** Spend the cancellation capability from the guest's booking confirmation. */
 export default defineHandler(async (event) => {
   const organizationId = event.context.organizationId as string | null | undefined
-  const requestId = getRouterParam(event, 'conversation_id')
+  const requestId = conversationIdParam(event)
   const token = readBearerToken(event.req.headers.get('authorization'))
   if (!organizationId || !requestId || !token) {
     return jsonResponse({ error: 'Missing required parameters' }, { status: 400 })

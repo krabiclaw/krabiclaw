@@ -2,12 +2,14 @@ import { createReplayableReservationCancelToken } from '~/server/utils/reservati
 import { formQuestionsRevision } from '../../shared/form-questions.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import Stripe from 'stripe'
 import { listAgenda, listTodayAgenda } from '../../server/utils/dashboard-agenda.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import type { UpdateProductInput } from '../../server/types/products.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
+import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
 import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, moveStayPhotos, readHomeCalendar, readStayCalendar, readStayHome, STAY_CALENDAR_HOME_FIELDS, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { closeTask, listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
@@ -28,9 +30,12 @@ import { createProductBooking, notifyProductBookingCreated } from '../../server/
 import publicBookingRoute from '../../server/api/public/products/[slug]/book.post.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getThreadOperationalRecord, requestActions } from '../../server/domain/requests.ts'
-import { cancelStayAsGuest, createStayRequest, expireStayRequests } from '../../server/domain/stays.ts'
+import { cancelStayAsGuest, createStayRequest, dispatchStayCheckoutDeadlines, readPublicStayHome } from '../../server/domain/stays.ts'
+import { bookingPolicy } from '../../server/utils/booking-policy-summary.ts'
+import { requireBookingConfig } from '../../server/utils/availability.ts'
 import { projectStripeConnectedAccount, reserveStripeConnectedAccount } from '../../server/utils/stripe-connect.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[payment_id]/return.post.ts'
+import tenantPaymentWebhookRoute from '../../server/api/stripe/payments/webhook.post.ts'
 import { tokenHash } from '../../server/domain/payments/buyer.ts'
 import { createLocation, updateLocation } from '../../server/utils/location-management.ts'
 import publicLocationsRoute from '../../server/api/public/locations.get.ts'
@@ -60,6 +65,10 @@ import { hashPassword } from 'better-auth/crypto'
 import { updateOrganizationSettingsFields } from '../../server/utils/organization-settings.ts'
 import editNightsRoute from '../../server/api/dashboard/stay-homes/[product_id]/nights.put.ts'
 import { buyStay } from './support/stay-checkout.ts'
+import { captureEvents } from './support/events.ts'
+
+// A stay write posts its cleaning job and alerts the person doing it, so every environment here can send: logged, never delivered.
+const JOB_ALERT_ENV = { MEDIA_BASE_URL: 'https://media.example.test', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
 
 
 
@@ -76,13 +85,39 @@ const outsider: StayAccess = { organizationId: ORG, actorId: OUTSIDER, manage: f
 async function boot() {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'stays-proof', compatibilityDate: '2024-11-01',
-    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { constructor(ctx) { this.ctx = ctx } async fetch(request) { if (new URL(request.url).pathname === "/observed") return Response.json(await this.ctx.storage.get("events") ?? []); if (new URL(request.url).pathname === "/failure") { await this.ctx.storage.put("failure", request.method === "PUT"); return new Response(null, { status: 204 }) } const event = await request.json(); await this.ctx.storage.put("events", [...await this.ctx.storage.get("events") ?? [], event]); if (await this.ctx.storage.get("failure")) return new Response("Publication refused", { status: 503 }); return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: `
+      export class Hub {
+        constructor(ctx) { this.ctx = ctx }
+        async fetch(request) {
+          const url = new URL(request.url)
+          const storage = this.ctx.storage
+          if (url.pathname === '/observed') return Response.json(await storage.get('events') ?? [])
+          if (url.pathname === '/deadlines') return Response.json(await storage.get('deadlines') ?? [])
+          if (url.pathname === '/wake') {
+            await storage.put('deadlines', [...await storage.get('deadlines') ?? [], await request.json()])
+            return new Response(null, { status: 204 })
+          }
+          if (url.pathname === '/failure') {
+            await storage.put('failure', request.method === 'PUT' ? url.searchParams.get('type') ?? '*' : '')
+            return new Response(null, { status: 204 })
+          }
+          const event = await request.json()
+          await storage.put('events', [...await storage.get('events') ?? [], event])
+          const failure = await storage.get('failure')
+          if (failure === '*' || failure === event.type) return new Response('Publication refused', { status: 503 })
+          return new Response(null, { status: 204 })
+        }
+      }
+      export default { fetch() { return new Response('ok') } }
+    ` } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
     env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stays-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'stay-billing-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests' } as CloudflareEnv
+    const queue = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), ...JOB_ALERT_ENV, DB: db, EVENTS: queue.binding, BETTER_AUTH_SECRET: 'stay-billing-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests' } as CloudflareEnv
+    bindDatabaseEvents(db, env)
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
@@ -95,7 +130,7 @@ async function boot() {
       await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
         VALUES (?, ?, ?, ?, 'active', 'America/Denver', ?, ?)`).bind(loc, ORG, loc, loc, NOW, NOW).run()
     }
-    return { runtime, db, env }
+    return { runtime, db, env, queue }
   } catch (error) {
     await runtime.dispose()
     throw error
@@ -116,8 +151,8 @@ function code(expected: string) {
 
 const guest = { adults: 2, guest_name: 'Ana', total_minor: 45_000 }
 
-test('committed stays report publication failures and idempotent retries publish without duplicate writes', { timeout: 120_000 }, async () => {
-  const { runtime, db, env } = await boot()
+test('committed stays survive failed queue deliveries and retries publish without duplicate writes', { timeout: 120_000 }, async () => {
+  const { runtime, db, env, queue } = await boot()
   try {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
     const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName(ORG))
@@ -131,10 +166,14 @@ test('committed stays report publication failures and idempotent retries publish
       { type: 'stay.changed', product_id: cabin.id, booking_id: null, location_id: 'cabin-site' },
       { type: 'nights.changed', product_id: cabin.id, booking_id: null, location_id: 'cabin-site' },
     ])
-    await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
+    const consumeStay = () => queue.runNext(env, 'stay.changed')
+    const failStayPublication = () => hub.fetch('https://inbox.test/failure?type=stay.changed', { method: 'PUT' })
+    await failStayPublication()
     const input = { product_id: cabin.id, idempotency_key: 'publish-stay', check_in_date: '2027-05-01', check_out_date: '2027-05-03', ...guest }
-    await assert.rejects(createStay(db, env, manager, input), (error: { status?: number; data?: Record<string, unknown> }) =>
-      error.status === 503 && error.data?.code === 'DASHBOARD_PUBLICATION_FAILED' && error.data.committed === true && error.data.version === 1 && typeof error.data.booking_id === 'string')
+    const saved = await createStay(db, env, manager, input)
+    assert.deepEqual(await events(), homeEvents)
+    await assert.rejects(consumeStay, (error: { status?: number; data?: Record<string, unknown> }) =>
+      error.status === 503 && error.data?.code === 'DASHBOARD_PUBLICATION_FAILED' && error.data.committed === true && error.data.version === 1 && error.data.booking_id === saved.id)
     const persisted = await db.prepare('SELECT id, version FROM bookings WHERE idempotency_key = ?').bind(input.idempotency_key).first<{ id: string; version: number }>()
     assert(persisted)
     assert.equal(await db.prepare('SELECT count(*) FROM stay_nights WHERE booking_id = ?').bind(persisted.id).first('count(*)'), 2)
@@ -142,10 +181,15 @@ test('committed stays report publication failures and idempotent retries publish
     const replay = await createStay(db, env, manager, input)
     assert.deepEqual({ id: replay.id, version: replay.version }, persisted)
     assert.equal(await db.prepare('SELECT count(*) FROM bookings WHERE idempotency_key = ?').bind(input.idempotency_key).first('count(*)'), 1)
-    // Every stay has its conversation, which hears the change after the stay's own screens.
-    assert.deepEqual((await events()).slice(-3).map(event => ({ type: event.type, ...('booking_id' in event ? { booking_id: event.booking_id, product_id: event.product_id } : {}) })), [
+    const beforeRetry = (await events()).length
+    await queue.drain(env, 'stay.changed')
+    const recovered = (await events()).slice(beforeRetry)
+    assert.deepEqual(recovered.slice(0, 3).map(event => ({ type: event.type, ...('booking_id' in event ? { booking_id: event.booking_id, product_id: event.product_id } : {}) })), [
       { type: 'stay.changed', booking_id: replay.id, product_id: cabin.id }, { type: 'nights.changed', booking_id: replay.id, product_id: cabin.id }, { type: 'MESSAGE_UPDATE' },
     ])
+    const cleaningMessages = () => db.prepare(`SELECT count(*) AS count FROM messages m JOIN conversations c ON c.id=m.conversation_id
+      WHERE c.booking_id=? AND c.kind='team' AND json_extract(m.payload_json, '$.key') LIKE 'job:%'`).bind(replay.id).first('count')
+    assert.equal(await cleaningMessages(), 1)
 
     await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
     const payment = { amount_minor: 10_000, method: 'cash', paid_on: '2027-05-01', idempotency_key: 'publish-payment' }
@@ -155,26 +199,32 @@ test('committed stays report publication failures and idempotent retries publish
     assert.equal((await recordStayPayment(db, env, manager, replay.id, payment)).stay.paid_minor, 10_000)
     assert.equal(await db.prepare('SELECT count(*) FROM offline_payments WHERE booking_id = ?').bind(replay.id).first('count(*)'), 1)
 
-    // A saved versioned edit reports its real version; its stale retry never writes again.
-    await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
-    await assert.rejects(updateStay(db, env, manager, replay.id, { version: 1, guest_name: 'Ana Recorded' }),
+    // The delivery carries the saved version. A stale edit cannot write again.
+    await failStayPublication()
+    assert.equal((await updateStay(db, env, manager, replay.id, { version: 1, guest_name: 'Ana Recorded' })).version, 2)
+    await assert.rejects(consumeStay,
       (error: { data?: Record<string, unknown> }) => error.data?.code === 'DASHBOARD_PUBLICATION_FAILED' && error.data.committed === true && error.data.version === 2)
     await hub.fetch('https://inbox.test/failure', { method: 'DELETE' })
+    await consumeStay()
     await assert.rejects(updateStay(db, env, manager, replay.id, { version: 1, guest_name: 'Ana Recorded' }), code('STAY_VERSION_CONFLICT'))
     assert.deepEqual({ name: (await getStay(db, manager, replay.id)).guest_name, version: (await getStay(db, manager, replay.id)).version }, { name: 'Ana Recorded', version: 2 })
 
     const booking = { provider: 'channex' as const, external_booking_id: 'live-channel-booking', channel_booking_id: null, channel: 'airbnb' as const,
       revision_id: 'live-revision', provider_updated_at: '2026-10-16T01:00:00Z', cancelled: false, check_in_date: '2027-06-01', check_out_date: '2027-06-03', adults: 2,
       children: 0, infants: 0, guest_name: null, guest_surname: null, guest_email: null, guest_phone: null, total_minor: 20_000, currency: 'USD' }
-    await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
-    await assert.rejects(applyChannelBooking(db, env, ORG, cabin.id, booking), code('DASHBOARD_PUBLICATION_FAILED'))
+    await failStayPublication()
+    const applied = await applyChannelBooking(db, env, ORG, cabin.id, booking)
+    assert.equal(applied.applied, true)
+    await assert.rejects(consumeStay, code('DASHBOARD_PUBLICATION_FAILED'))
     await hub.fetch('https://inbox.test/failure', { method: 'DELETE' })
     const channel = await applyChannelBooking(db, env, ORG, cabin.id, booking)
     assert.equal(channel.applied, false)
     assert.equal(channel.version, 1)
     assert.equal(await db.prepare('SELECT count(*) FROM bookings WHERE external_booking_id = ?').bind(booking.external_booking_id).first('count(*)'), 1)
+    const beforeChannelRetry = (await events()).length
+    await queue.drain(env, 'stay.changed')
     const published = await events()
-    assert.deepEqual(published.slice(-3).map(event => ({ type: event.type, ...('booking_id' in event ? { booking_id: event.booking_id, product_id: event.product_id, location_id: event.location_id } : {}) })), [
+    assert.deepEqual(published.slice(beforeChannelRetry, beforeChannelRetry + 3).map(event => ({ type: event.type, ...('booking_id' in event ? { booking_id: event.booking_id, product_id: event.product_id, location_id: event.location_id } : {}) })), [
       { type: 'stay.changed', booking_id: channel.id, product_id: cabin.id, location_id: 'cabin-site' },
       { type: 'nights.changed', booking_id: channel.id, product_id: cabin.id, location_id: 'cabin-site' },
       { type: 'MESSAGE_UPDATE' },
@@ -186,7 +236,7 @@ test('committed stays report publication failures and idempotent retries publish
 })
 
 test('a moved channel revision repairs its audited home scopes without rewriting a recognized or superseded delivery', { timeout: 120_000 }, async () => {
-  const { runtime, db, env } = await boot()
+  const { runtime, db, env, queue } = await boot()
   try {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
     const lake = await home(db, env, { name: 'Lake', location: 'lake-site' })
@@ -202,9 +252,13 @@ test('a moved channel revision repairs its audited home scopes without rewriting
       revision_id: 'initial-revision', provider_updated_at: '2026-10-16T01:00:00Z', cancelled: false, check_in_date: '2027-06-01', check_out_date: '2027-06-03', adults: 2,
       children: 0, infants: 0, guest_name: null, guest_surname: null, guest_email: null, guest_phone: null, total_minor: 20_000, currency: 'USD' }
     const first = await applyChannelBooking(db, env, ORG, cabin.id, booking)
+    await queue.runNext(env, 'stay.changed')
     const moved = { ...booking, revision_id: 'moved-revision', provider_updated_at: '2026-10-16T02:00:00Z' }
-    await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
-    await assert.rejects(applyChannelBooking(db, env, ORG, lake.id, moved), (error: { data?: Record<string, unknown> }) =>
+    const applied = await applyChannelBooking(db, env, ORG, lake.id, moved)
+    assert.deepEqual([applied.applied, applied.version], [true, 2])
+    await hub.fetch('https://inbox.test/failure?type=stay.changed', { method: 'PUT' })
+    const beforeFailure = (await events()).length
+    await assert.rejects(() => queue.runNext(env, 'stay.changed'), (error: { data?: Record<string, unknown> }) =>
       error.data?.code === 'DASHBOARD_PUBLICATION_FAILED' && error.data.product_id === cabin.id && error.data.version === 2)
     const committed = await getStay(db, manager, first.id)
     assert.equal(committed.product_id, lake.id)
@@ -223,6 +277,7 @@ test('a moved channel revision repairs its audited home scopes without rewriting
     const replay = await applyChannelBooking(db, env, ORG, lake.id, moved)
     assert.equal(replay.applied, false)
     assert.deepEqual([replay.version, replay.updated_at], [committed.version, committed.updated_at])
+    await queue.runNext(env, 'stay.changed')
     assert.deepEqual((await events()).slice(beforeRepair).map(event => ({ type: event.type, ...('product_id' in event ? { product_id: event.product_id, location_id: event.location_id, booking_id: event.booking_id } : {}) })), [
       { type: 'stay.changed', product_id: cabin.id, location_id: 'cabin-site', booking_id: first.id },
       { type: 'nights.changed', product_id: cabin.id, location_id: 'cabin-site', booking_id: first.id },
@@ -231,6 +286,13 @@ test('a moved channel revision repairs its audited home scopes without rewriting
       // The reservation's conversation, which every channel stay has from its first revision.
       { type: 'MESSAGE_UPDATE' },
     ])
+    const movedJob = await db.prepare(`SELECT m.id FROM messages m JOIN conversations c ON c.id=m.conversation_id
+      JOIN tasks t ON t.subject_id=c.booking_id AND json_extract(m.payload_json, '$.key') LIKE ('job:' || t.id || ':%')
+      WHERE c.booking_id=? AND c.kind='team' AND t.kind='turnover' AND t.product_id=? ORDER BY m.sequence DESC LIMIT 1`)
+      .bind(first.id, lake.id).first<{ id: string }>()
+    assert(movedJob)
+    assert((await events()).slice(beforeFailure).some(event => event.type === 'MESSAGE_CREATE' && event.team && event.message?.id === movedJob.id), 'the moved stay posts its new cleaning job')
+    await queue.runNext(env, 'stay.changed')
     assert.deepEqual((await audit()).results, appliedAudits.results)
 
     // A factual earlier receipt can be repaired after a later move. A stale
@@ -238,9 +300,11 @@ test('a moved channel revision repairs its audited home scopes without rewriting
     const earlier = await applyChannelBooking(db, env, ORG, cabin.id, booking)
     assert.equal(earlier.applied, false)
     assert.equal(earlier.product_id, lake.id)
+    await queue.runNext(env, 'stay.changed')
     const beforeStale = (await events()).length
     const stale = await applyChannelBooking(db, env, ORG, cabin.id, { ...booking, revision_id: 'never-applied', provider_updated_at: '2026-10-16T00:00:00Z' })
     assert.equal(stale.applied, false)
+    await queue.runNext(env, 'stay.changed')
     assert.deepEqual((await events()).slice(beforeStale).filter(event => 'product_id' in event).map(event => event.product_id), [lake.id, lake.id])
     assert.deepEqual((await audit()).results, appliedAudits.results)
     assert.equal((await getStay(db, manager, first.id)).updated_at, committed.updated_at)
@@ -296,6 +360,27 @@ test('a moved channel revision repairs its audited home scopes without rewriting
     assert.deepEqual([overbooked.id, overbooked.product_id, overbooked.overbooked, overbooked.version], [overlapStay.id, lake.id, true, 2])
     assert.equal(await db.prepare('SELECT count(*) FROM stay_nights WHERE booking_id = ?').bind(overlapStay.id).first('count(*)'), 0)
     assert.equal(await db.prepare('SELECT count(*) FROM stay_nights WHERE booking_id = ?').bind(first.id).first('count(*)'), 2)
+
+    // A historical host move retains the original channel listing while
+    // the booking's local claims identify the home where the guest sleeps.
+    await db.prepare('UPDATE bookings SET booked_product_id = ? WHERE id = ?').bind(cabin.id, first.id).run()
+    const revised = await applyChannelBooking(db, env, ORG, cabin.id, {
+      ...booking, revision_id: 'legacy-move-new-departure', provider_updated_at: '2026-10-16T06:00:00Z', check_out_date: '2027-06-04',
+    })
+    assert.equal(revised.applied, true)
+    const saved = await getStay(db, manager, first.id)
+    assert.deepEqual([saved.product_id, saved.booked_product_id, saved.booked_home_name], [lake.id, cabin.id, 'Cabin'])
+    for (const productId of [cabin.id, lake.id]) {
+      const calendar = await readHomeCalendar(db, manager, { productId, from: '2027-06-03', to: '2027-06-05' })
+      assert.deepEqual(calendar.nights.map(night => [night.date, night.booking_id, night.available]), [
+        ['2027-06-03', first.id, false],
+        ['2027-06-04', null, true],
+      ])
+    }
+    await assert.rejects(createStay(db, env, manager, {
+      product_id: cabin.id, idempotency_key: 'old-channel-listing-conflict', check_in_date: '2027-06-03',
+      check_out_date: '2027-06-04', adults: 1, guest_name: 'Another guest', total_minor: 10_000,
+    }), code('STAY_OVERLAP'))
   } finally {
     await runtime.dispose()
   }
@@ -1319,7 +1404,6 @@ test('the multi-calendar reads every home the caller looks after, each night as 
     assert.deepEqual(assigned.homes[0]!.nights, cabinNights)
     assert.deepEqual(assigned.stays.map(stay => stay.booking_id), [cabinStay.id])
     assert.deepEqual(await readStayCalendar(db, outsider, window), { ...window, homes: [], stays: [] })
-    await assert.rejects(readStayCalendar(db, manager, { from: '2026-11-01', to: '2027-02-02' }), code('INVALID_RANGE'))
   } finally {
     await runtime.dispose()
   }
@@ -1420,12 +1504,12 @@ test('a member reads a stay at a home they look after as its turnover on every r
     assert(stay.conversation_id)
     // The recorded arrival is the stay's start; it leaves at the home's 10:00 checkout.
     const turnover = { id: stay.id, product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', status: 'confirmed', starts_at: '2026-11-01T22:30:00.000Z', ends_at: '2026-11-03T17:00:00.000Z',
-      check_in_date: '2026-11-01', check_out_date: '2026-11-03', adults: 2, children: 1, infants: 1, guest_name: 'Ana', no_show_at: null }
+      check_in_date: '2026-11-01', check_out_date: '2026-11-03', adults: 2, children: 1, infants: 1, guest_name: 'Ana' }
     const window = { from: '2026-11-01', to: '2026-11-04' }
 
     assert.deepEqual(await getStay(db, cleaner, stay.id), turnover)
     // Every calendar read draws a member's stay as its days, status, party and the guest's first name.
-    const calendarTurnover = { unit: 'nights', booking_id: stay.id, product_id: cabin.id, status: 'confirmed', guest_name: 'Ana', adults: 2, children: 1, check_in_date: '2026-11-01', check_out_date: '2026-11-03' }
+    const calendarTurnover = { unit: 'nights', booking_id: stay.id, conversation_id: null, product_id: cabin.id, status: 'confirmed', guest_name: 'Ana', adults: 2, children: 1, check_in_date: '2026-11-01', check_out_date: '2026-11-03' }
     assert.deepEqual((await readHomeCalendar(db, cleaner, { productId: cabin.id, ...window })).stays, [calendarTurnover])
     assert.deepEqual((await readStayCalendar(db, cleaner, window)).stays, [calendarTurnover])
     // Owners and admins read the whole stay, unchanged.
@@ -1499,7 +1583,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
   context.mock.timers.enable({ apis: ['Date'], now: duringStay })
   const { runtime, db, env: bindings } = await boot()
   try {
-    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    const env = { ...bindings, ...JOB_ALERT_ENV, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
     // The guest's notices are written in the business's source language.
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
@@ -1507,17 +1591,20 @@ test('a business’s site shows a guest the stay its signed link names, from any
     const location = { address, latitude: 40.014984, longitude: -105.270546, maps_url: 'https://maps.google.com/?cid=123456' }
     assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
     const guide = { check_in_method: 'lockbox' as const, check_in_instructions: 'Use the garden lockbox.', wifi_network: 'Cabin guests', wifi_password: 'private-cabin-wifi', directions: 'Use the east entrance.', house_manual: 'Keep the gate closed.', checkout_instructions: [{ task: 'return_keys' as const, details: 'Leave keys in the box.' }] }
-    await updateStayHome(env, db, manager, cabin.id, guide)
+    await updateStayHome(env, db, manager, cabin.id, { ...guide, cancellation_policy: 'moderate', long_term_cancellation_policy: 'firm' })
     await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details_mode: 'merge', details: { pets_allowed: false, stairs_required: true, stairs_required_details: 'Two steps at the entrance.' } } })
-    // The guest bought the stay on the site: the captured checkout's conversion makes it theirs.
+    await writeMemberScheduling({ env, userId: OWNER, organizationId: ORG }, `m-${OWNER}`, { updated_at: null, public_name: OWNER, public_approved: true })
+    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
+    // The guest bought the stay on the site while the home was published.
     const signIn = async () => {
       const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
       return { id: signed.response!.user.id, cookie: signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ') }
     }
     const booker = await signIn()
     const otherGuest = await signIn()
-    const stay = await buyStay(db, { id: 'site-stay', organizationId: ORG, productId: cabin.id, locationId: 'cabin-site', timezone: 'America/Denver', checkIn: '2026-11-01', checkOut: '2026-11-04', adults: 2,
+    const stay = await buyStay(db, env, { id: 'site-stay', organizationId: ORG, productId: cabin.id, locationId: 'cabin-site', timezone: 'America/Denver', checkIn: '2026-11-01', checkOut: '2026-11-04', adults: 2,
       nightlyMinor: 15_000, currency: 'USD', buyerUserId: booker.id, guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null } })
+    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: false, actor: { actorId: OWNER } })
     // The guest's stay is read by its activity ID: its conversation's, as the account reads it.
     const activityId = stay.conversation_id ?? stay.id
     // The link the confirmation email and the paid return carry, signed with the site's secret.
@@ -1539,17 +1626,18 @@ test('a business’s site shows a guest the stay its signed link names, from any
     const own = await read(ORG, link)
     assert.equal(own.status, 200)
     assert.equal(own.headers.get('cache-control'), 'private, no-store')
-    const body = await own.json() as GuestStay
+    const body = await own.json() as GuestStay & { manage_url: string }
     const { location: guestLocation, arrival_guide: arrivalGuide, house_rules: rules, safety, ...guestHome } = body.home
     assert.deepEqual({ organization_id: body.organization_id, id: body.stay.id, email: body.stay.guest_email, policy: body.stay.cancellation_policy, dates: [body.stay.check_in_date, body.stay.check_out_date], home: guestHome, cancellation: body.cancellation },
-      { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: 'moderate', dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_out_time: '10:00', image_url: null },
+      { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: 'moderate', dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', photo_urls: [], listing: null, contact_phone: null, host: { name: OWNER, photo_url: null, bio: null }, co_hosts: [] },
         cancellation: { policy: 'moderate', paid_minor: 45_000, refund_minor: 7_500, currency: 'USD' } })
+    assert.equal(body.manage_url, `https://proof.example/dashboard/account/messages/${activityId}/reservation`)
     assert.deepEqual(arrivalGuide, { product_id: cabin.id, ...guide })
     const midStay = await listAgenda(db, { buyerUserId: booker.id }, { from: '2026-11-02', to: '2026-11-02', kinds: ['stay'] })
     assert.deepEqual(midStay.items.map(item => ({ kind: item.kind, title: item.title, requestId: item.conversation_id, to: item.to, startsAt: item.starts_at, endsAt: item.ends_at })), [
-      { kind: 'stay', title: 'Cabin', requestId: activityId, to: `/dashboard/account/activity/stay/${activityId}`, startsAt: '2026-11-01T23:00:00.000Z', endsAt: '2026-11-04T17:00:00.000Z' },
+      { kind: 'stay', title: 'Cabin', requestId: activityId, to: `/dashboard/account/messages/${activityId}`, startsAt: '2026-11-01T23:00:00.000Z', endsAt: '2026-11-04T17:00:00.000Z' },
     ])
-    assert.deepEqual((await listTodayAgenda(db, { buyerUserId: booker.id }, {}, new Date('2026-11-02T19:00:00.000Z'))).items.map(item => item.to), [`/dashboard/account/activity/stay/${activityId}`])
+    assert.deepEqual((await listTodayAgenda(db, { buyerUserId: booker.id }, {}, new Date('2026-11-02T19:00:00.000Z'))).items.map(item => item.to), [`/dashboard/account/messages/${activityId}`])
     assert.deepEqual((await listAgenda(db, { buyerUserId: otherGuest.id }, { from: '2026-11-02', to: '2026-11-02', kinds: ['stay'] })).items, [])
 
     assert.deepEqual(rules, ['No pets'])
@@ -1711,12 +1799,18 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
   const { runtime, db, env: bindings } = await boot()
   try {
     // A demo business on the live platform pays in Stripe test mode, which bills no usage.
-    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary', STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary' }
+    const webhookSecret = 'whsec_stay_payment_proof'
+    const env = { ...bindings, ...JOB_ALERT_ENV, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary', STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary', STRIPE_TEST_PAYMENTS_WEBHOOK_SECRET: webhookSecret }
     // The guest's notices are written in the business's source language.
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
     const location = { address: { regionCode: 'TH', addressLines: ['56 Test Lane', 'Villa 8', 'Garden entrance'], languageCode: 'th', locality: 'Krabi Town', sublocality: 'Ao Nang', administrativeArea: 'Krabi', postalCode: '81180' }, latitude: 8.0326, longitude: 98.822, maps_url: null }
     assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
+    await updateStayHome(env, db, manager, cabin.id, { cancellation_policy: 'moderate', long_term_cancellation_policy: 'firm' })
+    await writeMemberScheduling({ env, userId: OWNER, organizationId: ORG }, `m-${OWNER}`, { updated_at: null, public_name: 'Cabin host', public_approved: true })
+    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
+    const connected = await reserveStripeConnectedAccount(db, { organizationId: ORG, livemode: false })
+    await projectStripeConnectedAccount(db, { reservationId: connected.id, organizationId: ORG, stripeAccountId: 'acct_seller', country: 'US', livemode: false, cardPaymentsStatus: 'active', cardPaymentsResolutions: [], requirements: [], stripeRefreshedAt: NOW })
     const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
     const buyer = signed.response!.user.id
     const cookie = signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
@@ -1724,14 +1818,16 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     const checkoutSigned = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
     const checkoutGuest = checkoutSigned.response!.user.id
     const checkoutCookie = checkoutSigned.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
-    // The checkout as Stripe's capture finds it: the payment captured, its hold not yet converted. The return
-    // reconciles the payment, which runs the real conversion that makes the checkout guest's stay.
+    // Stripe has authorized the card. Its webhook saves the checkout guest's stay before capture.
     const nightly = ['2026-11-01', '2026-11-02', '2026-11-03'].map(date => ({ date, price_minor: 15_000 }))
     const purchase = { product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', check_in_date: '2026-11-01', check_out_date: '2026-11-04', adults: 2, children: 0, infants: 0, total_minor: 45_000, currency: 'USD', cancellation_policy: 'moderate', nightly, guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null } } as const
     // The terms the checkout froze with its purchase.
-    const policy = JSON.parse(await stayCheckoutPolicy(db, ORG, { ...purchase, tax_behavior: 'unspecified' }))
+    const policy = stayCheckoutPolicy(bookingPolicy(await requireBookingConfig(db, ORG, purchase.product_id), null), { ...purchase, tax_behavior: 'unspecified' })
     await db.prepare(`INSERT INTO payments (id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,captured_amount,stripe_payment_intent_id,price_snapshot_json,created_at,updated_at)
-      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'booking', NULL, 'cabin-site', 'USD', 45000, 45000, 'pi_stay-pay', ?, ?, ?)`).bind(ORG, checkoutGuest, JSON.stringify({ title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD' }, method_configuration_id: 'pmc_test', stay: purchase, policy }), NOW, NOW).run()
+      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'booking', NULL, 'cabin-site', 'USD', 45000, 0, 'pi_stay-pay', ?, ?, ?)`).bind(ORG, checkoutGuest, JSON.stringify({
+        title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD', tax_behavior: 'unspecified' },
+        automatic_tax: false, tax_code: null, method_configuration_id: 'pmc_test', stay: purchase, policy,
+      }), NOW, NOW).run()
     await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, location_id, timezone, buyer_user_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, converted_booking_id, expires_at, created_at)
       VALUES ('stay-hold', ?, ?, 'cabin-site', 'America/Denver', ?, 'stay-pay', 2, 45000, 'USD', '2026-11-01', '2026-11-04', 'active', NULL, '2099-01-01T00:00:00.000Z', ?)`).bind(ORG, cabin.id, checkoutGuest, NOW).run()
     const claim = crypto.randomUUID() + crypto.randomUUID()
@@ -1755,16 +1851,31 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     })
     const app = new H3()
     app.use((event) => { event.context.organizationId = ORG })
+    app.post('/api/stripe/payments/webhook', tenantPaymentWebhookRoute)
     app.post('/api/public/payments/:payment_id/return', paymentReturnRoute)
     app.get('/api/public/guest-stays/:activity_id', guestStayRoute)
     app.get('/api/account/bookings/:booking_id', accountStayRoute)
     const call = (path: string, init: RequestInit = {}, headers: Record<string, string> = { cookie }) => app.request(Object.assign(new Request(`https://org.proof.example${path}`, { ...init, headers: { ...headers, 'content-type': 'application/json' } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
 
-    const back = await call('/api/public/payments/stay-pay/return', { method: 'POST', body: JSON.stringify({ claim }) })
-    assert.equal(back.status, 200)
+    const returnToSite = () => call('/api/public/payments/stay-pay/return', { method: 'POST', body: JSON.stringify({ claim }) })
+    const waiting = await returnToSite()
+    assert.equal(waiting.status, 200, await waiting.clone().text())
+    assert.deepEqual(await waiting.json(), { state: 'processing' })
+    assert.equal(await db.prepare("SELECT converted_booking_id FROM payment_checkout_holds WHERE id = 'stay-hold'").first('converted_booking_id'), null)
+    assert.equal(stayIntentStatus, 'requires_capture')
+    const payload = JSON.stringify({
+      id: 'evt_stay_authorized', object: 'event', type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false,
+      data: { object: { id: 'pi_stay-pay', metadata: { krabiclaw_payment_id: 'stay-pay' } } },
+    })
+    const signature = await new Stripe('sk_test_signer').webhooks.generateTestHeaderStringAsync({ payload, secret: webhookSecret })
+    const webhook = await call('/api/stripe/payments/webhook?mode=test', { method: 'POST', body: payload }, { 'stripe-signature': signature })
+    assert.equal(webhook.status, 200, await webhook.clone().text())
+    assert.equal(stayIntentStatus, 'succeeded')
     const stay = (await db.prepare("SELECT s.id, c.id AS conversation_id FROM bookings s JOIN payment_checkout_holds h ON h.converted_booking_id = s.id JOIN conversations c ON c.booking_id = s.id AND c.kind = 'booking' WHERE h.id = 'stay-hold'").first<{ id: string; conversation_id: string }>())!
-    assert.ok(stay, 'The return converted the checkout into its stay')
+    assert.ok(stay, 'The authorization webhook saved the stay before the guest returned')
     const activityId = stay.conversation_id
+    const back = await returnToSite()
+    assert.equal(back.status, 200, await back.clone().text())
     // The stay is read by its signed link, not by a browser's session: none, or a forged one, opens nothing.
     assert.equal((await call(`/api/public/guest-stays/${activityId}`)).status, 401)
     assert.equal((await call(`/api/public/guest-stays/${activityId}`, {}, { authorization: 'Bearer forged' })).status, 404)
@@ -1775,7 +1886,7 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     // The claim moved the stay, its payment and its hold to the browser that paid.
     assert.deepEqual(await db.prepare("SELECT (SELECT user_id FROM bookings WHERE id = ?) AS stay, (SELECT buyer_user_id FROM payments WHERE id = 'stay-pay') AS payment, (SELECT buyer_user_id FROM payment_checkout_holds WHERE id = 'stay-hold') AS hold").bind(stay.id).first(), { stay: buyer, payment: buyer, hold: buyer })
     // The confirmation page reads the stay its link names, here from a browser with no session at all, as
-    // the emailed link is opened. What was paid and the policy come from the conversion the return ran.
+    // the emailed link is opened. It reads the payment saved by the webhook.
     const read = await call(`/api/public/guest-stays/${activityId}`, {}, { authorization: `Bearer ${returned.receipt_token}` })
     assert.equal(read.status, 200)
     const body = await read.json() as GuestStay
@@ -1796,11 +1907,11 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
 test('a stay request can be paid only after approval and Stripe confirms the same stay', { timeout: 120_000 }, async t => {
   const now = Date.now()
   t.mock.timers.enable({ apis: ['Date'], now })
-  const { runtime, db, env: bindings } = await boot()
+  const { runtime, db, env: bindings, queue } = await boot()
   try {
     const env = {
-      ...bindings, BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
-      NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://sites.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply',
+      ...bindings, ...JOB_ALERT_ENV, BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
+      NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://sites.example', EMAIL_REPLY_SECRET: 'local-stay-reply',
       EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary',
       STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary', STRIPE_TEST_PUBLISHABLE_KEY: 'pk_test_mock',
       STRIPE_TEST_PAYMENTS_METHOD_CONFIGURATION: 'pmc_parent',
@@ -1855,15 +1966,16 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
 
     const subtotal = 30_000
     const expected = 31_000
-    const paymentIntent = { id: 'pi_approved_stay', object: 'payment_intent', livemode: false, currency: 'usd', amount: subtotal,
+    const paymentIntentId = 'pi_approved_stay'
+    const charge = { id: 'ch_approved_stay', object: 'charge', livemode: false, amount: expected, currency: 'usd',
+      created: Math.floor(Date.now() / 1000), payment_intent: paymentIntentId, payment_method: 'pm_card', receipt_url: 'https://pay.stripe.com/receipts/stay',
+      billing_details: { email: 'ana@example.com' } }
+    const paymentIntent = { id: paymentIntentId, object: 'payment_intent', livemode: false, currency: 'usd', amount: subtotal,
       amount_received: 0, status: 'requires_payment_method', client_secret: 'pi_approved_stay_secret', customer: null, payment_method_types: ['card'],
-      application_fee_amount: null, latest_charge: null as string | null, payment_method: null as string | null,
+      application_fee_amount: null, latest_charge: null as typeof charge | null, payment_method: null as string | null,
       last_payment_error: null as { type: string; code: string; message: string } | null,
       hooks: { inputs: { tax: { calculation: null as string | null } } },
       metadata: { krabiclaw_payment_id: '' } }
-    const charge = { id: 'ch_approved_stay', object: 'charge', livemode: false, amount: expected, currency: 'usd',
-      created: Math.floor(Date.now() / 1000), payment_intent: paymentIntent.id, payment_method: 'pm_card', receipt_url: 'https://pay.stripe.com/receipts/stay',
-      billing_details: { email: 'ana@example.com' } }
     let bookingId = ''
     let activity = ''
     let approvedPayUrl = ''
@@ -1956,10 +2068,7 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
         paymentIntent.amount = Number(params.get('amount_to_confirm') ?? paymentIntent.amount)
         paymentIntent.hooks.inputs.tax.calculation = params.get('hooks[inputs][tax][calculation]') ?? paymentIntent.hooks.inputs.tax.calculation
         assert.deepEqual([paymentIntent.payment_method, paymentIntent.amount, paymentIntent.hooks.inputs.tax.calculation], ['pm_card', expected, 'taxcalc_reviewed'])
-        paymentIntent.latest_charge = charge.id
-        paymentIntent.status = 'requires_capture'
-      } else if (url.pathname.endsWith('/capture')) {
-        // The buyer paid just before the deadline. An existing in-flight checkout is still accessible.
+        // Authorization started before the deadline, so its in-flight checkout stays accessible.
         t.mock.timers.setTime(now + 86_400_001)
         const resumed = await call(`/api/account/bookings/${bookingId}/pay`, {})
         assert.equal(resumed.status, 200, await resumed.clone().text())
@@ -1973,6 +2082,12 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
         assert.deepEqual(requestActions(await getThreadOperationalRecord(db, activity), new Date().toISOString()), [])
         const withdraw = await call(`/api/account/bookings/${bookingId}/cancel`, { version: paying.booking.version })
         assert.equal(withdraw.status, 409)
+        paymentIntent.latest_charge = charge
+        paymentIntent.status = 'requires_capture'
+      } else if (url.pathname.endsWith('/capture')) {
+        assert.equal(await db.prepare('SELECT status FROM bookings WHERE id=?').bind(bookingId).first('status'), 'confirmed')
+        assert.deepEqual(await db.prepare('SELECT subject_id,captured_amount FROM payments WHERE id=?').bind(paymentIntent.metadata.krabiclaw_payment_id).first(),
+          { subject_id: bookingId, captured_amount: 0 })
         paymentIntent.amount_received = expected
         paymentIntent.status = 'succeeded'
         captures++
@@ -2014,8 +2129,8 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
     assert.equal(await db.prepare('SELECT user_id FROM bookings WHERE id=?').bind(bookingId).first('user_id'), buyer)
     assert.equal((await call(payPath, {})).status, 409)
     assert.equal(intentCount, 0)
-    const originalClaims = await db.prepare('SELECT date,booking_id,hold_id FROM stay_nights WHERE booking_id=? ORDER BY date').bind(bookingId).all()
-    assert.deepEqual(originalClaims.results, [date(10), date(11)].map(date => ({ date, booking_id: bookingId, hold_id: null })))
+    const originalClaims = await db.prepare('SELECT date,booking_id FROM stay_nights WHERE booking_id=? ORDER BY date').bind(bookingId).all()
+    assert.deepEqual(originalClaims.results, [date(10), date(11)].map(date => ({ date, booking_id: bookingId })))
 
     const decision = await executeGuestThreadOperation(db, { threadId: activity, organizationId: ORG, action: 'confirm', actorUserId: OWNER,
       idempotencyKey: 'approve-stay-request', stayManager: true, version: (await read()).booking.version, env })
@@ -2090,8 +2205,12 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
     await assert.rejects(submitStayRequest(cookie, { ...requestBody, adults: 1 }), code('IDEMPOTENCY_CONFLICT'))
     await assert.rejects(submitStayRequest('', requestBody), code('IDEMPOTENCY_CONFLICT'))
     assert.equal(await db.prepare('SELECT received_at FROM bookings WHERE id=?').bind(bookingId).first('received_at'), new Date(now).toISOString())
+    assert.equal(await scheduledReservationMessage(), null)
+    assert(queue.pending.some(item => item.body.type === 'payment.captured' && item.body.booking?.unit === 'nights' && item.body.booking.id === bookingId))
+    await queue.drain(env, 'payment.captured')
+    await queue.drain(env, 'stay.changed')
     assert.deepEqual(await scheduledReservationMessage(), { status: 'pending', due_at: new Date(Date.now() + 5 * 60_000).toISOString() })
-    assert.deepEqual((await db.prepare('SELECT date,booking_id,hold_id FROM stay_nights WHERE booking_id=? ORDER BY date').bind(bookingId).all()).results, originalClaims.results)
+    assert.deepEqual((await db.prepare('SELECT date,booking_id FROM stay_nights WHERE booking_id=? ORDER BY date').bind(bookingId).all()).results, originalClaims.results)
     assert.equal(await db.prepare('SELECT COUNT(*) FROM bookings WHERE product_id=?').bind(cabin.id).first('COUNT(*)'), 1)
 
     const toWithdraw = { ...requestBody, idempotency_key: 'withdraw-this-stay', check_in_date: date(14), check_out_date: date(16) }
@@ -2134,11 +2253,11 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
   }
 })
 
-test('stay request decisions and expiry reconcile the host task and the exact nights', { timeout: 120_000 }, async () => {
-  const { runtime, db, env: bindings } = await boot()
+test('stay request decisions and expiry reconcile the host task and the exact nights', { timeout: 120_000 }, async (t) => {
+  const { runtime, db, env: bindings, queue } = await boot()
   try {
     const env = {
-      ...bindings, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only',
+      ...bindings, ...JOB_ALERT_ENV, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only',
     }
     await db.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status) VALUES('org-en',?,'en',1,'published')").bind(ORG).run()
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
@@ -2147,9 +2266,9 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
     await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
     const date = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
     const submit = async (key: string, offset: number) => {
-      const listing = await readStayHome(db, manager, cabin.id)
+      const listing = await readPublicStayHome(db, ORG, cabin.id)
       const quote = await quoteStay(db, ORG, listing, { check_in_date: date(offset), check_out_date: date(offset + 2), adults: 2 })
-      return createStayRequest(db, env, { organizationId: ORG, buyerUserId: OUTSIDER, key, fingerprint: key, home: listing, quote,
+      return createStayRequest(db, env, { organizationId: ORG, buyerUserId: OUTSIDER, key, fingerprint: key, home: listing, quote, policy: stayCheckoutPolicy(listing.guestTerms, quote),
         guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null }, locale: 'en', ipHash: 'proof', websiteSource: 'Direct' })
     }
     const decide = (stay: Awaited<ReturnType<typeof submit>>, action: 'confirm' | 'reject', suffix = '') => executeGuestThreadOperation(db, {
@@ -2167,16 +2286,21 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
     assert.equal(await claims(approved.id), 2)
     assert((await visibleTasks(owner!)).some(task => task.booking_id === approved.id && task.action?.path === `/dashboard/org/bookings/${approved.id}`))
     assert.equal((await visibleTasks(cleanerMembership!)).length, 0)
+    const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName(ORG))
+    await queue.runNext(env, 'stay.changed')
+    assert.deepEqual(await (await hub.fetch('https://inbox.test/deadlines')).json(), [{ kind: 'checkout', due_at: Date.parse(approved.respond_by!) }])
     await notifyProductBookingCreated(env, db, ORG, approved.conversation_id)
     const { results: deliveries } = await db.prepare(`SELECT d.purpose, d.status FROM guest_thread_deliveries d JOIN messages m ON m.id=d.message_id
       WHERE m.conversation_id=? AND d.channel='email' AND d.purpose IN ('owner_alert','guest_acknowledgement') ORDER BY d.purpose`).bind(approved.conversation_id).all()
     assert.deepEqual(deliveries, [{ purpose: 'guest_acknowledgement', status: 'sent' }, { purpose: 'owner_alert', status: 'sent' }])
     assert.equal((await decide(approved, 'confirm')).ok, true)
     assert.equal((await getStay(db, manager, approved.id)).request_status, 'awaiting_payment')
+    await queue.runNext(env, 'booking.status_changed')
+    await queue.runNext(env, 'stay.changed')
     const approval = await db.prepare(`SELECT json_extract(m.payload_json, '$.subject') AS subject, json_extract(m.payload_json, '$.email.html') AS html,
       d.status FROM messages m JOIN guest_thread_deliveries d ON d.message_id=m.id WHERE m.conversation_id=? AND m.event_name='booking.confirm'`).bind(approved.conversation_id).first<{ subject: string; html: string; status: string }>()
     assert.equal(approval?.subject, 'Stay request approved — Cabin')
-    assert(approval?.html.includes(`/dashboard/account/activity/stay/${approved.conversation_id}`))
+    assert(approval?.html.includes(`/dashboard/account/messages/${approved.conversation_id}/reservation`))
     assert.equal(approval?.status, 'sent')
     assert.equal(await db.prepare('SELECT status FROM tasks WHERE dedupe_key=?').bind(`booking_review:${approved.id}`).first('status'), 'done')
     assert.equal(await claims(approved.id), 2)
@@ -2195,7 +2319,18 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
 
     const expired = await submit('stay-expire', 20)
     const payBy = (await getStay(db, manager, approved.id)).pay_by!
-    assert.equal(await expireStayRequests(db, env, new Date(Math.max(Date.parse(expired.respond_by!), Date.parse(payBy)) + 1).toISOString()), 2)
+    const deadlines = [Date.parse(expired.respond_by!), Date.parse(payBy)]
+    assert.equal(await dispatchStayCheckoutDeadlines(env, ORG, Math.min(...deadlines) - 1), Math.min(...deadlines))
+    assert.equal(queue.pending.filter(item => item.body.type === 'stay.checkout_expired').length, 0)
+    const due = Math.max(...deadlines)
+    t.mock.timers.enable({ apis: ['Date'], now: due })
+    try {
+      assert.equal(await dispatchStayCheckoutDeadlines(env, ORG, due), null)
+      assert.deepEqual(queue.pending.flatMap(item => item.body.type === 'stay.checkout_expired' ? [item.body.id] : []).sort(), [approved.id, expired.id].sort())
+      await queue.drain(env, 'stay.checkout_expired')
+    } finally {
+      t.mock.timers.reset()
+    }
     for (const entry of [expired, approved]) {
       assert.equal((await getStay(db, manager, entry.id)).cancellation_reason, 'stay_request_expired')
       assert.equal(await claims(entry.id), 0)
@@ -2474,7 +2609,7 @@ test('native calendar writes retain real session and impersonator evidence with 
 })
 
 test('migrated unpaid stays occupy nights without a fresh reservation message and OTA revisions adopt the same stay', { timeout: 120_000 }, async () => {
-  const { runtime, db, env } = await boot()
+  const { runtime, db, env, queue } = await boot()
   try {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
     const template = await saveMessageTemplate(db, env, manager, null, { title: 'Booking received', body: 'Thanks for your reservation.', schedule: { trigger: 'booking_received', delay_minutes: 5, product_ids: [cabin.id] } })
@@ -2496,6 +2631,8 @@ test('migrated unpaid stays occupy nights without a fresh reservation message an
     await assert.rejects(recordStayPayment(db, env, manager, imported.id, { amount_minor: 1000, method: 'cash', paid_on: '2027-06-01', idempotency_key: 'should-not-collect' }), code('STAY_NOT_EDITABLE'))
     assert.equal(await db.prepare('SELECT received_at FROM bookings WHERE id = ?').bind(imported.id).first('received_at'), null)
     assert.deepEqual((await readHomeCalendar(db, manager, { productId: cabin.id, from: '2027-06-01', to: '2027-06-03' })).nights.map(night => [night.available, night.booking_id]), [[false, imported.id], [false, imported.id]])
+    assert(queue.pending.some(item => item.body.type === 'stay.changed' && item.body.booking_id === imported.id && item.body.quiet))
+    await queue.drain(env, 'stay.changed')
     assert.deepEqual(await db.prepare("SELECT status, due_at FROM scheduled_guest_messages WHERE booking_id = ? AND template_id = ?").bind(imported.id, template.id).first(), { status: 'skipped', due_at: null })
     assert.equal((await createStay(db, env, manager, input, { imported: source })).id, imported.id)
     const audit = await db.prepare("SELECT payload_json FROM activity_entries WHERE event_name = 'stay.created' AND json_extract(payload_json, '$.entityId') = ?").bind(imported.id).first<string>('payload_json')
@@ -2519,14 +2656,17 @@ test('migrated unpaid stays occupy nights without a fresh reservation message an
     assert.equal((await getStay(db, manager, beforeMove.id)).owner, 'app')
     assert.deepEqual((await db.prepare('SELECT product_id, date FROM stay_nights WHERE booking_id = ? ORDER BY date').bind(beforeMove.id).all()).results, ['2027-07-01', '2027-07-02', '2027-07-03'].map(date => ({ product_id: cabin.id, date })))
     const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName(ORG))
-    await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
+    await queue.drain(env, 'stay.changed')
+    await hub.fetch('https://inbox.test/failure?type=stay.changed', { method: 'PUT' })
     const retryInput = { ...input, idempotency_key: 'hostaway:needs-publication', check_in_date: '2027-08-01', check_out_date: '2027-08-03' }
-    await assert.rejects(createStay(db, env, manager, retryInput, { imported: { ...source, source_id: 'needs-publication', channel: 'direct', channel_booking_id: null } }), code('DASHBOARD_PUBLICATION_FAILED'))
+    const saved = await createStay(db, env, manager, retryInput, { imported: { ...source, source_id: 'needs-publication', channel: 'direct', channel_booking_id: null } })
+    await assert.rejects(() => queue.runNext(env, 'stay.changed'), code('DASHBOARD_PUBLICATION_FAILED'))
     const committed = await db.prepare('SELECT id FROM bookings WHERE organization_id = ? AND idempotency_key = ?').bind(ORG, retryInput.idempotency_key).first<{ id: string }>()
-    assert(committed)
+    assert.deepEqual(committed, { id: saved.id })
     await hub.fetch('https://inbox.test/failure', { method: 'DELETE' })
-    await updateStay(db, env, manager, committed.id, { version: 1, guest_name: 'Host corrected name' })
-    const resumed = await resumeImportedStay(db, env, manager, committed.id)
+    await updateStay(db, env, manager, saved.id, { version: 1, guest_name: 'Host corrected name' })
+    const resumed = await resumeImportedStay(db, env, manager, saved.id)
+    await queue.drain(env, 'stay.changed')
     assert.equal(resumed.guest_name, 'Host corrected name')
     assert.equal(resumed.version, 2)
     assert.equal(await db.prepare('SELECT count(*) FROM bookings WHERE idempotency_key = ?').bind(retryInput.idempotency_key).first('count(*)'), 1)

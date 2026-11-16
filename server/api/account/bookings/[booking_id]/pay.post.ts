@@ -1,6 +1,6 @@
 import { defineHandler, HTTPError } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
-import { createPaymentCheckout } from '~/server/domain/payments/checkout'
+import { createPaymentCheckout, readCheckoutAttempt } from '~/server/domain/payments/checkout'
 import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
 import { readApprovedStayCheckout } from '~/server/domain/stays'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
@@ -26,11 +26,11 @@ export default defineHandler(async event => {
   if (!origin) throw new HTTPError({ statusCode: 409, message: 'This stay’s website is unavailable for payment' })
   const key = `approved-stay:${bookingId}:${approved.version}`
   const checkout = await createPaymentCheckout(env.DB, env, {
-    unit: 'nights', organizationId, buyerUserId, requestId: approved.conversationId,
-    requestFingerprint: key, idempotencyKey: key, quantity: 1, following: () => [],
+    unit: 'nights', organizationId, buyerUserId, buyer: session.user, requestId: approved.conversationId,
+    requestFingerprint: key, idempotencyKey: key, previous: await readCheckoutAttempt(env.DB, organizationId, key), quantity: 1, following: () => [],
     origin: { request: event.req, pageEventId: null },
-    stay: approved.quote, guest: approved.guest, quote: async () => approved.quote,
-    approval: { bookingId, buyerUserId, version: approved.version, conversationId: approved.conversationId, expiresAt: approved.expiresAt, policy: approved.policy },
+    stay: approved.quote, guest: approved.guest, terms: { quote: approved.quote, policy: approved.policy, taxCode: approved.taxCode },
+    approval: { bookingId, buyerUserId, version: approved.version, conversationId: approved.conversationId, expiresAt: approved.expiresAt },
   })
   const pay = new URL(checkout.pay_path, origin)
   pay.hash = checkout.purchase_claim

@@ -1,5 +1,8 @@
 import type { Subscription } from '@better-auth/stripe'
+import { and, asc, eq, exists, getTableColumns, inArray } from 'drizzle-orm'
 import { HTTPError } from 'nitro'
+import { createDb, type DbClient } from '~/server/db'
+import { organization, payment_servicing_tenants, stripe_connected_accounts, subscription } from '~/server/db/schema'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
 
@@ -20,6 +23,12 @@ export const SUBSCRIPTION_STATE_INVALID = 'SUBSCRIPTION_STATE_INVALID'
 
 const ORGANIZATION_CHUNK = 50
 const SUBSCRIPTION_PAGE = 100
+const ENTITLING_STATUSES = ['active', 'trialing']
+
+type EntitlementRow = Pick<Subscription, 'id' | 'referenceId' | 'plan'> & {
+  status: string
+  periodEnd?: Date | null
+}
 
 export function isSubscriptionStateInvalid(error: unknown): boolean {
   return error instanceof HTTPError && error.data?.code === SUBSCRIPTION_STATE_INVALID
@@ -69,20 +78,51 @@ export async function readOrganizationSubscriptions(
   return byOrganization
 }
 
+/** Better Auth's polymorphic subscription reference has no adapter relation to these seller tables. */
+export async function readCheckoutSeller(db: DbClient, organizationId: string) {
+  const connection = '$client' in db ? db : createDb(db)
+  const rows = await connection.select({
+    slug: organization.slug,
+    subdomain: organization.subdomain,
+    stripeCustomerId: organization.stripeCustomerId,
+    servicing: exists(connection.select({ organizationId: payment_servicing_tenants.organization_id })
+      .from(payment_servicing_tenants).where(eq(payment_servicing_tenants.organization_id, organization.id))),
+    account: getTableColumns(stripe_connected_accounts),
+    subscription: {
+      id: subscription.id,
+      referenceId: subscription.referenceId,
+      plan: subscription.plan,
+      status: subscription.status,
+      periodEnd: subscription.periodEnd,
+      stripeCustomerId: subscription.stripeCustomerId,
+      stripeSubscriptionId: subscription.stripeSubscriptionId,
+    },
+  })
+    .from(organization)
+    .leftJoin(stripe_connected_accounts, eq(stripe_connected_accounts.organization_id, organization.id))
+    .leftJoin(subscription, and(eq(subscription.referenceId, organization.id), inArray(subscription.status, ENTITLING_STATUSES)))
+    .where(eq(organization.id, organizationId))
+    .orderBy(asc(subscription.id))
+  const seller = rows[0]
+  if (!seller) return null
+  const current = entitlingSubscription(organizationId, rows.flatMap(row => row.subscription ? [row.subscription] : []))
+  return { ...seller, subscription: current, plan: subscriptionPlan(current) }
+}
+
 /**
  * The one subscription row that entitles this organization, by the rule at the
  * top of this file, or null on free. Pure, so the single read above can answer
  * the plan, its location quantity and the billing projection.
  */
-export function entitlingSubscription(
+export function entitlingSubscription<T extends EntitlementRow>(
   organizationId: string,
-  rows: Subscription[],
+  rows: T[],
   now = new Date(),
-): Subscription | null {
-  let current: Subscription | null = null
+): T | null {
+  let current: T | null = null
   for (const row of rows) {
     if (row.referenceId !== organizationId) continue
-    if (row.status !== 'active' && row.status !== 'trialing') continue
+    if (!ENTITLING_STATUSES.includes(row.status)) continue
     if (row.periodEnd != null) {
       if (row.periodEnd.getTime() <= now.getTime()) continue
     }
@@ -93,12 +133,16 @@ export function entitlingSubscription(
   return current
 }
 
+function subscriptionPlan(current: EntitlementRow | null): string {
+  return current?.plan.trim().toLowerCase() ?? FREE_PLAN
+}
+
 export function planFromSubscriptions(
   organizationId: string,
   rows: Subscription[],
   now = new Date(),
 ): string {
-  return entitlingSubscription(organizationId, rows, now)?.plan.trim().toLowerCase() ?? FREE_PLAN
+  return subscriptionPlan(entitlingSubscription(organizationId, rows, now))
 }
 
 export async function getOrganizationPlans(

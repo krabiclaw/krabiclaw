@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { captureEvents } from './support/events.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import sharp from 'sharp'
@@ -50,7 +51,8 @@ test('members talk in team conversations, see unread state and receive recorded 
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), MEDIA_BASE_URL: 'https://media.example.test', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+    const events = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: events.binding, MEDIA_BASE_URL: 'https://media.example.test', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'team-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     for (const [id, slug] of [[ORG, 'org'], [OTHER, 'other']]) {
@@ -76,6 +78,8 @@ test('members talk in team conversations, see unread state and receive recorded 
     } })
     const manager: StayAccess = { organizationId: ORG, actorId: 'owner', manage: true }
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 30_000 })
+
+    await events.runNext(env, 'stay.changed')
 
     const principal = (userId: string, role: string, memberId = 'm-' + userId) => memberAccessPrincipal({ userId, role, memberId, organizationId: ORG } as never, { env })
     const owner = principal('owner', 'owner', 'm-owner')
@@ -108,6 +112,8 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(createTeamThread(env, db, cleaner, { member_user_ids: ['outsider'] }), refused(422, 'INVALID_TEAM_MEMBERS', 'member_user_ids'))
     await assert.rejects(createTeamThread(env, db, cleaner, { member_user_ids: ['cleaner'] }), refused(422, 'TEAM_THREAD_MEMBERS_REQUIRED', 'member_user_ids'))
     const publicationCache = await runtime.getKVNamespace('ORGANIZATION_CACHE')
+    // Anything published before this (a stay's cleaning job posted when the stay was made) is not this conversation's.
+    const publishedBefore = Number(await publicationCache.get('team-publication:count') ?? '0')
     await publicationCache.put('team-publication:refuse', 'true')
     await assert.rejects(createTeamThread(env, db, cleaner, { member_user_ids: ['owner'] }), (error: unknown) => {
       const failure = error as { status: number; data: unknown }
@@ -126,7 +132,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     const retriedPublication = await publicationCache.get<{ conversation_id: string; event_id: string }>('team-publication:last', 'json')
     assert.equal(retriedPublication?.conversation_id, committedThread.id)
     assert.notEqual(retriedPublication?.event_id, firstPublication.event_id, 'reusing the saved thread completes the failed publication')
-    assert.equal(await publicationCache.get('team-publication:count'), '2')
+    assert.equal(await publicationCache.get('team-publication:count'), String(publishedBefore + 2))
     assert.deepEqual(await createTeamThread(env, db, owner, { member_user_ids: ['cleaner'] }), { id: direct.id, created: false })
     // Two starts of the same new conversation at once make one conversation.
     const raced = await Promise.all([createTeamThread(env, db, cleaner, { member_user_ids: ['cook'] }), createTeamThread(env, db, cook, { member_user_ids: ['cleaner'] })])
@@ -148,8 +154,10 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(assertConversationAccess(db, principal('cleaner', 'member'), stayConversation), refused(404, 'THREAD_NOT_FOUND', 'conversation_id'))
     assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stayConversation })).map(member => member.userId).sort(), ['owner'], 'a stay conversation alerts owner oversight, not the member looking after the home')
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner' })
+    await events.drain(env, 'jobs.changed')
+    // Giving the home to the cleaner posted the stay's clean in its conversation, which is the one "Message host" opens.
     const about = await createTeamThread(env, db, cleaner, { member_user_ids: ['owner'], booking_id: stay.id })
-    assert.equal(about.created, true)
+    assert.equal(about.created, false)
     assert.notEqual(about.id, direct.id)
 
     // A location conversation needs a location the caller can see, and reuses the existing thread.
@@ -491,6 +499,8 @@ test('members talk in team conversations, see unread state and receive recorded 
     const retainedGroup = (await teamThreads(owner)).find(thread => thread.name === 'Retained group')!
     assert.equal(retainedGroup.participants.length, 3)
     // Leaving the organization ends the seat; what they wrote stays, sent by their user.
+    // Giving the home to the cleaner posts the stay's clean, so the hub answers again first.
+    await publicationCache.delete('team-publication:refuse')
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner' })
     const auth = createAuth(env)
     const headers = new Headers({ authorization: 'Bearer owner-session-token' })
@@ -530,6 +540,10 @@ test('members talk in team conversations, see unread state and receive recorded 
     // Each departure releases the home, the open turnover that followed the home's assignee, and the tables the cook handled.
     assert.deepEqual((await db.prepare("SELECT json_extract(payload_json, '$.entityType') AS entity, COUNT(*) AS n FROM activity_entries WHERE event_name = 'member.access_scope_revoked' AND actor_kind = 'system' AND organization_id = ? GROUP BY entity ORDER BY entity").bind(ORG).all()).results,
       [{ entity: 'product_booking_configs', n: 3 }, { entity: 'tasks', n: 2 }])
+    assert.deepEqual((await db.prepare(`SELECT json_extract(payload_json, '$.afterState.assigned_member_id') AS assigned_member_id
+      FROM activity_entries WHERE organization_id = ? AND event_name = 'member.access_scope_revoked'
+        AND json_extract(payload_json, '$.entityType') = 'tasks'`).bind(ORG).all()).results,
+    [{ assigned_member_id: 'm-owner' }, { assigned_member_id: 'm-owner' }])
   } finally {
     await runtime.dispose()
   }

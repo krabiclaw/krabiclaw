@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { captureEvents } from './support/events.ts'
 import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { H3 } from 'nitro/h3'
@@ -33,7 +34,7 @@ async function boot() {
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'migration-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_migration_no_provider_requests' } as CloudflareEnv
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: captureEvents().binding, BETTER_AUTH_SECRET: 'migration-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_migration_no_provider_requests' } as CloudflareEnv
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
     await db.prepare("INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone) VALUES (?, 'Migration Org', 'migration-org', 'migration-org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', ?, 'America/Denver')").bind(ORG, NOW).run()
@@ -134,10 +135,11 @@ test('bounded migration batches resume from canonical stays and manual blocks an
     const failedSource = input(home.id, `${header}\n${row('repair', '2027-01-10', '2027-01-20')}`)
     const failedPreview = await previewStayMigration(db, access, failedSource)
     const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName(ORG))
-    await hub.fetch('https://inbox.test/fail', { method: 'PUT' })
-    const failed = await importStayMigration(db, env, access, { ...failedSource, fingerprint: failedPreview.fingerprint })
+    const failed = await importStayMigration(db, {
+      ...env, EVENTS: { async send() { throw new Error('Queue refused the stay event') } },
+    }, access, { ...failedSource, fingerprint: failedPreview.fingerprint })
     assert.equal(failed.failed, 1); assert.equal(failed.outcomes[0]!.committed, true)
-    await hub.fetch('https://inbox.test/fail', { method: 'DELETE' })
+    assert.match(failed.outcomes[0]!.detail!, /Queue refused the stay event/)
     const repaired = await importStayMigration(db, env, access, { ...failedSource, fingerprint: failedPreview.fingerprint })
     assert.equal(repaired.failed, 0); assert.equal(repaired.existing, 1)
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM bookings WHERE idempotency_key = 'hostaway:repair'").first('n'), 1)

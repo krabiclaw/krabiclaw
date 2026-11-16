@@ -210,13 +210,15 @@ export async function reportBillingUsage(env: CloudflareEnv, db: DbClient, organ
 }
 
 /** A subscription created or changed, a new period among them: its organization's count is reported again. */
-export async function reportBillingUsageForSubscriptionEvent(env: CloudflareEnv, db: DbClient, event: Stripe.Event): Promise<void> {
+export async function reportBillingUsageForSubscriptionEvent(env: CloudflareEnv, db: DbClient, event: Stripe.Event): Promise<string | undefined> {
   if (event.account || (event.type !== 'customer.subscription.created' && event.type !== 'customer.subscription.updated')) return
   const subscription = event.data.object
   const customerId = typeof subscription.customer === 'string' ? subscription.customer : subscription.customer.id
   const organizations = await queryAll<{ id: string }>(db, 'SELECT id FROM organization WHERE "stripeCustomerId"=?', [customerId])
   if (organizations.length > 1) throw new Error('Stripe customer belongs to more than one organization')
-  if (organizations[0]) await reportBillingUsage(env, db, organizations[0].id)
+  const organizationId = organizations[0]?.id
+  if (organizationId) await reportBillingUsage(env, db, organizationId)
+  return organizationId
 }
 
 // A NOT NULL failure aborts the whole D1 batch. A restricted write first checks

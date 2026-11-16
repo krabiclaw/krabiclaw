@@ -8,6 +8,7 @@ import { bookingDay } from '~/server/domain/requests'
 import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
 import { CURRENT_GUEST_SQL } from '~/server/domain/conversations'
 import { postEditorPath } from '~/server/utils/dashboard-links'
+import { bookingConversationOrRecordPath, guestConversationPath } from '~/shared/messages-contract'
 import type { Stay } from '~/server/domain/stays'
 import { STAY_CHANNEL_LABELS, stayGuestFirstName } from '~/shared/bookings'
 import { getVerticalCopy } from '~/utils/vertical-copy'
@@ -117,6 +118,7 @@ interface SourceRow {
   picture_owner_id: string
   resource_title: string | null
   party_size: number | null
+  viewer_seated: number
 }
 
 interface LocationRow {
@@ -235,7 +237,7 @@ export async function listAgenda(
       return {
         assigned_member_id: record.assigned_member_id, assigned_member_name: record.assigned_member_name, id: record.conversation_id!, operational_id: record.id,
         product_id: record.product_id, kind: 'booking', starts_at: record.starts_at, ends_at: record.ends_at, title: record.guest_name ?? '',
-        party_size_is_minimum: record.party_size_is_minimum, party_size: record.party_size, status: record.status, organization_id: record.organization_id,
+        party_size_is_minimum: record.party_size_is_minimum, party_size: record.party_size, status: record.status, organization_id: record.organization_id, viewer_seated: record.viewer_seated,
         organization_name: record.organization_name, vertical: record.vertical, location_id: record.location_id, location_title: record.location_title, timezone: record.timezone,
         guest_image_url: record.guest_image_url,
         picture_owner_type: !table ? 'product' : record.location_id === null ? 'organization' : 'business_location',
@@ -249,7 +251,7 @@ export async function listAgenda(
     SELECT NULL AS assigned_member_id, NULL AS assigned_member_name, p.id, NULL AS operational_id, NULL AS product_id, 'post' AS kind,
            p.published_at AS starts_at, NULL AS ends_at, NULLIF(p.title, '') AS title, NULL AS party_size_is_minimum, NULL AS party_size, p.status,
            p.organization_id, s.name AS organization_name, s.vertical, p.location_id, l.title AS location_title, s.timezone, NULL AS guest_image_url,
-           'content_document' AS picture_owner_type, p.id AS picture_owner_id, COALESCE(l.title, s.name, s.subdomain, s.id) AS resource_title
+           'content_document' AS picture_owner_type, p.id AS picture_owner_id, COALESCE(l.title, s.name, s.subdomain, s.id) AS resource_title, 0 AS viewer_seated
       FROM content_documents p
       JOIN organization s ON s.id = p.organization_id
       LEFT JOIN business_locations l ON l.id = p.location_id AND l.organization_id = p.organization_id
@@ -286,6 +288,7 @@ export async function listAgenda(
     const loaded = await loadOwnerPictures(db, organizationId, ownerType, ownerIds)
     for (const id of ownerIds) pictures.set(`${group}\n${id}`, loaded.get(id)?.imageUrl ?? null)
   }))
+  const organizationPath = query.organizationSlug ?? scope.organizationId
   const items = rows.filter(row=>!query.assignedMemberId || row.assigned_member_id===query.assignedMemberId).flatMap<AgendaItem>((row) => {
     const timezone = row.timezone
     if (!isValidTimezone(timezone)) throw new Error(`Timezone is not configured for agenda item ${row.id}`)
@@ -295,10 +298,10 @@ export async function listAgenda(
     if (day_key < query.from || day_key > query.to) return []
     // The business reads who is coming; the buyer reads where they are going.
     const to = scope.buyerUserId !== undefined
-      ? `/dashboard/account/activity/${row.kind}/${encodeURIComponent(row.id)}`
+      ? guestConversationPath('account', row.id)
       : row.kind === 'post'
-        ? postEditorPath(query.organizationSlug ?? scope.organizationId, row.id)
-        : `/dashboard/${query.organizationSlug ?? scope.organizationId}/bookings/${encodeURIComponent(row.operational_id!)}`
+        ? postEditorPath(organizationPath!, row.id)
+        : bookingConversationOrRecordPath(organizationPath!, row.operational_id!, row.viewer_seated ? row.id : null)
     return [{
       assigned_member_id:row.assigned_member_id,assigned_member_name:row.assigned_member_name,
       id: `${row.kind}:${row.id}`, conversation_id: row.kind === 'post' ? null : row.id, booking_id: row.kind === 'booking' ? row.operational_id : null, product_id: row.product_id, stay_channel: null, stay_moment: null, kind: row.kind, starts_at,
@@ -314,7 +317,6 @@ export async function listAgenda(
       name: row.resource_title, party_size: row.party_size, to,
     }]
   })
-  const organizationPath = query.organizationSlug ?? scope.organizationId
   // A departure is a turnover when the home's next guests arrive the same day, read in the home's own calendar.
   const sameDayArrival = (stay: typeof stays[number]) => records.some(next => next.unit === 'nights' && next.product_id === stay.product_id && next.id !== stay.id && bookingDay(next.starts_at, next.timezone) === stay.check_out_date)
   for (const stay of query.assignedMemberId ? [] : stays) {
@@ -342,7 +344,8 @@ export async function listAgenda(
         status: stay.status, organization_id: stay.organization_id, location_id: stay.location_id, location_title: stay.location_title,
         guest_image_url: stay.guest_image_url, guest_first_name: scope.buyerUserId ? null : stayGuestFirstName(stay.guest_name), overbooked: !staff && Number(stay.overbooked) === 1, check_out_date: stay.check_out_date,
         resource_image_url: pictures.get(`${stay.organization_id}\nproduct\n${stay.product_id}`) ?? null, name: stay.product_name, party_size: stay.party_size,
-        to: scope.buyerUserId ? `/dashboard/account/activity/stay/${encodeURIComponent(stay.conversation_id)}` : `/dashboard/${organizationPath}/bookings/${encodeURIComponent(stay.id)}`,
+        to: scope.buyerUserId ? guestConversationPath('account', stay.conversation_id)
+          : bookingConversationOrRecordPath(organizationPath!, stay.id, stay.viewer_seated ? stay.conversation_id : null),
       })
     }
   }

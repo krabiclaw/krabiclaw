@@ -1,4 +1,5 @@
 import { matchedRouteKey } from 'vue-router'
+import { useMediaQuery } from '@vueuse/core'
 
 /**
  * Which level of the route tree the caller is, what is open below it, and
@@ -91,11 +92,14 @@ export function useRouteLevel() {
    * the immediate child declares that it needs the frame. Anything deeper also
    * belongs to a descendant, so this level renders only the route beneath it.
    */
+  const threePanes = useMediaQuery('(min-width: 1536px)')
   const mode = computed<RouteLevelMode>(() => {
     if (index.value === -1) return 'yield'
     const below = levels.value.length - 1 - index.value
     if (below === 0) return 'index'
     if (below === 1) return levels.value[index.value + 1]?.meta.dashboardFrame === true ? 'yield' : 'pair'
+    // A third pane: a conversation's reservation sits beside the thread and the list, as Airbnb's does, where the screen is wide enough for three.
+    if (below === 2 && threePanes.value && levels.value[index.value + 2]?.meta.dashboardThirdPane === true) return 'pair'
     return 'yield'
   })
 
@@ -151,5 +155,11 @@ export function useRouteLevel() {
     return navigateTo(target, { replace: true })
   }
 
-  return { mode, to, path, child, close }
+  /** Three panes are on screen: this level is one of the two beside a third-pane leaf. Its share of the width follows. */
+  const third = computed(() => {
+    const below = levels.value.length - 1 - index.value
+    return index.value !== -1 && threePanes.value && (below === 1 || below === 2) && levels.value.at(-1)?.meta.dashboardThirdPane === true ? below : 0
+  })
+
+  return { mode, to, path, child, close, third }
 }

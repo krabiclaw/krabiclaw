@@ -1,3 +1,4 @@
+import { publishEvent } from '~/server/events'
 import type Stripe from 'stripe'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -12,7 +13,7 @@ import type { StripePlanLoader } from '~/server/utils/better-auth-stripe'
 import { approvedStayBooking, type Payment } from './index'
 import { buyerPaymentActivityPath } from './buyer'
 
-export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, env: CloudflareEnv, payment: Payment, input: {
+export interface PaymentFinancialEvent {
   kind: GuestPaymentNotificationKind | 'dispute_needs_response' | 'dispute_won' | 'dispute_lost' | 'dispute_closed'
   nativeId: string
   status: string
@@ -20,7 +21,13 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   /** The buyer's email as Stripe has it; read from the charge when the caller has not. */
   email?: string | null
   responseDueBy?: string | null
-}) {
+}
+
+export async function publishPaymentNotification(env: CloudflareEnv, payment: Pick<Payment, 'organization_id' | 'id'>, notice: PaymentFinancialEvent): Promise<void> {
+  await publishEvent(env, { type: 'payment.financial', organization_id: payment.organization_id, payment_id: payment.id, notice })
+}
+
+export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, env: CloudflareEnv, payment: Payment, input: PaymentFinancialEvent) {
   const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [payment.organization_id])
   if (!organization && !await queryFirst(db, 'SELECT organization_id FROM payment_servicing_tenants WHERE organization_id=? AND stripe_account_id=? AND livemode=?', [payment.organization_id, payment.stripe_account_id, payment.livemode])) throw new Error('Payments notification has no tenant or retained servicing identity')
   // A booking or stay paid on the site is confirmed to its guest by

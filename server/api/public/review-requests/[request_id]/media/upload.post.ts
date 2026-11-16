@@ -34,9 +34,7 @@ export default defineHandler(async (event) => {
 
     const result = await getReviewRequestByToken(db, token)
     if (!result || result.request.id !== requestId) return jsonResponse({ error: 'Review request not found or expired' }, { status: 404 })
-    // The token was minted for the booking's user; the upload is theirs.
     const uploaderUserId = result.request.user_id
-    if (!uploaderUserId) return jsonResponse({ error: 'This review request is not linked to a guest' }, { status: 409 })
 
     const existingMedia = await queryFirst<{ images: number; videos: number; next_sort_order: number }>(db, `
       SELECT

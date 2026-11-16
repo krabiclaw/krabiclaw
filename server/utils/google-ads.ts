@@ -1,6 +1,6 @@
 import { linkedAccountAccessToken, type CloudflareEnv } from './auth'
 import { readIntegration, storeIntegration } from './organization-integrations'
-import { requireRecordedManagedSpend } from '~/server/domain/payments/ad-spend'
+import { publishManagedAdSpendWake, requireRecordedManagedSpend } from '~/server/domain/payments/ad-spend'
 import { HTTPError } from 'nitro'
 import { isValidTimezone } from '~/utils/timezone'
 
@@ -145,11 +145,13 @@ export async function selectGoogleAdsCustomer(
     throw new HTTPError({ statusCode: 422, message: 'That is a Google Ads manager account. Choose one of the accounts it manages.' })
   }
   if (managedAds && account.currencyCode !== 'USD') throw new HTTPError({ statusCode: 422, message: 'Managed ads requires a Google Ads account billed in USD.' })
-  return await storeIntegration(env.DB, organizationId, 'google_ads', {
+  const revision = await storeIntegration(env.DB, organizationId, 'google_ads', {
     account_id: accountId,
     target_id: customerId,
     target_name: customerName,
   }, { revision: current?.revision ?? null })
+  await publishManagedAdSpendWake(env, organizationId)
+  return revision
 }
 
 function googleAdsHeaders(accessToken: string, developerToken?: string): Record<string, string> {

@@ -266,16 +266,14 @@ export async function previewStayMigration(db: DbClient, access: StayAccess, val
       } else sourceClaims.set(key, row)
     }
   }
-  // The canonical night claims hold stays, linked calendars and only live checkout holds.
   const ready = rows.filter(row => row.stay !== null)
-  const claims = ready.length ? await queryAll<{ product_id: string; date: string; booking_id: string | null }>(db, `SELECT n.product_id, n.date, n.booking_id FROM stay_nights n
-    LEFT JOIN payment_checkout_holds h ON h.id = n.hold_id
-    WHERE n.organization_id = ? AND n.product_id IN (SELECT value FROM json_each(?)) AND n.date >= ? AND n.date < ? AND (n.booking_id IS NOT NULL OR n.calendar_link_id IS NOT NULL OR (h.status = 'active' AND h.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`, [access.organizationId, JSON.stringify([...new Set(ready.map(row => row.product_id))]), ready.map(row => row.stay!.check_in_date).sort()[0], ready.map(row => row.stay!.check_out_date).sort().at(-1)]) : []
+  const claims = ready.length ? await queryAll<{ product_id: string; date: string; booking_id: string }>(db, `SELECT n.product_id, n.date, n.booking_id FROM stay_nights n
+    WHERE n.organization_id = ? AND n.product_id IN (SELECT value FROM json_each(?)) AND n.date >= ? AND n.date < ? AND n.booking_id IS NOT NULL`, [access.organizationId, JSON.stringify([...new Set(ready.map(row => row.product_id))]), ready.map(row => row.stay!.check_in_date).sort()[0], ready.map(row => row.stay!.check_out_date).sort().at(-1)]) : []
   for (const claim of claims) {
     const row = sourceClaims.get(`${claim.product_id}:${claim.date}`)
     if (row && row.state !== 'existing') {
       row.state = 'needs_attention'
-      const message = claim.booking_id ? `Overlaps existing stay ${claim.booking_id}` : 'Overlaps a linked calendar or live checkout hold'
+      const message = `Overlaps existing stay ${claim.booking_id}`
       if (!row.issues.includes(message)) row.issues.push(message)
     }
   }
@@ -355,9 +353,9 @@ export async function importStayMigration(db: DbClient, env: MigrationEnv, acces
         if (processed >= 5) { receipt.remaining++; receipt.outcomes.push({ source_id: row.source_id, booking_id: row.existing_booking_id, state: 'pending', detail: 'Waiting to finish this imported stay', committed: true, completion_pending: true }); continue }
         processed++
         try {
-          const resumed = await resumeImportedStay(db, env, access, row.existing_booking_id!)
+          await resumeImportedStay(db, env, access, row.existing_booking_id!)
           receipt.existing++
-          receipt.outcomes.push({ source_id: row.source_id, booking_id: row.existing_booking_id, state: 'existing', detail: resumed.channel_push?.state === 'pending' ? resumed.channel_push.detail : row.skip_reason, committed: true, completion_pending: resumed.channel_push?.state === 'pending' })
+          receipt.outcomes.push({ source_id: row.source_id, booking_id: row.existing_booking_id, state: 'existing', detail: row.skip_reason, committed: true })
         } catch (error) { receipt.failed++; receipt.outcomes.push({ source_id: row.source_id, booking_id: row.existing_booking_id, state: 'failed', detail: message(error), committed: true, completion_pending: true }) }
       } else { receipt.existing++; receipt.outcomes.push({ source_id: row.source_id, booking_id: row.existing_booking_id, state: 'existing', detail: row.skip_reason, committed: false }) }
       continue
@@ -374,7 +372,7 @@ export async function importStayMigration(db: DbClient, env: MigrationEnv, acces
       const readBack = await getStay(db, access, saved.id)
       if (!('owner' in readBack) || readBack.product_id !== stay.product_id || readBack.check_in_date !== stay.check_in_date || readBack.check_out_date !== stay.check_out_date || readBack.status !== 'confirmed') throw new HTTPError({ statusCode: 503, message: 'The saved stay did not read back with the imported property and dates', data: { committed: true } })
       receipt.imported++
-      receipt.outcomes.push({ source_id: row.source_id, booking_id: saved.id, state: 'imported', detail: saved.channel_push?.state === 'pending' ? saved.channel_push.detail : null, committed: true, completion_pending: saved.channel_push?.state === 'pending' })
+      receipt.outcomes.push({ source_id: row.source_id, booking_id: saved.id, state: 'imported', detail: null, committed: true })
     } catch (error) {
       receipt.failed++
       const persisted = await queryFirst<{ id: string }>(db, 'SELECT id FROM bookings WHERE organization_id = ? AND idempotency_key = ?', [access.organizationId, keyFor(row.source_id)])

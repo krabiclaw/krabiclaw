@@ -36,7 +36,7 @@ export function conversationMessage(input: {
 }): ConversationMessage {
   return {
     type: 'message', id: input.id, sequence: input.sequence, author_user_id: input.authorUserId,
-    side: input.side, author: input.author, automatic: input.automatic,
+    side: input.side, author: input.author, automatic: input.automatic, job: false,
     sent_at: input.sentAt, time: null, body: input.body, unshown_files: input.unshownFiles ?? 0,
     photos: input.attachments.map(({ id, url, thumbnailUrl, width, height }) => ({ id, url, thumbnail_url: thumbnailUrl, width, height })),
     deliveries: input.deliveries?.map(({ id, channel, status, error, updated_at }) => ({ id, channel, status, error, updated_at })) ?? [],

@@ -1,8 +1,10 @@
-import { execute, type DbClient } from "~/server/db";
-import { describeErrorForTelemetry } from "~/shared/error-telemetry";
+import { HTTPError } from "nitro";
+import { execute, executeBatch, type DbClient } from "~/server/db";
+import { describeErrorForTelemetry, redactErrorText } from "~/shared/error-telemetry";
 import { anonymizeId } from "~/server/utils/platform-telemetry";
-import { recordUsageEvent } from "~/server/utils/usage-metering";
+import { usageEventInsert } from "~/server/utils/usage-metering";
 import { isRecord } from "~/server/utils/type-guards";
+import { publishEvent, type DomainEvent, type EventsEnv } from "~/server/events";
 
 // Normal telemetry stores typed operational facts. Startup diagnostics are
 // explicitly enabled on the Worker and expire after seven days.
@@ -31,56 +33,76 @@ function operationalSummary(value: unknown, depth = 0): Record<string, unknown> 
   return Object.keys(summary).length ? summary : null;
 }
 
+// Cloudflare Queues allows 128,000 bytes including roughly 100 bytes of metadata.
+const MAX_EVENT_BYTES = 127_000;
+const MAX_SUMMARY_BYTES = 48_000;
+const encoder = new TextEncoder();
+
+function fitsSummaryField(value: string): boolean {
+  return encoder.encode(JSON.stringify(value)).byteLength <= MAX_SUMMARY_BYTES;
+}
+
 export function summarizeForTelemetry(value: unknown): string | null {
   const summary = operationalSummary(value);
-  return summary ? JSON.stringify(summary) : null;
+  if (!summary) return null;
+  const data = JSON.stringify(summary);
+  return fitsSummaryField(data) ? data : JSON.stringify({ ...operationalSummary(value, 3), _truncated: true });
 }
 
 const DIAGNOSTIC_SECRET_KEY = /(?:authorization|cookie|secret|token|password|api[_-]?key|access[_-]?key|download[_-]?url|file[_-]?data|base64|^_meta$)/i;
-const MAX_DIAGNOSTIC_LENGTH = 256_000;
 
 export function mcpDiagnosticPayload(value: unknown): string | null {
   if (value == null) return null;
   function replacer() {
     const ancestors: object[] = [];
     return function redact(this: Record<string, unknown>, key: string, field: unknown): unknown {
-    if (key === '_request') return undefined;
-    if (DIAGNOSTIC_SECRET_KEY.test(key)) return '[redacted]';
-    if (key === 'data' && (this.type === 'image' || this.type === 'audio')) return '[binary omitted]';
-    if (typeof field === 'string') {
-      const redacted = field
-        .replace(/\b[rs]k_(?:test|live)_[A-Za-z0-9_*]+/g, '[key redacted]')
-        .replace(/\bBearer\s+[^\s,"']+/gi, 'Bearer [redacted]')
-        .replace(/https?:\/\/[^\s<>"']+/gi, url => url.replace(/\?[^#]*/, '?[redacted]').replace(/#.*/, '#[redacted]'));
-      // MCP text often repeats structured JSON. Redact that copy as well.
-      if (/^\s*[{[]/.test(field)) {
-        try {
-          return JSON.stringify(JSON.parse(field), replacer());
-        } catch {
-          return redacted;
+      if (key === '_request') return undefined;
+      if (DIAGNOSTIC_SECRET_KEY.test(key)) return '[redacted]';
+      if (key === 'data' && (this.type === 'image' || this.type === 'audio')) return '[binary omitted]';
+      if (typeof field === 'string') {
+        const redacted = field
+          .replace(/\b(?:[rs]k_(?:test|live)_|sk-proj-|gh[pousr]_|github_pat_)[A-Za-z0-9_*-]+/g, '[key redacted]')
+          .replace(/\bBearer\s+[^\s,"']+/gi, 'Bearer [redacted]')
+          .replace(/\b(password|secret|token|api[_-]?key|authorization|cookie)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi, '$1: [redacted]')
+          .replace(/https?:\/\/[^\s<>"']+/gi, url => url
+            .replace(/^(https?:\/\/)[^/?#]*@/i, '$1[redacted]@')
+            .replace(/\?[^#]*/, '?[redacted]')
+            .replace(/#.*/, '#[redacted]'));
+        // MCP text can repeat the structured data.
+        if (/^\s*[{[]/.test(field)) {
+          try {
+            return JSON.stringify(JSON.parse(field), replacer());
+          } catch {
+            return redacted;
+          }
         }
+        return redacted;
       }
-      return redacted;
-    }
-    if (field && typeof field === 'object') {
-      while (ancestors.length && ancestors.at(-1) !== this) ancestors.pop();
-      if (ancestors.includes(field)) return '[circular]';
-      ancestors.push(field);
-    }
+      if (field && typeof field === 'object') {
+        while (ancestors.length && ancestors.at(-1) !== this) ancestors.pop();
+        if (ancestors.includes(field)) return '[circular]';
+        ancestors.push(field);
+      }
       return field;
     };
   }
   const data = JSON.stringify(value, replacer());
   if (data === undefined) return null;
-  return JSON.stringify(data.length > MAX_DIAGNOSTIC_LENGTH
-    ? { _diagnostic: true, truncated: true, original_length: data.length, preview: data.slice(0, MAX_DIAGNOSTIC_LENGTH) }
-    : { _diagnostic: true, data: JSON.parse(data) });
+  const diagnostic = `{"_diagnostic":true,"data":${data}}`;
+  if (fitsSummaryField(diagnostic)) return diagnostic;
+
+  let length = Math.min(data.length, MAX_SUMMARY_BYTES);
+  for (;;) {
+    const truncated = JSON.stringify({ _diagnostic: true, truncated: true, original_length: data.length, preview: data.slice(0, length) });
+    if (fitsSummaryField(truncated)) return truncated;
+    length = Math.floor(length / 2);
+  }
 }
 
 export type McpToolCallStatus = "success" | "error" | "auth_required" | "blocked";
 
 export interface LogMcpToolCallEventInput {
-  env?: ApiRecord | null;
+  env?: { BETTER_AUTH_SECRET?: string; MCP_DIAGNOSTICS_ENABLED?: string } | null;
   organizationId?: string | null;
   locationId?: string | null;
   userId?: string | null;
@@ -128,7 +150,7 @@ function toolErrorFields(result: unknown): Pick<LogMcpToolCallEventInput, 'httpS
   };
 }
 
-function hashIdentifier(env: ApiRecord | null | undefined, value: string | null | undefined) {
+function hashIdentifier(env: LogMcpToolCallEventInput["env"], value: string | null | undefined) {
   if (!env || !value) return null;
   try {
     return anonymizeId(value, env);
@@ -137,94 +159,123 @@ function hashIdentifier(env: ApiRecord | null | undefined, value: string | null 
   }
 }
 
-// Fire-and-forget by convention: callers should wrap this in waitUntil (or let
-// it run detached) rather than await it inline — telemetry must never add
-// latency to, or fail, an MCP response.
-export async function logMcpToolCallEvent(
-  db: DbClient,
-  input: LogMcpToolCallEventInput,
-): Promise<void> {
+export function prepareMcpToolCallEvent(input: LogMcpToolCallEventInput) {
   const mcpSurface = input.mcpSurface ?? "client";
   const diagnostic = input.env?.MCP_DIAGNOSTICS_ENABLED === 'true'
     && mcpSurface === 'client' && (input.method === 'tools/call' || input.method === 'tools/list');
   const failure = toolErrorFields(input.method === 'tools/call' && input.status === 'error' ? input.result : undefined);
   const errorCode = failure.errorCode ?? input.errorCode;
   const failureMessage = failure.errorMessage ?? input.errorMessage;
-  const httpStatus = failure.httpStatus ?? input.httpStatus;
-  const errorMessage = failureMessage
-    ? diagnostic ? describeErrorForTelemetry(failureMessage) : "MCP operation failed; see error code and status."
-    : null;
-  const jsonrpcErrorMessage = input.jsonrpcErrorMessage;
-  const eventId = crypto.randomUUID();
-  await execute(
-      db,
-      `
-      INSERT INTO mcp_tool_call_events
-        (id, organization_id, location_id, user_id, mcp_surface, request_id,
-         method, tool_name, tool_domain, is_mutating, arguments_summary_json,
-         result_summary_json, status, error_code, error_message,
-         http_status, jsonrpc_error_code, jsonrpc_error_message, protocol_version,
-         session_id_hash, oauth_client_id_hash, user_agent, cf_ray_id,
-         catalog_fingerprint, unknown_tool_name, duration_ms)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-      [
-        eventId,
-        input.organizationId ?? null,
-        input.locationId ?? null,
-        input.userId ?? null,
-        mcpSurface,
-        input.requestId == null ? null : String(input.requestId),
-        mcpTelemetryMethod(input.method),
-        input.unknownToolName ? null : input.toolName ?? null,
-        input.toolDomain ?? null,
-        input.isMutating == null ? null : input.isMutating ? 1 : 0,
-        diagnostic ? mcpDiagnosticPayload(input.arguments ?? {}) : summarizeForTelemetry(input.arguments),
-        diagnostic ? mcpDiagnosticPayload(input.result) : summarizeForTelemetry(input.result),
-        input.status,
-        errorCode == null ? null : String(errorCode),
-        errorMessage,
-        httpStatus ?? null,
-        input.jsonrpcErrorCode ?? null,
-        jsonrpcErrorMessage ? diagnostic ? describeErrorForTelemetry(jsonrpcErrorMessage) : "MCP operation failed; see error code and status." : null,
-        input.protocolVersion ?? null,
-        hashIdentifier(input.env, input.sessionId),
-        hashIdentifier(input.env, input.oauthClientId),
-        null,
-        input.cfRayId ?? null,
-        input.catalogFingerprint ?? null,
-        hashIdentifier(input.env, input.unknownToolName),
-        input.durationMs ?? null,
-      ],
-  );
+  const fallbackError = "MCP operation failed; see error code and status.";
+  return {
+    id: crypto.randomUUID(),
+    organization_id: input.organizationId ?? null,
+    location_id: input.locationId ?? null,
+    user_id: input.userId ?? null,
+    mcp_surface: mcpSurface,
+    request_id: input.requestId == null ? null : redactErrorText(String(input.requestId), 128),
+    method: mcpTelemetryMethod(input.method),
+    tool_name: input.unknownToolName ? null : input.toolName ?? null,
+    tool_domain: input.toolDomain ?? null,
+    is_mutating: input.isMutating == null ? null : Number(input.isMutating),
+    arguments_summary_json: diagnostic ? mcpDiagnosticPayload(input.arguments ?? {}) : summarizeForTelemetry(input.arguments),
+    result_summary_json: diagnostic ? mcpDiagnosticPayload(input.result) : summarizeForTelemetry(input.result),
+    status: input.status,
+    error_code: errorCode == null ? null : redactErrorText(String(errorCode), 128),
+    error_message: failureMessage ? diagnostic ? describeErrorForTelemetry(failureMessage) : fallbackError : null,
+    http_status: failure.httpStatus ?? input.httpStatus ?? null,
+    jsonrpc_error_code: input.jsonrpcErrorCode ?? null,
+    jsonrpc_error_message: input.jsonrpcErrorMessage ? diagnostic ? describeErrorForTelemetry(input.jsonrpcErrorMessage) : fallbackError : null,
+    protocol_version: input.protocolVersion && /^\d{4}-\d{2}-\d{2}$/.test(input.protocolVersion) ? input.protocolVersion : null,
+    session_id_hash: hashIdentifier(input.env, input.sessionId),
+    oauth_client_id_hash: hashIdentifier(input.env, input.oauthClientId),
+    cf_ray_id: input.cfRayId == null ? null : redactErrorText(input.cfRayId, 128),
+    catalog_fingerprint: input.catalogFingerprint ?? null,
+    unknown_tool_name: hashIdentifier(input.env, input.unknownToolName),
+    duration_ms: input.durationMs ?? null,
+    created_at: new Date().toISOString(),
+  };
+}
 
-  if (input.method === "tools/call" && input.organizationId) {
-    await recordUsageEvent(db, {
-        organizationId: input.organizationId,
-        resource: "mcp_operation",
-        source: mcpSurface,
-        provider: mcpSurface === "client" ? "mcp_client" : "krabiclaw",
-        channel: "tools/call",
-        quantity: 1,
-        unit: "tool_call",
-        metadata: {
-          toolName: input.toolName ?? null,
-          toolDomain: input.toolDomain ?? null,
-          status: input.status,
-          httpStatus: httpStatus ?? null,
-        },
-        // Hosts may reuse an RPC ID on separate HTTP requests.
-        idempotencyKey: `mcp:${mcpSurface}:${eventId}`,
+export type McpToolCallEvent = ReturnType<typeof prepareMcpToolCallEvent>;
+
+/** Publish only prepared telemetry. An enqueue failure is reported without replaying a tool. */
+export async function enqueueMcpToolCallEvent(env: EventsEnv & NonNullable<LogMcpToolCallEventInput["env"]>, input: LogMcpToolCallEventInput): Promise<void> {
+  try {
+    const message: DomainEvent = { type: 'mcp.telemetry', record: prepareMcpToolCallEvent({ ...input, env }) };
+    if (encoder.encode(JSON.stringify(message)).byteLength > MAX_EVENT_BYTES) {
+      throw new Error("MCP telemetry exceeds the Cloudflare Queue message size");
+    }
+    await publishEvent(env, message);
+  } catch (cause) {
+    const actionCompleted = input.isMutating === true && input.status === 'success';
+    throw new HTTPError({
+      statusCode: 503,
+      message: actionCompleted ? 'The action completed, but its audit could not be queued. Read the resulting state before retrying.' : 'The request could not be queued for auditing.',
+      data: { code: 'MCP_AUDIT_QUEUE_FAILED', ...(actionCompleted ? { committed: true } : {}) },
+      cause: new Error(describeErrorForTelemetry(cause)),
     });
   }
 }
 
-// The Privacy Policy's MCP telemetry limit: a row is deleted 180 days after it
-// was created. Runs in the daily analytics task beside the pageview cleanup.
+/** Queue redelivery uses the same telemetry ID and usage idempotency key. */
+export async function logMcpToolCallEvent(db: DbClient, record: McpToolCallEvent): Promise<void> {
+  const write = {
+    query: `INSERT INTO mcp_tool_call_events
+      (id, organization_id, location_id, user_id, mcp_surface, request_id,
+       method, tool_name, tool_domain, is_mutating, arguments_summary_json, result_summary_json,
+       status, error_code, error_message, http_status, jsonrpc_error_code, jsonrpc_error_message,
+       protocol_version, session_id_hash, oauth_client_id_hash, cf_ray_id, catalog_fingerprint,
+       unknown_tool_name, duration_ms, created_at)
+      VALUES (?, (SELECT id FROM organization WHERE id=?), (SELECT id FROM business_locations WHERE id=?),
+        (SELECT id FROM user WHERE id=?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO NOTHING`,
+    params: [
+      record.id, record.organization_id, record.location_id, record.user_id, record.mcp_surface,
+      record.request_id, record.method, record.tool_name, record.tool_domain, record.is_mutating,
+      record.arguments_summary_json, record.result_summary_json, record.status, record.error_code,
+      record.error_message, record.http_status, record.jsonrpc_error_code, record.jsonrpc_error_message,
+      record.protocol_version, record.session_id_hash, record.oauth_client_id_hash, record.cf_ray_id,
+      record.catalog_fingerprint, record.unknown_tool_name, record.duration_ms, record.created_at,
+    ],
+  };
+  if (record.method !== 'tools/call' || !record.organization_id) {
+    await execute(db, write.query, write.params);
+    return;
+  }
+
+  const usage = usageEventInsert({
+    organizationId: record.organization_id,
+    resource: 'mcp_operation',
+    source: record.mcp_surface,
+    provider: record.mcp_surface === 'client' ? 'mcp_client' : 'krabiclaw',
+    channel: 'tools/call',
+    quantity: 1,
+    unit: 'tool_call',
+    metadata: {
+      toolName: record.tool_name,
+      toolDomain: record.tool_domain,
+      status: record.status,
+      httpStatus: record.http_status,
+    },
+    // Hosts may reuse an RPC ID on separate HTTP requests.
+    idempotencyKey: `mcp:${record.mcp_surface}:${record.id}`,
+    createdAt: record.created_at,
+  }, undefined, {
+    query: 'SELECT 1 FROM mcp_tool_call_events WHERE id=? AND organization_id=?',
+    params: [record.id, record.organization_id],
+  });
+  await executeBatch(db, [write, usage], { operation: 'Record MCP telemetry and usage' });
+}
+
+export const MCP_AUDIT_RETENTION_DAYS = 180;
+export const MCP_DIAGNOSTIC_RETENTION_DAYS = 7;
+
+// Diagnostics expire sooner than ordinary operational telemetry.
 export async function cleanupMcpToolCallEvents(db: DbClient, now = new Date()): Promise<number> {
-  const cutoff = new Date(now.getTime() - 180 * 86_400_000).toISOString();
-  const diagnosticCutoff = new Date(now.getTime() - 7 * 86_400_000).toISOString();
-  const result = await execute(db, `DELETE FROM mcp_tool_call_events WHERE created_at < ?
-    OR (created_at < ? AND json_extract(arguments_summary_json, '$._diagnostic') = 1)`, [cutoff, diagnosticCutoff]);
+  const cutoff = new Date(now.getTime() - MCP_AUDIT_RETENTION_DAYS * 86_400_000).toISOString();
+  const diagnosticCutoff = new Date(now.getTime() - MCP_DIAGNOSTIC_RETENTION_DAYS * 86_400_000).toISOString();
+  const result = await execute(db, `DELETE FROM mcp_tool_call_events WHERE created_at <= ?
+    OR (created_at <= ? AND json_extract(arguments_summary_json, '$._diagnostic') = 1)`, [cutoff, diagnosticCutoff]);
   return Number(result.meta.changes);
 }

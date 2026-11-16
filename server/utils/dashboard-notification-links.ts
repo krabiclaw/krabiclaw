@@ -1,5 +1,6 @@
 import { HTTPError } from 'nitro'
 import { accountActivityPath, isAccountActivityPath, type AccountActivityKind } from '~/shared/account-activity'
+import { accountReservationPath } from '~/shared/messages-contract'
 import { buyerRequestActivityPath } from '~/server/domain/payments/buyer'
 import { queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -55,14 +56,19 @@ export function platformOrigin(env: DashboardNotificationLinkEnv): string {
   return origin.origin
 }
 
-/** An account activity link carries no guest capability; the ordinary session owns access. */
+/** Account links are authorized by the reader's ordinary session. */
 export function composeBuyerActivityUrl(env: DashboardNotificationLinkEnv, kind: AccountActivityKind, id: string): string {
-  return new URL(accountActivityPath(kind, id), platformOrigin(env)).href
+  const path = kind === 'booking' || kind === 'stay'
+    ? accountReservationPath(id)
+    : accountActivityPath(kind, id)
+  return new URL(path, platformOrigin(env)).href
 }
 
 /** Omit account management for unowned/imported records; never guess a buyer or visit. */
 export async function buildBuyerRequestActivityUrl(env: DashboardNotificationLinkEnv, db: DbClient, opts: { organizationId: string; threadId: string }): Promise<string | null> {
   const path = await buyerRequestActivityPath(db, { organizationId: opts.organizationId, conversationId: opts.threadId })
+  if (path === accountActivityPath('booking', opts.threadId)) return composeBuyerActivityUrl(env, 'booking', opts.threadId)
+  if (path === accountActivityPath('stay', opts.threadId)) return composeBuyerActivityUrl(env, 'stay', opts.threadId)
   return isAccountActivityPath(path) ? new URL(path, platformOrigin(env)).href : null
 }
 

@@ -6,12 +6,11 @@ import { executeBookingStatus } from '~/server/domain/guest-threads/operations'
 import { respondToStayChangeRequest } from '~/server/domain/guest-threads/stay-change-requests'
 import { assertConversationAccess } from '~/server/domain/conversations'
 import { roleAllows } from '~/server/utils/member-access'
-import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 
 export default defineHandler(async event => {
   const action = getRouterParam(event, 'action')
   const stayChange = action === 'accept_change' || action === 'decline_change'
-  if (!stayChange && action !== 'confirm' && action !== 'reject' && action !== 'cancel' && action !== 'no_show') throw new HTTPError({ statusCode: 404, message: 'Booking action not found' })
+  if (!stayChange && action !== 'confirm' && action !== 'reject' && action !== 'cancel') throw new HTTPError({ statusCode: 404, message: 'Booking action not found' })
   const context = await dashboardBookingContext(event)
   const { db, env, organization, userId, access, principal, bookingId, booking } = context
   if (booking.unit === 'nights' && !access.manage) {
@@ -33,16 +32,13 @@ export default defineHandler(async event => {
   if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1) throw new HTTPError({ statusCode: 400, message: 'Booking version is required' })
   const idempotencyKey = typeof body.idempotency_key === 'string' ? body.idempotency_key : event.req.headers.get('idempotency-key') ?? undefined
   const result = await executeBookingStatus(db, {
-    bookingId, version, organizationId: organization.id, threadId: booking.conversation_id, actorUserId: userId, action, idempotencyKey, env, stayAccess: access,
+    bookingId, version, organizationId: organization.id, threadId: booking.conversation_id, actorUserId: userId, actorRole: principal.role, action, idempotencyKey, env, stayAccess: access,
     reason: typeof body.reason === 'string' ? body.reason : undefined,
     financialAuthorizationId: typeof body.authorization_id === 'string' ? body.authorization_id : undefined,
     financialWritesAllowed: await roleAllows({ ...principal, permissions: { payments: ['refund'] } }),
   })
   if (result.kind === 'stay') return jsonResponse({ booking: nightBooking(result.stay) })
   const { outcome } = result
-  if (outcome.ok || outcome.reason === 'delivery_failed') {
-    await publishConversationEvent(env, db, { conversationId: booking.conversation_id, type: 'MESSAGE_CREATE' })
-  }
   if (outcome.ok) return jsonResponse(await dashboardBookingDetails(event))
   if (outcome.reason === 'delivery_failed') return jsonResponse({ ...outcome, error: outcome.message }, { status: outcome.status })
   const code = 'code' in outcome ? outcome.code : outcome.reason.toUpperCase()

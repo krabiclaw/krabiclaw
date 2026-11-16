@@ -28,8 +28,8 @@ const messageFields = { id: text, organization_id: text, product_id: nullableTex
   error_field: nullableText, message_id: nullableText, started_at: nullableText, sent_at: nullableText, created_at: text, updated_at: text }
 const messagingRecord = { type: ['object', 'null'], description: 'The stay or booking (a class, consultation or table) the conversation is about, as its guest reads it; null for an inquiry. starts and ends are local to timezone: a date, or a date and time.',
   properties: { unit: { type: 'string', enum: ['slot', 'nights'], description: 'nights is a stay at a home; slot is a class, consultation or table.' }, status: text, name: nullableText, location: nullableText, address: nullableText, phone: nullableText,
-    party_size: { type: 'integer' }, timezone: text, starts: text, ends: text, no_show_at: nullableText },
-  required: ['unit', 'status', 'name', 'location', 'address', 'phone', 'party_size', 'timezone', 'starts', 'ends', 'no_show_at'] }
+    party_size: { type: 'integer' }, timezone: text, starts: text, ends: text },
+  required: ['unit', 'status', 'name', 'location', 'address', 'phone', 'party_size', 'timezone', 'starts', 'ends'] }
 const messageObject = { type: 'object', properties: messageFields, required: Object.keys(messageFields) }
 const arrivalGuideFields = {
   check_in_method: nullableText, check_in_instructions: nullableText, wifi_network: nullableText, wifi_password: nullableText,

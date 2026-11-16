@@ -4,7 +4,8 @@
     data-dashboard-index
     :class="level.mode.value === 'yield' ? 'hidden' : undefined"
     :data-yield="level.mode.value === 'yield' ? '' : undefined"
-    :default-size="pair ? (pairedSize ?? 50) : undefined"
+    :key="level.third.value"
+    :default-size="pair ? (level.third.value === 2 ? 24.3 : level.third.value === 1 ? 51.4 : pairedSize ?? 50) : undefined"
     :ui="panelUi"
   >
     <template #header>
@@ -17,12 +18,13 @@
       -->
       <div
         v-if="isSubPage"
-        class="shrink-0 items-center gap-x-3 grid min-h-16 grid-cols-[minmax(2.5rem,auto)_minmax(0,1fr)_minmax(2.5rem,auto)] py-3"
-        :class="dashboardGutterClass"
+        class="shrink-0 items-center gap-x-3 grid min-h-16 py-3"
+        :class="[dashboardGutterClass, column === 'record' ? 'grid-cols-[minmax(0,1fr)_minmax(2.5rem,auto)] border-b border-default' : 'grid-cols-[minmax(2.5rem,auto)_minmax(0,1fr)_minmax(2.5rem,auto)]', conversationRecord ? '2xl:px-12' : undefined]"
       >
-        <div class="flex items-center justify-start min-w-[2.5rem]">
+        <!-- A record beside its parent has no Back of its own: its title starts the row, as Airbnb's Reservation panel does. -->
+        <div v-if="column !== 'record'" class="flex items-center justify-start min-w-[2.5rem]">
           <slot name="leading">
-            <DashboardNavbarLeading v-if="column !== 'record'" />
+            <DashboardNavbarLeading />
           </slot>
         </div>
 
@@ -30,8 +32,8 @@
           <h1 class="sr-only">{{ title }}</h1>
           <slot name="center" />
         </div>
-        <div v-else class="min-w-0 text-center">
-          <h1 class="text-base font-semibold text-highlighted truncate">{{ title }}</h1>
+        <div v-else class="min-w-0" :class="column === 'record' ? 'text-left' : 'text-center'">
+          <h1 class="font-semibold text-highlighted truncate" :class="column === 'record' ? 'text-xl' : 'text-base'">{{ title }}</h1>
           <p v-if="lead" class="mt-0.5 text-xs text-muted truncate">{{ lead }}</p>
         </div>
 
@@ -137,7 +139,7 @@ const isSubPage = computed((): boolean => {
 // A level that scrolls itself pads its own rows, so the body gives up its padding.
 const panelUi = computed((): { body?: string } => {
   const fill: boolean = props.fill
-  if (props.column === 'record') return { body: 'p-6 sm:p-6' }
+  if (props.column === 'record') return { body: conversationRecord.value ? 'p-6 sm:p-6 2xl:px-12 2xl:py-3' : 'p-6 sm:p-6' }
   return { body: fill ? 'p-0 sm:p-0 gap-0' : undefined }
 })
 const pair = computed(() => level.mode.value === 'pair')
@@ -165,6 +167,10 @@ provide(dashboardPanelActionsKey, actionsId)
 
 const pane = useDashboardPane()
 const route = useRoute()
+const conversationRecord = computed((): boolean => {
+  const column: DashboardColumn | undefined = props.column
+  return column === 'record' && route.meta.dashboardThirdPane === true
+})
 const router = useRouter()
 
 // A record being made opens its first step at every width; on wide screens, a bare index opens its default child.

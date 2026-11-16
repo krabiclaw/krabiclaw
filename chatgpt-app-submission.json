@@ -1220,18 +1220,6 @@
         "open_world_justification": "Changes only the caller’s private read position within the workspace."
       }
     },
-    "no_show_product_booking": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Records a no-show on the selected booking.",
-        "destructive_justification": "Stops the review invitation and invalidates an outstanding review link.",
-        "open_world_justification": "The guest can no longer submit a review for this booking."
-      }
-    },
     "open_dates": {
       "annotations": {
         "readOnlyHint": false,

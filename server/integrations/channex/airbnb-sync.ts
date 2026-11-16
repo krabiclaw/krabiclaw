@@ -1,4 +1,6 @@
 import { HTTPError } from 'nitro'
+import { publishEvent } from '~/server/events'
+import { scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
 import { execute, executeBatch, MAX_D1_BATCH_STATEMENTS, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { countActiveHomes, homeAllowance, homesQuote, homeLimit, liveHomeSql, reportBillingUsage } from '~/server/utils/billing'
@@ -11,11 +13,9 @@ import { assertRoleAllows, resolveOrganizationMembership } from '~/server/utils/
  * app posts the change once: listings to sync (imported as homes if they are
  * not yet, then made live) and homes to stop syncing (back to free drafts).
  * The plan is checked for the whole change before anything is queued. Each
- * listing is then one row of airbnb_sync_jobs, advanced by the airbnb-sync
- * cron task through the same AirbnbConnection steps an import has always
- * taken; the mapping's import_stage is where a job carries on from. A job is
- * done, or it failed with its error recorded until a new request names the
- * listing.
+ * listing is one row of airbnb_sync_jobs. EVENTS advances it through the
+ * AirbnbConnection steps recorded in the mapping's import_stage. The job's
+ * terminal result stays visible until a new request names the listing.
  */
 
 export interface AirbnbSyncListing {
@@ -42,10 +42,9 @@ interface JobRow {
   updated_at: string
 }
 
-/** A cron run stops starting steps after this, so runs two minutes apart never overlap. */
-export const CRON_SLICE_MS = 100_000
-/** Scheduling headroom for cron steps; the deadline still guards stalled I/O. */
-const CRON_START_RESERVE_MS = 30_000
+const STEP_TIMEOUT_MS = 100_000
+/** Channex prescribes a one-minute pause before another attempt for a waiting property. */
+const PROVIDER_SETTLE_SECONDS = 60
 
 const now = () => new Date().toISOString()
 
@@ -130,7 +129,7 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
 
   const queued = [...items.map(item => ({ listing: item.listing_id, product: productOf(item.listing_id) ?? null, action: 'sync' as const, details: item.details ? JSON.stringify(item.details) : null })),
     ...stopped.map(listing => ({ listing: listing.id, product: productOf(listing.id) ?? null, action: 'stop' as const, details: null }))]
-  await queueJobs(db, organizationId, userId, queued)
+  await queueJobs(db, env, organizationId, userId, queued)
   const named = new Set(queued.map(job => job.listing))
   return (await readAirbnbSync(db, organizationId)).filter(listing => named.has(listing.listing_id))
 }
@@ -140,22 +139,24 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
  * gives the row a new id, so a run still on the old request writes nothing
  * over this one. `requestedBy` is null only for a stop KrabiClaw asks for itself.
  */
-async function queueJobs(db: DbClient, organizationId: string, requestedBy: string | null, jobs: Array<{ listing: string; product: string | null; action: 'sync' | 'stop'; details: string | null }>): Promise<void> {
+async function queueJobs(db: DbClient, env: CloudflareEnv, organizationId: string, requestedBy: string | null, jobs: Array<{ listing: string; product: string | null; action: 'sync' | 'stop'; details: string | null }>): Promise<void> {
   const at = now()
-  await executeBatch(db, jobs.map(job => ({ query: `INSERT INTO airbnb_sync_jobs (id, organization_id, listing_id, product_id, action, details, state, requested_by, created_at, updated_at)
+  const pending = jobs.map(job => ({ ...job, id: crypto.randomUUID() }))
+  await executeBatch(db, pending.map(job => ({ query: `INSERT INTO airbnb_sync_jobs (id, organization_id, listing_id, product_id, action, details, state, requested_by, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
       ON CONFLICT (organization_id, listing_id) DO UPDATE SET id = excluded.id, action = excluded.action, details = excluded.details, state = 'pending', requested_by = excluded.requested_by,
         product_id = COALESCE(excluded.product_id, airbnb_sync_jobs.product_id), last_error_code = NULL, last_error = NULL,
         completed_at = NULL, updated_at = excluded.updated_at`,
-    params: [crypto.randomUUID(), organizationId, job.listing, job.product, job.action, job.details, requestedBy, at, at] })), { operation: 'Queue an Airbnb sync change' })
+    params: [job.id, organizationId, job.listing, job.product, job.action, job.details, requestedBy, at, at] })), { operation: 'Queue an Airbnb sync change' })
+  for (const job of pending) await publishEvent(env, { type: 'airbnb.sync', organization_id: organizationId, job_id: job.id })
 }
 
 /**
  * Stop syncing these homes with Airbnb because the organization's paid plan
- * ended: queued as a stop no one asked for, which the airbnb-sync task runs as
+ * ended: queued as a stop no one asked for, which the EVENTS consumer runs as
  * it runs any other. Each must be a home imported from the connected account.
  */
-export async function stopAirbnbSyncForPlanEnd(db: DbClient, organizationId: string, productIds: string[]): Promise<void> {
+export async function stopAirbnbSyncForPlanEnd(db: DbClient, env: CloudflareEnv, organizationId: string, productIds: string[]): Promise<void> {
   if (!productIds.length) return
   const mappings = await queryAll<{ product_id: string; listing_id: string }>(db, `SELECT m.product_id, m.listing_id FROM product_channel_mappings m
     JOIN channex_connections c ON c.organization_id = m.organization_id AND c.channel_id = m.channel_id
@@ -164,7 +165,7 @@ export async function stopAirbnbSyncForPlanEnd(db: DbClient, organizationId: str
   if (missing) throw new Error(`Home ${missing} is not imported from the organization's connected Airbnb account`)
   // One batch holds at most D1's statements per batch; an organization past Basic may have more homes than that.
   for (let start = 0; start < mappings.length; start += MAX_D1_BATCH_STATEMENTS) {
-    await queueJobs(db, organizationId, null, mappings.slice(start, start + MAX_D1_BATCH_STATEMENTS).map(row => ({ listing: row.listing_id, product: row.product_id, action: 'stop', details: null })))
+    await queueJobs(db, env, organizationId, null, mappings.slice(start, start + MAX_D1_BATCH_STATEMENTS).map(row => ({ listing: row.listing_id, product: row.product_id, action: 'stop', details: null })))
   }
 }
 
@@ -224,7 +225,12 @@ async function step(env: CloudflareEnv, db: DbClient, job: JobRow, signal: Abort
       await connection.activate(mapping.product_id)
       return 'continue'
     }
-    return advanced(await connection.advance(mapping.product_id))
+    const progressed = await connection.advance(mapping.product_id)
+    if (progressed.stage === 'complete') {
+      await reportBillingUsage(env, db, job.organization_id)
+      return 'done'
+    }
+    return advanced(progressed)
   }
   if (!mapping || mapping.import_stage === 'draft') {
     await reportBillingUsage(env, db, job.organization_id)
@@ -243,54 +249,54 @@ function advanced(result: { stage: ImportStage; waiting: boolean }): Step {
   return result.waiting && result.stage !== 'content' ? 'later' : 'continue'
 }
 
-/**
- * Advance pending jobs. New steps stop at the cron's launch cutoff; an
- * already-started step keeps its stall guard until `until`. A job that is
- * waiting on Channex or out of its start window stays pending and the next
- * run carries on from the stage its mapping reached. A step that throws fails
- * the job with its error until a new request names the listing. A job whose
- * connection is busy is left for the next run.
- */
-export async function runAirbnbSyncJobs(env: CloudflareEnv, until: number, options: { startReserveMs?: number } = {}): Promise<{ stepped: number; done: number; failed: number }> {
+/** An organization starts syncs only after its stops finish. */
+async function resumeWaitingSyncs(env: CloudflareEnv, organizationId: string): Promise<void> {
+  const waiting = await queryAll<{ id: string }>(env.DB, `SELECT id FROM airbnb_sync_jobs j
+    WHERE j.organization_id = ? AND j.action = 'sync' AND j.state = 'pending'
+      AND NOT EXISTS (SELECT 1 FROM airbnb_sync_jobs stop WHERE stop.organization_id = j.organization_id AND stop.action = 'stop' AND stop.state = 'pending')
+    ORDER BY j.created_at, j.id`, [organizationId])
+  for (const row of waiting) await publishEvent(env, { type: 'airbnb.sync', organization_id: organizationId, job_id: row.id })
+}
+
+/** Process one persisted listing change and send its continuation only when it has one. */
+export async function advanceAirbnbSyncJob(env: CloudflareEnv, organizationId: string, jobId: string): Promise<void> {
   const db = env.DB
-  const totals = { stepped: 0, done: 0, failed: 0 }
-  const startBy = until - (options.startReserveMs ?? CRON_START_RESERVE_MS)
-  // Stops first: the plan admitted this whole change after subtracting its stopped homes, and
-  // until they are stopped, activating a replacement would spend their allowance twice.
-  const due = await queryAll<JobRow>(db, `SELECT * FROM airbnb_sync_jobs WHERE state = 'pending'
-    ORDER BY CASE action WHEN 'stop' THEN 0 ELSE 1 END, created_at, id`)
-  for (const job of due) {
-    if (Date.now() >= startBy) break
-    if (job.action === 'sync' && await queryFirst(db, "SELECT 1 FROM airbnb_sync_jobs WHERE organization_id = ? AND action = 'stop' AND state = 'pending'", [job.organization_id])) continue
-    const signal = AbortSignal.timeout(Math.max(0, until - Date.now()))
-    const operationEnv = { ...env, requestSignal: signal }
-    let outcome: Step = 'continue'
-    try {
-      while (outcome === 'continue' && Date.now() < startBy) {
-        // A newer request replaces this job's id; this run must not complete it.
-        const current = await queryFirst<JobRow>(db, "SELECT * FROM airbnb_sync_jobs WHERE id = ? AND state = 'pending'", [job.id])
-        if (!current || Date.now() >= startBy) break
-        outcome = await step(operationEnv, db, current, signal)
-        totals.stepped++
-        await execute(db, 'UPDATE airbnb_sync_jobs SET updated_at = ? WHERE id = ?', [now(), job.id])
-      }
-      if (outcome === 'done') {
-        const completed = await execute(db, `UPDATE airbnb_sync_jobs SET state = 'done', last_error_code = NULL, last_error = NULL, completed_at = ?, updated_at = ?
-          WHERE id = ? AND state = 'pending'`, [now(), now(), job.id])
-        totals.done += completed.meta.changes
-      }
-    } catch (error) {
-      // H3 retains constructor details in cause, including the original provider cause.
-      const failure = error instanceof HTTPError && error.data?.code === 'POST_WRITE_COMPLETION_FAILED' && error.data?.field === 'billing_usage' && error.data?.committed === true ? (error.cause as { cause: unknown }).cause : error
-      const data = failure instanceof HTTPError || failure instanceof ChannexError ? failure.data as { code?: unknown } | undefined : undefined
-      const code = typeof data?.code === 'string' ? data.code : signal.aborted ? 'SYNC_SLICE_ENDED' : 'SYNC_STEP_FAILED'
-      // Another step of this organization holds the connection: not a failure of this listing.
-      if (code === 'CONNECTION_BUSY') continue
-      const message = error instanceof Error ? error.message : String(error)
-      const failed = await execute(db, "UPDATE airbnb_sync_jobs SET state = 'failed', last_error_code = ?, last_error = ?, updated_at = ? WHERE id = ? AND state = 'pending'",
-        [code, message, now(), job.id])
-      totals.failed += failed.meta.changes
-    }
+  const job = await queryFirst<JobRow & { waiting_for_stop: number }>(db, `SELECT j.*,
+    EXISTS (SELECT 1 FROM airbnb_sync_jobs stop WHERE stop.organization_id = j.organization_id AND stop.action = 'stop' AND stop.state = 'pending') AS waiting_for_stop
+    FROM airbnb_sync_jobs j WHERE j.organization_id = ? AND j.id = ?`, [organizationId, jobId])
+  if (!job) return
+  if (job.state !== 'pending') {
+    if (job.action === 'stop') await resumeWaitingSyncs(env, organizationId)
+    return
   }
-  return totals
+  if (job.action === 'sync' && job.waiting_for_stop) return
+  const event = { type: 'airbnb.sync' as const, organization_id: organizationId, job_id: jobId }
+  const signal = AbortSignal.timeout(STEP_TIMEOUT_MS)
+  let outcome: Step
+  try {
+    outcome = await step({ ...env, requestSignal: signal }, db, job, signal)
+  } catch (error) {
+    // H3 retains constructor details in cause, including the original provider cause.
+    const failure = error instanceof HTTPError && error.data?.code === 'POST_WRITE_COMPLETION_FAILED' && error.data?.field === 'billing_usage' && error.data?.committed === true ? (error.cause as { cause: unknown }).cause : error
+    const data = failure instanceof HTTPError || failure instanceof ChannexError ? failure.data as { code?: unknown } | undefined : undefined
+    const code = typeof data?.code === 'string' ? data.code : signal.aborted ? 'SYNC_SLICE_ENDED' : 'SYNC_STEP_FAILED'
+    if (code === 'CONNECTION_BUSY') {
+      await publishEvent(env, event, { delaySeconds: PROVIDER_SETTLE_SECONDS })
+      return
+    }
+    const message = error instanceof Error ? error.message : String(error)
+    await execute(db, "UPDATE airbnb_sync_jobs SET state = 'failed', last_error_code = ?, last_error = ?, updated_at = ? WHERE id = ? AND state = 'pending'",
+      [code, message, now(), job.id])
+    if (job.action === 'stop') await resumeWaitingSyncs(env, organizationId)
+    throw error
+  }
+  if (outcome === 'done') {
+    if (job.action === 'sync') await scheduleBusinessWake(env, organizationId, 'channex_ari', Date.now())
+    await execute(db, `UPDATE airbnb_sync_jobs SET state = 'done', last_error_code = NULL, last_error = NULL, completed_at = ?, updated_at = ?
+      WHERE id = ? AND state = 'pending'`, [now(), now(), job.id])
+    if (job.action === 'stop') await resumeWaitingSyncs(env, organizationId)
+    return
+  }
+  await execute(db, 'UPDATE airbnb_sync_jobs SET updated_at = ? WHERE id = ? AND state = ?', [now(), job.id, 'pending'])
+  await publishEvent(env, event, outcome === 'later' ? { delaySeconds: PROVIDER_SETTLE_SECONDS } : undefined)
 }

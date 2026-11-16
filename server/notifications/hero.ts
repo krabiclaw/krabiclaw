@@ -1,5 +1,5 @@
-import type { DbClient } from '~/server/db'
-import { readMediaPlacements, type StoredMediaPlacementItem } from '~/server/utils/media-asset-manager'
+import { queryAll, type DbClient } from '~/server/db'
+import { groupMediaPlacements, mediaPlacementsQuery, readMediaPlacements, type StoredMediaPlacementItem } from '~/server/utils/media-asset-manager'
 import { mediaStillUrl, resolveOwnerPicture, type MediaPlacementOwnerType } from '~/shared/media-placement-contract'
 
 /**
@@ -29,16 +29,20 @@ export async function loadOwnerPictures(
 ): Promise<Map<string, HeroImage | null>> {
   const ids = [...new Set(ownerIds)]
   if (!ids.length) return new Map()
-  const [ownerPlacements, organizationPlacements] = await Promise.all([
-    readMediaPlacements(db, { organizationId, ownerType, ownerIds: ids }),
-    options.organizationFallback === false ? null : readMediaPlacements(db, { organizationId, ownerType: 'organization', ownerIds: [organizationId] }),
-  ])
-  const organizationMedia = organizationPlacements?.get(organizationId) ?? []
+  const includeOrganizationFallback = options.organizationFallback !== false
+  const { query, params } = mediaPlacementsQuery({ organizationId, ownerType, owners: ids, includeOrganizationFallback })
+  const rows = await queryAll<{ owner_type: MediaPlacementOwnerType }>(db, query, params)
+  const ownerPlacements = groupMediaPlacements(rows.filter(row => row.owner_type === ownerType), ids)
+  const organizationMedia = includeOrganizationFallback
+    ? groupMediaPlacements(rows.filter(row => row.owner_type === 'organization')).get(organizationId) ?? []
+    : []
   return new Map(ids.map(id => [id, ownerPicture(ownerType, ownerPlacements.get(id) ?? [], organizationMedia)]))
 }
 
+export type PicturePlacement = Pick<StoredMediaPlacementItem, 'kind' | 'slot' | 'public_url' | 'thumbnail_url' | 'alt_text'>
+
 /** The picture `resolveOwnerPicture` picks from placements already read. */
-export function ownerPicture(ownerType: MediaPlacementOwnerType, ownerMedia: StoredMediaPlacementItem[], organizationMedia: StoredMediaPlacementItem[]): HeroImage | null {
+export function ownerPicture(ownerType: MediaPlacementOwnerType, ownerMedia: PicturePlacement[], organizationMedia: PicturePlacement[]): HeroImage | null {
   const picture = resolveOwnerPicture(ownerType, ownerMedia, organizationMedia)
   const imageUrl = mediaStillUrl(picture)
   return picture && imageUrl ? { imageUrl, alt: picture.alt_text ?? '' } : null

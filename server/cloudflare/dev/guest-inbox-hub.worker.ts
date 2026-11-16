@@ -1,4 +1,8 @@
-// The Durable Object as its own Worker, for `nuxt dev` only.
+import type { MessageBatch } from '@cloudflare/workers-types'
+import { consumeEventBatch } from '../queue-consumer'
+import type { CloudflareEnv } from '../../utils/auth'
+
+// The Durable Object and its event queue as their own Worker for `nuxt dev`.
 //
 // Wrangler's platform proxy cannot host a Durable Object whose class lives in
 // the Worker being proxied: it runs an empty script, so the production binding
@@ -12,7 +16,10 @@
 export { GuestInboxHubObject } from '../durable-objects/guest-inbox-hub'
 
 export default {
+  queue(batch: MessageBatch, env: CloudflareEnv): Promise<void> {
+    return consumeEventBatch(env, batch)
+  },
   fetch(): Response {
-    return new Response('krabiclaw-guest-inbox-hub serves only its Durable Object', { status: 404 })
+    return new Response(null, { status: 404 })
   },
 }

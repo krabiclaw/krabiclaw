@@ -55,7 +55,8 @@ import {
 } from '~/server/notifications/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { buildOwnerThreadInboxUrl, buildBuyerRequestActivityUrl, dashboardOrigin, destinationUnavailable, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
-import { bookingEditorPath, insightsPath, reviewEditorPath } from '~/server/utils/dashboard-links'
+import { insightsPath, reviewEditorPath } from '~/server/utils/dashboard-links'
+import { bookingConversationOrRecordPath } from '~/shared/messages-contract'
 import { createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isDeliverySent, recordDeliveryOutcome, type DeliverySubject } from '~/server/domain/guest-threads/deliveries'
 import { GUEST_NOTE_EVENT, appendMessage, findMessageByDedupeKey, getMessage, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
 import { listMessagePhotos, messagePreview } from '~/server/domain/guest-threads/attachments'
@@ -183,8 +184,8 @@ interface ReviewRequestNotificationInput extends OrganizationContext {
   partySize: string
   partyLabel?: string
   reviewUrl: string
-  /** Whose review_requests preference governs this email and its unsubscribe link. */
-  userId: string
+  /** The account whose preference governs the email, if the booking is linked. */
+  userId: string | null
   /** The invitation's message in the visit's conversation, which this email is the receipt of. */
   delivery: { conversationId: string; messageId: string }
 }
@@ -736,7 +737,6 @@ async function messageHero(db: DbClient, organizationId: string, owner: { type: 
   return (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null
 }
 
-// An alert about a booking's schedule opens the booking, not its conversation.
 const scheduleEvents = ['new_reservation', 'new_booking', 'new_stay', 'reservation_cancelled', 'booking_cancelled', 'stay_cancelled']
 const schedulePrefixes = ['channel_stay.', 'booking.change_', 'reservation.change_', 'stay.change_', 'consultation.change_']
 const isScheduleNotification = (event: string) => scheduleEvents.includes(event) || schedulePrefixes.some(prefix => event.startsWith(prefix))
@@ -784,8 +784,8 @@ export async function notifyOwner(
      * opens for them. Without one, every recipient reads `message`.
      */
     memberAlert?: { message: MemberAlertMessage; stayId: string }
-    /** The stay an event without a conversation is about, which every recipient's push opens. */
-    stayId?: string
+    /** The booking conversation behind a channel alert recorded on its own event. */
+    bookingConversationId?: string
     bookingRecordId?: string
   }
 ) {
@@ -793,13 +793,18 @@ export async function notifyOwner(
   const threadContext: DeliveryAnchor | null = opts.source
     ? { conversationId: opts.source.conversationId, subject: { messageId: opts.source.messageId } }
     : opening ? await getOpeningThreadContext(db, opening) : null
-  const stayId = opts.stayId ?? opts.memberAlert?.stayId
+  const stayId = opts.memberAlert?.stayId
   const bookingRecordId = stayId ?? opts.bookingRecordId
-  let scheduleUrl: string | null = null
+  const conversationId = threadContext?.conversationId ?? opts.bookingConversationId ?? null
+  let schedule: { slug: string; seats: Set<string>; bookingId: string } | null = null
   if (isScheduleNotification(opts.template)) {
     if (!bookingRecordId) throw new Error(`Schedule notification ${opts.template} has no booking destination`)
-    const { orgSlug } = await resolveDashboardSlugs(env, db, { organizationId: opts.organizationId })
-    scheduleUrl = new URL(bookingEditorPath(orgSlug, bookingRecordId), platformOrigin(env)).href
+    const destination = await queryFirst<{ slug: string; seats: string }>(db, `SELECT slug,
+      (SELECT json_group_array(seat.user_id) FROM conversation_participants seat
+       WHERE seat.organization_id = organization.id AND seat.conversation_id = ? AND seat.role = 'member') AS seats
+      FROM organization WHERE id = ?`, [conversationId, opts.organizationId])
+    if (!destination) throw destinationUnavailable('organization_id', opts.organizationId)
+    schedule = { slug: destination.slug, seats: new Set(JSON.parse(destination.seats) as string[]), bookingId: bookingRecordId }
   }
   let deliveryContext: DeliveryAnchor
   if (threadContext) deliveryContext = threadContext
@@ -825,27 +830,29 @@ export async function notifyOwner(
 
   // The owner reads mail sent for their business, framed by its own mark.
   const organizationLogoUrl = await organizationLogo(db, opts.organizationId)
-  const message = {
-    ...opts.message, organizationLogoUrl,
-    primaryAction: scheduleUrl ? { ...opts.message.primaryAction, url: scheduleUrl } : opts.message.primaryAction,
+  const linkMessage = (message: MemberAlertMessage, readableConversationId: string | null): MemberAlertMessage => {
+    if (!schedule) return { ...message, organizationLogoUrl }
+    const url = new URL(bookingConversationOrRecordPath(schedule.slug, schedule.bookingId, readableConversationId), platformOrigin(env)).href
+    return { ...message, organizationLogoUrl, primaryAction: { ...message.primaryAction, url } }
   }
-  const memberMessage = opts.memberAlert ? { ...opts.memberAlert.message, organizationLogoUrl } : message
 
   const results = await Promise.allSettled(recipients.flatMap(recipient => {
-    const projected = !recipient.organizationWide && opts.memberAlert !== undefined
-    const read = projected ? memberMessage : message
+    const readableConversationId = schedule?.seats.has(recipient.userId) ? conversationId : null
+    const read = linkMessage(!recipient.organizationWide && opts.memberAlert ? opts.memberAlert.message : opts.message, readableConversationId)
     return memberNotificationSends(env, db, recipient, {
       ...opts, message: read,
       context: deliveryContext,
       pushTemplate: opts.template, whatsappTemplate: opts.whatsappTemplate ?? null,
       eventKey: opts.deliveryEventKey,
-      target: stayId ? { kind: 'stay', booking_id: stayId }
-        : !scheduleUrl && deliveryContext.conversationId ? { kind: 'guest', conversation_id: deliveryContext.conversationId }
-          : { kind: 'link', url: read.primaryAction.url },
+      target: readableConversationId ? { kind: 'guest', conversation_id: readableConversationId }
+        : stayId ? { kind: 'stay', booking_id: stayId }
+          : !schedule && deliveryContext.conversationId ? { kind: 'guest', conversation_id: deliveryContext.conversationId }
+            : { kind: 'link', url: read.primaryAction.url },
     })
   }))
   const memberEmails = new Set(recipients.map(recipient => recipient.email?.toLowerCase()))
   const operatorEmails = [...new Set(opts.operatorEmails ?? [])].filter(to => !memberEmails.has(to.toLowerCase()))
+  const message = linkMessage(opts.message, null)
   const operatorResults = await Promise.allSettled(operatorEmails.map(async (to) => {
     const rendered = await renderNotificationEmail(message, {
       platformDomain: getPlatformDomain(env),
@@ -1056,6 +1063,8 @@ export async function notifyReviewRequest(
   db: DbClient,
   opts: ReviewRequestNotificationInput
 ): Promise<void> {
+  const reviewToken = new URL(opts.reviewUrl).searchParams.get('token')
+  if (!reviewToken) throw new Error('Review invitation requires a token')
   // The invitation owns one email, even if contact details are edited while
   // completion is pending. Retain any already-recorded receipt for this link.
   const recorded = await queryFirst<{ id: string }>(db, `
@@ -1063,7 +1072,7 @@ export async function notifyReviewRequest(
     WHERE message_id = ? AND channel = 'email' AND purpose = 'status_update'
       AND (email_json IS NULL OR instr(email_json, ?) > 0)
     ORDER BY created_at DESC, id DESC LIMIT 1
-  `, [opts.delivery.messageId, new URL(opts.reviewUrl).searchParams.get('token')])
+  `, [opts.delivery.messageId, reviewToken])
   const restaurant = organizationName(opts)
   const platformDomain = getPlatformDomain(env)
   const logoUrl = await organizationLogo(db, opts.organizationId)
@@ -1077,7 +1086,14 @@ export async function notifyReviewRequest(
     reviewUrl: opts.reviewUrl,
     organizationLogoUrl: logoUrl,
   })
-  const unsubscribe = await buildUnsubscribeUrls(env, { userId: opts.userId, category: message.category }, message.emailPurpose)
+  const origin = platformOrigin(env)
+  const encodedToken = encodeURIComponent(reviewToken)
+  const unsubscribe = opts.userId
+    ? await buildUnsubscribeUrls(env, { userId: opts.userId, category: message.category }, message.emailPurpose)
+    : {
+        pageUrl: `${origin}/unsubscribe?reviewToken=${encodedToken}`,
+        oneClickUrl: `${origin}/api/public/review-requests/opt-out?token=${encodedToken}`,
+      }
   if (!unsubscribe) throw new Error('Review requests require email unsubscribe links')
   const email = await renderNotificationEmail(message, { platformDomain, unsubscribeUrl: unsubscribe.pageUrl })
 
@@ -1312,7 +1328,7 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
   const send = (template: string, message: MemberAlertMessage, memberMessage: MemberAlertMessage, whatsappTemplate?: WhatsAppTemplate) => notifyOwner(env, db, {
     organizationId, organizationName: studio, locationId: home.location_id, template, title: message.title,
     payload: { booking_id: stay.id, revision_id: input.revisionId, deep_link: audience.stayUrl },
-    message, idempotencyKey: `notification:${eventKey}`, entity: { type: 'booking', id: stay.id }, deliveryEventKey: eventKey, stayId: stay.id,
+    message, idempotencyKey: `notification:${eventKey}`, entity: { type: 'booking', id: stay.id }, deliveryEventKey: eventKey, bookingConversationId: stay.conversation_id,
     memberIds: audience.memberIds, memberAlert: { message: memberMessage, stayId: stay.id }, whatsappTemplate,
   })
   if (cancelled) {
@@ -2060,7 +2076,7 @@ async function notifyTaskPeople(env: NotificationEnv, db: DbClient, input: { org
     if (!recipient) return
     const sends = memberNotificationSends(env, db, recipient, {
       organizationId: input.organizationId, organizationName: organization.name, locationId: task.locationId,
-      // An assignment's sends are keyed by its version; a start's by its day, which taskStartingSent reads.
+      // An assignment's sends are keyed by its version; a start's by its day.
       context: { conversationId: null, subject: { taskId: input.taskId } }, eventKey: input.kind === 'assigned' ? `${input.eventKey}:${userId}` : undefined,
       template: input.kind === 'assigned' ? 'task_assigned' : `task_starting:${input.day}`, pushTemplate: input.kind === 'assigned' ? 'task_assigned' : `task_starting:${input.day}`,
       whatsappTemplate: 'guest_thread_reply_whatsapp', payload: { task_id: input.taskId, deep_link: taskUrl }, message,
@@ -2082,12 +2098,3 @@ export async function notifyTaskAssigned(env: NotificationEnv, db: DbClient, inp
 export async function notifyTaskStarting(env: NotificationEnv, db: DbClient, input: { organizationId: string; taskId: string; day: string; recipientUserIds: string[] }): Promise<void> {
   await notifyTaskPeople(env, db, { organizationId: input.organizationId, taskId: input.taskId, recipientUserIds: input.recipientUserIds, kind: 'starting', actorUserId: null, day: input.day })
 }
-
-/** Whether a task's start alert for this day already went out on some channel: its sends are keyed by task, alert and day. */
-export async function taskStartingSent(db: DbClient, taskId: string, day: string): Promise<boolean> {
-  // D1 refuses a GLOB pattern this long, so the key's parts are matched by position.
-  const prefix = `${taskId}:owner_alert:`
-  return Boolean(await queryFirst(db, 'SELECT 1 FROM guest_thread_deliveries WHERE task_id = ? AND substr(id, 1, length(?)) = ? AND instr(id, ?) > 0',
-    [taskId, prefix, prefix, `:task_starting:${day}:`]))
-}
-

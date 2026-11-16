@@ -128,7 +128,8 @@ export async function writeMemberScheduling(actor: SchedulingActor, memberId: st
  SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM member WHERE id=? AND organizationId=?)
   AND (? IS NULL OR EXISTS(SELECT 1 FROM member_scheduling WHERE member_id=? AND organization_id=? AND updated_at=?))
  ON CONFLICT(member_id) DO UPDATE SET ${updates.map(field=>`${field}=excluded.${field}`).join(',')}
- WHERE member_scheduling.organization_id=excluded.organization_id AND member_scheduling.updated_at IS ?`,params:[memberId,actor.organizationId,timezone,weekly===null?null:JSON.stringify(weekly),timeOff===null?null:JSON.stringify(timeOff),publicName,input.public_photo_url===undefined?current?.public_photo_url??null:input.public_photo_url,input.public_bio===undefined?current?.public_bio??null:input.public_bio,Number(approved),now,actor.userId,memberId,actor.organizationId,input.updated_at,memberId,actor.organizationId,input.updated_at,input.updated_at]},
+ WHERE member_scheduling.organization_id=excluded.organization_id AND member_scheduling.updated_at IS ?`,params:[memberId,actor.organizationId,timezone,weekly===null?null:JSON.stringify(weekly),timeOff===null?null:JSON.stringify(timeOff),publicName,input.public_photo_url===undefined?current?.public_photo_url??null:input.public_photo_url,input.public_bio===undefined?current?.public_bio??null:input.public_bio,Number(approved),now,actor.userId,memberId,actor.organizationId,input.updated_at,memberId,actor.organizationId,input.updated_at,input.updated_at],
+ ...(publicName !== (current?.public_name ?? null) ? {event:{type:'calendar.changed' as const,organization_id:actor.organizationId,booking_id:null}} : {})},
  {query:"SELECT CASE WHEN changes() = 1 THEN NULL ELSE json('Member settings changed; reload before saving') END"},
  publicResourceCacheInvalidationQuery(actor.organizationId,'member-profile')],{operation:'Save member settings'}).catch(error=>{
   if(error instanceof Error && /malformed JSON/.test(error.message))throw new HTTPError({statusCode:409,message:'Member settings changed; reload before saving',cause:error})
@@ -184,12 +185,6 @@ export async function memberBusy(env: CloudflareEnv, row: Pick<MemberScheduling,
   })
  }))
  return chunks.flat()
-}
-
-/** The busy times one member's selected Google calendars report for a span; none when they check no calendar. */
-export async function memberBusyIntervals(db: DbClient, env: CloudflareEnv, organizationId: string, memberId: string, span: { from: string; until: string }): Promise<SchedulingInterval[]> {
- const row = await queryFirst<MemberScheduling>(db, 'SELECT * FROM member_scheduling WHERE organization_id=? AND member_id=?', [organizationId, memberId])
- return row ? await memberBusy(env, row, span) : []
 }
 
 /**

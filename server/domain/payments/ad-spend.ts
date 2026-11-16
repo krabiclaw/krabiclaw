@@ -5,44 +5,98 @@ import {linkedAccountAccessToken} from '~/server/utils/auth'
 import {getGoogleAdsCustomer, getGoogleAdsPerformanceSummary} from '~/server/utils/google-ads'
 import {getMetaAdAccount, getMetaAdsPerformanceSummary} from '~/server/utils/meta-ads'
 import {readIntegration} from '~/server/utils/organization-integrations'
-import { addLocalDays, assertCalendarDate, instantDate, localDateAt } from '~/utils/timezone'
+import { addLocalDays, instantDate, isValidTimezone, localDateAt } from '~/utils/timezone'
 import { listServices } from '~/server/utils/organization-services'
 import { localDateBounds } from '~/server/utils/analytics-calendar'
-import { paymentUsageEventQuery } from './usage'
+import { deliverPaymentsUsage, paymentUsageEventQuery } from './usage'
+import { publishEvent, type EventsEnv } from '~/server/events'
 
-/** Closed managed days for one ads integration whose amount has not reached the usage outbox. */
-export async function unrecordedDaysForIntegration(
+const ADS_PROVIDERS = ['google_ads', 'meta_ads'] as const
+const REPORTING_DELAY_DAYS = 2
+type AdsProvider = (typeof ADS_PROVIDERS)[number]
+type AdsConnection = { provider: AdsProvider; account_id: string; target_id: string; created_at: string }
+type ReportingAccount = {
+  provider: AdsProvider
+  targetId: string
+  accessToken: string
+  timeZone: string
+  currency: string
+}
+type ManagedPeriod = { start: string; end: string | null }
+
+async function readManagedPeriods(db: DbClient, organizationId: string): Promise<ManagedPeriod[]> {
+  const periods = await queryAll<{ agreed_at: string; ended_at: string | null }>(db,
+    "SELECT agreed_at,ended_at FROM organization_services WHERE organization_id=? AND service='managed_ads' ORDER BY agreed_at", [organizationId])
+  return periods.map(period => ({
+    start: instantDate(period.agreed_at).toISOString(),
+    end: period.ended_at === null ? null : instantDate(period.ended_at).toISOString(),
+  }))
+}
+
+async function readAdsConnection(db: DbClient, organizationId: string, provider: AdsProvider): Promise<AdsConnection | null> {
+  const ads = await readIntegration(db, organizationId, provider)
+  return ads?.account_id && ads.target_id ? { provider, account_id: ads.account_id, target_id: ads.target_id, created_at: ads.created_at } : null
+}
+
+async function readReportingAccount(env: CloudflareEnv, ads: AdsConnection): Promise<ReportingAccount> {
+  const { accessToken } = await linkedAccountAccessToken(env, ads.account_id)
+  const shared = { provider: ads.provider, targetId: ads.target_id, accessToken }
+  if (ads.provider === 'meta_ads') {
+    const account = await getMetaAdAccount(accessToken, ads.target_id)
+    if (!isValidTimezone(account.timezone_name)) throw new Error(`Meta Ads account ${ads.target_id} has no valid reporting timezone`)
+    return { ...shared, timeZone: account.timezone_name, currency: account.currency }
+  }
+  const account = await getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, ads.target_id)
+  return { ...shared, timeZone: account.timeZone, currency: account.currencyCode }
+}
+
+async function managedSpendPlan(
   db: DbClient,
   env: CloudflareEnv,
   organizationId: string,
-  ads: { provider: 'google_ads' | 'meta_ads'; account_id: string; target_id: string; created_at: string },
-  now = new Date(),
-  reportingDelayDays: 1 | 2 = 1,
-): Promise<string[]> {
-  instantDate(now)
+  ads: AdsConnection,
+  periods: ManagedPeriod[],
+  now: Date,
+  reportingDelayDays: 1 | 2,
+): Promise<{ account: ReportingAccount; days: string[]; next: number | null } | null> {
   const connectedAt = instantDate(ads.created_at).toISOString()
-  const periods = await queryAll<{ agreed_at: string; ended_at: string | null }>(db, "SELECT agreed_at,ended_at FROM organization_services WHERE organization_id=? AND service='managed_ads' ORDER BY agreed_at", [organizationId])
-  const intervals = periods.map(period => ({ start: instantDate(period.agreed_at).toISOString(), end: period.ended_at === null ? null : instantDate(period.ended_at).toISOString() }))
-  if (!intervals.some(period => period.end === null || period.end > connectedAt)) return []
-  const { accessToken } = await linkedAccountAccessToken(env, ads.account_id)
-  const isMeta = ads.provider === 'meta_ads'
-  const timeZone = isMeta
-    ? (await getMetaAdAccount(accessToken, ads.target_id)).timezone_name
-    : (await getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, ads.target_id)).timeZone
-  if (!timeZone) throw new Error(`Ads account ${ads.target_id} has no reporting timezone`)
+  const intervals = periods.filter(period => period.end === null || period.end > connectedAt)
+  if (intervals.length === 0) return null
+
+  const account = await readReportingAccount(env, ads)
+  const { timeZone } = account
   const throughDate = addLocalDays(localDateAt(now, timeZone), -reportingDelayDays)
-  const prefix = isMeta ? `meta_ads:${ads.target_id}:%` : `google_ads:${ads.target_id}:%`
-  const keyPrefix = isMeta ? `meta_ads:${ads.target_id}:` : `google_ads:${ads.target_id}:`
-  const recorded = new Set((await queryAll<{ source_id: string }>(db, "SELECT idempotency_key AS source_id FROM usage_events WHERE organization_id=? AND resource='ad_spend' AND provider_occurred_at IS NOT NULL AND idempotency_key LIKE ?", [organizationId, prefix])).map(row => row.source_id))
-  const missing: string[] = []
-  // An agreement predating a connection still applies to its overlapping days.
-  // Never charge before either consent or the current connection existed.
-  const start = localDateAt(instantDate([intervals.map(period => period.start).sort()[0]!, connectedAt].sort().at(-1)!), timeZone)
-  for (let date = start; date <= throughDate; date = addLocalDays(date, 1)) {
-    const { end } = localDateBounds(date, timeZone)
-    if (connectedAt < end && intervals.some(period => period.start < end && (period.end === null || period.end >= end)) && !recorded.has(`${keyPrefix}${date}`)) missing.push(date)
+  const keyPrefix = `${ads.provider}:${ads.target_id}:`
+  const recorded = new Set((await queryAll<{ source_id: string }>(db,
+    "SELECT idempotency_key AS source_id FROM usage_events WHERE organization_id=? AND resource='ad_spend' AND provider_occurred_at IS NOT NULL AND idempotency_key LIKE ?",
+    [organizationId, `${keyPrefix}%`])).map(row => row.source_id))
+
+  const missing = new Set<string>()
+  let nextDay: string | null = null
+  for (const interval of intervals) {
+    // Every eligible local day closes after both consent and the connection
+    // began, and on or before the agreement ended.
+    const from = interval.start > connectedAt ? interval.start : connectedAt
+    const firstDay = localDateAt(instantDate(from), timeZone)
+    for (let date = firstDay; date <= throughDate; date = addLocalDays(date, 1)) {
+      const { end } = localDateBounds(date, timeZone)
+      if (interval.end !== null && end > interval.end) break
+      if (from < end && !recorded.has(`${keyPrefix}${date}`)) missing.add(date)
+    }
+
+    let futureDay = firstDay > throughDate ? firstDay : addLocalDays(throughDate, 1)
+    while (recorded.has(`${keyPrefix}${futureDay}`)) futureDay = addLocalDays(futureDay, 1)
+    const { end } = localDateBounds(futureDay, timeZone)
+    if (from < end && (interval.end === null || end <= interval.end) && (nextDay === null || futureDay < nextDay)) {
+      nextDay = futureDay
+    }
   }
-  return missing
+
+  return {
+    account,
+    days: [...missing].sort(),
+    next: nextDay === null ? null : Date.parse(localDateBounds(addLocalDays(nextDay, reportingDelayDays), timeZone).start),
+  }
 }
 
 /** Closed managed days whose actual Google or Meta amount has not reached the usage outbox. */
@@ -52,20 +106,18 @@ export async function unrecordedAdSpendDays(
   organizationId: string,
   now = new Date(),
   reportingDelayDays: 1 | 2 = 1,
-  providers: readonly ('google_ads' | 'meta_ads')[] = ['google_ads', 'meta_ads'],
+  providers: readonly AdsProvider[] = ADS_PROVIDERS,
 ): Promise<string[]> {
   instantDate(now)
   const missing: string[] = []
+  let periods: ManagedPeriod[] | undefined
   for (const provider of providers) {
-    const ads = await readIntegration(db, organizationId, provider)
-    if (ads?.account_id && ads.target_id) {
-      missing.push(...await unrecordedDaysForIntegration(db, env, organizationId, {
-        provider,
-        account_id: ads.account_id,
-        target_id: ads.target_id,
-        created_at: ads.created_at,
-      }, now, reportingDelayDays))
-    }
+    const ads = await readAdsConnection(db, organizationId, provider)
+    if (!ads) continue
+    periods ??= await readManagedPeriods(db, organizationId)
+    if (!periods.length) break
+    const plan = await managedSpendPlan(db, env, organizationId, ads, periods, now, reportingDelayDays)
+    if (plan) missing.push(...plan.days)
   }
   return missing
 }
@@ -78,7 +130,7 @@ export async function requireRecordedManagedSpend(
   product?: 'google-ads' | 'meta-ads',
 ): Promise<void> {
   const providerLabel = product === 'meta-ads' ? 'Meta Ads' : 'Google Ads'
-  const targetProvider: 'google_ads' | 'meta_ads' = product === 'meta-ads' ? 'meta_ads' : 'google_ads'
+  const targetProvider: AdsProvider = product === 'meta-ads' ? 'meta_ads' : 'google_ads'
   if ((await listServices(db, organizationId)).managed_ads) throw new HTTPError({ statusCode: 409, message: `Turn off managed ads in Plan before changing ${providerLabel}.` })
   if ((await unrecordedAdSpendDays(db, env, organizationId, new Date(), 1, [targetProvider])).length) {
     throw new HTTPError({ statusCode: 409, message: `Keep ${providerLabel} connected until your prior managed spend has been counted. We count each day after two days; contact support if it remains pending.` })
@@ -93,7 +145,7 @@ async function persistAdSpendReceipt(
   occurredAt: string,
   date: string,
   providerLabel: string,
-): Promise<{ amount: number }> {
+): Promise<void> {
   const existing = await queryFirst<{ organization_id: string; amount: number; provider_occurred_at: string }>(
     db,
     "SELECT organization_id,quantity AS amount,provider_occurred_at FROM usage_events WHERE idempotency_key=? AND resource='ad_spend' AND provider_occurred_at IS NOT NULL",
@@ -114,49 +166,57 @@ async function persistAdSpendReceipt(
   if (!recorded || recorded.organization_id !== organizationId || recorded.amount !== amount || recorded.provider_occurred_at !== occurredAt) {
     throw new Error(`${providerLabel} spend receipt changed during capture; reconcile before billing`)
   }
-  return { amount }
 }
 
-/**
- * The managed ads service's usage fee: a share of what the business spent on Google
- * Ads, read from Google for one finished day and queued as an `ad_spend` usage
- * event, which the outbox reports to the Stripe ad-spend meter and the
- * Business subscription bills at its metered rate. Google reports an account in
- * its own currency; the fee is USD, so only USD accounts are billed and any
- * other currency fails here rather than being converted by guesswork.
- */
-export async function recordAdSpend(db: DbClient, env: CloudflareEnv, organizationId: string, date: string): Promise<{ amount: number }> {
-  assertCalendarDate(date)
-  const ads = await readIntegration(db, organizationId, 'google_ads')
-  if (!ads?.account_id || !ads.target_id) throw new HTTPError({ statusCode: 409, statusMessage: 'Google Ads is not connected' })
-  const { accessToken } = await linkedAccountAccessToken(env, ads.account_id)
-  const customer = await getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, ads.target_id)
-  const occurredAt = new Date(Date.parse(localDateBounds(date, customer.timeZone).end) - 1).toISOString()
-  const summary = await getGoogleAdsPerformanceSummary(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, ads.target_id, date, date)
-  if (!Number.isSafeInteger(summary.costMicros) || summary.costMicros < 0) throw new Error('Google Ads spend must be a nonnegative integer number of micros')
-  const currency = summary.currencyCode || customer.currencyCode
-  if (currency !== 'USD') throw new Error(`Google Ads account ${ads.target_id} spends in ${currency}; the ad-spend fee is billed in USD only`)
-  // Google counts in millionths of a dollar; the fee is priced in cents.
-  const amount = Math.round(summary.costMicros / 10_000)
-  return persistAdSpendReceipt(db, organizationId, `google_ads:${ads.target_id}:${date}`, amount, occurredAt, date, 'Google Ads')
+/** Capture the closed day from its provider into the existing payments meter outbox. */
+async function recordReportingDay(
+  db: DbClient,
+  env: CloudflareEnv,
+  organizationId: string,
+  account: ReportingAccount,
+  date: string,
+): Promise<void> {
+  const { provider, targetId, accessToken, timeZone } = account
+  const occurredAt = new Date(Date.parse(localDateBounds(date, timeZone).end) - 1).toISOString()
+  let amount: number
+  if (provider === 'meta_ads') {
+    const summary = await getMetaAdsPerformanceSummary(accessToken, targetId, date, date)
+    if (!account.currency) throw new Error(`Meta Ads account ${targetId} has no currency configured`)
+    if (account.currency !== 'USD') throw new Error(`Meta Ads account ${targetId} spends in ${account.currency}; the ad-spend fee is billed in USD only`)
+    amount = summary.costCents
+  } else {
+    const summary = await getGoogleAdsPerformanceSummary(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, targetId, date, date)
+    if (!Number.isSafeInteger(summary.costMicros) || summary.costMicros < 0) throw new Error('Google Ads spend must be a nonnegative integer number of micros')
+    const currency = summary.currencyCode || account.currency
+    if (currency !== 'USD') throw new Error(`Google Ads account ${targetId} spends in ${currency}; the ad-spend fee is billed in USD only`)
+    // Google counts in millionths of a dollar; the fee is priced in cents.
+    amount = Math.round(summary.costMicros / 10_000)
+  }
+  await persistAdSpendReceipt(db, organizationId, `${provider}:${targetId}:${date}`, amount, occurredAt, date, provider === 'meta_ads' ? 'Meta Ads' : 'Google Ads')
 }
 
-/**
- * The managed ads service's usage fee for Meta Ads: reads from Meta for one
- * finished day and queues an `ad_spend` usage event with kind='ad_spend'.
- */
-export async function recordMetaAdSpend(db: DbClient, env: CloudflareEnv, organizationId: string, date: string): Promise<{ amount: number }> {
-  assertCalendarDate(date)
-  const ads = await readIntegration(db, organizationId, 'meta_ads')
-  if (!ads?.account_id || !ads.target_id) throw new HTTPError({ statusCode: 409, statusMessage: 'Meta Ads is not connected' })
-  const { accessToken } = await linkedAccountAccessToken(env, ads.account_id)
-  const account = await getMetaAdAccount(accessToken, ads.target_id)
-  const timezone = account.timezone_name
-  if (!timezone) throw new Error(`Meta Ads account ${ads.target_id} has no reporting timezone`)
-  const occurredAt = new Date(Date.parse(localDateBounds(date, timezone).end) - 1).toISOString()
-  const summary = await getMetaAdsPerformanceSummary(accessToken, ads.target_id, date, date)
-  const currency = account.currency
-  if (!currency) throw new Error(`Meta Ads account ${ads.target_id} has no currency configured`)
-  if (currency !== 'USD') throw new Error(`Meta Ads account ${ads.target_id} spends in ${currency}; the ad-spend fee is billed in USD only`)
-  return persistAdSpendReceipt(db, organizationId, `meta_ads:${ads.target_id}:${date}`, summary.costCents, occurredAt, date, 'Meta Ads')
+/** Capture all eligible days for this business, then wake at its next reporting deadline. */
+export async function runScheduledManagedAdSpend(env: CloudflareEnv, organizationId: string, nowMs: number): Promise<{ next: number | null }> {
+  const now = instantDate(new Date(nowMs))
+  const periods = await readManagedPeriods(env.DB, organizationId)
+  let next: number | null = null
+  if (periods.length) {
+    for (const provider of ADS_PROVIDERS) {
+      const ads = await readAdsConnection(env.DB, organizationId, provider)
+      if (!ads) continue
+      const plan = await managedSpendPlan(env.DB, env, organizationId, ads, periods, now, REPORTING_DELAY_DAYS)
+      if (!plan) continue
+      for (const day of plan.days) await recordReportingDay(env.DB, env, organizationId, plan.account, day)
+      if (plan.next !== null && (next === null || plan.next < next)) next = plan.next
+    }
+  }
+
+  const pending = await queryFirst<{ pending: number }>(env.DB, `SELECT 1 AS pending FROM usage_events
+    WHERE organization_id=? AND resource='ad_spend' AND provider_occurred_at IS NOT NULL AND delivery_at IS NULL LIMIT 1`, [organizationId])
+  if (pending) await deliverPaymentsUsage(env.DB, env, organizationId)
+  return { next }
+}
+
+export function publishManagedAdSpendWake(env: EventsEnv, organizationId: string): Promise<void> {
+  return publishEvent(env, { type: 'business.wake', organization_id: organizationId, kind: 'ad_spend', due_at: Date.now() })
 }

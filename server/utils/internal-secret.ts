@@ -35,6 +35,7 @@ export type InternalRequestValidation =
 /** A secret-gated internal caller: the environment secret it holds and the one header it sends it in. */
 export const SEARCH_INTERNAL_CALLER = { secret: 'PLATFORM_SEARCH_REINDEX_SECRET', header: 'x-krabiclaw-search-secret' } as const
 export const CHANNEX_WEBHOOK_CALLER = { secret: 'CHANNEX_WEBHOOK_SECRET', header: 'x-channex-webhook-secret' } as const
+export const CLOUDFLARE_HOSTNAMES_CALLER = { secret: 'CF_CUSTOM_HOSTNAMES_WEBHOOK_SECRET', header: 'cf-webhook-auth' } as const
 
 // Shared auth flow for every secret-gated internal route: a misconfigured secret
 // is a 500, a mismatch a 401. The secret travels only in the caller's own
@@ -42,7 +43,7 @@ export const CHANNEX_WEBHOOK_CALLER = { secret: 'CHANNEX_WEBHOOK_SECRET', header
 export async function validateInternalRequest(
   event: H3Event,
   env: CloudflareEnv,
-  caller: typeof SEARCH_INTERNAL_CALLER | typeof CHANNEX_WEBHOOK_CALLER,
+  caller: typeof SEARCH_INTERNAL_CALLER | typeof CHANNEX_WEBHOOK_CALLER | typeof CLOUDFLARE_HOSTNAMES_CALLER,
 ): Promise<InternalRequestValidation> {
   const configured = env[caller.secret]
   const expectedSecret = typeof configured === 'string' ? configured.trim() : ''

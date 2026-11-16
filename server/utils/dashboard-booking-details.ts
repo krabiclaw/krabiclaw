@@ -1,5 +1,4 @@
-import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
-import { memberBusyIntervals } from '~/server/domain/member-scheduling'
+import { MEMBER_NAME_SQL, RESERVATION_HOST_SQL, type PublicProvider } from '~/shared/member-scheduling'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { getGuestRequest, getThreadOperationalRecord, requestActions } from '~/server/domain/requests'
 import { CURRENT_GUEST_SQL, GUEST_NOTE_EVENT, type MessageRow } from '~/server/domain/conversations'
@@ -14,14 +13,19 @@ import { freeCancellationUntil, outsideNotice } from '~/shared/availability-sett
 import type { ProductKind } from '~/shared/product-details'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { loadOwnerPictures } from '~/server/notifications/hero'
+import { readMediaPlacements } from '~/server/utils/media-asset-manager'
+import { readProductPhotos } from '~/server/utils/media-placement'
+import { mediaStillUrl, resolveOwnerPicture } from '~/shared/media-placement-contract'
 import { addLocalDays, isValidCalendarDate, localDateTimeToInstant, localPartsAt } from '~/utils/timezone'
 import { listBookableSessions } from '~/server/utils/availability'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
+import { calculateMapUrl, coordinatesFailure } from '~/utils/location-map'
 import { pendingBookingChangeView } from '~/server/domain/guest-threads/booking-changes'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { readPaymentDetails } from '~/server/domain/payments'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { canRetryGuestVisitRefund } from '~/server/domain/payments/visit-refund'
+import { historicalNoShowAtSql } from '~/server/utils/review-requests'
 import {paymentStateLabel,paymentDisplay,paymentRefundsDisplay,paymentOrderDisplay,type PaymentDisplay,type PaymentRefundDisplay,type PaymentOrderDisplay} from '~/shared/payment-display'
 
 export type DashboardBookingType = 'booking'
@@ -37,6 +41,8 @@ interface BookingChangeTerms {
 
 interface BookingRow {
   assigned_member_id: string | null
+  assigned_member_name: string | null
+  host_json: string | null
   booking_id: string
   version: number
   organization_id: string
@@ -46,6 +52,9 @@ interface BookingRow {
   location_slug: string | null
   location_title: string | null
   location_address: string | null
+  location_latitude: number | null
+  location_longitude: number | null
+  location_maps_url: string | null
   guest_name: string
   guest_email: string
   guest_phone: string | null
@@ -69,9 +78,9 @@ interface BookingRow {
   product_kind: ProductKind
   /** The offering's advance notice, which also closes the guest's own cancellation; null is no notice. */
   advance_notice_minutes: number | null
-  no_show_at: string | null
   review_id: string | null
   private_notes: string | null
+  no_show_at: string | null
 }
 
 
@@ -79,7 +88,7 @@ export interface DashboardBookingDetails {
   payment_id: string | null
   assigned_member_id: string | null
   assigned_member_name: string | null
-  provider_conflict: boolean
+  host: PublicProvider | null
   /** A future provider occurrence the caller may reassign through Better Auth. */
   updated_at: string
   booking_id: string | null
@@ -96,8 +105,10 @@ export interface DashboardBookingDetails {
   location_slug: string | null
   location_title: string
   location_address: string | null
+  location_pin: { latitude: number; longitude: number } | null
+  location_maps_url: string | null
   name: string
-  resource_image_url: string | null
+  resource_photo_urls: string[]
   /** Null for a purchase made without an account. */
   guest_name: string | null
   guest_email: string | null
@@ -132,6 +143,7 @@ export interface DashboardBookingDetails {
   policy: FormattedBookingPolicySummary | null
   /** The team's private note on the booking (bookings.private_notes), never shown to the guest; null when there is none or the reader is the guest. */
   private_notes: string | null
+  no_show_at: string | null
   /** The guest's answers to the business's own questions, in the wording they answered. A request made before questions has none. */
   answers: FormAnswerSnapshot[]
   /** A change the business proposed that the guest has not answered; Airbnb's "Change requested". */
@@ -146,9 +158,6 @@ export interface DashboardBookingDetails {
   /** The business's phone for this booking, as the guest reaches it. */
   contact_phone: string | null
   /** When staff recorded the guest did not come. */
-  no_show_at: string | null
-  /** The team may still record a no-show: confirmed, begun, and not reviewed. */
-  can_mark_no_show: boolean
   /** Where the visit's review invitation stands, for the team; null before one is sent. */
   review_invitation: { state: 'sent' | 'submitted' | 'revoked' | 'expired'; at: string } | null
 }
@@ -189,20 +198,27 @@ async function loadBookingRow(
   // refers to, not on the thread. The thread carries the conversation and the
   // guest.
   return queryFirst<BookingRow>(db, `SELECT record.id AS booking_id, record.version, r.organization_id, s.name AS organization_name, s.vertical,
-    record.assigned_member_id, record.policy_json, record.product_kind, record.advance_notice_minutes, record.location_id, l.slug AS location_slug, l.title AS location_title, l.address AS location_address,
+    record.assigned_member_id, record.policy_json, record.product_kind, record.advance_notice_minutes, record.location_id,
+    l.slug AS location_slug, l.title AS location_title, l.address AS location_address,
+    l.latitude AS location_latitude, l.longitude AS location_longitude, l.maps_url AS location_maps_url,
+    ${scope.buyerUserId ? 'NULL' : MEMBER_NAME_SQL} AS assigned_member_name,
+    ${RESERVATION_HOST_SQL} AS host_json,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status,
     (SELECT m.body FROM messages m WHERE m.conversation_id = r.id AND m.event_name = '${GUEST_NOTE_EVENT}' ORDER BY m.sequence LIMIT 1) AS notes,
     record.product_id, record.name, record.product_session_id,
-    r.id AS conversation_id, record.answers AS answers_json, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, record.created_at, record.updated_at, record.no_show_at, (SELECT rv.id FROM reviews rv WHERE rv.organization_id = record.organization_id AND rv.booking_id = record.id ORDER BY rv.created_at LIMIT 1) AS review_id, record.private_notes
+    r.id AS conversation_id, record.answers AS answers_json, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, record.created_at, record.updated_at, ${historicalNoShowAtSql('r')} AS no_show_at, (SELECT rv.id FROM reviews rv WHERE rv.organization_id = record.organization_id AND rv.booking_id = record.id ORDER BY rv.created_at LIMIT 1) AS review_id, record.private_notes
     FROM conversations r
     JOIN organization s ON s.id = r.organization_id
     JOIN (
-      SELECT b.id, b.version, b.organization_id, b.status, b.party_size, b.starts_at, b.ends_at, b.timezone, b.location_id, b.product_id, p.name, b.product_session_id, cfg.assigned_member_id, b.created_at, b.updated_at, b.policy_json, p.kind AS product_kind, cfg.advance_notice_minutes, b.no_show_at, b.answers, b.private_notes
+      SELECT b.id, b.version, b.organization_id, b.status, b.party_size, b.starts_at, b.ends_at, b.timezone, b.location_id, b.product_id, p.name, b.product_session_id, cfg.assigned_member_id, b.created_at, b.updated_at, b.policy_json, p.kind AS product_kind, cfg.advance_notice_minutes, b.answers, b.private_notes
         FROM bookings b JOIN products p ON p.id = b.product_id
         LEFT JOIN product_booking_configs cfg ON cfg.product_id = b.product_id AND cfg.organization_id = b.organization_id
     ) record ON record.id = r.booking_id AND record.organization_id = r.organization_id
-    LEFT JOIN business_locations l ON l.id = record.location_id
+    LEFT JOIN business_locations l ON l.id = record.location_id AND l.organization_id = record.organization_id
+    LEFT JOIN member_scheduling ms ON ms.organization_id = record.organization_id AND ms.member_id = record.assigned_member_id
+    LEFT JOIN member host_member ON host_member.organizationId = record.organization_id AND host_member.id = record.assigned_member_id
+    LEFT JOIN user u ON u.id = host_member.userId
     WHERE ${lookup === 'booking' ? 'record.id' : 'r.id'} = ? AND record.product_session_id IS NOT NULL AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${CURRENT_GUEST_SQL('r')}` : 'r.organization_id = ?'}`, [bookingId, type, scope.buyerUserId ?? scope.organizationId])
 }
 
@@ -260,13 +276,18 @@ export async function loadDashboardBookingDetails(
  * request's current buyer, the team's private notes and scheduling stay with
  * the team, and the payments are the ones this account made.
  */
-// A booking shows its offering's picture and a table its location's. Organization artwork never stands in.
-async function loadResourceImage(db: DbClient, row: BookingRow) {
-  const [ownerType, ownerId] = row.product_kind === 'table'
-    ? ['business_location' as const, row.location_id]
-    : ['product' as const, row.product_id]
-  if (!ownerId) return null
-  return (await loadOwnerPictures(db, row.organization_id, ownerType, [ownerId], { organizationFallback: false })).get(ownerId)?.imageUrl ?? null
+// A reservation shows its offering's photos, or the location's photos for a table.
+async function loadResourcePhotos(db: DbClient, row: BookingRow): Promise<string[]> {
+  const { organization_id: organizationId, product_id: productId, location_id: locationId } = row
+  if (row.product_kind !== 'table') {
+    const photos = (await readProductPhotos(db, { organizationId, productIds: [productId] })).get(productId) ?? []
+    return photos.map(mediaStillUrl).filter((url): url is string => url !== null)
+  }
+  if (!locationId) return []
+  const photos = (await readMediaPlacements(db, { organizationId, ownerType: 'business_location', ownerIds: [locationId] })).get(locationId) ?? []
+  const cover = resolveOwnerPicture('business_location', photos, [])
+  const ordered = [cover, ...photos.filter(photo => photo.slot === 'gallery')]
+  return [...new Set(ordered.map(mediaStillUrl).filter((url): url is string => url !== null))]
 }
 
 export async function loadBuyerBookingDetails(
@@ -290,6 +311,12 @@ async function composeBookingDetails(
   reader: { env: CloudflareEnv; canReadPayments: boolean; buyerUserId?: undefined } | { buyerUserId: string; env: CloudflareEnv; canReadPayments?: undefined },
 ): Promise<DashboardBookingDetails> {
   if (row.location_id !== null && !row.location_title) throw new HTTPError({ statusCode: 500, message: 'The booking location is missing its title' })
+  const { location_latitude: latitude, location_longitude: longitude, location_maps_url, location_address, location_title,
+    policy_json: _policy, answers_json, cancellation_used_at: _cancellation, advance_notice_minutes: _notice,
+    review_id: _review, private_notes, host_json, ...booking } = row
+  const address = parsePostalAddress(location_address)
+  const pinFailure = coordinatesFailure({ latitude, longitude })
+  if (pinFailure) throw new HTTPError({ statusCode: 500, message: pinFailure.error, data: { code: 'INVALID_STORED_LOCATION', field: pinFailure.field } })
 
   // A table may move to the business's tables at any of its locations; anything else stays where it is.
   const visibleLocations = await queryAll<{ id: string; title: string }>(db, row.product_kind === 'table'
@@ -307,13 +334,8 @@ async function composeBookingDetails(
       : queryFirst<{ contactPhone: string | null }>(db, 'SELECT contact_phone AS contactPhone FROM organization WHERE id = ?', [row.organization_id]),
   ])
 
-  const provider=!reader.buyerUserId&&row.assigned_member_id?await queryFirst<{name:string|null}>(db,`SELECT ${MEMBER_NAME_SQL} name FROM member m LEFT JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.id=? AND m.organizationId=?`,[row.assigned_member_id,row.organization_id]):null
   const now = new Date().toISOString()
   const complete = isBookingComplete({ status: row.status as BookingStatus, ends_at: row.ends_at }, now)
-  // A live booking's provider calendar is asked about its time when the team reads it; a past or cancelled one has nothing to conflict with.
-  const providerConflict=!reader.buyerUserId && row.assigned_member_id && !complete && row.status!=='cancelled'
-    ? (await memberBusyIntervals(db,reader.env,row.organization_id,row.assigned_member_id,{from:row.starts_at,until:row.ends_at})).some(busy=>busy.start<row.ends_at&&busy.end>row.starts_at)
-    : false
   const paymentIds=reader.buyerUserId
     ?await queryAll<{id:string}>(db,"SELECT id FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND buyer_user_id=? ORDER BY created_at,id",[row.organization_id,row.booking_id,reader.buyerUserId])
     :reader.canReadPayments?await queryAll<{id:string}>(db,"SELECT id FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? ORDER BY created_at,id",[row.organization_id,row.booking_id]):[]
@@ -323,8 +345,6 @@ async function composeBookingDetails(
   }))
   const guestCanRetryCancellation = Boolean(reader.buyerUserId && row.status === 'cancelled' && row.cancellation_used_at
     && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, bookingId: row.booking_id, requestId: row.conversation_id, buyerUserId: reader.buyerUserId }))
-  const { policy_json: _policy, location_address, answers_json, cancellation_used_at: _cancellation, advance_notice_minutes: _notice,
-    review_id: _review, private_notes, location_title, ...booking } = row
   return {
     ...booking,
     unit: 'slot',
@@ -333,12 +353,13 @@ async function composeBookingDetails(
       ...requestActions(await getThreadOperationalRecord(db, row.conversation_id), now).map(action => action === 'change' ? 'move' : action),
     ],
     payment_id: null,
-    assigned_member_name: provider?.name ?? null,
-    provider_conflict: providerConflict,
+    host: host_json === null ? null : JSON.parse(host_json) as PublicProvider,
     type,
     location_title: row.location_id === null ? 'Online' : location_title!,
-    location_address: location_address ? formatPostalAddress(parsePostalAddress(location_address)) || null : null,
-    resource_image_url: await loadResourceImage(db, row),
+    location_address: formatPostalAddress(address) || null,
+    location_pin: latitude === null || longitude === null ? null : { latitude, longitude },
+    location_maps_url: calculateMapUrl({ title: location_title ?? '', address, latitude, longitude, maps_url: location_maps_url }),
+    resource_photo_urls: await loadResourcePhotos(db, row),
     // The picture is the buyer's own account picture when they booked signed in; an emailed guest has none.
     // The screen shows a local date and time; the record holds one instant and
     // the zone it belongs to, so these are read off it rather than stored
@@ -360,7 +381,6 @@ async function composeBookingDetails(
     guest_can_retry_cancellation: guestCanRetryCancellation,
     guest_cancel_refunds: now <= freeCancellationUntil(row.starts_at, policy.advance_notice_minutes),
     contact_phone: contact?.contactPhone ?? null,
-    can_mark_no_show: !reader.buyerUserId && row.status === 'confirmed' && row.no_show_at === null && row.review_id === null && row.starts_at <= now,
     review_invitation: reader.buyerUserId ? null : await reviewInvitationState(db, row.booking_id, now),
   }
 }
@@ -401,8 +421,8 @@ export async function listDashboardBookingChangeSessions(event: H3Event, input: 
   if (!target) throw new HTTPError({ statusCode: 404, message: 'That location takes no table bookings' })
   const from = input.from ?? localDateOf(row)
   const to = input.to ?? (isValidCalendarDate(from) ? addLocalDays(from, 7) : null)
-  if (!isValidCalendarDate(from) || !isValidCalendarDate(to) || to <= from || to > addLocalDays(from, 31)) {
-    throw new HTTPError({ statusCode: 422, message: 'Request up to 31 calendar days' })
+  if (!isValidCalendarDate(from) || !isValidCalendarDate(to) || to <= from) {
+    throw new HTTPError({ statusCode: 422, message: 'Choose calendar dates with to after from' })
   }
   const locationId = elsewhere ? input.locationId as string : row.location_id
   const sessions = await listBookableSessions(context.db, { env: context.env, organizationId: row.organization_id, productId: target.product_id, locationId,
@@ -446,7 +466,7 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
   if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error('Purchase has no immutable title')
   const contact = payment.location_id ? await resolveLocationContact(db, payment.organization_id, payment.location_id) : { contactPhone: payment.contact_phone }
   return {
-    assigned_member_id: null, assigned_member_name: null, provider_conflict: false,
+    assigned_member_id: null, assigned_member_name: null, host: null,
     // A purchase asks no questions.
     answers: [],
     payment_id: paymentId,
@@ -462,8 +482,10 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     location_slug: payment.location_slug,
     location_title: payment.location_id === null ? 'Online' : payment.location_title ?? 'Online',
     location_address: null,
+    location_pin: null,
+    location_maps_url: null,
     product_kind: null,
-    resource_image_url: resourceImageUrl,
+    resource_photo_urls: resourceImageUrl ? [resourceImageUrl] : [],
     name: snapshot.title,
     guest_name: payment.buyer_name,
     guest_email: payment.buyer_email,
@@ -487,14 +509,13 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     updated_at: payment.updated_at,
     policy: null,
     private_notes: null,
+    no_show_at: null,
     pending_change: null,
     locations: [],
     payments: [{ payment: paymentDisplay(detail.payment), refunds: paymentRefundsDisplay(detail.refunds), order: paymentOrderDisplay(detail.order) }],
     guest_can_cancel: false,
     guest_can_retry_cancellation: false,
     guest_cancel_refunds: false,
-    no_show_at: null,
-    can_mark_no_show: false,
     review_invitation: null,
     contact_phone: contact?.contactPhone ?? null,
   }

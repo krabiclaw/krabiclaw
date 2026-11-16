@@ -3,7 +3,8 @@ import { getRouterParam, readBody } from 'nitro/h3'
 import { INTEGRATION_SCOPES } from '~/shared/organization-settings'
 import { jsonResponse } from '~/server/utils/api-response'
 import { linkedAccountAccessToken, requireIntegrationAccount } from '~/server/utils/auth'
-import { CalendarSelectionConflict, connectCalendar, readCalendarIntegration, syncCalendarOrganization } from '~/server/utils/google-calendar'
+import { CalendarSelectionConflict, connectCalendar, readCalendarIntegration } from '~/server/utils/google-calendar'
+import { publishEvent } from '~/server/events'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
 export default defineHandler(async event => {
@@ -17,8 +18,7 @@ export default defineHandler(async event => {
  await requireIntegrationAccount(env, body.account_id, { userId: session.user.id, currentAccountId: current?.account_id, providerId: 'google', scopes: INTEGRATION_SCOPES['google-calendar'] })
  try {
   await connectCalendar(env.DB, organization.id, body.account_id, (await linkedAccountAccessToken(env, body.account_id)).accessToken)
-  const result = await syncCalendarOrganization(env, organization.id)
-  if (result.failed) throw new Error('Your calendar is connected, but bookings could not be synced. Retry to finish syncing.')
+  await publishEvent(env, { type: 'calendar.changed', organization_id: organization.id, booking_id: null })
   return jsonResponse({ success: true })
  } catch (error) { return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, { status: error instanceof CalendarSelectionConflict ? 409 : 502 }) }
 })
