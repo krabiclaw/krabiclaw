@@ -6,6 +6,20 @@ import mcpCatalog from '../../server/utils/mcp-catalog-snapshots/tenant.json' wi
 // KrabiClaw's own pages are authored on production; the platform project runs
 // these there only.
 
+test('old-apex browser entry preserves the path and query on Blawby', async ({ request }) => {
+  const origin = new URL(testBaseUrl()).origin
+  const legacy = 'https://krabiclaw.com'
+  const query = '?redirect=%2Fdashboard%2Faccount%2Fprofile&source=bookmark'
+  for (const path of ['/login', '/signup', '/forgot-password', '/dashboard/account/profile', '/accept-invitation/verification']) {
+    const result = await request.get(`${legacy}${path}${query}`, { headers: { accept: 'text/html' }, maxRedirects: 0 })
+    expect(result.status(), path).toBe(302)
+    expect(result.headers().location, path).toBe(`${origin}${path}${query}`)
+  }
+  const head = await request.head(`${legacy}/dashboard/account/profile${query}`, { maxRedirects: 0 })
+  expect(head.status()).toBe(302)
+  expect(head.headers().location).toBe(`${origin}/dashboard/account/profile${query}`)
+})
+
 test('KrabiClaw pricing retains its billing plans after hydration', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' })
   await page.addInitScript(() => localStorage.setItem('krabiclaw-theme', 'light'))

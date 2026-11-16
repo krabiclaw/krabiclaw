@@ -33,22 +33,29 @@ registry version or CMS operation is activated by the staging release.
 - Prepare the replacement OpenAI draft at the authorized point in the
   window to obtain its new challenge. Keep the existing review untouched
   until the new origin and both challenges have passed.
+  Set the production Actions environment secret `OPENAI_APPS_CHALLENGE_BLAWBY_B64`
+  to the base64 encoding of the exact public bytes assigned by the new draft,
+  including any final newline.
 
 ## Production-only source edits
 
-Prepare one reviewed cutover diff for the normal staging to main promotion.
-Use the existing release jobs and `wrangler deploy --strict`.
+Qualify the reviewed cutover diff through staging before the normal
+staging to main promotion. The production release job uses `wrangler deploy
+--strict` with a temporary JSON secrets file. The existing CI token authorizes
+the deploy. Set production environment secret `BLAWBY_ZARAZ_RUNTIME_API_TOKEN`
+to the dedicated two-zone credential, which the job binds as the Worker’s
+`CLOUDFLARE_API_TOKEN` in the same deployment.
 
 | File or setting | Exact production change |
 | --- | --- |
 | `wrangler.toml` top-level routes | Append `[[routes]]` with `pattern = "blawby.com/*"` and `zone_name = "blawby.com"`. Preserve all old route blocks and do not add a www Worker route. |
 | `wrangler.toml` top-level vars | Set `BETTER_AUTH_URL`, `NUXT_PUBLIC_PLATFORM_DOMAIN`, and `NUXT_PUBLIC_SITE_URL` to `https://blawby.com`; `NUXT_PUBLIC_HELP_URL` to `https://blawby.com/help`; `NUXT_PUBLIC_APP_NAME` to `Blawby`; `EMAIL_FROM` to `Blawby <hello@krabiclaw.com>`. Keep `EMAIL_REPLY_DOMAIN=reply.krabiclaw.com`, free domain, media URL, SaaS zone/token/target, IDs, database and signing secrets. |
-| Zaraz | Add top-level `CF_PLATFORM_ZARAZ_ZONE_ID` with the verified Blawby zone ID. Set the production Worker secret `CLOUDFLARE_API_TOKEN` to the dedicated Zone Zaraz Write credential for exactly these two zones. Leave the separate CI deploy secret and SaaS hostname token alone. Verify Blawby Zaraz is active and auto-injects; the existing Live-status settings write reconciles and reads back both zones when the binding is present. |
+| Zaraz | `CF_PLATFORM_ZARAZ_ZONE_ID` is the verified Blawby zone. Supply `BLAWBY_ZARAZ_RUNTIME_API_TOKEN` with Zone Zaraz Write for both zones as a production Actions environment secret. CI binds it under the existing Worker token name. |
 | `.github/workflows/ci.yml` | In the production build and verify jobs only, change platform/site/auth origins to `https://blawby.com`, help to `https://blawby.com/help`, app name to Blawby, and the verify job's `PLAYWRIGHT_PREVIEW_URL` and platform convergence host to `https://blawby.com`. Preserve the facility, custom-domain and staging hosts and the free organization domain. |
 | `.github/workflows/prod-real-send-canaries.yml` | Change the platform URL loop to `https://blawby.com/` and `https://blawby.com/blog` and their expected origin to `https://blawby.com`. Set the existing production `CANARY_BASE_URL` to the new apex when verification starts. |
 | `package.json` | Change only the `--base-url` in `ai-search:sync:prod`, `ai-search:status:prod` and `test:mcp:prod` to `https://blawby.com`. Preserve the AI Search binding and index identity. |
-| OpenAI files | Change the reviewed image fixture URL in `scripts/generate-chatgpt-app-submission.mjs` to `https://blawby.com/templates/saya-preview.jpg`. Regenerate and check with `yarn chatgpt:submission:write` / `yarn chatgpt:submission:check`, and run `yarn mcp:catalog`. Move the existing `public/.well-known/openai-apps-challenge` response out of static assets into the exact-path GET route at `server/routes/.well-known/openai-apps-challenge.get.ts`. Capture the response's actual bytes, MIME and cache directive before removing the static asset. The handler switches on `event.url.hostname`: return only the saved old bytes for `krabiclaw.com`, the replacement draft's exact bytes for `blawby.com`, and 404 for other hosts; preserve MIME and cache policy. Verify each host directly before touching either review. |
-| Production content checks | Update deployed platform assertions to match the final published titles and headlines (including the retained `/docs/create-your-krabiclaw-account` slug). Keep all customer smoke URLs. |
+| OpenAI files | The fixture is `https://blawby.com/templates/saya-preview.jpg`. The host-specific challenge route preserves the old apex and staging response and decodes the new draft's bytes for Blawby. |
+| Production content checks | CI checks routes and actual served editorial data before or after the CMS write. Check the exact new headlines and guide titles after applying the content manifest. |
 
 At deploy, the old apex redirects browser visits to login, signup, forgot
 password, the dashboard and invitation entry onto the distinct auth origin.
@@ -65,14 +72,21 @@ audience; the old MCP endpoint declines the old connection without a redirect.
 
 ## Edge cutover and hold points
 
-1. Confirm the new Worker route and TLS are ready. In Blawby Pages detach only
-   the legacy apex. Replace the proxied apex and www CNAMEs with proxied A
-   records to `192.0.2.0` (Auto TTL). Under Single Redirects on Blawby, match
-   `http.host eq "www.blawby.com"`, use dynamic target
-   `concat("https://blawby.com", http.request.uri.path)`, preserve query
-   string, and verify both hostnames. Keep other DNS records and TLS intact.
+1. Confirm CI token access, both production runtime inputs, TLS and the
+   absence of a competing apex route. In Pages project
+   `blawby-marketing-frontend`, detach only the apex. Replace the proxied
+   apex and www CNAMEs pointing to `blawby-cloudflare-marketing.pages.dev`
+   with proxied A records to `192.0.2.0` (Auto TTL). At the top of Blawby
+   Single Redirects, match `http.host eq "www.blawby.com"` with dynamic target
+   `concat("https://blawby.com", http.request.uri.path)` and preserve query.
+   Read back the edge records and rule before merging the approved promotion.
+   CI creates the exact apex Worker route. If the strict deploy fails, inspect
+   the version serving traffic immediately and roll back if it advanced.
 2. Deploy and wait for the production build asset ID to converge. After the
-   zone and runtime token are active, confirm that the platform has its
+   zone and runtime token are active, enable Blawby Zaraz and confirm
+   auto-injection. Require `realtime` from
+   `GET /zones/{zone_id}/settings/zaraz/workflow` before writing the name.
+   Confirm that the platform has its
    linked GA4 property and existing GA4 event action. Call `update_organization_settings` on
    `platform` with `name: "Blawby"` and the existing Live status
    (`status: "active"` in the MCP schema). This preserves the subdomain and
@@ -128,37 +142,12 @@ both challenges pass, cancel the old pending review, then submit the new
 draft. Publish only an approved Blawby listing. The staging work does not
 change either review.
 
-For the MCP Registry, derive the descriptor from the saved response with:
-
-```sh
-jq '.server | .title = "Blawby" | .version = "1.0.1" |
-    .websiteUrl = "https://blawby.com" |
-    .remotes[0].url = "https://blawby.com/api/mcp"' mcp-registry-1.0.0.json > server.json
-```
-
-Check in the reviewed descriptor and a manual `workflow_dispatch` job at the
-cutover commit. Scope permissions to the publish job (`contents: read`,
-`id-token: write`), use the `production` environment, and restrict the job to
-the reviewed commit on main. Use the repository's pinned checkout action with
-credentials persistence disabled. On the Ubuntu x64 runner use the official
-[v1.8.1 release files](https://github.com/modelcontextprotocol/registry/releases/tag/v1.8.1):
-
-```sh
-release=https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1
-archive=mcp-publisher_linux_amd64.tar.gz
-curl -fsSLO "$release/$archive"
-curl -fsSLO "$release/registry_1.8.1_checksums.txt"
-grep " $archive\$" registry_1.8.1_checksums.txt | sha256sum -c -
-printf '%s  %s\n' a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc "$archive" | sha256sum -c -
-tar -xzf "$archive" mcp-publisher
-./mcp-publisher login github-oidc
-./mcp-publisher publish server.json
-```
-
-Read the latest version through the public registry API before promoting any
-installs. Record the reviewed SHA, deployment ID, test receipts, both review
-statuses and registry readback in the issue. Keep the issue open until the
-owner schedules the remaining work.
+The reviewed `server.json` updates the existing Registry identity to Blawby
+version 1.0.1. Dispatch **Publish MCP Registry** on `main` at the approved
+production SHA after the website and both clients pass. The workflow probes
+the descriptor’s issuer and resource, checks the official v1.8.1 publisher
+checksum, and publishes with GitHub OIDC. Read back the public Registry entry
+before enabling installs. Record the release and test receipts in the issue.
 
 ## Rollback
 
@@ -167,13 +156,16 @@ saved production Worker version through Cloudflare deployment history. If the
 new apex must serve legacy Pages again, remove its Worker route and new edge
 redirect, restore both proxied CNAMEs and reattach the old Pages apex. Restore
 the saved Zaraz configurations and affected provider/canary display URLs;
-restore CMS values through the same editors, using current revisions and the
-saved asset IDs. The old delivery endpoints and D1/R2 remain in place.
+restore CMS values through the same editors, using current revisions and prior editable logo, favicon, social share and
+cover asset IDs. Regenerate generated OG cards through the existing canonical
+editor bulk social cards action. The old delivery endpoints and D1/R2 remain in place.
 
 If any directory pointer already moved, restore the Claude listing after the
 old endpoint passes. OpenAI's canceled review slot cannot be restored; leave
 the replacement unpublished and use the archived old package only if the
 owner chooses to re-enter review. A published registry change is reversed by
-publishing 1.0.2 on the same identity with the old endpoint metadata once it
-passes. Reverse a submitted Search Console move only once old routing has
+restoring the old website via native rollback and the normal fix-forward
+release. Retain the Registry workflow with a reviewed 1.0.2 descriptor naming
+the old canonical issuer and resource. Dispatch from the reviewed restored
+main SHA after both discovery URLs pass. Reverse a submitted Search Console move only once old routing has
 been restored.
