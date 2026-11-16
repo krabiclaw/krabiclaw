@@ -8,6 +8,11 @@ test('signed-out dashboard deep links preserve their destination through login',
 
   expect(response.status()).toBe(302)
   expect(response.headers().location).toBe(`/login?redirect=${encodeURIComponent(target)}`)
+  const alias = await request.get(`/signin?redirect=${encodeURIComponent(target)}`, {
+    headers: { accept: 'text/html' }, maxRedirects: 0,
+  })
+  expect(alias.status()).toBe(302)
+  expect(alias.headers().location).toBe(`/login?redirect=${encodeURIComponent(target)}`)
 
   const appTarget = '/dashboard/app/products/menu?tab=specials'
   const appResponse = await request.get(appTarget, { maxRedirects: 0 })
