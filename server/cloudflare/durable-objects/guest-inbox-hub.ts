@@ -8,6 +8,10 @@ import { loadConversationPage } from '~/server/domain/conversation-history'
 import type { ConversationEntriesPage } from '~/shared/messages-contract'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { guestInboxTarget, SCHEDULED_AUTHOR_HEADER } from '~/server/cloudflare/guest-inbox-events'
+import { sendDueOutbox } from '~/server/domain/scheduled-guest-messages'
+
+/** The business whose outbox this hub wakes for. */
+const OUTBOX_ORGANIZATION = 'outbox:organization'
 
 type GuestInboxHubEnv = CloudflareEnv
 
@@ -159,6 +163,26 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     return new Response(null, { status: 101, webSocket: client })
   }
 
+  /**
+   * The business's outbox: messages stored with a send time (a guest's
+   * automatic and send-later messages, a job's reminders). A write that may
+   * have added or changed one wakes it at once; each wake sends what is due and
+   * sets the next wake to the exact time of the next one. Nothing polls.
+   */
+  private async wakeOutbox(organizationId: string): Promise<void> {
+    await this.ctx.storage.put(OUTBOX_ORGANIZATION, organizationId)
+    await this.ctx.storage.setAlarm(Date.now())
+  }
+
+  override async alarm(): Promise<void> {
+    const organizationId = await this.ctx.storage.get<string>(OUTBOX_ORGANIZATION)
+    if (!organizationId) throw new Error('The outbox alarm fired for a hub that holds no organization')
+    const { next } = await sendDueOutbox(this.env.DB, this.env, organizationId)
+    // A write that arrived while this ran has already set an earlier wake.
+    const scheduled = await this.ctx.storage.getAlarm()
+    if (next !== null && (scheduled === null || Date.parse(next) < scheduled)) await this.ctx.storage.setAlarm(Date.parse(next))
+  }
+
   override webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {
     if (message === 'ping' || (typeof message === 'string' && message === 'ping')) {
       socket.send('pong')
@@ -197,6 +221,9 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     if (scheduleOnly ? scheduledAuthor === null : scheduledAuthor !== null && !scheduledSend) {
       return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid scheduled message audience', SCHEDULED_AUTHOR_HEADER)
     }
+    // A stay, booking or message write is announced this way; what it stored to send later is picked up at once.
+    if (event.type === 'stay.changed' || event.type === 'business.changed' || event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') await this.wakeOutbox(organizationId)
+
     const accounts = !scheduleOnly && !('team' in event && event.team) ? await guestAudience(this.env, event) : []
     const namespace = this.env.GUEST_INBOX_HUBS
     if (accounts.length && !namespace) return failure(503, 'REALTIME_CONFIGURATION_REQUIRED', 'Guest inbox binding is not configured', 'realtime')

@@ -24,6 +24,9 @@ export async function consumeEvent(env: CloudflareEnv, event: DomainEvent): Prom
   if (event.type === 'jobs.changed') {
     const { postJobs } = await import('~/server/domain/cleaner-jobs')
     await postJobs(env, env.DB, event.organization_id)
+    // The reminders it stored are sent at their exact times: the business's hub is told to look.
+    const { publishBusinessInvalidation } = await import('~/server/cloudflare/guest-inbox-events')
+    await publishBusinessInvalidation(env, event.organization_id)
     return
   }
   throw new Error(`Unknown event ${JSON.stringify(event)}`)
