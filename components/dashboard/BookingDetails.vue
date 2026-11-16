@@ -57,7 +57,7 @@
           <p v-if="heroSubtitle" class="mt-1 break-words text-base text-muted">{{ heroSubtitle }}</p>
         </div>
         <div class="flex flex-col" :class="!personalScope && !purchase ? 'items-start' : 'items-center text-center'">
-          <UBadge v-if="stay && (personalScope || manage)" class="mt-3" :color="stay.status === 'confirmed' ? 'success' : 'neutral'" variant="soft" :label="statusLabel" />
+          <UBadge v-if="stay && (personalScope || (manage && requestStatus))" class="mt-3" :color="stay.status === 'confirmed' ? 'success' : 'neutral'" variant="soft" :label="statusLabel" />
           <div v-if="manage && hostActions.includes('confirm')" class="mt-5 flex flex-wrap justify-center gap-3">
             <UButton color="neutral" size="lg" :label="t('stay.approve_request')" :loading="busy === 'confirm'" :disabled="busy !== null" @click="decide('confirm')" />
             <UButton color="neutral" variant="outline" size="lg" :label="t('stay.decline_request')" :loading="busy === 'reject'" :disabled="busy !== null" @click="decide('reject')" />
@@ -96,7 +96,7 @@
           </UAlert>
 
           <UCard v-if="!purchase" variant="record">
-            <div class="grid grid-cols-2 divide-x divide-default">
+            <div class="grid grid-cols-2 divide-x divide-default" :class="personalScope ? '' : 'rounded-2xl bg-accented/40 p-5'">
               <div class="min-w-0 pe-6">
                 <h3 class="text-base font-semibold text-highlighted">{{ stay ? 'Check-in' : 'Date' }}</h3>
                 <p class="mt-1 text-sm text-muted">{{ formattedDate }}</p>
@@ -125,6 +125,10 @@
             </div>
           </UCard>
           <h2 v-if="!personalScope && stay" class="pb-1 pt-8 text-xl font-semibold text-highlighted">Reservation details</h2>
+          <UCard v-if="!personalScope && detail" variant="record">
+            <h3 class="text-base font-semibold text-highlighted">Confirmation code</h3>
+            <p class="mt-1 text-base text-muted" data-testid="stay-confirmation-code">{{ detail.channel_booking_id ?? detail.booking_id.slice(0, 8).toUpperCase() }}</p>
+          </UCard>
 
           <UCard v-if="personalScope && home?.location && (guestAddress || home.location.maps_url)" variant="record">
             <h2 class="text-base font-semibold text-highlighted">{{ t('stay.where_youll_be') }}</h2>
@@ -234,7 +238,18 @@
           </section>
           </UCard>
 
-          <UCard variant="record">
+          <!-- What the host can do to the reservation, one row each, as Airbnb lists them. -->
+          <UCard v-if="!personalScope && manage && !channelManaged && (hostActions.includes('edit') || hostActions.includes('cancel'))" variant="record">
+            <div class="divide-y divide-default">
+              <NuxtLink v-if="hostActions.includes('edit')" :to="{ path: `${editorPath}/dates`, query: route.query }" class="flex w-full items-center gap-4 py-4" data-testid="stay-change">
+                <UIcon name="i-lucide-pencil" class="size-5 shrink-0 text-highlighted" /><span class="min-w-0 flex-1 text-base text-highlighted">Change reservation</span><UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+              </NuxtLink>
+              <button v-if="hostActions.includes('cancel')" type="button" class="flex w-full items-center gap-4 py-4 text-left disabled:opacity-50" :disabled="busy !== null" data-testid="stay-cancel" @click="cancelStay">
+                <UIcon name="i-lucide-ban" class="size-5 shrink-0 text-highlighted" /><span class="min-w-0 flex-1 text-base text-highlighted">Cancel reservation</span><UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+              </button>
+            </div>
+          </UCard>
+          <UCard v-if="personalScope" variant="record">
           <dl class="space-y-4">
             <div class="flex items-start justify-between gap-4">
               <dt class="text-base font-semibold text-highlighted">Total</dt>
@@ -247,57 +262,39 @@
           </dl>
           </UCard>
 
-          <!-- The Stripe payment the guest made on the site: its record and refunds are the payment's own screens. -->
-          <UCard v-if="!personalScope && (detail.online_payment || (!channelManaged && !requestStatus))" variant="record">
-          <h2 class="text-base font-semibold text-highlighted">Payments</h2>
-          <template v-if="detail.online_payment">
-            <h3 class="mt-6 text-base font-semibold text-highlighted">Paid on your site</h3>
-            <p class="mt-1 text-base text-muted">{{ money(detail.online_payment.captured_minor) }}{{ detail.online_payment.refunded_minor ? ` · ${money(detail.online_payment.refunded_minor)} refunded` : '' }}</p>
-            <div class="mt-4 divide-y divide-default border-y border-default">
+          <!-- Payment info, in Airbnb's words: what was paid, then where an offline payment is added. -->
+          <UCard v-if="!personalScope" variant="record">
+            <h2 class="text-xl font-semibold text-highlighted">Payment info</h2>
+            <h3 class="mt-6 text-base font-semibold text-highlighted">Amount paid</h3>
+            <p class="mt-1 text-base text-muted" data-testid="stay-amount-paid">{{ money(detail.online_payment ? detail.online_payment.captured_minor - detail.online_payment.refunded_minor : detail.paid_minor) }}</p>
+            <div v-if="detail.online_payment" class="mt-4 divide-y divide-default border-y border-default">
               <NuxtLink :to="`${paymentPath}`" class="flex items-center gap-4 py-4">
-                <span class="min-w-0 flex-1 text-base font-medium text-highlighted">View payment</span>
+                <span class="min-w-0 flex-1 text-base text-highlighted">Get receipt</span>
                 <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
               </NuxtLink>
               <NuxtLink v-if="manage && detail.online_payment.captured_minor > detail.online_payment.refunded_minor" :to="{ path: `${paymentPath}/refund`, query: { payment: detail.online_payment.payment_id } }" class="flex items-center gap-4 py-4">
-                <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Send a refund</span>
+                <span class="min-w-0 flex-1 text-base text-highlighted">Send a refund</span>
                 <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
               </NuxtLink>
             </div>
-          </template>
-
-          <template v-if="!channelManaged && !requestStatus">
-            <p class="text-sm text-muted" :class="detail.online_payment ? 'mt-6' : 'mt-1'">Money you received or refunded outside KrabiClaw. Recording it moves no money.</p>
-            <ul v-if="detail.payments.length" class="mt-4 divide-y divide-default border-y border-default">
-              <li v-for="payment in detail.payments" :key="payment.id" class="flex items-center gap-4 py-3">
-                <span class="min-w-0 flex-1">
-                  <span class="block text-base text-highlighted">{{ money(payment.amount_minor) }} · {{ methodLabel(payment.method) }}</span>
-                  <span class="block text-sm text-muted">{{ formatCalendarDate(payment.paid_on, 'en') }}{{ payment.reference ? ` · ${payment.reference}` : '' }}</span>
-                </span>
-                <UButton v-if="manage" icon="i-lucide-trash-2" color="neutral" variant="ghost" :aria-label="`Delete payment of ${money(payment.amount_minor)}`" :loading="busy === payment.id" @click="deletePayment(payment.id)" />
-              </li>
-            </ul>
-            <p v-else class="mt-4 text-base text-muted">No payments recorded.</p>
-
-            <!-- Recording a payment is its own step, as every change to a reservation is. -->
-            <div v-if="manage" class="mt-4 divide-y divide-default border-y border-default">
-              <NuxtLink :to="{ path: `${editorPath}/payment`, query: route.query }" class="flex items-center gap-4 py-4" data-testid="stay-record-payment">
-                <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Record a payment</span>
-                <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
-              </NuxtLink>
-            </div>
-            <p v-if="!personalScope && detail.no_show_at" class="mt-6 text-sm text-muted" data-testid="stay-no-show">No-show recorded {{ formatCalendarDate(detail.no_show_at.slice(0, 10), 'en') }}. No review invitation is sent.</p>
-          </template>
-          </UCard>
-          <!-- What the host can do to the stay, one row each, as Airbnb lists Change and Cancel reservation. -->
-          <UCard v-if="!personalScope && (canMarkNoShow || (manage && !channelManaged && hostActions.includes('cancel')))" variant="record">
-            <div class="divide-y divide-default">
-              <button v-if="canMarkNoShow" type="button" class="flex w-full items-center gap-4 py-4 text-left disabled:opacity-50" :disabled="busy !== null" data-testid="stay-mark-no-show" @click="markNoShow">
-                <UIcon name="i-lucide-user-x" class="size-5 shrink-0 text-highlighted" /><span class="min-w-0 flex-1 text-base text-highlighted">Mark as a no-show</span><UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
-              </button>
-              <button v-if="manage && !channelManaged && hostActions.includes('cancel')" type="button" class="flex w-full items-center gap-4 py-4 text-left disabled:opacity-50" :disabled="busy !== null" data-testid="stay-cancel" @click="cancelStay">
-                <UIcon name="i-lucide-ban" class="size-5 shrink-0 text-highlighted" /><span class="min-w-0 flex-1 text-base text-highlighted">Cancel reservation</span><UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
-              </button>
-            </div>
+            <template v-if="!channelManaged && !requestStatus">
+              <ul v-if="detail.payments.length" class="mt-4 divide-y divide-default border-y border-default">
+                <li v-for="payment in detail.payments" :key="payment.id" class="flex items-center gap-4 py-3">
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-base text-highlighted">{{ money(payment.amount_minor) }} · {{ methodLabel(payment.method) }}</span>
+                    <span class="block text-sm text-muted">{{ formatCalendarDate(payment.paid_on, 'en') }}{{ payment.reference ? ` · ${payment.reference}` : '' }}</span>
+                  </span>
+                  <UButton v-if="manage" icon="i-lucide-trash-2" color="neutral" variant="ghost" :aria-label="`Delete payment of ${money(payment.amount_minor)}`" :loading="busy === payment.id" @click="deletePayment(payment.id)" />
+                </li>
+              </ul>
+              <template v-if="manage && !detail.online_payment">
+                <h3 class="mt-6 text-base font-semibold text-highlighted">This is an offline booking</h3>
+                <NuxtLink :to="{ path: `${editorPath}/payment`, query: route.query }" class="mt-2 flex items-center gap-4 border-y border-default py-4" data-testid="stay-record-payment">
+                  <span class="min-w-0 flex-1 text-base text-highlighted">Add payment details gathered manually</span>
+                  <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+                </NuxtLink>
+              </template>
+            </template>
           </UCard>
           <UCard v-if="detail.channel_booking_id || (!personalScope && channelManaged)" variant="record">
           <dl class="space-y-4">
@@ -417,6 +414,8 @@ export interface BookingEditor {
   formatCreatedAt: (value: string) => string
   /** A stay's offline payment step: its currency, today at the home, and the write. */
   stayPayment: { currency: ComputedRef<string | null>; today: () => string; record: (input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; idempotency_key: string }) => Promise<void> }
+  /** A stay's Change reservation step: what it is now, and the write. */
+  stayChange: { stay: ComputedRef<{ check_in_date: string; check_out_date: string; adults: number; children: number } | null>; save: (input: { check_in_date: string; check_out_date: string; adults: number; children: number }) => Promise<void> }
 }
 
 export const bookingEditorKey = Symbol('booking-editor') as InjectionKey<BookingEditor>
@@ -882,21 +881,12 @@ async function deletePayment(paymentId: string) {
   await run(paymentId, () => dashboardApi(`${dashboardBookingPath(value.booking_id)}/payments/${encodeURIComponent(paymentId)}`, { method: 'DELETE', validate: isNightBooking }), 'The payment could not be deleted')
 }
 
-// A stay paid on the site returns the guest's whole payment, as Airbnb's host cancellation does; the host approves that refund next.
-// A stay booked here that has begun, before its guest reviewed it. The thread
-// operation is the writer; it refuses a stay that no longer qualifies.
-const canMarkNoShow = computed(() => !props.personalScope && manage.value && detail.value?.channel === 'direct' && detail.value.status === 'confirmed'
-  && !detail.value.no_show_at && Boolean(detail.value.conversation_id) && detail.value.check_in_date <= localDateAt(new Date(), detail.value.timezone))
-
-async function markNoShow() {
+/** The Change reservation step's write: new dates and guests for a stay the business made, under its version. */
+async function changeStay(input: { check_in_date: string; check_out_date: string; adults: number; children: number }) {
   const value = detail.value
-  if (!value?.conversation_id) return
-  if (!await confirmDialog.open({
-    title: 'Mark as a no-show',
-    description: `${guest.value.state === 'named' ? guest.value.name : 'The guest'} won’t be asked to review this stay, and a review link already sent stops working. The stay itself stays as it is. This cannot be undone.`,
-    confirmLabel: 'Mark as a no-show', cancelLabel: 'Keep as is',
-  })) return
-  await run('no_show', () => updateStatus('no_show', value), 'The stay could not be marked as a no-show', false)
+  if (!value) throw new Error('The stay is not loaded')
+  await dashboardApi(`${dashboardBookingPath(value.booking_id)}/change`, { method: 'POST', validate: isNightBooking, body: { ...input, version: value.version } })
+  await refreshDetails()
 }
 
 async function cancelStay() {
@@ -960,5 +950,6 @@ provide(bookingEditorKey, {
   firstName,
   formatCreatedAt,
   stayPayment: { currency: computed(() => detail.value?.currency ?? null), today: homeToday, record: recordStayPayment },
+  stayChange: { stay: computed(() => detail.value ? { check_in_date: detail.value.check_in_date, check_out_date: detail.value.check_out_date, adults: detail.value.adults, children: detail.value.children } : null), save: changeStay },
 })
 </script>

@@ -23,6 +23,20 @@
 
             <p v-else-if="item.type === 'event'" class="my-2 text-center text-xs text-muted">{{ item.text }}</p>
 
+            <!-- What KrabiClaw says in a team conversation sits in the middle, as Airbnb's own lines and cards do: a job is a card with its Done, a reminder is a line. -->
+            <div v-else-if="thread.kind === 'team' && item.runs.every(message => message.automatic)" class="my-2 flex w-full flex-col items-center gap-2" :data-message="item.key">
+              <template v-for="message in item.runs" :key="message.id">
+                <div v-if="message.job" class="w-full max-w-md rounded-[28px] bg-accented/50 p-2" :data-team-message="message.id" data-automatic data-testid="conversation-job-card">
+                  <div class="rounded-3xl bg-default p-4 shadow-sm">
+                    <p class="text-sm text-muted">Job</p>
+                    <p class="mt-0.5 whitespace-pre-wrap break-words text-base font-semibold text-highlighted">{{ message.body }}</p>
+                    <UButton v-if="data?.work?.type === 'done'" label="Done" color="neutral" variant="soft" block class="mt-3 rounded-xl" :loading="closing" data-testid="conversation-job-done" @click="emit('done')" />
+                  </div>
+                </div>
+                <p v-else class="max-w-md whitespace-pre-wrap text-center text-sm text-muted" :data-team-message="message.id" data-automatic>{{ message.body }}</p>
+              </template>
+            </div>
+
             <div v-else class="flex min-w-0 max-w-[76%] flex-col gap-0.5" :class="item.mine ? 'items-end self-end' : 'relative items-start self-start pl-10'" :data-message="item.key">
               <span v-if="!item.mine" class="absolute bottom-0 left-0"><InboxAvatar :name="item.runs[0]!.author" :initial="initialOf(item.runs[0]!.author)" :support="thread.kind === 'support'" size="sm" /></span>
               <p class="mb-1 mt-2.5 text-sm text-muted"><span class="text-highlighted">{{ item.runs[0]!.author }}</span> {{ item.runs[0]!.time }}</p>
@@ -39,15 +53,8 @@
                     <img :src="photo.thumbnail_url" alt="" :width="photo.width ?? undefined" :height="photo.height ?? undefined" loading="lazy" class="size-full object-cover" :class="message.photos.length > 1 ? 'aspect-square' : 'max-h-80'">
                   </button>
                 </div>
-                <!-- A job is a card in the thread with its Done on it, as Airbnb's requests are. -->
-                <div v-if="message.job && message.body" class="w-full min-w-64 max-w-sm rounded-3xl bg-accented/50 p-2" data-testid="conversation-job-card">
-                  <div class="rounded-2xl bg-default p-4 shadow-sm">
-                    <p class="whitespace-pre-wrap break-words text-base font-medium text-highlighted">{{ message.body }}</p>
-                    <UButton v-if="data?.work?.type === 'done'" label="Done" color="neutral" variant="soft" block class="mt-3 rounded-xl" :loading="closing" data-testid="conversation-job-done" @click="emit('done')" />
-                  </div>
-                </div>
                 <div
-                  v-else-if="message.body"
+                  v-if="message.body"
                   class="max-w-full whitespace-pre-wrap break-words rounded-[18px] px-3.5 py-2.5 text-base [overflow-wrap:anywhere]"
                   :class="[item.mine ? 'rounded-br-md bg-inverted text-inverted' : 'rounded-bl-md bg-elevated text-default', message.sending ? 'opacity-60' : '']"
                 >{{ message.body }}</div>
