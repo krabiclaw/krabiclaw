@@ -9,10 +9,8 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
-import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayGapCandidates, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
-import { readBusinessProgressReference } from '../../server/utils/business-outcomes.ts'
-import { dismissOpportunity, listOpportunities } from '../../server/domain/opportunities.ts'
-import { getTask, listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
+import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, moveStayPhotos, readHomeCalendar, readStayCalendar, readStayHome, STAY_CALENDAR_HOME_FIELDS, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
+import { closeTask, listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { H3Event } from 'h3'
@@ -58,8 +56,11 @@ import Ajv from 'ajv'
 import { stayPhotoRoomName, type StayPhotoRoom } from '../../shared/stay-photos.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
 import { hashPassword } from 'better-auth/crypto'
+import { updateOrganizationSettingsFields } from '../../server/utils/organization-settings.ts'
 import editNightsRoute from '../../server/api/dashboard/stay-homes/[product_id]/nights.put.ts'
 import { buyStay } from './support/stay-checkout.ts'
+
+
 
 const ORG = 'org'
 const OWNER = 'owner-user'
@@ -1048,15 +1049,15 @@ test('editing and cancelling a stay move and free exactly its nights, under its 
     await assert.rejects(updateStay(db, env, manager, stay.id, { version: 99, check_out_date: '2026-11-04' }), code('STAY_VERSION_CONFLICT'))
     await assert.rejects(updateStay(db, env, manager, stay.id, { version: 1, check_in_date: '2026-11-09', check_out_date: '2026-11-11' }), code('STAY_OVERLAP'))
     // A refused move leaves the stay and its nights where they were.
-    assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-03' })).nights.map(night => night.booking_id), [stay.id, stay.id])
+    assert.deepEqual((await readHomeCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-03' })).nights.map(night => night.booking_id), [stay.id, stay.id])
     const moved = await updateStay(db, env, manager, stay.id, { version: 1, check_in_date: '2026-11-05', check_out_date: '2026-11-08', guest_phone: '+61491570154' })
     assert.equal(moved.version, 2)
     assert.equal(moved.guest_phone, '+61491570154')
-    const calendar = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-09' })
+    const calendar = await readHomeCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-09' })
     // The calendar reads its full 500 nights, with the stays in them.
-    const year = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2028-03-15' })
+    const year = await readHomeCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2028-03-15' })
     assert.equal(year.nights.length, 500)
-    assert.ok(year.stays.some(row => row.id === stay.id))
+    assert.ok(year.stays.some(row => row.booking_id === stay.id))
     assert.deepEqual(calendar.nights.map(night => night.available), [true, true, true, true, false, false, false, true])
     assert.equal(calendar.nights[0]!.price_minor, 15_000)
     // Two edits from the same version race; whichever wins, the nights held are the winner's.
@@ -1073,12 +1074,11 @@ test('editing and cancelling a stay move and free exactly its nights, under its 
     const cancelled = await cancelStay(db, env, manager, stay.id, { version: 3, reason: 'Guest changed plans' })
     assert.equal(cancelled.status, 'cancelled')
     assert.ok(cancelled.cancelled_at)
-    const afterCancellation = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-05', to: '2026-11-30' })
+    const afterCancellation = await readHomeCalendar(db, manager, { productId: cabin.id, from: '2026-11-05', to: '2026-11-30' })
     assert.equal(afterCancellation.nights.length, 25)
     assert(afterCancellation.nights.every(night => night.booking_id !== stay.id))
     await assert.rejects(updateStay(db, env, manager, stay.id, { version: 4, adults: 1 }), code('STAY_NOT_EDITABLE'))
-    assert.deepEqual((await listStays(db, manager, { from: '2026-11-01', to: '2026-12-01' })).map(row => row.id).includes(stay.id), false)
-    assert.equal((await listStays(db, manager, { from: '2026-11-01', to: '2026-12-01', includeCancelled: true })).some(row => row.id === stay.id), true)
+    assert.equal(afterCancellation.stays.some(row => row.booking_id === stay.id), false)
     const audit = await db.prepare("SELECT event_name FROM activity_entries WHERE organization_id = ? AND event_name LIKE 'stay.%' ORDER BY occurred_at, event_name").bind(ORG).all<{ event_name: string }>()
     assert.deepEqual(audit.results.map(row => row.event_name).sort(), ['stay.cancelled', 'stay.created', 'stay.created', 'stay.updated', 'stay.updated'])
   } finally {
@@ -1109,6 +1109,10 @@ test('a channel stay is read-only here and is paid through its channel; an app s
     await assert.rejects(recordStayPayment(db, env, manager, stay.id, { amount_minor: 100, method: 'crypto', paid_on: '2026-11-01', idempotency_key: 'pay-3' }), code('INVALID_STAY_FIELD'))
     const partial = await recordStayPayment(db, env, manager, stay.id, { amount_minor: 20_000, method: 'cash', paid_on: '2026-11-01', reference: 'deposit', idempotency_key: 'pay-4' })
     assert.deepEqual([partial.stay.paid_minor, partial.stay.payment_status, partial.stay.payments.length], [20_000, 'partial', 1])
+    // Money is recorded in USD: the business currency no longer changes.
+    assert.deepEqual(await updateOrganizationSettingsFields(db, env, ORG, { default_currency: 'EUR' }, OWNER),
+      { status: 409, data: { error: 'The business currency cannot change once money has been recorded or a channel is connected', code: 'CURRENCY_FIXED' } })
+    assert.equal(await db.prepare('SELECT default_currency FROM organization WHERE id = ?').bind(ORG).first('default_currency'), 'USD')
     const storedPayment = await db.prepare('SELECT id, amount_minor, reference, note FROM offline_payments WHERE organization_id = ? AND booking_id = ? AND idempotency_key = ?').bind(ORG, stay.id, 'pay-4').first<{ id: string; amount_minor: number; reference: string | null; note: string | null }>()
     assert.deepEqual(storedPayment, { id: partial.payment.id, amount_minor: 20_000, reference: 'deposit', note: null })
     // A retried record is the same payment; the same key for another payment is refused.
@@ -1152,10 +1156,10 @@ test('the host sets nights apart from the defaults and resets them', { timeout: 
   const { runtime, db, env } = await boot()
   try {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
-    const beforeRefusedSettings = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-04' })
+    const beforeRefusedSettings = await readHomeCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-04' })
     for (const patch of [{}, { reset: false }, { reset: true, closed: true }, { reset: true, price_minor: null }, { min_stay_through: 3, price_minor: 200_00 }]) {
       await assert.rejects(setStayNights(db, env, manager, { product_id: cabin.id, from: '2026-11-01', to: '2026-11-04', ...patch }), code('INVALID_STAY_FIELD'))
-      assert.deepEqual(await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-04' }), beforeRefusedSettings)
+      assert.deepEqual(await readHomeCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-04' }), beforeRefusedSettings)
     }
     const closed = await setStayNights(db, env, manager, { product_id: cabin.id, from: '2026-11-01', to: '2026-11-03', closed: true })
     assert.deepEqual(closed.nights.map(night => [night.available, night.source]), [[false, 'host'], [false, 'host']])
@@ -1177,7 +1181,7 @@ test('the host sets nights apart from the defaults and resets them', { timeout: 
       { date: '2026-11-21', available: true, price_minor: 15_000, min_stay_arrival: 2, max_stay: null, closed_to_arrival: false, closed_to_departure: false },
     ])
     const datedHome = await readStayHome(db, manager, cabin.id)
-    const dated = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-20', to: '2026-11-22' })
+    const dated = await readHomeCalendar(db, manager, { productId: cabin.id, from: '2026-11-20', to: '2026-11-22' })
     assert.equal(dated.home.min_nights, 2)
     assert.deepEqual(dated.nights.map(night => night.min_stay_arrival), [21, 2])
     assert.equal((await quoteStay(db, ORG, datedHome, { check_in_date: '2026-11-19', check_out_date: '2026-11-21', adults: 1 })).total_minor, 30_000)
@@ -1202,14 +1206,14 @@ test('the host sets nights apart from the defaults and resets them', { timeout: 
       min_stay_arrival: offset === 2 ? 2 : null, max_stay: null, closed_to_arrival: false, closed_to_departure: false,
     })))
     const policyWindow = { productId: cabin.id, from: '2026-12-01', to: '2026-12-07' }
-    assert.deepEqual((await readStayCalendar(db, manager, policyWindow)).nights.map(night => [night.min_stay_arrival, night.price_minor]), [
+    assert.deepEqual((await readHomeCalendar(db, manager, policyWindow)).nights.map(night => [night.min_stay_arrival, night.price_minor]), [
       [5, 17_000], [5, 17_000], [2, 19_000], [5, 22_000], [5, 22_000], [5, 17_000],
     ])
     await updateStayHome(env, db, manager, cabin.id, { min_nights: 9, base_price_minor: 18_000 })
     const canonical = await getProduct(db, ORG, cabin.id)
     assert.equal(canonical.stay!.min_nights, 9)
     assert.deepEqual(canonical.stay!.calendar_rules, rules)
-    assert.deepEqual((await readStayCalendar(db, manager, policyWindow)).nights.map(night => [night.min_stay_arrival, night.price_minor]), [
+    assert.deepEqual((await readHomeCalendar(db, manager, policyWindow)).nights.map(night => [night.min_stay_arrival, night.price_minor]), [
       [9, 18_000], [5, 18_000], [2, 19_000], [9, 22_000], [9, 22_000], [9, 18_000],
     ])
     assert.deepEqual((await db.prepare("SELECT n.date, n.min_stay_arrival, pr.unit_amount AS price_minor FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? AND n.date >= '2026-12-01' ORDER BY date").bind(cabin.id).all()).results,
@@ -1218,7 +1222,7 @@ test('the host sets nights apart from the defaults and resets them', { timeout: 
     await assert.rejects(quoteStay(db, ORG, policyHome, { check_in_date: '2026-12-01', check_out_date: '2026-12-06', adults: 1 }), code('STAY_MIN_NIGHTS'))
     assert.equal((await quoteStay(db, ORG, policyHome, { check_in_date: '2026-12-02', check_out_date: '2026-12-07', adults: 1 })).total_minor, 99_000)
     assert.equal((await quoteStay(db, ORG, policyHome, { check_in_date: '2026-12-03', check_out_date: '2026-12-05', adults: 1 })).total_minor, 41_000)
-    const futureWeek = await readStayCalendar(db, manager, { productId: cabin.id, from: future(501), to: future(508) })
+    const futureWeek = await readHomeCalendar(db, manager, { productId: cabin.id, from: future(501), to: future(508) })
     assert.equal(futureWeek.nights[0]!.date, future(501))
     assert.deepEqual(futureWeek.nights.map(night => [night.date, night.min_stay_arrival, night.price_minor]), Array.from({ length: 7 }, (_, offset) => {
       const date = future(501 + offset)
@@ -1238,14 +1242,14 @@ test('the host changes only the chosen weekdays and moves each night’s own pri
     // 2026-11-01 is a Sunday: the week runs Sunday to Saturday.
     const week = { productId: cabin.id, from: '2026-11-01', to: '2026-11-08' }
     const write = (patch: Record<string, unknown>, from = week.from, to = week.to) => setStayNights(db, env, manager, { product_id: cabin.id, from, to, ...patch })
-    const before = await readStayCalendar(db, manager, week)
+    const before = await readHomeCalendar(db, manager, week)
     for (const patch of [{ closed: true, weekdays: [] }, { closed: true, weekdays: [7] }, { closed: true, weekdays: [5, 5] }, { closed: true, weekdays: 'fri' }, { weekdays: [5] },
       { price_change_percent: 51 }, { price_change_percent: -51 }, { price_change_percent: 0 }, { price_change_percent: 1.5 }, { price_change_percent: 10, price_minor: 100 }, { reset: true, price_change_percent: 10 }]) {
       await assert.rejects(write(patch), code('INVALID_STAY_FIELD'), JSON.stringify(patch))
     }
     // A Monday alone has no Friday to change.
     await assert.rejects(write({ closed: true, weekdays: [5] }, '2026-11-02', '2026-11-03'), code('INVALID_STAY_FIELD'))
-    assert.deepEqual(await readStayCalendar(db, manager, week), before)
+    assert.deepEqual(await readHomeCalendar(db, manager, week), before)
 
     await write({ price_minor: 20_000 }, '2026-11-04', '2026-11-05')
     await write({ price_minor: 9_999 }, '2026-11-05', '2026-11-06')
@@ -1257,7 +1261,7 @@ test('the host changes only the chosen weekdays and moves each night’s own pri
     // Each chosen night moves from its own price: a set price, or the listing's; a fraction of a minor unit rounds.
     await write({ price_change_percent: -10, weekdays: [3] })
     await write({ price_change_percent: 5, weekdays: [4, 0] })
-    const priced = await readStayCalendar(db, manager, week)
+    const priced = await readHomeCalendar(db, manager, week)
     assert.deepEqual(priced.nights.map(night => [night.date, night.price_minor]), [
       ['2026-11-01', 15_750], ['2026-11-02', 15_000], ['2026-11-03', 15_000], ['2026-11-04', 18_000], ['2026-11-05', 10_499], ['2026-11-06', 15_000], ['2026-11-07', 15_000],
     ])
@@ -1273,7 +1277,7 @@ test('the host changes only the chosen weekdays and moves each night’s own pri
 
     // Reset clears only the chosen weekday; the rest of the week keeps its settings.
     await write({ reset: true, weekdays: [3] })
-    assert.deepEqual((await readStayCalendar(db, manager, week)).nights.map(night => [night.date, night.price_minor, night.source]), [
+    assert.deepEqual((await readHomeCalendar(db, manager, week)).nights.map(night => [night.date, night.price_minor, night.source]), [
       ['2026-11-01', 15_750, 'host'], ['2026-11-02', 15_000, null], ['2026-11-03', 15_000, null], ['2026-11-04', 15_000, null], ['2026-11-05', 10_499, 'host'], ['2026-11-06', 15_000, 'host'], ['2026-11-07', 15_000, 'host'],
     ])
   } finally {
@@ -1291,11 +1295,12 @@ test('the multi-calendar reads every home the caller looks after, each night as 
     const cabinStay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'c', check_in_date: '2026-10-30', check_out_date: '2026-11-03', ...guest, guest_name: 'Ana' })
     const lakeStay = await createStay(db, env, manager, { product_id: lake.id, idempotency_key: 'l', check_in_date: '2026-11-04', check_out_date: '2026-11-07', ...guest, guest_name: 'Bo' })
     const window = { from: '2026-11-01', to: '2026-11-08' }
-    const all = await readStayCalendars(db, manager, window)
+    const all = await readStayCalendar(db, manager, window)
     assert.deepEqual(all.homes.map(entry => entry.home.name), ['Cabin', 'Lake house'])
     for (const entry of all.homes) {
-      const own = await readStayCalendar(db, manager, { productId: entry.home.product_id, ...window })
-      assert.deepEqual(entry, { home: own.home, nights: own.nights })
+      const own = await readHomeCalendar(db, manager, { productId: entry.home.product_id, ...window })
+      // The calendar draws a home's name, clock, price, minimum nights, rules, address and cancellation terms; nothing else of it.
+      assert.deepEqual(entry, { home: Object.fromEntries(STAY_CALENDAR_HOME_FIELDS.map(field => [field, own.home[field]])), nights: own.nights })
     }
     const cabinNights = all.homes[0]!.nights
     assert.deepEqual(cabinNights.map(night => [night.date, night.booking_id, night.closed, night.available]), [
@@ -1305,94 +1310,16 @@ test('the multi-calendar reads every home the caller looks after, each night as 
     assert.deepEqual(all.homes[1]!.nights.slice(1, 4).map(night => [night.date, night.price_minor, night.min_stay_arrival, night.booking_id]), [
       ['2026-11-02', 22_000, 3, null], ['2026-11-03', 22_000, 3, null], ['2026-11-04', 15_000, 2, lakeStay.id],
     ])
-    assert.deepEqual(all.stays.map(stay => [stay.id, stay.guest_name, stay.channel, stay.check_in_date, stay.check_out_date]), [
+    assert.deepEqual(all.stays.map(stay => [stay.booking_id, stay.guest_name, stay.channel, stay.check_in_date, stay.check_out_date]), [
       [cabinStay.id, 'Ana', 'direct', '2026-10-30', '2026-11-03'], [lakeStay.id, 'Bo', 'direct', '2026-11-04', '2026-11-07'],
     ])
-    const assigned = await readStayCalendars(db, cleaner, window)
+    const assigned = await readStayCalendar(db, cleaner, window)
     assert.deepEqual(assigned.homes.map(entry => entry.home.product_id), [cabin.id])
     assert.deepEqual(assigned.homes[0]!.nights, cabinNights)
-    assert.deepEqual(assigned.stays.map(stay => stay.id), [cabinStay.id])
-    assert.deepEqual(await readStayCalendars(db, outsider, window), { ...window, homes: [], stays: [] })
-    await assert.rejects(readStayCalendars(db, manager, { from: '2026-11-01', to: '2027-02-02' }), code('INVALID_RANGE'))
+    assert.deepEqual(assigned.stays.map(stay => stay.booking_id), [cabinStay.id])
+    assert.deepEqual(await readStayCalendar(db, outsider, window), { ...window, homes: [], stays: [] })
+    await assert.rejects(readStayCalendar(db, manager, { from: '2026-11-01', to: '2027-02-02' }), code('INVALID_RANGE'))
   } finally {
-    await runtime.dispose()
-  }
-})
-
-test('gap recommendations follow live listing state, effective night rules and actual stay claims', { timeout: 120_000 }, async t => {
-  const { runtime, db, env } = await boot()
-  try {
-    const cabin = await home(db, env, { name: 'Gap cabin', location: 'cabin-site' })
-    await updateStayHome(env, db, manager, cabin.id, { min_nights: 21, assigned_member_id: `m-${OWNER}` })
-    const first = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'gap-before', check_in_date: '2027-05-01', check_out_date: '2027-05-03', ...guest })
-    const second = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'gap-after', check_in_date: '2027-05-04', check_out_date: '2027-05-06', ...guest })
-    await setStayNights(db, env, manager, { product_id: cabin.id, from: '2027-05-03', to: '2027-05-04', min_stay_arrival: 1 })
-    const window = { from: '2027-05-01', to: '2027-05-07' }
-    const read = () => readStayGapCandidates(db, manager, window)
-    assert.deepEqual(await read(), [], 'a configured draft home is not promoted')
-
-    await writeMemberScheduling({ env, userId: OWNER, organizationId: ORG }, `m-${OWNER}`, { updated_at: null, public_name: 'Cabin host', public_approved: true })
-    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
-    const gap = { productId: cabin.id, name: 'Gap cabin', locationId: 'cabin-site', from: '2027-05-03', to: '2027-05-04', nights: 1, bookable: true, restriction: null }
-    assert.deepEqual(await read(), [gap], 'the saved one-night override applies despite the 21-night home default')
-    const quoted = await quoteStay(db, ORG, await readStayHome(db, manager, cabin.id), { check_in_date: gap.from, check_out_date: gap.to, adults: 1 })
-    assert.equal(quoted.nights, 1)
-    assert.equal(quoted.total_minor, 15_000)
-
-    await setStayNights(db, env, manager, { product_id: cabin.id, from: gap.from, to: gap.to, min_stay_arrival: 2 })
-    assert.deepEqual(await read(), [{ ...gap, bookable: false, restriction: 'Stays arriving on 2027-05-03 are at least 2 nights' }])
-    await setStayNights(db, env, manager, { product_id: cabin.id, from: gap.from, to: gap.to, min_stay_arrival: 1 })
-    const filled = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'gap-filled', check_in_date: gap.from, check_out_date: gap.to, ...guest })
-    assert.deepEqual(await read(), [], 'a real stay clears the gap on the next read')
-    await cancelStay(db, env, manager, filled.id, { version: filled.version, reason: 'Guest cancelled' })
-    assert.deepEqual(await read(), [gap], 'cancellation frees the same bounded gap')
-
-    // Base-price eligibility is the quote's own rule, even with priced overrides.
-    await setStayNights(db, env, manager, { product_id: cabin.id, from: gap.from, to: gap.to, price_minor: 15_000 })
-    const offering = await getProduct(db, ORG, cabin.id)
-    const variant = offering.variants[0]!
-    const base = variant.prices[0]!
-    await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { variants: [{ id: variant.id, prices: [{ id: base.id, active: false }] }] } }), { status: 409, data: { code: 'STAY_BOOKING_INCOMPLETE', field: 'variants.prices', missing: ['variants.prices'] } })
-    assert.deepEqual(await read(), [gap], 'The canonical product writer prevents removing the active nightly price from a published home')
-
-    await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'gap-third-boundary', check_in_date: '2027-05-08', check_out_date: '2027-05-10', ...guest })
-    const membership = await resolveMembership(env, { organizationId: ORG, userId: OWNER })
-    assert.ok(membership)
-    const principal = memberAccessPrincipal(membership, { env })
-    for (const [from, to] of [['invalid', gap.to], ['2027-02-30', gap.to], [gap.from, gap.from], [gap.to, gap.from], ['2027-05-03', '2027-08-03'], ['0000-01-01', '0000-01-02'], ['9999-12-30', '9999-12-31']]) {
-      await assert.rejects(readBusinessProgressReference(db, principal, { operation: 'stay.gap', subject_id: JSON.stringify([cabin.id, from, to]) }), { status: 404, data: { code: 'PROGRESS_SUBJECT_NOT_FOUND', field: 'subject_id' } })
-    }
-    // The gap opportunities Today offers the owner, by the subject each one records.
-    const gapOpportunities = async () => {
-      const listed = (await listOpportunities(db, principal)).opportunities
-      const recorded = new Map((await db.prepare('SELECT id, operation, subject_id FROM opportunities WHERE organization_id = ?').bind(ORG).all<{ id: string; operation: string; subject_id: string }>()).results.map(row => [row.id, row]))
-      return listed.flatMap(item => recorded.get(item.id)!.operation === 'stay.gap' ? [{ id: item.id, subjectId: recorded.get(item.id)!.subject_id }] : [])
-    }
-    t.mock.timers.enable({ apis: ['Date'], now: new Date('2027-05-03T12:00:00.000Z') })
-    const [firstGap, ...otherGaps] = await gapOpportunities()
-    assert.ok(firstGap)
-    assert.deepEqual([firstGap.subjectId, otherGaps], [JSON.stringify([cabin.id, gap.from, gap.to]), []])
-    assert.deepEqual(await dismissOpportunity(db, principal, firstGap.id, {}), { id: firstGap.id, status: 'dismissed' })
-    assert.deepEqual(await gapOpportunities(), [], 'a dismissed gap stays dismissed while its evidence is unchanged')
-    t.mock.timers.tick(2 * 86_400_000)
-    assert.deepEqual((await gapOpportunities()).map(item => item.subjectId), [JSON.stringify([cabin.id, '2027-05-06', '2027-05-08'])], 'A prior interval’s dismissal never suppresses this home’s next gap')
-    t.mock.timers.reset()
-
-    // The organization is still on May 3 in Denver; this home's day is May 4.
-    await updateLocation(db, ORG, 'cabin-site', { timezone: 'Asia/Bangkok' }, OWNER, env)
-    t.mock.timers.enable({ apis: ['Date'], now: new Date('2027-05-03T20:00:00.000Z') })
-    assert.deepEqual(await read(), [], 'An interval that passed locally is not promoted')
-    await assert.rejects(quoteStay(db, ORG, await readStayHome(db, manager, cabin.id), { check_in_date: gap.from, check_out_date: gap.to, adults: 1 }), { data: { code: 'STAY_CHECK_IN_PAST', field: 'check_in_date', today: '2027-05-04' } })
-    t.mock.timers.reset()
-
-    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: false, actor: { actorId: OWNER } })
-    assert.deepEqual(await read(), [], 'withdrawing the listing clears its growth recommendation')
-    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
-    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { active: false } })
-    assert.deepEqual(await read(), [], 'an inactive home is not promoted even when its publication remains saved')
-    assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, ...window })).stays.map(stay => stay.id), [first.id, second.id], 'listing eligibility does not delete existing stays')
-  } finally {
-    t.mock.timers.reset()
     await runtime.dispose()
   }
 })
@@ -1408,12 +1335,7 @@ test('unknown home clocks preserve turnover dates without inventing task instant
     const membership = await resolveMembership(env, { organizationId: ORG, userId: CLEANER })
     const viewer = await taskViewer(memberAccessPrincipal(membership!, { env }))
     const before = new Date('2026-11-02T18:00:00.000Z')
-    // An earlier deployed Worker can still write an old reply task during the rollout.
-    await db.prepare(`INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, assigned_member_id, timezone, status, dedupe_key, created_at, updated_at)
-      VALUES ('retired-reply', ?, 'guest_reply', 'conversation', ?, ?, 'UTC', 'open', 'retired-reply', ?, ?)`)
-      .bind(ORG, first.conversation_id, `m-${CLEANER}`, before.toISOString(), before.toISOString()).run()
     assert.deepEqual((await listTasks(db, viewer, parseTaskListQuery({}), before)).sections, [])
-    await assert.rejects(getTask(db, viewer, 'retired-reply', before), { status: 404 })
     const upcoming = await listTasks(db, viewer, parseTaskListQuery({ range: 'upcoming' }), before)
     assert.deepEqual(upcoming.sections.map(section => [section.id, section.tasks.map(task => task.booking_id)]), [['2026-11-03', [first.id]], ['2026-11-05', [next.id]]])
     assert.equal(upcoming.sections[0]!.title, 'Tomorrow')
@@ -1423,8 +1345,15 @@ test('unknown home clocks preserve turnover dates without inventing task instant
     const tasks = today.sections.flatMap(section => section.tasks)
     assert.equal(tasks.length, 1)
     assert.equal(tasks[0]!.booking_id, first.id)
-    assert.equal(tasks[0]!.when, 'Time not set')
-    assert.deepEqual(tasks[0]!.sheet, { heading: 'Turnover', title: 'Cabin', date: 'Tue, Nov 3', checkout: { label: 'Checkout', time: 'Time not set', guest: 'Ana' }, checkin: { label: 'Check-in', time: 'Time not set', guest: 'Ana · 2 guests' } })
+    // A home with no clock has no window to show: the day is the checkout's.
+    assert.deepEqual([tasks[0]!.when, tasks[0]!.title, tasks[0]!.detail], [null, 'Clean up after Ana’s group of 2', 'Clean Cabin after Ana checks out, Tue Nov 3.'])
+    assert.deepEqual(tasks[0]!.sheet, { heading: 'Turnover', title: 'Cabin', date: 'Tue, Nov 3' })
+    // The cleaner closes it in one tap: the list reads the closed card exactly as the close returned it, with who closed it.
+    const closed = await closeTask(db, viewer, tasks[0]!.id, { status: 'done', env })
+    assert.deepEqual([closed.status, closed.person?.name, closed.status_line?.startsWith('Done at ')], ['done', 'You', true])
+    const done = (await listTasks(db, viewer, parseTaskListQuery({}), new Date())).sections
+    assert.deepEqual(done.map(section => [section.id, section.tasks.map(task => task.id)]), [['done', [closed.id]]])
+    assert.deepEqual(done[0]!.tasks[0], closed)
   } finally {
     t.mock.timers.reset()
     await runtime.dispose()
@@ -1454,21 +1383,21 @@ test('members see only the homes they look after and change nothing; a home with
     }
     // The cleaner's Today is the turnover tasks at the homes they look after.
     const cleanerTasks = async (now: string) => (await listTasks(db, await taskViewer(memberAccessPrincipal(cleanerMembership!, { env })), parseTaskListQuery({}), new Date(now)))
-      .sections.flatMap(section => section.tasks).map(task => [task.kind, task.booking_id, task.detail])
-    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out']])
+      .sections.flatMap(section => section.tasks).map(task => [task.kind, task.booking_id, task.when])
+    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, '10:00 AM']])
     const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
     const turnover = await cleanerToday('2026-11-03T18:00:00.000Z')
     const departure = turnover.items.find(item => item.booking_id === cabinStay.id)!
     assert.equal(departure.stay_moment, 'turnover')
-    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out · Ana in']])
+    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, '10:00 AM – 4:00 PM']])
     await cancelStay(db, env, manager, next.id, { version: next.version })
     assert.equal((await cleanerToday('2026-11-03T18:00:00.000Z')).items.find(item => item.booking_id === cabinStay.id)!.stay_moment, 'departure')
-    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out']])
-    assert.deepEqual((await listStays(db, cleaner, { from: '2026-11-01', to: '2026-11-30' })).map(stay => stay.id), [cabinStay.id])
-    assert.deepEqual(await listStays(db, outsider, { from: '2026-11-01', to: '2026-11-30' }), [])
+    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, '10:00 AM']])
+    assert.deepEqual((await readStayCalendar(db, cleaner, { from: '2026-11-01', to: '2026-11-30' })).stays.map(stay => stay.booking_id), [cabinStay.id])
+    assert.deepEqual((await readStayCalendar(db, outsider, { from: '2026-11-01', to: '2026-11-30' })).stays, [])
     assert.equal((await getStay(db, cleaner, cabinStay.id)).id, cabinStay.id)
     await assert.rejects(getStay(db, cleaner, lakeStay.id), code('STAY_NOT_FOUND'))
-    await assert.rejects(readStayCalendar(db, cleaner, { productId: lake.id, from: '2026-11-01', to: '2026-11-03' }), code('HOME_NOT_FOUND'))
+    await assert.rejects(readHomeCalendar(db, cleaner, { productId: lake.id, from: '2026-11-01', to: '2026-11-03' }), code('HOME_NOT_FOUND'))
     await assert.rejects(createStay(db, env, cleaner, { product_id: cabin.id, idempotency_key: 'x', check_in_date: '2026-11-10', check_out_date: '2026-11-12', ...guest }), code('STAY_ROLE_REQUIRED'))
     await assert.rejects(cancelStay(db, env, cleaner, cabinStay.id, { version: 1 }), code('STAY_ROLE_REQUIRED'))
     await assert.rejects(deleteProduct(db, { env, organizationId: ORG, productId: cabin.id }), /has bookings or stays/)
@@ -1494,19 +1423,20 @@ test('a member reads a stay at a home they look after as its turnover on every r
     const window = { from: '2026-11-01', to: '2026-11-04' }
 
     assert.deepEqual(await getStay(db, cleaner, stay.id), turnover)
-    assert.deepEqual(await listStays(db, cleaner, window), [turnover])
-    assert.deepEqual((await readStayCalendar(db, cleaner, { productId: cabin.id, ...window })).stays, [turnover])
-    assert.deepEqual((await readStayCalendars(db, cleaner, window)).stays, [turnover])
+    // Every calendar read draws a member's stay as its days, status, party and the guest's first name.
+    const calendarTurnover = { unit: 'nights', booking_id: stay.id, product_id: cabin.id, status: 'confirmed', guest_name: 'Ana', adults: 2, children: 1, check_in_date: '2026-11-01', check_out_date: '2026-11-03' }
+    assert.deepEqual((await readHomeCalendar(db, cleaner, { productId: cabin.id, ...window })).stays, [calendarTurnover])
+    assert.deepEqual((await readStayCalendar(db, cleaner, window)).stays, [calendarTurnover])
     // Owners and admins read the whole stay, unchanged.
     const whole = await getStay(db, manager, stay.id)
     assert.deepEqual([whole.guest_name, whole.guest_email, whole.private_notes, whole.total_minor, whole.paid_minor, whole.payments.length, whole.conversation_id], ['Ana Silva', 'ana@example.test', 'Door code 4411', 45_000, 20_000, 1, stay.conversation_id])
-    assert.equal((await listStays(db, manager, window))[0]!.guest_name, 'Ana Silva')
+    assert.equal((await readStayCalendar(db, manager, window)).stays[0]!.guest_name, 'Ana Silva')
     // A site checkout saves the guest's whole name in guest_name; the member still reads the first name.
     const wholeName = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'whole-name', check_in_date: '2026-11-05', check_out_date: '2026-11-07', adults: 1, guest_name: '  Bo   Lee ', total_minor: 30_000 })
     assert.equal((await getStay(db, cleaner, wholeName.id)).guest_name, 'Bo')
     assert.equal((await getStay(db, manager, wholeName.id)).guest_name, 'Bo   Lee')
     // A member with no responsibility for the home reads nothing of it.
-    assert.deepEqual(await listStays(db, outsider, window), [])
+    assert.deepEqual((await readStayCalendar(db, outsider, window)).stays, [])
     await assert.rejects(getStay(db, outsider, stay.id), code('STAY_NOT_FOUND'))
 
     for (const change of [
@@ -1553,7 +1483,7 @@ test('a member reads a stay at a home they look after as its turnover on every r
     const listed = (owner: boolean) => mcp(owner ? ownerMembership : cleanerMembership, owner ? 'owner' : 'member', 'list_product_bookings', { from: '2026-11-01T00:00:00.000Z', to: '2026-11-04T00:00:00.000Z' })
       .then(result => (result.bookings as Array<Record<string, unknown>>).map(row => [row.booking_id, row.unit, row.guest, row.starts_at]))
     assert.deepEqual(await listed(false), [[stay.id, 'nights', { name: 'Ana' }, turnover.starts_at]])
-    assert.deepEqual((await mcp(cleanerMembership, 'member', 'get_stay_calendar', { product_id: cabin.id, ...window })).stays, [turnover])
+    assert.deepEqual((await mcp(cleanerMembership, 'member', 'get_stay_calendar', { product_id: cabin.id, ...window })).stays, [calendarTurnover])
     assert.equal(((await mcp(ownerMembership, 'owner', 'get_product_booking', { booking_id: stay.id })).record as Record<string, unknown>).guest_email, 'ana@example.test')
     assert.deepEqual(await listed(true), [[stay.id, 'nights', { name: 'Ana Silva' }, turnover.starts_at]])
     assert.equal(((await mcp(ownerMembership, 'owner', 'get_stay_calendar', { product_id: cabin.id, ...window })).stays as Array<Record<string, unknown>>)[0]!.guest_name, 'Ana Silva')
@@ -2198,7 +2128,7 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
       const listing = await readStayHome(db, manager, cabin.id)
       const quote = await quoteStay(db, ORG, listing, { check_in_date: date(offset), check_out_date: date(offset + 2), adults: 2 })
       return createStayRequest(db, env, { organizationId: ORG, buyerUserId: OUTSIDER, key, fingerprint: key, home: listing, quote,
-        guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null }, locale: 'en', ipHash: 'proof' })
+        guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null }, locale: 'en', ipHash: 'proof', websiteSource: 'Direct' })
     }
     const decide = (stay: Awaited<ReturnType<typeof submit>>, action: 'confirm' | 'reject', suffix = '') => executeGuestThreadOperation(db, {
       threadId: stay.conversation_id, organizationId: ORG, action, actorUserId: OWNER, idempotencyKey: `${action}:${stay.id}${suffix}`, stayManager: true,
@@ -2529,7 +2459,7 @@ test('migrated unpaid stays occupy nights without a fresh reservation message an
     const offline = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'hostaway:offline', check_in_date: '2027-05-01', check_out_date: '2027-05-04', ...guest }, { imported: { source: 'hostaway', source_id: 'offline', row: { status: 'New', payment: 'Unpaid' }, fingerprint: 'offline-fingerprint', channel: 'direct' } })
     assert.equal(offline.payment_status, 'unpaid')
     assert.equal(offline.status, 'confirmed')
-    const afterImport = await readStayCalendar(db, manager, { productId: cabin.id, from: '2027-05-01', to: '2027-05-04' })
+    const afterImport = await readHomeCalendar(db, manager, { productId: cabin.id, from: '2027-05-01', to: '2027-05-04' })
     assert.equal(afterImport.nights.length, 3)
     assert(afterImport.nights.every(night => night.booking_id === offline.id && !night.available))
     const input = { product_id: cabin.id, idempotency_key: 'hostaway:source-1', check_in_date: '2027-06-01', check_out_date: '2027-06-03', ...guest, guest_email: 'ana@example.test' }
@@ -2543,7 +2473,7 @@ test('migrated unpaid stays occupy nights without a fresh reservation message an
     await assert.rejects(cancelStay(db, env, manager, imported.id, { version: imported.version }), code('STAY_NOT_EDITABLE'))
     await assert.rejects(recordStayPayment(db, env, manager, imported.id, { amount_minor: 1000, method: 'cash', paid_on: '2027-06-01', idempotency_key: 'should-not-collect' }), code('STAY_NOT_EDITABLE'))
     assert.equal(await db.prepare('SELECT received_at FROM bookings WHERE id = ?').bind(imported.id).first('received_at'), null)
-    assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, from: '2027-06-01', to: '2027-06-03' })).nights.map(night => [night.available, night.booking_id]), [[false, imported.id], [false, imported.id]])
+    assert.deepEqual((await readHomeCalendar(db, manager, { productId: cabin.id, from: '2027-06-01', to: '2027-06-03' })).nights.map(night => [night.available, night.booking_id]), [[false, imported.id], [false, imported.id]])
     assert.deepEqual(await db.prepare("SELECT status, due_at FROM scheduled_guest_messages WHERE booking_id = ? AND template_id = ?").bind(imported.id, template.id).first(), { status: 'skipped', due_at: null })
     assert.equal((await createStay(db, env, manager, input, { imported: source })).id, imported.id)
     const audit = await db.prepare("SELECT payload_json FROM activity_entries WHERE event_name = 'stay.created' AND json_extract(payload_json, '$.entityId') = ?").bind(imported.id).first<string>('payload_json')
@@ -2556,7 +2486,7 @@ test('migrated unpaid stays occupy nights without a fresh reservation message an
     assert.equal(adopted.applied, true)
     assert.deepEqual({ id: adopted.id, owner: adopted.owner, provider: adopted.provider, overbooked: adopted.overbooked }, { id: imported.id, owner: 'channel', provider: 'channex', overbooked: false })
     assert.equal(await db.prepare('SELECT count(*) FROM bookings WHERE channel_booking_id = ?').bind(source.channel_booking_id).first('count(*)'), 1)
-    assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, from: input.check_in_date, to: input.check_out_date })).nights.map(night => night.booking_id), [imported.id, imported.id])
+    assert.deepEqual((await readHomeCalendar(db, manager, { productId: cabin.id, from: input.check_in_date, to: input.check_out_date })).nights.map(night => night.booking_id), [imported.id, imported.id])
     assert.equal((await applyChannelBooking(db, env, ORG, cabin.id, booking)).applied, false)
     const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
     const moveInput = { ...input, idempotency_key: 'hostaway:source-2', check_in_date: '2027-07-01', check_out_date: '2027-07-04' }

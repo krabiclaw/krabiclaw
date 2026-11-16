@@ -1,11 +1,11 @@
 import { isStayAmenityCodes, NEW_HOME_CANCELLATION_POLICIES, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { assertResponsibleMember, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
-import { assertPublishedHost, hasPublishedHost } from '~/server/utils/public-provider'
+import { assertPublishedHost } from '~/server/utils/public-provider'
 import type { PaymentBasis, ProductBookingSetupInput } from '~/server/utils/availability'
 import { HTTPError } from 'nitro'
-import { AVAILABILITY_PAGE_DAYS, BOOKING_HORIZON_DAYS, MAX_STAY_NIGHTS, parseStayCalendarRules } from '~/shared/bookings'
-import { d1JsonArray, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { BOOKING_HORIZON_DAYS, MAX_STAY_NIGHTS, parseStayCalendarRules } from '~/shared/bookings'
+import { d1JsonArray, d1JsonValue, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
@@ -461,7 +461,6 @@ async function publicProductWindow(db: DbClient, organizationId: string, product
   }
   const paymentSetup = sharedPaymentSetup ?? (() => setup ??= readStripeCheckoutSetup(db, organizationId, requireEnv()))
   const needsReadiness = products.filter(product => bookableOnly ? Boolean(product.booking || product.order_url) || product.kind === 'stay' : product.kind === 'experience' || product.kind === 'stay' || Boolean(product.booking))
-  const { bookingScheduleScopes } = await import('~/server/utils/availability')
   const [activeLocationIds, currency, scheduledScopes] = await Promise.all([
     bookableOnly ? queryAll<{ id: string }>(db, "SELECT id FROM business_locations WHERE organization_id = ? AND status = 'active'", [organizationId]).then(rows => new Set(rows.map(location => location.id))) : undefined,
     needsReadiness.some(product => !product.order_url) ? organizationDefaultCurrency(db, organizationId) : undefined,
@@ -2175,6 +2174,43 @@ async function productCacheInvalidations(db: DbClient, organizationId: string, p
 // Publication and location relationships
 // ---------------------------------------------------------------------------
 
+/** Read which product scopes have a schedule, without projecting an entire catalog. */
+export async function bookingScheduleScopes(db: DbClient, organizationId: string, productIds: string[]): Promise<Map<string, Set<string | null>>> {
+  if (!productIds.length) return new Map()
+  const rows = await queryAll<{ product_id: string; location_id: string | null }>(db, `
+    WITH configured AS (
+      SELECT c.* FROM product_booking_configs c WHERE c.organization_id=? AND c.duration_minutes>0
+        AND c.product_id IN (SELECT value FROM json_each(?))
+        AND (c.scheduling_mode<>'provider' OR EXISTS (
+          SELECT 1 FROM member_scheduling ms WHERE ms.organization_id=c.organization_id AND ms.member_id=c.assigned_member_id
+            AND ms.timezone IS NOT NULL AND json_array_length(ms.weekly_json)>0))
+    )
+    SELECT c.product_id, pl.location_id FROM configured c
+      JOIN product_locations pl ON pl.organization_id=c.organization_id AND pl.product_id=c.product_id
+      JOIN business_locations l ON l.id=pl.location_id AND l.organization_id=c.organization_id
+      WHERE l.status='active' AND ((
+        c.seating_interval_minutes IS NOT NULL AND (json_array_length(l.opening_hours,'$.periods')>0 OR EXISTS (
+          SELECT 1 FROM json_each(l.special_hours) WHERE json_extract(value,'$.kind')='hours'
+            AND json_extract(value,'$.date')>=date('now','-1 day') AND json_array_length(value,'$.periods')>0))
+      ) OR (c.seating_interval_minutes IS NULL AND (
+        EXISTS (SELECT 1 FROM product_availability_rules r WHERE r.organization_id=c.organization_id
+          AND r.product_id=c.product_id AND r.location_id=pl.location_id AND COALESCE(r.capacity,c.default_capacity,1)>0)
+        OR EXISTS (SELECT 1 FROM product_sessions s WHERE s.organization_id=c.organization_id AND s.product_id=c.product_id
+          AND s.location_id=pl.location_id AND s.status='scheduled' AND COALESCE(s.capacity,1)>0
+          AND s.starts_at>strftime('%Y-%m-%dT%H:%M:%fZ','now',printf('+%d minutes',COALESCE(c.advance_notice_minutes,0)))
+          AND s.starts_at<strftime('%Y-%m-%dT%H:%M:%fZ','now',printf('+%d days',?))))))
+    UNION ALL
+    SELECT c.product_id, NULL FROM configured c WHERE c.held_online=1 AND c.scheduling_mode='provider'
+  `, [organizationId, d1JsonValue(productIds), BOOKING_HORIZON_DAYS])
+  const byProduct = new Map<string, Set<string | null>>()
+  for (const row of rows) {
+    const scopes = byProduct.get(row.product_id) ?? new Set()
+    scopes.add(row.location_id)
+    byProduct.set(row.product_id, scopes)
+  }
+  return byProduct
+}
+
 /**
  * Publish or withhold a product on one site.
  *
@@ -2210,7 +2246,7 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
     }
     missing.push(...setup.missing)
   }
-  const { bookingScheduleScopes, listBookableSessions, resolveBookingSession, sessionAllocationPredicate } = await import('~/server/utils/availability')
+  const { firstBookableOpening, sessionAllocationPredicate } = await import('~/server/utils/availability')
   const scheduled = options.scheduledScopes ?? (await bookingScheduleScopes(db, organizationId, [product.id])).get(product.id)
   if (!options.requireAllocation && !options.prepareAllocation) {
     if (!scopes.some(scope => scheduled?.has(scope))) missing.push('booking.schedule')
@@ -2220,23 +2256,13 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
   let allocation: BatchQuery | undefined
   if (product.booking?.duration_minutes && scopes.length && (scheduled?.size || options.prepareAllocation)) {
     const now = new Date().toISOString()
-    const start = Date.parse(now)
-    const end = start + BOOKING_HORIZON_DAYS * 86_400_000
-    const partySize = product.booking.party_size_min ?? 1
-    const scope = options.prepareAllocation ? 'publication' : 'bookable'
-    for (let from = start; from < end; from += AVAILABILITY_PAGE_DAYS * 86_400_000) {
-      const sessions = await listBookableSessions(db, {
-        env, organizationId, productId: product.id, locationId: options.locationId, now,
-        fromInstant: new Date(from).toISOString(), toInstant: new Date(Math.min(end, from + AVAILABILITY_PAGE_DAYS * 86_400_000)).toISOString(),
-      }, scope)
-      const candidate = sessions.find(session => scopes.includes(session.location_id) && (session.remaining === null || session.remaining >= partySize))
-      if (!candidate) continue
-      const resolved = await resolveBookingSession(db, { env, organizationId, productId: product.id, sessionId: candidate.id, locationId: candidate.location_id, actorId: 'system', now }, scope)
+    const first = await firstBookableOpening(db, env, { organizationId, productId: product.id, locationId: options.locationId, now, scope: options.prepareAllocation ? 'publication' : 'bookable' },
+      { match: session => scopes.includes(session.location_id) })
+    if (first) {
       allocation = await sessionAllocationPredicate(db, {
-        env, organizationId, productId: product.id, sessionId: candidate.id, partySize, now,
-        requireActive: Boolean(requireActive), resolved, preview: true,
+        env, organizationId, productId: product.id, sessionId: first.session.id, partySize: first.partySize, now,
+        requireActive: Boolean(requireActive), resolved: first.resolve('system'), preview: true,
       })
-      break
     }
   }
   if (allocation) {
@@ -2252,14 +2278,6 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
   // guarded batch. Ordinary publication still evaluates the current flags.
   if (!allocation || (!options.prepareAllocation && !(await queryFirst<{ ready: number }>(db, `SELECT (${allocation.query}) AS ready`, allocation.params))?.ready)) missing.push('booking.schedule')
   return { ready: missing.length === 0, missing, allocation }
-}
-
-/** The next publication blocker for an active experience. */
-export async function experiencePublicationBlocker(db: DbClient, organizationId: string, product: Product, env: CloudflareEnv): Promise<string | undefined> {
-  if (product.kind !== 'experience' || !product.active || product.order_url) return
-  const published = product.publications.some(publication => publication.organization_id === organizationId && publication.published)
-  if (!published && product.booking && !await hasPublishedHost(db, organizationId, product.booking)) return 'host'
-  return (await productBookingReadiness(db, organizationId, product, { requireAllocation: !published, env })).missing[0]
 }
 
 export async function setProductPublication(db: DbClient, input: {

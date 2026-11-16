@@ -10,6 +10,7 @@ import { normalizeVertical } from '~/utils/vertical-copy'
 import { dialsSameNumber } from '~/utils/phone'
 import { PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
 import { defineHandler } from 'nitro'
+import { isInsightsClick } from '~/shared/insights'
 
 // Only public interactions arrive here; every outcome is produced by the server, and signed-in
 // product-usage events have their own authenticated endpoint.
@@ -41,8 +42,8 @@ export default defineHandler(async (event) => {
   const pageEventId = body.page_event_id === undefined ? null : body.page_event_id
   if (pageEventId !== null && !isCanonicalEventId(pageEventId)) return jsonResponse({ error: 'page_event_id must be a UUID' }, { status: 400 })
   if (!VALID_EVENTS.has(eventName)) return jsonResponse({ error: 'Invalid event_name' }, { status: 400 })
-  const organization = await queryFirst<{ id: string; vertical: string | null }>(db,
-    `SELECT id, vertical FROM organization WHERE id = ? AND status = 'active' AND onboarding_status = 'active' LIMIT 1`, [organizationId])
+  const organization = await queryFirst<{ id: string; vertical: string | null; timezone: string }>(db,
+    `SELECT id, vertical, timezone FROM organization WHERE id = ? AND status = 'active' AND onboarding_status = 'active' LIMIT 1`, [organizationId])
   if (!organization || !normalizeVertical(organization.vertical)) return jsonResponse({ error: 'Organization not found' }, { status: 404 })
 
   const ipHash = await hashClientIp(getClientIp(event))
@@ -100,22 +101,19 @@ export default defineHandler(async (event) => {
     if (!product || !destinationHost(product.order_url)) return jsonResponse({ error: 'Product not found' }, { status: 404 })
     const destinationHostname = new URL(product.order_url).hostname.toLowerCase()
     entityType = 'product'; ctaDestination = destinationHostname; pageType = 'product'; metadata = { product_id: product.id, destination_hostname: destinationHostname }
-  } else if (eventName === 'product_view' || eventName === 'checkout_start') {
-    stage = eventName === 'product_view' ? 'viewed' : 'started'
+  } else if (eventName === 'checkout_start') {
+    stage = 'started'
     locationId = cleanString(body.location_id, 120) || null
     entityId = cleanString(body.product_id, 120) || null
     if (!entityId) return jsonResponse({ error: 'product_id is required' }, { status: 400 })
-    // A view may precede location selection or observe a published paused
-    // offering. Checkout requires an active offering at its actual scope.
+    // Checkout requires an active offering at its actual scope.
     const product = await queryFirst<{ id: string }>(db, `
       SELECT p.id FROM products p
       JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id AND pub.organization_id = ? AND pub.published = 1
-      WHERE p.id = ? AND ${PUBLIC_PRODUCT_SQL}${eventName === 'checkout_start' ? ' AND p.active = 1' : ''} AND ${locationId
+      WHERE p.id = ? AND ${PUBLIC_PRODUCT_SQL} AND p.active = 1 AND ${locationId
         ? `EXISTS (SELECT 1 FROM product_locations pl JOIN business_locations bl ON bl.id = pl.location_id AND bl.organization_id = pl.organization_id
-             WHERE pl.product_id = p.id AND pl.organization_id = p.organization_id AND pl.location_id = ? AND pl.published = 1${eventName === 'checkout_start' ? ' AND pl.active = 1' : ''} AND bl.status = 'active')`
-        : `(p.order_url IS NOT NULL OR EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.product_id = p.id AND cfg.organization_id = p.organization_id AND cfg.held_online = 1)
-            ${eventName === 'product_view' ? `OR EXISTS (SELECT 1 FROM product_locations pl JOIN business_locations bl ON bl.id = pl.location_id AND bl.organization_id = pl.organization_id
-              WHERE pl.product_id = p.id AND pl.organization_id = p.organization_id AND pl.published = 1 AND bl.status = 'active')` : ''})`}
+             WHERE pl.product_id = p.id AND pl.organization_id = p.organization_id AND pl.location_id = ? AND pl.published = 1 AND pl.active = 1 AND bl.status = 'active')`
+        : `(p.order_url IS NOT NULL OR EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.product_id = p.id AND cfg.organization_id = p.organization_id AND cfg.held_online = 1))`}
       LIMIT 1`, [organizationId, entityId, ...(locationId ? [locationId] : [])])
     if (!product) return jsonResponse({ error: 'Product not found' }, { status: 404 })
     entityType = 'product'; pageType = 'product'
@@ -125,20 +123,6 @@ export default defineHandler(async (event) => {
       if (!variant) return jsonResponse({ error: 'Variant not found' }, { status: 404 })
       variantId = variant.id
     }
-  } else if (eventName === 'link_click') {
-    stage = 'external_handoff'
-    entityId = cleanString(body.link_item_id, 120) || null
-    if (!entityId) return jsonResponse({ error: 'link_item_id is required' }, { status: 400 })
-    const link = await queryFirst<{ id: string; label: string; destination: string; sort_order: number; page_path: string }>(db, `SELECT b.id, (b.data_json ->> '$.label') AS label, (source.data_json ->> '$.url') AS destination, source.position AS sort_order, d.path AS page_path
-      FROM content_blocks b JOIN content_documents d ON d.id = b.document_id
-      JOIN content_documents root ON root.id = COALESCE(d.root_id,d.id)
-      JOIN content_blocks source ON source.id = COALESCE(b.source_block_id,b.id)
-      WHERE b.id = ? AND d.organization_id = ? AND b.type = 'cta' AND root.kind = 'page' AND root.row_role = 'root'
-        AND (root.metadata_json ->> '$.recipe') = 'links' AND (source.data_json ->> '$.status') = 'active' LIMIT 1`, [entityId, organizationId])
-    const host = link ? destinationHost(link.destination) : null
-    if (!link || !host) return jsonResponse({ error: 'Link item not found' }, { status: 404 })
-    entityType = 'content_block'; ctaDestination = host; pageType = 'links'; pagePath = link.page_path
-    metadata = { link_label: link.label, position: Number(link.sort_order) + 1, destination_hostname: host }
   } else if (eventName === 'donation_click') {
     stage = 'external_handoff'
     const documentId = cleanString(body.document_id, 120)
@@ -210,11 +194,14 @@ export default defineHandler(async (event) => {
     return jsonResponse({ error: 'Submission conversions are server-produced' }, { status: 400 })
   }
 
-  const result = await recordOrganizationConversionEvent(db, event.req, {
-    organizationId: organization.id, eventName: eventName as OrganizationConversionEventName,
-    stage, locationId, entityType, entityId, pageType, pagePath, ctaDestination, metadata, surface: 'website',
-    id: eventId, originEventId: pageEventId, variantId,
-    occurredAt: boundedOccurrence(body.occurred_at, new Date().toISOString()),
-  })
+  const name = eventName as OrganizationConversionEventName
+  const fields = {
+    organizationId: organization.id, stage, locationId, entityType, entityId, pageType, pagePath, ctaDestination, metadata, surface: 'website' as const,
+    id: eventId, originEventId: pageEventId, variantId, occurredAt: boundedOccurrence(body.occurred_at, new Date().toISOString()),
+  }
+  // A click Insights counts is counted on the business's local day.
+  const result = await recordOrganizationConversionEvent(db, event.req, isInsightsClick(name)
+    ? { ...fields, eventName: name, timezone: organization.timezone }
+    : { ...fields, eventName: name })
   return jsonResponse({ success: true, id: result.id, recorded: result.created }, { status: result.created ? 201 : 200 })
 })

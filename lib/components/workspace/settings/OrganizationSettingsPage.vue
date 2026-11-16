@@ -53,9 +53,9 @@
             <p class="mt-0.5 text-sm text-muted">{{ pagesSummary }}</p>
           </div>
 
-          <!-- Image Fan Stack -->
-          <div v-if="previewImages.length > 0" class="relative flex items-center justify-center h-44 sm:h-52 my-3 select-none">
-            <!-- Left image -->
+          <!-- Image Fan Stack (always renders 3 fanned cards) -->
+          <div class="relative flex items-center justify-center h-44 sm:h-52 my-3 select-none">
+            <!-- Left card (photo if >= 3 images, otherwise placeholder) -->
             <img
               v-if="previewImages.length >= 3"
               :src="previewImages[0]"
@@ -64,7 +64,12 @@
               loading="lazy"
               decoding="async"
             />
-            <!-- Right image -->
+            <div
+              v-else
+              class="absolute left-1/2 -translate-x-[115%] w-36 sm:w-44 h-28 sm:h-36 rounded-2xl bg-[#F7F7F7] dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-700/60 shadow-md -rotate-6 opacity-90 transition-transform group-hover:-rotate-8 group-hover:-translate-x-[120%]"
+            />
+
+            <!-- Right card (photo if >= 2 images, otherwise placeholder) -->
             <img
               v-if="previewImages.length >= 2"
               :src="previewImages.length >= 3 ? previewImages[2] : previewImages[1]"
@@ -73,33 +78,23 @@
               loading="lazy"
               decoding="async"
             />
-            <!-- Center image with badge -->
-            <div class="relative w-40 sm:w-48 h-32 sm:h-40 rounded-2xl overflow-hidden shadow-xl border-2 border-white/20 z-10 transition-transform group-hover:scale-105">
+            <div
+              v-else
+              class="absolute left-1/2 translate-x-[15%] w-36 sm:w-44 h-28 sm:h-36 rounded-2xl bg-[#F7F7F7] dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-700/60 shadow-md rotate-6 opacity-90 transition-transform group-hover:rotate-8 group-hover:translate-x-[20%]"
+            />
+
+            <!-- Center card with badge (photo if >= 1 image, otherwise placeholder with icon) -->
+            <div class="relative w-40 sm:w-48 h-32 sm:h-40 rounded-2xl overflow-hidden bg-[#F7F7F7] dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-700/60 shadow-xl z-10 flex items-center justify-center transition-transform group-hover:scale-105">
               <img
+                v-if="previewImages.length > 0"
                 :src="previewImages.length >= 3 ? previewImages[1] : previewImages[0]"
                 alt=""
                 class="size-full object-cover"
                 loading="lazy"
                 decoding="async"
               />
-              <span class="absolute top-2.5 left-2.5 bg-white/95 dark:bg-neutral-900/95 text-neutral-900 dark:text-neutral-100 shadow-sm text-xs font-semibold px-2.5 py-1 rounded-full">
-                {{ pagesCount }} {{ pagesCount === 1 ? 'page' : 'pages' }}
-              </span>
-            </div>
-          </div>
-          <!-- Image Fan Stack (Placeholder when no images) -->
-          <div v-else class="relative flex items-center justify-center h-44 sm:h-52 my-3 select-none">
-            <!-- Left placeholder card -->
-            <div
-              class="absolute left-1/2 -translate-x-[115%] w-36 sm:w-44 h-28 sm:h-36 rounded-2xl bg-[#F7F7F7] dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-700/60 shadow-md -rotate-6 opacity-90 transition-transform group-hover:-rotate-8 group-hover:-translate-x-[120%]"
-            />
-            <!-- Right placeholder card -->
-            <div
-              class="absolute left-1/2 translate-x-[15%] w-36 sm:w-44 h-28 sm:h-36 rounded-2xl bg-[#F7F7F7] dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-700/60 shadow-md rotate-6 opacity-90 transition-transform group-hover:rotate-8 group-hover:translate-x-[20%]"
-            />
-            <!-- Center placeholder card with icon and badge -->
-            <div class="relative w-40 sm:w-48 h-32 sm:h-40 rounded-2xl overflow-hidden bg-[#F7F7F7] dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-700/60 shadow-xl z-10 flex items-center justify-center transition-transform group-hover:scale-105">
               <UIcon
+                v-else
                 name="i-lucide-image"
                 class="size-10 sm:size-12 text-neutral-300 dark:text-neutral-600 transition-transform duration-300 group-hover:scale-110"
               />
@@ -427,7 +422,6 @@
             data-testid="confirm-status-toggle"
             @click="toggleStatusFromModal"
           />
-          <UButton v-if="publishingFromToday" label="Preview" color="neutral" variant="ghost" block :to="todayPath" />
           <UButton
             label="Cancel"
             color="neutral"
@@ -651,8 +645,6 @@ const form = reactive<OrganizationSettingsForm>({
 
 const statusModalOpen = ref(false)
 const togglingStatus = ref(false)
-const publishingFromToday = computed(() => route.query.publish === '1')
-const todayPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.org_slug))}`)
 const isPublished = computed(() => form.status === 'active')
 const statusLabel = computed(() => {
   if (form.status === 'active') return 'Published'
@@ -679,7 +671,6 @@ async function toggleStatusFromModal() {
     await patchSettings({ status: nextStatus })
     form.status = nextStatus
     statusModalOpen.value = false
-    if (nextStatus === 'active' && publishingFromToday.value) await navigateTo(todayPath.value)
   } catch (error) {
     editorError.value = getErrorMessage(error, 'Failed to update website status')
   } finally {
@@ -908,7 +899,7 @@ const navigationGroups = computed(() => {
 
 const autoOpenDestination = computed(() => {
   if (surface.value === 'settings') {
-    return publishingFromToday.value ? { path: pagesPath.value, query: { publish: '1' } } : pagesPath.value
+    return pagesPath.value
   }
   return navigationGroups.value[0]?.items.find(item => item.to)?.to ?? null
 })
@@ -1026,9 +1017,6 @@ watch(settingsResource, (resource) => {
   if (!resource) return
   fillForm(resource.settings.settings)
   originalSignature.value = editorSignature(detailKey.value)
-}, { immediate: true })
-watch([() => loadedSettings.value?.status, publishingFromToday], ([status, requested]) => {
-  if (props.surface === 'settings' && status === 'inactive' && requested) statusModalOpen.value = true
 }, { immediate: true })
 watch(detailKey, () => resetDraft())
 

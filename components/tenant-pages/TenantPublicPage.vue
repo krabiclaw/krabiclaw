@@ -126,7 +126,7 @@ function serviceContent(canBook: boolean): PublicTenantPage {
 
 // The locale representations of the page this instance is showing, written the
 // way every other public route writes them (pages/blog/[slug].vue,
-// pages/posts/[slug].vue, pages/links.vue, layouts/blawby.vue): once, in setup.
+// pages/posts/[slug].vue, layouts/blawby.vue): once, in setup.
 //
 // Not a watcher, and above all not a `watchEffect`: calling `useState` inside
 // the effect read the payload entry the effect then wrote, so the effect was

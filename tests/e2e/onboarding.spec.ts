@@ -1,5 +1,5 @@
-import { expect, test, type APIRequestContext } from '@playwright/test'
-import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { dismissPreviewToolbar } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest, publishOwnHostProfile } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
@@ -47,6 +47,14 @@ test.afterEach(async () => {
     await release?.()
   }
 })
+
+/** Publishes the website from its status card, as an owner does, and reads the status back. */
+async function publishWebsite(page: Page, slug: string) {
+  await page.goto(`/dashboard/${slug}/website`)
+  await page.getByTestId('website-status-banner').click()
+  await page.getByTestId('confirm-status-toggle').click()
+  await expect(page.getByTestId('website-status-banner')).toContainText('Published')
+}
 
 test('a new owner builds a draft and creates a site through the routed flow', async ({ page, request, baseURL, browser, playwright }) => {
   test.setTimeout(60_000)
@@ -245,38 +253,22 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   const context = await (await page.request.get('/api/dashboard/context', { params: { org: created!.slug } })).json() as { organization: { subdomain: string | null } }
   expect(context.organization.subdomain).toBe(subdomain)
 
-  const website = page.getByTestId('today-website')
-  await expect(website).toContainText('Private')
+  // A new business has nothing booked and cannot take payment yet: Today is its setup, and the site stays private until it is published.
+  await expect(page.getByTestId('today-title')).toHaveText('Finish setting up to take bookings')
+  const payments = page.locator(`[data-item-id="payments.connect:${organizationId}"]`)
+  await expect(payments).toContainText('Set up payments')
+  await expect(payments.getByRole('link').first()).toHaveAttribute('href', /\/payments\/payout-method$/)
   const stillPrivate = await readLocalTenant(request, subdomain, '/')
   expect(stillPrivate.status()).toBe(404)
   expect(await stillPrivate.text()).not.toContain(name)
-  await expect(website.frameLocator('iframe').locator('body')).toContainText(name)
-  const suggestions = page.getByTestId('today-opportunities')
-  await expect(suggestions.getByRole('link', { name: /Set up payments/ })).toHaveAttribute('href', /\/payments\/payout-method$/)
-  await suggestions.getByRole('link', { name: /Connect a custom domain/ }).click()
+  // The domain page offers the plan that includes a custom domain.
+  await page.goto(`/dashboard/${created!.slug}/website/preferences/domains`)
   await expect(page.getByRole('link', { name: 'View plans' })).toHaveAttribute('href', /\/billing\/upgrade\?plan=growth$/)
   await expect(page.getByRole('button', { name: 'Connect domain' })).toHaveCount(0)
   await expect(page.getByText('Private', { exact: true })).toBeVisible()
   await page.getByRole('link', { name: 'View plans' }).click()
   await expect(page.getByRole('radio', { name: /^Growth/ })).toBeChecked()
-  await page.goto(`/dashboard/${created!.slug}`)
-  await website.getByRole('link', { name: 'Publish website' }).click()
-  const previewPageviews: string[] = []
-  page.on('request', (outgoing) => {
-    if (new URL(outgoing.url()).pathname === '/api/analytics/track' && outgoing.frame().parentFrame() === page.mainFrame()) {
-      previewPageviews.push(outgoing.url())
-    }
-  })
-  await page.getByRole('button', { name: 'Make public' }).click()
-  await expect(website).toContainText('Live')
-  const previewFrame = website.locator('iframe')
-  await expect(previewFrame).toHaveAttribute('src', /[?&]preview_token=/)
-  await expect(website.frameLocator('iframe').locator('body')).toContainText(name)
-  const frame = await (await previewFrame.elementHandle())?.contentFrame()
-  if (!frame) throw new Error('Today did not load its website preview')
-  await waitForNuxtHydration(frame)
-  expect(previewPageviews).toEqual([])
-  const visit = website.getByRole('link', { name: 'View website' })
+  await publishWebsite(page, created!.slug)
   const publicAddress = new URL(baseURL!)
   publicAddress.hostname = subdomain + '.' + publicAddress.hostname
   const draftDishName = 'Preview-only tamarind prawns'
@@ -291,22 +283,12 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   const { product: { id: dishId } } = await draftDish.json() as { product: Product }
   const placement = await page.request.put(`${catalogUrl}/products/${dishId}/locations/${locationId}`, { data: { active: true, published: false } })
   expect(placement.status(), await placement.text()).toBe(200)
-  const expandedPromise = page.waitForEvent('popup')
-  await website.getByRole('link', { name: 'Website preview' }).click()
-  const expanded = await expandedPromise
-  await expect(expanded.locator('body')).toContainText(name)
-  const menuAddress = new URL('/menu', publicAddress)
-  await expanded.goto(menuAddress.href)
-  await expect(expanded.getByText(draftDishName, { exact: true })).toBeVisible()
-  const publicPagePromise = page.waitForEvent('popup')
-  await visit.click()
-  const publicPage = await publicPagePromise
-  await expect(publicPage).toHaveURL(publicAddress.href)
-  await publicPage.goto(menuAddress.href)
+  // The public menu shows what is published and not the unpublished dish.
+  const publicPage = await browser.newPage()
+  await publicPage.goto(new URL('/menu', publicAddress).href)
   await expect(publicPage.getByText('Grilled squid', { exact: true })).toBeVisible()
   await expect(publicPage.getByText(draftDishName, { exact: true })).toHaveCount(0)
   await publicPage.close()
-  await expanded.close()
   // Publishing makes the same site public, without a preview token.
   const live = await readLocalTenant(request, subdomain, '/')
   expect(live.status()).toBe(200)
@@ -446,7 +428,6 @@ for (const setup of [
         const exit = page.getByRole('button', { name: 'Save & exit', exact: true })
         const section = page.getByRole('textbox', { name: 'Section name', exact: true })
         const dish = page.getByRole('textbox', { name: 'Dish name', exact: true })
-        const resume = page.getByRole('link', { name: 'Continue your menu setup', exact: true })
         await page.goto(guide.href)
         await section.fill('Lunch menu')
         await exit.click()
@@ -460,9 +441,7 @@ for (const setup of [
         await exit.click()
         await expect(page).toHaveURL(`${baseURL}${caller}`)
 
-        await page.goto(`/dashboard/${org}`)
-        await resume.click()
-        await expect(page).toHaveURL(url => url.searchParams.get('location_id') === mainLocation)
+        await page.goto(guide.href)
         await dish.fill('Tamarind prawns')
         const next = page.getByRole('button', { name: 'Next', exact: true })
         await next.click()
@@ -477,9 +456,7 @@ for (const setup of [
         await page.getByText('Lunch menu', { exact: true }).click()
         await expect(page.getByText('Tamarind prawns', { exact: true })).toBeVisible()
 
-        await page.goto(`/dashboard/${org}`)
-        await resume.click()
-        await expect(page).toHaveURL(url => url.searchParams.get('location_id') === branchLocation)
+        await page.goto(branchGuide.href)
         await expect(dish).toBeVisible()
       }
       if (setup.vertical === 'experience') {
@@ -904,11 +881,7 @@ test('an owner changes their restaurant draft to lodging and saves their first h
   await expect(page.getByRole('link', { name: /Publish listing/ })).toBeVisible()
   const published = await page.request.put(`${productUrl}/publication`, { data: { published: true } })
   expect(published.status(), await published.text()).toBe(200)
-  await page.goto(`/dashboard/${created!.slug}`)
-  const website = page.getByTestId('today-website')
-  await website.getByRole('link', { name: 'Publish website' }).click()
-  await page.getByRole('button', { name: 'Make public' }).click()
-  await expect(website).toContainText('Live')
+  await publishWebsite(page, created!.slug)
   const subdomain = (await context.json() as { organization: { subdomain: string } }).organization.subdomain
   const guestPage = await readLocalTenant(request, subdomain, `/stays/${listing.slug}`)
   expect(guestPage.status(), await guestPage.text()).toBe(200)

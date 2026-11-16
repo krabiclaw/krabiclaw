@@ -43,6 +43,34 @@
       "when": 1794638164396,
       "tag": "0005_index_support_conversation_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794721699590,
+      "tag": "0006_drop_content_documents_links_org_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794726494346,
+      "tag": "0007_drop_goals_opportunities_and_retired_task_kinds",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794733451287,
+      "tag": "0008_insights_counters_and_booking_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794740017877,
+      "tag": "0009_drop_task_outcome_note_and_photos",
+      "breakpoints": true
     }
   ]
 }

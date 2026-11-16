@@ -1,7 +1,7 @@
 import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { queryAll, type DbClient } from '~/server/db'
 import {
-  articleCategoryEditorPath, blogEditorPath, brandEditorPath, collectionEditorPath, linksEditorPath,
+  articleCategoryEditorPath, blogEditorPath, brandEditorPath, collectionEditorPath,
   locationEditorPath, pageEditorPath, postEditorPath, productEditorPath, qaEditorPath,
 } from '~/server/utils/dashboard-links'
 import { getPersistedSourceLocale } from '~/server/utils/localization'
@@ -97,7 +97,7 @@ export async function getOrganizationLocalizationProgress(
   const source = await getPersistedSourceLocale(db, input.organizationId)
   if (input.locale === source.locale) throw new Error('Localization progress requires an additional language')
   const params = [input.locale, input.organizationId]
-  const [organization, locations, catalog, collections, posts, blog, categories, qa, links, pages] = await Promise.all([
+  const [organization, locations, catalog, collections, posts, blog, categories, qa, pages] = await Promise.all([
     queryAll<LocalizableRow>(db, `SELECT s.id, s.name, s.vertical, s.brand_description, rl.values_json
       FROM organization s LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'organization' AND rl.resource_id = s.id AND rl.locale = ?
         AND rl.organization_id = s.id
@@ -149,20 +149,6 @@ export async function getOrganizationLocalizationProgress(
       FROM content_documents q
       LEFT JOIN content_documents t ON t.root_id = q.id AND t.row_role = 'representation' AND t.locale = ?
       WHERE q.organization_id = ? AND q.kind = 'qa' AND q.row_role = 'root' AND q.status = 'published' ORDER BY q.id`, params),
-    queryAll<LocalizableRow>(db, `
-      SELECT p.id, p.title, NULL AS label,
-        CASE WHEN t.id IS NULL THEN NULL ELSE json_object('title',t.title) END AS values_json
-      FROM content_documents p
-      LEFT JOIN content_documents t ON t.root_id = p.id AND t.row_role = 'representation' AND t.locale = ?
-      WHERE p.organization_id = ? AND p.row_role = 'root' AND p.kind = 'page' AND p.metadata_json ->> '$.recipe' = 'links'
-      UNION ALL
-      SELECT p.id, NULL AS title, b.data_json ->> '$.label' AS label,
-        CASE WHEN tb.id IS NULL THEN NULL ELSE json_object('label',tb.data_json ->> '$.label') END AS values_json
-      FROM content_documents p JOIN content_blocks b ON b.document_id = p.id AND b.type = 'cta'
-      LEFT JOIN content_documents t ON t.root_id = p.id AND t.row_role = 'representation' AND t.locale = ?
-      LEFT JOIN content_blocks tb ON tb.document_id = t.id AND tb.source_block_id = b.id
-      WHERE p.organization_id = ? AND p.row_role = 'root' AND p.kind = 'page' AND p.metadata_json ->> '$.recipe' = 'links'
-        AND b.data_json ->> '$.status' = 'active'`, [...params, ...params]),
     queryAll<LocalizableRow>(db, `SELECT source.id, source.product_id, source.title, source.summary,
         CASE WHEN translated.id IS NULL THEN NULL ELSE json_object(
           'title', translated.title, 'summary', translated.summary,
@@ -171,8 +157,7 @@ export async function getOrganizationLocalizationProgress(
         (SELECT json_group_array(json(block.data_json)) FROM content_blocks block WHERE block.document_id = source.id) AS content
       FROM content_documents source
       LEFT JOIN content_documents translated ON translated.root_id = source.id AND translated.row_role = 'representation' AND translated.locale = ?
-      WHERE source.organization_id = ? AND source.row_role = 'root' AND source.kind = 'page'
-        AND (source.metadata_json ->> '$.recipe' IS NULL OR source.metadata_json ->> '$.recipe' <> 'links') ORDER BY source.id`, params),
+      WHERE source.organization_id = ? AND source.row_role = 'root' AND source.kind = 'page' ORDER BY source.id`, params),
   ])
 
   const slug = input.organizationSlug
@@ -193,7 +178,6 @@ export async function getOrganizationLocalizationProgress(
     { id: 'blog', label: 'Blog', result: progress(blog, ['title', 'summary']), path: (row: LocalizableRow) => blogEditorPath(slug, row.id) },
     { id: 'article-categories', label: 'Article categories', result: progress(categories, ['name', 'description']), path: (row: LocalizableRow) => articleCategoryEditorPath(slug, row.id) },
     { id: 'qa', label: 'Q&A', result: progress(qa, ['title', 'summary']), path: (row: LocalizableRow) => qaEditorPath(slug, row.id) },
-    { id: 'links', label: 'Links', result: progress(links, ['title', 'label']), path: () => linksEditorPath(slug) },
   ]
   const results = groups
     .map(group => opportunity(group.id, group.label, group.result, group.path, input.locale))

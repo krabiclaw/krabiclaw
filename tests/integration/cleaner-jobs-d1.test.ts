@@ -104,8 +104,8 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.deepEqual([thread.name, thread.booking_id, thread.participants.map(person => person.id).sort(), await isUnread(db, cleaner, thread.id)], [null, dee.id, ['admin', 'cleaner', 'owner'], true])
     const [job] = await automatic(thread.id)
     assert.equal(job!.key, jobKey(turnover))
-    assert.match(job!.body, /^Turnover: Cabin\n/)
-    assert.match(job!.body, /Checkout 10:00 AM · Dee\nCheck-in 3:00 PM · Lee · 1 guest/)
+    const checkoutDay = new Intl.DateTimeFormat('en', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${day(3)}T12:00:00Z`)).replace(',', '')
+    assert.equal(job!.body, `Clean Cabin after Dee checks out, ${checkoutDay}, 10:00 AM.`)
     const messages = (await conversationPageFor(db, cleaner, thread.id)).entries.filter(entry => entry.type === 'message').reverse()
     assert.deepEqual([messages[0]!.automatic, messages[0]!.author_user_id], [true, null])
     // The hosts read along, and it is unread for them too until they do.
@@ -121,8 +121,8 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
 
     // The evening before, the morning of, and the warning to the hosts two hours before Lee arrives; each once.
     for (const [when, key, pattern] of [
-      [at(day(2), '18:05'), `reminder:${turnover.id}:evening:${day(3)}`, /^Tomorrow: turnover at Cabin, 10:00 AM – 3:00 PM\.$/],
-      [at(day(3), '08:05'), `reminder:${turnover.id}:morning:${day(3)}`, /^Today: turnover at Cabin, 10:00 AM – 3:00 PM\.$/],
+      [at(day(2), '18:05'), `reminder:${turnover.id}:evening:${day(3)}`, /^Tomorrow: clean Cabin after the 10:00 AM checkout\.$/],
+      [at(day(3), '08:05'), `reminder:${turnover.id}:morning:${day(3)}`, /^Today: clean Cabin after the 10:00 AM checkout\.$/],
       [at(day(3), '13:05'), `warning:${turnover.id}:${turnover.due_at}`, /^Cabin is not marked done and the next guests arrive at 3:00 PM\.$/],
     ] as const) {
       await runOrganizationJobs(env, db, ORG, when)
@@ -143,13 +143,13 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     const cookThreads = (await teamThreads(cook)).filter(item => item.booking_id === dee.id)
     assert.equal(cookThreads.length, 1)
     assert.deepEqual(cookThreads[0]!.participants.map(person => person.id).sort(), ['admin', 'cook', 'owner'])
-    assert.equal((await automatic(cookThreads[0]!.id)).find(message => message.key === jobKey(turnover))?.body.split('\n')[0], 'Turnover: Cabin')
+    assert.equal((await automatic(cookThreads[0]!.id)).find(message => message.key === jobKey(turnover))?.body, `Clean Cabin after Dee checks out, ${checkoutDay}, 10:00 AM.`)
 
-    // Done: the cook's note is their own message in the conversation, and nobody is alerted.
-    const closed = await closeTask(db, await taskViewer(principal('cook', 'member')), turnover.id, { status: 'done', note: 'All clean, towels restocked', photos: [], env })
+    // Done, in one tap: "Done" is the cook's own message in the conversation, and nobody is alerted.
+    const closed = await closeTask(db, await taskViewer(principal('cook', 'member')), turnover.id, { status: 'done', env })
     assert.equal(closed.status, 'done')
     const cookMessages = (await conversationPageFor(db, cook, cookThreads[0]!.id)).entries.filter(entry => entry.type === 'message').reverse()
-    assert.deepEqual([cookMessages[0]!.author_user_id, cookMessages[0]!.automatic, cookMessages[0]!.body, cookMessages[0]!.deliveries], ['cook', false, 'All clean, towels restocked', []])
+    assert.deepEqual([cookMessages[0]!.author_user_id, cookMessages[0]!.automatic, cookMessages[0]!.body, cookMessages[0]!.deliveries], ['cook', false, 'Done', []])
     assert.equal((await taskRow(`turnover:${dee.id}`))!.status, 'done')
     // The cook's own message reads the conversation through for them and is unread for the hosts; the cleaner, no longer seated with it, never sees it.
     assert.equal(await isUnread(db, owner, cookThreads[0]!.id), true)
@@ -217,7 +217,7 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,default_capacity,confirmation_mode,held_online,scheduling_mode,assigned_member_id,online_payment_required,created_by,updated_by) VALUES('product',?,'slot',60,1,'review',1,'provider','host-member',1,'host','host')").bind(ORG).run()
     await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by) VALUES('session',?,'product','America/New_York','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z',1,'scheduled','host','host')").bind(ORG).run()
     const opening = { id: 'consult-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: null, payload: threadPayloadForGuest({ name: 'Client', email: 'client@example.test' }), created_at: NOW }
-    const booking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1,
+    const booking = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1,
       following: bookingId => requestInsertQueries({ ...opening, booking_id: bookingId }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Consultation for 1', note: null }) })
     const jobs = async () => (await db.prepare("SELECT kind, subject_type, subject_id, assigned_member_id, starts_at, status FROM tasks WHERE kind IN ('consultation_prep', 'consultation_follow_up') ORDER BY kind").all<{ kind: string; status: string }>()).results
     const recompute = () => executeBatch(db, conversationTaskQueries(opening.id, new Date().toISOString()), { operation: 'Recompute consultation jobs' })
@@ -280,7 +280,7 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     await db.prepare("UPDATE bookings SET status = 'cancelled', cancelled_at = ? WHERE id = ?").bind(NOW, booking.bookingId).run()
     await recompute()
     const replacement = { ...opening, id: 'replacement-request', payload: threadPayloadForGuest({ name: 'Replacement Client', email: 'replacement@example.test' }) }
-    const newBooking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1,
+    const newBooking = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1,
       following: bookingId => requestInsertQueries({ ...replacement, booking_id: bookingId }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Consultation for 1', note: null }) })
     await db.prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?").bind(newBooking.bookingId).run()
     await executeBatch(db, conversationTaskQueries(replacement.id, new Date().toISOString()), { operation: 'Recompute replacement consultation jobs' })
@@ -294,8 +294,8 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
       .bind(newThread, `job:${prep!.id}:*`).first<string>('id')
     assert.ok((await messages(newThread)).some(message => message.id === reassignedPost && message.automatic && message.body?.includes('Replacement')))
     const viewer = await taskViewer(attorney)
-    const outcome = 'Private completion note for the current client'
-    assert.equal((await closeTask(db, viewer, prep!.id, { status: 'done', note: outcome, photos: [], env })).status, 'done')
+    const outcome = 'Done'
+    assert.equal((await closeTask(db, viewer, prep!.id, { status: 'done', env })).status, 'done')
     assert.ok((await messages(newThread)).some(message => message.body === outcome))
     assert.ok((await messages(oldThread)).every(message => message.body !== outcome))
   } finally { await runtime.dispose() }

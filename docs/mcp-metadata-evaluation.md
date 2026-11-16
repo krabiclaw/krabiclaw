@@ -57,7 +57,7 @@ unpaid substitutes, or publish to an unrequested social audience.
 | `get_member_scheduling` | Show this team member's working hours and time off. | When is this person available to take appointments? | Change their weekly working hours. |
 | `get_member_public_profile` | Show this member's authored host profile and publication approval. | What name and biography have we saved for this host, including an unpublished draft? | Read their Better Auth account profile or working hours. |
 | `get_organization` | Show our business's identity and public website address. | Which public website belongs to the business we're managing? | Change the website's brand colors. |
-| `get_organization_analytics` | Give me our website performance overview for last month. | How has our website been doing lately? | Show only visits from this campaign, grouped by country. |
+| `get_organization_analytics` | Show our cancellation rate for last month. | Where did the bookings we got this month come from? | Show only visits from this campaign, grouped by country. |
 | `list_media_assets` | Show the photos already saved in our media library. | Do we already have a picture I can use on this page? | Save this newly attached image from the conversation. |
 | `get_organization_settings` | Show our current website settings. | What font, colors and visitor popup are we using? | Turn on a visitor popup with this message. |
 | `get_payment` | Show the details of this customer payment, including refunds. | What did this customer buy, and has any of it been refunded? | Issue a refund for this payment. |
@@ -95,7 +95,6 @@ unpaid substitutes, or publish to an unrequested social audience.
 | `publish_blog_post` | Publish this reviewed Blog article on our website. | The long guide looks good. Make it public on the blog. | Post it to Facebook as well without me requesting that. |
 | `publish_post` | Publish this reviewed short post to our website only. | This announcement is ready. Put it on our site, and nowhere else. | Publish it to every connected social account automatically. |
 | `put_resource_localization` | Replace this resource's Thai translation with the supplied wording. | Use this finished Thai version for that product description. | Edit authored FAQ content through the translation tool. |
-| `query_organization_analytics` | Show visits from this campaign last month, grouped by country. | Which countries brought us visitors from that specific promotion? | Give only a general website overview without the requested filters. |
 | `query_google_analytics` | Compare our Google Analytics sessions and users this October with last October. | How did traffic before we moved to KrabiClaw compare with now? | Show KrabiClaw's own visitor counts for last week. |
 | `query_search_console` | Show the search queries that brought us clicks from Google last month, with impressions and average position. | Which Google searches is our site showing up for? | Show what our Google Ads campaigns spent. |
 | `query_google_ads_report` | Show the search terms our ads appeared for last month, with clicks and spend. | Which searches triggered our ads, and which landing pages did they go to? | Pause the campaign that spent the most. |

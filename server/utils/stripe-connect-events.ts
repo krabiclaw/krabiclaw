@@ -2,6 +2,7 @@ import type Stripe from 'stripe'
 import type { DbClient } from '~/server/db'
 import { getStripeConnectedAccountByStripeId, refreshStripeConnectedAccount } from '~/server/utils/stripe-connect'
 import { processStripeWebhookEvent } from '~/server/utils/stripe-webhook-events'
+import { publishBusinessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 
 const CONNECT_ACCOUNT_EVENT_TYPES = new Set([
   'v2.core.account.updated',
@@ -23,6 +24,7 @@ async function connectedAccountId(notification: Stripe.V2.Core.EventNotification
 }
 
 export async function processStripeConnectEvent(
+  env: GuestInboxPublicationEnv,
   db: DbClient,
   stripe: Stripe,
   notification: Stripe.V2.Core.EventNotification,
@@ -45,5 +47,7 @@ export async function processStripeConnectEvent(
       return
     }
     await refreshStripeConnectedAccount(db, stripe, connected, notification.context)
+    // Today's payment setup reads the account; open dashboards read it again.
+    await publishBusinessInvalidation(env, connected.organization_id)
   })
 }

@@ -68,12 +68,11 @@ export interface InboxRow {
   unread: boolean
 }
 
-/** Unread conversations per kind, for the filter menu. */
-export interface InboxUnreadCounts { all: number; guests: number; support: number; team: number }
-
 export interface InboxListPage {
   threads: InboxRow[]
   pagination: GuestThreadPagination
+  /** The reader's Current mailbox holds an unread conversation, whatever this page's filters. */
+  has_unread: boolean
 }
 
 export interface InboxPhoto {

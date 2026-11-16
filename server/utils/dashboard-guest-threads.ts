@@ -1,12 +1,11 @@
 import type { DbClient } from '~/server/db'
 import { HTTPError, type H3Event } from 'nitro'
-import { countUnreadConversations, readWorkspaceInbox } from '~/server/domain/guest-threads/repository'
+import { readWorkspaceInbox } from '~/server/domain/guest-threads/repository'
 import type {
   GuestThreadSubmissionType,
   InboxListPage,
   InboxRow,
   InboxThreadKind,
-  InboxUnreadCounts,
 } from '~/server/domain/guest-threads/types'
 import type { GuestThreadMailbox } from '~/server/domain/guest-threads/mailbox'
 import { organizationSession, requireOrganizationPrincipal } from '~/server/utils/location-access'
@@ -88,13 +87,13 @@ const GUEST_THREAD_LIST_PARAMS = new Set([
 ])
 
 /** The extra row proves whether another page exists; no total is inferred. */
-export function guestThreadListPage(rows: InboxRow[], query: Pick<DashboardGuestThreadListQuery, 'limit' | 'offset'>): InboxListPage {
-  const { items: threads, pagination } = messageListPage(rows, { limit: query.limit ?? 100, offset: query.offset ?? 0 })
-  return { threads, pagination }
+export function guestThreadListPage(inbox: { threads: InboxRow[]; has_unread: boolean }, query: Pick<DashboardGuestThreadListQuery, 'limit' | 'offset'>): InboxListPage {
+  const { items: threads, pagination } = messageListPage(inbox.threads, { limit: query.limit ?? 100, offset: query.offset ?? 0 })
+  return { threads, pagination, has_unread: inbox.has_unread }
 }
 
-/** The list response the dashboard and the app read, with its unread counts; the contract fixtures in contracts/inbox are generated from it. */
-export async function memberInbox(db: DbClient, organizationId: string, userId: string, query: DashboardGuestThreadListQuery): Promise<InboxListPage & { unread: InboxUnreadCounts }> {
+/** The list response the dashboard and the app read; the contract fixtures in contracts/inbox are generated from it. */
+export async function memberInbox(db: DbClient, organizationId: string, userId: string, query: DashboardGuestThreadListQuery): Promise<InboxListPage> {
   const options = {
     conversationIds: query.conversationIds,
     includeSortKey: query.includeSortKey,
@@ -108,8 +107,7 @@ export async function memberInbox(db: DbClient, organizationId: string, userId: 
     mailbox: query.mailbox ?? null,
     unreadOnly: query.unreadOnly ?? false,
   }
-  const { threads, unread } = await readWorkspaceInbox(db, organizationId, options)
-  return { ...guestThreadListPage(threads, query), unread }
+  return guestThreadListPage(await readWorkspaceInbox(db, organizationId, options), query)
 }
 
 /** Every conversation the member sees through their current workspace membership and conversation seats. */
@@ -118,11 +116,6 @@ export async function loadOrganizationConversations(event: H3Event, organization
   return memberInbox(db, organizationId, session.user.id, query)
 }
 
-/** The workspace Messages badge counts exactly the same Current conversations as the list. */
-export async function loadOrganizationConversationUnread(event: H3Event, organizationId: string) {
-  const { db, session } = await organizationSession(event)
-  return countUnreadConversations(db, organizationId, { userId: session.user.id })
-}
 
 /** One conversation the member may read, by the one access statement. */
 export async function memberConversation(event: H3Event, organizationId: string, conversationId: string, guestOnly = false): Promise<{ db: DbClient; env: CloudflareEnv; principal: MemberAccessPrincipal; conversation: ConversationRow }> {

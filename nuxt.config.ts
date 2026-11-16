@@ -162,7 +162,7 @@ export default defineNuxtConfig({
     serverBundle: false,
     clientBundle: {
       scan: {
-        globInclude: ['**/*.{vue,jsx,tsx,md,mdc,mdx}', '{composables,shared,utils}/**/*.ts', 'app.config.ts', 'server/domain/tasks.ts', 'server/domain/business-progress.ts'],
+        globInclude: ['**/*.{vue,jsx,tsx,md,mdc,mdx}', '{composables,shared,utils}/**/*.ts', 'app.config.ts', 'server/domain/tasks.ts'],
       },
       icons: [
         'lucide:menu',
@@ -453,8 +453,6 @@ export default defineNuxtConfig({
     '/auth/**':      { headers: { 'cache-control': 'no-store' } },
     '/signup':       { headers: { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" } },
     '/login':        { headers: { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" } },
-    '/links':        { headers: { 'cache-control': 'private, no-store' } },
-
   },
 
   // Nitro configuration for Cloudflare deployment

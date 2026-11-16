@@ -11,14 +11,13 @@ import { applyChannelBooking, createStay, type ChannelBooking } from '../../serv
 import { backfillChannexMessages, mirrorChannexMessageEvent, mirrorChannexThread } from '../../server/domain/guest-threads/channel-messages.ts'
 import { sendGuestThreadReply, sendScheduledGuestReply } from '../../server/domain/guest-threads/operations.ts'
 import { conversationPageFor } from './support/conversation-page.ts'
-import { listConversations } from '../../server/domain/guest-threads/repository.ts'
+import { listConversations, readWorkspaceInbox } from '../../server/domain/guest-threads/repository.ts'
 import { appendMessage, assertConversationAccess, type MessageRow } from '../../server/domain/conversations.ts'
 import { createDeliveryReceipt, listThreadDeliveries, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { getGuestRequest } from '../../server/domain/requests.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { guestThreadListPage, parseGuestThreadListQuery } from '../../server/utils/dashboard-guest-threads.ts'
-import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
-import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
+import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
 import { receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
 import { InboundEmailRejection, parseReplyToAddress } from '../../server/utils/reply-address.ts'
@@ -324,10 +323,10 @@ test('the inbox exposes every page with a stable tie order and validates paginat
         db.prepare("INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role) VALUES (?, ?, ?, 'member')").bind(id, ORG, OWNER),
       ])
     }
-    const first = guestThreadListPage(await listConversations(db, ORG, { userId: OWNER, limit: 4, offset: 0 }), { limit: 3, offset: 0 })
+    const first = guestThreadListPage(await readWorkspaceInbox(db, ORG, { userId: OWNER, limit: 4, offset: 0 }), { limit: 3, offset: 0 })
     assert.deepEqual(first.threads.map(thread => thread.id), ['a', 'b', 'c'])
     assert.deepEqual(first.pagination, { limit: 3, offset: 0, has_more: true, next_offset: 3 })
-    const last = guestThreadListPage(await listConversations(db, ORG, { userId: OWNER, limit: 4, offset: 3 }), { limit: 3, offset: 3 })
+    const last = guestThreadListPage(await readWorkspaceInbox(db, ORG, { userId: OWNER, limit: 4, offset: 3 }), { limit: 3, offset: 3 })
     assert.deepEqual(last.threads.map(thread => thread.id), ['d', 'e'])
     assert.deepEqual(last.pagination, { limit: 3, offset: 3, has_more: false, next_offset: null })
     for (const [query, field] of [[{ limit: '0' }, 'limit'], [{ limit: '101' }, 'limit'], [{ offset: '-1' }, 'offset'], [{ limit: ['3'] }, 'limit'],
@@ -489,9 +488,6 @@ test('a reply is sent with the message id Channex returns, and any Channex error
   let releaseRetry: (() => void) | undefined
   globalThis.fetch = provider.fetch as typeof fetch
   try {
-    const membership = await resolveMembership(env, { organizationId: ORG, userId: OWNER })
-    assert.ok(membership)
-    const principal = memberAccessPrincipal(membership, { env })
     const result = await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal(result.status, 'mirrored')
     if (result.status !== 'mirrored') throw new Error('Expected mapped inquiry')
@@ -522,10 +518,6 @@ test('a reply is sent with the message id Channex returns, and any Channex error
     }
     const refusedEntry = await db.prepare('SELECT id FROM messages WHERE dedupe_key = ?').bind(`guest-thread-operation:${result.conversation_id}:refused`).first<{ id: string }>()
     assert.ok(refusedEntry)
-    const refusedProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
-    assert.deepEqual(refusedProgress?.verification, { status: 'failed', basis: 'provider_acceptance', receipts: [{
-      id: `guest-thread-channex:${result.conversation_id}:refused`, channel: 'airbnb', provider: 'channex', status: 'failed', provider_message_id: null,
-    }] })
     assert.equal((await listThreadDeliveries(db, result.conversation_id)).filter(delivery => delivery.status === 'failed').length, 3)
 
     // Sending the failed reply again under its key sends it once, even when two retries race.
@@ -561,9 +553,6 @@ test('a reply is sent with the message id Channex returns, and any Channex error
     assert.equal(provider.sends - sendsBefore, 1, 'a revoked cohost cannot replay the delivered message')
     assert.deepEqual(await db.prepare('SELECT status, provider_message_id, error FROM guest_thread_deliveries WHERE message_id = ?').bind(refusedEntry.id).first(),
       { status: 'accepted', provider_message_id: `accepted-${provider.sends}`, error: null })
-    const recoveredProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
-    assert.deepEqual([recoveredProgress?.verification.status, recoveredProgress?.verification.receipts.map(receipt => [receipt.status, receipt.provider_message_id])],
-      ['verified', [['accepted', `accepted-${provider.sends}`]]])
   } finally { releaseRetry?.(); globalThis.fetch = realFetch; await runtime.dispose() }
 })
 

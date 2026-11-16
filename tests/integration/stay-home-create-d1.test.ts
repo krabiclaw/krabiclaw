@@ -322,17 +322,16 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     // The first calendar page opens today. The final page includes the last
     // checkout date, with prices for the three nights a guest can occupy.
     const publishedHome = await readStayHome(db, { organizationId: ORG, actorId: 'owner', manage: true }, made.product_id)
-    const publicSlug = (await getProduct(db, ORG, made.product_id)).slug
     const firstDate = localDateAt(new Date(), publishedHome.timezone)
     const lastDate = addLocalDays(firstDate, 500)
-    const firstPage = await readPublicStayCalendar(db, ORG, publicSlug, { from: firstDate, to: addLocalDays(firstDate, 31) })
+    const firstPage = await readPublicStayCalendar(db, ORG, made.product_id, { from: firstDate, to: addLocalDays(firstDate, 31) })
     assert.deepEqual(firstPage.nights.map(night => night.date), Array.from({ length: 32 }, (_, day) => addLocalDays(firstDate, day)))
-    await assert.rejects(readPublicStayCalendar(db, ORG, publicSlug, { from: firstDate, to: lastDate }), {
+    await assert.rejects(readPublicStayCalendar(db, ORG, made.product_id, { from: firstDate, to: lastDate }), {
       status: 422, data: { code: 'INVALID_RANGE', field: 'to' },
     })
     const lastArrival = addLocalDays(lastDate, -3)
     const beyondHorizon = addLocalDays(lastDate, 1)
-    const lastPage = await readPublicStayCalendar(db, ORG, publicSlug, { from: lastArrival, to: beyondHorizon })
+    const lastPage = await readPublicStayCalendar(db, ORG, made.product_id, { from: lastArrival, to: beyondHorizon })
     assert.deepEqual(lastPage.nights, [0, 1, 2, 3].map(day => ({
       date: addLocalDays(lastArrival, day), available: day < 3, price_minor: 210_00, min_stay_arrival: 3,
       max_stay: null, closed_to_arrival: false, closed_to_departure: false,

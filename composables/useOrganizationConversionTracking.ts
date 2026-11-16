@@ -94,9 +94,12 @@ export function useOrganizationConversionTracking() {
 
   // A product was viewed / a booking was started: native interactions first, then the GA4
   // ecommerce event through Zaraz's ecommerce API. Neither is an outcome.
-  function trackProductView(productId: string, locationId: string | null, ecommerce: Record<string, unknown> | null) {
-    void recordNative({ event_name: 'product_view', stage: 'viewed', product_id: productId, location_id: locationId, page_type: 'product' })
-      .then((eventId) => { if (eventId && ecommerce) window.zaraz?.ecommerce?.('Product Viewed', { ...ecommerce, event_id: eventId }) })
+  // A product view is its page's view: the pageview collector records it and counts it for the
+  // offering. Google Analytics' Product Viewed carries that recorded pageview's id.
+  function trackProductView(ecommerce: Record<string, unknown>) {
+    if (!import.meta.client || previewAuthorized || automatedBrowser()) return
+    void Promise.race([pageEventIdFor(window.location.pathname), whenLeaving()])
+      .then((eventId) => { if (eventId) window.zaraz?.ecommerce?.('Product Viewed', { ...ecommerce, event_id: eventId }) })
   }
 
   function trackCheckoutStart(productId: string | null, locationId: string | null, ecommerce: Record<string, unknown> | null, variantId?: string | null) {
@@ -133,10 +136,6 @@ export function useOrganizationConversionTracking() {
     track({ event_name: 'donation_click', stage: 'external_handoff', document_id: documentId, page_path: pagePath, page_type: 'donate', tier_label: tierLabel, tier_amount: tierAmount })
   }
 
-  function trackLinkClick(linkItemId: string) {
-    track({ event_name: 'link_click', stage: 'external_handoff', link_item_id: linkItemId, page_type: 'links', page_path: '/links' })
-  }
-
   function trackProductOrder(locationId: string | null, productId: string, pagePath?: string) {
     track({ event_name: 'product_order_external_click', stage: 'external_handoff', location_id: locationId, product_id: productId, page_type: 'product', page_path: pagePath })
   }
@@ -151,11 +150,10 @@ export function useOrganizationConversionTracking() {
   }
 
   // The destination is resolved server-side from the organization's current announcement
-  // config, the same way link_click resolves its host from the stored link — the client never
-  // asserts which URL it actually reached.
+  // config — the client never asserts which URL it actually reached.
   function trackAnnouncementCtaClick(pagePath: string) {
     track({ event_name: 'announcement_cta_click', stage: 'external_handoff', page_path: pagePath })
   }
 
-  return { track, pageEventId, trackProductView, trackCheckoutStart, trackConsultationClick, mirrorSubmission, trackDonationClick, trackLinkClick, trackProductOrder, trackPhoneClick, trackAnnouncementView, trackAnnouncementCtaClick }
+  return { track, pageEventId, trackProductView, trackCheckoutStart, trackConsultationClick, mirrorSubmission, trackDonationClick, trackProductOrder, trackPhoneClick, trackAnnouncementView, trackAnnouncementCtaClick }
 }

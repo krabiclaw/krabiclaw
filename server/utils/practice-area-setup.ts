@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { execute, executeBatch, queryFirst } from '~/server/db'
+import { execute, executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { parseOnboardingDraftPayload, type OnboardingDraftPayload } from '~/server/utils/onboarding-drafts'
 import { memberSchedulingList, writeMemberScheduling } from '~/server/domain/member-scheduling'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
@@ -7,8 +7,9 @@ import { majorAmountToMinor, minorAmountToMajor } from '~/shared/prices'
 import type { OfferingSetupAnswer, OfferingSetupField, OfferingSetupResponse } from '~/shared/offering-setup'
 import { listDashboardLocations } from '~/server/utils/dashboard-context'
 import { catalogPath, firstPracticeAreaPath } from '~/server/utils/dashboard-links'
-import { bookingConfigurationWriteError, bookingScheduleScopes, hasDraftBookableTime, listAvailabilityRules, prepareProductBookingConfig, replaceWeeklySchedule, setProductBookingConfig } from '~/server/utils/availability'
-import { createProduct, getProduct, listOrganizationProducts, organizationDefaultCurrency, prepareProductLocation, productLocationWriteError, resolveVariantPrice, updateProduct } from '~/server/utils/product-management'
+import { bookingConfigurationWriteError, firstBookableOpening, listAvailabilityRules, prepareProductBookingConfig, replaceWeeklySchedule, requireBookingConfig, setProductBookingConfig } from '~/server/utils/availability'
+import type { CloudflareEnv } from '~/server/utils/auth'
+import { bookingScheduleScopes, createProduct, getProduct, listOrganizationProducts, organizationDefaultCurrency, prepareProductLocation, productLocationWriteError, resolveVariantPrice, updateProduct } from '~/server/utils/product-management'
 import { requireTrimmedProductString } from '~/server/utils/product-validation'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { isValidTimezone, MINUTE_TIME_PATTERN } from '~/utils/timezone'
@@ -84,9 +85,14 @@ async function readPracticeArea(context: OfferingSetupContext, productId: string
   return { product, booking, members, attorney, schedule, activeOffices, office, officeRules, officeTime, scope, format, variant, price, currency, draft, intake: payload?.source.details, progress, complete }
 }
 
-export async function firstPracticeAreaSetupIncomplete(context: OfferingSetupContext, productId: string) {
-  const state = await readPracticeArea(context, productId)
-  return state !== null && steps.some(step => !state.complete[step])
+/** Find a bookable time before publishing the selected draft scope. */
+async function hasDraftBookableTime(db: DbClient, input: {
+  env: CloudflareEnv; organizationId: string; productId: string; locationId: string | null; durationMinutes?: number
+}): Promise<boolean> {
+  const config = await requireBookingConfig(db, input.organizationId, input.productId)
+  return Boolean(await firstBookableOpening(db, input.env, { ...input, now: new Date().toISOString(), scope: 'editor' }, {
+    prepared: { productId: input.productId, config: input.durationMinutes === undefined ? config : { ...config, duration_minutes: input.durationMinutes } },
+  }))
 }
 
 export async function firstPracticeAreaSetup(context: OfferingSetupContext, productId: string | undefined, requested: string | undefined, answer: OfferingSetupAnswer | null): Promise<OfferingSetupResponse> {

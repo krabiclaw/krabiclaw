@@ -12,8 +12,8 @@ import { matchedRouteKey } from 'vue-router'
  * records, not URL segments, because a directory's `index.vue` adds a record
  * without adding a level.
  *
- * A directory's `index.vue` is a second record at the same URL — `/links/items`
- * matches both `items` and `items/index` — and it is one level, not two.
+ * A directory's `index.vue` is a second record at the same URL — `/products/menu`
+ * matches both `menu` and `menu/index` — and it is one level, not two.
  *
  * `meta.back` is a destination root's exit: `menu` for the shell's Menu —
  * Website, Account settings — or a named route, Payments to Earnings. A level with a matched

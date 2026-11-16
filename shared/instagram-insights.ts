@@ -11,7 +11,7 @@ export const instagramInsightsSchema = z.discriminatedUnion('status', [
   z.object({
     status: z.literal('connected'),
     username: z.string(),
-    period: z.object({ startDate: z.string(), endDate: z.string() }),
+    period: z.object({ startDate: z.string(), endDate: z.string(), timezone: z.string() }),
     account: z.object({
       views: metric, reach: metric, accounts_engaged: metric, total_interactions: metric,
       likes: metric, comments: metric, shares: metric, saves: metric, replies: metric, profile_links_taps: metric,

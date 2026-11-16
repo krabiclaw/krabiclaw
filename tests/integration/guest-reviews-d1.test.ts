@@ -10,14 +10,12 @@ import { nameConversationBooking } from './support/booking-state.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getReviewBookingContext, getReviewRequestByToken } from '../../server/utils/review-requests.ts'
 import { sendReviewRequestForBooking } from '../../server/utils/review-request-delivery.ts'
-import { loadReviewFeedback } from '../../server/utils/review-feedback.ts'
+import { readInsightsPage } from '../../server/domain/insights.ts'
 import { listOrganizationReviews, setReviewStatus } from '../../server/utils/organization-reviews.ts'
 import reviewTask from '../../server/tasks/review-request-automation.ts'
 import validateRoute from '../../server/api/public/review-requests/validate.get.ts'
 import submitRoute from '../../server/api/public/review-requests/submit.post.ts'
 import { localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
-import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
-import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 
 const HOUR = 3_600_000
 const at = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString()
@@ -341,15 +339,6 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     assert.equal(consultation.status, 201)
     assert.equal(consultation.body.status, 'private')
     const consultationReviewId = String(consultation.body.review_id)
-    const progressMembership = await resolveMembership(env, { organizationId: 'org', userId: 'owner' })
-    assert(progressMembership)
-    const reviewProgress = await listBusinessOutcomes(db, memberAccessPrincipal(progressMembership, { env }), { limit: 100 })
-    for (const [reviewId, threadId] of [[dinnerReviewId, T.dinner], [consultationReviewId, T.consultation]]) {
-      const fact = reviewProgress.outcomes.find(item => item.source.table === 'reviews' && item.source.id === reviewId)
-      assert(fact)
-      assert.deepEqual(fact.subject, { kind: 'review', id: reviewId })
-      assert.deepEqual(fact.references, [{ kind: 'guest_thread', id: threadId }], 'the review writer records the actual request id; the progress reference must not use the operational booking id')
-    }
 
     await assert.rejects(setReviewStatus(db, 'org', consultationReviewId, 'approved'), /shared their review privately/)
 
@@ -365,15 +354,22 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     assert.equal(editorRows.find(row => row.id === dinnerReviewId)?.private_feedback, 'The patio heater was broken.')
 
     // Who reads the feedback: owners everything; the dining room's host its visit only; an unrelated member nothing.
-    const feedbackFor = (userId: string, organizationWide: boolean) => loadReviewFeedback(db, { organizationId: 'org', userId, organizationWide, days: 30 })
+    // Insights → Overall rating is where they are read: a member who reads no analytics reads their own visits' reviews.
+    const organization = (await db.prepare("SELECT timezone, default_currency FROM organization WHERE id = 'org'").first<{ timezone: string; default_currency: string }>())!
+    const feedbackFor = async (userId: string, analytics: boolean) => {
+      const page = await readInsightsPage(db, { organizationId: 'org', slug: 'proof', timezone: organization.timezone, defaultCurrency: organization.default_currency, userId, analytics }, 'quality/overall-rating', {}, env)
+      assert.equal(page.list?.kind, 'reviews')
+      return page.list?.kind === 'reviews' ? page.list.reviews : []
+    }
     const owner = await feedbackFor('owner', true)
-    assert.deepEqual(owner.recent.map(review => review.id).sort(), [consultationReviewId, dinnerReviewId].sort())
-    assert.equal(owner.privateFeedbackCount, 2)
-    assert.deepEqual(owner.subjects.find(subject => subject.subject === 'restaurant')?.categories,
-      [{ key: 'food', label: 'Food', average: 5, count: 1 }, { key: 'service', label: 'Service', average: null, count: 0 }, { key: 'atmosphere', label: 'Atmosphere', average: 3, count: 1 }])
+    assert.deepEqual(owner.map(review => review.id).sort(), [consultationReviewId, dinnerReviewId].sort())
+    assert.equal(owner.filter(review => review.private_feedback !== null).length, 2)
+    assert.equal(owner.find(review => review.id === dinnerReviewId)?.categories, 'Atmosphere 3 · Food 5')
     const host = await feedbackFor('host', false)
-    assert.deepEqual(host.recent.map(review => [review.id, review.privateFeedback]), [[dinnerReviewId, 'The patio heater was broken.']])
-    assert.equal((await feedbackFor('other', false)).responses, 0)
+    assert.deepEqual(host.map(review => [review.id, review.private_feedback]), [[dinnerReviewId, 'The patio heater was broken.']])
+    assert.deepEqual(await feedbackFor('other', false), [])
+    await assert.rejects(readInsightsPage(db, { organizationId: 'org', slug: 'proof', timezone: organization.timezone, defaultCurrency: organization.default_currency, userId: 'host', analytics: false }, 'rates/cancellation-rate', {}, env),
+      (error: { statusCode?: number }) => error.statusCode === 403)
 
     // The responsible host is told about the review on their visit; the unrelated member is not.
     const alerted = (await db.prepare(`SELECT json_extract(email_json, '$.message.to') AS recipient FROM guest_thread_deliveries WHERE purpose = 'owner_alert' ORDER BY recipient`).all<{ recipient: string }>()).results.map(row => row.recipient)

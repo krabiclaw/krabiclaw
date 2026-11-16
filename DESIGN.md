@@ -117,7 +117,7 @@ The destinations are files under `O`, and their URLs are their files:
 | --- | --- |
 | Website | `O/website` — Pages, Blog, Posts, Reviews, Q&A, Brand, Preferences, Website booking |
 | Preferences | `O/website/preferences` and its leaves — Status, Languages, Domains, Currency |
-| Pages | `O/website/pages`, a page `O/website/pages/:pageId`, the Links page `O/website/pages/links` |
+| Pages | `O/website/pages`, a page `O/website/pages/:pageId` |
 | Blog | `O/website/blog` |
 | Reviews | `O/website/reviews` |
 | Q&A | `O/website/qa` |
@@ -153,50 +153,50 @@ never changes it.
 
 ### Today and Upcoming
 
-Business Today and Upcoming show two stored things
-(`project/tasks-and-opportunities.md` in the design system):
+Today tells the person looking what needs them today; Upcoming is the same
+list for the next 30 days. It is one list in the order the day happens, read
+from stored booking, task and payment rows in one D1 round trip
+(`server/domain/today.ts`; the booked records are `bookedRecordsInRange` in
+`server/domain/product-bookings.ts`, the open work `openWorkQuery` in
+`server/domain/tasks.ts`).
 
-- **Tasks** (`tasks`, `server/domain/tasks.ts`): work someone has to do, with
-  an assignee, a window, and who closed it and when. A turnover and a failed
-  scheduled delivery follow their source records. A person closes an accepted
-  opportunity or a task they add.
-- **Opportunities** (`opportunities`, `server/domain/opportunities.ts`): what
-  `readBusinessRecommendations` finds the business could do, recorded against
-  its evidence revision. Owners and admins see suggestions in the same card
-  layout as tasks. A card opens the editor or record that owns the work. The
-  top-right dismiss control records a decision about the current evidence.
+What appears: the bookings the viewer hosts (an owner or admin hosts every
+one; a member, the slot bookings of the offerings they are named on); the jobs
+given to them, or for an owner or admin a job nobody has; a request waiting
+for a decision; a message that did not send; a change waiting on the business;
+a task someone added; and, for an owner or admin on Today, the setup the
+business has not finished (payments, a first offering, a price), after the
+day's cards.
+A job is the action of its booking's card on the same day ("Casey is
+cleaning"), otherwise its own card. A follow-up is Today's work on the day it
+is due. There are three roles and no cleaner or attorney role: assignment
+decides what a member sees.
 
-`GET /api/dashboard/today` returns task sections, opportunities, assignees
-and the resolved time. The server supplies each card's content and destination. On unfiltered Today,
-workspace managers see the signed preview of a private site and a link into
-the Website status dialog. When Today has no open work, a published site
-links to its public address. Before publishing, a workspace created through
-onboarding can see up to three suggestions. Stripe setup, a custom domain,
-and the first catalog item for its business type take priority when they apply.
-The task sheet holds assignment and completion controls for work that a person
-tracks there. Guest messages enter Messages and update its unread count. A
-payment card opens that offering's Payment settings. Saving the payment
-requirement completes its accepted task in the booking configuration batch.
+Every card is `TodayItemCard`, in Airbnb's order, centered, with a shadow and
+no border or badges: when, once ("3:00 PM", "Oct 26 – 29", "Thu, Nov 20 ·
+10:30 AM"); the home's or offering's own picture (a table's location); one
+sentence with who and how many ("Eva’s group of 4 checks in", "Pottery wheel
+class for 6", "Clean up after Parity’s group of 2"); one line of where, with
+the money for owners and admins; then the two-line action. The heading uses
+the business's word ("You have 2 reservations and 1 task"); setup is not
+counted, and a business with only setup left reads "Finish setting up to take
+bookings"; empty, "Nothing needs you today". A class is named by itself, its
+line where and how many guests are booked. On desktop the cards sit in a centered grid, each at most
+380px wide; on a phone, one column. A card with no picture shows a small round
+tile with its icon instead, so it stays short.
 
-Each active experience can show one catalog suggestion for its current
-publication blocker. The server uses the catalog’s published-host and booking
-readiness checks. The card opens the editor for the current blocker and
-advances or clears as the catalog state changes.
+A card opens the conversation about it: the guest's for a booking, the team's
+for a job. A job's conversation has Done, one tap; a request's or change's has
+Review. Photos and notes are messages in that conversation. A task someone
+added has no conversation: its picture is the home or offering it is about,
+its line who added it, and "Mark as done" closes it in one tap. A setup card
+opens the editor or settings that finishes it. A member without a
+seat in the guest's conversation opens the booking instead. The header holds
+Today/Upcoming and a round + for Add task and, for stays, Add stay. Returning within the live session
+shows the held read.
 
-Owner Today shows failed deliveries, turnovers and booking decisions before
-opportunities and Done. A member sees the work in their scope and Done.
-The shared header holds Today/Upcoming, a round +
-for the permitted Add task and Add stay actions, and a task kind filter.
-`TodayTaskSheet` uses Airbnb's Checkout | Check-in split, followed by Assigned
-with Change. A task someone completes adds "What you found", Skip and Done.
-Closing a task needs no note. Upcoming groups by day
-("Tomorrow · Sat, Nov 7"). Arrivals and bookings
-stay in Calendar.
-
-The page re-reads on `business.changed`, `stay.changed` and conversation
-invalidations. Opening a task (`?task=`) reads its alerts.
 Personal-account Today/Upcoming project the buyer's own agenda with
-`TodayAgendaCard`; this is separate from the business's tasks.
+`TodayAgendaCard`; this is separate from the business's list.
 
 Calendar cards read the canonical agenda and open beneath their calendar day.
 Booked activity uses the existing detail layout: desktop keeps the agenda beside the
@@ -1231,8 +1231,8 @@ Nuxt's error page. A guard that has to run again when the route changes belongs
 in a `watchEffect`, because moving between leaves reuses the component.
 
 A record the list does not contain is missing state, not an empty draft:
-`links/items/<unknown-id>` rendering a blank Link editor, with a Save that would
-write the list back unchanged, is the failure this rule exists to prevent.
+a leaf editor rendering a blank editor with a Save that would write the list back
+unchanged is the failure this rule exists to prevent.
 
 A missing record and a failed request are not the same event and do not get the
 same answer. A record that is not there is not a page, so it 404s. A request

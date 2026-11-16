@@ -408,29 +408,42 @@ type MediaPlacementRow = MediaAsset & {
   presentation_json: string | null
 }
 
-export async function readMediaPlacements(db: DbClient, input: {
-  organizationId: string
+/**
+ * The active placements of these owners, as one statement: `owners` is a list
+ * of ids, or a subquery a batch reads them from. `groupMediaPlacements` reads
+ * its rows.
+ */
+export function mediaPlacementsQuery(input: {
+  /** The organization, or a SQL term for it a batch statement reads (BATCH_VIEWER.organization). */
+  organizationId: string | { sql: string }
   ownerType: MediaPlacementOwnerType
-  ownerIds: string[]
+  owners: string[] | { sql: string; params?: unknown[] }
   slot?: string
   includePendingSocialCard?: boolean
-}): Promise<Map<string, StoredMediaPlacementItem[]>> {
-  const ownerIds = [...new Set(input.ownerIds)].filter(Boolean)
-  const result = new Map(ownerIds.map(id => [id, [] as StoredMediaPlacementItem[]]))
-  if (!ownerIds.length) return result
-  const rows = await queryAll<MediaPlacementRow>(db, `
+}): BatchQuery {
+  const owners = Array.isArray(input.owners) ? { sql: 'SELECT value FROM json_each(?)', params: [d1JsonStringSet([...new Set(input.owners)].filter(Boolean))] } : input.owners
+  return {
+    query: `
     SELECT mp.id AS placement_id, mp.owner_type, mp.owner_id, mp.slot, mp.sort_order, mp.presentation_json,
            ma.*
       FROM media_placements mp
       JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id
-     WHERE mp.organization_id = ? AND mp.owner_type = ?
-       AND mp.owner_id IN (SELECT value FROM json_each(?))
+     WHERE mp.organization_id = ${typeof input.organizationId === 'string' ? '?' : input.organizationId.sql} AND mp.owner_type = ?
+       AND mp.owner_id IN (${owners.sql})
        ${input.slot ? 'AND mp.slot = ?' : ''}
        AND (mp.status = 'active' ${input.includePendingSocialCard ? "OR (mp.slot = 'social_card' AND mp.status = 'pending')" : ''}) AND ma.status = 'active'
      ORDER BY mp.owner_id, mp.slot, mp.sort_order
-  `, [input.organizationId, input.ownerType, d1JsonStringSet(ownerIds), ...(input.slot ? [input.slot] : [])])
-  for (const row of rows) {
-    result.get(row.owner_id)?.push({
+  `,
+    params: [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.ownerType, ...(owners.params ?? []), ...(input.slot ? [input.slot] : [])],
+  }
+}
+
+/** `mediaPlacementsQuery`'s rows by owner, every named owner present. */
+export function groupMediaPlacements(rows: unknown[], ownerIds: string[] = []): Map<string, StoredMediaPlacementItem[]> {
+  const result = new Map(ownerIds.map(id => [id, [] as StoredMediaPlacementItem[]]))
+  for (const row of rows as MediaPlacementRow[]) {
+    const list = result.get(row.owner_id) ?? []
+    list.push({
       ...toResolvedMediaAsset(row),
       source: row.source,
       generation_key: row.generation_key,
@@ -443,8 +456,22 @@ export async function readMediaPlacements(db: DbClient, input: {
       sort_order: row.sort_order,
       presentation: row.presentation_json ? parseLogoPresentation(JSON.parse(row.presentation_json)) : null,
     })
+    result.set(row.owner_id, list)
   }
   return result
+}
+
+export async function readMediaPlacements(db: DbClient, input: {
+  organizationId: string
+  ownerType: MediaPlacementOwnerType
+  ownerIds: string[]
+  slot?: string
+  includePendingSocialCard?: boolean
+}): Promise<Map<string, StoredMediaPlacementItem[]>> {
+  const ownerIds = [...new Set(input.ownerIds)].filter(Boolean)
+  if (!ownerIds.length) return new Map()
+  const { query, params } = mediaPlacementsQuery({ ...input, owners: ownerIds })
+  return groupMediaPlacements(await queryAll<MediaPlacementRow>(db, query, params), ownerIds)
 }
 
 export async function hydrateMediaAssetRefs(
@@ -582,8 +609,8 @@ export async function listMediaAssets(
   const conditions = [`ma.organization_id = ?`, `ma.status = 'active'`, `ma.generation_key IS NULL`]
   const params: SqlBindValue[] = [organizationId]
   // A photo sent in a conversation is the conversation's, not the website's.
-  if (opts.ownerType !== 'message' && opts.ownerType !== 'task') {
-    conditions.push(`NOT EXISTS (SELECT 1 FROM media_placements sent WHERE sent.asset_id = ma.id AND sent.organization_id = ma.organization_id AND sent.owner_type IN ('message', 'task'))`)
+  if (opts.ownerType !== 'message') {
+    conditions.push(`NOT EXISTS (SELECT 1 FROM media_placements sent WHERE sent.asset_id = ma.id AND sent.organization_id = ma.organization_id AND sent.owner_type = 'message')`)
   }
   if (opts.kind) { conditions.push(`ma.kind = ?`); params.push(opts.kind) }
   if (opts.search) { conditions.push(`ma.file_name LIKE ? ESCAPE '\\'`); params.push(`%${opts.search.replace(/[\\%_]/g, '\\$&')}%`) }

@@ -1,20 +1,22 @@
 import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
-import { d1JsonStringSet, queryAll, queryFirst } from '~/server/db'
-import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
-import { assignedMemberSql, memberAccessPrincipal } from '~/server/utils/member-access'
+import { executeBatch, queryFirst } from '~/server/db'
+import { dashboardOrgQueryParam, getDashboardMemberContext } from '~/server/utils/dashboard-context'
+import { cloudflareEnv } from '~/server/utils/api-response'
+import { getAuthSession } from '~/server/utils/auth'
+import { assignedMemberSql, BATCH_VIEWER, joinedMemberPrincipal, memberAccessPrincipal, membershipBySlugQuery, withViewer } from '~/server/utils/member-access'
+import { bookedRecordsInRange, businessWideViewer, type BookedRecordInRange } from '~/server/domain/product-bookings'
 import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
-import { getStay, listStays, readStayCalendar, readStayCalendars, stayAccessFor } from '~/server/domain/stays'
-import { readPlacesCalendar } from '~/server/domain/places'
+import { calendarStays, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, type StayHome } from '~/server/domain/stays'
+import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
 import { loadDashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
 import { addLocalDays, isValidCalendarDate, localDateAt } from '~/utils/timezone'
 import { readProductPhotos } from '~/server/utils/media-placement'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
-import type { StayHome } from '~/server/domain/stays'
 
 export type BookingHome = Pick<StayHome, 'name' | 'internal_name' | 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'check_in_method' | 'check_in_instructions'> & { image_url: string | null }
 
@@ -94,60 +96,86 @@ function bookingListWindow(query: BookingListQuery) {
 type BookingWindow = ReturnType<typeof bookingListWindow>
 type DashboardBookingsContext = Awaited<ReturnType<typeof dashboardBookingsContext>>
 
-function listTimedBookings({ db, access, organization, userId }: DashboardBookingsContext, { productId, from, to, includeCancelled }: BookingWindow) {
-  type Row = { booking_id: string; unit: 'slot'; product_id: string; product_kind: 'table' | 'service' | 'experience'; name: string; location_title: string | null; guest_name: string | null; status: string; starts_at: string; ends_at: string; timezone: string }
-  return queryAll<Row>(db, `
-    SELECT b.id AS booking_id, b.unit, b.product_id, b.product_kind, b.product_name AS name, l.title AS location_title,
-           json_extract(c.payload_json, '$.guest.name') AS guest_name, b.status, b.starts_at, b.ends_at, b.timezone
-      FROM ${BOOKING_RECORDS_SQL} b JOIN conversations c ON c.booking_id=b.id AND c.organization_id=b.organization_id AND c.kind='booking'
-      LEFT JOIN business_locations l ON l.id=b.location_id AND l.organization_id=b.organization_id
-      WHERE b.organization_id = ? AND b.unit = 'slot' AND b.starts_at >= ? AND b.starts_at < ?
-        AND (? IS NULL OR b.product_id = ?)
-        ${includeCancelled ? '' : "AND b.status <> 'cancelled'"}
-        ${access.manage ? '' : `AND ${assignedMemberSql('b')}`}
-      ORDER BY b.starts_at, b.id
-  `, [organization.id, addLocalDays(from, -1), addLocalDays(to, 1), productId ?? null, productId ?? null, ...(access.manage ? [] : [userId])])
-    .then(rows => rows.filter(row => {
-      const day = localDateAt(new Date(row.starts_at), row.timezone)
-      return day >= from && day < to
-    }))
+/** A visit's booking as the bookings list and the host Calendar show it, from the one read of booked records. */
+function timedBookings(records: BookedRecordInRange[], { productId, from, to }: BookingWindow) {
+  return records.flatMap((record) => {
+    const day = localDateAt(new Date(record.starts_at), record.timezone)
+    if (record.unit !== 'slot' || day < from || day >= to || (productId && record.product_id !== productId)) return []
+    const { id, unit, product_id, product_kind, product_name, location_title, guest_name, status, starts_at, ends_at, timezone } = record
+    return [{ booking_id: id, unit, product_id, product_kind, name: product_name, location_title, guest_name, status, starts_at, ends_at, timezone }]
+  })
+}
+
+/** The booked records of the window the caller may see, in one statement: a member's are those of the offerings and homes they are named on. */
+async function readBookedRecords({ db, access, organization, userId }: DashboardBookingsContext, window: BookingWindow) {
+  const [records] = await executeBatch(db, [withViewer(businessWideViewer(membershipBySlugQuery(organization.slug, userId)), bookedRecordsInRange(BATCH_VIEWER, { ...window, cancelled: window.includeCancelled }))], { operation: 'Read booked records' })
+  return (records!.results as BookedRecordInRange[]).filter(record => access.manage || record.assigned_member_id === organization.memberId)
 }
 
 export async function dashboardBookingList(event: H3Event, query: BookingListQuery) {
   const window = bookingListWindow(query)
   const context = await dashboardBookingsContext(event)
-  const [timed, stays] = await Promise.all([
-    window.unit === 'nights' ? [] : listTimedBookings(context, window),
-    window.unit === 'slot' ? [] : listStays(context.db, context.access, window),
-  ])
-  const homeIds = [...new Set(stays.map(stay => stay.product_id))]
-  const homes = homeIds.length ? await queryAll<{ product_id: string; internal_name: string }>(context.db,
-    'SELECT product_id, internal_name FROM product_stay_configs WHERE organization_id=? AND product_id IN (SELECT value FROM json_each(?))',
-    [context.organization.id, d1JsonStringSet(homeIds)]) : []
-  const names = new Map(homes.map(home => [home.product_id, home.internal_name]))
-  const nights = stays.map(stay => {
-    const name = names.get(stay.product_id)
-    if (!name) throw new Error('Booking home has no internal name')
-    return { ...nightBooking(stay), name }
-  })
-  return { bookings: [...timed, ...nights], manage: context.access.manage }
+  const records = await readBookedRecords(context, window)
+  const stays = window.unit === 'slot' ? [] : calendarStays(records, context.access.manage, window, record => !window.productId || record.product_id === window.productId)
+  return { bookings: [...(window.unit === 'nights' ? [] : timedBookings(records, window)), ...stays], manage: context.access.manage }
+}
+
+/**
+ * The host Calendar's places: one D1 round trip after the session, as
+ * Messages reads its inbox. The batch's first statement is the membership,
+ * read by the organization's slug, and every other statement names the
+ * organization through that slug.
+ */
+async function dashboardPlacesCalendar(event: H3Event, window: BookingWindow) {
+  const env = cloudflareEnv(event)
+  const session = await getAuthSession(event, env)
+  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
+  const slug = dashboardOrgQueryParam(event)
+  if (!slug) throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
+  const userId = session.user.id
+  const organization = { query: '(SELECT id FROM organization WHERE slug = ?)', params: [slug] }
+  const days = placesWindow(window)
+  const membership = membershipBySlugQuery(slug, userId)
+  const [memberResult, records, ...places] = await executeBatch(env.DB, [
+    membership,
+    withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, { ...window, cancelled: window.includeCancelled })),
+    ...placesCalendarQueries(organization, userId, days),
+  ], { operation: 'Read host calendar' })
+  const member = memberResult?.results[0] as { organization_id: string; member_id: string; role: string } | undefined
+  if (!member) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
+  const principal = joinedMemberPrincipal({ organizationId: member.organization_id, memberId: member.member_id, role: member.role, userId }, { env, event })
+  await stayAccessFor(principal)
+  const calendar = await placesCalendarOf(principal, days, places)
+  return { from: window.from, to: window.to, bookings: timedBookings(records!.results as BookedRecordInRange[], window), homes: [], places: calendar.places, manage: calendar.manage }
+}
+
+/**
+ * The host Calendar's homes: one D1 round trip after the session, as its
+ * places are. The membership leads the batch; homes, prices, stays and nights
+ * follow, each reading the homes the viewer may see.
+ */
+async function dashboardHomesCalendar(event: H3Event, window: BookingWindow) {
+  const env = cloudflareEnv(event)
+  const session = await getAuthSession(event, env)
+  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
+  const slug = dashboardOrgQueryParam(event)
+  if (!slug) throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
+  const userId = session.user.id
+  const membership = membershipBySlugQuery(slug, userId)
+  const [memberResult, ...rest] = await executeBatch(env.DB, [membership, ...stayCalendarQueries(membership, { from: window.from, to: window.to, productId: window.productId ?? null })], { operation: 'Read homes calendar' })
+  const member = memberResult?.results[0] as { organization_id: string; member_id: string; role: string } | undefined
+  if (!member) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
+  const access = await stayAccessFor(joinedMemberPrincipal({ organizationId: member.organization_id, memberId: member.member_id, role: member.role, userId }, { env, event }))
+  const calendar = stayCalendarOf(rest, access.manage, window)
+  if (window.productId && !calendar.homes.length) throw new HTTPError({ statusCode: 404, message: 'That place to stay is not in this organization', data: { code: 'HOME_NOT_FOUND' } })
+  return { from: window.from, to: window.to, bookings: calendar.stays, homes: calendar.homes, places: [], manage: access.manage }
 }
 
 export async function dashboardBookingCalendar(event: H3Event, query: BookingListQuery) {
   const window = bookingListWindow(query)
-  const context = await dashboardBookingsContext(event)
-  const { db, access, principal } = context
-  const { unit, from, to, productId } = window
-  const nights = async () => {
-    if (unit === 'slot') return { homes: [], stays: [] }
-    if (!productId) return readStayCalendars(db, access, { from, to })
-    const { home, nights, stays } = await readStayCalendar(db, access, { productId, from, to })
-    return { homes: [{ home, nights }], stays }
-  }
-  const [timed, nightCalendar, placeCalendar] = await Promise.all([
-    unit === 'nights' ? [] : listTimedBookings(context, window),
-    nights(),
-    unit === 'slot' ? readPlacesCalendar(db, principal, { from, to }) : { places: [], manage: false },
-  ])
-  return { from, to, bookings: [...timed, ...nightCalendar.stays.map(nightBooking)], homes: nightCalendar.homes, places: placeCalendar.places, manage: unit === 'slot' ? placeCalendar.manage : access.manage }
+  if (window.unit === 'slot') return dashboardPlacesCalendar(event, window)
+  if (window.unit === 'nights') return dashboardHomesCalendar(event, window)
+  // Without a unit: the homes calendar, and the timed bookings beside its stays.
+  const [homes, timed] = await Promise.all([dashboardHomesCalendar(event, window), dashboardBookingsContext(event).then(async context => timedBookings(await readBookedRecords(context, window), window))])
+  return { ...homes, bookings: [...timed, ...homes.bookings] }
 }

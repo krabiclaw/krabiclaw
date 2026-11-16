@@ -9,9 +9,8 @@ import sharp from 'sharp'
 import { H3 } from 'nitro/h3'
 import { HTTPError } from 'nitro'
 import { handlePostsTools, POSTS_TOOLS } from '../../server/utils/mcp-tools/posts.ts'
-import { handleTaskTools } from '../../server/utils/mcp-tools/tasks.ts'
 import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
-import { asMcpError, MCP_ERROR } from '../../server/utils/mcp-protocol.ts'
+import { MCP_ERROR } from '../../server/utils/mcp-protocol.ts'
 import { isMcpRenderResponse } from '../../server/utils/mcp-render.ts'
 import { createAuth, linkedAccountAccessToken, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { createPost, deletePost, getPost, listPublicSocialPosts, postPayloadFingerprint, updatePost } from '../../server/utils/post-management.ts'
@@ -32,16 +31,11 @@ import deauthorizeCallback from '../../server/api/integrations/meta/deauthorize.
 import { loadInstagramInsights } from '../../server/utils/instagram-insights.ts'
 import deleteCallback from '../../server/api/integrations/meta/data-deletion.post.ts'
 import deletionStatus from '../../server/api/integrations/meta/data-deletion.get.ts'
-import { createBlogPost, deleteBlogPost, getBlogPost } from '../../server/utils/content/publishing.ts'
+import { createBlogPost, getBlogPost } from '../../server/utils/content/publishing.ts'
 import { fetchTransformedImageAsDataUri } from '../../server/utils/og-image/fetch-image.ts'
 import { renderOgImagePng } from '../../server/utils/og-image/render.ts'
 import { PostValidationError, POST_TITLE_MAX } from '../../shared/posts.ts'
-import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
-import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
-import { readBusinessRecommendations } from '../../server/domain/business-progress.ts'
-import { listOpportunities, type OpportunityView } from '../../server/domain/opportunities.ts'
-import type { TaskView } from '../../server/domain/tasks.ts'
-import { blogEditorPath, postEditorPath } from '../../server/utils/dashboard-links.ts'
+import { resolveMembership } from '../../server/utils/member-access.ts'
 
 /**
  * Publication, channel management and erasure against real local D1, with Meta and
@@ -410,12 +404,7 @@ test('publication: one result and one external post per target; a failure is the
       assert(ajv.validate(POSTS_TOOLS.find(tool => tool.name === toolName)!.outputSchema, output), `${toolName} output: ${ajv.errorsText()}`)
       return output as { post?: { id: string; publications: unknown[] }; posts?: Array<{ id: string; publications: unknown[] }>; replayed?: boolean }
     }
-    const progress = () => listBusinessOutcomes(db, memberAccessPrincipal(membership, { env }), { limit: 100 })
-    const recommendations = async () => {
-      const plan = await readBusinessRecommendations(db, memberAccessPrincipal(membership, { env }))
-      assert.deepEqual(plan.issues, [], 'normal connected-provider reads must not silently turn into unavailable performance or status')
-      return plan
-    }
+    const publicationState = async (id: string | undefined) => await db.prepare('SELECT state FROM post_publications WHERE id = ?').bind(id).first<string>('state')
     await asset('a1', 'image/jpeg')
     await asset('a2', 'image/jpeg')
     await asset('a3', 'image/png')
@@ -528,20 +517,6 @@ test('publication: one result and one external post per target; a failure is the
       assert.equal(event.metadata.post_id, first.post.id)
       assert.equal(event.metadata.channel, row.channel)
     }
-    const receiptIds = new Set(initiators.results.map(row => row.id))
-    const firstProgress = await progress()
-    const publicationFacts = firstProgress.outcomes.filter(fact => fact.source.table === 'post_publications' && receiptIds.has(fact.source.id))
-    assert.equal(publicationFacts.length, 2)
-    assert.deepEqual(publicationFacts.map(fact => fact.source.id).sort(), [...receiptIds].sort())
-    for (const fact of publicationFacts) {
-      assert.equal(fact.event, 'post.publication')
-      assert.equal(fact.subject.kind, 'post_publication')
-      assert.equal(fact.subject.id, fact.source.id)
-      assert.deepEqual(fact.actor, { kind: 'member', user_id: 'publisher' })
-      assert.equal(fact.state, 'published')
-      assert.equal(fact.verification.status, 'verified')
-    }
-    assert.equal(firstProgress.outcomes.some(fact => String(fact.event) === 'post.publication_started'), false, 'the start is provenance for the provider receipt, not another completed publication')
 
     // A repeat reads the receipts: nothing is sent again and the publication date stays.
     const requestCount = meta.requests.length
@@ -586,26 +561,18 @@ test('publication: one result and one external post per target; a failure is the
 
     // Definite rejection before the native draft: failed, then the corrected retry publishes once.
     const third = await create('key-3', { body: 'Rejected first', media: [{ asset_id: 'a1', slot: 'cover' }] })
-    assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === third.post.id), true,
-      'the actual draft is available before it has any provider publication')
     meta.fault('reject', request => request.path.endsWith(`${PAGE}/photos`))
     const rejected = await publishPost(env, 'org-a', third.post.id, { expectedUpdatedAt: third.post.updated_at, targets: [targets.facebook()] }, 'owner')
     assert.deepEqual([rejected.ok, rejected.outcomes[0]!.status, rejected.outcomes[0]!.code], [false, 'failed', 'provider_rejected'])
-    const failedFact = (await progress()).outcomes.find(fact => fact.source.table === 'post_publications' && fact.source.id === rejected.outcomes[0]!.publication_id)
-    assert.equal(failedFact?.state, 'failed')
-    assert.equal(failedFact?.verification.status, 'failed')
+    assert.equal(await publicationState(rejected.outcomes[0]!.publication_id), 'failed')
     const retried = await publishPost(env, 'org-a', third.post.id, { expectedUpdatedAt: third.post.updated_at, targets: [targets.facebook()] }, 'publisher')
     assert.equal(retried.outcomes[0]!.status, 'published')
     await publishedOnMeta(third.post.id, 'facebook')
     assert.equal((await getPost(db, env, 'org-a', third.post.id))!.status, 'draft', 'external publication does not publish the website draft')
-    assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === third.post.id), false,
-      'the confirmed Facebook receipt clears sharing work even while the independent website draft remains')
     const retryInitiator = await db.prepare(`SELECT a.actor_user_id FROM post_publications p JOIN activity_entries a ON a.id = p.initiating_activity_id
       WHERE p.post_id = ? AND p.channel = 'facebook'`).bind(third.post.id).first<{ actor_user_id: string }>()
     assert.equal(retryInitiator?.actor_user_id, 'publisher')
-    const retriedFact = (await progress()).outcomes.find(fact => fact.source.table === 'post_publications' && fact.source.id === retried.outcomes[0]!.publication_id)
-    assert.deepEqual(retriedFact?.actor, { kind: 'member', user_id: 'publisher' })
-    assert.equal(retriedFact?.verification.status, 'verified')
+    assert.equal(await publicationState(retried.outcomes[0]!.publication_id), 'published')
     const attempts = await db.prepare(`SELECT actor_user_id, payload_json FROM activity_entries WHERE event_name = 'post.publication_started'
       AND json_extract(payload_json, '$.metadata.post_id') = ?`).bind(third.post.id).all<{ actor_user_id: string; payload_json: string }>()
     assert.equal(attempts.results.length, 2)
@@ -616,9 +583,7 @@ test('publication: one result and one external post per target; a failure is the
     meta.fault('dropped', request => request.path.endsWith(`${PAGE}/feed`))
     const lost = await publishPost(env, 'org-a', fourth.post.id, { expectedUpdatedAt: fourth.post.updated_at, targets: [targets.facebook()] }, 'owner')
     assert.deepEqual([lost.ok, lost.outcomes[0]!.status, lost.outcomes[0]!.code], [false, 'failed', 'provider_unreachable'])
-    const lostFact = (await progress()).outcomes.find(fact => fact.source.table === 'post_publications' && fact.source.id === lost.outcomes[0]!.publication_id)
-    assert.equal(lostFact?.state, 'failed')
-    assert.equal(lostFact?.verification.status, 'failed')
+    assert.equal(await publicationState(lost.outcomes[0]!.publication_id), 'failed')
     const pinned = (await getPost(db, env, 'org-a', fourth.post.id))!
     const receipt = pinned.publications[0]!
     assert.deepEqual((await mcp('get_post', { post_id: pinned.id })).post?.publications, [receipt])
@@ -693,8 +658,6 @@ test('publication: one result and one external post per target; a failure is the
     meta.fault('reject', request => request.path.endsWith('media_publish'))
     const refusedPublish = await publishPost(env, 'org-a', refusedContainer.post.id, { expectedUpdatedAt: refusedContainer.post.updated_at, targets: [targets.instagram()] }, 'owner')
     assert.equal(refusedPublish.outcomes[0]!.code, 'provider_rejected')
-    assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === refusedContainer.post.id), false,
-      'a recorded provider answer is not reopened as owner work')
     assert.equal((await publishPost(env, 'org-a', refusedContainer.post.id, { expectedUpdatedAt: refusedContainer.post.updated_at, targets: [targets.instagram()] }, 'owner')).outcomes[0]!.status, 'published')
     await publishedOnMeta(refusedContainer.post.id, 'instagram')
 
@@ -976,107 +939,11 @@ test('configured Facebook system user reads every assigned Page and rejects inco
   }
 })
 
-test('opportunity MCP tools preserve saved decisions during incomplete social reads and reopen the original ID on recovery', async () => {
-  const { runtime, db, env, cardless, meta, run, restore } = await setUp()
+test('a website edit that lands after publish has read the draft fails the publish as stale and keeps the edit', async () => {
+  const { runtime, db, env, cardless, meta, restore } = await setUp()
   try {
-    await run("INSERT INTO member (id, organizationId, userId, role) VALUES ('progress-owner', 'org-a', 'owner', 'owner')")
-    const membership = await resolveMembership(env, { organizationId: 'org-a', userId: 'owner' })
-    assert.ok(membership)
-    const organization: McpExecutorContext['organization'] = { env, db, membership, organizationId: 'org-a', userId: 'owner', role: 'owner', isPlatformAdmin: false, scopes: [] }
-    const tool = (toolName: string, args: Record<string, unknown> = {}) => handleTaskTools({ toolName, organization, args })
-    const list = async (args: Record<string, unknown> = {}) => await tool('list_opportunities', args) as { opportunities: OpportunityView[]; issues: string[] }
-    const status = (id: string) => db.prepare('SELECT status, available_at FROM opportunities WHERE organization_id = ? AND id = ?').bind('org-a', id).first()
-    const saved = async () => (await db.prepare("SELECT * FROM opportunities WHERE organization_id = 'org-a' ORDER BY id").all()).results
-    const posts = []
-    for (const title of ['Summer menu', 'Friday tables', 'Saturday lunch']) {
-      const { post } = await createPost(db, cardless, 'org-a', { post: { title, body: `News about ${title}` }, idempotencyKey: title }, 'owner')
-      const result = await publishPost(cardless, 'org-a', post.id, { expectedUpdatedAt: post.updated_at, targets: [targets.website] }, 'owner')
-      assert.deepEqual(result.outcomes.map(outcome => [outcome.channel, outcome.status]), [['organization', 'published']])
-      posts.push(post)
-    }
-
-    const before = await list()
-    assert.deepEqual(before.issues, [])
-    const ids = posts.map(post => before.opportunities.find(item => item.path === postEditorPath('org-a', post.id))?.id)
-    assert.equal(ids.filter(Boolean).length, 3)
-
-    // This location has no posts of its own, but the workspace already has posts to finish.
-    await run("INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at) VALUES ('other-location', 'org-a', 'other-location', 'Other location', 'active', 'UTC', '2026-09-28T00:00:00.000Z', '2026-09-28T00:00:00.000Z')")
-    const scoped = () => list({ location_id: 'other-location' })
-    const scopedOnly = (await scoped()).opportunities.find(item => item.path === postEditorPath('org-a', 'new', 'other-location'))
-    assert.ok(scopedOnly)
-    const savedScopes = await saved()
-    assert.deepEqual(await list(), before)
-    assert((await scoped()).opportunities.some(item => item.id === scopedOnly.id))
-    assert.deepEqual(await saved(), savedScopes)
-
-    const [open, dismissed, accepted] = ids as [string, string, string]
-    await tool('dismiss_opportunity', { opportunity_id: dismissed })
-    const { task } = await tool('accept_opportunity', { opportunity_id: accepted }) as { task: TaskView }
-    const beforeOutage = await saved()
-
-    meta.fault('dropped', request => request.path.endsWith('/assigned_pages'), 2)
-    meta.fault('dropped', request => request.host === 'graph.instagram.com' && request.path.endsWith('/me'), 2)
-    const partial = await list()
-    assert.equal(partial.issues.length, 2)
-    assert(partial.issues.every(issue => /Social connection status for (facebook|instagram) could not be read:.*Network connection lost/.test(issue)))
-    assert(!partial.opportunities.some(item => ids.includes(item.id) || /^(Reconnect your social account|Capture a new business photo)/.test(item.title)))
-    await assert.rejects(tool('accept_opportunity', { opportunity_id: open }), (error: unknown) => {
-      assert.deepEqual(asMcpError(error).data, { status: 503, code: 'OPPORTUNITY_EVIDENCE_UNAVAILABLE', operation_completed: false, field: 'opportunity_id' })
-      return true
-    })
-    assert.deepEqual(await status(open), { status: 'open', available_at: null })
-    assert.deepEqual(await saved(), beforeOutage)
-    assert((await list()).opportunities.some(item => item.id === open), 'the first successful read shows the original opportunity')
-    assert.deepEqual(await saved(), beforeOutage)
-
-    const article = await createBlogPost(db, 'owner', { idempotency_key: 'article-opportunity', title: 'A new menu',
-      content_blocks: [{ type: 'markdown', data: { markdown: 'Read about the new menu.', editor_mode: 'rich' } }] }, { organization_id: 'org-a' }, cardless)
-    const articleWork = (await list()).opportunities.find(item => item.path === blogEditorPath('org-a', article.id))
-    assert.ok(articleWork)
-    await deleteBlogPost(db, article.id, 'org-a')
-    meta.fault('dropped', request => request.path.endsWith('/assigned_pages'))
-    meta.fault('dropped', request => request.host === 'graph.instagram.com' && request.path.endsWith('/me'))
-    await assert.rejects(tool('accept_opportunity', { opportunity_id: articleWork.id }), (error: unknown) => {
-      assert.deepEqual(asMcpError(error).data, { status: 409, code: 'OPPORTUNITY_CHANGED', field: 'opportunity_id' })
-      return true
-    })
-
-    const until = new Date(Date.now() + 60_000).toISOString()
-    await tool('defer_opportunity', { opportunity_id: open, until })
-    // The providers now explicitly report missing access to the selected targets.
-    const pages = meta.assignedPageResponses.get('')
-    const account = meta.igResponses.get('me')
-    meta.assignedPageResponses.set('', { data: [] })
-    meta.igResponses.set('me', { user_id: OTHER_IG, username: 'different-account' })
-    const disconnected = await list()
-    assert.deepEqual(disconnected.issues, [])
-    assert(!disconnected.opportunities.some(item => item.id === open))
-    assert.deepEqual(await status(open), { status: 'open', available_at: until })
-    meta.assignedPageResponses.set('', pages)
-    meta.igResponses.set('me', account)
-    const recovered = await list()
-    assert.deepEqual(recovered.issues, [])
-    assert(!recovered.opportunities.some(item => ids.includes(item.id)))
-    assert.deepEqual(await status(open), { status: 'open', available_at: until })
-    const due = await listOpportunities(db, memberAccessPrincipal(membership, { env }), { now: new Date(until) })
-    assert.deepEqual(due.issues, [])
-    assert(due.opportunities.some(item => item.id === open))
-    assert.deepEqual(await status(dismissed), { status: 'dismissed', available_at: null })
-    assert.deepEqual(await status(accepted), { status: 'accepted', available_at: null })
-    assert.deepEqual((await db.prepare("SELECT id, opportunity_id FROM tasks WHERE organization_id = 'org-a'").all()).results, [{ id: task.id, opportunity_id: accepted }])
-    const afterRecovery = await saved()
-    assert.deepEqual(await list(), recovered)
-    assert.deepEqual(await saved(), afterRecovery)
-
     // A newer website edit can win after publish has already read the draft.
     const { post: draft } = await createPost(db, cardless, 'org-a', { post: { body: 'Draft for a website update' }, idempotencyKey: 'website-race' }, 'owner')
-    const websiteWork = (await list()).opportunities.find(item => item.path === postEditorPath('org-a', draft.id))
-    assert.ok(websiteWork)
-    const { task: websiteTask } = await tool('accept_opportunity', { opportunity_id: websiteWork.id }) as { task: TaskView }
-    const readWebsiteTask = () => db.prepare('SELECT status, version, closed_at FROM tasks WHERE id = ?').bind(websiteTask.id).first()
-    const openTask = await readWebsiteTask()
-    assert.deepEqual(openTask, { status: 'open', version: 1, closed_at: null })
     let interleaved = false
     const editingDb = new Proxy(db, { get(target, key) {
       if (key === 'batch') return async (statements: D1PreparedStatement[]) => {
@@ -1095,11 +962,9 @@ test('opportunity MCP tools preserve saved decisions during incomplete social re
     const updatedDraft = await getPost(db, env, 'org-a', draft.id)
     assert.equal(updatedDraft?.status, 'draft')
     assert.equal(updatedDraft.body, 'A concurrent website edit')
-    assert.deepEqual(await readWebsiteTask(), openTask)
     const published = await publishPost(cardless, 'org-a', draft.id, { expectedUpdatedAt: updatedDraft.updated_at, targets: [targets.website] }, 'owner')
     assert.deepEqual(published.outcomes.map(outcome => outcome.status), ['published'])
     assert.equal((await getPost(db, env, 'org-a', draft.id))?.status, 'published')
-    assert.deepEqual(await readWebsiteTask(), { status: 'done', version: 2, closed_at: published.updated_at })
     assert.equal(meta.sent(request => request.method === 'POST').length, 0)
   } finally {
     restore()
@@ -1192,7 +1057,7 @@ test('Instagram insights read the connected account and its posts for the organi
     assert.equal(report.status, 'connected')
     if (report.status !== 'connected') return
     assert.equal(report.username, 'krabiclaw')
-    assert.deepEqual(report.period, range)
+    assert.deepEqual(report.period, { ...range, timezone: 'Asia/Bangkok' })
     // Zero is Instagram's zero; a metric it did not return is null.
     assert.deepEqual(report.account, { views: 1200, reach: 0, accounts_engaged: 14, total_interactions: 31, likes: 20, comments: 3, shares: 4, saves: 4, replies: null, profile_links_taps: 2 })
     const [accountRequest] = meta.sent(request => request.path.endsWith(`${IG}/insights`))

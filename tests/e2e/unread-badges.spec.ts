@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Request } from '@playwright/test'
 import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
-import type { InboxRow, InboxUnreadCounts } from '../../server/domain/guest-threads/types'
-import type { TaskSection } from '../../server/domain/tasks'
+import type { InboxRow } from '../../server/domain/guest-threads/types'
+import type { BusinessToday } from '../../shared/dashboard-today'
 import { openTenantPage } from './helpers'
 import { acceptOrganizationInvitation, authRequestHeaders, loginAs, sendOrganizationInvitation } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
@@ -11,7 +11,7 @@ import { bookTable, openSeating } from './helpers/tables'
 
 import type { ConversationPage } from '../../shared/messages-contract'
 
-type WorkspaceInbox = { threads: InboxRow[]; unread: InboxUnreadCounts }
+type WorkspaceInbox = { threads: InboxRow[]; has_unread: boolean }
 
 test('a signed-in reader sees an empty inbox until a message arrives and loses workspace inbox access when removed', async ({ browser, playwright, baseURL }) => {
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates and removes an isolated local workspace')
@@ -34,14 +34,9 @@ test('a signed-in reader sees an empty inbox until a message arrives and loses w
     const member = await acceptOrganizationInvitation(reader, origin, invitationId)
     const workspaceParams = { organization_id: organizationId }
     const inbox = (request: APIRequestContext) => request.get('/api/messages', { params: { ...workspaceParams, mailbox: 'current' } })
-    const badge = () => reader.get('/api/messages/unread-count', { params: workspaceParams })
-    const zero = { all: 0, guests: 0, support: 0, team: 0 }
     const empty = await inbox(reader)
     expect(empty.status(), await empty.text()).toBe(200)
-    expect(await empty.json()).toMatchObject({ threads: [], unread: zero })
-    const emptyBadge = await badge()
-    expect(emptyBadge.status(), await emptyBadge.text()).toBe(200)
-    expect(await emptyBadge.json()).toEqual({ unread: zero })
+    expect(await empty.json()).toMatchObject({ threads: [], has_unread: false })
 
     const conversation = await owner.post('/api/dashboard/team/threads', { params: { org: slug }, headers, data: { member_user_ids: [fixture.id] } })
     expect(conversation.status(), await conversation.text()).toBe(201)
@@ -51,10 +46,7 @@ test('a signed-in reader sees an empty inbox until a message arrives and loses w
     expect(sent.status(), await sent.text()).toBe(200)
     const seeded = await inbox(reader)
     expect(seeded.status(), await seeded.text()).toBe(200)
-    expect(await seeded.json()).toMatchObject({ threads: [{ id: conversationId, preview: message, unread: true }], unread: { ...zero, all: 1, team: 1 } })
-    const seededBadge = await badge()
-    expect(seededBadge.status(), await seededBadge.text()).toBe(200)
-    expect(await seededBadge.json()).toEqual({ unread: { ...zero, all: 1, team: 1 } })
+    expect(await seeded.json()).toMatchObject({ threads: [{ id: conversationId, preview: message, unread: true }], has_unread: true })
     const session = await reader.get('/api/auth/get-session')
     expect(session.status(), await session.text()).toBe(200)
     const { session: { id: sessionId } } = await session.json() as { session: { id: string } }
@@ -95,10 +87,9 @@ test('a signed-in reader sees an empty inbox until a message arrives and loses w
     } finally {
       await page.close()
     }
-    for (const response of await Promise.all([inbox(reader), badge()])) {
-      expect(response.status(), await response.text()).toBe(404)
-      expect(await response.json()).toMatchObject({ data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
-    }
+    const removed = await inbox(reader)
+    expect(removed.status(), await removed.text()).toBe(404)
+    expect(await removed.json()).toMatchObject({ data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
     const stillSignedIn = await reader.get('/api/auth/get-session')
     expect(stillSignedIn.status(), await stillSignedIn.text()).toBe(200)
     expect(await stillSignedIn.json()).toMatchObject({ session: { id: sessionId }, user: { id: fixture.id } })
@@ -143,15 +134,14 @@ test('a new booking, its cancellation and a guest message are unread until read,
   await loginAs(owner, baseURL)
   const conversations = '/api/messages'
   const organization_id = restaurant.organizationId
-  // The one unread statement: the list's counts, which Messages' badge reads too.
+  // The one unread statement: the Current list's unread rows, and the dot that says whether there are any.
   const unread = async (request: APIRequestContext = owner) => {
-    const response = await request.get(conversations, { params: { organization_id, limit: 1, mailbox: 'current' } })
+    const response = await request.get(conversations, { params: { organization_id, limit: 100, mailbox: 'current' } })
     expect(response.status(), await response.text()).toBe(200)
-    const listCount = (await response.json() as WorkspaceInbox).unread.all
-    const badge = await request.get('/api/messages/unread-count', { params: { organization_id } })
-    expect(badge.status(), await badge.text()).toBe(200)
-    expect((await badge.json() as { unread: InboxUnreadCounts }).unread.all).toBe(listCount)
-    return listCount
+    const inbox = await response.json() as WorkspaceInbox
+    const rows = inbox.threads.filter(thread => thread.unread).length
+    expect(inbox.has_unread).toBe(rows > 0)
+    return rows
   }
   // The row as the list draws it: read back through a different path than the one that moved it.
   const row = async (id: string) => {
@@ -227,8 +217,8 @@ test('a new booking, its cancellation and a guest message are unread until read,
     for (const range of ['today', 'upcoming']) {
       const feed = await owner.get('/api/dashboard/today', { params: { org: restaurant.slug, range } })
       expect(feed.status(), await feed.text()).toBe(200)
-      const { tasks } = await feed.json() as { tasks: TaskSection[] }
-      expect(tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === threadId)).toEqual([])
+      const { cards } = await feed.json() as BusinessToday
+      expect(cards.filter(card => card.to.endsWith(`/messages/${threadId}`))).toEqual([])
     }
     const dashboardNav = page.getByTestId('dashboard-top-nav')
     const calendar = dashboardNav.getByRole('link', { name: 'Calendar', exact: true })
@@ -239,7 +229,7 @@ test('a new booking, its cancellation and a guest message are unread until read,
       await expect(listRow).toHaveCount(0)
     }
     await leaveInbox()
-    await expect(page.getByTestId('dashboard-nav-unread')).toHaveText(arrived > 99 ? '99+' : String(arrived))
+    await expect(page.getByTestId('dashboard-nav-unread')).toBeVisible()
 
     // A return on the same socket uses the latest rows, including the scoped update.
     const firstPageUrl = (url: URL) => url.pathname === conversations
@@ -295,13 +285,13 @@ test('a new booking, its cancellation and a guest message are unread until read,
     await leaveInbox()
     const changed = await owner.post(`${conversations}/${threadId}/unread`, { headers: authRequestHeaders(baseURL) })
     expect(changed.status(), await changed.text()).toBe(200)
-    await expect(page.getByTestId('dashboard-nav-unread')).toHaveText(arrived > 99 ? '99+' : String(arrived))
+    await expect(page.getByTestId('dashboard-nav-unread')).toBeVisible()
     const refreshedList = page.waitForResponse(response => response.request().method() === 'GET' && firstPageUrl(new URL(response.url())))
     const readAfterChange = waitForRead()
     await messages.click()
     const refreshed = await refreshedList
     expect(refreshed.status(), await refreshed.text()).toBe(200)
-    expect(await refreshed.json()).toMatchObject({ unread: { all: arrived } })
+    expect(await refreshed.json()).toMatchObject({ has_unread: true })
     if (await listRow.getAttribute('aria-current') !== 'page') await listRow.click()
     expect((await readAfterChange).status()).toBe(200)
     await expect(listRow.getByLabel('Unread badge proof: unread')).toHaveCount(0)

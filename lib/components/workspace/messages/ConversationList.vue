@@ -10,12 +10,12 @@
 
     <div class="min-h-0 flex-1 overflow-y-auto" :class="dashboardGutterClass">
       <UAlert
-        v-if="threadsError || nextPageError"
+        v-if="threadsError || nextPageError || readAheadError"
         color="error"
         variant="soft"
         class="mb-3"
         title="Messages could not be loaded"
-        :description="getErrorMessage(threadsError || nextPageError, 'Guest thread request failed')"
+        :description="getErrorMessage(threadsError || nextPageError || readAheadError, 'Guest thread request failed')"
       />
 
       <!-- Reordering animates. New previews and access removals take effect immediately. -->
@@ -37,6 +37,8 @@
           <NuxtLink
             :to="{ path: threadRoute(thread), query: route.query }"
             :data-thread-row="thread.id"
+            @pointerenter="readAhead(thread.id)"
+            @focus="readAhead(thread.id)"
             :aria-current="thread.id === openThreadId ? 'page' : undefined"
             class="relative flex items-start gap-4 rounded-xl py-4 pl-7 pr-3 transition duration-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             :class="thread.id === openThreadId ? 'bg-elevated' : 'hover:bg-elevated/60'"
@@ -138,8 +140,12 @@ const listHydrated = ref(false)
 const realtime = useDashboardInvalidations()
 onMounted(() => { listHydrated.value = true })
 
-const unreadCounts = useInboxUnread(organizationId)
+const workspaceUnread = useInboxUnread(organizationId)
 const personalUnread = usePersonalInboxUnread()
+const inboxUnread = computed({
+  get: () => props.personalScope ? personalUnread.value : workspaceUnread.value,
+  set: value => { if (props.personalScope) personalUnread.value = value; else workspaceUnread.value = value },
+})
 
 const emptyTitle = computed(() => search.value || kind.value || unreadOnly.value ? 'No conversations match' : 'No conversations yet.')
 const emptyDescription = computed(() => {
@@ -222,14 +228,15 @@ const { data, pending, status, error: threadsError, refresh, clear } = await use
   nextPageError.value = null
   const scope = listKey.value
   if (readConnectionEpoch === null) {
-    const held = realtime.recentInbox.snapshot
-    realtime.recentInbox.snapshot = undefined
-    if (held?.key === scope && held.expiresAt > Date.now() && realtime.status.value === 'open') {
+    // The inbox key holds only the window this list stored, every loaded page included.
+    const held = realtime.held.take(`inbox:${scope}`)
+    if (held) {
+      const window = held.value as ThreadListPage
       readConnectionEpoch = realtime.connectionEpoch.value
       reuseExpiresAt = held.expiresAt
-      loadedPages = 1 + held.page.pagination.offset / held.page.pagination.limit
+      loadedPages = 1 + window.pagination.offset / window.pagination.limit
       rowsKey.value = scope
-      return held.page
+      return window
     }
     await realtime.waitForFirstOpen(signal)
   }
@@ -249,6 +256,23 @@ const { data, pending, status, error: threadsError, refresh, clear } = await use
 
 const page = computed(() => rowsKey.value === listKey.value ? data.value ?? null : null)
 const threads = computed(() => page.value?.threads ?? [])
+// The first rows are the likeliest to be opened; any other row is read when the pointer or focus reaches it.
+const prefetch = useConversationPrefetch(props.personalScope)
+// A failed read-ahead stays in the alert until that conversation is read.
+const readAheadErrors = shallowRef(new Map<string, unknown>())
+const readAheadError = computed(() => readAheadErrors.value.values().next().value ?? null)
+function readAhead(conversationId: string) {
+  const settle = (error?: unknown) => {
+    const errors = new Map(readAheadErrors.value)
+    if (error === undefined) errors.delete(conversationId)
+    else errors.set(conversationId, error)
+    readAheadErrors.value = errors
+  }
+  prefetch(conversationId)?.then(page => { if (page) settle() }, settle)
+}
+watch([threads, realtime.status], ([rows]) => {
+  for (const thread of rows.slice(0, 5)) if (thread.id !== openThreadId.value) readAhead(thread.id)
+}, { immediate: true })
 
 async function loadMore() {
   const before = data.value
@@ -362,9 +386,7 @@ let disposed = false
 let reconcileAbort: AbortController | undefined
 
 function publishUnread(value: ThreadListPage | undefined) {
-  if (props.personalScope) {
-    if (value?.count !== undefined) personalUnread.value = value.count
-  } else if (value?.unread) unreadCounts.value = value.unread
+  if (value) inboxUnread.value = value.has_unread
 }
 watch(page, value => publishUnread(value ?? undefined), { immediate: true })
 watch(listKey, () => {
@@ -380,9 +402,10 @@ onScopeDispose(() => {
   if (!props.personalScope && current && reader.value && status.value === 'success' && !loadingMore.value && !reconciling
     && !nextPageError.value && !toggling.size && !fullRefresh && !changedIds.size && realtime.status.value === 'open'
     && readConnectionEpoch === realtime.connectionEpoch.value) {
-    // Mailboxes and labels change with time. Reusing a snapshot does not extend its life.
-    const expiresAt = reuseExpiresAt ?? Date.now() + 30_000
-    if (expiresAt > Date.now()) realtime.recentInbox.snapshot = { key: listKey.value, page: current, expiresAt }
+    // Mailboxes and labels change with time. Reusing a held read does not extend its life.
+    realtime.held.hold(realtime.held.begin(`inbox:${listKey.value}`, event => event.type === 'access.changed'
+      || ((event.type === 'MESSAGE_ACK' || event.type === 'CONVERSATION_LEAVE') && event.user_id === reader.value)
+      || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.scheduled)), current, reuseExpiresAt ?? Date.now() + 30_000, 1)
   }
 })
 
@@ -446,7 +469,7 @@ async function drainChanges() {
       return
     }
     const threads = before.pagination.has_more ? rows.slice(0, before.threads.length) : rows
-    data.value = { ...before, threads, unread: changed.unread, count: changed.count }
+    data.value = { ...before, threads, has_unread: changed.has_unread }
   } catch (error) {
     if (!disposed && generationAtStart === generation && scope === listKey.value) nextPageError.value = error
   } finally {
@@ -463,8 +486,7 @@ function clearInbox() {
   fullRefresh = false
   reconcileAbort?.abort()
   pageController?.abort()
-  if (props.personalScope) personalUnread.value = null
-  else unreadCounts.value = null
+  inboxUnread.value = null
   clear()
   loadedPages = 1
 }
@@ -486,9 +508,8 @@ watch(realtime.event, event => {
         return
       }
       else {
-        if (data.value) data.value = { ...data.value, threads: data.value.threads.filter(row => row.id !== event.conversation_id), unread: undefined, count: undefined }
-        if (props.personalScope) personalUnread.value = null
-        else unreadCounts.value = null
+        if (data.value) data.value = { ...data.value, threads: data.value.threads.filter(row => row.id !== event.conversation_id) }
+        inboxUnread.value = null
       }
     }
     reconcile(event.conversation_id)

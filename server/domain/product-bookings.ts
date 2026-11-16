@@ -4,10 +4,11 @@ import { CapacityUnavailableError, claimSessionCapacity, paidQuantity, partyPays
 import { cloudflareEnv, cleanString } from '~/server/utils/api-response'
 import { isReservedTestDomain, shouldSendRealEmail } from '~/server/utils/email-delivery'
 import { notifyBookingCreated, raiseSettledFailures } from '~/server/utils/notifications'
-import { measurementOutcome, readPageEventId, recordOrganizationConversionEvent } from '~/server/utils/organization-conversions'
+import { measurementOutcome, readPageEventId, readWebsiteSource, recordOrganizationConversionEvent } from '~/server/utils/organization-conversions'
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import { toE164 } from '~/utils/phone'
-import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { addLocalDays } from '~/utils/timezone'
+import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { bookingPolicy, formatBookingPolicySummary } from '~/server/utils/booking-policy-summary'
 import { readTimedBookingPrice } from '~/server/domain/bookings'
 import { isCurrencyCode } from '~/shared/currencies'
@@ -35,7 +36,9 @@ import { accountActivityPath } from '~/shared/account-activity'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
 import { formAnswerSnapshotsSchema, formAnswersFingerprint } from '~/shared/form-questions'
 import type { ProductKind } from '~/shared/product-details'
-import type { MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assignedMemberSql, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
+import { CURRENT_GUEST_SQL } from '~/server/domain/conversations'
+import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 
 export interface BookingCreationContext {
   organizationId: string
@@ -400,6 +403,8 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
       env,
       organizationId: organization.id, productId: product.id, sessionId: session.id,
       productVariantId, partySize, userId, policyJson: JSON.stringify(policy), answers, resolved,
+      // A guest's booking on the website keeps how they arrived; one a member makes has no source.
+      websiteSource: operator ? null : await readWebsiteSource(db, organization.id, event.req, pageEventId),
       following: bookingId => [
         ...requestInsertQueries({
           kind: 'booking', id: threadId, organization_id: organization.id,
@@ -570,6 +575,7 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
       const stay = await createStayRequest(db, env, {
         organizationId, buyerUserId, key: idempotencyKey, fingerprint,
         home, quote: quoted, guest, locale, ipHash: await hashClientIp(getClientIp(event)),
+        websiteSource: await readWebsiteSource(db, organizationId, event.req, readPageEventId(body.page_event_id)),
       })
       return requestResult(stay.id, stay.conversation_id, false, false)
     }
@@ -593,4 +599,97 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
   // The held nights close on the home's channel now, not when the payment lands.
   await pushStayHoldNights(db, env, organizationId, home.product_id, stay.check_in_date, stay.check_out_date)
   return { body: { success: true, status: 'checkout', replayed: Boolean(retrying), ...checkout }, status: retrying ? 200 : 201 }
+}
+
+/** One booked record as `bookedRecordsInRange` reads it, with what was paid and whether the viewer has a seat in its guest conversation. */
+export interface BookedRecordInRange {
+  id: string
+  organization_id: string
+  organization_name: string
+  vertical: string
+  status: 'pending' | 'confirmed' | 'cancelled'
+  unit: 'slot' | 'nights'
+  product_id: string
+  product_kind: ProductKind
+  /** A home's own name (internal) for its business, its public name for its guest; an offering's name. */
+  product_name: string
+  product_session_id: string | null
+  location_id: string | null
+  location_title: string | null
+  starts_at: string
+  ends_at: string
+  timezone: string
+  party_size: number
+  /** A stay's adults and children; a visit's are null. */
+  adults: number | null
+  children: number | null
+  /** The guest said "this many or more". */
+  party_size_is_minimum: number
+  guest_name: string | null
+  /** The guest's account picture, when they have one. */
+  guest_image_url: string | null
+  owner: 'app' | 'channel'
+  channel: 'airbnb' | 'vrbo' | 'booking_com' | 'direct'
+  /** A channel stay that landed on held nights. */
+  overbooked: number
+  total_minor: number | null
+  currency: string | null
+  /** Recorded payments and captured online payments, net of refunds, in the booking's currency. */
+  paid_minor: number
+  /** The offering's responsible member, and how the team names them. */
+  assigned_member_id: string | null
+  assigned_member_name: string | null
+  conversation_id: string | null
+  /** 1 when the viewer sits in the booking's guest conversation and so can open it. */
+  viewer_seated: number
+}
+
+/**
+ * The booked records a viewer hosts that overlap local days `from`..`to`, as
+ * one statement for the caller's batch: an owner or admin hosts every one, a
+ * member the slot bookings of the offerings they are named on. Instants are
+ * read a day wider either side, because each record's day is its own zone's;
+ * the caller keeps the days it shows. `pending` adds every request still
+ * waiting for a decision that has not ended; `cancelled` keeps cancelled ones.
+ * A `guest` read is the viewer's own visits and stays across businesses, as
+ * their account shows them. Today, the Agenda, the host Calendar and the
+ * bookings list read it.
+ */
+/**
+ * A viewer for `bookedRecordsInRange` that reads every booked record of the
+ * membership's business, for a caller that keeps a member's own rows itself:
+ * the homes calendar and the bookings list, whose member rows include the
+ * stays at homes they look after.
+ */
+export function businessWideViewer(membership: BatchQuery): BatchQuery {
+  return { query: `SELECT organization_id, user_id, member_id, 1 AS organization_wide FROM (${membership.query})`, params: membership.params }
+}
+
+export function bookedRecordsInRange(viewer: ViewerTerms, range: { from: string; to: string; pending?: boolean; cancelled?: boolean; guest?: boolean }): BatchQuery {
+  const wideFrom = `${addLocalDays(range.from, -1)}T00:00:00.000Z`, wideTo = `${addLocalDays(range.to, 1)}T23:59:59.999Z`
+  const whose = range.guest
+    ? `r.user_id = ${viewer.user} AND ${CURRENT_GUEST_SQL('r')} AND (b.product_session_id IS NOT NULL OR (b.owner = 'app' AND b.user_id = r.user_id))`
+    : `b.organization_id = ${viewer.organization} AND (${viewer.organizationWide} = 1 OR (b.product_session_id IS NOT NULL AND ${assignedMemberSql('c', viewer.user)}))`
+  return {
+    query: `SELECT b.id, b.organization_id, org.name AS organization_name, org.vertical, b.status, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit, b.product_id, p.kind AS product_kind,
+        ${range.guest ? 'p.name' : 'COALESCE(sc.internal_name, p.name)'} AS product_name, b.product_session_id, COALESCE(b.location_id, sc.location_id) AS location_id, l.title AS location_title,
+        b.starts_at, b.ends_at, b.timezone, b.party_size, b.adults, b.children, b.party_size_is_minimum, json_extract(r.payload_json, '$.guest.name') AS guest_name,
+        (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, b.owner, b.channel, b.overbooked, b.total_minor, b.currency,
+        (SELECT COALESCE(SUM(o.amount_minor), 0) FROM offline_payments o WHERE o.organization_id = b.organization_id AND o.booking_id = b.id)
+          + (SELECT COALESCE(SUM(pay.captured_amount - pay.refunded_amount), 0) FROM payments pay WHERE pay.organization_id = b.organization_id AND pay.subject_type = 'booking' AND pay.subject_id = b.id) AS paid_minor,
+        c.assigned_member_id, (SELECT ${MEMBER_NAME_SQL} FROM member m JOIN user u ON u.id = m.userId LEFT JOIN member_scheduling ms ON ms.member_id = m.id AND ms.organization_id = m.organizationId
+          WHERE m.id = c.assigned_member_id AND m.organizationId = b.organization_id) AS assigned_member_name, r.id AS conversation_id,
+        EXISTS (SELECT 1 FROM conversation_participants seat WHERE seat.conversation_id = r.id AND seat.user_id = ${viewer.user} AND seat.role = 'member') AS viewer_seated
+      FROM bookings b
+      JOIN organization org ON org.id = b.organization_id
+      JOIN products p ON p.organization_id = b.organization_id AND p.id = b.product_id
+      LEFT JOIN product_booking_configs c ON c.organization_id = b.organization_id AND c.product_id = b.product_id
+      LEFT JOIN product_stay_configs sc ON b.product_session_id IS NULL AND sc.organization_id = b.organization_id AND sc.product_id = b.product_id
+      LEFT JOIN business_locations l ON l.organization_id = b.organization_id AND l.id = COALESCE(b.location_id, sc.location_id)
+      LEFT JOIN conversations r ON r.organization_id = b.organization_id AND r.booking_id = b.id AND r.kind = 'booking'
+     WHERE ${whose} ${range.cancelled ? '' : "AND b.status <> 'cancelled'"}
+       AND ((b.starts_at <= ? AND b.ends_at >= ?)${range.pending ? " OR (b.status = 'pending' AND b.ends_at >= ?)" : ''})
+     ORDER BY b.starts_at, b.id`,
+    params: [wideTo, wideFrom, ...(range.pending ? [wideFrom] : [])],
+  }
 }

@@ -35,11 +35,6 @@ Evaluate the CMS on Android as well as desktop.
 - The existing pending organization is the eventual active organization, and
   its preview is the real website renderer. Saved answers and imported or
   owner-supplied content remain the source for the preview.
-- Owner goals are distinct from account identity and business facts. Their
-  capture and the recommendation strategy remain decisions in
-  [#1606](https://github.com/krabiclaw/krabiclaw/issues/1606) and
-  [#1607](https://github.com/krabiclaw/krabiclaw/issues/1607); a new profile field
-  or mandatory setup question is not implied by this first slice.
 
 ### Existing journey and verification boundaries
 
@@ -180,8 +175,7 @@ Generated placeholder rows are no longer part of onboarding or site creation. Te
 ## After website setup
 
 Brand, hours, contact, catalog, connections and team are available in their
-dashboard editors. The website preview is available on Today once the site is
-created.
+dashboard editors. The website is published from its status card in Website.
 
 ### Location-level (once per location, including the first)
 

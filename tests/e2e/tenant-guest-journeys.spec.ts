@@ -3,12 +3,13 @@ import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { seededTenant } from './seed/manifest'
 import { devLoginHeaders, seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
 import { loginAs } from './helpers/auth'
-import { mcpData, mcpRequest } from './helpers/mcp'
+import { insightsRowValue, mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTables } from './helpers/tables'
 import type { Product, PublicProduct } from '../../server/types/products'
 import type { ConversationPage } from '../../shared/messages-contract'
 import type { TaskSection } from '../../server/domain/tasks'
+import type { BusinessToday } from '../../shared/dashboard-today'
 
 type DeliveryRow = { conversation_id: string; channel: 'email' | 'whatsapp'; purpose: string; status: string }
 type NotificationState = { deliveries: DeliveryRow[] }
@@ -331,8 +332,8 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect(entries.filter(entry => entry.type === 'event' && / canceled the booking$/.test(entry.text))).toHaveLength(1)
     const todayAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(todayAfter.status(), await todayAfter.text()).toBe(200)
-    const todayAfterPayload = await todayAfter.json() as { tasks: TaskSection[] }
-    expect(todayAfterPayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id && task.status === 'open')).toEqual([])
+    const todayAfterPayload = await todayAfter.json() as BusinessToday
+    expect(todayAfterPayload.cards.filter(card => card.to.endsWith(`/messages/${body.conversation_id}`))).toEqual([])
     const scheduleAfter = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
     expect(scheduleAfter.status(), await scheduleAfter.text()).toBe(200)
     expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.conversation_id}`)).toBe(false)
@@ -601,27 +602,18 @@ for (const seeded of [
       const paused = mcpData<{ product: { active: boolean; publications: Array<{ organization_id: string; published: boolean }> } }>(await (await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: target.org, product_id: product.id } })).json()).product
       expect(paused.active).toBe(false)
       expect(paused.publications).toContainEqual(expect.objectContaining({ organization_id: target.org, published: true }))
-      const pausedView = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events'
-        && response.request().postDataJSON()?.event_name === 'product_view' && response.request().postDataJSON()?.product_id === product.id)
+      // A paused offering's page is still served, and viewing it is a view of the offering: Insights lists an
+      // experience's views under Booking conversion, and a dish (not booked) under Top pages by its path.
+      const offeringViews = () => target.experience
+        ? insightsRowValue(page.request, baseURL!, target.org, 'conversion/booking-conversion', product.name, 1)
+        : insightsRowValue(page.request, baseURL!, target.org, 'conversion/top-pages', publicPath, 0)
+      const viewsBefore = await offeringViews()
       await openTenantPage(page, `${target.base}${publicPath}`, target.headers)
       await expect(page.getByRole('heading', { name: product.name, level: 1, exact: true })).toBeVisible()
       await expect(page.getByText(detail, { exact: true })).toBeVisible()
       await expect(page.locator(`a[href="${externalUrl}"]:visible`)).toHaveCount(0)
       await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `${target.base}${publicPath}`)
-      const pausedViewResponse = await pausedView
-      expect(pausedViewResponse.status()).toBe(201)
-      const pausedViewId = (await pausedViewResponse.json()).id
-      const events = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: {
-        organization_id: target.org, mode: 'events', filters: { event_name: 'product_view', entity_id: product.id },
-      } })
-      const eventRows = mcpData<{ rows: Array<Record<string, unknown>> }>(await events.json()).rows
-      expect(eventRows).toContainEqual(expect.objectContaining({
-        event_id: pausedViewId, subject: { type: 'product', id: product.id },
-      }))
-      const pausedEvent = eventRows.find(row => row.event_id === pausedViewId)
-      expect(pausedEvent).not.toHaveProperty('actor')
-      expect(pausedEvent).not.toHaveProperty('properties')
-      expect(pausedEvent).not.toHaveProperty('metadata')
+      await expect.poll(offeringViews).toBe(viewsBefore + 1)
     } finally {
       try {
         expect((await page.request.delete(`${editor}/${product.id}`)).status()).toBe(200)

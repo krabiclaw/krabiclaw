@@ -2,7 +2,7 @@ import { expect, test, type APIResponse } from '@playwright/test'
 import type { InboxRow } from '../../server/domain/guest-threads/types'
 import type { ConversationPage } from '../../shared/messages-contract'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
-import type { ReviewFeedback } from '../../shared/review-feedback'
+import type { InsightsPage } from '../../shared/insights'
 import { loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { openTenantPage, waitForNuxtHydration } from './helpers'
@@ -66,18 +66,18 @@ test('a guest who did not come is marked a no-show from the booking record, and 
   }
 })
 
-test('Insights reads guest feedback apart from published reviews', async ({ page }) => {
+test('Quality reads guest feedback, private feedback included, for the range', async ({ page }) => {
   const { slug } = studio()
   await loginAs(page.request, baseURL, ownerId)
-  const feedback = await body<ReviewFeedback>(await page.request.get('/api/dashboard/review-feedback', { params: { org: slug, days: '365' } }), 200)
-  expect(feedback.organizationWide).toBe(true)
-  expect((await page.request.get('/api/dashboard/review-feedback', { params: { org: slug, days: '400' } })).status()).toBe(400)
+  const quality = await body<InsightsPage>(await page.request.get('/api/dashboard/insights/quality/overall-rating', { params: { org: slug } }), 200)
+  expect(quality.list?.kind).toBe('reviews')
+  expect((await page.request.get('/api/dashboard/insights/quality/overall-rating', { params: { org: slug, start_date: '2020-01-01' } })).status()).toBe(400)
 
-  await page.goto(`/dashboard/${slug}/insights?tab=reviews`)
+  await page.goto(`/dashboard/${slug}/insights/quality/overall-rating`)
   await waitForNuxtHydration(page)
-  await expect(page.getByRole('heading', { name: 'Guest feedback' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Published reviews' })).toBeVisible()
-  await expect(page.getByTestId('feedback-overall')).toHaveText(feedback.overall.average === null ? '—' : String(feedback.overall.average))
+  await expect(page.getByRole('heading', { name: 'Overall rating', exact: true }).first()).toBeVisible()
+  // The page draws the number as the read wrote it.
+  await expect(page.getByTestId('insights-metric-overall_rating')).toHaveText(quality.metrics.find(metric => metric.key === 'overall_rating')!.display)
 })
 
 test('a review link opens the one review address, and an unknown link says it is unavailable', async ({ page }) => {

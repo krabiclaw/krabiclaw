@@ -151,6 +151,17 @@ export function closureOnDate(special: SpecialHours, date: string): Closure | un
 export function datedHours(special: SpecialHours, date: string) {
   return special?.find(p => p.kind === 'hours' && p.date === date)
 }
+/** Why a location takes nobody on a date, or null when it is open: the one rule the host calendar and the MCP calendar read. */
+export type LocationDayClosure = { reason: 'inactive' | 'closure' | 'dated_hours' | 'regular_hours'; note: string | null }
+export function locationDayClosure(location: { status: string }, hours: OpeningHours, special: SpecialHours, date: string): LocationDayClosure | null {
+  if (location.status !== 'active') return { reason: 'inactive', note: null }
+  const closure = closureOnDate(special, date)
+  if (closure) return { reason: 'closure', note: closure.note ?? null }
+  const dated = datedHours(special, date)
+  if (dated?.kind === 'hours' && !dated.periods.length) return { reason: 'dated_hours', note: dated.note ?? null }
+  const intervals = getDateIntervals(hours, special, date)
+  return intervals !== null && !intervals.length ? { reason: 'regular_hours', note: null } : null
+}
 export function getDateIntervals(hours: OpeningHours, special: SpecialHours, date: string): HoursInterval[] | null {
   if (closureOnDate(special, date)) return []
   const dated = datedHours(special, date)

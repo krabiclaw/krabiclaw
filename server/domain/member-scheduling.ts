@@ -162,7 +162,7 @@ const BUSY_HORIZON_MS = 94 * 86400000
  * established when they were selected; here the token is used and Google is
  * asked. Nothing is cached.
  */
-async function memberBusy(env: CloudflareEnv, row: MemberScheduling, span: { from: string; until: string }): Promise<SchedulingInterval[]> {
+export async function memberBusy(env: CloudflareEnv, row: Pick<MemberScheduling, 'organization_id' | 'calendar_account_id' | 'calendar_ids_json'>, span: { from: string; until: string }): Promise<SchedulingInterval[]> {
  const ids = JSON.parse(row.calendar_ids_json) as string[]
  if (!row.calendar_account_id || !ids.length) return []
  // Google Calendar sync is Business; a selection kept past the plan is not read.

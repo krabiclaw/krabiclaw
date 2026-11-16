@@ -2,8 +2,7 @@ import { HTTPError } from 'nitro'
 import { readLinkedAccount, type CloudflareEnv } from '~/server/utils/auth'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { readIntegration } from '~/server/utils/organization-integrations'
-import { resolveOrganizationAnalyticsContext } from '~/server/utils/analytics-report'
-import { localDateBounds, parseAnalyticsRange } from '~/server/utils/analytics-calendar'
+import { localDateBounds, parseAnalyticsRange, resolveOrganizationAnalyticsContext } from '~/server/utils/analytics-calendar'
 import { ACCOUNT_INSIGHT_METRICS, MEDIA_INSIGHT_METRICS, instagramAccessToken, listMedia, readAccountInsights, readMediaInsights, type InstagramTarget } from '~/server/utils/instagram'
 import { MetaGraphError } from '~/server/utils/meta-graph'
 import { failureOf } from '~/server/utils/social-publication'
@@ -44,7 +43,7 @@ export async function loadInstagramInsights(env: CloudflareEnv, organizationId: 
       }
     })
     return {
-      status: 'connected', username: connection.target_name, period: { startDate: range.startDate, endDate: range.endDate },
+      status: 'connected', username: connection.target_name, period: { startDate: range.startDate, endDate: range.endDate, timezone: context.timezone },
       account: Object.fromEntries(ACCOUNT_INSIGHT_METRICS.map(name => [name, totals[name] ?? null])) as Record<typeof ACCOUNT_INSIGHT_METRICS[number], number | null>,
       media, moreMedia: posted.more,
     }

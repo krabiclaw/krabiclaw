@@ -99,19 +99,12 @@ import { getErrorMessage } from '~/utils/errors'
 import { isTenantPageListResponse, tenantPageRows, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
 import PageTasksModal from '~/components/dashboard/PageTasksModal.vue'
 
-const route = useRoute()
-const router = useRouter()
 const dashboardApi = useDashboardApi()
 const organizationId = useDashboardOrganizationId()
 const level = useRouteLevel()
 
 const tasksModalOpen = ref(false)
 const dismissedTaskIds = ref<Set<string>>(new Set())
-
-const linksPath = computed(() => router.resolve({
-  name: 'dashboard-org_slug-website-pages-links',
-  params: { org_slug: route.params.org_slug },
-}).path)
 
 const { data, error, status, refresh } = await useAsyncData(
   `tenant-pages-${organizationId}`,
@@ -136,7 +129,7 @@ const loadError = computed(() => (error.value ? getErrorMessage(error.value, 'Fa
 
 const listItems = computed(() => tenantPageRows(data.value?.pages ?? []).map(row => ({
   ...row,
-  to: row.recipe === 'links' ? linksPath.value : `${level.path.value}/${row.id}`,
+  to: `${level.path.value}/${row.id}`,
 })))
 
 const tasks = computed<PageTask[]>(() => {

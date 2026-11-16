@@ -366,7 +366,7 @@ export async function appendMessage(db: DbClient, input: MessageInput, additions
           ON CONFLICT(id) DO NOTHING`,
         params: [receipt.id, receipt.channel, receipt.provider, receipt.purpose, now, now, id],
       }] : [],
-      ...send && media ? media.messagePhotoPlacements(send.organizationId, 'message', id, assetIds, now) : [],
+      ...send && media ? media.messagePhotoPlacements(send.organizationId, id, assetIds, now) : [],
       ...extra,
       { query: 'SELECT * FROM messages WHERE dedupe_key = ?', params: [dedupeKey] },
     ], { operation: 'Write message' })
@@ -535,9 +535,6 @@ export async function assertConversationAccess(db: DbClient, principal: MemberAc
   if (!row) conversationAccessDenied()
   return row
 }
-
-/** The unread conversations a person sees, per list kind: the filter counts, the nav count and the badge. */
-export interface UnreadCounts { all: number; guests: number; support: number; team: number }
 
 /** An Airbnb Support case: Airbnb's agents wrote and no guest did. */
 export const SUPPORT_CONVERSATION_SQL = (alias: string) => `(${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM messages support_message WHERE support_message.conversation_id = ${alias}.id AND support_message.author_kind = 'krabiclaw' AND support_message.event_name = '${MIRRORED_EVENT}')

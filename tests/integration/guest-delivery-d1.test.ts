@@ -12,7 +12,7 @@ import { Miniflare } from 'miniflare'
 import { createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isVisibleDeliveryFailure, listThreadDeliveries, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { appendMessage, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { executeGuestThreadOperation, sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
-import { countUnreadAsGuest, listConversations } from '../../server/domain/guest-threads/repository.ts'
+import { listConversations, readGuestInbox } from '../../server/domain/guest-threads/repository.ts'
 import { moveBooking, requestBookingChange, respondToBookingChange } from '../../server/domain/guest-threads/booking-changes.ts'
 import { notifyContactSubmitted, notifyFinancialNotification, notifyStayCancelled, notifyBookingCreated } from '../../server/utils/notifications.ts'
 import { buyStay } from './support/stay-checkout.ts'
@@ -22,8 +22,7 @@ import { buildPublicResourceCacheKey } from '../../server/utils/public-resource-
 import { PUBLIC_CACHE_REVISION_SQL } from '../../server/utils/edge-cache.ts'
 import { cancelStay, createStay, getStay, readPublicStayHome } from '../../server/domain/stays.ts'
 import { buildBuyerRequestActivityUrl } from '../../server/utils/dashboard-notification-links.ts'
-import { memberAccessPrincipal, organizationAdapter, resolveMembership } from '../../server/utils/member-access.ts'
-import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
+import { organizationAdapter } from '../../server/utils/member-access.ts'
 import { setNotificationPreference } from '../../server/domain/notification-preferences.ts'
 import { registerDevice } from '../../server/domain/devices.ts'
 import { guestPaymentMessage, ownerPaymentMessage } from '../../server/notifications/payment-events.ts'
@@ -33,6 +32,14 @@ import { renderNotificationEmail } from '../../server/emails/render.ts'
 import { reviewRequestMessage } from '../../server/notifications/guest-events.ts'
 import { addLocalDays, formatCalendarDate, formatTimestamp, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
+
+async function guestUnread(db: Parameters<typeof readGuestInbox>[0], userId: string) {
+  const inbox = await readGuestInbox(db, { userId, mailbox: 'current' })
+  const unread = inbox.threads.filter(row => row.unread).length
+  assert.equal(inbox.has_unread, unread > 0, 'the dot is the rows marked unread')
+  return unread
+}
+
 
 test('a guest-thread email is sent once per event: replays send nothing, a failed send goes again, and a late reply never moves the thread', async () => {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -62,7 +69,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       contactId: 'contact-proof', guestName: 'Proof Guest', email: 'guest@proof.example', subject: null, message: 'Hello' })))
     assert.equal((await listConversations(db, 'org-proof', { userId: 'user-proof', unreadOnly: true }))[0]?.id, 'contact-proof')
     // The guest wrote it: their own words are not unread to them.
-    assert.equal(await countUnreadAsGuest(db, 'guest-proof'), 0)
+    assert.equal(await guestUnread(db, 'guest-proof'), 0)
 
     assert.deepEqual((await db.prepare("SELECT d.purpose,d.status FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id WHERE e.conversation_id='contact-proof' ORDER BY d.purpose").all()).results,
       [{ purpose: 'guest_acknowledgement', status: 'sent' }, { purpose: 'owner_alert', status: 'sent' }])
@@ -169,7 +176,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     const [seating] = await listBookableSessions(db, { env, organizationId: 'org-proof', productId: tables.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 8 * 86_400_000).toISOString() })
     assert.equal(seating && formatTimestamp(seating.starts_at, 'en', 'Asia/Bangkok', { weekday: 'long', hour: 'numeric', minute: '2-digit' }), 'Monday 4:00 PM')
     const tablePolicy = JSON.stringify({ advance_notice_minutes: null, party_size_min: null, party_size_max: null, minimum_guest_age: null, accessibility_contact_required: false, payment: null })
-    const { bookingId: createdBookingId } = await claimSessionCapacity(db, { env, organizationId: 'org-proof', productId: tables.id, sessionId: seating!.id, productVariantId: tables.variants[0]!.id, partySize: 1, userId: 'guest-proof', policyJson: tablePolicy,
+    const { bookingId: createdBookingId } = await claimSessionCapacity(db, { websiteSource: null, env, organizationId: 'org-proof', productId: tables.id, sessionId: seating!.id, productVariantId: tables.variants[0]!.id, partySize: 1, userId: 'guest-proof', policyJson: tablePolicy,
       following: bookingId => requestInsertQueries({ id: 'change-proof', kind: 'booking', organization_id: 'org-proof', location_id: 'booking-location', booking_id: bookingId,
         user_id: 'guest-proof', payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@proof.example', phone: '+66812345678' }), created_at: now },
       { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Table for 1', note: null }) })
@@ -192,7 +199,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     }
     const proposal = await propose('first-change', 2)
     // The proposal is KrabiClaw's message in the guest's conversation, unread to them until they open it.
-    assert.equal(await countUnreadAsGuest(db, 'guest-proof'), 1)
+    assert.equal(await guestUnread(db, 'guest-proof'), 1)
     const proposalEmail = await db.prepare('SELECT status,email_json FROM guest_thread_deliveries WHERE message_id = ? AND purpose=\'status_update\'').bind(proposal.requestId).first<{status:string;email_json:string}>()
     assert.equal(proposalEmail?.status, 'sent')
     const proposalMessage = JSON.parse(proposalEmail!.email_json).message
@@ -222,14 +229,6 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     assert.match(JSON.parse(acceptedMail).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/activity\/booking\/change-proof"/)
     assert.equal(await db.prepare("SELECT party_size FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id='change-proof')").first('party_size'), 2)
     assert.equal(await db.prepare("SELECT count(*) AS count FROM messages WHERE conversation_id = 'change-proof' AND event_name='booking_change.accepted'").first('count'), 1)
-    const progressMembership = await resolveMembership(env, { organizationId: 'org-proof', userId: 'user-proof' })
-    assert(progressMembership)
-    const bookingProgress = await listBusinessOutcomes(db, memberAccessPrincipal(progressMembership, { env }), { limit: 100 })
-    const bookingId = await db.prepare("SELECT id FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id='change-proof')").first<string>('id')
-    assert(bookingId)
-    const acceptedProgress = bookingProgress.outcomes.find(item => item.event === 'booking_change.accepted' && item.references.some(reference => reference.kind === 'guest_thread' && reference.id === 'change-proof'))
-    assert(acceptedProgress)
-    assert.deepEqual(acceptedProgress.subject, { kind: 'booking', id: bookingId }, 'the recorded request kind owns the operational subject, not the booking_change event prefix')
 
     const stale = await propose('stale-change', 3)
     // Anything that moves the record makes the open proposal stale. What moved
@@ -290,7 +289,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     assert.equal((await deliveryRow(deliveryId))?.provider_message_id, sent?.provider_message_id)
     assert.equal((await deliveryRow(deliveryId))?.email_json, sent.email_json, 'replaying a staff reply preserves its frozen email request')
     // The business's reply is unread to the guest until they open it, once however often it is replayed.
-    assert.equal(await countUnreadAsGuest(db, 'guest-proof'), 2)
+    assert.equal(await guestUnread(db, 'guest-proof'), 2)
 
 
     // A delayed delivery cannot replace a newer guest message in the inbox.
@@ -798,7 +797,7 @@ test('a guest writing while the business edits a table booking does not refuse t
 
     const policyJson = JSON.stringify({ advance_notice_minutes: null, party_size_min: null, party_size_max: null, minimum_guest_age: null, accessibility_contact_required: false, payment: null, cancellation: null })
     const now = new Date().toISOString()
-    await claimSessionCapacity(db, { env, organizationId: 'org-table', productId: oldTown.id, sessionId: first.id, productVariantId: oldTown.variants[0]!.id, partySize: 2, userId: 'guest-table', policyJson,
+    await claimSessionCapacity(db, { websiteSource: null, env, organizationId: 'org-table', productId: oldTown.id, sessionId: first.id, productVariantId: oldTown.variants[0]!.id, partySize: 2, userId: 'guest-table', policyJson,
       following: bookingId => requestInsertQueries({ id: 'table-thread', kind: 'booking', organization_id: 'org-table', location_id: 'loc-old-town', booking_id: bookingId,
         user_id: 'guest-table', payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@table.example', phone: '+66812345678' }), created_at: now },
       { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Table for 2', note: null }) })

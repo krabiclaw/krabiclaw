@@ -6,16 +6,12 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededSiteHeaders } from './test-env'
 import { seededTenant } from './seed/manifest'
 import type { Product } from '../../server/types/products'
-import type { TaskPerson, TaskSection } from '../../server/domain/tasks'
-import type { OpportunityView } from '../../server/domain/opportunities'
+import type { BusinessToday } from '../../shared/dashboard-today'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
 const SLUG = 'harbor-legal-aid'
 const DASHBOARD = `/dashboard/${SLUG}`
 const ACTOR = 'user-e2e-ncls-consultation-owner'
-
-/** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
 
 async function body<T>(response: APIResponse, status: number): Promise<T> {
   expect(response.status(), await response.text()).toBe(status)
@@ -90,14 +86,14 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
       await memberContext.request.get(`/api/dashboard/bookings/${bookingId}`, { params: { org: SLUG } }), 200)
     expect(assignedRead.booking).toMatchObject({ conversation_id: requestId, assigned_member_id: actor.id })
 
-    // A member's Today is their own work: no opportunities, nobody to assign to,
-    // and only tasks given to them.
+    // A member's Today is their own work: the request waiting for their decision, with no money. The attorney sits in
+    // the client's conversation, so the card opens it.
+    const when = (options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en', { timeZone: session.timezone, ...options }).format(new Date(session.starts_at))
     const today = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
-    expect(today).toMatchObject({ opportunities: [], opportunity_issues: [], assignees: [] })
-    for (const task of today.tasks.flatMap(section => section.tasks)) {
-      expect(task.can, `${task.kind} ${task.id} is not a manager's`).toMatchObject({ assign: false, edit: false })
-      expect(task.assignee, `${task.kind} ${task.id} is given to the member`).toMatchObject({ type: 'member', id: actor.id, you: true })
-    }
+    expect([today.title, today.cards]).toEqual(['You have 1 request', [{
+      id: `booking:${bookingId}`, when: `${when({ weekday: 'short', month: 'short', day: 'numeric' })} · ${when({ hour: 'numeric', minute: '2-digit' })}`, image_url: null, icon: 'i-lucide-scale', done: null,
+      headline: `${guestFirstName} wants to book`, line: `${product.name} · Online`, action: { title: 'Review the request', detail: 'Accept or decline' }, to: `${DASHBOARD}/messages/${requestId}`, draft: null,
+    }]])
     // The consultation is the Calendar's: it is on its day there.
     const agenda = await body<{ items: Array<{ id: string; conversation_id: string; booking_id: string; starts_at: string; to: string }> }>(await memberContext.request.get('/api/dashboard/agenda', { params: { org: SLUG, from: day, to: new Date(Date.parse(day) + 86_400_000).toISOString().slice(0, 10) } }), 200)
     expect(agenda.items.find(item => item.conversation_id === requestId)).toMatchObject({ id: `booking:${requestId}`, booking_id: read.booking.booking_id, starts_at: session.starts_at, to: bookingPath })
@@ -188,12 +184,12 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     const persisted = await body<{ booking: { status: string; assigned_member_id: string } }>(
       await page.request.get(`/api/dashboard/bookings/${bookingId}`, { params: { org: SLUG } }), 200)
     expect(persisted.booking).toMatchObject({ status: 'confirmed', assigned_member_id: actor.id })
-    // Confirming the consultation is the review its booking asked for: that task is done, by the member who
-    // confirmed it, and nothing else is left on Today for it; the visit itself is the Calendar's.
+    // Confirming the consultation answers the request: nothing is left on Today, and the consultation is the member's Upcoming.
     const after = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
-    expect(after.tasks.flatMap(section => section.tasks.map(task => ({ section: section.id, task }))).filter(item => item.task.conversation_id === requestId)).toEqual([{ section: 'done', task: expect.objectContaining({
-      kind: 'booking_review', status: 'done', person: expect.objectContaining({ name: 'You', you: true }), outcome: expect.objectContaining({ closed_by: 'You' }),
-    }) }])
+    expect([after.title, after.cards]).toEqual(['Nothing needs you today', []])
+    const upcoming = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG, range: 'upcoming' } }), 200)
+    expect([upcoming.title, upcoming.cards.map(card => [card.id, card.headline, card.action.title, card.to])]).toEqual(['You have 1 upcoming consultation',
+      [[`booking:${bookingId}`, `${guestFirstName}’s consultation`, 'Say hello to your guests', `${DASHBOARD}/messages/${requestId}`]]])
     await memberPage.setViewportSize({ width: 1440, height: 900 })
     await expect(todayPanel).toBeVisible()
     await memberPage.clock.setFixedTime(new Date(`${day}T13:00:00.000Z`))

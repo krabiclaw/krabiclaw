@@ -31,7 +31,6 @@ const listRow = { type: 'object', properties: {
   home: nullableText, when: nullableText, preview: text, preview_from: nullableText, time: text,
   unread: { type: 'boolean', description: 'A message from someone else you have not read, as Messages shows it.' },
 }, required: ['conversation_id', 'kind', 'title', 'channel', 'home', 'when', 'preview', 'preview_from', 'time', 'unread'], additionalProperties: false }
-const unreadCounts = { type: 'object', properties: { all: { type: 'integer' }, guests: { type: 'integer' }, support: { type: 'integer' }, team: { type: 'integer' } }, required: ['all', 'guests', 'support', 'team'] }
 const cursor = { type: ['integer', 'null'], minimum: 1 }
 const messageEntries = { type: 'array', items: { type: 'object', properties: { id: text, type: { type: 'string', enum: ['message', 'day', 'event'] } }, required: ['id', 'type'] } }
 const messageWindow = { type: 'object', properties: { before: cursor, oldest: cursor, newest: cursor, read_through: cursor }, required: ['before', 'oldest', 'newest', 'read_through'] }
@@ -63,7 +62,7 @@ export const CONVERSATION_TOOLS: McpToolDefinition[] = [
       q: { type: 'string', minLength: 1, maxLength: 200, description: 'Words in the guest’s name, the home or the messages.' },
       location_id: { type: 'string', minLength: 1 }, ...paginationInputSchema,
     },
-    outputSchema: { type: 'object', properties: { conversations: { type: 'array', items: listRow }, unread: unreadCounts, page_info: pageInfoObject }, required: ['conversations', 'unread', 'page_info'] },
+    outputSchema: { type: 'object', properties: { conversations: { type: 'array', items: listRow }, has_unread: { type: 'boolean', description: 'Your Current mailbox holds an unread conversation, whatever this page\'s filters.' }, page_info: pageInfoObject }, required: ['conversations', 'has_unread', 'page_info'] },
   }),
   organizationTool({ name: 'get_conversation', domain: 'conversations', minimumRole: 'member', description: 'Read the latest page of a conversation you participate in. Entries are in sequence order. Pass page.before to read older messages. Reading does not acknowledge messages.',
     inputSchema: { conversation_id: conversationId, before: { type: 'integer', minimum: 1 } }, required: ['conversation_id'],
@@ -113,9 +112,9 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
       const resource = { resource: `conversations:${JSON.stringify([organizationId, userId, filter])}` }
       const window = mcpPageWindow(args, resource)
       const options = { ...filter, userId, limit: window.limit + 1, offset: window.offset }
-      const { threads: rows, unread } = await readWorkspaceInbox(db, organizationId, options)
+      const { threads: rows, has_unread } = await readWorkspaceInbox(db, organizationId, options)
       const conversations = rows.slice(0, window.limit).map(row => ({ conversation_id: row.id, kind: row.kind, title: row.title, channel: row.channel, home: row.home, when: row.when, preview: row.preview, preview_from: row.preview_from, time: row.time, unread: row.unread }))
-      return { conversations, unread, page_info: mcpPageInfo(window, conversations.length, rows.length > window.limit, resource) }
+      return { conversations, has_unread, page_info: mcpPageInfo(window, conversations.length, rows.length > window.limit, resource) }
     }
     case 'list_conversation_recipients': return { current_user_id: userId, members: await listTeamMembers(env, principal) }
     case 'start_conversation': {
