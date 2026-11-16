@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { captureEvents } from './support/events.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import sharp from 'sharp'
@@ -50,7 +51,8 @@ test('members talk in team conversations, see unread state and receive recorded 
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), MEDIA_BASE_URL: 'https://media.example.test', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+    const events = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: events.binding, MEDIA_BASE_URL: 'https://media.example.test', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'team-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     for (const [id, slug] of [[ORG, 'org'], [OTHER, 'other']]) {
@@ -76,6 +78,8 @@ test('members talk in team conversations, see unread state and receive recorded 
     } })
     const manager: StayAccess = { organizationId: ORG, actorId: 'owner', manage: true }
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 30_000 })
+
+    await events.runNext(env, 'stay.changed')
 
     const principal = (userId: string, role: string, memberId = 'm-' + userId) => memberAccessPrincipal({ userId, role, memberId, organizationId: ORG } as never, { env })
     const owner = principal('owner', 'owner', 'm-owner')
@@ -150,6 +154,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(assertConversationAccess(db, principal('cleaner', 'member'), stayConversation), refused(404, 'THREAD_NOT_FOUND', 'conversation_id'))
     assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stayConversation })).map(member => member.userId).sort(), ['owner'], 'a stay conversation alerts owner oversight, not the member looking after the home')
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner' })
+    await events.drain(env, 'jobs.changed')
     // Giving the home to the cleaner posted the stay's clean in its conversation, which is the one "Message host" opens.
     const about = await createTeamThread(env, db, cleaner, { member_user_ids: ['owner'], booking_id: stay.id })
     assert.equal(about.created, false)

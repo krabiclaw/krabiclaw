@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { captureEvents } from './support/events.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
@@ -140,7 +141,7 @@ test('Today suggests Stripe setup until the account is ready, and a price for ea
     const db = await runtime.getD1Database('DB')
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     const env = {
-      ...await runtime.getBindings<CloudflareEnv>(), DB: db, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth',
+      ...await runtime.getBindings<CloudflareEnv>(), DB: db, EVENTS: captureEvents().binding, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', STRIPE_SECRET_KEY: 'sk_test_payouts', NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_payouts', STRIPE_PAYMENTS_METHOD_CONFIGURATION: 'pmc_payouts', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
     } as CloudflareEnv
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)

@@ -3,6 +3,7 @@ import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
+import { captureEvents } from './support/events.ts'
 import { handleStripeGa4Event, withdrawStripeGaIdentifiers } from '../../server/utils/stripe-ga4.ts'
 import { deliverViaMeasurementProtocol, readGa4Delivery, recordZarazPageviewReceipt, zarazPageviewDelivery } from '../../server/utils/ga4-delivery.ts'
 import { PLATFORM_SITE } from '../../utils/site-routing.ts'
@@ -280,7 +281,7 @@ test('the Stripe handler records every paid subscription invoice and refund once
       prices: { retrieve: async () => price },
       charges: { retrieve: async () => ({ invoice: null }) },
     } as never
-    const env = { GA4_API_SECRET: 'secret' } as never
+    const env = { GA4_API_SECRET: 'secret', EVENTS: captureEvents().binding } as never
     const paid = (invoice: Record<string, unknown>, eventId: string) => handleStripeGa4Event(env, db, stripe, { id: eventId, type: 'invoice.paid', data: { object: invoice } } as never)
     const purchases = async () => (await db.prepare(`SELECT id, json_extract(payload_json, '$.metadata.purchase_type') type, json_extract(payload_json, '$.attribution.campaign') campaign,
       json_extract(payload_json, '$.metadata.originating_user_id') owner, json_extract(payload_json, '$.value.amount_minor') value, json_extract(payload_json, '$.value.collected_minor') cash, session_id,

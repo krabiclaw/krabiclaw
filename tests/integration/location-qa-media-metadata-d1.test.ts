@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { captureEvents } from './support/events.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { H3 } from 'nitro/h3'
@@ -120,7 +121,7 @@ test('organization Q&A route finds a page record by id without widening tenant a
     const pricingId = (pricing.data as { id: string }).id
     const otherId = (other.data as { id: string }).id
     const env = {
-      DB: db, BETTER_AUTH_SECRET: 'local-qa-route-proof-secret-long-enough-for-auth',
+      DB: db, EVENTS: captureEvents().binding, BETTER_AUTH_SECRET: 'local-qa-route-proof-secret-long-enough-for-auth',
       BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
       STRIPE_SECRET_KEY: 'sk_test_local_qa_route_no_provider_requests',
       EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',

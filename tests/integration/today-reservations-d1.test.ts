@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { captureEvents } from './support/events.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { hashPassword } from 'better-auth/crypto'
@@ -41,7 +42,8 @@ async function boot() {
     env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, MEDIA_BUCKET: { type: 'r2' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'today-reservations-proof', exportName: 'Hub' } },
   } }] })
   const db = await runtime.getD1Database('DB')
-  const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'today-reservations-proof-secret-long-enough', BETTER_AUTH_URL: 'https://proof.example',
+  const events = captureEvents()
+  const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: events.binding, BETTER_AUTH_SECRET: 'today-reservations-proof-secret-long-enough', BETTER_AUTH_URL: 'https://proof.example',
     STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'today-reservations-reply-secret',
     PREVIEW_SECRET: 'today-reservations-preview-proof-secret', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
   await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
@@ -71,7 +73,7 @@ async function boot() {
     assert.equal(response.status, 200, await response.clone().text())
     return await response.json() as Today
   }
-  return { runtime, db, env, event: () => new H3Event(request()), today }
+  return { runtime, db, env, events, event: () => new H3Event(request()), today }
 }
 
 /** A scheduled offering at the organization's site, with a session on `day` at 10:00. */
@@ -96,7 +98,7 @@ async function offering(db: D1Database, env: CloudflareEnv, org: Org, input: { k
 const operator = (key: string) => ({ userId: OWNER, idempotencyKey: key, source: 'operator', externalReference: null, guestAcknowledgement: false })
 
 test('Today shows every booking type as one card for its own business, with the welcome as its action only where it applies', { timeout: 180_000 }, async () => {
-  const { runtime, db, env, event, today } = await boot()
+  const { runtime, db, env, events, event, today } = await boot()
   try {
     const localToday = localDateAt(new Date(), ZONE)
     const inTwoDays = addLocalDays(localToday, 2), inThreeDays = addLocalDays(localToday, 3)
@@ -130,6 +132,7 @@ test('Today shows every booking type as one card for its own business, with the 
     const stay = await createStay(db, env, manager, { product_id: home.id, idempotency_key: 'diana-stay', check_in_date: inTwoDays, check_out_date: addLocalDays(inTwoDays, 3),
       adults: 2, children: 0, guest_name: 'Diana Lee', guest_email: 'diana@proof.example', total_minor: 45_000 })
     assert.ok(stay.conversation_id, 'a stay with a guest email has a conversation')
+    await events.runNext(env, 'stay.changed')
 
     // A table reservation: a booking of the bistro's tables at 18:00.
     const tables = await createTables(db, env, { organizationId: 'bistro', locationId: 'bistro-site', actorId: OWNER, memberId: 'bistro-owner', name: 'Bistro table',

@@ -3,6 +3,7 @@ import { createHmac } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import test from 'node:test'
+import { captureEvents } from './support/events.ts'
 import Ajv from 'ajv'
 import { Miniflare } from 'miniflare'
 import sharp from 'sharp'
@@ -223,7 +224,7 @@ async function setUp() {
     for (const statement of readFileSync(`migrations/${tag}.sql`, 'utf8').split('--> statement-breakpoint').map(sql => sql.trim()).filter(Boolean)) await db.prepare(statement).run()
   }
   const env = {
-    ...await runtime.getBindings<CloudflareEnv>(),
+    ...await runtime.getBindings<CloudflareEnv>(), EVENTS: captureEvents().binding,
     BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests',
     NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', PREVIEW_SECRET: 'preview-proof-secret',
     FACEBOOK_APP_ID: 'fb-app', FACEBOOK_APP_SECRET: 'facebook-secret', INSTAGRAM_APP_ID: 'ig-app', INSTAGRAM_APP_SECRET: 'instagram-secret',
