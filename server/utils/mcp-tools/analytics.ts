@@ -33,7 +33,7 @@ export const ANALYTICS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'query_google_analytics',
-    description: 'Run a report on the connected Google Analytics 4 property: GA4 dimensions and metrics (such as date, landingPage, sessionSource, sessionMedium; activeUsers, sessions, screenPageViews, keyEvents) over one to four date ranges, with filters, ordering and paging. GA4 keeps history from before KrabiClaw; use it for periods the business\'s own analytics do not cover.',
+    description: 'Run a report on the connected Google Analytics 4 property: GA4 dimensions and metrics (such as date, landingPage, sessionSource, sessionMedium; activeUsers, sessions, screenPageViews, keyEvents) over one to four date ranges, with filters, ordering and paging. GA4 keeps history from before Blawby; use it for periods the business\'s own analytics do not cover.',
     domain: 'analytics',
     minimumRole: 'admin',
     required: ['date_ranges', 'metrics'],

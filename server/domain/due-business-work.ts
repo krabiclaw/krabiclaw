@@ -1,4 +1,4 @@
-import { execute, queryAll, queryFirst } from '~/server/db'
+import { execute, queryAllPages, queryFirst } from '~/server/db'
 import { publishEvent } from '~/server/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { runScheduledManagedAdSpend } from '~/server/domain/payments/ad-spend'
@@ -10,10 +10,13 @@ import { CACHE_INVALIDATION_TERMINAL_RETENTION_DAYS } from '~/server/utils/publi
 
 export const RETENTION_HUB = 'platform:analytics-retention'
 
-/** Adopt work recorded before booking and integration writes started sending events. */
-export async function enqueueOutstandingBusinessDeadlines(env: CloudflareEnv): Promise<void> {
+/** Deployment adopts work that has no Worker wake yet, including writes made by the old build. */
+export async function enqueueOutstandingWork(env: CloudflareEnv): Promise<void> {
   const due = Date.now()
-  const rows = await queryAll<{ organization_id: string; kind: 'reviews' | 'checkout' | 'channex_ari' }>(env.DB, `
+  const rows = await queryAllPages<{
+    organization_id: string
+    kind: 'reviews' | 'checkout' | 'channex_ari' | 'ad_spend' | 'site' | 'calendar' | 'calendar_cleanup'
+  }>(env.DB, `
     SELECT DISTINCT organization_id, 'reviews' AS kind
     FROM bookings WHERE channel = 'direct' AND status = 'confirmed' AND length(ends_at) > 10 AND ends_at > ?
     UNION ALL SELECT DISTINCT organization_id, 'checkout' FROM (
@@ -23,15 +26,35 @@ export async function enqueueOutstandingBusinessDeadlines(env: CloudflareEnv): P
         AND b.owner = 'app' AND b.channel = 'direct' AND json_type(b.policy_json, '$.stay_request.respond_by') = 'text'
     )
     UNION ALL SELECT DISTINCT organization_id, 'channex_ari'
-    FROM product_channel_mappings WHERE provider = 'channex' AND enabled = 1`,
-  [new Date(due - REVIEW_REQUEST_TTL_DAYS * 86_400_000).toISOString()])
+    FROM product_channel_mappings WHERE provider = 'channex' AND enabled = 1
+    UNION ALL SELECT organization_id, 'ad_spend' FROM (
+      SELECT s.organization_id
+      FROM organization_services s JOIN organization_integrations i
+        ON i.organization_id=s.organization_id AND i.provider IN ('google_ads', 'meta_ads') AND i.status IS NOT 'setting_up'
+      WHERE s.service='managed_ads' AND (s.ended_at IS NULL OR s.ended_at > i.created_at)
+      UNION SELECT organization_id FROM usage_events WHERE resource='ad_spend'
+        AND provider_occurred_at IS NOT NULL AND delivery_at IS NULL
+    )
+    UNION ALL SELECT DISTINCT organization_id, 'site'
+    FROM public_resource_cache_invalidations WHERE status IN ('pending', 'failed')
+    UNION ALL SELECT organization_id, 'calendar'
+    FROM organization_integrations WHERE provider='google_calendar' AND status <> 'setting_up'
+    UNION ALL SELECT DISTINCT organization_id, 'calendar_cleanup'
+    FROM google_calendar_cleanup_jobs WHERE state IN ('pending', 'error')
+      AND NOT EXISTS (SELECT 1 FROM organization WHERE organization.id=google_calendar_cleanup_jobs.organization_id)
+    ORDER BY kind, organization_id
+  `, [new Date(due - REVIEW_REQUEST_TTL_DAYS * 86_400_000).toISOString()])
   await publishEvent(env, { type: 'business.wake', organization_id: RETENTION_HUB, kind: 'retention', due_at: due })
-  for (const row of rows) {
-    await publishEvent(env, { type: 'business.wake', organization_id: row.organization_id, kind: row.kind, due_at: due })
+  for (const { organization_id, kind } of rows) {
+    if (kind === 'site') await publishEvent(env, { type: 'site.cache_changed', organization_id, invalidation_id: null })
+    else if (kind === 'calendar') await publishEvent(env, { type: 'calendar.changed', organization_id, booking_id: null })
+    else if (kind === 'calendar_cleanup') await publishEvent(env, { type: 'calendar.cleanup', organization_id })
+    else await publishEvent(env, { type: 'business.wake', organization_id, kind, due_at: due })
   }
-  const syncJobs = await queryAll<{ organization_id: string; id: string }>(env.DB, "SELECT organization_id, id FROM airbnb_sync_jobs WHERE state = 'pending'")
-  for (const job of syncJobs) {
-    await publishEvent(env, { type: 'airbnb.sync', organization_id: job.organization_id, job_id: job.id })
+  const jobs = await queryAllPages<{ organization_id: string; id: string }>(env.DB,
+    "SELECT organization_id, id FROM airbnb_sync_jobs WHERE state = 'pending' ORDER BY id", [])
+  for (const { organization_id, id } of jobs) {
+    await publishEvent(env, { type: 'airbnb.sync', organization_id, job_id: id })
   }
 }
 

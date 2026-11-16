@@ -24,7 +24,7 @@
             <p v-else-if="item.type === 'event'" class="my-2 text-center text-xs text-muted">{{ item.text }}</p>
 
             <p v-else-if="item.type === 'reservation'" class="my-2 text-center text-xs text-muted">
-              This conversation is about a reservation. <NuxtLink :to="item.to" class="font-medium text-highlighted underline underline-offset-4" data-testid="conversation-show-reservation">Show reservation</NuxtLink>
+              {{ item.text ? `${item.text} ` : '' }}<NuxtLink :to="item.to" class="font-medium text-highlighted underline underline-offset-4" data-testid="conversation-show-reservation">Show reservation</NuxtLink>
             </p>
 
             <!-- What KrabiClaw says in a team conversation sits in the middle, as Airbnb's own lines and cards do: a job is a card with its Done, a reminder is a line. -->
@@ -113,7 +113,7 @@
         <UAlert v-if="requestingChange" class="mb-3" color="info" variant="soft" :description="t(changeRequestSent ? 'booking.change_request_sent' : 'booking.change_request_help')" />
         <MessageComposer v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :sending="sending" :channel="thread.composer.channel" :send-later="!personalScope && thread.kind !== 'team'" :suggest-reply="suggestionsOn && !!latestGuestMessage && !personalScope" :generating-suggestions="generatingSuggestions" :placeholder="thread.kind === 'team' ? 'Message your team' : undefined" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : guestThread ? 'Send reply' : 'Send message'" @send="sendReply" @suggest-reply="generateSuggestions" />
         <MessagePhotoViewer v-model="viewer" />
-        <ReportDialog :open="reporting !== null" title="Report this message" :description="reporting ? `Tell KrabiClaw what is wrong with ${reporting.author}'s message.` : ''" confirm-label="Report" :saving="reportSaving" :error="reportError" @submit="report" @close="reporting = null" />
+        <ReportDialog :open="reporting !== null" title="Report this message" :description="reporting ? `Tell Blawby what is wrong with ${reporting.author}'s message.` : ''" confirm-label="Report" :saving="reportSaving" :error="reportError" @submit="report" @close="reporting = null" />
       </div>
     </template>
   </div>
@@ -273,7 +273,7 @@ const failedDeliveries = (message: MessageItem) => message.deliveries.filter(del
 type Row =
   | { type: 'day'; key: string; label: string }
   | { type: 'event'; key: string; text: string }
-  | { type: 'reservation'; key: string; to: string }
+  | { type: 'reservation'; key: string; to: string; text: string | null }
   | { type: 'run'; key: string; mine: boolean; runs: MessageItem[] }
 
 /*
@@ -351,10 +351,35 @@ const rows = computed<Row[]>(() => {
     })
   }
   const out: Row[] = []
-  for (const item of items) {
+  const { reservation } = current
+  const oldest = items.find(item => item.type !== 'day')
+  const to = props.reservationTo
+  let reservationPending = Boolean(to && reservation && (!before.value || (oldest && oldest.sent_at <= reservation.at)))
+  let day: string | undefined
+  function placeReservation() {
+    if (!reservationPending || !reservation || !to) return
+    reservationPending = false
+    if (day !== reservation.day.id) {
+      day = reservation.day.id
+      out.push({ type: 'day', key: day, label: reservation.day.label })
+    }
+    out.push({ type: 'reservation', key: 'reservation', to, text: reservation.confirmation?.text ?? null })
+  }
+  for (const [index, item] of items.entries()) {
     const key = settledKeys.value[item.id] ?? item.id
-    if (item.type === 'day') out.push({ type: 'day', key, label: item.label })
-    else if (item.type === 'event') out.push({ type: 'event', key, text: item.text })
+    if (item.type === 'day') {
+      const next = items[index + 1]
+      if (reservation && item.id !== reservation.day.id && next && next.type !== 'day' && next.sent_at > reservation.at) placeReservation()
+      if (day !== item.id) out.push({ type: 'day', key, label: item.label })
+      day = item.id
+      continue
+    }
+    if (reservationPending && item.id === reservation?.confirmation?.message_id) {
+      placeReservation()
+      continue
+    }
+    if (reservation && item.sent_at > reservation.at) placeReservation()
+    if (item.type === 'event') out.push({ type: 'event', key, text: item.text })
     else {
       const last = out.at(-1)
       const mine = item.author === 'You' || (userId.value != null && item.author_user_id === userId.value)
@@ -362,10 +387,7 @@ const rows = computed<Row[]>(() => {
       else out.push({ type: 'run', key, mine, runs: [item] })
     }
   }
-  if (props.reservationTo) {
-    const firstExchange = out.findIndex(row => row.type === 'run')
-    out.splice(firstExchange < 0 ? out.length : firstExchange + 1, 0, { type: 'reservation', key: 'reservation', to: props.reservationTo })
-  }
+  placeReservation()
   return out
 })
 

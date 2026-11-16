@@ -107,6 +107,11 @@ export function isConversationPage(value: unknown): value is ConversationPage {
     isRecord(person) && (isText(person.id) || (value.viewer_role === 'guest' && person.id === null)) && isText(person.name) && isNullableText(person.image)
     && (person.invitation_id === undefined || isText(person.invitation_id))
     && (person.role === 'guest' || person.role === 'member') && isText(person.title) && typeof person.can_remove === 'boolean')) return false
+  const { reservation } = conversation
+  if (reservation !== undefined && (!isRecord(reservation) || !isText(reservation.at) || !isRecord(reservation.day)
+    || reservation.day.type !== 'day' || !isConversationEntry(reservation.day)
+    || (reservation.confirmation !== null && (!isRecord(reservation.confirmation)
+      || !isNullableText(reservation.confirmation.message_id) || !isText(reservation.confirmation.text))))) return false
   if ((conversation.kind !== 'team' && conversation.kind !== 'guest' && conversation.kind !== 'support')
     || typeof conversation.is_group !== 'boolean' || !isNullableText(conversation.name) || !isNullableText(conversation.booking_id)
     || !isNullableText(conversation.created_by_user_id) || !isNullableText(conversation.activity_path)

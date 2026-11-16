@@ -1,7 +1,7 @@
 <template>
   <!--
     Airbnb's Payouts: how the money the organization takes in reaches it. Its
-    plan and what it pays KrabiClaw are Plan and billing, a Menu row of its
+    plan and what it pays Blawby are Plan and billing, a Menu row of its
     own. Reached from the Earnings cog; each row is a leaf beside this column,
     and the first opens on arrival where there is a pane.
   -->
@@ -20,7 +20,7 @@ import EditorNavigationList, { type EditorNavigationGroup, type EditorNavigation
 import { connectStatusPresentation, useConnectAccount } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'dashboard-org_slug-earnings' })
-useSeoMeta({ title: 'Payments | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Payments | Blawby', robots: 'noindex, nofollow' })
 
 const level = useRouteLevel()
 const { account, payout, connectError, connectPending } = useConnectAccount()

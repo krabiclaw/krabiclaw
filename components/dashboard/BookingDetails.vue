@@ -36,7 +36,7 @@
           title="Overbooked"
           :description="`${channelName} confirmed this stay on nights another stay holds. Cancel this stay on ${channelName}, or cancel the other stay where it was booked.`"
         />
-        <UAlert v-if="!personalScope && guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in KrabiClaw, which requires a guest name, but it has none." />
+        <UAlert v-if="!personalScope && guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This reservation requires a guest name." />
         <p v-if="changeResult" class="mb-4 text-sm text-highlighted" role="status">{{ changeResult }}</p>
         <UAlert
           v-if="booking?.pending_change"
@@ -120,7 +120,7 @@
             <template v-if="panel.guests">
               <h3 class="mt-5 text-sm font-semibold text-highlighted">Who’s coming</h3>
               <component :is="guestDetailLink ? NuxtLink : 'p'" :to="guestDetailLink" class="mt-1 flex justify-between gap-3 text-sm text-muted">
-                <span><template v-if="!personalScope && recordGuestName">{{ recordGuestName }} · </template>{{ panel.guests }}</span>
+                <span><template v-if="!personalScope && recordGuestName && (!stay || !manage)">{{ recordGuestName }} · </template>{{ panel.guests }}</span>
                 <UIcon v-if="guestDetailLink" name="i-lucide-chevron-right" class="size-4 shrink-0" />
               </component>
             </template>
@@ -172,9 +172,9 @@
             </p>
           </div>
 
-          <div v-if="panel.location || panel.address || panel.mapEmbed || panel.guide?.directions" id="getting-there" :class="sectionClass">
+          <div v-if="panel.location || panel.address || panel.pin || panel.guide?.directions" id="getting-there" :class="sectionClass">
             <h2 class="text-lg font-semibold text-highlighted">Getting there</h2>
-            <iframe v-if="panel.mapEmbed" :src="panel.mapEmbed" title="Reservation location" loading="lazy" class="mt-4 aspect-[3/2] w-full rounded-xl" referrerpolicy="strict-origin-when-cross-origin" />
+            <StaySetupMap v-if="panel.pin" :pin="panel.pin" :interactive="false" compact class="mt-4" />
             <p v-if="panel.location" class="mt-4 text-sm font-medium text-highlighted">{{ panel.location }}</p>
             <p v-if="panel.address" :class="panel.location ? 'mt-1' : 'mt-4'" class="text-sm text-muted">{{ panel.address }}</p>
             <template v-if="panel.guide?.directions">
@@ -300,10 +300,10 @@
   </DashboardIndexPanel>
 
   <ReservationItinerary
-    v-if="canPrintItinerary && accountStay && panel?.code"
+    v-if="canPrintItinerary && detail && recordHome && panel?.code"
     v-model:open="itineraryOpen"
-    :booking="accountStay.booking"
-    :home="accountStay.home"
+    :booking="detail"
+    :home="recordHome"
     :confirmation-code="panel.code"
   />
 
@@ -430,7 +430,7 @@ import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
 import { formatPostalAddress } from '~/utils/postal-address'
-import { calculateMapEmbedUrl } from '~/utils/location-map'
+import StaySetupMap from './StaySetupMap.client.vue'
 import { ApiClientError } from '~/utils/api-clients'
 
 const props = defineProps<{
@@ -724,7 +724,6 @@ async function runAction(action: string) {
 }
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 const accountStay = computed(() => isAccountNightBooking(data.value) ? data.value : null)
-const canPrintItinerary = computed(() => props.personalScope && accountStay.value?.booking.status === 'confirmed')
 const itineraryOpen = ref(false)
 const dashboardStay = computed(() => isDashboardBooking(data.value) && 'home' in data.value ? data.value : null)
 const managedStay = computed(() => dashboardStay.value?.manage ? dashboardStay.value : null)
@@ -732,6 +731,7 @@ const stay = computed(() => accountStay.value?.booking ?? dashboardStay.value?.b
 const detail = computed(() => accountStay.value?.booking ?? managedStay.value?.booking ?? null)
 const pendingChanges = computed(() => managedStay.value?.booking.pending_changes ?? [])
 const channelManaged = computed(() => detail.value !== null && isChannelManagedStay(detail.value))
+const canPrintItinerary = computed(() => detail.value?.status === 'confirmed' && !channelManaged.value)
 const manage = computed(() => managedStay.value !== null)
 const recordHome = computed(() => accountStay.value?.home ?? dashboardStay.value?.home ?? null)
 
@@ -745,11 +745,8 @@ const reservationActions = computed<PanelAction[]>(() => {
       if (canRequestChange.value && messageTo.value) {
         actions.push({ label: 'Change reservation', icon: 'i-lucide-pencil', to: { path: messageTo.value, query: { intent: 'booking-change' } }, testid: 'stay-change' })
       }
-      if (!channelManaged.value && !paymentProcessing.value && (cancellation.value || requestStatus.value)) {
+      if (!channelManaged.value && !paymentProcessing.value && (canRequestChange.value || requestStatus.value)) {
         actions.push({ label: requestStatus.value ? t('stay.withdraw_request') : 'Cancel reservation', icon: 'i-lucide-ban', run: () => void cancelAsGuest(), testid: 'stay-cancel' })
-      }
-      if (canPrintItinerary.value) {
-        actions.push({ label: 'Get a PDF for visa purposes', icon: 'i-lucide-file-text', run: () => { itineraryOpen.value = true }, testid: 'stay-itinerary' })
       }
     } else if (manage.value && !channelManaged.value) {
       if (hostActions.value.includes('edit')) {
@@ -758,6 +755,9 @@ const reservationActions = computed<PanelAction[]>(() => {
       if (hostActions.value.includes('cancel')) {
         actions.push({ label: 'Cancel reservation', icon: 'i-lucide-ban', run: () => void cancelStay(), testid: 'stay-cancel' })
       }
+    }
+    if (canPrintItinerary.value) {
+      actions.push({ label: 'Get a PDF for visa purposes', icon: 'i-lucide-file-text', run: () => { itineraryOpen.value = true }, testid: 'stay-itinerary' })
     }
     return actions
   }
@@ -858,7 +858,6 @@ const panel = computed(() => {
     { label: 'Date', value: reservationDay(record.booking_date), detail: null },
     { label: 'Time', value: formattedTime.value, detail: null },
   ] : []
-  const guests = value ? value.adults + value.children : record?.party_size
   const bookingId = value?.booking_id ?? record?.booking_id
 
   return {
@@ -869,13 +868,14 @@ const panel = computed(() => {
     coHosts: place?.co_hosts ?? [],
     when,
     rows,
-    guests: guests === null || guests === undefined ? null : value ? `${guests} ${guests === 1 ? 'guest' : 'guests'}` : presentation.value?.formatCount(guests),
+    guests: value ? `${guestCount.value} ${guestCount.value === 1 ? 'guest' : 'guests'}` : record && presentation.value?.formatCount(record.party_size),
     code: detail.value?.channel_booking_id ?? bookingId?.slice(0, 8).toUpperCase(),
     actions: reservationActions.value,
     contact: contact.value,
     location,
     address,
-    mapEmbed: place?.location ? calculateMapEmbedUrl({ ...place.location, title: place.name }) : null,
+    pin: place?.location && place.location.latitude !== null && place.location.longitude !== null
+      ? { latitude: place.location.latitude, longitude: place.location.longitude } : null,
     mapsUrl: place?.location?.maps_url,
     listingUrl: place?.listing ? new URL(STAY_PRESENTATION.productPath('', place.listing.slug), tenantOrganizationOrigin({
       platformDomain: String(runtimeConfig.public.platformDomain),
@@ -883,7 +883,7 @@ const panel = computed(() => {
       subdomain: place.listing.subdomain,
       canonicalDomain: place.listing.canonical_domain,
     })).href : null,
-    policy: policy.value ? `${policy.value.label} · ${policy.value.summary}` : cancellationSummary.value,
+    policy: policy.value ? (props.personalScope ? policy.value.terms[0] : `${policy.value.label} · ${policy.value.summary}`) : cancellationSummary.value,
     guide: place ? {
       directions: guide?.directions,
       method,
@@ -923,7 +923,7 @@ const guest = computed<GuestIdentity>(() => {
   if (value.owner === 'app' && !value.guest_name) return { state: 'missing' }
   return value.guest_name ? { state: 'named', name: value.guest_name } : { state: 'not-provided' }
 })
-const guestCount = computed(() => stay.value ? stay.value.adults + stay.value.children + stay.value.infants : 0)
+const guestCount = computed(() => detail.value?.party_size ?? (stay.value ? stay.value.adults + stay.value.children : 0))
 const paymentProcessing = computed(() => accountStay.value?.payment_processing === true)
 const requestStatus = computed(() => detail.value?.request_status)
 const hostActions = computed(() => managedStay.value?.booking.available_actions ?? [])
@@ -1002,7 +1002,7 @@ async function answerStayChange(messageId: string, decision: 'accept' | 'decline
   }, t('booking.change_failed'))
 }
 
-/** The payment step's write: money the host received or refunded outside KrabiClaw, recorded on the stay. */
+/** The payment step's write: money the host received or refunded offline, recorded on the stay. */
 async function recordStayPayment(input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; idempotency_key: string }) {
   const value = detail.value
   if (!value || isChannelManagedStay(value) || !isCurrencyCode(value.currency)) throw new Error('This stay records no payments here')
@@ -1072,7 +1072,11 @@ async function cancelAsGuest() {
   const quote = cancellation.value
   if (!value || isChannelManagedStay(value) || !value.conversation_id) return
   const pending = value.request_status !== null
-  if (!pending && (!quote || !policy.value)) return
+  if (!pending && !quote) {
+    if (messageTo.value && await confirmDialog.open({ title: 'Cancel reservation', description: 'Contact your host to cancel this reservation.',
+      confirmLabel: t('stay.message_host'), cancelLabel: 'Keep reservation' })) await navigateTo(messageTo.value)
+    return
+  }
   const description = pending || !quote ? '' : quote.refund_minor === quote.paid_minor ? `You get back the full ${money(quote.paid_minor)}.`
     : quote.refund_minor > 0 ? `Under the ${policy.value?.label} policy you get back ${money(quote.refund_minor)} of the ${money(quote.paid_minor)} you paid.`
       : `Under the ${policy.value?.label} policy none of the ${money(quote.paid_minor)} you paid comes back.`

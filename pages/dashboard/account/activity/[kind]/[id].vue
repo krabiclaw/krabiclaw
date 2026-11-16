@@ -7,7 +7,7 @@ import BookingDetails from '~/components/dashboard/BookingDetails.vue'
 import { isAccountActivityKind } from '~/shared/account-activity'
 
 definePageMeta({ layout: 'dashboard', key: route => `${route.params.kind ?? 'booking'}:${route.params.id ?? route.params.conversation_id}` })
-useSeoMeta({ title: 'Activity details | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Activity details | Blawby', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const level = useRouteLevel()

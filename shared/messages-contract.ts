@@ -74,6 +74,12 @@ export interface ConversationHeader {
   created_by_user_id: string | null
   booking_id: string | null
   activity_path: string | null
+  /** The booking's existing confirmation or creation, placed in the transcript's order. */
+  reservation?: {
+    at: string
+    day: Extract<ConversationEntry, { type: 'day' }>
+    confirmation: { message_id: string | null; text: string } | null
+  }
   participants: ConversationParticipant[]
   composer: { channel: 'airbnb' | 'email' | 'team' }
 }

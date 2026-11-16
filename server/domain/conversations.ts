@@ -6,6 +6,7 @@ import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import type { GuestThreadDeliveryChannel, GuestThreadDeliveryProvider, GuestThreadDeliveryPurpose } from './guest-threads/types'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { ConversationParticipant } from '~/shared/messages-contract'
+import { PUBLISHED_PROFILE_SQL } from '~/shared/member-scheduling'
 
 /**
  * Conversations, as Slack and Discord have them (docs/domain-model.md): a
@@ -28,7 +29,12 @@ export type ConversationParticipantRow = Omit<ConversationParticipant, 'can_remo
 /** Only the live roster is shown. Guests never receive internal account or member IDs. */
 export function conversationParticipantsSql(conversation: string, viewerRole: string): string {
   return `SELECT CASE WHEN ${viewerRole} = 'member' OR seat.user_id = ? THEN u.id END AS id,
-           u.name, CASE WHEN ${viewerRole} = 'member' OR seat.user_id = ? THEN u.image END AS image, seat.role,
+           CASE WHEN ${conversation}.kind = 'booking' AND seat.role = 'guest' AND seat.user_id = ${conversation}.user_id
+                  THEN COALESCE(NULLIF(TRIM(json_extract(${conversation}.payload_json, '$.guest.name')), ''), u.name)
+                WHEN ${viewerRole} = 'guest' AND seat.role = 'member' AND ${PUBLISHED_PROFILE_SQL} THEN ms.public_name
+                ELSE u.name END AS name,
+           CASE WHEN ${viewerRole} = 'member' OR seat.user_id = ? THEN u.image
+                WHEN seat.role = 'member' AND ${PUBLISHED_PROFILE_SQL} THEN ms.public_photo_url END AS image, seat.role,
            CASE WHEN ${viewerRole} = 'guest' AND ${conversation}.kind = 'booking' AND ${conversation}.user_id = ?
                   AND seat.role = 'guest' AND seat.user_id <> ${conversation}.user_id THEN (
              SELECT min(invite.id) FROM conversation_guest_invites invite WHERE invite.conversation_id = seat.conversation_id
@@ -39,6 +45,7 @@ export function conversationParticipantsSql(conversation: string, viewerRole: st
       FROM conversation_participants seat
       JOIN user u ON u.id = seat.user_id
       LEFT JOIN member m ON m.organizationId = seat.organization_id AND m.userId = seat.user_id
+      LEFT JOIN member_scheduling ms ON ms.organization_id = seat.organization_id AND ms.member_id = m.id
       WHERE seat.organization_id = ${conversation}.organization_id AND seat.conversation_id = ${conversation}.id
         AND (seat.role = 'guest' OR (seat.role = 'member' AND m.id IS NOT NULL))
       ORDER BY seat.role, seat.created_at, seat.user_id`

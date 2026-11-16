@@ -1,8 +1,9 @@
 import { HTTPError } from 'nitro'
 import { executeBatch, queryFirst, type DbClient } from '~/server/db'
-import type { ConversationEntriesPage, ConversationEntry, ConversationMessage, ConversationPage, ConversationViewerRole } from '~/shared/messages-contract'
+import type { ConversationEntriesPage, ConversationEntry, ConversationHeader, ConversationMessage, ConversationPage, ConversationViewerRole } from '~/shared/messages-contract'
 import { accountActivityPath } from '~/shared/account-activity'
 import { formatFormAnswer } from '~/shared/form-questions'
+import { formatCalendarRange } from '~/utils/timezone'
 import { assignedMemberSql, bookingOperationsScope } from '~/server/utils/member-access'
 import {
   conversationAccessDenied, conversationAccessFromRow, conversationAccessQuery, conversationParticipantsSql, guestVisibleSql, isEventMessage, MEMBER_REPLY_EVENT, messageRole,
@@ -11,15 +12,39 @@ import {
 } from './conversations'
 import { conversationDeliveryReceipt, conversationGuestName } from './guest-threads/inbox'
 import { conversationGroupCapabilities } from './team-messages'
-import { firstName, providerInstant } from './guest-threads/presentation'
+import { calendarDate, firstName, providerInstant, transcriptDays } from './guest-threads/presentation'
 import { conversationHistorySql, conversationMessage, groupConversationEntries, projectConversationHistory, type ConversationHistory, type HistoryRow } from './conversation-history-data'
 import { readConversationEnrichment, threadDeliveriesQuery } from './guest-threads/deliveries'
-import { parseGuestRequest, participantLabel } from './requests'
+import { bookingDay, parseGuestRequest, participantLabel } from './requests'
 import { jobBookingIdSql } from './tasks'
 
 type TranscriptViewer = { conversationId: string; userId: string; organizationId?: string }
 type MessageContext = Pick<ConversationHistory, 'photos' | 'deliveriesByMessage'>
-type HistoryContext = { organization_name: string; timezone: string; record_title: string | null; booking_type: 'booking' | 'stay' | null; booking_assigned: number; support: number; airbnb: number; roster: string | null; job: string | null; review: number | null }
+type HistoryContext = { organization_name: string; timezone: string; record_title: string | null; booking_type: 'booking' | 'stay' | null; booking_assigned: number; support: number; airbnb: number; roster: string | null; job: string | null; review: number | null; reservation: string | null }
+
+type ReservationFacts = {
+  created_at: string; starts_at: string; ends_at: string; timezone: string; party_size: number; status: string; stay: 0 | 1
+  confirmation: { at: string; message_id: string; event: 'booking.confirm' | 'payment.payment_captured' } | null
+}
+
+function reservationInThread(context: HistoryContext, viewer: { conversation: ConversationRow; role: ConversationViewerRole }, now: Date): ConversationHeader['reservation'] {
+  if (!context.reservation) return undefined
+  const facts = JSON.parse(context.reservation) as ReservationFacts
+  const { role, conversation } = viewer
+  const at = facts.confirmation?.at ?? facts.created_at
+  const dayFormat = transcriptDays(context.timezone, now)
+  const instant = new Date(at)
+  const day = dayFormat.date(instant)
+  let confirmation = null
+  if (facts.status === 'confirmed' && conversation.kind === 'booking') {
+    const from = bookingDay(facts.starts_at, facts.timezone)
+    const dates = facts.stay ? formatCalendarRange(from, bookingDay(facts.ends_at, facts.timezone), 'en-US') : calendarDate(from)
+    const party = `${facts.party_size} ${facts.party_size === 1 ? 'guest' : 'guests'}`
+    const subject = role === 'guest' ? 'Your reservation is confirmed' : 'Reservation confirmed'
+    confirmation = { message_id: facts.confirmation?.event === 'booking.confirm' ? facts.confirmation.message_id : null, text: `${subject} for ${party} on ${dates}.` }
+  }
+  return { at, day: { type: 'day', id: `day:${day.key}`, label: dayFormat.label(instant, day) }, confirmation }
+}
 
 function presentMessage(message: Pick<MessageRow, 'id' | 'sequence' | 'event_name'>, context: MessageContext, input: {
   author: string; viewerRole: ConversationViewerRole; guestName: string; authorUserId: string | null
@@ -180,7 +205,16 @@ export async function loadConversationPage(
               AND (vm.id = t.assigned_member_id OR (t.assigned_member_id IS NULL AND vm.role IN ('owner', 'admin')))))
           ORDER BY t.created_at, t.id LIMIT 1) END` : 'NULL'} AS job,
         ${head ? `CASE WHEN c.viewer_role = 'member' AND c.kind = 'booking' THEN COALESCE(b.status = 'pending', 0) OR EXISTS (SELECT 1 FROM tasks ch
-          WHERE ch.organization_id = c.organization_id AND ch.kind = 'booking_change' AND ch.status = 'open' AND ch.subject_id = c.booking_id) END` : 'NULL'} AS review
+          WHERE ch.organization_id = c.organization_id AND ch.kind = 'booking_change' AND ch.status = 'open' AND ch.subject_id = c.booking_id) END` : 'NULL'} AS review,
+        ${head ? `CASE WHEN b.id IS NOT NULL THEN json_object(
+          'created_at', b.created_at, 'starts_at', b.starts_at, 'ends_at', b.ends_at, 'timezone', b.timezone,
+          'party_size', b.party_size, 'status', b.status, 'stay', b.product_session_id IS NULL,
+          'confirmation', CASE WHEN c.kind = 'booking' AND b.status = 'confirmed' THEN
+            (SELECT json_object('at', m.occurred_at, 'message_id', m.id, 'event', m.event_name) FROM messages m
+              WHERE m.organization_id = c.organization_id AND m.conversation_id = c.id AND m.author_kind = 'krabiclaw'
+                AND m.event_name IN ('booking.confirm', 'payment.payment_captured')
+              ORDER BY m.sequence DESC LIMIT 1) END
+        ) END` : 'NULL'} AS reservation
       FROM authorized c
       JOIN organization o ON o.id = c.organization_id
       LEFT JOIN business_locations l ON l.id = c.location_id AND l.organization_id = c.organization_id
@@ -221,6 +255,7 @@ export async function loadConversationPage(
       created_by_user_id: role === 'member' ? conversation.created_by_user_id : null,
       booking_id: canReadBooking ? conversation.booking_id : null,
       activity_path: activityPath,
+      reservation: canReadBooking ? reservationInThread(context, { conversation, role }, now) : undefined,
       participants: roster.map(({ invitation_id, ...person }) => {
         const can_remove = managesBookingGuests && person.role === 'guest' && (invitation_id !== null
           || (role === 'member' && person.id !== null && person.id !== conversation.user_id))

@@ -303,14 +303,13 @@ test('listing messaging grants and verified trip invites use the live conversati
     await expectStatus(await traveler.request.post('/api/messages/invites/accept', { headers, data: { token: otherToken } }), 200)
     await otherAppears
     await expect(otherRow).toContainText(otherReply)
-    const disconnected = travelerSocket.waitForEvent('close')
-    await travelerPage.evaluate(() => window.dispatchEvent(new Event('offline')))
-    await disconnected
+    await traveler.setOffline(true)
     const reconnectText = 'Your second arrival guide was updated.'
     await expectStatus(await page.request.post(otherPath, { headers, data: { body: reconnectText, idempotency_key: crypto.randomUUID() } }), 200)
+    await expect(otherRow).toContainText(otherReply)
     const reconnectedSocket = travelerPage.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).searchParams.get('scope') === 'account' })
     const reconnectedTranscript = travelerPage.waitForResponse(response => transcriptRequest(response.request()))
-    await travelerPage.evaluate(() => window.dispatchEvent(new Event('online')))
+    await traveler.setOffline(false)
     const activeTravelerSocket = await reconnectedSocket
     await expectStatus(await reconnectedTranscript, 200)
     await expect(otherRow).toContainText(reconnectText)
@@ -883,7 +882,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   await expect(arrival).toContainText('Ana')
   await arrival.click()
   await expect(page).toHaveURL(`${thread}/reservation/${stay.data!.record.id}`)
-  await expect(page.getByTestId('reservation-panel').getByText('Ana Silva · 2 guests', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('reservation-panel').getByText('2 guests', { exact: true })).toBeVisible()
 
   await page.getByRole('link', { name: 'Record a payment', exact: true }).click()
   await page.getByRole('textbox', { name: 'Amount (THB)' }).fill('100')
@@ -4833,7 +4832,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await calendarStay.click()
       await expect(page).toHaveURL(stayRecord)
       const calendarStayDetails = page.locator('#dashboard-panel-stay-details')
-      await expect(calendarStayDetails.getByText('Ana Silva · 2 guests', { exact: true })).toBeVisible()
+      await expect(calendarStayDetails.getByText('2 guests', { exact: true })).toBeVisible()
       await page.setViewportSize({ width: 390, height: 844 })
       const stayClose = calendarStayDetails.getByRole('link', { name: 'Close stay details', exact: true })
       await expect(stayClose).toBeVisible()

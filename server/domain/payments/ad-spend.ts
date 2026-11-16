@@ -220,15 +220,3 @@ export async function runScheduledManagedAdSpend(env: CloudflareEnv, organizatio
 export function publishManagedAdSpendWake(env: EventsEnv, organizationId: string): Promise<void> {
   return publishEvent(env, { type: 'business.wake', organization_id: organizationId, kind: 'ad_spend', due_at: Date.now() })
 }
-
-/** One cutover event adopts previously connected agreements and pending meter delivery. */
-export async function enqueueOutstandingManagedAdSpend(env: CloudflareEnv): Promise<void> {
-  const organizations = await queryAll<{ organization_id: string }>(env.DB, `
-    SELECT s.organization_id
-      FROM organization_services s JOIN organization_integrations i
-        ON i.organization_id=s.organization_id AND i.provider IN ('google_ads', 'meta_ads') AND i.status IS NOT 'setting_up'
-     WHERE s.service='managed_ads' AND (s.ended_at IS NULL OR s.ended_at > i.created_at)
-    UNION
-    SELECT organization_id FROM usage_events WHERE resource='ad_spend' AND provider_occurred_at IS NOT NULL AND delivery_at IS NULL`)
-  for (const row of organizations) await publishManagedAdSpendWake(env, row.organization_id)
-}

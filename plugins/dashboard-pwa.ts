@@ -31,11 +31,11 @@ export default defineNuxtPlugin((nuxtApp) => {
         // `default` the web view starts under the status bar and ends at the
         // screen edge; the status bar takes `theme-color`.
         { name: 'apple-mobile-web-app-status-bar-style', content: 'default' },
-        { name: 'apple-mobile-web-app-title', content: 'KrabiClaw' },
+        { name: 'apple-mobile-web-app-title', content: 'Blawby' },
       ],
       link: [
         { rel: 'manifest', href: '/manifest.webmanifest' },
-        { rel: 'apple-touch-icon', href: '/platform/apple-touch-icon.png' },
+        { rel: 'apple-touch-icon', href: '/platform/blawby-180.png' },
       ],
     }
   })

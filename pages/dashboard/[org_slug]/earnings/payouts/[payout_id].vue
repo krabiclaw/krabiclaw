@@ -47,7 +47,7 @@ import { isPayoutDetail, payoutDate, payoutStatusLabel, type PayoutDetail, type 
 import { formatTimestamp } from '~/utils/timezone'
 
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Payout | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Payout | Blawby', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const api = useDashboardApi()

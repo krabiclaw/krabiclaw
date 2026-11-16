@@ -4,7 +4,8 @@ import { createAuth } from '~/server/utils/auth'
 
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
-  const baseUrl = (env.BETTER_AUTH_URL ?? 'https://krabiclaw.com').replace(/\/$/, '')
+  const baseUrl = env.BETTER_AUTH_URL?.replace(/\/$/, '')
+  if (!baseUrl) throw new Error('BETTER_AUTH_URL is required')
 
   setResponseHeaders(event, {
     'content-type': 'application/json', 'access-control-allow-origin': '*', })
@@ -13,7 +14,7 @@ export default defineHandler(async (event) => {
   // 'openid' is deliberately excluded — Better Auth's resource-server helper
   // rejects it in scopes_supported (it's an authorization-server/OIDC scope, // not something a resource server advertises per RFC 9728).
   return await getProtectedResourceMetadata({
-    resource: `${baseUrl}/api/mcp`, bearer_methods_supported: ['header'], scopes_supported: ['offline_access', 'tenant'], })
+    resource: `${baseUrl}/api/mcp`, resource_name: 'Blawby', resource_documentation: `${baseUrl}/docs/mcp-setup`, bearer_methods_supported: ['header'], scopes_supported: ['offline_access', 'tenant'], })
 })
 import { defineHandler } from 'nitro';
 import {  setResponseHeaders  } from 'nitro/h3';

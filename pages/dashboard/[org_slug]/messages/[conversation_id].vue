@@ -4,7 +4,7 @@
     <template v-if="conversation" #center>
       <button type="button" class="me-auto flex min-w-0 items-center gap-3 overflow-hidden rounded-full py-1 pe-2 text-left hover:bg-elevated" :data-thread-id="conversation.id" aria-label="In this conversation" @click="sheetOpen = true">
         <span class="flex shrink-0 -space-x-3">
-          <InboxAvatar v-for="person in conversation.participants.slice(0, 3)" :key="person.id ?? person.name" :name="person.name" :initial="person.name.slice(0, 1)" :image="person.image" :support="conversation.kind === 'support'" size="sm" class="ring-2 ring-default" />
+          <InboxAvatar v-for="(person, index) in headerPeople" :key="index" :name="person.name" :initial="[...person.name.trim()][0]?.toUpperCase() ?? ''" :image="person.image" :support="conversation.kind === 'support'" size="sm" class="ring-2 ring-default" />
         </span>
         <span class="truncate text-xl font-semibold text-highlighted">{{ conversation.title }}</span>
         <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
@@ -36,6 +36,14 @@ const threadId = computed(() => String(route.params.conversation_id))
 const history = useConversation(threadId, personalScope)
 const { data, refresh } = history.request
 const conversation = computed(() => data.value?.conversation)
+const headerPeople = computed(() => {
+  const page = data.value
+  if (!page) return []
+  const { kind, participants, title } = page.conversation
+  if (kind !== 'guest') return participants.slice(0, 3)
+  const counterparts = participants.filter(person => person.role !== page.viewer_role)
+  return counterparts.length ? counterparts.slice(0, 3) : [{ name: title, image: null }]
+})
 const sheetOpen = ref(false)
 const manageGuests = ref(false)
 const canManageGuests = computed(() => Boolean(data.value?.capabilities.can_invite_guest || conversation.value?.participants.some(person => person.can_remove)))
@@ -86,5 +94,5 @@ async function moved(transition: string) {
   else await refresh()
 }
 
-useSeoMeta({ title: 'Conversation | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Conversation | Blawby', robots: 'noindex, nofollow' })
 </script>

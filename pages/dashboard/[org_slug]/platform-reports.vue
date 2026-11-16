@@ -3,7 +3,7 @@
     <div class="space-y-6">
       <p class="text-sm text-muted">
         What members reported about guests and teammates, and the guests they blocked. Decide each within 24 hours: Remove takes the
-        content away and bans its author's KrabiClaw account; an Airbnb guest has no account, so their conversation is
+        content away and bans its author's Blawby account; an Airbnb guest has no account, so their conversation is
         blocked for that business.
       </p>
 
@@ -62,7 +62,7 @@ if (!dashboard.organization.value || !canOpenPlatformReports(dashboard.organizat
   throw createError({ statusCode: 404, statusMessage: 'Page not found' })
 }
 
-useSeoMeta({ title: 'Platform reports | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Platform reports | Blawby Dashboard', robots: 'noindex, nofollow' })
 
 const statuses = [
   { value: 'open', label: 'Open' },

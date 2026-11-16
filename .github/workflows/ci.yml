@@ -166,7 +166,7 @@ jobs:
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
       NUXT_PUBLIC_PLATFORM_DOMAIN: https://staging.krabiclaw.com
       NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://krabiclaw.com
-      NUXT_PUBLIC_APP_NAME: KrabiClaw Staging
+      NUXT_PUBLIC_APP_NAME: Blawby
       NUXT_PUBLIC_SITE_URL: https://staging.krabiclaw.com
       NUXT_PUBLIC_HELP_URL: https://staging.krabiclaw.com/help
       NUXT_PUBLIC_WHATSAPP_NUMBER: "16197200000"
@@ -253,8 +253,6 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: corepack yarn wrangler deploy --env staging --strict
-      - name: Run read-only tenant MCP discovery smoke
-        run: yarn test:mcp
       # A Worker version reaches colos gradually. Until every colo serves the new
       # version, one colo renders the page while another serves the assets, and the
       # old build's chunks 404. Production already waits for this; staging did not,
@@ -268,6 +266,14 @@ jobs:
           https://kikuzuki-krabi-thailand-staging.krabiclaw.com
           https://ncls-staging.krabiclaw.com
           https://staging.krabiclaw.com
+      - &adopt_outstanding_work
+        name: Adopt outstanding work
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/adopt-pending-work.mjs "$GITHUB_REF_NAME"
+      - name: Run read-only tenant MCP discovery smoke
+        run: yarn test:mcp
       - name: Run read-only tenant rendering
         env:
           CANARY_LOGIN_EMAIL: ${{ secrets.CANARY_LOGIN_EMAIL }}
@@ -397,6 +403,7 @@ jobs:
           https://www.kikuzuki-thailand.com
           https://www.northcarolinalegalservices.org
           https://krabiclaw.com
+      - *adopt_outstanding_work
       - name: Refresh production search index
         env:
           PLATFORM_SEARCH_REINDEX_SECRET: ${{ secrets.PLATFORM_SEARCH_REINDEX_SECRET }}

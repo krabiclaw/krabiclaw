@@ -71,6 +71,15 @@ assets have converged on the exact deployed build before browser coverage
 starts. Retry only the verification job after a verification failure; do not
 redeploy a healthy production Worker to repeat browser checks.
 
+After asset convergence, the deployment workflow sends one outstanding-work
+message to that environment’s `EVENTS` queue. The consumer reads eligible
+review bookings, checkout holds and pending stay requests, enabled Channex
+mappings, managed ad agreements and undelivered ad charges, pending Airbnb
+imports, pending or failed site invalidations, Calendar integrations, and
+orphaned Calendar cleanup records. It sends scoped messages for those records
+and schedules the platform retention alarm. This runs on every deployment
+that reaches the step, including a retried verification job.
+
 For every iOS App Store submission, select **Automatically release this
 version** in App Store Connect and verify the selection before submitting for
 review. When submitting a build to an existing external TestFlight group,

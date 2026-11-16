@@ -13,7 +13,8 @@ corepack yarn local:seed   # with `yarn dev` serving port 3000
 ```
 
 Copy `.env.example` to `.env` and fill the required application secrets before
-setup. `.env` is the single local configuration for Nuxt, Wrangler, setup scripts,
+setup. Keep `EMAIL_REPLY_DOMAIN=reply.krabiclaw.local` for local signed replies.
+`.env` is the single local configuration for Nuxt, Wrangler, setup scripts,
 and E2E tests; `.env.example` is the maintained template. Both `yarn dev` and
 `yarn dev:worker` use port 3000 by default.
 

@@ -428,13 +428,3 @@ export async function drainCalendarCleanup(env: CloudflareEnv, organizationId: s
   if (result.failed) throw new Error(`${result.failed} retained Google Calendar cleanup jobs failed`)
   if (result.checked === limit) await publishEvent(env, { type: 'calendar.cleanup', organization_id: organizationId })
 }
-
-/** Enroll earlier writes once when the cron is retired. */
-export async function enqueueOutstandingCalendarChanges(env: CloudflareEnv): Promise<void> {
-  const active = await queryAll<{ organization_id: string }>(env.DB,
-    "SELECT organization_id FROM organization_integrations WHERE provider='google_calendar' AND status <> 'setting_up'")
-  for (const row of active) await publishEvent(env, { type: 'calendar.changed', organization_id: row.organization_id, booking_id: null })
-  const orphaned = await queryAll<{ organization_id: string }>(env.DB, `SELECT DISTINCT organization_id FROM google_calendar_cleanup_jobs
-    WHERE state IN ('pending', 'error') AND NOT EXISTS (SELECT 1 FROM organization WHERE organization.id=google_calendar_cleanup_jobs.organization_id)`)
-  for (const row of orphaned) await publishEvent(env, { type: 'calendar.cleanup', organization_id: row.organization_id })
-}

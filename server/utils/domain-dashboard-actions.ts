@@ -20,7 +20,7 @@ async function requestDomainCheck(env: CloudflareEnv, organizationId: string, do
   })
 }
 
-export async function reconcileRequestedDomains(env: CloudflareEnv, event: DomainCheck, retry: boolean): Promise<void> {
+export async function reconcileRequestedDomains(env: CloudflareEnv, event: DomainCheck): Promise<void> {
   const db = env.DB
   const dashboardUrl = event.actor && buildDashboardUrl({ env, organizationId: event.organization_id, organizationSlug: event.actor.organization_slug }, 'organization.domains')
   for (const check of event.domains) {
@@ -29,7 +29,7 @@ export async function reconcileRequestedDomains(env: CloudflareEnv, event: Domai
         AND type = 'custom' AND desired_state = 'active' AND status NOT IN ('disabled', 'deleted')
     `, [check.id, event.organization_id, check.cloudflare_hostname_id])
     if (!domain) continue
-    const synced = await syncDomainWithCloudflare(env, db, domain, event.actor?.type, event.actor?.id, retry)
+    const synced = await syncDomainWithCloudflare(env, db, domain, event.actor?.type, event.actor?.id)
     if (dashboardUrl) await notifyDomainLifecycle(env, db, { organizationId: event.organization_id, event: 'synced', domain: synced, dashboardUrl })
   }
 }

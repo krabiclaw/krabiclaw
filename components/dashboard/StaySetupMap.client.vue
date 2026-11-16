@@ -1,6 +1,6 @@
 <template>
   <div class="relative isolate overflow-hidden rounded-xl border border-default bg-muted">
-    <div ref="container" class="h-[25rem] w-full" data-testid="stay-setup-map" :aria-busy="!ready && !error" :data-pin-placed="!!pin" :data-map-zoom="zoom" />
+    <div ref="container" class="w-full" :class="compact ? 'aspect-[3/2]' : 'h-[25rem]'" data-testid="stay-setup-map" :aria-busy="!ready && !error" :data-pin-placed="!!pin" :data-map-zoom="zoom" />
     <div v-if="ready && !error && !approximate" class="pointer-events-none absolute inset-0 grid place-items-center" aria-hidden="true">
       <span class="grid size-11 place-items-center rounded-full bg-black text-white shadow-md">
         <UIcon name="i-lucide-house" class="size-5" />
@@ -23,9 +23,10 @@ type Pin = { latitude: number; longitude: number }
 
 const props = defineProps<{
   pin: Pin | null
-  city: string
-  region: string
-  country: string
+  city?: string
+  region?: string
+  country?: string
+  compact?: boolean
   interactive?: boolean
   approximate?: boolean
 }>()
