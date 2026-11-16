@@ -266,16 +266,14 @@ export async function previewStayMigration(db: DbClient, access: StayAccess, val
       } else sourceClaims.set(key, row)
     }
   }
-  // The canonical night claims hold stays, linked calendars and only live checkout holds.
   const ready = rows.filter(row => row.stay !== null)
-  const claims = ready.length ? await queryAll<{ product_id: string; date: string; booking_id: string | null }>(db, `SELECT n.product_id, n.date, n.booking_id FROM stay_nights n
-    LEFT JOIN payment_checkout_holds h ON h.id = n.hold_id
-    WHERE n.organization_id = ? AND n.product_id IN (SELECT value FROM json_each(?)) AND n.date >= ? AND n.date < ? AND (n.booking_id IS NOT NULL OR (h.status = 'active' AND h.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`, [access.organizationId, JSON.stringify([...new Set(ready.map(row => row.product_id))]), ready.map(row => row.stay!.check_in_date).sort()[0], ready.map(row => row.stay!.check_out_date).sort().at(-1)]) : []
+  const claims = ready.length ? await queryAll<{ product_id: string; date: string; booking_id: string }>(db, `SELECT n.product_id, n.date, n.booking_id FROM stay_nights n
+    WHERE n.organization_id = ? AND n.product_id IN (SELECT value FROM json_each(?)) AND n.date >= ? AND n.date < ? AND n.booking_id IS NOT NULL`, [access.organizationId, JSON.stringify([...new Set(ready.map(row => row.product_id))]), ready.map(row => row.stay!.check_in_date).sort()[0], ready.map(row => row.stay!.check_out_date).sort().at(-1)]) : []
   for (const claim of claims) {
     const row = sourceClaims.get(`${claim.product_id}:${claim.date}`)
     if (row && row.state !== 'existing') {
       row.state = 'needs_attention'
-      const message = claim.booking_id ? `Overlaps existing stay ${claim.booking_id}` : 'Overlaps a linked calendar or live checkout hold'
+      const message = `Overlaps existing stay ${claim.booking_id}`
       if (!row.issues.includes(message)) row.issues.push(message)
     }
   }

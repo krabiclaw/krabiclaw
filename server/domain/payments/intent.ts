@@ -10,7 +10,7 @@ import { claimCheckoutReturn, tokenHash } from './buyer'
 import { approvedStayBooking, type Payment } from './index'
 import { isStayPurchase, type PaymentReview } from './checkout'
 import { PRICE_TAX_BEHAVIORS, type Price } from '~/shared/prices'
-import { checkoutHoldSql, reconcilePaymentIntent, confirmationHoldUntil, readCheckoutHold, releaseApprovedStayConfirmation, type CheckoutHold } from './events'
+import { checkoutHoldSql, reconcilePaymentIntent, confirmationHoldUntil, releaseApprovedStayConfirmation, type CheckoutHold } from './events'
 import { assertBookingBatchWrite, bookingBatchWriteRefused } from '~/server/utils/availability'
 import { approvedStayPaymentPredicate } from '~/server/domain/stays'
 import { accountActivityPath } from '~/shared/account-activity'
@@ -28,7 +28,7 @@ import { createReplayableReservationCancelToken, hashReservationCancelToken } fr
  * the checkout handed the browser, so another buyer cannot pay or review it.
  */
 type IntentWithSurcharge = Stripe.PaymentIntent & { amount_details?: { surcharge?: { status?: string; maximum_amount?: number; amount?: number } } }
-export type PaymentHandoffState = 'open' | 'processing' | 'verifying' | 'paid' | 'failed' | 'expired'
+export type PaymentHandoffState = 'open' | 'processing' | 'verifying' | 'paid' | 'failed' | 'expired' | 'taken'
 
 type CheckoutPayment = Payment & {
   confirmation_in_flight: number; stripe_payment_intent_id: string; checkout_expires_at: string; return_expires_at: string
@@ -88,7 +88,11 @@ async function readCheckoutPayment(db: DbClient, organizationId: string, payment
 async function readCheckoutIntent(stripe: Stripe, payment: CheckoutPayment, now: string) {
   const intent = await stripe.paymentIntents.retrieve(payment.stripe_payment_intent_id, { expand: ['latest_charge'] }, { stripeAccount: payment.stripe_account_id })
   const confirming = payment.confirmation_in_flight === 1 && (intent.status === 'requires_confirmation' || intent.status === 'requires_payment_method')
-  const state: PaymentHandoffState = payment.captured_amount > 0 || intent.status === 'succeeded' ? 'paid' : intent.status === 'requires_capture' || intent.status === 'processing' || confirming ? 'processing' : intent.status === 'canceled' ? 'failed' : intent.next_action?.type === 'verify_with_microdeposits' ? 'verifying' : payment.checkout_expires_at <= now || payment.return_expires_at <= now ? 'expired' : 'open'
+  const state: PaymentHandoffState = payment.captured_amount > 0 ? 'paid'
+    : intent.status === 'canceled' ? (intent.cancellation_reason === 'abandoned' && !payment.subject_id && payment.checkout_expires_at > now ? 'taken' : 'failed')
+    : ['succeeded', 'requires_capture', 'processing'].includes(intent.status) || confirming ? 'processing'
+    : intent.next_action?.type === 'verify_with_microdeposits' ? 'verifying'
+    : payment.checkout_expires_at <= now || payment.return_expires_at <= now ? 'expired' : 'open'
   return { intent, state, confirming }
 }
 
@@ -135,11 +139,10 @@ function snapshotOf(payment: Payment) {
 
 /**
  * What the buyer is confirming, as Airbnb's summary card shows it: the thing's
- * picture, the time it holds and what kind of booking it is. The time is the
- * checkout hold's — the one the purchase reserved.
+ * picture, the selected time and the kind of booking.
  */
 async function handoffSubject(db: DbClient, organizationId: string, payment: CheckoutPayment, snapshot: ReturnType<typeof snapshotOf>, state: PaymentHandoffState) {
-  // A session's time is its hold's; a stay's nights are its purchase's.
+  // A session's time is saved on its checkout record.
   const slot = payment.subject_type === 'booking' && snapshot.stay === null
   const heldSlot = slot || snapshot.approval
   if (heldSlot && !payment.hold_conversation_id) throw new Error('Payment has no checkout conversation')
@@ -200,11 +203,11 @@ export async function paymentHandoff(db: DbClient, env: CloudflareEnv, organizat
   }
 }
 
-/** The buyer goes back to change a stay only after Stripe cancels the purchase and its held nights are released. */
+/** The buyer goes back to change a stay only after Stripe cancels the purchase. */
 export async function cancelStayPayment(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string): Promise<{ status: 'canceled' }> {
   const { payment, stripe, intent: current, state } = await requireClaimedPayment(db, env, organizationId, paymentId, claim)
   const snapshot = snapshotOf(payment)
-  if (snapshot.stay === null) throw new HTTPError({ statusCode: 409, statusMessage: 'This payment does not hold a stay' })
+  if (snapshot.stay === null) throw new HTTPError({ statusCode: 409, statusMessage: 'This payment is not for a stay' })
   if (snapshot.approval) throw new HTTPError({ statusCode: 409, statusMessage: 'Manage changes from your approved stay' })
   if (state === 'processing') throw new HTTPError({ statusCode: 409, statusMessage: 'This payment has started processing and cannot be changed here', data: { code: 'payment_in_progress' } })
   if (state === 'paid') throw new HTTPError({ statusCode: 409, statusMessage: 'This stay is already paid; open its booking to request a change', data: { code: 'payment_paid' } })
@@ -216,8 +219,6 @@ export async function cancelStayPayment(db: DbClient, env: CloudflareEnv, organi
   const canceled = current.status === 'canceled' ? current : await stripe.paymentIntents.cancel(current.id, { cancellation_reason: 'requested_by_customer' }, { stripeAccount: payment.stripe_account_id, idempotencyKey: `krabiclaw-cancel:${payment.id}` })
   if (canceled.status !== 'canceled') throw new Error('Stripe did not cancel the purchase')
   await reconcilePaymentIntent(db, stripe, payment, canceled, env)
-  const released = await queryFirst<{ status: string }>(db, 'SELECT status FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, organizationId])
-  if (released?.status !== 'released') throw new Error('The canceled purchase still holds its stay')
   return { status: 'canceled' }
 }
 
@@ -307,12 +308,10 @@ export async function confirmPayment(db: DbClient, env: CloudflareEnv, organizat
   if (approval && automatic_tax && !review.tax_calculation_id) throw new HTTPError({ statusCode: 409, statusMessage: 'Review the payment again before confirming', data: { code: 'review_required' } })
   const attached = typeof current.payment_method === 'string' ? current.payment_method : current.payment_method?.id
   if (current.status !== 'requires_confirmation' || attached !== review.payment_method_id || current.amount !== review.subtotal + review.tax) throw new HTTPError({ statusCode: 409, statusMessage: 'The payment changed since it was reviewed; review it again', data: { code: 'review_required' } })
-  // The capacity is kept before Stripe can take the money, against the hold itself: a hold that has gone stops the payment here.
-  const started = new Date().toISOString()
-  const expired = () => new HTTPError({ statusCode: 409, statusMessage: 'This payment can no longer be confirmed; start the booking again', data: { code: 'payment_expired' } })
   let confirmingPayment = payment
-  const expiresAt = confirmationHoldUntil(payment, approval ? started : undefined)
   if (approval) {
+    const started = new Date().toISOString()
+    const expiresAt = confirmationHoldUntil(started)
     if (!stay || !hold?.conversation_id || !hold.buyer_user_id) throw new Error('Approved stay payment has no stay or guest conversation')
     const bookable = await approvedStayPaymentPredicate(db, {
       ...approval, organizationId, productId: stay.product_id, checkIn: stay.check_in_date, checkOut: stay.check_out_date,
@@ -332,18 +331,15 @@ export async function confirmPayment(db: DbClient, env: CloudflareEnv, organizat
       if (!isRecord(updated) || typeof updated.review_json !== 'string') throw new Error('Approved stay confirmation has no saved payment review')
       confirmingPayment = { ...payment, review_json: updated.review_json }
     } catch (error) {
-      if (bookingBatchWriteRefused(error)) throw expired()
+      if (bookingBatchWriteRefused(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'This payment can no longer be confirmed; start the booking again', data: { code: 'payment_expired' } })
       throw error
     }
-  } else {
-    const held = await execute(db, "UPDATE payment_checkout_holds SET expires_at=MAX(expires_at,?) WHERE payment_id=? AND status='active' AND expires_at>?", [expiresAt, payment.id, started])
-    if (held.meta.changes !== 1) throw expired()
+    await publishEvent(env, { type: 'business.wake', kind: 'checkout', organization_id: organizationId, due_at: Date.parse(expiresAt) })
   }
-  if (stay) await publishEvent(env, { type: 'business.wake', kind: 'checkout', organization_id: organizationId, due_at: Date.parse(expiresAt) })
   let confirmed: Stripe.PaymentIntent
   try {
     confirmed = await stripe.paymentIntents.confirm(current.id, {
-      expand: ['latest_charge'],
+      expand: ['latest_charge', 'payment_method'],
       // A method that leaves the site comes back to this pay page, which completes the return there.
       return_url: new URL(`/pay/${encodeURIComponent(payment.id)}?claim=${encodeURIComponent(claim)}`, siteOrigin).toString(),
       // A concurrent review can change the attached method before Stripe receives this confirmation.
@@ -367,7 +363,7 @@ export async function confirmPayment(db: DbClient, env: CloudflareEnv, organizat
   // Automatic confirmation lets whoever holds this secret confirm the intent, so only a payment that needs the browser gets it. Bank verification happens on Stripe's own page.
   const verifying = settled.next_action?.type === 'verify_with_microdeposits'
   const authenticating = settled.status === 'requires_action' && !verifying
-  return { status: settled.status, client_secret: authenticating ? settled.client_secret : null, requires_action: authenticating, bank_verification_url: verifying ? bankVerificationUrl(settled) : null }
+  return { status: settled.status, taken: settled.status === 'canceled' && settled.cancellation_reason === 'abandoned' && !payment.subject_id && Date.parse(payment.checkout_expires_at) > Date.now(), client_secret: authenticating ? settled.client_secret : null, requires_action: authenticating, bank_verification_url: verifying ? bankVerificationUrl(settled) : null }
 }
 
 /**
@@ -378,24 +374,12 @@ export async function confirmPayment(db: DbClient, env: CloudflareEnv, organizat
 export type PaymentReturn =
   | { state: 'paid'; kind: 'booking'; conversation_id: string; cancellation_token: string }
   | { state: 'paid'; kind: 'stay'; activity_id: string; receipt_token: string }
-  /** Stripe is still clearing the payment; nothing is booked until it captures. */
   | { state: 'processing' }
-  /** The payment captured after capacity was lost and the full refund is recorded or pending. */
-  | { state: 'refunded' }
-  /** What it was for has gone, so the authorization was cancelled and nothing was charged. */
+  | { state: 'taken' }
   | { state: 'expired' }
 
-async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment, hold: CheckoutHold | null): Promise<PaymentReturn> {
-  const receipt = hold?.status === 'converted' ? hold : await readCheckoutHold(db, payment)
-  if (!receipt) throw new Error('Captured payment has no checkout hold')
-  if (receipt.status !== 'converted') {
-    if (receipt.refunded_amount > 0) return { state: 'refunded' }
-    // A payment captured after its capacity went is refunded in full; Stripe may still be settling that refund.
-    const refund = await queryFirst<{ status: string; error: string | null }>(db, 'SELECT status, error FROM payment_refunds WHERE payment_id=? ORDER BY created_at DESC LIMIT 1', [payment.id])
-    if (refund && ['creating', 'pending', 'requires_action', 'succeeded'].includes(refund.status)) return { state: 'refunded' }
-    if (refund) throw new Error(`Captured payment has no booking and its refund ${refund.status}${refund.error ? `: ${refund.error}` : ''}`)
-    throw new Error('Captured payment has no booking it paid for')
-  }
+async function paymentReceipt(env: CloudflareEnv, payment: Payment, receipt: CheckoutHold | null): Promise<PaymentReturn> {
+  if (receipt?.status !== 'converted') throw new Error('Captured payment has no saved booking')
   if (payment.subject_type !== 'booking') throw new Error(`Payment subject ${payment.subject_type} has no guest confirmation`)
   const conversationId = receipt.receipt_conversation_id
   if (!conversationId) throw new Error('Converted hold has no booking conversation')
@@ -408,29 +392,20 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
   return { state: 'paid', kind: 'booking', conversation_id: conversationId, cancellation_token: cancellation.token }
 }
 
-/**
- * The buyer is back from paying, on the business's site. Stripe is asked
- * whether the intent succeeded before the purchase is attached to the site's
- * buyer and its receipt is named; a payment still clearing claims nothing.
- */
+/** Read the receipt after confirm or the Stripe webhook has saved and captured the booking. */
 export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, buyer: () => Promise<string>): Promise<PaymentReturn> {
-  const { payment, stripe, intent, confirming } = await requireClaimedPayment(db, env, organizationId, paymentId, claim, 'settlement')
-  const hold = payment.checkout_hold ? JSON.parse(payment.checkout_hold) as CheckoutHold : null
+  const { payment, intent, state } = await requireClaimedPayment(db, env, organizationId, paymentId, claim, 'settlement')
   if (intent.livemode !== Boolean(payment.livemode) || intent.metadata.krabiclaw_payment_id !== payment.id) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
-  if (confirming) {
-    const settled = await reconcilePaymentIntent(db, stripe, payment, intent, env, hold)
-    if (settled.status === 'requires_payment_method' && settled.last_payment_error) {
-      throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe declined this payment', data: { code: 'payment_declined' } })
-    }
-    return { state: 'processing' }
+  if (state === 'taken') return { state: 'taken' }
+  if (state === 'failed' || state === 'expired') return { state: 'expired' }
+  if (intent.status === 'requires_payment_method' && intent.last_payment_error) {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe declined this payment', data: { code: 'payment_declined' } })
   }
-  if (intent.status !== 'succeeded' && intent.status !== 'processing' && intent.status !== 'requires_capture') throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
-  const settled = await reconcilePaymentIntent(db, stripe, payment, intent, env, hold)
-  if (settled.status === 'processing') return { state: 'processing' }
-  if (settled.status !== 'succeeded') return { state: 'expired' }
+  if (state === 'processing' || state === 'verifying') return { state: 'processing' }
+  if (state !== 'paid' || intent.status !== 'succeeded') throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
   // The approval checkout began in the buyer's account; the business's site may have a different browser session.
-  const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
-  if (!isRecord(snapshot)) throw new Error('Payment has no frozen purchase')
-  if (!approvedStayBooking(snapshot)) await claimCheckoutReturn(db, await buyer(), claim, { ...payment, captured_amount: settled.amount_received })
-  return paymentReceipt(db, env, payment, hold)
+  const snapshot = snapshotOf(payment)
+  if (!snapshot.approval) await claimCheckoutReturn(db, await buyer(), claim, payment)
+  const hold = payment.checkout_hold ? JSON.parse(payment.checkout_hold) as CheckoutHold : null
+  return paymentReceipt(env, payment, hold)
 }

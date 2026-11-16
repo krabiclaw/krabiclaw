@@ -13,7 +13,7 @@
 
     <UAlert v-if="doneError" color="error" variant="soft" title="Done could not be saved" :description="getErrorMessage(doneError, 'The request failed')" class="mx-4 mb-2" />
     <ConversationThread :key="threadId" :thread-id="threadId" :history="history" :personal-scope="personalScope" :reservation-to="reservationTo" :closing="closing" @done="done" />
-    <ConversationSheet v-if="data" v-model:open="sheetOpen" v-model:manage-guests="manageGuests" :can-manage-guests="canManageGuests" :page="data" :history="history" :on-left="left" :booking-to="reservationTo" @moved="moved" @participants-changed="refresh()" />
+    <ConversationSheet v-if="data" v-model:open="sheetOpen" v-model:manage-guests="manageGuests" :can-manage-guests="canManageGuests" :booking-party="bookingParty" :page="data" :history="history" :on-left="left" :booking-to="reservationTo" @moved="moved" @participants-changed="refresh()" />
   </DashboardIndexPanel>
 </template>
 
@@ -46,10 +46,12 @@ const headerPeople = computed(() => {
 })
 const sheetOpen = ref(false)
 const manageGuests = ref(false)
+const bookingParty = ref<'clients' | 'guests'>()
 const canManageGuests = computed(() => Boolean(data.value?.capabilities.can_invite_guest || conversation.value?.participants.some(person => person.can_remove)))
 provide(manageReservationGuestsKey, {
   available: canManageGuests,
-  open: () => {
+  open: party => {
+    bookingParty.value = party
     manageGuests.value = true
     sheetOpen.value = true
   },

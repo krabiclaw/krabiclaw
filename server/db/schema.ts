@@ -1332,32 +1332,19 @@ export const product_nights = sqliteTable("product_nights", {
 	check("product_nights_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
 
-// Either a nights booking or a guest's checkout hold owns this night.
-//   Exactly one of booking_id and hold_id is set. It is the nights unit's inventory
-//   claim, as a session's seats are a slot booking's.
-// The primary key is the overlap guard: a night is held by at most one booking
-//   or hold, so two concurrent writes for the same night cannot both commit.
-//   Claims are written in the same batch as the booking or hold and deleted
-//   when it is cancelled or converted. An overbooked or cancelled booking
-//   holds none.
-// A hold's claim counts only while its hold is active and unexpired. Every
-//   batch that claims nights first deletes, in its range, the claims of holds
-//   that no longer count; the stay-checkout-holds task deletes the rest and
-//   reopens those nights on the home's channel.
-// Deletion: cascades from the booking or the hold.
+// A booking's claim to one night. The primary key allows only one booking
+// to claim each home and date. Claims change in the same batch as the booking.
+// Cancelled and overbooked bookings have no claims.
 export const stay_nights = sqliteTable("stay_nights", {
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text().notNull(),
 	date: text().notNull(),
-	booking_id: text(),
-	hold_id: text().references(() => payment_checkout_holds.id, { onDelete: "cascade" }),
+	booking_id: text().notNull(),
 }, (table) => [
 	primaryKey({ columns: [table.product_id, table.date], name: "stay_nights_pk" }),
 	foreignKey({ columns: [table.organization_id, table.product_id, table.booking_id], foreignColumns: [bookings.organization_id, bookings.product_id, bookings.id], name: "stay_nights_booking_scope_fk" }).onDelete("cascade"),
 	index("stay_nights_booking_idx").on(table.booking_id),
-	index("stay_nights_hold_idx").on(table.hold_id),
 	check("stay_nights_date_check", sql`date(date, '+0 days') IS date`),
-	check("stay_nights_claimant_check", sql`(booking_id IS NOT NULL) + (hold_id IS NOT NULL) = 1`),
 ]);
 
 // Row meaning: the host recorded receiving (or, negative, refunding) this
@@ -2921,6 +2908,7 @@ export const payments = sqliteTable("payments", {
  check("payments_currency_check", sql`length(currency) = 3 AND currency = upper(currency)`),
 ]);
 
+// Checkout details, conversion status and the approved stay's payment lock.
 export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  id: text().primaryKey(),
  organization_id: text().notNull(),
@@ -2942,12 +2930,10 @@ export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  expires_at: text().notNull(),
  created_at: text().notNull(),
  converted_booking_id: text(),
-}, t => [
- index("payment_holds_capacity_idx").on(t.session_id, t.status, t.expires_at),
+}, () => [
  check("payment_holds_quantity_check", sql`quantity > 0 AND amount > 0`),
- // A session booking; or a nights booking, whose starts_at and ends_at are its
- // check-in and check-out dates at the home (product_id) and whose nights are
- // claimed in stay_nights. converted_booking_id is the booking either became.
+ // A session or a stay. For a stay, starts_at and ends_at are the check-in
+ // and check-out dates at the home.
  check("payment_holds_subject_check", sql`(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL) OR (product_id IS NOT NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND date(starts_at, '+0 days') IS starts_at AND date(ends_at, '+0 days') IS ends_at AND ends_at > starts_at)`),
 ]);
 

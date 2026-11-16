@@ -24,7 +24,7 @@ export type ThreadListItem = InboxRow
 export type ThreadListPage = InboxListPage
 export type ThreadDetails = ConversationDetails
 
-export const manageReservationGuestsKey: InjectionKey<{ available: ComputedRef<boolean>; open: () => void }> = Symbol('manage-reservation-guests')
+export const manageReservationGuestsKey: InjectionKey<{ available: ComputedRef<boolean>; open: (party: 'clients' | 'guests') => void }> = Symbol('manage-reservation-guests')
 
 export const removeInboxConversationKey: InjectionKey<(id: string) => void> = Symbol('remove-inbox-conversation')
 

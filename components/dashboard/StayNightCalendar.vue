@@ -52,7 +52,7 @@
                 <span class="block text-sm sm:text-base" :class="night(day)?.available === false ? 'line-through' : ''">{{ day.day }}</span>
                 <UIcon v-if="channelState(day)" :name="CHANNEL_MARKS[channelState(day)!]" class="size-3.5 shrink-0" :class="channelState(day) === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-night-channel-${channelState(day)}`" aria-hidden="true" />
               </span>
-              <span v-if="night(day)?.booking_id || night(day)?.held_until" class="hidden truncate text-xs sm:block">{{ stayLabel(day) }}</span>
+              <span v-if="night(day)?.booking_id" class="hidden truncate text-xs sm:block">{{ stayLabel(day) }}</span>
               <span class="block break-all text-[10px] leading-tight tabular-nums sm:hidden">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : compactMoney(night(day)!.price_minor!) : '…' }}</span>
               <span class="hidden truncate text-sm sm:block">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : money(night(day)!.price_minor!) : '…' }}</span>
             </span>
@@ -268,12 +268,9 @@ const staysById = computed(() => new Map((data.value?.bookings ?? []).map(stay =
 const stayTo = (id: string) => bookingConversationOrRecordPath(orgSlug, id, staysById.value.get(id)?.conversation_id ?? null)
 const night = (day: DateValue) => nightsByDate.value.get(day.toString())
 function stayLabel(day: DateValue) {
-  const value = night(day)
-  if (value?.booking_id) {
-    const stay = staysById.value.get(value.booking_id)
-    return stay ? [stay.guest_name || 'Guest name not provided', ...(stay.channel ? [STAY_CHANNEL_LABELS[stay.channel]] : [])].join(' · ') : 'Reserved'
-  }
-  return 'Checkout hold'
+  const bookingId = night(day)?.booking_id
+  const stay = bookingId ? staysById.value.get(bookingId) : undefined
+  return stay ? [stay.guest_name || 'Guest name not provided', ...(stay.channel ? [STAY_CHANNEL_LABELS[stay.channel]] : [])].join(' · ') : 'Reserved'
 }
 const selectedNights = computed(() => selectedDates.value.flatMap(day => nightsByDate.value.get(day.toString()) ?? []))
 const selected = (day: DateValue) => selectedDates.value.some(date => date.toString() === day.toString())
@@ -288,7 +285,7 @@ const channelState = (day: DateValue) => {
 function nightTitle(day: DateValue) {
   const value = night(day)
   const note = value ? channelNote(value) : null
-  return value ? `${day.toString()} · ${value.booking_id ? stayLabel(day) : value.held_until ? 'Checkout hold' : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${note ? ` · ${note}` : ''}` : day.toString()
+  return value ? `${day.toString()} · ${value.booking_id ? stayLabel(day) : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${note ? ` · ${note}` : ''}` : day.toString()
 }
 const dateLabel = computed(() => {
   const range = selectedRange.value

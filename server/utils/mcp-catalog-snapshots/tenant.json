@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:b0319ff240acb37d2f5053d6554f03ae963c47907268adfc6ad8b1295f787b0f",
-  "documentationFingerprint": "sha256:b0cbf65490c7510f184dc5063c3ab878ed321e660db04a57129fc89c19dff5fc",
+  "fingerprint": "sha256:6080e3c722f92b71b591ff95dd0815f9bdeb5bd2861c518c31feb7244833b4a3",
+  "documentationFingerprint": "sha256:350b1a265337949b8fbd36b2a557c61ca5f824388b013c0613534c9fd3d9f1b7",
   "tools": [
     {
       "name": "add_organization_language",
@@ -64182,13 +64182,6 @@
                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                   "type": "string"
                 },
-                "held_until": {
-                  "description": "When a guest checkout hold on this night lapses; null when no guest is paying for it. A held night is not available.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "max_stay": {
                   "type": [
                     "integer",
@@ -64227,7 +64220,6 @@
                 "closed_to_arrival",
                 "closed_to_departure",
                 "source",
-                "held_until",
                 "channel"
               ],
               "type": "object"
@@ -99885,13 +99877,6 @@
                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                   "type": "string"
                 },
-                "held_until": {
-                  "description": "When a guest checkout hold on this night lapses; null when no guest is paying for it. A held night is not available.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "max_stay": {
                   "type": [
                     "integer",
@@ -99930,7 +99915,6 @@
                 "closed_to_arrival",
                 "closed_to_departure",
                 "source",
-                "held_until",
                 "channel"
               ],
               "type": "object"

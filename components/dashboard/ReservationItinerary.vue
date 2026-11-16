@@ -20,58 +20,77 @@
     <article class="reservation-itinerary-paper" :lang="documentLocale" data-testid="reservation-itinerary-paper">
       <header>
         <h1>{{ labels.title }}</h1>
-        <p>{{ home.organization_name }}</p>
+        <p>{{ itinerary.organizationName }}</p>
       </header>
-      <img v-if="home.photo_urls[0]" ref="cover" class="reservation-itinerary-cover" :src="home.photo_urls[0]" :alt="home.name">
-      <h2>{{ home.name }}</h2>
-      <p v-if="home.location?.address">{{ formatPostalAddress(home.location.address) }}</p>
+      <img v-if="itinerary.photoUrl" ref="cover" class="reservation-itinerary-cover" :src="itinerary.photoUrl" :alt="itinerary.title">
+      <h2>{{ itinerary.title }}</h2>
+      <p v-if="itinerary.address">{{ itinerary.address }}</p>
       <dl>
         <div v-for="row in facts" :key="row.label">
           <dt>{{ row.label }}</dt>
           <dd>{{ row.value }}</dd>
         </div>
       </dl>
-      <section v-if="home.arrival_guide?.house_manual">
+      <section v-if="itinerary.houseManual">
         <h3>{{ labels.houseManual }}</h3>
-        <p class="reservation-itinerary-manual">{{ home.arrival_guide.house_manual }}</p>
+        <p class="reservation-itinerary-manual">{{ itinerary.houseManual }}</p>
       </section>
-      <section v-if="home.house_rules.length">
+      <section v-if="itinerary.houseRules?.length">
         <h3>{{ labels.houseRules }}</h3>
         <ul>
-          <li v-for="rule in home.house_rules" :key="rule">{{ rule }}</li>
+          <li v-for="rule in itinerary.houseRules" :key="rule">{{ rule }}</li>
         </ul>
       </section>
     </article>
   </Teleport>
 </template>
 
+<script lang="ts">
+export type ReservationItineraryDetails = {
+  title: string
+  organizationName: string
+  address: string | null
+  photoUrl: string | null
+  hostName: string | null
+  partySize: number
+  paid: Array<{ amount: number; currency: string }>
+  schedule:
+    | { unit: 'nights'; checkInDate: string; checkOutDate: string; checkInTime: string | null; checkOutTime: string | null }
+    | { unit: 'slot'; startsAt: string; endsAt: string; timezone: string }
+  houseManual?: string | null
+  houseRules?: string[]
+}
+</script>
+
 <script setup lang="ts">
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
-import type { AccountNightBooking } from '~/composables/useDashboardBooking'
 import { paymentMoney } from '~/shared/payment-display'
-import { formatPostalAddress } from '~/utils/postal-address'
 import { getErrorMessage } from '~/utils/errors'
-import { formatCalendarDate, formatTime } from '~/utils/timezone'
+import { formatCalendarDate, formatTime, formatTimestamp } from '~/utils/timezone'
 
-const props = defineProps<{ booking: AccountNightBooking['booking']; home: AccountNightBooking['home']; confirmationCode: string }>()
+const props = defineProps<{ itinerary: ReservationItineraryDetails; confirmationCode: string }>()
 const open = defineModel<boolean>('open', { required: true })
 const { locale } = useI18n()
 
 const translations = {
   en: {
     title: 'Travel itinerary', confirmation: 'Confirmation code', checkIn: 'Check-in', checkout: 'Checkout',
+    starts: 'Starts', ends: 'Ends',
     guests: 'Guests', names: 'Guest names', hostedBy: 'Hosted by', paid: 'Amount paid', houseManual: 'House manual', houseRules: 'House rules',
   },
   ja: {
     title: '旅行日程表', confirmation: '予約確認コード', checkIn: 'チェックイン', checkout: 'チェックアウト',
+    starts: '開始', ends: '終了',
     guests: '宿泊人数', names: '宿泊者名', hostedBy: 'ホスト', paid: '支払い済み金額', houseManual: 'ハウスマニュアル', houseRules: 'ハウスルール',
   },
   th: {
     title: 'กำหนดการเดินทาง', confirmation: 'รหัสยืนยันการจอง', checkIn: 'เช็คอิน', checkout: 'เช็คเอาท์',
+    starts: 'เริ่ม', ends: 'สิ้นสุด',
     guests: 'จำนวนผู้เข้าพัก', names: 'ชื่อผู้เข้าพัก', hostedBy: 'เจ้าของที่พัก', paid: 'ยอดชำระแล้ว', houseManual: 'คู่มือที่พัก', houseRules: 'กฎของที่พัก',
   },
   vi: {
     title: 'Lịch trình chuyến đi', confirmation: 'Mã xác nhận', checkIn: 'Nhận phòng', checkout: 'Trả phòng',
+    starts: 'Bắt đầu', ends: 'Kết thúc',
     guests: 'Số khách', names: 'Tên khách', hostedBy: 'Chủ nhà', paid: 'Số tiền đã thanh toán', houseManual: 'Hướng dẫn sử dụng nhà', houseRules: 'Nội quy nhà',
   },
 } as const
@@ -86,9 +105,8 @@ const documentLocale = ref(languages.find(language => language.value === locale.
 const labels = computed(() => translations[documentLocale.value])
 const guestNames = ref('')
 const names = computed(() => guestNames.value.split('\n').map(name => name.trim()).filter(Boolean))
-const guestCount = computed(() => props.booking.adults + props.booking.children + props.booking.infants)
 const nameError = computed(() => {
-  if (names.value.length > guestCount.value) return `Enter up to ${guestCount.value} names for this reservation.`
+  if (names.value.length > props.itinerary.partySize) return `Enter up to ${props.itinerary.partySize} names for this reservation.`
   if (names.value.some(name => name.length > 160)) return 'Each name must be 160 characters or fewer.'
   return undefined
 })
@@ -103,24 +121,29 @@ watch(open, visible => {
 })
 
 const facts = computed(() => {
-  const { booking, home } = props
+  const { schedule, hostName, paid, partySize } = props.itinerary
   const copy = labels.value
+  const language = documentLocale.value
   const localizedDay = (date: string, time: string | null) => {
-    const day = formatCalendarDate(date, documentLocale.value, { dateStyle: 'long' })
-    return time ? `${day} · ${formatTime(time, documentLocale.value)}` : day
+    const day = formatCalendarDate(date, language, { dateStyle: 'long' })
+    return time ? `${day} · ${formatTime(time, language)}` : day
   }
-  const paid = booking.online_payment
-    ? booking.online_payment.captured_minor - booking.online_payment.refunded_minor
-    : booking.paid_minor
-  const amount = paymentMoney(paid, booking.currency, documentLocale.value)
+  const timeRows = schedule.unit === 'nights'
+    ? [
+        { label: copy.checkIn, value: localizedDay(schedule.checkInDate, schedule.checkInTime) },
+        { label: copy.checkout, value: localizedDay(schedule.checkOutDate, schedule.checkOutTime) },
+      ]
+    : [
+        { label: copy.starts, value: formatTimestamp(schedule.startsAt, language, schedule.timezone, { dateStyle: 'long', timeStyle: 'short' }) },
+        { label: copy.ends, value: formatTimestamp(schedule.endsAt, language, schedule.timezone, { dateStyle: 'long', timeStyle: 'short' }) },
+      ]
   return [
     { label: copy.confirmation, value: props.confirmationCode },
-    { label: copy.checkIn, value: localizedDay(booking.check_in_date, home.check_in_time) },
-    { label: copy.checkout, value: localizedDay(booking.check_out_date, home.check_out_time) },
-    { label: copy.guests, value: new Intl.NumberFormat(documentLocale.value).format(guestCount.value) },
+    ...timeRows,
+    { label: copy.guests, value: new Intl.NumberFormat(language).format(partySize) },
     ...(names.value.length ? [{ label: copy.names, value: names.value.join(', ') }] : []),
-    ...(home.host ? [{ label: copy.hostedBy, value: home.host.name }] : []),
-    { label: copy.paid, value: amount },
+    ...(hostName ? [{ label: copy.hostedBy, value: hostName }] : []),
+    ...(paid.length ? [{ label: copy.paid, value: paid.map(({ amount, currency }) => paymentMoney(amount, currency, language)).join(' · ') }] : []),
   ]
 })
 

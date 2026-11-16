@@ -21,12 +21,9 @@ export async function enqueueOutstandingWork(env: CloudflareEnv): Promise<void> 
   }>(env.DB, `
     SELECT DISTINCT organization_id, 'reviews' AS kind
     FROM bookings WHERE channel = 'direct' AND status = 'confirmed' AND length(ends_at) > 10 AND ends_at > ?
-    UNION ALL SELECT DISTINCT organization_id, 'checkout' FROM (
-      SELECT h.organization_id FROM payment_checkout_holds h WHERE h.session_id IS NULL
-        AND EXISTS (SELECT 1 FROM stay_nights n WHERE n.hold_id = h.id AND n.organization_id = h.organization_id)
-      UNION SELECT b.organization_id FROM bookings b WHERE b.status = 'pending' AND b.product_session_id IS NULL
-        AND b.owner = 'app' AND b.channel = 'direct' AND json_type(b.policy_json, '$.stay_request.respond_by') = 'text'
-    )
+    UNION ALL SELECT DISTINCT organization_id, 'checkout'
+    FROM bookings WHERE status = 'pending' AND product_session_id IS NULL
+      AND owner = 'app' AND channel = 'direct' AND json_type(policy_json, '$.stay_request.respond_by') = 'text'
     UNION ALL SELECT DISTINCT organization_id, 'channex_ari'
     FROM product_channel_mappings WHERE provider = 'channex' AND enabled = 1
     UNION ALL SELECT organization_id, 'ad_spend' FROM (

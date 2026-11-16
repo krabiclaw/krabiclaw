@@ -299,7 +299,7 @@ export async function createMemberBooking(event: H3Event, input: {
   return { kind: 'booking' as const, ...result }
 }
 
-/** Create a booking or hold using the offering's canonical inventory unit. */
+/** Create a booking or checkout using the offering's canonical inventory unit. */
 export async function createProductBooking(event: H3Event, context: BookingCreationContext) {
   const { organizationId, slug, body } = context
   if (!organizationId || !slug) return creationResult({ error: 'Organization and slug are required' }, { status: 400 })
@@ -453,7 +453,7 @@ async function createBookingFrom(event: H3Event, env: CloudflareEnv, context: Bo
   if (requiresPayment) {
     const checkoutKey = idempotencyKey
     // Contact stays on the guest thread. A checkout thread waits on the guest;
-    // authenticated capture alone creates its operational Booking and activity.
+    // the payment authorization saves its operational booking and activity.
     const checkout = await createPaymentCheckout(db, env, {
       unit: 'slot', organizationId, buyerUserId: userId, buyer, productId: product.id, variantId: productVariantId,
       sessionId: session.id, terms: { resolved, price, title: product.name, taxCode: product.tax_code }, answers, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize, idempotencyKey: checkoutKey,
@@ -566,13 +566,7 @@ function stayBookingError(statusCode: number, code: string, message: string, fie
   throw new HTTPError({ statusCode, statusMessage: message, data: { code, field } })
 }
 
-/**
- * Book a place to stay on the site. The guest names the nights and the party;
- * the server quotes them against every rule the home offers and the guest pays
- * the full amount: the checkout holds the nights while they pay, the home's
- * channel closes them at once, and capture confirms the stay. A retry with the
- * same key returns the same checkout without quoting the nights it holds.
- */
+/** Price an instant stay checkout or submit a request for the host to approve. */
 async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClient, context: BookingCreationContext, productId: string, contact: BookingContact,
   organization: Parameters<typeof lodgingBookingPolicy>[1], sourceLocale: string) {
   const { organizationId, slug, body } = context
@@ -587,9 +581,11 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
     params: [organizationId, idempotencyKey],
   }
   const dates = { check_in_date: body.check_in_date, check_out_date: body.check_out_date }
+  const currentPolicy = lodgingBookingPolicy(organizationId, organization)
+  const quoteOptions = { checkInventory: currentPolicy.confirmation_mode === 'review' }
   const [homes, prices, saved, attempts, ...nights] = await executeBatch(db, [
     ...publicStayHomeQueries(organizationId, productId), savedRequestQuery, checkoutAttemptQuery(organizationId, idempotencyKey),
-    ...stayQuoteNightQueries(organizationId, productId, dates),
+    ...stayQuoteNightQueries(organizationId, productId, dates, quoteOptions),
   ], { operation: 'Read stay checkout terms and saved purchase' })
   const home = publicStayHomeFrom(homes!, prices!)
   const request = { product_id: home.product_id, ...dates, adults: body.adults, children: body.children ?? 0, infants: body.infants ?? 0 }
@@ -625,7 +621,7 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
   const existing = await replayRequest(saved!.results[0] as SavedRequest | undefined)
   if (existing) return existing
   const retrying = attempts!.results[0] as CheckoutAttempt | undefined
-  const policy = retrying ? null : lodgingBookingPolicy(organizationId, organization)
+  const policy = retrying ? null : currentPolicy
   if (policy && (body.confirmation_mode !== undefined || policy.confirmation_mode === 'review') && body.confirmation_mode !== policy.confirmation_mode) {
     stayBookingError(409, 'STAY_BOOKING_MODE_CHANGED', 'Refresh this listing to see the host’s current booking settings.', 'confirmation_mode')
   }
@@ -640,11 +636,11 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
   let priced: Awaited<ReturnType<typeof quoteStayAvailability>> | null = null
   let buyerUserId: string | undefined
   try {
-    if (!retrying) priced = quoteStayAvailability(organizationId, home, request, nights)
+    if (!retrying) priced = quoteStayAvailability(organizationId, home, request, nights, quoteOptions)
     const limited = !retrying && await bookingRateLimit(db, env, await hashClientIp(getClientIp(event)), email)
     if (limited) stayBookingError(429, 'RATE_LIMITED', limited, 'guest_email')
     if (policy?.confirmation_mode === 'review') {
-      if (!priced) throw new Error('A new stay request needs its quote')
+      if (!priced?.channelAvailability) throw new Error('A new stay request needs its availability quote')
       const { quote, channelAvailability } = priced
       await requireStripeCheckoutAcceptance(db, env, organizationId)
       buyerUserId = (await ensureInteractionUser(event, env)).id

@@ -19,6 +19,7 @@ import { mediaStillUrl, resolveOwnerPicture } from '~/shared/media-placement-con
 import { addLocalDays, isValidCalendarDate, localDateTimeToInstant, localPartsAt } from '~/utils/timezone'
 import { listBookableSessions } from '~/server/utils/availability'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
+import { calculateMapUrl, coordinatesFailure } from '~/utils/location-map'
 import { pendingBookingChangeView } from '~/server/domain/guest-threads/booking-changes'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { readPaymentDetails } from '~/server/domain/payments'
@@ -50,6 +51,9 @@ interface BookingRow {
   location_slug: string | null
   location_title: string | null
   location_address: string | null
+  location_latitude: number | null
+  location_longitude: number | null
+  location_maps_url: string | null
   guest_name: string
   guest_email: string
   guest_phone: string | null
@@ -99,6 +103,8 @@ export interface DashboardBookingDetails {
   location_slug: string | null
   location_title: string
   location_address: string | null
+  location_pin: { latitude: number; longitude: number } | null
+  location_maps_url: string | null
   name: string
   resource_photo_urls: string[]
   /** Null for a purchase made without an account. */
@@ -189,7 +195,9 @@ async function loadBookingRow(
   // refers to, not on the thread. The thread carries the conversation and the
   // guest.
   return queryFirst<BookingRow>(db, `SELECT record.id AS booking_id, record.version, r.organization_id, s.name AS organization_name, s.vertical,
-    record.assigned_member_id, record.policy_json, record.product_kind, record.advance_notice_minutes, record.location_id, l.slug AS location_slug, l.title AS location_title, l.address AS location_address,
+    record.assigned_member_id, record.policy_json, record.product_kind, record.advance_notice_minutes, record.location_id,
+    l.slug AS location_slug, l.title AS location_title, l.address AS location_address,
+    l.latitude AS location_latitude, l.longitude AS location_longitude, l.maps_url AS location_maps_url,
     ${scope.buyerUserId ? 'NULL' : MEMBER_NAME_SQL} AS assigned_member_name,
     ${RESERVATION_HOST_SQL} AS host_json,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
@@ -204,7 +212,7 @@ async function loadBookingRow(
         FROM bookings b JOIN products p ON p.id = b.product_id
         LEFT JOIN product_booking_configs cfg ON cfg.product_id = b.product_id AND cfg.organization_id = b.organization_id
     ) record ON record.id = r.booking_id AND record.organization_id = r.organization_id
-    LEFT JOIN business_locations l ON l.id = record.location_id
+    LEFT JOIN business_locations l ON l.id = record.location_id AND l.organization_id = record.organization_id
     LEFT JOIN member_scheduling ms ON ms.organization_id = record.organization_id AND ms.member_id = record.assigned_member_id
     LEFT JOIN member host_member ON host_member.organizationId = record.organization_id AND host_member.id = record.assigned_member_id
     LEFT JOIN user u ON u.id = host_member.userId
@@ -300,6 +308,12 @@ async function composeBookingDetails(
   reader: { env: CloudflareEnv; canReadPayments: boolean; buyerUserId?: undefined } | { buyerUserId: string; env: CloudflareEnv; canReadPayments?: undefined },
 ): Promise<DashboardBookingDetails> {
   if (row.location_id !== null && !row.location_title) throw new HTTPError({ statusCode: 500, message: 'The booking location is missing its title' })
+  const { location_latitude: latitude, location_longitude: longitude, location_maps_url, location_address, location_title,
+    policy_json: _policy, answers_json, cancellation_used_at: _cancellation, advance_notice_minutes: _notice,
+    review_id: _review, private_notes, host_json, ...booking } = row
+  const address = parsePostalAddress(location_address)
+  const pinFailure = coordinatesFailure({ latitude, longitude })
+  if (pinFailure) throw new HTTPError({ statusCode: 500, message: pinFailure.error, data: { code: 'INVALID_STORED_LOCATION', field: pinFailure.field } })
 
   // A table may move to the business's tables at any of its locations; anything else stays where it is.
   const visibleLocations = await queryAll<{ id: string; title: string }>(db, row.product_kind === 'table'
@@ -328,8 +342,6 @@ async function composeBookingDetails(
   }))
   const guestCanRetryCancellation = Boolean(reader.buyerUserId && row.status === 'cancelled' && row.cancellation_used_at
     && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, bookingId: row.booking_id, requestId: row.conversation_id, buyerUserId: reader.buyerUserId }))
-  const { policy_json: _policy, location_address, answers_json, cancellation_used_at: _cancellation, advance_notice_minutes: _notice,
-    review_id: _review, private_notes, location_title, host_json, ...booking } = row
   return {
     ...booking,
     unit: 'slot',
@@ -341,7 +353,9 @@ async function composeBookingDetails(
     host: host_json === null ? null : JSON.parse(host_json) as PublicProvider,
     type,
     location_title: row.location_id === null ? 'Online' : location_title!,
-    location_address: location_address ? formatPostalAddress(parsePostalAddress(location_address)) || null : null,
+    location_address: formatPostalAddress(address) || null,
+    location_pin: latitude === null || longitude === null ? null : { latitude, longitude },
+    location_maps_url: calculateMapUrl({ title: location_title ?? '', address, latitude, longitude, maps_url: location_maps_url }),
     resource_photo_urls: await loadResourcePhotos(db, row),
     // The picture is the buyer's own account picture when they booked signed in; an emailed guest has none.
     // The screen shows a local date and time; the record holds one instant and
@@ -465,6 +479,8 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     location_slug: payment.location_slug,
     location_title: payment.location_id === null ? 'Online' : payment.location_title ?? 'Online',
     location_address: null,
+    location_pin: null,
+    location_maps_url: null,
     product_kind: null,
     resource_photo_urls: resourceImageUrl ? [resourceImageUrl] : [],
     name: snapshot.title,

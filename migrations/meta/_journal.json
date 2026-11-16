@@ -99,6 +99,13 @@
       "when": 1794803292350,
       "tag": "0013_deadline_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1794830019425,
+      "tag": "0014_remove_checkout_inventory_holds",
+      "breakpoints": true
     }
   ]
 }

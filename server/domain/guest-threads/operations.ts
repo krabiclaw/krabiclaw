@@ -452,7 +452,7 @@ async function executeSourceMutation(
     }) : { queries: [], guard: null }
   const stay = nightly ? await import('~/server/domain/stays') : null
   const nightRelease = stay && plan.afterStatus === 'cancelled'
-    ? stay.stayRequestReleaseQueries({ ...context.record, check_in_date: bookingDay(context.record.starts_at, context.record.timezone),
+    ? stay.stayNightReleaseQueries({ ...context.record, check_in_date: bookingDay(context.record.starts_at, context.record.timezone),
       check_out_date: bookingDay(context.record.ends_at, context.record.timezone) }, input.organizationId, now)
     : []
   const queries = [

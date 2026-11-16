@@ -43,9 +43,9 @@ export type DomainEvent =
       task_ids: string[]
       guest_cancellation_refund_minor?: number
       checkout_expires_at?: string
+      checkout_saved?: true
     }
-  | { type: 'stay.hold_changed'; organization_id: string; product_id: string; location_id: string; range: readonly [string, string]; checkout_expires_at: string }
-  | { type: 'stay.checkout_expired'; organization_id: string; kind: 'hold' | 'request'; id: string }
+  | { type: 'stay.checkout_expired'; organization_id: string; kind: 'request'; id: string }
   | { type: 'stay.channel_revision'; organization_id: string; booking_id: string; revision_id: string; previous: ChannelStayTerms | null; terms: ChannelStayTerms }
   | { type: 'stay.guide_changed'; organization_id: string; product_id: string }
   | { type: 'payment.financial'; organization_id: string; payment_id: string; notice: PaymentFinancialEvent }
@@ -138,13 +138,6 @@ export async function consumeEvent(env: CloudflareEnv, event: DomainEvent): Prom
     await scheduleBusinessWake(env, RETENTION_HUB, 'retention', retentionWakeAt(Date.parse(event.record.created_at) + days * 86_400_000))
     return
   }
-  if (event.type === 'stay.hold_changed') {
-    const { scheduleBusinessWake } = await import('~/server/cloudflare/guest-inbox-events')
-    await scheduleBusinessWake(env, event.organization_id, 'checkout', Date.parse(event.checkout_expires_at))
-    const { pushStayHoldNights } = await import('~/server/domain/stays')
-    await pushStayHoldNights(env.DB, env, event.organization_id, event.product_id, event.location_id, event.range)
-    return
-  }
   if (event.type === 'booking.status_changed') {
     const { deliverBookingStatusUpdate } = await import('~/server/domain/guest-threads/operations')
     await deliverBookingStatusUpdate(env, event)
@@ -173,9 +166,8 @@ export async function consumeEvent(env: CloudflareEnv, event: DomainEvent): Prom
     return
   }
   if (event.type === 'stay.checkout_expired') {
-    const { expireStayRequest, releaseLapsedStayHold } = await import('~/server/domain/stays')
-    if (event.kind === 'hold') await releaseLapsedStayHold(env.DB, env, event.organization_id, event.id)
-    else await expireStayRequest(env.DB, env, event.organization_id, event.id)
+    const { expireStayRequest } = await import('~/server/domain/stays')
+    await expireStayRequest(env.DB, env, event.organization_id, event.id)
     return
   }
   if (event.type === 'stay.changed' && event.checkout_expires_at) {

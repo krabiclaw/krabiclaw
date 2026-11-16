@@ -179,8 +179,7 @@ Stripe's settlement timing and payout schedule are separate. KrabiClaw does not
 apply Airbnb check-in payout-release rules. Bank changes use Stripe Express;
 sent payouts cannot be redirected. Merchant refunds require authenticated browser
 approval. A paid visit's rejection or cancellation, a guest's own cancellation of
-a deposit-paid reservation inside its terms, and the refund of a bank debit that
-cleared after its capacity went are each Stripe's full-remaining refund: the
+a deposit-paid reservation inside its terms both use Stripe's full-remaining refund. The
 request names no amount, Stripe returns whatever it still holds for the
 payment, and the recorded amount is the one Stripe reports. The approval screen
 shows that remainder read from the charge. Each refund is one request under a
@@ -383,19 +382,13 @@ Primary contracts: [Managed Risk](https://docs.stripe.com/connect/risk-managemen
 
 ## Durable boundaries
 
-`createProductBooking` is shared by public and MCP creation. Public booking
-creation with required positive collection reserves an expiring hold and
-waiting-on-guest request in one D1 batch before creating Stripe Checkout. MCP
-passes the explicit no-financial-writes boundary and returns
-`financial_action_required` with the authenticated product booking dashboard URL
-before creating any Booking, hold, request, Checkout, Payment or authorization;
-required collection and the product payment configuration stay unchanged.
-The public booking hold uses the canonical allocator predicate,
-including tenant/calendar-group half-open overlap exclusion. Holds expire after
-60 minutes. Review-pending Bookings have no Checkout TTL and consume capacity.
-A card or Link authorization, or a bank debit once it clears, converts the hold
-to the canonical pending or confirmed Booking and commits its lifecycle
-activity/operational ID atomically. A card is captured only after that commit.
+`createProductBooking` is shared by public and MCP creation. For a paid booking,
+the site saves the purchase terms and opens a Stripe PaymentIntent. Checkout
+takes no nights or places. Stripe selects eligible methods from the business's
+payment method configuration. MCP returns `financial_action_required` with the
+product's dashboard URL before a financial write. At Pay, one D1 batch saves
+the confirmed booking, claims the inventory and links the payment and
+conversation. Pending stay requests own their nights from submission.
 
 Stripe account + livemode + native object identity scope every financial mutation.
 The connected snapshot webhook is separate from the subscription handler; durable
@@ -415,8 +408,7 @@ that same stay.
 
 The host has up to 24 hours to respond and the guest has up to 24 hours after
 approval to start payment. Both deadlines end by check-in. A declined,
-withdrawn, or expired request releases the dates. A bank payment in progress
-uses the same clearing window as other stay payments.
+withdrawn, or expired request releases the dates. Initiating a bank debit confirms the approved stay while Stripe clears the payment.
 
 ### Paying on the site
 
@@ -432,15 +424,9 @@ method and total, and the browser completes any 3DS with `handleNextAction`. A
 method that leaves the site comes back to the same pay page on the business's host
 (Stripe's `return_url` carries the claim in its query). The pay page then calls
 `POST .../return` (`completePaymentReturn`): Stripe is asked whether the intent
-succeeded, the purchase is claimed for the site's Better Auth buyer (the anonymous
-user the booking made), the capture alert is sent, and the response names the
-business's own receipt — `/bookings/confirmed` or `/reservations/confirmed` with
-the request's replayable cancellation token, as an unpaid booking's confirmation,
-or `/bookings/stay` for a stay, read by that browser's session through
-`GET /api/public/guest-stays/<activity id>`. A payment still `processing` claims
-nothing and the pay page says it is clearing; a capture whose booking was taken
-first is refunded and the pay page says so. A succeeded confirmation settles at
-once through `reconcilePaymentIntent`, and again, idempotently, from the webhook.
+succeeded. The return reads the saved receipt and hands it to the site's Better
+Auth buyer. It does not confirm or capture the payment. A payment awaiting
+payment settlement can be checked again from the pay page.
 
 **Surcharge.** A business that opts in sets `surcharge_basis_points` on its
 connected account. Stripe's native surcharge preview (`amount_details.surcharge`,
@@ -451,51 +437,22 @@ error, never a free payment. The surcharged total is confirmed with
 `amount_to_confirm` and the named surcharge, so Stripe's receipts and refunds carry
 it; `payments.surcharge_amount` records what Stripe charged.
 
-**Bank clearing and ACH Direct Debit.** Payments accepts ACH Direct Debit
-(`us_bank_account`). Because Stripe's native surcharging API only permits credit
-cards, surcharging `us_bank_account` returns `surcharge.status = 'unavailable'`;
-ACH is automatically $0.00 surcharge (free to the customer). On confirmation,
-Stripe returns `processing` while bank settlement clears. The active hold's
-expiration is extended by 14 days on confirmation and processing webhook
-reconciliation to preserve booking capacity during ACH clearing. Succeeded
-intents settle via `reconcilePaymentIntent` when the `payment_intent.succeeded`
-webhook fires. Clearing failures still generate financial notifications. An
-intent in `requires_payment_method` with `last_payment_error` remains payable
-and retains its active hold so the buyer can retry, including after a
-recoverable confirmation decline, until its window ends. A bank debit that
-fails after that gives back the 14 days it was holding. A canceled intent is
-terminal: it releases the active hold.
+**Expiry.** The buyer's deadline is `payments.checkout_expires_at`. An approved
+stay also uses its checkout record to hold its request payment lock during
+authorization. An approval already owns its nights.
 
-**Expiry.** The buyer's time to pay is `payments.checkout_expires_at`. Every
-availability query ignores a hold past `expires_at`, and the confirm endpoint
-refuses a payment past its window. Before the confirm request goes to Stripe, one
-conditional write extends the active, unexpired hold by an hour; a hold that has
-already lapsed stops the confirmation there.
+**Cards and Link.** The PaymentIntent uses manual capture. The confirm response
+or the Stripe webhook saves the booking when the intent requires capture. After
+the batch commits, Stripe captures with a stable idempotency key. If nights or
+places were taken, the authorization is cancelled and the buyer can pick
+another date or time.
 
-**Cards and Link: authorize, book, capture.** Both use manual capture
-(`payment_method_options[card|link].capture_method`; surcharge and tax are in the
-authorized total). When Stripe reports `requires_capture`, from the confirm
-response, the webhook or the pay page's return, the hold becomes the booking and
-only then is the payment captured. If the capacity has gone the authorization is
-cancelled: nothing is charged and nothing is refunded. These intents use automatic
-confirmation, because Stripe refuses `confirmation_method: manual` alongside
-`automatic_payment_methods`, so a browser holding the client secret could confirm
-one late; the browser only gets the secret for `requires_action`, and a late
-authorization is cancelled the same way.
-
-A lost capture response is not a failure. Stripe's status is read again before
-anything is retried, and the hold finds the same booking. If Stripe cancels an
-authorization a booking was committed on, nothing was paid and the business gets a
-payment-failed alert on the booking.
-
-**ACH.** Confirmation starts the debit, so there is nothing to authorize. The hold
-keeps the capacity for 14 days while the debit clears, and the booking is made
-when it succeeds. Stripe tries instant bank verification and falls back to
-microdeposits: the pay page then shows Stripe's verification link, and the hold
-lasts through verification. A verification that fails or expires returns the
-intent to `requires_payment_method` with its error, which gives the capacity back. A debit that clears after its capacity went, because the business closed
-what it paid for, goes back through the ordinary refund under
-`unfulfillable:<intent>`, and a redelivery repeats that refund rather than booking.
+**ACH Direct Debit.** Stripe starts clearing when the buyer confirms. The same
+booking batch claims the inventory on initiation, including when Stripe sends
+the buyer to verify microdeposits. The succeeding webhook records payment. If
+Stripe later reports failure, the financial event cancels the booking using the
+existing cancellation operation. Stripe controls when a processing debit can
+still be cancelled. ACH payments have no card surcharge.
 
 **Tax.** A business in a Stripe Tax business location
 (https://docs.stripe.com/tax/supported-countries) with active Stripe Tax

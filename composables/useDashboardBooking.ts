@@ -5,6 +5,7 @@ import type { pendingStayChanges } from '~/server/domain/guest-threads/stay-chan
 import { isGuestStay, isStayCheckInMethod } from '~/shared/stay-arrival'
 import { isPublicProvider } from '~/shared/member-scheduling'
 import { isRecord } from '~/utils/api-clients'
+import { coordinatesFailure } from '~/utils/location-map'
 
 type NightBooking<T> = Omit<T, 'id'> & { booking_id: string; unit: 'nights' }
 type StayChange = Awaited<ReturnType<typeof pendingStayChanges>>[number]
@@ -35,6 +36,10 @@ export function isBookingDetailsResponse(value: unknown): value is { booking: Da
     && (value.booking.notes === null || typeof value.booking.notes === 'string')
     && Array.isArray(value.booking.resource_photo_urls) && value.booking.resource_photo_urls.every(url => typeof url === 'string')
     && (value.booking.host === null || isPublicProvider(value.booking.host))
+    && (value.booking.location_pin === null || (isRecord(value.booking.location_pin)
+      && typeof value.booking.location_pin.latitude === 'number' && typeof value.booking.location_pin.longitude === 'number'
+      && !coordinatesFailure({ latitude: value.booking.location_pin.latitude, longitude: value.booking.location_pin.longitude })))
+    && (value.booking.location_maps_url === null || typeof value.booking.location_maps_url === 'string')
     && Array.isArray(value.booking.answers)
     && (value.booking.policy === null || isRecord(value.booking.policy))
 }

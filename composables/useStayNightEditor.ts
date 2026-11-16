@@ -3,7 +3,7 @@ import type { PlaceDay, PlaceKind } from '~/server/domain/places'
 import type { CurrencyCode } from '~/shared/currencies'
 import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, changeNightPrice, resolveStayNightPolicy } from '~/shared/bookings'
 import { majorAmountToMinor, minorAmountToMajor } from '~/shared/prices'
-import { addLocalDays, isValidCalendarDate, isValidInstant } from '~/utils/timezone'
+import { addLocalDays, isValidCalendarDate } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 
 export type NightConcern = 'summary' | 'price' | 'custom' | 'minimum' | 'maximum' | 'arrival' | 'reset'
@@ -53,7 +53,7 @@ export function isStayNight(item: unknown): item is StayNight {
     && typeof item.available === 'boolean' && typeof item.closed === 'boolean' && nullableText(item.booking_id) && nullableAmount(item.price_minor)
     && typeof item.min_stay_arrival === 'number' && nullableRule(item.min_stay_arrival) && nullableRule(item.max_stay)
     && typeof item.closed_to_arrival === 'boolean' && typeof item.closed_to_departure === 'boolean'
-    && [null, 'host', 'import'].includes(item.source as string | null) && (item.held_until === null || isValidInstant(item.held_until))
+    && [null, 'host', 'import'].includes(item.source as string | null)
     && (item.channel === null || isRecord(item.channel) && ['pending', 'pushed', 'needs_review'].includes(String(item.channel.state)) && nullableText(item.channel.detail))
 }
 
@@ -66,8 +66,7 @@ export function isPlaceDay(item: unknown): item is PlaceDay {
     && (item.places_left === null || typeof item.places_left === 'number' && Number.isInteger(item.places_left) && item.places_left >= 0)
 }
 
-/** A night held by a booking or a checkout. A selection never writes one. */
-export const isBookedNight = (night: StayNight) => Boolean(night.booking_id || night.held_until)
+export const isBookedNight = (night: StayNight) => night.booking_id !== null
 
 /** 0 Sunday to 6 Saturday, as the nights write reads weekdays. */
 export const nightWeekday = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay()
@@ -87,12 +86,9 @@ export function stayNightSource(api: ReturnType<typeof useDashboardApi>, signal:
   return {
     id: home => home.product_id,
     held: isBookedNight,
-    label: night => night.booking_id ? 'Reserved' : night.held_until ? 'Checkout hold' : night.closed ? 'Blocked by you' : 'Available',
-    // What holds nights a selection cannot change: a reservation is managed from its stay and a hold by its guest's checkout.
-    heldExplanation: booked => booked.some(night => night.booking_id)
-      ? 'Booked nights belong to their reservations. Open the stay to manage it.'
-      : 'A guest is checking out these nights. The hold ends on its own if they do not pay.',
-    heldLine: booked => `${booked.length} booked ${booked.length === 1 ? 'night is' : 'nights are'} left out. Reservations and checkout holds keep their settings.`,
+    label: night => night.booking_id ? 'Reserved' : night.closed ? 'Blocked by you' : 'Available',
+    heldExplanation: () => 'Booked nights belong to their reservations. Open the stay to manage it.',
+    heldLine: booked => `${booked.length} booked ${booked.length === 1 ? 'night is' : 'nights are'} left out.`,
     async write(home, range, weekdays, patch) {
       await api(`/api/dashboard/stay-homes/${encodeURIComponent(home.product_id)}/nights`, {
         method: 'PUT', body: { ...range, ...(weekdays ? { weekdays } : {}), ...patch }, signal,

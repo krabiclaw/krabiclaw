@@ -283,7 +283,7 @@ const homeRows = computed<GridRow[]>(() => {
       const gaps = unbookableGaps(nights)
       const cells = nights.map((night, index): GridCell => ({
         date: night.date, open: night.available, held: isBookedNight(night), strike: night.closed, mark: channelState(night),
-        label: !isBookedNight(night) || night.held_until ? freeLabel(home, night) : '', title: nightTitle(home, night, gaps.get(index)?.text),
+        label: isBookedNight(night) ? '' : price(home, night), title: nightTitle(home, night, gaps.get(index)?.text),
       }))
       return { id: home.product_id, name: home.internal_name, detail: addressOf(home), to: homeTo(home.product_id), cells, bars, gaps, home, nights }
     })
@@ -326,14 +326,10 @@ const windowLabel = computed(() => `${formatCalendarDate(from.value, 'en', { mon
 // Each home's own currency, as the night inspector shows it: a Krabi villa and a
 // Santa Monica studio sit in the same grid, so a bare number would mislead.
 const price = (home: Home, night: StayNight) => night.price_minor === null ? 'No price' : formatMinorAmount(night.price_minor, home.currency).replace(/\.00$/, '')
-function freeLabel(home: Home, night: StayNight) {
-  if (night.held_until) return 'Hold'
-  return price(home, night)
-}
 /** A night the channel has not confirmed: still queued for it, or refused and needing review. */
 const channelState = (night: StayNight) => night.channel?.state === 'pending' || night.channel?.state === 'needs_review' ? night.channel.state : null
 function nightTitle(home: Home, night: StayNight, gap?: string) {
-  const state = night.booking_id ? 'Booked' : night.held_until ? 'Checkout hold' : night.closed ? 'Blocked' : 'Available'
+  const state = night.booking_id ? 'Booked' : night.closed ? 'Blocked' : 'Available'
   const note = channelNote(night)
   return `${home.internal_name} · ${formatCalendarDate(night.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${state} · ${price(home, night)}${gap ? ` · ${gap}` : ''}${note ? ` · ${note}` : night.channel?.state === 'pushed' ? ' · On Airbnb' : ''}`
 }

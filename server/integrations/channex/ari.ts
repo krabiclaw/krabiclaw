@@ -45,10 +45,9 @@ export async function completeChannelPush<T extends object>(outcome: ChannelPush
  * pending nights as they are now and sends Channex only what differs from
  * what Channex last confirmed for each (sent_json), contiguous nights with
  * the same change as one date range: at most one restrictions call and one
- * availability call per home. Availability is the room's inventory: 0 while a
- * booking or a checkout hold takes the night, else 1. A
- * host closing a night is stop_sell on the rate plan alone, and opening it
- * stop_sell false alone; neither touches availability (docs.channex.io ARI
+ * availability call per home. Availability is 0 when a booking takes the
+ * night, else 1. Closing a night sets stop_sell on the rate plan, and opening
+ * it clears stop_sell. Neither touches availability (docs.channex.io ARI
  * and its certification: a stop sell is one restrictions update). Airbnb's
  * minimum is a rule of the arrival date. Its actual imported listing default
  * applies when that date has no override.
@@ -118,7 +117,7 @@ function clock(instant: string): string {
 
 function ariValues(night: StayNight, home: AriHome): AriValues {
   return {
-    availability: night.booking_id !== null || night.held_until !== null ? 0 : 1,
+    availability: night.booking_id === null ? 1 : 0,
     rate: night.price_minor === null ? null : rate(night.price_minor, home.currency),
     min_stay_arrival: night.min_stay_arrival,
     max_stay: night.max_stay ?? 0,

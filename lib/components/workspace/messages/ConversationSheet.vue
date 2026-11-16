@@ -37,7 +37,7 @@
         </li>
       </ul>
       <button v-if="canManageGuests" type="button" :class="actionRowClass" :aria-expanded="manageGuests" @click="manageGuests = !manageGuests; removing = null; removalError = null">
-        <UIcon name="i-lucide-pencil" class="size-6 shrink-0" />Manage guests
+        <UIcon name="i-lucide-pencil" class="size-6 shrink-0" />Manage {{ party }}
       </button>
       <div v-if="page.capabilities.can_manage_participants" class="mt-4">
         <UButton v-if="!pickingMembers" label="Add people" icon="i-lucide-user-plus" color="neutral" variant="outline" :loading="loadingMembers" @click="loadMembers" />
@@ -61,7 +61,7 @@
       <p v-else-if="!details" role="status" class="text-sm text-muted">Loading…</p>
       <template v-if="details">
         <div v-if="manageGuests && page.capabilities.can_invite_guest" class="mt-2">
-          <UButton label="Invite a guest" icon="i-lucide-user-plus" color="neutral" variant="outline" @click="inviting = !inviting" />
+          <UButton :label="party === 'clients' ? 'Invite a client' : 'Invite a guest'" icon="i-lucide-user-plus" color="neutral" variant="outline" @click="inviting = !inviting" />
           <UForm v-if="inviting" :state="{ email: inviteEmail }" class="mt-3 space-y-3" @submit="createInvite">
             <UFormField label="Email address" required>
               <UInput v-model="inviteEmail" type="email" autocomplete="email" required :disabled="creatingInvite" class="w-full" />
@@ -136,7 +136,7 @@ import { isConversationOperation, isThreadDetails, type ThreadDetails } from './
 import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'
 import ReportDialog from './ReportDialog.vue'
 
-const props = defineProps<{ page: ConversationPage; history: ReturnType<typeof useConversation>; onLeft: () => Promise<void>; bookingTo?: string | null; canManageGuests: boolean }>()
+const props = defineProps<{ page: ConversationPage; history: ReturnType<typeof useConversation>; onLeft: () => Promise<void>; bookingTo?: string | null; canManageGuests: boolean; bookingParty?: 'clients' | 'guests' }>()
 const emit = defineEmits<{ moved: [transition: 'archive' | 'unarchive' | 'report' | 'block' | 'unblock']; participantsChanged: [] }>()
 const threadId = computed(() => props.page.conversation.id)
 const open = defineModel<boolean>('open', { required: true })
@@ -150,6 +150,7 @@ const participants = computed(() => {
     : people
 })
 const dashboard = useDashboardOrganization()
+const party = computed(() => props.bookingParty ?? (dashboard.organization.value?.vertical === 'service' ? 'clients' : 'guests'))
 const api = useDashboardApi(useDashboardRouteScope())
 const path = computed(() => `/api/dashboard/organizations/${dashboard.organizationId.value}/guest-threads/${encodeURIComponent(threadId.value)}`)
 
