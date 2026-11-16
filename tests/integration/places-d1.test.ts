@@ -130,7 +130,7 @@ test('the places calendar reads each location, experience and consultation with 
     assert.equal(family!.place.timezone, ZONE)
 
     // The host Calendar and the booking page read the same places left: Wednesday's booking takes three, and on
-    // Thursday a guest's live checkout holds one while a lapsed checkout holds none.
+    // Thursday both an active and an expired checkout leave the session's places free.
     for (const [id, quantity, expires] of [['live', 1, '+1 day'], ['lapsed', 2, '-1 minute']] as const) {
       await db.prepare("INSERT INTO payments (id, organization_id, stripe_account_id, livemode, subject_type, currency, amount, price_snapshot_json, created_at, updated_at) VALUES (?, ?, 'acct_test', 0, 'booking', 'USD', 100, '{}', ?, ?)").bind(`pay-${id}`, ORG, NOW, NOW).run()
       await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, variant_id, price_id, session_id, payment_id, quantity, amount, currency, starts_at, ends_at, expires_at, created_at)
@@ -143,10 +143,10 @@ test('the places calendar reads each location, experience and consultation with 
       assert.deepEqual(host.map(day => day.places_left), host.map(day => guestPlacesLeft(day.date)))
       return host.map(day => day.places_left)
     }
-    assert.deepEqual(await placesLeft(), [0, 4, 1, 3, 4, 0, 0])
+    assert.deepEqual(await placesLeft(), [0, 4, 1, 4, 4, 0, 0])
     // Wednesday's one place is fewer than a party of two, the smallest the class takes: neither side offers it.
     await db.prepare("UPDATE product_booking_configs SET party_size_min = 2 WHERE product_id = 'class'").run()
-    assert.deepEqual(await placesLeft(), [0, 4, 0, 3, 4, 0, 0])
+    assert.deepEqual(await placesLeft(), [0, 4, 0, 4, 4, 0, 0])
 
     // A member sees only what they are assigned, and cannot manage.
     const assigned = await readPlacesCalendar(db, staff, { from: FROM, to: TO })

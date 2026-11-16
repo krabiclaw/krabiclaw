@@ -114,7 +114,7 @@
   <ReportDialog
     :open="reporting !== null"
     :title="reporting?.block ? 'Block this guest' : 'Report this conversation'"
-    :description="reporting?.block ? 'Their conversation moves to Blocked guests and new messages from them stop alerting your team.' : 'Tell KrabiClaw what this guest sent.'"
+    :description="reporting?.block ? 'Their conversation moves to Blocked guests and new messages from them stop alerting your team.' : 'Tell Blawby what this guest sent.'"
     :confirm-label="reporting?.block ? 'Block and report' : 'Report'"
     :saving="saving === 'report' || saving === 'block'"
     :error="moveError"

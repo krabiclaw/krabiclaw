@@ -19,14 +19,6 @@
     "participants": [
       {
         "can_remove": false,
-        "id": "airbnb-guest-account",
-        "image": null,
-        "name": "Mililani Garcia",
-        "role": "guest",
-        "title": "Booker"
-      },
-      {
-        "can_remove": false,
         "id": "owner-contract",
         "image": null,
         "name": "Skyler Baird",

@@ -445,12 +445,12 @@ test('a completed onboarding emails each operator once, with a link to that cust
     return Response.json({ id: `email-${sent.length}` })
   })
   try {
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, theme_id, status, default_currency, timezone) VALUES ('org-platform', 'KrabiClaw', 'krabiclaw', 'www', ?, 'active', 'USD', 'Asia/Bangkok')`).bind(PLATFORM_SITE.themeId).run()
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, theme_id, status, default_currency, timezone) VALUES ('org-platform', 'Blawby', 'krabiclaw', 'www', ?, 'active', 'USD', 'Asia/Bangkok')`).bind(PLATFORM_SITE.themeId).run()
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, status, default_currency, timezone) VALUES ('org-customer', 'Clay Corner', 'clay-corner', 'clay-corner', 'active', 'USD', 'Asia/Bangkok')`).run()
     await db.prepare(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('dom-1', 'org-customer', 'clay-corner.krabiclaw.com', 'system', 'canonical', 'active')`).run()
     await db.prepare(`INSERT INTO user (id, name, email) VALUES ('user-owner', 'Mina Park', 'mina@clay-corner.com')`).run()
     await db.prepare(`INSERT INTO member (id, "organizationId", "userId", role) VALUES ('m-owner', 'org-customer', 'user-owner', 'owner')`).run()
-    const env = { DB: db, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 're_test_operator', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.com', PLATFORM_OWNER_EMAILS: 'ops@krabiclaw.com, OPS@KrabiClaw.com ' } as unknown as Parameters<typeof completeOnboarding>[0]
+    const env = { DB: db, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 're_test_operator', EMAIL_FROM: 'Blawby <hello@krabiclaw.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.com', PLATFORM_OWNER_EMAILS: 'ops@krabiclaw.com, OPS@KrabiClaw.com ' } as unknown as Parameters<typeof completeOnboarding>[0]
 
     const completion = await completeOnboarding(env, db, 'org-customer', null)
     assert.deepEqual(completion.operator_email, { status: 'sent' })
@@ -461,7 +461,7 @@ test('a completed onboarding emails each operator once, with a link to that cust
     assert.ok(operatorMail)
     assert.ok(ownerMail)
     assert.deepEqual(operatorMail!.body.to, ['ops@krabiclaw.com'])
-    assert.equal(operatorMail!.body.subject, 'Clay Corner is live on KrabiClaw')
+    assert.equal(operatorMail!.body.subject, 'Clay Corner is live on Blawby')
     assert.equal(operatorMail!.idempotencyKey, `onboarding-complete:org-customer:${hashEmail('ops@krabiclaw.com')}`)
     for (const expected of ['Mina Park (mina@clay-corner.com)', 'https://clay-corner.krabiclaw.com/',
       'https://krabiclaw.com/dashboard/krabiclaw/platform-accounts?user=user-owner&amp;organization=org-customer']) {
@@ -469,15 +469,15 @@ test('a completed onboarding emails each operator once, with a link to that cust
     }
 
     assert.deepEqual(ownerMail!.body.to, ['mina@clay-corner.com'])
-    assert.equal(ownerMail!.body.subject, 'Welcome to KrabiClaw — congrats on launching Clay Corner!')
+    assert.equal(ownerMail!.body.subject, 'Welcome to Blawby — congrats on launching Clay Corner!')
     assert.equal(ownerMail!.idempotencyKey, `onboarding-welcome:org-customer:${hashEmail('mina@clay-corner.com')}`)
-    for (const expected of ['Hi Mina,', 'Clay Corner', 'https://clay-corner.krabiclaw.com/', 'https://krabiclaw.com/dashboard/clay-corner', 'dining experience or cuisine', 'Paul', 'Founder, KrabiClaw']) {
+    for (const expected of ['Hi Mina,', 'Clay Corner', 'https://clay-corner.krabiclaw.com/', 'https://krabiclaw.com/dashboard/clay-corner', 'dining experience or cuisine', 'Paul', 'Founder, Blawby']) {
       assert.ok(ownerMail!.body.html.includes(expected), `owner welcome email carries ${expected}`)
     }
     // The conversion is recorded on its own path, once per organization.
     assert.equal(await db.prepare("SELECT count(*) FROM analytics_events WHERE json_extract(payload_json, '$.event_name') = 'onboarding_complete' AND json_extract(payload_json, '$.entity_id') = 'org-customer'").first('count(*)'), 1)
 
-    // KrabiClaw activating itself is not a customer: no email.
+    // The platform activating itself is not a customer: no email.
     assert.deepEqual((await completeOnboarding(env, db, 'org-platform', null)).operator_email, { status: 'sent' })
     assert.deepEqual((await completeOnboarding(env, db, 'org-platform', null)).owner_welcome_email, { status: 'sent' })
     assert.equal(sent.length, 2)

@@ -627,7 +627,7 @@ export const organizationSummaryItem = {
     id: { type: 'string' },
     name: { type: 'string', description: 'Business name, or the subdomain slug when it has none.' },
     subdomain: { type: ['string', 'null'] },
-    slug: { type: ['string', 'null'], description: 'Organization slug. Use the location slug from list_locations for https://krabiclaw.com/dashboard/{organization_slug}/locations/{location_slug}' },
+    slug: { type: ['string', 'null'], description: 'Organization slug. Use the location slug from list_locations for /dashboard/{organization_slug}/locations/{location_slug}' },
     public_url: { type: ['string', 'null'] },
     status: { type: 'string', enum: ['active', 'inactive', 'suspended'] },
     active: { type: 'boolean', description: 'True when this is the currently active MCP organization context.' },

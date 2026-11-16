@@ -43,7 +43,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     const db = await runtime.getD1Database('DB')
     const queue = captureEvents()
     const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db, EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
-      STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof',
+      STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof',
       EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     bindDatabaseEvents(db, env)
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
@@ -78,12 +78,12 @@ test('a stay opens its guest conversation in the one inbox', async () => {
       payload_json: { guest: { name: 'Ana Silva', email: 'ana@example.test', phone: '+61491570150' }, ...unanswered },
     })
     assert.equal(await messageCount(ana.conversation_id), 0)
-    // The booking contact and the workspace owner get their own conversation seats.
-    assert.deepEqual(await db.prepare('SELECT u.name, u."isAnonymous" AS anonymous, r.user_id = u.id AS owns FROM bookings b JOIN user u ON u.id = b.user_id JOIN conversations r ON r.booking_id = b.id AND r.kind = \'booking\' WHERE b.id = ?').bind(ana.id).first(),
-      { name: 'Ana Silva', anonymous: 1, owns: 1 })
+    // The workspace owner has a conversation seat. The guest's contact is recorded above and stays unclaimed until they sign in.
+    assert.deepEqual(await db.prepare("SELECT b.user_id AS booking_user_id, r.user_id AS conversation_user_id FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking' WHERE b.id = ?").bind(ana.id).first(),
+      { booking_user_id: null, conversation_user_id: null })
     assert.deepEqual((await db.prepare(`SELECT p.role, u.name FROM conversation_participants p JOIN user u ON u.id = p.user_id
       WHERE p.conversation_id = ? ORDER BY p.role`).bind(ana.conversation_id).all()).results,
-    [{ role: 'guest', name: 'Ana Silva' }, { role: 'member', name: OWNER }])
+    [{ role: 'member', name: OWNER }])
 
     // A guest reachable by phone alone has a thread too, but no email and no account anyone signs in to: a reply has nowhere to go and says so.
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(30), check_out_date: day(31), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 15_000 })

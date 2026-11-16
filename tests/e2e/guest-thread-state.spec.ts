@@ -642,22 +642,24 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     expect(Math.abs(pictureBounds.x - identityBounds.x)).toBeLessThan(1)
     await expect(detailPanel.getByLabel('1 other guest', { exact: true })).toHaveText('+1')
 
-    const guests = detailPanel.getByRole('link', { name: `${guestName} · 2 guests`, exact: true })
+    const guests = detailPanel.getByRole('link', { name: '2 guests', exact: true })
     const support = detailPanel.getByRole('link', { name: 'Visit the Help Center', exact: true })
     const call = detailPanel.getByRole('link', { name: 'Call guest', exact: true })
     await expect(call).toHaveAttribute('href', 'tel:+12025550123')
     await expect(detailPanel.getByRole('link', { name: 'Message guest', exact: true })).toHaveCount(0)
     const paymentInfo = detailPanel.getByRole('heading', { name: 'Payment info', exact: true })
-    await expect(paymentInfo).toHaveCount(summary.payments?.length ? 1 : 0)
+    expect(summary.payments).toEqual([])
+    await expect(paymentInfo).toBeVisible()
+    await expect(detailPanel.getByText('No payments recorded.', { exact: true })).toBeVisible()
     const sections = [
       detailPanel.getByText('Date', { exact: true }),
       detailPanel.getByRole('heading', { name: 'Reservation details', exact: true }),
       guests,
-      detailPanel.getByRole('heading', { name: 'Cancellation policy', exact: true }),
-      detailPanel.getByRole('heading', { name: 'Private note', exact: true }),
-      detailPanel.getByRole('link', { name: 'Change reservation', exact: true }),
       call,
-      ...await paymentInfo.all(),
+      detailPanel.getByRole('heading', { name: 'Cancellation policy', exact: true }),
+      detailPanel.getByRole('link', { name: 'Private note', exact: true }),
+      detailPanel.getByRole('link', { name: 'Change reservation', exact: true }),
+      paymentInfo,
       support,
     ]
     for (let at = 1; at < sections.length; at++) {
@@ -704,10 +706,10 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     await testInfo.attach(`reservation-details-${width}`, { path: capture, contentType: 'image/png' })
   }
   await page.setViewportSize(priorViewport)
-  await detailPanel.getByRole('link', { name: `${guestName} · 2 guests`, exact: true }).click()
+  await detailPanel.getByRole('link', { name: '2 guests', exact: true }).click()
   await expect(page.getByText(guestEmail, { exact: true })).toBeVisible()
 
-  // The team's one private note lives on the booking, saved as a whole when the field is left; it never enters the conversation.
+  // The private-note step saves the booking field and returns to the reservation.
   const note = `Today page note ${Date.now()}`
   const noteContext = `?range=upcoming&location_id=${demoLocationId()}&kinds=booking`
   const noteEndpoint = `/api/dashboard/bookings/${bookingIds[0]}`
@@ -717,19 +719,26 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     return (await read.json() as { booking: DashboardBookingDetails }).booking
   }
   await page.goto(`${baseURL}${recordPath}${noteContext}`)
-  const noteInput = detailPanel.getByRole('textbox', { name: 'Private note', exact: true })
+  const noteLink = detailPanel.getByRole('link', { name: /^Private note/ })
+  const notePanel = page.locator('#dashboard-panel-booking-private-note')
+  const noteInput = notePanel.getByRole('textbox', { name: 'Private note', exact: true })
   for (const [written, expectedUpdatedAt] of [[note, summary.updated_at], [`${note} revised`, null]] as const) {
     const before = await readBooking()
     if (expectedUpdatedAt) expect(before.updated_at).toBe(expectedUpdatedAt)
+    await expect(detailPanel.getByRole('textbox', { name: 'Private note', exact: true })).toHaveCount(0)
+    await noteLink.click()
+    await expect(page).toHaveURL(`${baseURL}${recordPath}/private-note${noteContext}`)
+    await expect(noteInput).toHaveValue(before.private_notes ?? '')
     await noteInput.fill(written)
     const noteWrite = page.waitForResponse(response => new URL(response.url()).pathname === noteEndpoint && response.request().method() === 'PATCH')
-    await detailPanel.getByText('Private note', { exact: true }).click()
+    await notePanel.getByRole('button', { name: 'Save', exact: true }).click()
     const noteResponse = await noteWrite
     await expectStatus(noteResponse, 200)
     expect(noteResponse.request().postDataJSON()).toEqual({ private_notes: written, version: before.version })
     // Read back through the booking, not the write's own answer.
     expect((await readBooking()).private_notes).toBe(written)
-    await expect(noteInput).toHaveValue(written)
+    await expect(page).toHaveURL(`${baseURL}${recordPath}${noteContext}`)
+    await expect(noteLink).toContainText(written)
     // Nothing in the conversation carries it: no message, event or preview.
     expect(JSON.stringify(await loadThreadDetail(page.request, summary.conversation_id!, demoOrganizationId()))).not.toContain(written)
   }

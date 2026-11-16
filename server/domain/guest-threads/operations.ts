@@ -9,7 +9,7 @@ import { shouldSendRealEmail } from '~/server/utils/email-delivery'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
 import { bookingDay, getGuestRequest, getThreadOperationalRecord, noStayRequestPaymentInFlightSql, requestActions, requestSummary, stayRequestPayBySql, stayRequestRespondBySql, validateGuestRequest, type GuestRequest, type ThreadOperationalRecord } from '~/server/domain/requests'
 import type { StayAccess } from '~/server/domain/stays'
-import { revokeReviewRequestQuery } from '~/server/utils/review-requests'
+import { bookingReviewDueAt, revokeReviewRequestQuery } from '~/server/utils/review-requests'
 import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent, recordDeliveryOutcome } from './deliveries'
 import { MEMBER_REPLY_EVENT, SCHEDULED_MESSAGE_EVENT, MessageDedupeConflictError, MessageStateConflictError, appendChatMessage, conversationMessageGuard, findMessageByDedupeKey, getMessage, messageQueries, parseMessagePayload, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
 import { listMessagePhotos, MessagePhotoRejection, messagePhotoCount, messagePhotoHashes, type MessagePhotoInput } from './attachments'
@@ -361,7 +361,6 @@ export async function deliverBookingStatusUpdate(env: CloudflareEnv, event: Extr
     const { planSourceMessages } = await import('~/server/domain/scheduled-guest-messages')
     await planSourceMessages(db, event.organization_id, record.id)
     if (action === 'confirm' && record.status === 'confirmed') {
-      const { bookingReviewDueAt } = await import('~/server/utils/review-request-delivery')
       const due = bookingReviewDueAt(record.ends_at)
       if (due !== null) await publishEvent(env, { type: 'business.wake', organization_id: event.organization_id, kind: 'reviews', due_at: due })
     }

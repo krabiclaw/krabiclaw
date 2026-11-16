@@ -1780,7 +1780,7 @@ test.describe('dashboard pane hierarchy', () => {
         await expect(page).toHaveURL(`/dashboard/account/activity/${item.kind}/${item.id}`)
         const record = page.locator(isStay ? '#dashboard-panel-stay-details' : '#dashboard-panel-account-booking-details')
         await expect(record.getByRole('heading', { name: isVisit ? 'Reservation' : item.title, level: 1, exact: true })).toBeVisible()
-        await expect(record.getByRole('heading', { name: 'Payment info', level: 2, exact: true })).toHaveCount(isStay || detail.payments.length ? 1 : 0)
+        await expect(record.getByRole('heading', { name: 'Payment info', level: 2, exact: true })).toHaveCount(isVisit || detail.payments.length ? 1 : 0)
         // The record opens beside Past activity; closing it returns to that list.
         await record.getByRole('link', { name: isStay ? 'Close stay details' : 'Close booking details', exact: true }).click()
         await expect(page).toHaveURL('/dashboard/account/activity')

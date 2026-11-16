@@ -16,7 +16,7 @@ import {
   markReviewRequestSendSuccess,
   reviewInvitationDue,
   REVIEW_PUBLICATION_PENDING,
-  REVIEW_REQUEST_DELAY_HOURS,
+  REVIEW_REQUEST_DELAY_MS,
   REVIEW_REQUEST_TTL_DAYS,
 } from '~/server/utils/review-requests'
 
@@ -92,15 +92,6 @@ export async function sendReviewRequestForBooking(
   return { sent: true, requestId: request.id }
 }
 
-const REVIEW_DELAY_MS = REVIEW_REQUEST_DELAY_HOURS * 3_600_000
-
-export function bookingReviewDueAt(endsAt: string): number | null {
-  if (endsAt.length === 10) return null
-  const due = Date.parse(endsAt) + REVIEW_DELAY_MS
-  if (!Number.isFinite(due)) throw new Error('A timed booking needs a valid end instant for its review invitation')
-  return due
-}
-
 /** Send the business's due invitations and return the next booking's exact deadline. */
 export async function sendDueReviewInvitations(env: CloudflareEnv, organizationId: string, now: number): Promise<{ next: number | null }> {
   const publications = await queryAll<{ request_id: string; conversation_id: string }>(env.DB, `
@@ -113,7 +104,7 @@ export async function sendDueReviewInvitations(env: CloudflareEnv, organizationI
   }
   if (!(await filterEntitledRows(env, [{ organization_id: organizationId }], 'review_requests')).length) return { next: null }
   const wantsReview = wantsCategoryEmailSql('r.user_id', 'review_requests')
-  const latestDue = new Date(now - REVIEW_DELAY_MS).toISOString()
+  const latestDue = new Date(now - REVIEW_REQUEST_DELAY_MS).toISOString()
   const oldest = new Date(now - REVIEW_REQUEST_TTL_DAYS * 86_400_000).toISOString()
   const rows = await queryAll<{ booking_id: string | null; ends_at: string | null }>(env.DB, `
     WITH eligible AS (
@@ -142,5 +133,5 @@ export async function sendDueReviewInvitations(env: CloudflareEnv, organizationI
     }
   }
   if (failures.length) throw new AggregateError(failures, failures.map(error => error.message).join('. '))
-  return { next: next == null ? null : Date.parse(next) + REVIEW_DELAY_MS }
+  return { next: next == null ? null : Date.parse(next) + REVIEW_REQUEST_DELAY_MS }
 }

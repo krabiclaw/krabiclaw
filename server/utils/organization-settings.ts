@@ -343,10 +343,14 @@ async function attemptOrganizationUpdate(
     guardParams.push(JSON.stringify(current))
   }
   if (updates.name !== undefined) {
-    setParts.push('name = ?', 'subdomain = ?')
-    params.push(updates.name.trim(), subdomain)
+    setParts.push('name = ?')
+    params.push(updates.name.trim())
     guards.push('name IS ?')
     guardParams.push(organization.name)
+    if (subdomain !== null) {
+      setParts.push('subdomain = ?')
+      params.push(subdomain)
+    }
   }
   if (updates.brand_description !== undefined) {
     setParts.push('brand_description = ?')
@@ -524,7 +528,7 @@ async function attemptOrganizationUpdate(
     SITE_RECIPE_KEYS.some(key => updates[key] !== undefined)
   ) {
     if (!env.ORGANIZATION_CACHE) throw new Error('ORGANIZATION_CACHE is not bound; site caches cannot be purged')
-    await purgeOrganizationCaches(db, env.ORGANIZATION_CACHE, organizationId, env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
+    await purgeOrganizationCaches(db, env.ORGANIZATION_CACHE, organizationId, env)
   }
 
   // Zaraz serves analytics only for tenants that are Live, so taking one to
@@ -611,7 +615,7 @@ export async function updateOrganizationSettingsFields(
   // what is stored is always complete and validated before anything is written.
   if (updates.palette !== undefined) {
     if (organization.theme_id === PLATFORM_THEME_ID) {
-      return { status: 400, data: { error: "KrabiClaw's own site has fixed colors" } }
+      return { status: 400, data: { error: "Blawby's own site has fixed colors" } }
     }
     if (updates.palette !== null) {
       const current = resolveSitePalette((await getConfig(db, organizationId)).palette)
@@ -707,6 +711,12 @@ export async function updateOrganizationSettingsFields(
       }
     }
 
+    // The platform hostname is deployment configuration. Its stored alias
+    // remains routable across a display name change.
+    if (organization.theme_id === PLATFORM_THEME_ID) {
+      return attemptOrganizationUpdate(db, env, organization, organizationId, updates, userId, null)
+    }
+
     for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt += 1) {
       const subdomain = attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`
 
@@ -719,23 +729,13 @@ export async function updateOrganizationSettingsFields(
       if (existing) continue
       if (await isSystemSubdomainSpent(env, db, subdomain)) continue
 
-      let result: OrganizationSettingsUpdateResult
       try {
-        result = await attemptOrganizationUpdate(
-          db,
-          env,
-          organization,
-          organizationId,
-          updates,
-          userId,
-          subdomain
-        )
+        return await attemptOrganizationUpdate(db, env, organization, organizationId, updates, userId, subdomain)
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         if (/UNIQUE constraint failed/i.test(message)) continue
         throw error
       }
-      return result
     }
 
     return {

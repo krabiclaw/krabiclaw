@@ -346,6 +346,28 @@ test('an organization write purges that organization despite an older invalidati
   assert.equal(await kv.get('html:org.krabiclaw.com:/'), null)
 })
 
+test('a platform write invalidates the configured apex without changing hosted identity', async (t) => {
+  const { db, kv, hubs } = await migratedCacheD1(t)
+  await db.prepare(`INSERT INTO organization_domains
+    (id, organization_id, domain, type, role, status, dns_status)
+    VALUES ('platform-old-apex', 'platform', 'krabiclaw.com', 'custom', 'canonical', 'active', 'valid')`).run()
+  const newApex = 'html:blawby.example:/'
+  const oldApex = 'html:krabiclaw.com:/'
+  const customer = 'html:org.krabiclaw.com:/'
+  for (const key of [newApex, oldApex, customer]) await kv.put(key, 'cached HTML')
+  await purgePublicResourceCacheNow({
+    DB: db, ORGANIZATION_CACHE: kv, GUEST_INBOX_HUBS: hubs,
+    NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://blawby.example',
+    NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://krabiclaw.com',
+  }, 'platform')
+  assert.equal(await kv.get(newApex), null)
+  assert.equal(await kv.get(oldApex), null)
+  assert.equal(await kv.get(customer), 'cached HTML')
+  assert.deepEqual(await db.prepare("SELECT domain, role, status FROM organization_domains WHERE id = 'platform-old-apex'").first(), {
+    domain: 'krabiclaw.com', role: 'canonical', status: 'active',
+  })
+})
+
 test('an old failure stays recorded; a later change to the same site is its own row', async (t) => {
   const { db, kv } = await migratedCacheD1(t)
   const now = new Date('2026-09-29T04:30:00.000Z')

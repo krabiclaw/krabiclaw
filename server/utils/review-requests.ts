@@ -75,7 +75,14 @@ export interface ReviewBookingContext {
 export const REVIEW_REQUEST_TTL_DAYS = 30
 export const REVIEW_PUBLICATION_PENDING = 'The review invitation was sent and dashboard publication is pending'
 /** An invitation goes out this long after the visit ends. */
-export const REVIEW_REQUEST_DELAY_HOURS = 24
+export const REVIEW_REQUEST_DELAY_MS = 24 * 3_600_000
+
+export function bookingReviewDueAt(endsAt: string): number | null {
+  if (endsAt.length === 10) return null
+  const due = Date.parse(endsAt) + REVIEW_REQUEST_DELAY_MS
+  if (!Number.isFinite(due)) throw new Error('A timed booking needs a valid end instant for its review invitation')
+  return due
+}
 
 export function addDays(iso: string, days: number): string {
   return new Date(new Date(iso).getTime() + days * 86_400_000).toISOString()
@@ -91,7 +98,7 @@ export function reviewInvitationDue(context: ReviewBookingContext, now = new Dat
   const ended = Date.parse(context.completed_at)
   return context.status === 'confirmed' && !context.no_show
     && !context.review_request_closed_at && !context.review_id
-    && ended + REVIEW_REQUEST_DELAY_HOURS * 3_600_000 <= now.getTime()
+    && ended + REVIEW_REQUEST_DELAY_MS <= now.getTime()
     && ended + REVIEW_REQUEST_TTL_DAYS * 86_400_000 > now.getTime()
 }
 

@@ -70,7 +70,7 @@ export const NOTIFICATION_CATEGORY_LABELS = {
   reviews: 'New reviews',
   review_requests: 'Review requests',
   organization_and_billing: 'Organization and billing',
-  product_news: 'KrabiClaw news',
+  product_news: 'Blawby news',
 } as const satisfies Record<NotificationCategory, string>
 
 /**

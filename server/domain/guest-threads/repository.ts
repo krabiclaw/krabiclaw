@@ -453,8 +453,12 @@ export function conversationTaskQueries(conversationId: string, now: string, pre
   }]
 }
 
-/** KrabiClaw's event `message` was caused by the conversation `conversation`'s guest: their account, or their channel (a channel guest's event names the guest's account too). */
-const GUEST_CAUSED_SQL = (message: string, conversation: string) => `${message}.author_user_id IS ${conversation}.user_id AND ${conversation}.user_id IS NOT NULL`
+/** Airbnb records who initiated its proposal even when the guest has no account. */
+const GUEST_CAUSED_SQL = (message: string, conversation: string) => `(CASE
+  WHEN ${message}.channel = 'airbnb' AND ${message}.payload_json ->> '$.source' = 'airbnb'
+    THEN ${message}.payload_json ->> '$.initiated_by' IS 'guest'
+  ELSE ${message}.author_user_id IS ${conversation}.user_id AND ${conversation}.user_id IS NOT NULL
+END)`
 
 /** A change proposal (message `p`) has its answer, or a newer proposal or a move replaced it. */
 const CHANGE_ANSWERED_SQL = `(EXISTS (SELECT 1 FROM messages answer WHERE answer.conversation_id = p.conversation_id AND answer.dedupe_key = 'booking-change-decision:' || p.id)

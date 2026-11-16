@@ -35,7 +35,7 @@ async function openDb(name: string) {
   await db.batch(statements.map(statement => db.prepare(statement)))
   const queue = captureEvents()
   const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db, EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://insights.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
-    NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://insights.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://insights.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
   bindDatabaseEvents(db, env)
   return { runtime, db, env }
 }

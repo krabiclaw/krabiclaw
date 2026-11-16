@@ -203,5 +203,5 @@ function revert() {
 
 provide(qaEditorKey, { form, saving, saveDisabled, saveLabel, errorMessage, revert, save: saveOpenSection })
 
-useSeoMeta({ title: 'Question | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Question | Blawby Dashboard', robots: 'noindex, nofollow' })
 </script>

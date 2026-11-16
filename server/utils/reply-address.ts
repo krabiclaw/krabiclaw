@@ -1,4 +1,4 @@
-import { getReplyDomain } from '~/server/utils/reply-domain'
+import { getReplyDomain, type ReplyDomainEnv } from '~/server/utils/reply-domain'
 
 /**
  * An inbound email that delivering again cannot make acceptable. The message is
@@ -6,9 +6,8 @@ import { getReplyDomain } from '~/server/utils/reply-domain'
  */
 export class InboundEmailRejection extends Error {}
 
-interface ReplyAddressEnv {
+interface ReplyAddressEnv extends ReplyDomainEnv {
   EMAIL_REPLY_SECRET?: string
-  NUXT_PUBLIC_PLATFORM_DOMAIN?: string
 }
 
 const TOKEN_BYTES = 12
@@ -85,7 +84,7 @@ export async function buildReplyToAddress(env: ReplyAddressEnv, messageId: strin
 /** The identity of a reply address; an address on another domain, or one KrabiClaw never issued, is refused. */
 export function parseReplyToAddress(env: ReplyAddressEnv, address: string): ReplyAddress {
   const parts = address.split('@')
-  const match = parts.length === 2 && parts[1]!.toLowerCase() === getReplyDomain(env).toLowerCase()
+  const match = parts.length === 2 && parts[1]!.toLowerCase() === getReplyDomain(env)
     ? /^r([gm])([0-9a-f]{32})([0-9a-f]{24})$/i.exec(parts[0]!) : null
   if (!match) throw new InboundEmailRejection('This address does not accept email.')
   const id = match[2]!.toLowerCase()

@@ -6,12 +6,11 @@ import * as schema from '../../server/db/schema.ts'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createProduct, createProductsBatch, getProduct, reconcileProducts, updateProduct } from '../../server/utils/product-management.ts'
 import { cancelStay, createStay, deliverPendingChannelNights, dispatchStayCheckoutDeadlines, readHomeCalendar, readStayHome, setStayNights, updateStayHome, verifyStayCalendarOccupancy, type StayAccess } from '../../server/domain/stays.ts'
-import { describeFailure } from '../../server/scheduled-tasks.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { captureEvents } from './support/events.ts'
 
 // A connected home's night changes reach Channex: closed nights, prices and
-// stay rules as restrictions, held and booked nights as availability, each
+// stay rules as restrictions, booked nights as availability, each
 // night carrying only what differs from what Channex last confirmed, and
 // contiguous nights with the same change as one date range. What Channex took
 // is recorded on each night; a partial rejection reads needs_review with the
@@ -163,61 +162,31 @@ async function boot() {
   }
 }
 
-test('lapsed hold failures retain their claims while an independent queued hold releases', async () => {
-  const { runtime, db, env, queue, connected, local } = await boot()
+test('checkout records leave nights available on the home calendar and Channex', async () => {
+  const { runtime, db, env, queue, connected } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
   try {
     const now = new Date().toISOString()
-    for (const [id, productId, offset] of [['00-channel-failure', connected, 60], ['01-delete-failure', connected, 61], ['02-independent', local, 62]] as const) {
+    for (const [id, offset, expires] of [['active', 60, day(1)], ['expired', 61, day(-1)]] as const) {
       await db.prepare(`INSERT INTO payments (id, organization_id, stripe_account_id, livemode, subject_type, currency, amount, price_snapshot_json, created_at, updated_at)
-        VALUES (?, ?, 'acct_hold_proof', 0, 'booking', 'USD', 15000, '{}', ?, ?)`).bind(id, ORG, now, now).run()
+        VALUES (?, ?, 'acct_checkout_proof', 0, 'booking', 'USD', 15000, '{}', ?, ?)`).bind(id, ORG, now, now).run()
       await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, location_id, timezone, payment_id, quantity, amount, currency, starts_at, ends_at, status, expires_at, created_at)
-        VALUES (?, ?, ?, 'site', ?, ?, 1, 15000, 'USD', ?, ?, 'active', '2000-01-01T00:00:00.000Z', ?)`).bind(id, ORG, productId, TZ, id, day(offset), day(offset + 1), now).run()
-      await db.prepare('INSERT INTO stay_nights (organization_id, product_id, date, hold_id) VALUES (?, ?, ?, ?)').bind(ORG, productId, day(offset), id).run()
-    }
-    await db.prepare(`CREATE TRIGGER refuse_one_hold_release BEFORE DELETE ON stay_nights WHEN OLD.hold_id = '01-delete-failure'
-      BEGIN SELECT RAISE(ABORT, 'Hold release deletion refused'); END`).run()
-    let firstRestriction = true
-    channex.answer['/restrictions'] = () => {
-      if (!firstRestriction) return new Response(JSON.stringify({ data: [{ id: 'task-release', type: 'task' }], meta: { message: 'Success', warnings: [] } }), { status: 200 })
-      firstRestriction = false
-      return new Response(JSON.stringify({ data: [], meta: { message: 'Success', warnings: [{ warning: 'Release refused' }] } }), { status: 200 })
+        VALUES (?, ?, ?, 'site', ?, ?, 1, 15000, 'USD', ?, ?, 'active', ?, ?)`).bind(id, ORG, connected, TZ, id, day(offset), day(offset + 1), expires, now).run()
     }
     assert.equal(await dispatchStayCheckoutDeadlines(env, ORG, Date.now()), null)
-    assert.deepEqual(queue.pending.flatMap(item => item.body.type === 'stay.checkout_expired' ? [item.body.id] : []).sort(), ['00-channel-failure', '01-delete-failure', '02-independent'])
-    const release = async (id: string) => {
-      const index = queue.pending.findIndex(item => item.body.type === 'stay.checkout_expired' && item.body.id === id)
-      assert(index >= 0, `No checkout event for ${id}`)
-      await queue.deliver(env, queue.pending.splice(index, 1)[0]!)
-    }
-    await assert.rejects(() => release('00-channel-failure'), (failedPush: { status?: number; data?: Record<string, unknown>; message: string }) => {
-      assert.equal(failedPush?.status, 503)
-      assert.partialDeepStrictEqual(failedPush.data, { code: 'CHANNEL_PUSH_FAILED', committed: true, product_id: connected, ranges: [{ from: day(60), to: day(61) }], channel_push: { state: 'needs_review' } })
-      assert.match(failedPush.message, /Release refused/)
-      return true
-    })
-    await assert.rejects(() => release('01-delete-failure'), error => {
-      assert.match(describeFailure(error), /Hold release deletion refused/)
-      return true
-    })
-    await release('02-independent')
-    assert.deepEqual((await db.prepare('SELECT hold_id, date FROM stay_nights ORDER BY hold_id').all()).results, [
-      { hold_id: '00-channel-failure', date: day(60) }, { hold_id: '01-delete-failure', date: day(61) },
+    assert.deepEqual(queue.pending.filter(item => item.body.type === 'stay.checkout_expired'), [])
+    const range = { productId: connected, from: day(60), to: day(62) }
+    const changed = await setStayNights(db, env, manager, { product_id: connected, from: range.from, to: range.to, price_minor: 17500 })
+    assert.deepEqual(changed.channel_push, { state: 'pushed', detail: null })
+    assert.deepEqual(channex.take().filter(request => request.path === '/availability'), [
+      { path: '/availability', values: [{ property_id: 'prop-1', room_type_id: 'room-1', date_from: day(60), date_to: day(61), availability: 1 }] },
     ])
-    const sent = channex.take()
-    // The refused restrictions do not hold back the released availability.
-    assert.deepEqual(sent.map(request => [request.path, request.values.map(value => value.date_from)]), [
-      ['/restrictions', [day(60)]], ['/availability', [day(60)]], ['/restrictions', [day(61)]], ['/availability', [day(61)]],
+    assert.deepEqual((await readHomeCalendar(db, manager, range)).nights.map(night => [night.available, night.booking_id]), [[true, null], [true, null]])
+    assert.deepEqual((await db.prepare('SELECT id, status FROM payment_checkout_holds ORDER BY id').all()).results, [
+      { id: 'active', status: 'active' }, { id: 'expired', status: 'active' },
     ])
-    assert.deepEqual((await readHomeCalendar(db, manager, { productId: connected, from: day(60), to: day(62) })).nights.map(night => [night.available, night.channel?.state]), [[true, 'needs_review'], [true, 'pushed']])
-    assert.deepEqual((await readHomeCalendar(db, manager, { productId: local, from: day(62), to: day(63) })).nights.map(night => [night.available, night.channel]), [[true, null]])
-    await db.prepare('DROP TRIGGER refuse_one_hold_release').run()
-    channex.answer['/restrictions'] = undefined
-    await queue.drain(env, 'stay.checkout_expired')
-    assert.equal(await db.prepare('SELECT count(*) FROM stay_nights').first('count(*)'), 0)
-    assert.deepEqual((await readHomeCalendar(db, manager, { productId: connected, from: day(60), to: day(62) })).nights.map(night => [night.available, night.channel?.state]), [[true, 'pushed'], [true, 'pushed']])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

@@ -7,7 +7,7 @@ import { setProductPublication } from '~/server/utils/product-management'
 import { stopAirbnbSyncForPlanEnd } from '~/server/integrations/channex/airbnb-sync'
 import { BASIC_HOMES, isKnownRecurringPlan } from '~/shared/billing-model'
 
-/** A home's publication records who changed it; KrabiClaw's own changes carry this actor, as its other scheduled work does. */
+/** A home's publication records who changed it; Blawby's own changes carry this actor, as its other scheduled work does. */
 const SYSTEM_ACTOR = 'system'
 
 /**

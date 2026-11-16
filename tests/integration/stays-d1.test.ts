@@ -2,6 +2,7 @@ import { createReplayableReservationCancelToken } from '~/server/utils/reservati
 import { formQuestionsRevision } from '../../shared/form-questions.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import Stripe from 'stripe'
 import { listAgenda, listTodayAgenda } from '../../server/utils/dashboard-agenda.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import type { UpdateProductInput } from '../../server/types/products.ts'
@@ -33,6 +34,7 @@ import { bookingPolicy } from '../../server/utils/booking-policy-summary.ts'
 import { requireBookingConfig } from '../../server/utils/availability.ts'
 import { projectStripeConnectedAccount, reserveStripeConnectedAccount } from '../../server/utils/stripe-connect.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[payment_id]/return.post.ts'
+import tenantPaymentWebhookRoute from '../../server/api/stripe/payments/webhook.post.ts'
 import { tokenHash } from '../../server/domain/payments/buyer.ts'
 import { createLocation, updateLocation } from '../../server/utils/location-management.ts'
 import publicLocationsRoute from '../../server/api/public/locations.get.ts'
@@ -65,7 +67,7 @@ import { buyStay } from './support/stay-checkout.ts'
 import { captureEvents } from './support/events.ts'
 
 // A stay write posts its cleaning job and alerts the person doing it, so every environment here can send: logged, never delivered.
-const JOB_ALERT_ENV = { MEDIA_BASE_URL: 'https://media.example.test', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
+const JOB_ALERT_ENV = { MEDIA_BASE_URL: 'https://media.example.test', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
 
 
 
@@ -1567,9 +1569,11 @@ test('a business’s site shows a guest the stay its signed link names, from any
     const location = { address, latitude: 40.014984, longitude: -105.270546, maps_url: 'https://maps.google.com/?cid=123456' }
     assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
     const guide = { check_in_method: 'lockbox' as const, check_in_instructions: 'Use the garden lockbox.', wifi_network: 'Cabin guests', wifi_password: 'private-cabin-wifi', directions: 'Use the east entrance.', house_manual: 'Keep the gate closed.', checkout_instructions: [{ task: 'return_keys' as const, details: 'Leave keys in the box.' }] }
-    await updateStayHome(env, db, manager, cabin.id, guide)
+    await updateStayHome(env, db, manager, cabin.id, { ...guide, cancellation_policy: 'moderate', long_term_cancellation_policy: 'firm' })
     await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details_mode: 'merge', details: { pets_allowed: false, stairs_required: true, stairs_required_details: 'Two steps at the entrance.' } } })
-    // The guest bought the stay on the site: the captured checkout's conversion makes it theirs.
+    await writeMemberScheduling({ env, userId: OWNER, organizationId: ORG }, `m-${OWNER}`, { updated_at: null, public_name: OWNER, public_approved: true })
+    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
+    // The guest bought the stay on the site while the home was published.
     const signIn = async () => {
       const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
       return { id: signed.response!.user.id, cookie: signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ') }
@@ -1578,6 +1582,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
     const otherGuest = await signIn()
     const stay = await buyStay(db, env, { id: 'site-stay', organizationId: ORG, productId: cabin.id, locationId: 'cabin-site', timezone: 'America/Denver', checkIn: '2026-11-01', checkOut: '2026-11-04', adults: 2,
       nightlyMinor: 15_000, currency: 'USD', buyerUserId: booker.id, guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null } })
+    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: false, actor: { actorId: OWNER } })
     // The guest's stay is read by its activity ID: its conversation's, as the account reads it.
     const activityId = stay.conversation_id ?? stay.id
     // The link the confirmation email and the paid return carry, signed with the site's secret.
@@ -1772,12 +1777,18 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
   const { runtime, db, env: bindings } = await boot()
   try {
     // A demo business on the live platform pays in Stripe test mode, which bills no usage.
-    const env = { ...bindings, ...JOB_ALERT_ENV, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary', STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary' }
+    const webhookSecret = 'whsec_stay_payment_proof'
+    const env = { ...bindings, ...JOB_ALERT_ENV, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary', STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary', STRIPE_TEST_PAYMENTS_WEBHOOK_SECRET: webhookSecret }
     // The guest's notices are written in the business's source language.
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
     const location = { address: { regionCode: 'TH', addressLines: ['56 Test Lane', 'Villa 8', 'Garden entrance'], languageCode: 'th', locality: 'Krabi Town', sublocality: 'Ao Nang', administrativeArea: 'Krabi', postalCode: '81180' }, latitude: 8.0326, longitude: 98.822, maps_url: null }
     assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
+    await updateStayHome(env, db, manager, cabin.id, { cancellation_policy: 'moderate', long_term_cancellation_policy: 'firm' })
+    await writeMemberScheduling({ env, userId: OWNER, organizationId: ORG }, `m-${OWNER}`, { updated_at: null, public_name: 'Cabin host', public_approved: true })
+    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
+    const connected = await reserveStripeConnectedAccount(db, { organizationId: ORG, livemode: false })
+    await projectStripeConnectedAccount(db, { reservationId: connected.id, organizationId: ORG, stripeAccountId: 'acct_seller', country: 'US', livemode: false, cardPaymentsStatus: 'active', cardPaymentsResolutions: [], requirements: [], stripeRefreshedAt: NOW })
     const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
     const buyer = signed.response!.user.id
     const cookie = signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
@@ -1785,13 +1796,16 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     const checkoutSigned = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
     const checkoutGuest = checkoutSigned.response!.user.id
     const checkoutCookie = checkoutSigned.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
-    // Stripe has authorized the card. The return converts the hold into the checkout guest's stay and captures the authorization.
+    // Stripe has authorized the card. Its webhook saves the checkout guest's stay before capture.
     const nightly = ['2026-11-01', '2026-11-02', '2026-11-03'].map(date => ({ date, price_minor: 15_000 }))
     const purchase = { product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', check_in_date: '2026-11-01', check_out_date: '2026-11-04', adults: 2, children: 0, infants: 0, total_minor: 45_000, currency: 'USD', cancellation_policy: 'moderate', nightly, guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null } } as const
     // The terms the checkout froze with its purchase.
     const policy = stayCheckoutPolicy(bookingPolicy(await requireBookingConfig(db, ORG, purchase.product_id), null), { ...purchase, tax_behavior: 'unspecified' })
     await db.prepare(`INSERT INTO payments (id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,captured_amount,stripe_payment_intent_id,price_snapshot_json,created_at,updated_at)
-      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'booking', NULL, 'cabin-site', 'USD', 45000, 0, 'pi_stay-pay', ?, ?, ?)`).bind(ORG, checkoutGuest, JSON.stringify({ title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD' }, method_configuration_id: 'pmc_test', stay: purchase, policy }), NOW, NOW).run()
+      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'booking', NULL, 'cabin-site', 'USD', 45000, 0, 'pi_stay-pay', ?, ?, ?)`).bind(ORG, checkoutGuest, JSON.stringify({
+        title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD', tax_behavior: 'unspecified' },
+        automatic_tax: false, tax_code: null, method_configuration_id: 'pmc_test', stay: purchase, policy,
+      }), NOW, NOW).run()
     await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, location_id, timezone, buyer_user_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, converted_booking_id, expires_at, created_at)
       VALUES ('stay-hold', ?, ?, 'cabin-site', 'America/Denver', ?, 'stay-pay', 2, 45000, 'USD', '2026-11-01', '2026-11-04', 'active', NULL, '2099-01-01T00:00:00.000Z', ?)`).bind(ORG, cabin.id, checkoutGuest, NOW).run()
     const claim = crypto.randomUUID() + crypto.randomUUID()
@@ -1815,16 +1829,31 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     })
     const app = new H3()
     app.use((event) => { event.context.organizationId = ORG })
+    app.post('/api/stripe/payments/webhook', tenantPaymentWebhookRoute)
     app.post('/api/public/payments/:payment_id/return', paymentReturnRoute)
     app.get('/api/public/guest-stays/:activity_id', guestStayRoute)
     app.get('/api/account/bookings/:booking_id', accountStayRoute)
     const call = (path: string, init: RequestInit = {}, headers: Record<string, string> = { cookie }) => app.request(Object.assign(new Request(`https://org.proof.example${path}`, { ...init, headers: { ...headers, 'content-type': 'application/json' } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
 
-    const back = await call('/api/public/payments/stay-pay/return', { method: 'POST', body: JSON.stringify({ claim }) })
-    assert.equal(back.status, 200)
+    const returnToSite = () => call('/api/public/payments/stay-pay/return', { method: 'POST', body: JSON.stringify({ claim }) })
+    const waiting = await returnToSite()
+    assert.equal(waiting.status, 200, await waiting.clone().text())
+    assert.deepEqual(await waiting.json(), { state: 'processing' })
+    assert.equal(await db.prepare("SELECT converted_booking_id FROM payment_checkout_holds WHERE id = 'stay-hold'").first('converted_booking_id'), null)
+    assert.equal(stayIntentStatus, 'requires_capture')
+    const payload = JSON.stringify({
+      id: 'evt_stay_authorized', object: 'event', type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false,
+      data: { object: { id: 'pi_stay-pay', metadata: { krabiclaw_payment_id: 'stay-pay' } } },
+    })
+    const signature = await new Stripe('sk_test_signer').webhooks.generateTestHeaderStringAsync({ payload, secret: webhookSecret })
+    const webhook = await call('/api/stripe/payments/webhook?mode=test', { method: 'POST', body: payload }, { 'stripe-signature': signature })
+    assert.equal(webhook.status, 200, await webhook.clone().text())
+    assert.equal(stayIntentStatus, 'succeeded')
     const stay = (await db.prepare("SELECT s.id, c.id AS conversation_id FROM bookings s JOIN payment_checkout_holds h ON h.converted_booking_id = s.id JOIN conversations c ON c.booking_id = s.id AND c.kind = 'booking' WHERE h.id = 'stay-hold'").first<{ id: string; conversation_id: string }>())!
-    assert.ok(stay, 'The return converted the checkout into its stay')
+    assert.ok(stay, 'The authorization webhook saved the stay before the guest returned')
     const activityId = stay.conversation_id
+    const back = await returnToSite()
+    assert.equal(back.status, 200, await back.clone().text())
     // The stay is read by its signed link, not by a browser's session: none, or a forged one, opens nothing.
     assert.equal((await call(`/api/public/guest-stays/${activityId}`)).status, 401)
     assert.equal((await call(`/api/public/guest-stays/${activityId}`, {}, { authorization: 'Bearer forged' })).status, 404)
@@ -1835,7 +1864,7 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     // The claim moved the stay, its payment and its hold to the browser that paid.
     assert.deepEqual(await db.prepare("SELECT (SELECT user_id FROM bookings WHERE id = ?) AS stay, (SELECT buyer_user_id FROM payments WHERE id = 'stay-pay') AS payment, (SELECT buyer_user_id FROM payment_checkout_holds WHERE id = 'stay-hold') AS hold").bind(stay.id).first(), { stay: buyer, payment: buyer, hold: buyer })
     // The confirmation page reads the stay its link names, here from a browser with no session at all, as
-    // the emailed link is opened. What was paid and the policy come from the conversion the return ran.
+    // the emailed link is opened. It reads the payment saved by the webhook.
     const read = await call(`/api/public/guest-stays/${activityId}`, {}, { authorization: `Bearer ${returned.receipt_token}` })
     assert.equal(read.status, 200)
     const body = await read.json() as GuestStay
@@ -1915,15 +1944,16 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
 
     const subtotal = 30_000
     const expected = 31_000
-    const paymentIntent = { id: 'pi_approved_stay', object: 'payment_intent', livemode: false, currency: 'usd', amount: subtotal,
+    const paymentIntentId = 'pi_approved_stay'
+    const charge = { id: 'ch_approved_stay', object: 'charge', livemode: false, amount: expected, currency: 'usd',
+      created: Math.floor(Date.now() / 1000), payment_intent: paymentIntentId, payment_method: 'pm_card', receipt_url: 'https://pay.stripe.com/receipts/stay',
+      billing_details: { email: 'ana@example.com' } }
+    const paymentIntent = { id: paymentIntentId, object: 'payment_intent', livemode: false, currency: 'usd', amount: subtotal,
       amount_received: 0, status: 'requires_payment_method', client_secret: 'pi_approved_stay_secret', customer: null, payment_method_types: ['card'],
-      application_fee_amount: null, latest_charge: null as string | null, payment_method: null as string | null,
+      application_fee_amount: null, latest_charge: null as typeof charge | null, payment_method: null as string | null,
       last_payment_error: null as { type: string; code: string; message: string } | null,
       hooks: { inputs: { tax: { calculation: null as string | null } } },
       metadata: { krabiclaw_payment_id: '' } }
-    const charge = { id: 'ch_approved_stay', object: 'charge', livemode: false, amount: expected, currency: 'usd',
-      created: Math.floor(Date.now() / 1000), payment_intent: paymentIntent.id, payment_method: 'pm_card', receipt_url: 'https://pay.stripe.com/receipts/stay',
-      billing_details: { email: 'ana@example.com' } }
     let bookingId = ''
     let activity = ''
     let approvedPayUrl = ''
@@ -2016,10 +2046,7 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
         paymentIntent.amount = Number(params.get('amount_to_confirm') ?? paymentIntent.amount)
         paymentIntent.hooks.inputs.tax.calculation = params.get('hooks[inputs][tax][calculation]') ?? paymentIntent.hooks.inputs.tax.calculation
         assert.deepEqual([paymentIntent.payment_method, paymentIntent.amount, paymentIntent.hooks.inputs.tax.calculation], ['pm_card', expected, 'taxcalc_reviewed'])
-        paymentIntent.latest_charge = charge.id
-        paymentIntent.status = 'requires_capture'
-      } else if (url.pathname.endsWith('/capture')) {
-        // The buyer paid just before the deadline. An existing in-flight checkout is still accessible.
+        // Authorization started before the deadline, so its in-flight checkout stays accessible.
         t.mock.timers.setTime(now + 86_400_001)
         const resumed = await call(`/api/account/bookings/${bookingId}/pay`, {})
         assert.equal(resumed.status, 200, await resumed.clone().text())
@@ -2033,6 +2060,12 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
         assert.deepEqual(requestActions(await getThreadOperationalRecord(db, activity), new Date().toISOString()), [])
         const withdraw = await call(`/api/account/bookings/${bookingId}/cancel`, { version: paying.booking.version })
         assert.equal(withdraw.status, 409)
+        paymentIntent.latest_charge = charge
+        paymentIntent.status = 'requires_capture'
+      } else if (url.pathname.endsWith('/capture')) {
+        assert.equal(await db.prepare('SELECT status FROM bookings WHERE id=?').bind(bookingId).first('status'), 'confirmed')
+        assert.deepEqual(await db.prepare('SELECT subject_id,captured_amount FROM payments WHERE id=?').bind(paymentIntent.metadata.krabiclaw_payment_id).first(),
+          { subject_id: bookingId, captured_amount: 0 })
         paymentIntent.amount_received = expected
         paymentIntent.status = 'succeeded'
         captures++
@@ -2074,8 +2107,8 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
     assert.equal(await db.prepare('SELECT user_id FROM bookings WHERE id=?').bind(bookingId).first('user_id'), buyer)
     assert.equal((await call(payPath, {})).status, 409)
     assert.equal(intentCount, 0)
-    const originalClaims = await db.prepare('SELECT date,booking_id,hold_id FROM stay_nights WHERE booking_id=? ORDER BY date').bind(bookingId).all()
-    assert.deepEqual(originalClaims.results, [date(10), date(11)].map(date => ({ date, booking_id: bookingId, hold_id: null })))
+    const originalClaims = await db.prepare('SELECT date,booking_id FROM stay_nights WHERE booking_id=? ORDER BY date').bind(bookingId).all()
+    assert.deepEqual(originalClaims.results, [date(10), date(11)].map(date => ({ date, booking_id: bookingId })))
 
     const decision = await executeGuestThreadOperation(db, { threadId: activity, organizationId: ORG, action: 'confirm', actorUserId: OWNER,
       idempotencyKey: 'approve-stay-request', stayManager: true, version: (await read()).booking.version, env })
@@ -2155,7 +2188,7 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
     await queue.drain(env, 'payment.captured')
     await queue.drain(env, 'stay.changed')
     assert.deepEqual(await scheduledReservationMessage(), { status: 'pending', due_at: new Date(Date.now() + 5 * 60_000).toISOString() })
-    assert.deepEqual((await db.prepare('SELECT date,booking_id,hold_id FROM stay_nights WHERE booking_id=? ORDER BY date').bind(bookingId).all()).results, originalClaims.results)
+    assert.deepEqual((await db.prepare('SELECT date,booking_id FROM stay_nights WHERE booking_id=? ORDER BY date').bind(bookingId).all()).results, originalClaims.results)
     assert.equal(await db.prepare('SELECT COUNT(*) FROM bookings WHERE product_id=?').bind(cabin.id).first('COUNT(*)'), 1)
 
     const toWithdraw = { ...requestBody, idempotency_key: 'withdraw-this-stay', check_in_date: date(14), check_out_date: date(16) }

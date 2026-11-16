@@ -120,7 +120,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect(dashboard.status(), await dashboard.text()).toBe(200)
       expect((await dashboard.json()).booking).toMatchObject({ status: 'pending', conversation_id: created.conversation_id, booking_id: created.booking_id })
       await page.goto(`${baseURL}/dashboard/${encodeURIComponent(orgSlug)}/bookings/${created.booking_id}`)
-      await expect(page.getByTestId('reservation-panel').getByRole('link', { name: 'MCP Guest · 1 guest', exact: true })).toBeVisible()
+      await expect(page.getByTestId('reservation-panel').getByRole('link', { name: '1 guest', exact: true })).toBeVisible()
       await expect.poll(async () => (await readDeliveries(created.conversation_id)).some(row => row.purpose === 'owner_alert' && row.status === 'sent')).toBe(true)
       expect((await readDeliveries(created.conversation_id)).filter(row => row.purpose === 'guest_acknowledgement')).toHaveLength(0)
       const proposals = { booking_id: created.booking_id, product_session_id: available[1]!.id, party_size: 2, version: stored.version, idempotency_key: crypto.randomUUID() }

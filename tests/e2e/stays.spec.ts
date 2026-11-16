@@ -733,7 +733,8 @@ test('a responsible home member reads its stays as turnovers on every surface un
     await expectStatus(await stayRead, 200)
     const details = memberPage.locator('#dashboard-panel-stay-details')
     await expect(details.getByRole('heading', { name: 'Reservation', level: 1, exact: true })).toBeVisible()
-    await expect(details.getByText(`${guestName} · 3 guests`, { exact: true })).toBeVisible()
+    await expect(details.getByText('3 guests', { exact: true })).toBeVisible()
+    await expect(details.getByText(guestName[0]!, { exact: true })).toBeVisible()
     await expect(details.getByText(/^Arriving 3:30\sPM$/u)).toBeVisible()
     await expect(details.getByText('Cliff Cabin', { exact: true })).toBeVisible()
     for (const hidden of [surname, guestEmail, notes]) await expect(memberPage.getByText(hidden)).toHaveCount(0)
@@ -4977,25 +4978,29 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const arrival = cleanerPage.locator(`[data-day="${localDay(0)}"] a[href="${arrivalPath}"]`)
       await expect(arrival).toContainText('Ana')
       await arrival.click()
-      await expect(cleanerPage.getByText('Ana · 2 guests', { exact: true })).toBeVisible()
+      const reservationPanel = cleanerPage.getByTestId('reservation-panel')
+      await expect(reservationPanel.getByText('2 guests', { exact: true })).toBeVisible()
+      await expect(reservationPanel.getByText('A', { exact: true })).toBeVisible()
       await expect(cleanerPage.getByRole('button', { name: 'Cancel reservation', exact: true })).toHaveCount(0)
       await expect(cleanerPage.getByRole('link', { name: 'Record a payment', exact: true })).toHaveCount(0)
       await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list&month=${localDay(2).slice(0, 7)}`)
       const departure = cleanerPage.locator(`[data-day="${localDay(2)}"] a[href="${arrivalPath}"]`)
       await expect(departure).toContainText('Ana')
       await departure.click()
-      await expect(cleanerPage.getByText('Ana · 2 guests', { exact: true })).toBeVisible()
+      await expect(reservationPanel.getByText('2 guests', { exact: true })).toBeVisible()
+      await expect(reservationPanel.getByText('A', { exact: true })).toBeVisible()
 
       // Another device's edit updates the assigned stay without navigation. An
       // ordered later event proves that the intervening other-home event was filtered.
-      // The cleaner reads the stay as its turnover: the first name and arrival
-      // change in place, while the surname and the host's notes never reach them.
+      // The turnover's guest initial and arrival time update in place. The
+      // cleaner's view protects the surname and the host's notes.
       const current = await call<{ record: { version: number } }>('get_product_booking', { booking_id: stays[0]!.booking_id })
       const renamed = await call<NightBookingReceipt>('update_product_booking', { booking_id: stays[0]!.booking_id, version: current.data!.record.version, guest_name: 'Lia' })
       expect(renamed.error).toBeNull()
       expect(renamed.data).toMatchObject({ booking_id: stays[0]!.booking_id, unit: 'nights', version: current.data!.record.version + 1 })
       expect(renamed.data).not.toHaveProperty('channel_push')
-      await expect(cleanerPage.getByText('Lia · 2 guests', { exact: true })).toBeVisible()
+      await expect(reservationPanel.getByText('L', { exact: true })).toBeVisible()
+      await expect(reservationPanel.getByText('2 guests', { exact: true })).toBeVisible()
       await expect(cleanerPage.getByText('Silva')).toHaveCount(0)
       const privateStay = await call<{ record: { version: number } }>('get_product_booking', { booking_id: stays[1]!.booking_id })
       expect((await call('update_product_booking', { booking_id: stays[1]!.booking_id, version: privateStay.data!.record.version, private_notes: 'Other home only' })).error).toBeNull()
@@ -5085,7 +5090,9 @@ test('a stay socket in a service organization closes when Better Auth removes it
     const openedRead = cleanerPage.waitForResponse(response => response.request().method() === 'GET'
       && new URL(response.url()).pathname === `/api/dashboard/bookings/${stay.booking_id}`)
     expect((await cleanerPage.goto(`/dashboard/${slug}/bookings/${stay.booking_id}`))?.status()).toBe(200)
-    await expect(cleanerPage.getByTestId('reservation-panel').getByText('Membership · 1 guest', { exact: true })).toBeVisible()
+    const reservationPanel = cleanerPage.getByTestId('reservation-panel')
+    await expect(reservationPanel.getByText('1 guest', { exact: true })).toBeVisible()
+    await expect(reservationPanel.getByText('M', { exact: true })).toBeVisible()
     // The real first-open reconciliation read proves the app socket completed
     // its upgrade before the other device publishes the event under assertion.
     expect((await openedRead).status()).toBe(200)
@@ -5093,7 +5100,7 @@ test('a stay socket in a service organization closes when Better Auth removes it
     const renamed = await page.request.patch(api(`bookings/${stay.booking_id}`), { data: { version: stay.version, arrival_time: '18:30' } })
     await expectStatus(renamed, 200)
     const version = (await renamed.json() as { booking: NightBooking }).booking.version
-    await expect(cleanerPage.getByTestId('reservation-panel').getByText('Membership · 1 guest', { exact: true })).toBeVisible()
+    await expect(reservationPanel.getByText('1 guest', { exact: true })).toBeVisible()
     await expect(cleanerPage.getByText(/^Arriving 6:30\sPM$/u)).toBeVisible()
     // The queued creation can also arrive after the socket opens. The live panel above proves it read the edited arrival.
     await expect.poll(() => liveEvents.some(event => event.type === 'stay.changed' && event.booking_id === stay.booking_id)).toBe(true)

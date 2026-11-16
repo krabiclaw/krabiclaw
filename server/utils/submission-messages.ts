@@ -4,6 +4,7 @@ import type { GuestRequestKind } from '~/server/domain/requests'
 export type SubmissionType = GuestRequestKind
 
 export interface ReplyEmailEnv {
+  EMAIL_REPLY_DOMAIN?: string
   EMAIL_REPLY_SECRET?: string
   NUXT_PUBLIC_PLATFORM_DOMAIN?: string
   RESEND_API_KEY?: string
