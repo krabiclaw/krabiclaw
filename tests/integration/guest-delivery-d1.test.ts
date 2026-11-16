@@ -174,8 +174,12 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     // from and applied to the booking.
     const tables = await createTables(db, env, { organizationId: 'org-proof', locationId: 'booking-location', actorId: 'user-proof', memberId: 'member-proof', name: 'Booking table',
       durationMinutes: 120, seats: 10, weekdays: [1], open: '16:00', lastSeating: '20:00' })
-    // The first Monday seating the tables' weekly rule put on the calendar.
-    const [seating] = await listBookableSessions(db, { env, organizationId: 'org-proof', productId: tables.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 8 * 86_400_000).toISOString() })
+    // Read a full future week so the first Monday starts with its opening seating.
+    const firstFullDay = addLocalDays(localDateAt(new Date(now), 'Asia/Bangkok'), 1)
+    const [seating] = await listBookableSessions(db, { env, organizationId: 'org-proof', productId: tables.id,
+      fromInstant: localDateTimeToInstant(firstFullDay, '00:00', 'Asia/Bangkok').toISOString(),
+      toInstant: localDateTimeToInstant(addLocalDays(firstFullDay, 7), '00:00', 'Asia/Bangkok').toISOString(),
+    })
     assert.equal(seating && formatTimestamp(seating.starts_at, 'en', 'Asia/Bangkok', { weekday: 'long', hour: 'numeric', minute: '2-digit' }), 'Monday 4:00 PM')
     const tablePolicy = JSON.stringify({ advance_notice_minutes: null, party_size_min: null, party_size_max: null, minimum_guest_age: null, accessibility_contact_required: false, payment: null })
     const { bookingId: createdBookingId } = await claimSessionCapacity(db, { websiteSource: null, env, organizationId: 'org-proof', productId: tables.id, sessionId: seating!.id, productVariantId: tables.variants[0]!.id, partySize: 1, userId: 'guest-proof', policyJson: tablePolicy,
