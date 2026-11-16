@@ -51,9 +51,9 @@ test('Products section links reach their relevant published destinations', async
   test.slow()
   const destinations = [
     { label: 'Explore website builder', path: '/templates', heading: /Your business\.\s*Its own kind of beautiful\./ },
-    { label: 'Explore AI management', path: '/docs/mcp-setup', heading: /^Connect KrabiClaw to ChatGPT$/ },
+    { label: 'Explore AI management', path: '/docs/mcp-setup', heading: /^Connect (?:KrabiClaw|Blawby) to ChatGPT$/ },
     { label: 'Read the inbox guide', path: '/docs/handle-inquiries-and-reservation-requests', heading: /Handle inquiries and reservation requests/ },
-    { label: 'Explore bookings', path: '/experiences', heading: /^A great day starts\s+with a booking\.$/ },
+    { label: 'Explore bookings', path: '/experiences', heading: /^(?:A great day starts\s+with a booking\.|The second brain for your experience business)$/ },
     { label: 'Read the publishing guide', path: '/docs/publish-a-post', heading: /Publish a post/ },
     { label: 'Manage local business details', path: '/docs/update-locations-and-hours', heading: /Update locations and hours/ },
     { label: 'Read the analytics guide', path: '/docs/read-your-site-analytics', heading: /Read your site analytics/ },

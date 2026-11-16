@@ -59,7 +59,7 @@ test('unknown and retired API routes return JSON 404 without rendering a tenant 
 test('Blawby authored contact sections retain their forms and selected locations', async ({ page, request }) => {
   const platform = new URL(testBaseUrl())
   test.skip(isNonProductionHost(platform.hostname), 'These authored contact pages are production tenants.')
-  const site = `https://cedar-legal.${platform.hostname}`
+  const site = 'https://cedar-legal.krabiclaw.com'
   const title = 'Office Location & Contact Info'
   const locationIds = ['loc-abce1341-c462-4e8d-ab8c-f4f6657f07cf']
   const response = await request.get(`${site}/api/public/pages`, { params: { path: '/contact' } })

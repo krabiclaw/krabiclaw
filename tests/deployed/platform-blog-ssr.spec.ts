@@ -201,7 +201,10 @@ test('docs reading header exposes one mobile search shortcut without a second co
 
 test('docs category landings explain published tasks and preserve canonical guide identities', async ({ page, request, baseURL }) => {
   const response = await request.get('/api/public/blog?collection=docs')
+  expect(response.status()).toBe(200)
   const { posts, categories } = await response.json() as { posts: Array<{ slug: string; title: string; excerpt: string | null; category: { slug: string } }>; categories: Array<{ slug: string; name: string }> }
+  const accountGuide = posts.find(post => post.slug === 'create-your-krabiclaw-account')
+  if (!accountGuide) throw new Error('The published account guide is missing')
   // Every category landing is opened in the browser.
   test.setTimeout(30_000 + categories.length * 10_000)
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -232,7 +235,8 @@ test('docs category landings explain published tasks and preserve canonical guid
       expect(posts.some(post => path === `/docs/${post.slug}`) || categories.some(item => path === `/docs/category/${item.slug}`) || path === '/docs').toBe(true)
     })
     if (category.slug === 'getting-started') {
-      await expect(feature.getByRole('heading')).toHaveText('Create your KrabiClaw account')
+      await expect(feature.getByRole('heading')).toHaveText(accountGuide.title)
+      await expect(feature.locator('a[href="/docs/create-your-krabiclaw-account"]')).toHaveCount(1)
       const image = page.locator('[data-category-illustration]')
       await expect(image).toHaveAttribute('src', '/platform/docs/categories/krabiclaw-getting-started-category.png')
       await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).complete && (element as HTMLImageElement).naturalWidth > 0)).toBe(true)
@@ -265,7 +269,7 @@ test('docs category landings explain published tasks and preserve canonical guid
   // Exercise Nuxt client navigation, rather than proving only independent SSR loads.
   await page.locator('aside a[href="/docs/category/getting-started"]').click()
   await expect(page.locator('h1')).toHaveText('Getting Started')
-  await expect(page.locator('[data-category-feature] h2')).toHaveText('Create your KrabiClaw account')
+  await expect(page.locator('[data-category-feature] h2')).toHaveText(accountGuide.title)
 })
 
 
