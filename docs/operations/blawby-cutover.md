@@ -7,6 +7,14 @@ registry version or CMS operation is activated by the staging release.
 
 ## Before the change
 
+- Qualify and deploy the bounded brand-name refresh on KrabiClaw first. Save
+  that verified Worker as the rollback version so pending refreshes can keep
+  running after a traffic rollback.
+- Verify Bot Fight Mode is off in the Blawby zone. From a GitHub-hosted runner,
+  confirm the home page returns Pages HTML and the Nuxt build URL returns an
+  ordinary Pages 404 before the switch. Neither response may carry
+  `cf-mitigated: challenge`. After the switch, verify the exact expected
+  Nuxt build JSON on the Worker.
 - Complete the staging rollout and record the tested SHA, deployed build ID,
   actual tenant and credentialed MCP results. In the authorized window, save
   the active `krabiclaw` Worker version, source SHA, DNS/route/rule state from
@@ -91,7 +99,13 @@ audience; the old MCP endpoint declines the old connection without a redirect.
    `platform` with `name: "Blawby"` and the existing Live status
    (`status: "active"` in the MCP schema). This preserves the subdomain and
    invokes the existing Zaraz reconciliation. Read the unchanged domain
-   rows and both zones' reconciled configuration back before proceeding. Run the
+   rows and both zones' reconciled configuration back before proceeding.
+   Record the refresh ID returned with the saved name. In Website → Brand →
+   Name, finish the refresh for that organization. Read the same refresh ID
+   as complete through `get_organization_settings`. Compare each active
+   placement against the pre-write owner and generation-key snapshot, then
+   fetch the resulting card images and verify their PNG dimensions before
+   releasing redirects or updating directory records. Run the
    existing deployed tenant and platform projects and credentialed
    `node scripts/test-mcp-oauth.mjs --base-url https://blawby.com` with
    `MCP_CREDENTIAL_LOGIN=1`, the authorized production canary credentials
@@ -157,8 +171,9 @@ new apex must serve legacy Pages again, remove its Worker route and new edge
 redirect, restore both proxied CNAMEs and reattach the old Pages apex. Restore
 the saved Zaraz configurations and affected provider/canary display URLs;
 restore CMS values through the same editors, using current revisions and prior editable logo, favicon, social share and
-cover asset IDs. Regenerate generated OG cards through the existing canonical
-editor bulk social cards action. The old delivery endpoints and D1/R2 remain in place.
+cover asset IDs. Finish the restored name's refresh in Website → Brand →
+Name and verify its receipt and active cards. The old delivery endpoints and
+D1/R2 remain in place.
 
 If any directory pointer already moved, restore the Claude listing after the
 old endpoint passes. OpenAI's canceled review slot cannot be restored; leave

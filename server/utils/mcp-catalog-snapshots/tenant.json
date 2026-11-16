@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:415b6acdee69972f26445e73dd1baa0e977fc3265516416a39ee4b68d85450e6",
-  "documentationFingerprint": "sha256:1adabec63fbf2551cfd74793752b01e2e1d4137880e6244bab8fad77edcf6b27",
+  "fingerprint": "sha256:f3cbbf4cf2a2cb2ed2a86d1cff987b2e67d177e569c6bd56d691dfec96458176",
+  "documentationFingerprint": "sha256:445dc05d64a99085532b391da557ffd6c5b7c6177d225a0c38b0b1fd8c68a6b4",
   "tools": [
     {
       "name": "add_organization_language",
@@ -7390,7 +7390,7 @@
     {
       "name": "assign_home_photos_to_room",
       "title": "Assign home photos to room",
-      "description": "Assign existing home photos to one room group, to Additional photos, or to a newly created room. First call get_product: photo IDs are product.image.asset_id and product.gallery[].asset_id; current room membership is product.stay.photo_rooms. Supply exactly one destination: room_id with an existing ID, explicit room_id:null for Additional photos, or new_room_type. Omitting room_id does not mean null. Each selected photo needs its current expected_room_id; changed membership or a removed photo refuses the whole assignment, including new room creation. Returns the destination ID, new room ID if created and moved photo IDs. Changes only KrabiClaw; it does not update Airbnb. Edit Airbnb’s photo tour separately in Airbnb.",
+      "description": "Assign existing home photos to one room group, to Additional photos, or to a newly created room. First call get_product: photo IDs are product.image.asset_id and product.gallery[].asset_id; current room membership is product.stay.photo_rooms. Supply exactly one destination: room_id with an existing ID, explicit room_id:null for Additional photos, or new_room_type. Omitting room_id does not mean null. Each selected photo needs its current expected_room_id; changed membership or a removed photo refuses the whole assignment, including new room creation. Returns the destination ID, new room ID if created and moved photo IDs. Changes only Blawby; it does not update Airbnb. Edit Airbnb’s photo tour separately in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "oneOf": [
@@ -7580,7 +7580,7 @@
     {
       "name": "attach_media",
       "title": "Attach media",
-      "description": "Attach one existing media asset to an ordered collection placement (a gallery or a compliance document list), appending it after the current last item. An existing attachment stays in place; a full collection rejects a new attachment. For a single-valued placement (a cover, hero, or logo) use set_media instead. Product galleries are saved in KrabiClaw; a connected listing’s Airbnb photo tour is edited in Airbnb.",
+      "description": "Attach one existing media asset to an ordered collection placement (a gallery or a compliance document list), appending it after the current last item. An existing attachment stays in place; a full collection rejects a new attachment. For a single-valued placement (a cover, hero, or logo) use set_media instead. Product galleries are saved in Blawby; a connected listing’s Airbnb photo tour is edited in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -19543,7 +19543,7 @@
     {
       "name": "create_home_room",
       "title": "Create home room",
-      "description": "Create an empty room or space, such as Bedroom or Patio, for grouping an existing home’s photos. This creates a room group, not a photo or business location, and requires no amenity answers. Use assign_home_photos_to_room to group existing home photos afterward; save_media_attachment saves new attachments and attach_media adds library images to the home’s gallery. Returns the new room ID. Each call creates a new room; if the outcome is uncertain, read get_product before retrying. Changes only KrabiClaw; it does not update Airbnb. Edit Airbnb’s photo tour separately in Airbnb.",
+      "description": "Create an empty room or space, such as Bedroom or Patio, for grouping an existing home’s photos. This creates a room group, not a photo or business location, and requires no amenity answers. Use assign_home_photos_to_room to group existing home photos afterward; save_media_attachment saves new attachments and attach_media adds library images to the home’s gallery. Returns the new room ID. Each call creates a new room; if the outcome is uncertain, read get_product before retrying. Changes only Blawby; it does not update Airbnb. Edit Airbnb’s photo tour separately in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -20127,7 +20127,7 @@
             "oneOf": [
               {
                 "additionalProperties": false,
-                "description": "Five minutes after KrabiClaw receives a new booking.",
+                "description": "Five minutes after Blawby receives a new booking.",
                 "properties": {
                   "delay_minutes": {
                     "const": 5
@@ -20275,7 +20275,7 @@
                 "oneOf": [
                   {
                     "additionalProperties": false,
-                    "description": "Five minutes after KrabiClaw receives a new booking.",
+                    "description": "Five minutes after Blawby receives a new booking.",
                     "properties": {
                       "delay_minutes": {
                         "const": 5
@@ -37607,7 +37607,7 @@
     {
       "name": "delete_channel_post",
       "title": "Delete channel post",
-      "description": "Permanently delete exactly the provider_post_id on the explicitly selected connected Facebook Page, or the KrabiClaw bot's message in the connected Discord channel. Keeps the website post and marks its publication receipt removed. Read get_social_connections and list_channel_posts first. Instagram deletion is unavailable with this app's Instagram Login connection; delete Instagram posts in Instagram. Use delete_post to remove website content separately.",
+      "description": "Permanently delete exactly the provider_post_id on the explicitly selected connected Facebook Page, or the Blawby bot's message in the connected Discord channel. Keeps the website post and marks its publication receipt removed. Read get_social_connections and list_channel_posts first. Instagram deletion is unavailable with this app's Instagram Login connection; delete Instagram posts in Instagram. Use delete_post to remove website content separately.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -41585,7 +41585,7 @@
     {
       "name": "delete_home_room",
       "title": "Delete home room",
-      "description": "Delete a room or space group from a home. First call get_product for product.stay.photo_rooms and choose its exact room ID. Its photos become Additional photos; the home’s cover, gallery and library files remain. Returns the removed ID and current photo memberships. Changes only KrabiClaw; it does not update Airbnb. Delete an Airbnb room separately in Airbnb.",
+      "description": "Delete a room or space group from a home. First call get_product for product.stay.photo_rooms and choose its exact room ID. Its photos become Additional photos; the home’s cover, gallery and library files remain. Returns the removed ID and current photo memberships. Changes only Blawby; it does not update Airbnb. Delete an Airbnb room separately in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -48817,7 +48817,7 @@
     {
       "name": "get_organization",
       "title": "Get organization",
-      "description": "Read the selected KrabiClaw site’s identity, public address and settings. organization_id is the internal ID returned by get_workspace_context or list_organizations, not a URL, domain or business name.",
+      "description": "Read the selected Blawby site’s identity, public address and settings. organization_id is the internal ID returned by get_workspace_context or list_organizations, not a URL, domain or business name.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -49465,7 +49465,7 @@
     {
       "name": "get_organization_settings",
       "title": "Get organization settings",
-      "description": "Read editable settings for the selected KrabiClaw site. Use its internal organization_id from get_workspace_context or list_organizations, not its public URL, domain or name.",
+      "description": "Read editable settings for the selected Blawby site. Use its internal organization_id from get_workspace_context or list_organizations, not its public URL, domain or name.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -49978,7 +49978,7 @@
                 "type": "string"
               },
               "palette": {
-                "description": "The colors the site renders, light and dark: its own, or the default. Null on KrabiClaw's own site.",
+                "description": "The colors the site renders, light and dark: its own, or the default. Null on Blawby's own site.",
                 "properties": {
                   "dark": {
                     "additionalProperties": false,
@@ -63880,7 +63880,7 @@
     {
       "name": "get_social_connections",
       "title": "Get social connections",
-      "description": "Read the site’s website, Facebook Page, Instagram and Discord channel publishing connections before selecting a publication target. Returns target_id, connection_revision, supported formats and operations, setup links, and problems, including whether Meta currently accepts each connection and whether the KrabiClaw bot can still post to the connected Discord channel. Credentials are not returned.",
+      "description": "Read the site’s website, Facebook Page, Instagram and Discord channel publishing connections before selecting a publication target. Returns target_id, connection_revision, supported formats and operations, setup links, and problems, including whether Meta currently accepts each connection and whether the Blawby bot can still post to the connected Discord channel. Credentials are not returned.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -65410,7 +65410,7 @@
     {
       "name": "list_channel_posts",
       "title": "List channel posts",
-      "description": "Read live posts directly from the explicitly selected connected Facebook Page, Instagram professional account or Discord channel; for Discord, the KrabiClaw bot's messages there. Does not import website posts or media. Read get_social_connections first and supply the exact channel, target_id and connection_revision. next_after is the provider's cursor; pass it as after for the next page.",
+      "description": "Read live posts directly from the explicitly selected connected Facebook Page, Instagram professional account or Discord channel; for Discord, the Blawby bot's messages there. Does not import website posts or media. Read get_social_connections first and supply the exact channel, target_id and connection_revision. next_after is the provider's cursor; pass it as after for the next page.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -67267,7 +67267,7 @@
                   "oneOf": [
                     {
                       "additionalProperties": false,
-                      "description": "Five minutes after KrabiClaw receives a new booking.",
+                      "description": "Five minutes after Blawby receives a new booking.",
                       "properties": {
                         "delay_minutes": {
                           "const": 5
@@ -68302,7 +68302,7 @@
                   ]
                 },
                 "slug": {
-                  "description": "Organization slug. Use the location slug from list_locations for https://krabiclaw.com/dashboard/{organization_slug}/locations/{location_slug}",
+                  "description": "Organization slug. Use the location slug from list_locations for /dashboard/{organization_slug}/locations/{location_slug}",
                   "type": [
                     "string",
                     "null"
@@ -72101,7 +72101,7 @@
     {
       "name": "publish_website",
       "title": "Publish website",
-      "description": "Publish a saved website draft, select it as your workspace and notify KrabiClaw operators by email. Finish any returned missing fields before retrying. Repeating a completed publication can resend the operator email.",
+      "description": "Publish a saved website draft, select it as your workspace and notify Blawby operators by email. Finish any returned missing fields before retrying. Repeating a completed publication can resend the operator email.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -81923,7 +81923,7 @@
     {
       "name": "query_google_analytics",
       "title": "Query Google analytics",
-      "description": "Run a report on the connected Google Analytics 4 property: GA4 dimensions and metrics (such as date, landingPage, sessionSource, sessionMedium; activeUsers, sessions, screenPageViews, keyEvents) over one to four date ranges, with filters, ordering and paging. GA4 keeps history from before KrabiClaw; use it for periods the business's own analytics do not cover.",
+      "description": "Run a report on the connected Google Analytics 4 property: GA4 dimensions and metrics (such as date, landingPage, sessionSource, sessionMedium; activeUsers, sessions, screenPageViews, keyEvents) over one to four date ranges, with filters, ordering and paging. GA4 keeps history from before Blawby; use it for periods the business's own analytics do not cover.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -86364,7 +86364,7 @@
     {
       "name": "record_stay_payment",
       "title": "Record stay payment",
-      "description": "Record money received outside KrabiClaw for a host-entered stay, such as cash or a bank transfer. Read get_product_booking for the stay ID and currency. A negative amount records an offline refund. Returns the exact recorded payment and current paid amount/status, without unrelated guest details or payment history. Moves no money.",
+      "description": "Record money received outside Blawby for a host-entered stay, such as cash or a bank transfer. Read get_product_booking for the stay ID and currency. A negative amount records an offline refund. Returns the exact recorded payment and current paid amount/status, without unrelated guest details or payment history. Moves no money.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -86743,7 +86743,7 @@
     {
       "name": "remove_media",
       "title": "Remove media",
-      "description": "Detach one media asset from an ordered collection placement (a gallery or a compliance document list). Removing an asset that is not attached changes nothing; other attached assets keep their order. Product galleries are saved in KrabiClaw; a connected listing’s Airbnb photo tour is edited in Airbnb.",
+      "description": "Detach one media asset from an ordered collection placement (a gallery or a compliance document list). Removing an asset that is not attached changes nothing; other attached assets keep their order. Product galleries are saved in Blawby; a connected listing’s Airbnb photo tour is edited in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -88153,7 +88153,7 @@
     {
       "name": "reorder_media",
       "title": "Reorder media",
-      "description": "Move attached gallery or compliance assets before or after an attached neighbor. Omitted anchors move the asset to the end; invalid assets or anchors reject the call. Product galleries are saved in KrabiClaw; a connected listing’s Airbnb photo tour is edited in Airbnb.",
+      "description": "Move attached gallery or compliance assets before or after an attached neighbor. Omitted anchors move the asset to the end; invalid assets or anchors reject the call. Product galleries are saved in Blawby; a connected listing’s Airbnb photo tour is edited in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -98174,7 +98174,7 @@
     {
       "name": "set_media",
       "title": "Set media",
-      "description": "Assign an asset to one cover, hero, logo or menu section photo; null clears it. Use attach_media for galleries and presentation for logo cropping. Product photos are saved in KrabiClaw; a connected listing’s Airbnb photo tour is edited in Airbnb.",
+      "description": "Assign an asset to one cover, hero, logo or menu section photo; null clears it. Use attach_media for galleries and presentation for logo cropping. Product photos are saved in Blawby; a connected listing’s Airbnb photo tour is edited in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -107074,7 +107074,7 @@
     {
       "name": "update_home_accessibility",
       "title": "Update home accessibility",
-      "description": "Change one home accessibility answer. First call get_product for product.updated_at and product.stay.accessibility. True requires evidence images in this organization; saving appends selected library images to this home’s Product photos without changing the cover, existing order or room assignments. False/null requires []; null clears the answer. Evidence photos remain protected until the answer is cleared or the evidence replaced. A stale Product revision or photo order refuses the entire change. Changes only KrabiClaw; it does not update Airbnb. Edit Airbnb accessibility separately in Airbnb.",
+      "description": "Change one home accessibility answer. First call get_product for product.updated_at and product.stay.accessibility. True requires evidence images in this organization; saving appends selected library images to this home’s Product photos without changing the cover, existing order or room assignments. False/null requires []; null clears the answer. Evidence photos remain protected until the answer is cleared or the evidence replaced. A stale Product revision or photo order refuses the entire change. Changes only Blawby; it does not update Airbnb. Edit Airbnb accessibility separately in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -107280,7 +107280,7 @@
     {
       "name": "update_home_room",
       "title": "Update home room",
-      "description": "Change a room’s beds, bedroom bathroom privacy, amenity assignments or one bedroom accessibility answer. First call get_product for product.stay.photo_rooms and the selected room’s details_version. Omitted fields remain unchanged. Bed allocations must fit the home’s declared total; assigning an amenity also adds it to the home’s amenity set, while unassigning only removes its room membership. Accessibility evidence may append library images to the home’s gallery. A stale room revision or invalid combination refuses the entire change. Returns the saved room details. Changes only KrabiClaw; it does not update Airbnb. Edit Airbnb room details separately in Airbnb.",
+      "description": "Change a room’s beds, bedroom bathroom privacy, amenity assignments or one bedroom accessibility answer. First call get_product for product.stay.photo_rooms and the selected room’s details_version. Omitted fields remain unchanged. Bed allocations must fit the home’s declared total; assigning an amenity also adds it to the home’s amenity set, while unassigning only removes its room membership. Accessibility evidence may append library images to the home’s gallery. A stale room revision or invalid combination refuses the entire change. Returns the saved room details. Changes only Blawby; it does not update Airbnb. Edit Airbnb room details separately in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -110118,7 +110118,7 @@
             "oneOf": [
               {
                 "additionalProperties": false,
-                "description": "Five minutes after KrabiClaw receives a new booking.",
+                "description": "Five minutes after Blawby receives a new booking.",
                 "properties": {
                   "delay_minutes": {
                     "const": 5
@@ -110276,7 +110276,7 @@
                 "oneOf": [
                   {
                     "additionalProperties": false,
-                    "description": "Five minutes after KrabiClaw receives a new booking.",
+                    "description": "Five minutes after Blawby receives a new booking.",
                     "properties": {
                       "delay_minutes": {
                         "const": 5
@@ -111550,7 +111550,7 @@
                 "type": "string"
               },
               "palette": {
-                "description": "The colors the site renders, light and dark: its own, or the default. Null on KrabiClaw's own site.",
+                "description": "The colors the site renders, light and dark: its own, or the default. Null on Blawby's own site.",
                 "properties": {
                   "dark": {
                     "additionalProperties": false,
@@ -125079,7 +125079,7 @@
     {
       "name": "update_stay_arrival_guide",
       "title": "Update stay arrival guide",
-      "description": "Save one home's private arrival guide: check-in method and instructions, wifi, directions, house manual and checkout instructions. Fields left out keep their values; null removes one. Saving does not send anything to a guest or publish it on the site. For a connected Airbnb home, supplied check-in, wifi, directions and house-manual fields return editor links in airbnb_unsynced for the host to check and edit in Airbnb. Checkout instructions are saved only in KrabiClaw.",
+      "description": "Save one home's private arrival guide: check-in method and instructions, wifi, directions, house manual and checkout instructions. Fields left out keep their values; null removes one. Saving does not send anything to a guest or publish it on the site. For a connected Airbnb home, supplied check-in, wifi, directions and house-manual fields return editor links in airbnb_unsynced for the host to check and edit in Airbnb. Checkout instructions are saved only in Blawby.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -125232,7 +125232,7 @@
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
           "airbnb_unsynced": {
-            "description": "Airbnb editor links for supplied fields that have a mapped editor page. Each entry identifies a field saved in KrabiClaw for the host to check and edit in Airbnb. Empty when no mapped fields were supplied or the home is not connected.",
+            "description": "Airbnb editor links for supplied fields that have a mapped editor page. Each entry identifies a field saved in Blawby for the host to check and edit in Airbnb. Empty when no mapped fields were supplied or the home is not connected.",
             "items": {
               "additionalProperties": false,
               "properties": {
@@ -125786,7 +125786,7 @@
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:7c79f573c07df88cb92d7506531a53fd493d7b5e6480511e4fb98e5dd331886b",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
-        "list_organizations": "sha256:1d699ce3820543aed0a3f9b17007d6f33a3c498d17a73f77de0971943a98d30a",
+        "list_organizations": "sha256:dc1b45423396a800e47e6ca24661305ab670a033738f7ceecc6e8e021ddd3ca9",
         "reconcile_products": "sha256:776775d2b51ce5e5f27c5e08d9a522548b4be7f979d89cc7f03ecb7adcf747d2",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:7d92dda53c08f4ebcf2f11cfc3a4c2cc6f7465ad97b9190d9997fea30e0cc81d",
@@ -125815,7 +125815,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:a2a95f5e752b47a10f2d42dfaaca0caca19afd2a4110adc3fd97dad2eb8a763a",
-        "get_social_connections": "sha256:ce06b442ff3f389bf517c54c51ff4fb762a7bde099820d26f260139f1e3d1686",
+        "get_social_connections": "sha256:0b69bc4bd8739b684d41b13b63c90c9b9281fdf40fd58aa0a6331bd6fcaf3b1d",
         "publish_post": "sha256:752fb1e9c0267e6ba03088081fa8a0e5c5f8034640f03df3c52078a8df8f95d4"
       }
     },
@@ -125834,7 +125834,7 @@
         "text": "Create a bookable offering from: <description> Use get_workspace_context, list_locations and list_products to resolve the business, existing offerings and explicit location or online scope. Ask for missing price, duration, capacity, actual start times, confirmation and payment choices. Use create_product with booking setup and one idempotency key. Preserve the supplied facts and attach supplied media to the returned product ID. Use get_product to read booking_readiness and list_product_booking_sessions with a concrete date range to verify actual availability. Use save_media_attachment for supplied files or attach_media for existing assets. Open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
+        "attach_media": "sha256:170c6665556f77a7be9607052052581cfc9632f45d01b88cbbb5ff5683ff8f32",
         "create_product": "sha256:73e37dfcdfb348be542001a9888b00bdada68a739d54c60360fe102f4c40e387",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
@@ -125880,14 +125880,14 @@
         "text": "Use get_workspace_context, list_site_pages and get_site_page to read the selected business's homepage, and list_media_assets for its media. Open its public preview and recommend the most useful improvements in plain language. Check if hero media, brand logo, favicon, and bookable offerings (such as places to stay or menu items via product_grid) are present, and ask the user for any missing brand assets. Apply requested copy changes with update_site_page; use set_media for one image or attach_media, remove_media and reorder_media for a gallery. Read back the page and public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
+        "attach_media": "sha256:170c6665556f77a7be9607052052581cfc9632f45d01b88cbbb5ff5683ff8f32",
         "get_site_page": "sha256:9618228ff74cee9b28c76564d329d9842cf4a2d0feae81656d8ff4abcbbf451f",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
-        "remove_media": "sha256:70c3ad05014d52e9ce95b1a4363d6ab8b23b0d1ffd37c31b03a3da6684d49943",
-        "reorder_media": "sha256:2ba6530e10b65684d8efd9d9543c6e3a62e760a988d7a876abe7962ff0fb7e75",
-        "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
+        "remove_media": "sha256:2d9f580ca9664c93e76640ab4144fea1fa9187ec88f70a42c4ced0a409a42f21",
+        "reorder_media": "sha256:124ff79867ad14cb56b197e28383d915b24f88f2e74a076d305c4bac1fe55a63",
+        "set_media": "sha256:832f5f23b3136722fcba0f7e7769b9bdf5b1ed11275a38c1e0692ca297266a26",
         "update_site_page": "sha256:ddc337bdcab4df17d99b7913ea2dbf4ed1f0ba91a60a1f39f97b8e08a6e451ad"
       }
     },
@@ -125900,14 +125900,14 @@
         "text": "Inspect the supplied photos and use get_workspace_context plus the relevant get_site_page, get_location, get_product or get_post read to resolve the intended owner and placement. Ask only about an ambiguous destination. Use save_media_attachment with a stable idempotency_key and the intended placement for each attachment; retries reuse that key. For an existing asset use set_media or attach_media. Read back the owner and open the public result before reporting placement."
       },
       "toolContracts": {
-        "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
+        "attach_media": "sha256:170c6665556f77a7be9607052052581cfc9632f45d01b88cbbb5ff5683ff8f32",
         "get_location": "sha256:eeb473e44df629a24ceb82a2db6873a6b1f108dd852c2fa923f605a637439f34",
         "get_post": "sha256:fd95e9d97a5f0624dda58886752832eee80a1fef08c9c7a64d8c2af4ff3481d1",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_site_page": "sha256:9618228ff74cee9b28c76564d329d9842cf4a2d0feae81656d8ff4abcbbf451f",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
-        "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b"
+        "set_media": "sha256:832f5f23b3136722fcba0f7e7769b9bdf5b1ed11275a38c1e0692ca297266a26"
       }
     },
     {
@@ -125920,18 +125920,18 @@
       },
       "toolContracts": {
         "create_product": "sha256:73e37dfcdfb348be542001a9888b00bdada68a739d54c60360fe102f4c40e387",
-        "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
+        "get_organization": "sha256:be4891efa8ad393a88869138bf2dacb5a66a3af6005298cfbd261f378cb6c1aa",
         "get_site_page": "sha256:9618228ff74cee9b28c76564d329d9842cf4a2d0feae81656d8ff4abcbbf451f",
         "get_website_draft": "sha256:c1444d21ed13337ab56e9d48764d8befe1e0016ba625bc70c8b7d6f29d179d24",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
-        "list_organizations": "sha256:1d699ce3820543aed0a3f9b17007d6f33a3c498d17a73f77de0971943a98d30a",
+        "list_organizations": "sha256:dc1b45423396a800e47e6ca24661305ab670a033738f7ceecc6e8e021ddd3ca9",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
-        "publish_website": "sha256:05e40520e524c3ab6c5cf48d56bd0cc94e9e18f61c11b519930950ecc0c7fdee",
+        "publish_website": "sha256:e6856cc57434225006a35c794253cbd35a838569f2dd13bdf7698da06dc73507",
         "save_website_draft": "sha256:175fdfcf6b66beeecf25d2db60354d5273ea34c59ad8140487e3e714001cfc35",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
-        "update_organization_settings": "sha256:e1cf97ba916ebf6b4116caa9e748cedc5b64c93c7e1043d6bf5e594a75aa7862",
+        "update_organization_settings": "sha256:4f1a62735af2470e974d07b775594aa2a76f8526128c444ee7ad240783d50f13",
         "update_site_page": "sha256:ddc337bdcab4df17d99b7913ea2dbf4ed1f0ba91a60a1f39f97b8e08a6e451ad"
       }
     },
@@ -125964,13 +125964,13 @@
         "text": "Use get_workspace_context, list_site_pages, get_site_page, list_media_assets and list_products to read the actual public pages, media and catalog. Recommend specific improvements in plain language: high-impact hero image or video, logo and favicon, brand colors, offerings showcase on the homepage, and host story with portrait on the about page. Apply the requested copy with update_site_page or update_product, and media with set_media or attach_media. Read back the changed record and verify the public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
+        "attach_media": "sha256:170c6665556f77a7be9607052052581cfc9632f45d01b88cbbb5ff5683ff8f32",
         "get_site_page": "sha256:9618228ff74cee9b28c76564d329d9842cf4a2d0feae81656d8ff4abcbbf451f",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
-        "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
+        "set_media": "sha256:832f5f23b3136722fcba0f7e7769b9bdf5b1ed11275a38c1e0692ca297266a26",
         "update_product": "sha256:afed95fa490fdae7aed3b9d4e6f5db435e1ab4c8d3909b260fbe380a82f9d461",
         "update_site_page": "sha256:ddc337bdcab4df17d99b7913ea2dbf4ed1f0ba91a60a1f39f97b8e08a6e451ad"
       }
