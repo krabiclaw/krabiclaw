@@ -1,5 +1,5 @@
 import { execute, queryAll, queryFirst } from '~/server/db'
-import { getPlatformOrganization } from '~/server/utils/platform-organization'
+import { PLATFORM_THEME_ID } from '~/utils/site-routing'
 import type { DomainEnv } from '~/server/utils/domains'
 import { NATIVE_PAGEVIEW_ZARAZ_EVENT, ZARAZ_ANALYTICS_PURPOSE, ZARAZ_ANALYTICS_PURPOSE_ID, ZARAZ_CONSENT_COOKIE_NAME, zarazConsentModalIntroHtml } from '~/utils/zaraz-consent'
 
@@ -316,6 +316,7 @@ function removeUndesiredAnalyticsConfig(config: ZarazConfig, desiredKeys: Set<st
 
 interface ActiveTenantAnalyticsRow {
   organization_id: string
+  theme_id: string
   ga4_measurement_id: string
   domain: string
 }
@@ -397,6 +398,7 @@ export async function reconcileZarazAnalytics(
 
   const rows = await queryAll<ActiveTenantAnalyticsRow>(db, `
     SELECT o.id AS organization_id,
+           o.theme_id,
            analytics.measurement_id AS ga4_measurement_id,
            domain.domain
       FROM organization o
@@ -439,14 +441,21 @@ export async function reconcileZarazAnalytics(
   let platformTemplateKey: string | undefined
   if (platformZone) {
     if (platformZone === saasZone) throw new Error('CF_PLATFORM_ZARAZ_ZONE_ID must differ from CF_ZONE_ID')
-    const platform = await getPlatformOrganization(db)
-    const analytics = tenants.get(platform.id)
-    if (analytics?.measurementId) platformTemplateKey = tenantKey(platform.id)
-    zones.push({ id: platformZone, tenants: analytics?.measurementId ? [{
-      organizationId: platform.id,
-      measurementId: analytics.measurementId,
-      hostnames: [platformUrl.hostname],
-    }] : [] })
+    const platformIds = new Set(rows.filter(row => row.theme_id === PLATFORM_THEME_ID).map(row => row.organization_id))
+    if (platformIds.size > 1) throw new Error('More than one linked organization runs the platform site')
+    const platformId = [...platformIds][0]
+    const analytics = platformId ? tenants.get(platformId) : undefined
+    if (platformId && analytics?.measurementId) {
+      platformTemplateKey = tenantKey(platformId)
+      zones.push({ id: platformZone, tenants: [{
+        organizationId: platformId,
+        measurementId: analytics.measurementId,
+        hostnames: [platformUrl.hostname],
+      }] })
+    } else {
+      // A disconnected or unpublished platform has no eligible GA4 tool.
+      zones.push({ id: platformZone, tenants: [] })
+    }
   }
 
   const result: ZarazAnalyticsReconciliationResult = {
