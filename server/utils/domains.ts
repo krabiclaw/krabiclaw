@@ -194,7 +194,7 @@ export async function createSystemSubdomain(
   organizationId: string,
   subdomain: string,
   options: {
-    organizationUpdate?: { sql: string; values: unknown[] }
+    organizationWrites?: BatchQuery[]
     writeGuard?: BatchQuery
   } = {},
 ): Promise<DomainRecord> {
@@ -211,6 +211,9 @@ export async function createSystemSubdomain(
   )
 
   if (existing?.domain === domain) {
+    if (options.organizationWrites?.length) {
+      await executeBatch(db, [...(options.writeGuard ? [options.writeGuard] : []), ...options.organizationWrites])
+    }
     return (await queryFirst<DomainRecord>(db, 'SELECT * FROM organization_domains WHERE id = ?', [existing.id])) as DomainRecord
   }
 
@@ -247,11 +250,11 @@ export async function createSystemSubdomain(
   )
 
 
-  if (options.organizationUpdate) {
-    stmts.push(options.organizationUpdate)
-  }
-
-  await executeBatch(db, [...(options.writeGuard ? [options.writeGuard] : []), ...stmts.map(s => ({ query: s.sql, params: s.values }))])
+  await executeBatch(db, [
+    ...(options.writeGuard ? [options.writeGuard] : []),
+    ...stmts.map(s => ({ query: s.sql, params: s.values })),
+    ...(options.organizationWrites ?? []),
+  ])
 
   return (await queryFirst<DomainRecord>(db, `SELECT * FROM organization_domains WHERE id = ?`, [id])) as DomainRecord
 }

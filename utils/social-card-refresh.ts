@@ -1,5 +1,12 @@
 export type SocialCardRefreshKind = 'generated' | 'reused' | 'skipped' | 'failed'
 
+export interface OrganizationSocialCardRefresh {
+  id: string
+  status: 'pending' | 'complete' | 'failed'
+  cursor: string | null
+  error: string | null
+}
+
 export interface SocialCardRefreshSummary {
   generated: number
   reused: number
@@ -20,6 +27,13 @@ export interface SocialCardRegenerationResponse {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function isOrganizationSocialCardRefresh(value: unknown): value is OrganizationSocialCardRefresh {
+  return isRecord(value) && typeof value.id === 'string'
+    && (value.status === 'pending' || value.status === 'complete' || value.status === 'failed')
+    && (value.cursor === null || typeof value.cursor === 'string')
+    && (value.error === null || typeof value.error === 'string')
 }
 
 export function summarizeSocialCardRefreshResults(

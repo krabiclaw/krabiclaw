@@ -7,6 +7,7 @@ import { expireStripeGa4Intents, STRIPE_GA4_CONSUMED_RETENTION_DAYS } from '~/se
 import { sendDueReviewInvitations } from '~/server/utils/review-request-delivery'
 import { REVIEW_REQUEST_TTL_DAYS } from '~/server/utils/review-requests'
 import { CACHE_INVALIDATION_TERMINAL_RETENTION_DAYS } from '~/server/utils/public-resource-cache'
+import { SOCIAL_CARD_REFRESH_PREFIX } from '~/server/utils/social-card'
 
 export const RETENTION_HUB = 'platform:analytics-retention'
 
@@ -42,14 +43,15 @@ export async function enqueueOutstandingWork(env: CloudflareEnv): Promise<void> 
     kind: 'site' | 'calendar' | 'calendar_cleanup'
   }>(env.DB, `
     SELECT DISTINCT organization_id, 'site' AS kind
-    FROM public_resource_cache_invalidations WHERE status IN ('pending', 'failed')
+    FROM public_resource_cache_invalidations
+    WHERE status IN ('pending', 'failed') OR (status='processing' AND reason LIKE ?)
     UNION ALL SELECT organization_id, 'calendar'
     FROM organization_integrations WHERE provider='google_calendar' AND status <> 'setting_up'
     UNION ALL SELECT DISTINCT organization_id, 'calendar_cleanup'
     FROM google_calendar_cleanup_jobs WHERE state IN ('pending', 'error')
       AND NOT EXISTS (SELECT 1 FROM organization WHERE organization.id=google_calendar_cleanup_jobs.organization_id)
     ORDER BY kind, organization_id
-  `, [])
+  `, [`${SOCIAL_CARD_REFRESH_PREFIX}%`])
   await publishEvent(env, { type: 'business.wake', organization_id: RETENTION_HUB, kind: 'retention', due_at: due })
   for (const { organization_id, kind } of deadlines) {
     await publishEvent(env, { type: 'business.wake', organization_id, kind, due_at: due })
@@ -77,8 +79,9 @@ async function retainAnalytics(env: CloudflareEnv, now: number): Promise<{ next:
   await cleanupMcpToolCallEvents(env.DB, instant)
   await expireStripeGa4Intents(env.DB, instant)
   const cacheCutoff = new Date(now - CACHE_INVALIDATION_TERMINAL_RETENTION_DAYS * 86_400_000).toISOString()
+  const socialCardReason = `${SOCIAL_CARD_REFRESH_PREFIX}%`
   await execute(env.DB, `DELETE FROM public_resource_cache_invalidations
-    WHERE status IN ('processed', 'failed') AND created_at <= ? AND processed_at <= ?`, [cacheCutoff, cacheCutoff])
+    WHERE status IN ('processed', 'failed') AND reason NOT LIKE ? AND created_at <= ? AND processed_at <= ?`, [socialCardReason, cacheCutoff, cacheCutoff])
   const row = await queryFirst<{ next: string | null }>(env.DB, `
     SELECT MIN(expires) AS next FROM (
       SELECT strftime('%Y-%m-%dT%H:%M:%fZ', MIN(created_at), '+${MCP_AUDIT_RETENTION_DAYS} days') AS expires
@@ -93,8 +96,8 @@ async function retainAnalytics(env: CloudflareEnv, now: number): Promise<{ next:
       FROM stripe_ga4_subscription_intents WHERE status = 'consumed'
       UNION ALL
       SELECT strftime('%Y-%m-%dT%H:%M:%fZ', MIN(processed_at), '+${CACHE_INVALIDATION_TERMINAL_RETENTION_DAYS} days')
-      FROM public_resource_cache_invalidations WHERE status IN ('processed', 'failed')
-    )`)
+      FROM public_resource_cache_invalidations WHERE status IN ('processed', 'failed') AND reason NOT LIKE ?
+    )`, [socialCardReason])
   return { next: row?.next == null ? null : retentionWakeAt(Date.parse(row.next)) }
 }
 

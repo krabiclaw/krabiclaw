@@ -288,14 +288,21 @@ async function boot() {
   }
 }
 
-async function expectSyncTimeout(t: TestContext, consume: () => Promise<void>) {
+async function expectSyncTimeout(t: TestContext, consume: () => Promise<void>, providerStalled: Promise<void>) {
   const timeout = AbortSignal.timeout
-  const shortened = t.mock.method(AbortSignal, 'timeout', (duration: number) => timeout(duration === 100_000 ? 1_000 : duration))
+  const deadline = new AbortController()
+  const controlled = t.mock.method(AbortSignal, 'timeout', (duration: number) => duration === 100_000 ? deadline.signal : timeout(duration))
   try {
-    await assert.rejects(consume)
-    assert(shortened.mock.calls.some(call => call.arguments[0] === 100_000), 'the consumer supplies its configured provider deadline')
+    const rejected = assert.rejects(consume)
+    await Promise.race([
+      providerStalled,
+      rejected.then(() => { throw new Error('The sync failed before reaching the stalled provider') }),
+    ])
+    deadline.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+    await rejected
+    assert(controlled.mock.calls.some(call => call.arguments[0] === 100_000), 'the consumer supplies its configured provider deadline')
   } finally {
-    shortened.mock.restore()
+    controlled.mock.restore()
   }
 }
 
@@ -1327,17 +1334,27 @@ test('slice deadlines cancel provider reads and photo bodies and fail the job wi
     const job = () => db.prepare('SELECT state, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first()
     const consume = () => queue.drain(env, 'airbnb.sync')
     const stalled = (matches: (url: URL, init: RequestInit) => boolean, body = false) => {
+      const provider = Promise.withResolvers<void>()
       globalThis.fetch = async (input, init = {}) => {
         const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
         if (!matches(url, init)) return channex.fetch(input, init)
-        assert.ok(init.signal, 'the provider boundary receives the current slice deadline')
-        if (body) return new Response(new ReadableStream({ start(controller) { init.signal!.addEventListener('abort', () => controller.error(init.signal!.reason), { once: true }) } }))
-        return new Promise<Response>((_resolve, reject) => { init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true }) })
+        const signal = init.signal
+        assert.ok(signal, 'the provider boundary receives the current slice deadline')
+        if (body) return new Response(new ReadableStream({
+          pull(controller) {
+            signal.addEventListener('abort', () => controller.error(signal.reason), { once: true })
+            provider.resolve()
+          },
+        }, { highWaterMark: 0 }))
+        return new Promise<Response>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+          provider.resolve()
+        })
       }
+      return provider.promise
     }
     await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
-    stalled(url => url.pathname === '/api/v1/channels/chan-1')
-    await expectSyncTimeout(t, consume)
+    await expectSyncTimeout(t, consume, stalled(url => url.pathname === '/api/v1/channels/chan-1'))
     assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_SLICE_ENDED' })
     assert.deepEqual(await db.prepare('SELECT status, operation_id, pending_step FROM channex_connections').first(), { status: 'connected', operation_id: null, pending_step: null })
 
@@ -1345,8 +1362,7 @@ test('slice deadlines cancel provider reads and photo bodies and fail the job wi
     for (let step = 0; step < 6; step++) { if ((await connection.advance(prepared.product_id)).stage === 'content') break }
     assert.equal(await db.prepare('SELECT import_stage FROM product_channel_mappings').first('import_stage'), 'content')
     await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
-    stalled(url => url.origin === CDN, true)
-    await expectSyncTimeout(t, consume)
+    await expectSyncTimeout(t, consume, stalled(url => url.origin === CDN, true))
     assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_SLICE_ENDED' })
     assert.equal(await count(db, 'media_assets'), 0)
     assert.deepEqual(await db.prepare('SELECT operation_id, pending_step FROM channex_connections').first(), { operation_id: null, pending_step: null })
@@ -1361,9 +1377,9 @@ test('slice deadlines cancel provider reads and photo bodies and fail the job wi
     assert.deepEqual(await job(), { state: 'done', last_error_code: null })
     await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
     let sent = 0
-    stalled((url, init) => { if (url.pathname === '/api/v1/channels/chan-1/mappings' && init.method === 'POST') { sent++; return true } return false })
     // Syncing again sends the calendar ahead first (the stop forgot what Channex had), then maps the listing.
-    await expectSyncTimeout(t, consume)
+    const mappingStalled = stalled((url, init) => { if (url.pathname === '/api/v1/channels/chan-1/mappings' && init.method === 'POST') { sent++; return true } return false })
+    await expectSyncTimeout(t, consume, mappingStalled)
     assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_SLICE_ENDED' })
     assert.equal(await db.prepare('SELECT status FROM channex_connections').first('status'), 'needs_review')
     assert.equal(await db.prepare('SELECT pending_step FROM channex_connections').first('pending_step'), 'map_airbnb_listing')
@@ -1388,7 +1404,7 @@ test('a paid home records a failed meter report and reports it again before comp
     await db.prepare('UPDATE organization SET stripeCustomerId = ? WHERE id = ?').bind('cus_paid_host', ORG).run()
     await db.prepare("DELETE FROM subscription WHERE id = 'sub-boot'").run()
     await db.prepare("INSERT INTO subscription (id, plan, referenceId, stripeCustomerId, stripeSubscriptionId, status, seats, periodEnd) VALUES ('sub-paid', 'business', ?, 'cus_paid_host', 'sub-paid', 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
-    let stalled = true
+    let stalled: PromiseWithResolvers<void> | null = Promise.withResolvers()
     let refused = false
     let requests = 0
     const receipts: Array<{ event: string; customer: string; value: string }> = []
@@ -1397,11 +1413,14 @@ test('a paid home records a failed meter report and reports it again before comp
       if (url.origin !== 'https://api.stripe.com') return channex.fetch(input, init)
       assert.equal(url.pathname, '/v1/billing/meter_events')
       requests++
-      if (stalled) {
-        assert.ok(init.signal, 'the real Stripe SDK transport receives the operation deadline')
+      const provider = stalled
+      if (provider) {
+        const signal = init.signal
+        assert.ok(signal, 'the real Stripe SDK transport receives the operation deadline')
         return new Promise<Response>((_resolve, reject) => {
-          if (init.signal!.aborted) reject(init.signal!.reason)
-          else init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true })
+          if (signal.aborted) reject(signal.reason)
+          else signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+          provider.resolve()
         })
       }
       if (refused) return Response.json({ error: { type: 'invalid_request_error', message: 'Meter refused' } }, { status: 400 })
@@ -1414,17 +1433,18 @@ test('a paid home records a failed meter report and reports it again before comp
     const consume = () => queue.drain(env, 'airbnb.sync')
     await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
     // The slice covers the mapping stage's calendar check and the activation; the stalled meter report ends it.
-    await expectSyncTimeout(t, consume)
+    await expectSyncTimeout(t, consume, stalled.promise)
     assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_SLICE_ENDED' })
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings').first(), { import_stage: 'reservations', enabled: 1 })
     assert.equal(requests, 1, 'the SDK does not retry beyond the operation deadline')
     await retry()
-    await expectSyncTimeout(t, consume)
+    stalled = Promise.withResolvers<void>()
+    await expectSyncTimeout(t, consume, stalled.promise)
     assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_SLICE_ENDED' })
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings').first(), { import_stage: 'complete', enabled: 1 })
     assert.equal(requests, 2)
     const providerStart = channex.seen.length
-    stalled = false
+    stalled = null
     await retry()
     await consume()
     assert.deepEqual(await job(), { state: 'done', last_error_code: null })

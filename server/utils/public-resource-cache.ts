@@ -4,6 +4,8 @@ import { purgeOrganizationKvCache } from '~/server/utils/edge-cache'
 import { syncOrganizationSearchIndex } from '~/server/utils/public-search'
 import { isNonProductionHost, normalizeHost } from '~/server/utils/tenant-hosts'
 import { publishBusinessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { publishEvent, type EventsEnv } from '~/server/events'
+import { advanceOrganizationSocialCardRefresh, SOCIAL_CARD_REFRESH_LEASE_SECONDS, SOCIAL_CARD_REFRESH_PREFIX, type SocialCardEnv } from '~/server/utils/social-card'
 
 // KV read-through cache for public shell and page resource queries.
 // Mirrors edge-cache.ts's HTML cache shape, but keyed by organizationId + resource
@@ -44,7 +46,7 @@ export function publicResourceCacheInvalidationQuery(
   }
 }
 
-export type OrganizationChangeDrainEnv = Pick<CloudflareEnv, 'AI_SEARCH' | 'AI_SEARCH_INSTANCE_ID' | 'NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN' | 'NUXT_PUBLIC_PLATFORM_DOMAIN'>
+export type OrganizationChangeDrainEnv = SocialCardEnv & EventsEnv & Pick<CloudflareEnv, 'AI_SEARCH' | 'AI_SEARCH_INSTANCE_ID' | 'NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN' | 'NUXT_PUBLIC_PLATFORM_DOMAIN'>
 
 /**
  * Drain one site's committed changes. On redelivery include the failed row
@@ -64,31 +66,46 @@ export async function drainPublicResourceCacheInvalidations(
   const now = options.now ?? new Date()
   const nowIso = now.toISOString()
   const { organizationId, invalidationId } = options
-  const eligible = "organization_id = ? AND (status = 'pending' OR (status = 'failed' AND (? IS NULL OR id = ?)))"
-  const scope = [organizationId, invalidationId, invalidationId]
-  const boundary = await queryFirst<{ latest: number | null }>(db, `
-    SELECT MAX(rowid) AS latest FROM public_resource_cache_invalidations WHERE ${eligible}
-  `, scope)
-  if (boundary?.latest == null) return 0
-
-  const finish = (status: 'processed' | 'failed', error: string | null): BatchQuery => ({
-    query: `UPDATE public_resource_cache_invalidations SET status = ?, processed_at = ?, last_error = ?
-       WHERE ${eligible} AND rowid <= ?`,
-    params: [status, nowIso, error, ...scope, boundary.latest],
-  })
-  let more = false
-  try {
-    await purgeOrganizationCaches(db, kv, organizationId, freeOrganizationDomain)
-    if (productionSearch) more = (await syncOrganizationSearchIndex(env as CloudflareEnv, db, organizationId)).pending > 0
-  } catch (error) {
-    await executeBatch(db, [finish('failed', (error instanceof Error ? error.message : String(error)).slice(0, 2000))])
-    throw error
+  const socialCardReason = `${SOCIAL_CARD_REFRESH_PREFIX}%`
+  const eligible = "organization_id = ? AND reason NOT LIKE ? AND (status = 'pending' OR (status = 'failed' AND (? IS NULL OR id = ?)))"
+  const scope = [organizationId, socialCardReason, invalidationId, invalidationId]
+  const work = await queryFirst<{ latest: number | null; social_card_id: string | null }>(db, `
+    SELECT (SELECT MAX(rowid) FROM public_resource_cache_invalidations WHERE ${eligible}) AS latest,
+           (SELECT id FROM public_resource_cache_invalidations WHERE organization_id = ? AND reason LIKE ?
+             AND (? IS NULL OR id = ?) AND status IN ('pending', 'processing')
+             ORDER BY rowid DESC LIMIT 1) AS social_card_id
+  `, [...scope, organizationId, socialCardReason, invalidationId, invalidationId])
+  let processed = 0
+  if (work?.latest != null) {
+    const finish = (status: 'processed' | 'failed', error: string | null): BatchQuery => ({
+      query: `UPDATE public_resource_cache_invalidations SET status = ?, processed_at = ?, last_error = ?
+         WHERE ${eligible} AND rowid <= ?`,
+      params: [status, nowIso, error, ...scope, work.latest],
+    })
+    let more = false
+    try {
+      await purgeOrganizationCaches(db, kv, organizationId, freeOrganizationDomain)
+      if (productionSearch) more = (await syncOrganizationSearchIndex(env as CloudflareEnv, db, organizationId)).pending > 0
+    } catch (error) {
+      await executeBatch(db, [finish('failed', (error instanceof Error ? error.message : String(error)).slice(0, 2000))])
+      throw error
+    }
+    const [finalized] = await executeBatch(db, [
+      finish('processed', null),
+      ...(more ? [publicResourceCacheInvalidationQuery(organizationId, SEARCH_SYNC_CONTINUE)] : []),
+    ], { operation: 'Finish public site changes' })
+    processed = Number(finalized?.meta.changes ?? 0)
   }
-  const [finalized] = await executeBatch(db, [
-    finish('processed', null),
-    ...(more ? [publicResourceCacheInvalidationQuery(organizationId, SEARCH_SYNC_CONTINUE)] : []),
-  ], { operation: 'Finish public site changes' })
-  return Number(finalized?.meta.changes ?? 0)
+  if (work?.social_card_id) {
+    const id = work.social_card_id
+    const { refresh, next_cursor } = await advanceOrganizationSocialCardRefresh({ db, env, organizationId, id })
+    if (refresh?.id === id && refresh.status === 'failed' && refresh.error) throw new Error(refresh.error)
+    if (refresh?.id === id && refresh.status === 'pending' && next_cursor === null) {
+      // A redelivery can find a render still claimed. Recheck after its lease can expire.
+      await publishEvent(env, { type: 'site.cache_changed', organization_id: organizationId, invalidation_id: id }, { delaySeconds: SOCIAL_CARD_REFRESH_LEASE_SECONDS + 1 })
+    }
+  }
+  return processed
 }
 
 export interface PublicResourceCacheParams {

@@ -1,7 +1,8 @@
-import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import {
   buildSingleMediaPlacementQueries,
   deleteMediaAsset,
+  mediaPlacementsQuery,
   readMediaPlacements,
   type StoredMediaPlacementItem,
 } from '~/server/utils/media-asset-manager'
@@ -23,6 +24,7 @@ import { mediaStillUrl, resolveOwnerPicture, type MediaPlacementOwnerType } from
 import { platformHomeSocialCardCopy } from '~/server/utils/platform-home-social-card'
 import { publicLocationProtectedSql } from '~/server/utils/public-location-privacy'
 import { publicLocationIsProtected } from '~/shared/location-sharing'
+import type { OrganizationSocialCardRefresh } from '~/utils/social-card-refresh'
 
 export function hashSocialCardGenerationInput(value: string): string {
   return bytesToHex(sha256(new TextEncoder().encode(value)))
@@ -54,8 +56,9 @@ export async function listSocialCardOwners(db: DbClient, input: { organizationId
   for (const [ownerType, source] of Object.entries(SOCIAL_CARD_OWNERS).sort(([left], [right]) => left < right ? -1 : 1)) {
     const remaining = input.limit === undefined ? -1 : input.limit - owners.length
     if (remaining === 0) break
+    const filter = ownerType === 'organization' && input.organizationId ? '1' : source.filter
     owners.push(...await queryAll<SocialCardOwner & { cursor: string }>(db, `SELECT '${ownerType}' AS owner_type, o.id AS owner_id, '${ownerType}:' || o.id AS cursor
-      FROM ${source.table} o WHERE ${source.filter}
+      FROM ${source.table} o WHERE ${filter}
         AND (? IS NULL OR ${source.tenant} = ?) AND (? IS NULL OR '${ownerType}:' || o.id > ?)
       ORDER BY o.id LIMIT ?`, [input.organizationId ?? null, input.organizationId ?? null, input.after ?? null, input.after ?? null, remaining]))
   }
@@ -89,7 +92,139 @@ interface OrganizationRecord {
 export type SocialCardPlacedAsset = StoredMediaPlacementItem
 
 const SOCIAL_CARD_RENDERER_VERSION = 'social-card-v2'
-type SocialCardEnv = UploadResolvedMediaInput['env'] & { IMAGES?: ImagesBinding; NUXT_PUBLIC_PLATFORM_DOMAIN?: string }
+export type SocialCardEnv = UploadResolvedMediaInput['env'] & { IMAGES?: ImagesBinding; NUXT_PUBLIC_PLATFORM_DOMAIN?: string }
+
+export const SOCIAL_CARD_REFRESH_PREFIX = 'social-card-refresh:'
+export const SOCIAL_CARD_REFRESH_LEASE_SECONDS = 5 * 60
+type SocialCardRefreshClaim = { id: string; claimedAt: string }
+type SocialCardRefreshWork = { cursor: string | null; displaced: string | null }
+const SOCIAL_CARD_REFRESH_WORK_START = SOCIAL_CARD_REFRESH_PREFIX.length + 1
+
+function socialCardRefreshReason(cursor: string | null, displaced: string | null = null) {
+  return SOCIAL_CARD_REFRESH_PREFIX + JSON.stringify({ cursor, displaced })
+}
+
+function cardRefreshWork(reason: string): SocialCardRefreshWork {
+  return JSON.parse(reason.slice(SOCIAL_CARD_REFRESH_PREFIX.length))
+}
+
+export function expiredSocialCardRefreshClaim(now = new Date()): string {
+  return new Date(now.getTime() - SOCIAL_CARD_REFRESH_LEASE_SECONDS * 1000).toISOString()
+}
+
+function socialCardClaimGuard(claim?: SocialCardRefreshClaim): BatchQuery {
+  return claim ? {
+    query: "EXISTS (SELECT 1 FROM public_resource_cache_invalidations WHERE id = ? AND status = 'processing' AND processed_at = ?)",
+    params: [claim.id, claim.claimedAt],
+  } : { query: '1', params: [] }
+}
+
+function recordDisplacedSocialCard(claim: SocialCardRefreshClaim | undefined, assetId: string | undefined): BatchQuery[] {
+  if (!claim || !assetId) return []
+  return [{
+    query: `UPDATE public_resource_cache_invalidations
+      SET reason = ? || json_set(substr(reason, ?), '$.displaced', ?)
+      WHERE id = ? AND status = 'processing' AND processed_at = ?`,
+    params: [SOCIAL_CARD_REFRESH_PREFIX, SOCIAL_CARD_REFRESH_WORK_START, assetId, claim.id, claim.claimedAt],
+  }]
+}
+
+// Store the unfinished cursor in the existing site-change record. The first
+// statement follows the name UPDATE in the same D1 batch. A newer rename
+// replaces the old cursor, so it always visits every owner for the new name.
+export function queueOrganizationSocialCardRefresh(organizationId: string): { id: string; queries: BatchQuery[] } {
+  const refresh = publicResourceCacheInvalidationQuery(organizationId, socialCardRefreshReason(null), { query: 'changes() = 1', params: [] })
+  const id = String(refresh.params![0])
+  const prefix = `${SOCIAL_CARD_REFRESH_PREFIX}%`
+  return { id, queries: [refresh, {
+    query: `UPDATE public_resource_cache_invalidations
+      SET reason = ? || json_set(substr(reason, ?), '$.displaced', (
+        SELECT json_extract(substr(old.reason, ?), '$.displaced')
+        FROM public_resource_cache_invalidations old
+        WHERE old.organization_id = ? AND old.reason LIKE ? AND old.rowid < public_resource_cache_invalidations.rowid
+        ORDER BY old.rowid DESC LIMIT 1
+      ))
+      WHERE id = ?`,
+    params: [SOCIAL_CARD_REFRESH_PREFIX, SOCIAL_CARD_REFRESH_WORK_START, SOCIAL_CARD_REFRESH_WORK_START, organizationId, prefix, id],
+  }, {
+    query: `DELETE FROM public_resource_cache_invalidations
+      WHERE organization_id = ? AND reason LIKE ? AND rowid < (
+        SELECT rowid FROM public_resource_cache_invalidations WHERE id = ?
+      )`,
+    params: [organizationId, prefix, id],
+  }] }
+}
+
+function readOrganizationSocialCardRefresh(db: DbClient, organizationId: string) {
+  return queryFirst<{ id: string; reason: string; status: 'pending' | 'processing' | 'processed' | 'failed'; last_error: string | null }>(db, `
+    SELECT id, reason, status, last_error FROM public_resource_cache_invalidations
+    WHERE organization_id = ? AND reason LIKE ? ORDER BY rowid DESC LIMIT 1
+  `, [organizationId, `${SOCIAL_CARD_REFRESH_PREFIX}%`])
+}
+
+export async function loadOrganizationSocialCardRefresh(db: DbClient, organizationId: string): Promise<OrganizationSocialCardRefresh | null> {
+  const row = await readOrganizationSocialCardRefresh(db, organizationId)
+  if (!row) return null
+  return {
+    id: row.id,
+    status: row.status === 'processed' ? 'complete' : row.status === 'failed' ? 'failed' : 'pending',
+    cursor: cardRefreshWork(row.reason).cursor,
+    error: row.last_error,
+  }
+}
+
+export async function advanceOrganizationSocialCardRefresh(input: {
+  db: DbClient
+  env: SocialCardEnv
+  organizationId: string
+  actorId?: string | null
+  id?: string
+  retryFailed?: boolean
+}) {
+  const { db, organizationId } = input
+  const refresh = await readOrganizationSocialCardRefresh(db, organizationId)
+  if (!refresh || refresh.status === 'processed' || (input.id && input.id !== refresh.id) || (refresh.status === 'failed' && !input.retryFailed)) {
+    return { refresh: await loadOrganizationSocialCardRefresh(db, organizationId), results: [] as SocialCardRefreshResult[], next_cursor: null }
+  }
+  const now = new Date()
+  const claim = { id: refresh.id, claimedAt: now.toISOString() }
+  const work = cardRefreshWork(refresh.reason)
+  const claimed = await execute(db, `
+    UPDATE public_resource_cache_invalidations SET status = 'processing', processed_at = ?, last_error = NULL
+    WHERE id = ? AND reason = ? AND (
+      status = 'pending' OR (status = 'failed' AND ?) OR (status = 'processing' AND processed_at < ?)
+    )
+  `, [claim.claimedAt, claim.id, refresh.reason, input.retryFailed ? 1 : 0, expiredSocialCardRefreshClaim(now)])
+  if (claimed.meta?.changes !== 1) {
+    return { refresh: await loadOrganizationSocialCardRefresh(db, organizationId), results: [] as SocialCardRefreshResult[], next_cursor: null }
+  }
+  let results: SocialCardRefreshResult[] = []
+  let next_cursor: string | null = null
+  let error: string | null = null
+  try {
+    if (work.displaced) await deleteUnplacedCard(db, input.env, work.displaced, organizationId, input.actorId ?? null)
+    const batch = await regenerateOrganizationSocialCards({ ...input, after: work.cursor, claim })
+    results = batch.results
+    next_cursor = batch.next_cursor
+    const result = results[0]
+    if (result?.kind === 'failed') error = `${result.owner.owner_type}/${result.owner.owner_id}: ${result.error}`
+    if (result?.kind === 'skipped' && result.reason === 'images_unavailable') error = `${result.owner.owner_type}/${result.owner.owner_id}: image storage is unavailable`
+  } catch (cause) {
+    error = errorMessage(cause)
+  }
+  const status = error ? 'failed' : next_cursor ? 'pending' : 'processed'
+  const [finished] = await executeBatch(db, [{
+    query: `UPDATE public_resource_cache_invalidations
+      SET status = ?, reason = COALESCE(?, reason), processed_at = ?, last_error = ?
+      WHERE id = ? AND status = 'processing' AND processed_at = ?`,
+    params: [status, error ? null : socialCardRefreshReason(next_cursor),
+      new Date().toISOString(), error?.slice(0, 2000) ?? null, claim.id, claim.claimedAt],
+    ...(status === 'pending' ? { event: { type: 'site.cache_changed' as const, organization_id: organizationId, invalidation_id: claim.id } } : {}),
+  }], { operation: 'Advance social-card refresh' })
+  const current = await loadOrganizationSocialCardRefresh(db, organizationId)
+  if (finished?.meta.changes !== 1) return { refresh: current, results: [], next_cursor: null }
+  return { refresh: current, results, next_cursor }
+}
 
 export async function socialCardRefreshOwnersForPlacement(db: DbClient, placement: {
   owner_type: string
@@ -230,13 +365,17 @@ async function deleteUnplacedCard(db: DbClient, env: SocialCardEnv, assetId: str
   await deleteMediaAsset(db, env, assetId, organizationId, actorId)
 }
 
-async function clearSocialCard(input: { db: DbClient; env: SocialCardEnv; owner: SocialCardOwner; actorId?: string | null }, reason: 'no_source' | 'owner_not_found' | 'missing_content' | 'private_location') {
+async function clearSocialCard(input: { db: DbClient; env: SocialCardEnv; owner: SocialCardOwner; actorId?: string | null; claim?: SocialCardRefreshClaim }, reason: 'no_source' | 'owner_not_found' | 'missing_content' | 'private_location') {
   // Only production stores cards, so only production deletes one; elsewhere
   // the rows are a copy of production's and the card they name is production's.
   const placed = await queryAll<{ organization_id: string; asset_id: string }>(input.db, "SELECT organization_id, asset_id FROM media_placements WHERE owner_type = ? AND owner_id = ? AND slot = 'social_card'", [input.owner.owner_type, input.owner.owner_id])
   if (placed.length) {
+    const guard = socialCardClaimGuard(input.claim)
     await executeBatch(input.db, [
-      { query: "DELETE FROM media_placements WHERE owner_type = ? AND owner_id = ? AND slot = 'social_card'", params: [input.owner.owner_type, input.owner.owner_id] },
+      { query: `DELETE FROM media_placements WHERE owner_type = ? AND owner_id = ? AND slot = 'social_card'
+          AND asset_id IN (SELECT value FROM json_each(?)) AND (${guard.query})`,
+        params: [input.owner.owner_type, input.owner.owner_id, JSON.stringify(placed.map(row => row.asset_id)), ...guard.params!] },
+      ...recordDisplacedSocialCard(input.claim, placed[0]?.asset_id),
       ...[...new Set(placed.map(row => row.organization_id))].map(organizationId => publicResourceCacheInvalidationQuery(organizationId, 'social-card-cleared')),
     ], { operation: 'clear social card placement' })
     if (cloudflareImagesConfigured(input.env)) for (const row of placed) await deleteUnplacedCard(input.db, input.env, row.asset_id, row.organization_id, input.actorId ?? null)
@@ -250,10 +389,12 @@ export async function refreshSocialCard(input: {
   env: SocialCardEnv
   owner: SocialCardOwner
   actorId?: string | null
+  claim?: SocialCardRefreshClaim
 }): Promise<Exclude<SocialCardRefreshResult, { kind: 'failed' }>> {
   // A write that changed a card's input calls this, and a card that did not
   // regenerate fails that write: the batch paths below record the failure.
   const { db, env, owner } = input
+  const claimGuard = socialCardClaimGuard(input.claim)
   const ownerRecord = await loadOwner(db, owner)
   if (!ownerRecord) return await clearSocialCard(input, 'owner_not_found')
   if (owner.owner_type === 'business_location' && publicLocationIsProtected(ownerRecord.is_stay_location)) return await clearSocialCard(input, 'private_location')
@@ -300,14 +441,16 @@ export async function refreshSocialCard(input: {
     ? (await fetch(current.public_url, { method: 'HEAD' })).ok
     : false
   if (currentServed && current?.public_url) {
-    await executeBatch(db, [{ query: "UPDATE media_placements SET status = 'active' WHERE owner_type = ? AND owner_id = ? AND slot = 'social_card' AND asset_id = ?", params: [owner.owner_type, owner.owner_id, current.asset_id] }])
+    const reused = await execute(db, `UPDATE media_placements SET status = 'active'
+      WHERE organization_id = ? AND owner_type = ? AND owner_id = ? AND slot = 'social_card' AND asset_id = ?
+        AND EXISTS (SELECT 1 FROM organization WHERE id = ? AND name IS ?) AND (${claimGuard.query})`,
+    [organization.id, owner.owner_type, owner.owner_id, current.asset_id, organization.id, organization.name, ...claimGuard.params!])
+    if (reused.meta?.changes !== 1) throw new Error('Social-card inputs changed during refresh')
     return { kind: 'reused', owner, asset_id: current.asset_id, public_url: current.public_url, generation_key: generationKey }
   }
   // Only production can store a card. Elsewhere the rows are production's copy,
   // so the card it already has stays exactly as it is and the result says why.
   if (!cloudflareImagesConfigured(env)) return { kind: 'skipped', owner, reason: 'images_unavailable' }
-  await executeBatch(db, [{ query: "UPDATE media_placements SET status = 'pending' WHERE owner_type = ? AND owner_id = ? AND slot = 'social_card'", params: [owner.owner_type, owner.owner_id] }])
-
   if (!env.IMAGES) throw new Error('Cloudflare Images binding is required to render social cards')
   if (!env.NUXT_PUBLIC_PLATFORM_DOMAIN) throw new Error('NUXT_PUBLIC_PLATFORM_DOMAIN is required to render social cards')
   const png = await renderOgImagePng(payload, { images: env.IMAGES, publicOrigin: env.NUXT_PUBLIC_PLATFORM_DOMAIN })
@@ -329,11 +472,27 @@ export async function refreshSocialCard(input: {
   })
 
   try {
-    await executeBatch(db, buildSingleMediaPlacementQueries({
+    // Fail this batch if a rename happened during the render or another
+    // request has already replaced this placement. Keep the served card
+    // available until the replacement is committed.
+    const savedCard = mediaPlacementsQuery({
+      organizationId: organization.id, ownerType: owner.owner_type, owners: [owner.owner_id], slot: 'social_card', includePendingSocialCard: true,
+    })
+    const writeGuard: BatchQuery = {
+      query: `INSERT INTO media_placements
+        (id, organization_id, owner_type, owner_id, slot, asset_id, sort_order)
+        SELECT ?, ?, ?, ?, 'social_card', ?, -1
+        WHERE NOT (${claimGuard.query}) OR NOT EXISTS (SELECT 1 FROM organization WHERE id = ? AND name IS ?)
+          OR (SELECT id FROM (${savedCard.query}) LIMIT 1) IS NOT ?`,
+      params: [crypto.randomUUID(), organization.id, owner.owner_type, owner.owner_id, uploaded.assetId, ...claimGuard.params!,
+        organization.id, organization.name, ...savedCard.params!, current?.asset_id ?? null],
+    }
+    await executeBatch(db, [writeGuard, ...buildSingleMediaPlacementQueries({
       organizationId: organization.id,
       placement: { owner_type: owner.owner_type, owner_id: owner.owner_id, slot: 'social_card' },
       media: [{ asset_id: uploaded.assetId }],
-    }), { operation: 'replace social card placement' })
+    }), ...recordDisplacedSocialCard(input.claim, current?.asset_id),
+    publicResourceCacheInvalidationQuery(organization.id, 'social-card-replaced')], { operation: 'replace social card placement' })
   } catch (placementError) {
     try {
       await deleteMediaAsset(db, env, uploaded.assetId, organization.id, input.actorId ?? null)
@@ -355,18 +514,17 @@ export async function regenerateOrganizationSocialCards(input: {
   organizationId: string
   actorId?: string | null
   after?: string | null
-  limit?: number
+  claim?: SocialCardRefreshClaim
 }) {
-  const owners = await listSocialCardOwners(input.db, { organizationId: input.organizationId, after: input.after, limit: (input.limit ?? 1) + 1 })
-  const results: SocialCardRefreshResult[] = []
-  const batch = owners.slice(0, input.limit ?? 1)
-  for (const { owner_type, owner_id } of batch) {
-    const owner = { owner_type, owner_id }
-    try {
-      results.push(await refreshSocialCard({ ...input, owner }))
-    } catch (error) {
-      results.push({ kind: 'failed', owner, error: errorMessage(error) })
-    }
+  const [current, next] = await listSocialCardOwners(input.db, { organizationId: input.organizationId, after: input.after, limit: 2 })
+  if (!current) return { results: [] as SocialCardRefreshResult[], next_cursor: null }
+  const { owner_type, owner_id } = current
+  const owner = { owner_type, owner_id }
+  let result: SocialCardRefreshResult
+  try {
+    result = await refreshSocialCard({ ...input, owner })
+  } catch (error) {
+    result = { kind: 'failed', owner, error: errorMessage(error) }
   }
-  return { results, next_cursor: owners.length > batch.length ? batch.at(-1)!.cursor : null }
+  return { results: [result], next_cursor: next ? current.cursor : null }
 }
