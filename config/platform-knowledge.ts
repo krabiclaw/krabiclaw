@@ -1,4 +1,6 @@
 
+export const LODGING_PAGE_SUMMARY = "Manage furnished rentals, direct bookings and turnovers. Eligible Airbnb homes connect through Channex, and linked Vrbo calendars exchange occupied dates."
+
 export type PlatformKnowledgeResultType =
   | 'doc'
   | 'blog'
@@ -214,8 +216,8 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     id: 'lodging-page',
     title: 'Mid-Term Rental & Host PMS Software',
     path: '/lodging',
-    snippet: 'Mobile PMS for mid-term and furnished rentals (21+ day stays), two-way Airbnb and Vrbo calendar sync, and zero-commission direct bookings.',
-    body: 'Present furnished homes, photos, amenities, and extended stay rate plans on your own website. Manage 21+ day stays, two-way Airbnb and Vrbo calendar sync, zero OTA fee direct bookings with Stripe, turnovers, and guest conversations through Blawby.',
+    snippet: LODGING_PAGE_SUMMARY,
+    body: `Present furnished homes, photos, amenities, and extended stay rate plans on your own website. ${LODGING_PAGE_SUMMARY} Manage guest conversations in Blawby.`,
     icon: 'calendar',
     section: 'Solutions',
     keywords: ['lodging', 'mid term rental', 'furnished rental', 'mtr', 'pms', 'extended stay', 'airbnb host', 'vrbo', 'direct booking', 'turnover', 'calendar sync'],
