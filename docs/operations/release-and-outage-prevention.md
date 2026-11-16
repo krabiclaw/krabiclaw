@@ -75,9 +75,10 @@ After asset convergence, the deployment workflow sends one outstanding-work
 message to that environment’s `EVENTS` queue. The consumer reads eligible
 review bookings, checkout holds and pending stay requests, enabled Channex
 mappings, managed ad agreements and undelivered ad charges, pending Airbnb
-imports, pending or failed site invalidations, Calendar integrations, and
-orphaned Calendar cleanup records. It sends scoped messages for those records
-and schedules the platform retention alarm. This runs on every deployment
+imports, pending or failed site invalidations, Calendar integrations, orphaned
+Calendar cleanup records, pending outbox sends, and open tasks with reminders.
+It sends scoped messages for those records and schedules the platform retention
+alarm. This runs on every deployment
 that reaches the step, including a retried verification job.
 
 For every iOS App Store submission, select **Automatically release this

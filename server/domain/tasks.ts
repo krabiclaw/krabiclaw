@@ -52,8 +52,6 @@ function fail(statusCode: number, code: string, message: string, field?: string)
 // keeps the task alert instead.
 // ---------------------------------------------------------------------------
 
-export const JOB_TASK_SQL = (alias: string) => `${alias}.kind IN ('turnover', 'consultation_follow_up')`
-
 export function isJobTask(row: Pick<TaskRow, 'kind'>): boolean {
   return row.kind === 'turnover' || row.kind === 'consultation_follow_up'
 }

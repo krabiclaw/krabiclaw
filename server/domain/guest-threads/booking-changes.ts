@@ -268,7 +268,6 @@ export async function changeBooking(db: DbClient, env: CloudflareEnv, input: {
   const change = input.apply
     ? await moveBooking(db, env, thread, { userId: input.actorUserId }, input.body, key)
     : await requestBookingChange(db, env, thread, input.actorUserId, input.body, key)
-  await publishConversationEvent(env, db, { conversationId: thread.id, type: 'MESSAGE_CREATE' })
   return { kind: 'booking' as const, conversationId: thread.id, ...change }
 }
 

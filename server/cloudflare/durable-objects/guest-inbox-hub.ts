@@ -10,8 +10,8 @@ import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { BUSINESS_WAKE_KINDS, guestInboxTarget, SCHEDULED_AUTHOR_HEADER, type BusinessWakeKind } from '~/server/cloudflare/guest-inbox-events'
 import { sendDueOutbox } from '~/server/domain/scheduled-guest-messages'
 
-/** The business whose outbox this hub wakes for. */
-const OUTBOX_ORGANIZATION = 'outbox:organization'
+/** The business whose outbox this hub wakes for, using the existing alarm's storage key. */
+const OUTBOX_ORGANIZATION = 'jobs:organization'
 
 const BUSINESS_WAKES = 'outbox:wakes'
 type Wake = { at: number; revision: string }

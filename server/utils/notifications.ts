@@ -2076,7 +2076,7 @@ async function notifyTaskPeople(env: NotificationEnv, db: DbClient, input: { org
     if (!recipient) return
     const sends = memberNotificationSends(env, db, recipient, {
       organizationId: input.organizationId, organizationName: organization.name, locationId: task.locationId,
-      // An assignment's sends are keyed by its version; a start's by its day, which taskStartingSent reads.
+      // An assignment's sends are keyed by its version; a start's by its day.
       context: { conversationId: null, subject: { taskId: input.taskId } }, eventKey: input.kind === 'assigned' ? `${input.eventKey}:${userId}` : undefined,
       template: input.kind === 'assigned' ? 'task_assigned' : `task_starting:${input.day}`, pushTemplate: input.kind === 'assigned' ? 'task_assigned' : `task_starting:${input.day}`,
       whatsappTemplate: 'guest_thread_reply_whatsapp', payload: { task_id: input.taskId, deep_link: taskUrl }, message,
@@ -2098,12 +2098,3 @@ export async function notifyTaskAssigned(env: NotificationEnv, db: DbClient, inp
 export async function notifyTaskStarting(env: NotificationEnv, db: DbClient, input: { organizationId: string; taskId: string; day: string; recipientUserIds: string[] }): Promise<void> {
   await notifyTaskPeople(env, db, { organizationId: input.organizationId, taskId: input.taskId, recipientUserIds: input.recipientUserIds, kind: 'starting', actorUserId: null, day: input.day })
 }
-
-/** Whether a task's start alert for this day already went out on some channel: its sends are keyed by task, alert and day. */
-export async function taskStartingSent(db: DbClient, taskId: string, day: string): Promise<boolean> {
-  // D1 refuses a GLOB pattern this long, so the key's parts are matched by position.
-  const prefix = `${taskId}:owner_alert:`
-  return Boolean(await queryFirst(db, 'SELECT 1 FROM guest_thread_deliveries WHERE task_id = ? AND substr(id, 1, length(?)) = ? AND instr(id, ?) > 0',
-    [taskId, prefix, prefix, `:task_starting:${day}:`]))
-}
-

@@ -185,7 +185,7 @@ export async function consumeEvent(env: CloudflareEnv, event: DomainEvent): Prom
   if (event.type === 'stay.changed' || event.type === 'jobs.changed') {
     if (event.task_ids.length) {
       const { postJobs } = await import('~/server/domain/cleaner-jobs')
-      await postJobs(env, env.DB, event.organization_id, event.task_ids, { quiet: event.quiet === true })
+      await postJobs(env, env.DB, event.organization_id, event.task_ids, event.quiet === true)
     }
     if (event.type === 'jobs.changed') {
       const { publishBusinessInvalidation } = await import('~/server/cloudflare/guest-inbox-events')

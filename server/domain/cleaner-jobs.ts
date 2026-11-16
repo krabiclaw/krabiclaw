@@ -92,8 +92,8 @@ function plannedSendQueries(task: Pick<TaskRow, 'id' | 'organization_id' | 'time
 }
 
 /** Post and schedule only the tasks recorded by the write. */
-export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId: string, taskIds: string[], options: { quiet?: boolean; now?: Date } = {}): Promise<void> {
-  const now = options.now ?? new Date()
+export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId: string, taskIds: string[], quiet: boolean): Promise<void> {
+  const now = new Date()
   const tasks = await queryAll<TaskRow & { job_booking_id: string | null; private_prep: number }>(db, `SELECT t.*, ${jobBookingIdSql('t')} AS job_booking_id,
     (t.subject_type = 'product_session' AND EXISTS (SELECT 1 FROM products p WHERE p.organization_id = t.organization_id AND p.id = t.product_id AND p.kind = 'service')) AS private_prep
     FROM tasks t WHERE t.organization_id = ? AND t.id IN (SELECT value FROM json_each(?))`,
@@ -134,7 +134,7 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
   }
   const hostUsers = members.filter(member => isOrganizationWideRole(member.role)).map(member => member.userId)
   const post = async (subject: JobSubject, seats: readonly string[], key: string, body: string, alertUserIds: readonly string[], threadId?: string) => {
-    const result = await postAutomaticTeamMessage(env, db, { organizationId, subject, seatMemberIds: seats, body, idempotencyKey: key, alertUserIds: options.quiet ? [] : alertUserIds, senderName: organization.name, threadId })
+    const result = await postAutomaticTeamMessage(env, db, { organizationId, subject, seatMemberIds: seats, body, idempotencyKey: key, alertUserIds: quiet ? [] : alertUserIds, senderName: organization.name, threadId })
     postsByThread.set(result.threadId, (postsByThread.get(result.threadId) ?? new Map()).set(key, result.messageId))
     return result
   }
@@ -251,14 +251,16 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
  * conversation. A task no longer open sends nothing.
  */
 export async function sendTaskSend(env: CloudflareEnv, db: DbClient, row: { id: string; organization_id: string; task_id: string }, now: string): Promise<'sent' | 'not_due'> {
-  const claim = await execute(db, "UPDATE scheduled_guest_messages SET status = 'sending', started_at = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND due_at <= ?", [now, now, row.id, now])
-  if (claim.meta.changes !== 1) return 'not_due'
-  const send = await queryFirst<{ body: string; conversation_id: string | null; status: string; assigned_member_id: string | null; starts_at: string | null; due_at: string | null; timezone: string }>(db,
+  // The organization's outbox alarm is the only sender. The post and alert each have a stable delivery key.
+  const send = await queryFirst<{ body: string; conversation_id: string | null; status: string | null; assigned_member_id: string | null; starts_at: string | null; due_at: string | null; timezone: string }>(db,
     `SELECT m.body, m.conversation_id, t.status, t.assigned_member_id, t.starts_at, t.due_at, t.timezone
-      FROM scheduled_guest_messages m JOIN tasks t ON t.id = m.task_id WHERE m.id = ?`, [row.id])
-  if (!send) throw new Error(`Scheduled task send ${row.id} has no task`)
+      FROM scheduled_guest_messages m LEFT JOIN tasks t ON t.organization_id = m.organization_id AND t.id = m.task_id
+      WHERE m.id = ? AND m.organization_id = ? AND m.status = 'pending' AND m.due_at <= ?`, [row.id, row.organization_id, now])
+  if (!send) return 'not_due'
+  if (send.status === null) throw new Error(`Scheduled task send ${row.id} has no task`)
   const finish = (status: 'sent' | 'cancelled', messageId: string | null) => execute(db,
-    "UPDATE scheduled_guest_messages SET status = ?, message_id = ?, sent_at = ?, updated_at = ? WHERE id = ? AND status = 'sending'", [status, messageId, status === 'sent' ? now : null, now, row.id])
+    "UPDATE scheduled_guest_messages SET status = ?, message_id = ?, sent_at = ?, started_at = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND due_at <= ?",
+    [status, messageId, status === 'sent' ? now : null, now, now, row.id, now])
   if (send.status !== 'open') { await finish('cancelled', null); return 'not_due' }
   const [organization, members] = await Promise.all([
     queryFirst<{ name: string }>(db, 'SELECT name FROM organization WHERE id = ?', [row.organization_id]),

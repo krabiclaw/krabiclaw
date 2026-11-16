@@ -8,6 +8,7 @@ import { sendDueReviewInvitations } from '~/server/utils/review-request-delivery
 import { REVIEW_REQUEST_TTL_DAYS } from '~/server/utils/review-requests'
 import { CACHE_INVALIDATION_TERMINAL_RETENTION_DAYS } from '~/server/utils/public-resource-cache'
 import { SOCIAL_CARD_REFRESH_PREFIX } from '~/server/utils/social-card'
+import { scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
 
 export const RETENTION_HUB = 'platform:analytics-retention'
 
@@ -60,6 +61,21 @@ export async function enqueueOutstandingWork(env: CloudflareEnv): Promise<void> 
     if (kind === 'site') await publishEvent(env, { type: 'site.cache_changed', organization_id, invalidation_id: null })
     else if (kind === 'calendar') await publishEvent(env, { type: 'calendar.changed', organization_id, booking_id: null })
     else await publishEvent(env, { type: 'calendar.cleanup', organization_id })
+  }
+  const outboxes = await queryAllPages<{ organization_id: string }>(env.DB, `SELECT DISTINCT organization_id
+    FROM scheduled_guest_messages WHERE status = 'pending' ORDER BY organization_id`, [])
+  for (const { organization_id } of outboxes) await scheduleBusinessWake(env, organization_id, 'outbox', due)
+
+  // Open tasks from the old timer need a reminder in the outbox even if the task never changes again.
+  const tasks = await queryAllPages<{ organization_id: string; task_ids: string }>(env.DB, `
+    WITH upcoming AS (
+      SELECT organization_id, id, (row_number() OVER (PARTITION BY organization_id ORDER BY id) - 1) / 100 AS page
+      FROM tasks WHERE status='open' AND assigned_member_id IS NOT NULL AND COALESCE(due_at, starts_at) >= ?
+    )
+    SELECT organization_id, json_group_array(id) AS task_ids FROM upcoming GROUP BY organization_id, page ORDER BY organization_id, page`,
+  [new Date(due - 43_200_000).toISOString()])
+  for (const { organization_id, task_ids } of tasks) {
+    await publishEvent(env, { type: 'jobs.changed', organization_id, task_ids: JSON.parse(task_ids) as string[], quiet: true })
   }
   const jobs = await queryAllPages<{ organization_id: string; id: string }>(env.DB,
     "SELECT organization_id, id FROM airbnb_sync_jobs WHERE state = 'pending' ORDER BY id", [])

@@ -194,7 +194,7 @@ export async function quoteTimedBooking(db: DbClient, env: CloudflareEnv, input:
 }
 
 /** Creation delivery is shared by ordinary claims and authenticated Checkout conversion. */
-export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClient, organizationId: string, requestId: string, cancellationToken?: string) {
+export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClient, organizationId: string, requestId: string) {
   const [request, record, organization] = await Promise.all([
     getGuestRequest(db, requestId, organizationId, 'booking'),
     getThreadOperationalRecord(db, requestId),
@@ -211,9 +211,8 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
   const locale = request.payload.guest.locale ?? sourceLocale
   // The guest's note is their message in the conversation.
   const note = await queryFirst<{ body: string | null }>(db, 'SELECT body FROM messages WHERE conversation_id = ? AND event_name = ?', [requestId, GUEST_NOTE_EVENT])
-  const token = cancellationToken ?? (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', requestId)).token
+  const { token } = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', requestId)
   const tokenMatches = await hashReservationCancelToken(token) === request.payload.cancellation.token_hash
-  if (cancellationToken && !tokenMatches) throw new Error('Booking cancellation capability does not match its request')
   const receiptUrl = tokenMatches && organization.public_url
     ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/bookings/confirmed', locale, sourceLocale)}?id=${requestId}#${token}`
     : null
