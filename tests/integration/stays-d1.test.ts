@@ -25,6 +25,7 @@ import paymentHandoffRoute from '../../server/api/public/payments/[payment_id].g
 import paymentConfirmRoute from '../../server/api/public/payments/[payment_id]/confirm.post.ts'
 import paymentReviewRoute from '../../server/api/public/payments/[payment_id]/review.post.ts'
 import { createProductBooking, notifyProductBookingCreated } from '../../server/domain/product-bookings.ts'
+import publicBookingRoute from '../../server/api/public/products/[slug]/book.post.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getThreadOperationalRecord, requestActions } from '../../server/domain/requests.ts'
 import { cancelStayAsGuest, createStayRequest, expireStayRequests } from '../../server/domain/stays.ts'
@@ -2107,6 +2108,27 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
     assert.equal(cancelledReplay.body.request_status, null)
     assert.equal(cancelledReplay.body.booking_id, secondId)
     assert.equal(cancelledReplay.body.activity_path, second.body.activity_path)
+
+    app.post('/api/public/products/:slug/book', publicBookingRoute)
+    const bookFromSameIp = (attempt: number) => app.request(Object.assign(new Request(`https://proof.example/api/public/products/${cabin.slug}/book`, {
+      method: 'POST',
+      headers: { cookie, origin: 'https://proof.example', 'content-type': 'application/json', 'cf-connecting-ip': '192.0.2.41' },
+      body: JSON.stringify({
+        ...requestBody,
+        idempotency_key: `repeat-stay-${attempt}`,
+        check_in_date: date(22 + attempt * 3),
+        check_out_date: date(24 + attempt * 3),
+      }),
+    }), { runtime: runtimeContext }))
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const response = await bookFromSameIp(attempt)
+      assert.equal(response.status, 201, await response.clone().text())
+    }
+    const limited = await bookFromSameIp(6)
+    assert.equal(limited.status, 429)
+    assert.equal((await limited.json()).data?.code, 'RATE_LIMITED')
+    const { results: repeatedStays } = await db.prepare("SELECT idempotency_key, status FROM bookings WHERE organization_id=? AND idempotency_key LIKE 'repeat-stay-%' ORDER BY idempotency_key").bind(ORG).all()
+    assert.deepEqual(repeatedStays, Array.from({ length: 5 }, (_, index) => ({ idempotency_key: `repeat-stay-${index + 1}`, status: 'pending' })))
   } finally {
     await runtime.dispose()
   }

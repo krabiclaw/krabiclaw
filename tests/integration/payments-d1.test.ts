@@ -12,6 +12,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import * as schema from '../../server/db/schema.ts'
 import { claimSessionCapacity, listBookableSessions, setProductBookingConfig } from '../../server/utils/availability.ts'
 import { createProductBooking, quoteTimedBooking } from '../../server/domain/product-bookings.ts'
+import publicBookingRoute from '../../server/api/public/products/[slug]/book.post.ts'
 import { projectStripeConnectedAccount, reserveStripeConnectedAccount } from '../../server/utils/stripe-connect.ts'
 import { H3Event } from 'h3'
 import { ingestStripeFeeReport, stripeFeeMinor, stripeFeeScaled } from '../../server/domain/payments/costs.ts'
@@ -195,6 +196,28 @@ test('a table deposit is the table price once, only for parties at its threshold
   assert.match(booked.items[2]!.text, /\$100\.00/u)
   assert.deepEqual(await db.prepare('SELECT COUNT(*) n FROM payments').first('n'), 0)
 
+  const publicApp = new H3()
+  publicApp.use(event => { event.context.organizationId = ORG })
+  publicApp.post('/api/public/products/:slug/book', publicBookingRoute)
+  const bookFromSameIp = (attempt: number) => publicApp.request(Object.assign(new Request('https://payments.proof.example/api/public/products/tables/book', {
+   method: 'POST',
+   headers: { 'content-type': 'application/json', 'cf-connecting-ip': '192.0.2.40' },
+   body: JSON.stringify({ guest_name: 'Repeat guest', guest_email: 'repeat@example.com', guest_phone: '+12025550123', product_session_id: 'soon', party_size: 1, idempotency_key: `repeat-${attempt}` }),
+  }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+  const bookingsBeforeRepeat = await counts()
+  for (let attempt = 1; attempt <= 5; attempt++) {
+   const response = await bookFromSameIp(attempt)
+   assert.equal(response.status, 201, await response.clone().text())
+  }
+  const blocked = await bookFromSameIp(6)
+  assert.equal(blocked.status, 429)
+  assert.deepEqual(await blocked.json(), { error: 'Too many requests. Please try again later.' })
+  assert.deepEqual(await counts(), {
+   ...bookingsBeforeRepeat,
+   bookings: Number(bookingsBeforeRepeat?.bookings) + 5,
+   requests: Number(bookingsBeforeRepeat?.requests) + 5,
+  })
+
   // The configured demo business can start a real checkout for the projected next seating.
   await db.prepare("UPDATE organization SET subdomain='demo' WHERE id=?").bind(ORG).run()
   await db.prepare("INSERT INTO subscription(id,plan,referenceId,status,seats) VALUES('test-plan','business',?,'active',1)").bind(ORG).run()
@@ -244,6 +267,7 @@ test('a table deposit is the table price once, only for parties at its threshold
   const cancelled = await cancelBookingRequest(db, { id: String(five.body.conversation_id), organizationId: ORG, kind: 'booking', now: new Date().toISOString(), env, tokenHash: await hashReservationCancelToken(String(five.body.cancellation_token)) })
   assert.equal(cancelled?.changed, true)
   assert.equal(await db.prepare('SELECT status FROM bookings WHERE id=?').bind(String(five.body.booking_id)).first('status'), 'cancelled')
+
  } finally { await runtime.dispose() }
 })
 
