@@ -206,13 +206,14 @@ export const OG_IMAGE_HEIGHT = 630
 export const PLATFORM_DEFAULT_TITLE = 'Blawby | Open-Source Websites, Bookings & Payments'
 
 /**
- * Format a page title for the Blawby platform frame without repeating the brand.
+ * Format a page title for the KrabiClaw platform frame, ensuring brand prefix
+ * or suffix is applied without stutter (e.g. duplicate '| KrabiClaw').
  */
 export function formatPlatformTitle(title?: string | null): string {
   if (!title) return PLATFORM_DEFAULT_TITLE
   const trimmed = title.trim()
   if (!trimmed) return PLATFORM_DEFAULT_TITLE
-  if (trimmed.startsWith('Blawby |') || trimmed.startsWith('Blawby —') || trimmed.endsWith(' | Blawby') || trimmed === 'Blawby') return trimmed
+  if (trimmed.startsWith('Blawby |') || trimmed.startsWith('Blawby —') || trimmed === 'Blawby') return trimmed
   return `${trimmed} | Blawby`
 }
 

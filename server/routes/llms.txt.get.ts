@@ -1,6 +1,5 @@
 import { HTTPError, defineHandler  } from 'nitro';
 
-import { LODGING_PAGE_SUMMARY } from '~/config/platform-knowledge'
 import { cloudflareEnv, textResponse } from '~/server/utils/api-response'
 import {
   buildLlmsTxt, buildTenantBlogLinkEntries, buildPlatformBlogLinkEntries, buildPlatformDocLinkEntries, listPublishedTenantBlogPostsForLlm, listPublishedPlatformBlogPostsForLlm, listPublishedDocsForLlm, resolvePublicOrigin, } from '~/server/utils/platform-llm'
@@ -81,7 +80,7 @@ export default defineHandler(async (event) => {
           { title: 'Pricing & Plans', path: '/pricing', description: 'Published plans, included features, and payment pricing.' },
           { title: 'Law firms (Blawby)', path: '/legal', description: 'Law firm websites, practice areas, and legal consultation requests.' },
           { title: 'Restaurants (Saya)', path: '/restaurants', description: 'Restaurant websites, menus, and table reservations.' },
-          { title: 'Lodging & Stays (PMS)', path: '/lodging', description: LODGING_PAGE_SUMMARY },
+          { title: 'Lodging & Stays (PMS)', path: '/lodging', description: 'Property management system (PMS) for mid-term and furnished rentals (21+ day stays), two-way Airbnb and Vrbo sync, and zero-commission direct booking.' },
           { title: 'Experiences', path: '/experiences', description: 'Experience websites, dated sessions, and ticketed bookings.' },
         ],
       },
