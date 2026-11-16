@@ -208,13 +208,14 @@ export async function readInsightsPage(db: DbClient, reader: InsightsReader, pag
   })
 }
 
-/** A number's chart: five ticks from zero to a round top, and each day as its point reads. */
+/** A number's chart: five ticks from zero to a round top, the unit written on the bottom and top tick only, and each day as its bar reads. */
 function chart(metric: Metric, show: (value: number) => string) {
   const top = Math.max(0, ...metric.daily!.filter((value): value is number => value !== null))
   const maximum = top <= 4 ? 4 : Math.ceil(top / 4) * 4
   const label = metric.label.toLowerCase()
+  const bare = metric.format === 'nights' || metric.format === 'days' ? count : show
   return {
-    axis: [0, 1, 2, 3, 4].map(step => ({ value: maximum * step / 4, label: show(maximum * step / 4) })),
+    axis: [0, 1, 2, 3, 4].map(step => ({ value: maximum * step / 4, label: (step === 0 || step === 4 ? show : bare)(maximum * step / 4) })),
     points: metric.daily!.map(value => ({ value, display: value === null ? `No ${label}` : `${show(value)} ${label}` })),
   }
 }

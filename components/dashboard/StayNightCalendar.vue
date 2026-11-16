@@ -2,7 +2,6 @@
   <DashboardIndexPanel id="stay-night-calendar" title="Calendar" fill>
     <template #right>
       <div class="flex w-[calc(100vw-2rem)] flex-wrap items-center gap-2 sm:w-auto">
-        <CalendarOfferingFilter :items="offeringItems" :disabled="busy || Boolean(level.child.value)" />
         <UButton v-if="manage" label="Add stay" icon="i-lucide-plus" :to="addStayTo" :disabled="busy || Boolean(level.child.value)" />
         <UButton v-if="data && level.mode.value === 'index'" label="Select nights" color="neutral" variant="outline" class="hidden sm:inline-flex" :disabled="busy" @click="openDates" />
         <UDropdownMenu :items="viewItems" :content="{ align: 'end' }">
@@ -144,7 +143,6 @@ import type { Stay, StayHome, StayNight, StayTurnover } from '~/server/domain/st
 import { MAX_STAY_NIGHTS, STAY_CHANNEL_LABELS, parseStayCalendarRules } from '~/shared/bookings'
 import StayNightInspector from './StayNightInspector.vue'
 import EditorNavigationList from './EditorNavigationList.vue'
-import CalendarOfferingFilter from './CalendarOfferingFilter.vue'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, minorAmountToMajor } from '~/shared/prices'
 import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
@@ -157,7 +155,7 @@ type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' 
 // A manager reads each stay's channel; a member's turnover has none.
 type CalendarStay = { booking_id: string; unit: 'nights' } & Pick<StayTurnover, 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'status'> & Partial<Pick<Stay, 'channel'>>
 interface CalendarPayload { home: Home; nights: StayNight[]; bookings: CalendarStay[]; channel_push?: SuccessfulChannelPush | null }
-const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone'>[]; manage: boolean; homeError: string; offeringItems: { label: string; value: string }[]; offeringsError?: string }>()
+const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone'>[]; manage: boolean; homeError: string; offeringsError?: string }>()
 const route = useRoute()
 const level = useRouteLevel()
 const router = useRouter()

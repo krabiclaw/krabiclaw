@@ -230,11 +230,16 @@ const isPlacesPayload = (value: unknown): value is PlacesPayload => isWindow(val
   && value.places.every(entry => isRecord(entry) && isPlace(entry.place) && Array.isArray(entry.days) && entry.days.length === SPAN && entry.days.every((day, index) => isPlaceDay(day) && day.date === dates.value[index]))
 
 const cacheKey = () => `${words.testId}-grid:${orgSlug}:${from.value}`
+// Whether this visit read the window itself; a window shown from an earlier visit is read again once it is on screen.
+let readNow = false
 const { data, error, status, refresh } = await useAsyncData<HomesPayload | PlacesPayload>(
   cacheKey,
-  (_nuxtApp, { signal }) => homesView
-    ? api('/api/dashboard/bookings/calendar', { query: { unit: 'nights', from: from.value, to: to.value }, validate: isHomesPayload, signal })
-    : api('/api/dashboard/bookings/calendar', { query: { unit: 'slot', from: from.value, to: to.value }, validate: isPlacesPayload, signal }),
+  (_nuxtApp, { signal }) => {
+    readNow = true
+    return homesView
+      ? api('/api/dashboard/bookings/calendar', { query: { unit: 'nights', from: from.value, to: to.value }, validate: isHomesPayload, signal })
+      : api('/api/dashboard/bookings/calendar', { query: { unit: 'slot', from: from.value, to: to.value }, validate: isPlacesPayload, signal })
+  },
   {
     getCachedData(key, nuxtApp, ctx) {
       if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
@@ -247,7 +252,7 @@ const placesData = computed(() => !homesView ? data.value as PlacesPayload | nul
 
 if (import.meta.client) {
   onMounted(() => {
-    if (useNuxtApp().payload.data[cacheKey()]) void refresh()
+    if (!readNow) void refresh()
   })
 }
 

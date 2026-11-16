@@ -6,32 +6,37 @@
         <p class="mt-1 text-muted">{{ chart.points[selectedIndex]!.display }}</p>
       </template>
     </div>
-    <svg v-if="dates.length" viewBox="0 0 800 260" class="w-full overflow-visible" role="group" :aria-label="label" @mouseleave="selectedIndex = null">
-      <g v-for="tick in chart.axis" :key="tick.value">
-        <line x1="60" :y1="y(tick.value)" x2="780" :y2="y(tick.value)" class="stroke-default" />
-        <text x="48" :y="y(tick.value) + 5" text-anchor="end" class="fill-muted text-[20px]">{{ tick.label }}</text>
-      </g>
-      <polyline v-for="(run, index) in runs" :key="index" :points="run.map(point => `${x(point)},${y(chart.points[point]!.value!)}`).join(' ')"
-        fill="none" stroke="var(--ui-text-highlighted)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-      <g v-for="(date, index) in dates" :key="date.date" tabindex="0" role="button"
-        :aria-label="`${date.label}: ${chart.points[index]!.display}`"
-        @focus="selectedIndex = index" @blur="selectedIndex = null" @mouseenter="selectedIndex = index"
-        @click="selectedIndex = index" @keydown.enter="selectedIndex = index" @keydown.space.prevent="selectedIndex = index">
-        <rect :x="x(index) - 360 / dates.length" y="35" :width="720 / dates.length" height="190" fill="transparent" />
-        <line v-if="selectedIndex === index" :x1="x(index)" y1="40" :x2="x(index)" y2="218" class="stroke-muted" />
-        <circle v-if="chart.points[index]!.value !== null" :cx="x(index)" :cy="y(chart.points[index]!.value!)" :r="selectedIndex === index ? 5 : 2" fill="var(--ui-text-highlighted)" />
-      </g>
-      <text x="60" y="248" class="fill-muted text-[20px]">{{ dates[0]!.label }}</text>
-      <text x="420" y="248" text-anchor="middle" class="fill-muted text-[20px]">{{ dates[Math.floor((dates.length - 1) / 2)]!.label }}</text>
-      <text x="780" y="248" text-anchor="end" class="fill-muted text-[20px]">{{ dates.at(-1)!.label }}</text>
-    </svg>
+    <div v-if="dates.length" class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 text-xs text-muted" role="group" :aria-label="label" @mouseleave="selectedIndex = null">
+      <!-- The ticks, top to bottom, each on its grid line. -->
+      <div class="flex h-56 flex-col-reverse justify-between text-right sm:h-72">
+        <span v-for="tick in chart.axis" :key="tick.value" class="h-0 -translate-y-2 whitespace-nowrap leading-4">{{ tick.label }}</span>
+      </div>
+      <div class="relative h-56 sm:h-72">
+        <div class="absolute inset-0 flex flex-col justify-between" aria-hidden="true">
+          <div v-for="tick in chart.axis" :key="tick.value" class="h-0 border-t border-default" />
+        </div>
+        <div class="absolute inset-0 flex items-end">
+          <button v-for="(date, index) in dates" :key="date.date" type="button" class="flex h-full min-w-0 flex-1 items-end justify-center px-px focus-visible:outline-2 focus-visible:outline-primary"
+            :class="selectedIndex === index ? 'bg-elevated' : ''" :aria-label="`${date.label}: ${chart.points[index]!.display}`"
+            @focus="selectedIndex = index" @blur="selectedIndex = null" @mouseenter="selectedIndex = index" @click="selectedIndex = index">
+            <span v-if="chart.points[index]!.value" class="w-full max-w-6 rounded-t-sm bg-inverted" :style="{ height: `${Math.max(chart.points[index]!.value! / maximum * 100, 1)}%` }" />
+          </button>
+        </div>
+      </div>
+      <div />
+      <div class="mt-2 flex justify-between">
+        <span>{{ dates[0]!.label }}</span>
+        <span v-if="dates.length > 2">{{ dates[Math.floor((dates.length - 1) / 2)]!.label }}</span>
+        <span v-if="dates.length > 1">{{ dates.at(-1)!.label }}</span>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { InsightsPage } from '~/shared/insights'
 
-/** One number over the range as the page composed it: its axis ticks, and each day's point; a null day had nothing to measure and breaks the line. */
+/** One number over the range as the page composed it: its axis ticks, and a bar for each day that has a value; a day with nothing, or nothing to measure, has no bar. */
 const props = defineProps<{
   label: string
   dates: InsightsPage['series']['dates']
@@ -39,17 +44,4 @@ const props = defineProps<{
 }>()
 const selectedIndex = ref<number | null>(null)
 const maximum = computed(() => props.chart.axis.at(-1)!.value)
-const x = (index: number) => 60 + (props.dates.length > 1 ? index * 720 / (props.dates.length - 1) : 0)
-const y = (value: number) => 218 - value / maximum.value * 178
-/** The runs of consecutive measured days, each drawn as its own line. */
-const runs = computed(() => {
-  const result: number[][] = []
-  props.chart.points.forEach((point, index) => {
-    if (point.value === null) return
-    const last = result.at(-1)
-    if (last && last.at(-1) === index - 1) last.push(index)
-    else result.push([index])
-  })
-  return result
-})
 </script>

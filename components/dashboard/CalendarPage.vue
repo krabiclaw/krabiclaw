@@ -46,7 +46,6 @@
       <UAlert v-if="offeringsError" class="mb-6" color="error" variant="soft" title="Offerings could not be loaded" :description="offeringsError" />
       <!-- Calendar chooses bookings or one offering's availability; Location narrows that scope. -->
       <div v-if="!personalScope" class="flex flex-wrap items-center gap-3" :class="gridView ? 'mb-4 sm:mb-8' : 'mb-8'">
-        <CalendarOfferingFilter :items="offeringItems ?? []" :disabled="Boolean(level.child.value)" />
         <!-- Every home is its own location, so the Homes view narrows by city instead. -->
         <DashboardLocationFilter v-if="!gridView" v-model="filters.locationId" :items="locationItems" :disabled="Boolean(level.child.value)" />
         <!-- One search for every calendar: homes by name or address, places by name and where, bookings by who, what and where. -->
@@ -289,7 +288,6 @@ import AgendaRow from '~/lib/components/workspace/dashboard/AgendaRow.vue'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import AgendaFilters from './AgendaFilters.vue'
 import CalendarGrid from './CalendarGrid.vue'
-import CalendarOfferingFilter from './CalendarOfferingFilter.vue'
 import { closureOnDate, getDateIntervals, parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 import { addLocalDays, formatCalendarDate, formatTimestamp, isValidCalendarDate, localNow } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
@@ -304,7 +302,6 @@ const props = defineProps<{
   personalScope?: boolean
   sessionProduct?: Product
   sessionLocations?: DashboardLocation[]
-  offeringItems?: { label: string; value: string }[]
   offeringsError?: string
   canCreateStay?: boolean
   hasHomes?: boolean
