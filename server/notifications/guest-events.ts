@@ -25,14 +25,14 @@ function facts(...entries: Array<NotificationFact | null>): NotificationFact[] {
 export function verifyEmailMessage(input: { verificationUrl: string }): NotificationMessage {
   return {
     title: 'Verify your email',
-    preheader: 'Confirm your address to finish setting up your KrabiClaw account.',
+    preheader: 'Confirm your address to finish setting up your Blawby account.',
     hero: null,
     intro: 'Confirm your email address to finish setting up your account and keep your sign-in secure.',
     facts: [],
     primaryAction: { url: input.verificationUrl, label: 'Verify email' },
     finePrint: 'If you did not create this account, you can ignore this email.',
     emailPurpose: 'transactional',
-    emailReason: 'You received this email because this address was used to create a KrabiClaw account.',
+    emailReason: 'You received this email because this address was used to create a Blawby account.',
     category: 'account_security',
   }
 }
@@ -40,14 +40,14 @@ export function verifyEmailMessage(input: { verificationUrl: string }): Notifica
 export function resetPasswordMessage(input: { resetUrl: string }): NotificationMessage {
   return {
     title: 'Reset your password',
-    preheader: 'Choose a new KrabiClaw password.',
+    preheader: 'Choose a new Blawby password.',
     hero: null,
     intro: 'We received a request to reset your password. The link below is secure and single-use.',
     facts: [],
     primaryAction: { url: input.resetUrl, label: 'Choose a new password' },
     finePrint: 'If you did not request this, you can ignore this email — your password stays as it is.',
     emailPurpose: 'transactional',
-    emailReason: 'You received this email because a password reset was requested for your KrabiClaw account.',
+    emailReason: 'You received this email because a password reset was requested for your Blawby account.',
     category: 'account_security',
   }
 }
@@ -62,7 +62,7 @@ export function organizationInviteMessage(input: {
 }): NotificationMessage {
   return {
     title: `You're invited to ${input.organizationName}`,
-    preheader: `${input.inviterName} invited you to join ${input.organizationName} on KrabiClaw. The invitation expires ${input.expires}.`,
+    preheader: `${input.inviterName} invited you to join ${input.organizationName} on Blawby. The invitation expires ${input.expires}.`,
     hero: null,
     facts: facts(
       fact('invitedBy', 'Invited by', input.inviterName),
@@ -73,7 +73,7 @@ export function organizationInviteMessage(input: {
     primaryAction: { url: input.inviteUrl, label: 'Accept invitation' },
     finePrint: `Accept by ${input.expires}; after that, ask ${input.inviterName} for a new invitation. Not expecting this? You can ignore it.`,
     emailPurpose: 'transactional',
-    emailReason: `You received this email because ${input.inviterName} invited you to join ${input.organizationName} on KrabiClaw.`,
+    emailReason: `You received this email because ${input.inviterName} invited you to join ${input.organizationName} on Blawby.`,
     category: 'account_security',
   }
 }
@@ -399,7 +399,7 @@ export function articleAnnouncementMessage(input: {
     facts: [],
     primaryAction: { url: input.articleUrl, label: 'Read the article' },
     emailPurpose: 'promotional',
-    emailReason: 'You receive KrabiClaw news under your email notification preferences.',
+    emailReason: 'You receive Blawby news under your email notification preferences.',
     category: 'product_news',
   }
 }

@@ -6,7 +6,7 @@ test('oauthErrorMessage handles invalid_client with actionable guidance for AI a
   const message = oauthErrorMessage('invalid_client', 'client not found')
   assert.match(message, /unrecognized or outdated/)
   assert.match(message, /ChatGPT or Claude/)
-  assert.match(message, /https:\/\/krabiclaw\.com\/api\/mcp/)
+  assert.match(message, /MCP setup guide/)
   assert.match(message, /\(invalid_client\) client not found/)
 })
 

@@ -367,5 +367,5 @@ async function detachMany(ids: string[]) {
   }
 }
 
-useSeoMeta({ title: 'Photos | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Photos | Blawby Dashboard', robots: 'noindex, nofollow' })
 </script>

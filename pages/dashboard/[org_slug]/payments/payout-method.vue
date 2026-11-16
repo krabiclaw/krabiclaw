@@ -39,7 +39,7 @@ import PaymentsHelp from '~/components/dashboard/PaymentsHelp.vue'
 import { connectStatusPresentation, isConnectedAccount, useConnectAccount, type ConnectedAccount } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'How you get paid | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'How you get paid | Blawby', robots: 'noindex, nofollow' })
 
 const dashboardApi = useDashboardApi()
 const route = useRoute()

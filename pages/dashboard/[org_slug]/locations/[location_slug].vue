@@ -100,5 +100,5 @@ const { data: overview, error: overviewError } = await useAsyncData<LocationOver
   )
 })
 
-useSeoMeta({ title: () => `${isNew.value ? newLocation.title.value : location.value?.title || 'Location'} | KrabiClaw`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${isNew.value ? newLocation.title.value : location.value?.title || 'Location'} | Blawby`, robots: 'noindex, nofollow' })
 </script>

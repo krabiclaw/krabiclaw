@@ -35,7 +35,7 @@ import { SERVICES } from '~/shared/billing-model'
 import { isServices, useOrganizationServices } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Managed ads | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Managed ads | Blawby', robots: 'noindex, nofollow' })
 
 type Requirements = { google_ads_usd: boolean; business_plan: boolean; default_payment_method: boolean }
 const isRequirements = (value: unknown): value is { success: true; requirements: { managed_ads: Requirements } } => {

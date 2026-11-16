@@ -19,7 +19,7 @@
       ref="homeHero"
       class="kc-parallax-hero"
       data-parity-section="hero"
-      aria-label="KrabiClaw"
+      aria-label="Blawby"
     >
       <div class="kc-parallax-hero__art" aria-hidden="true">
         <picture
