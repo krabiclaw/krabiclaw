@@ -41,7 +41,9 @@ zone_name = "krabiclaw.com"
 pattern = "*/*"
 zone_name = "krabiclaw.com"
 
-
+[[routes]]
+pattern = "blawby.com/*"
+zone_name = "blawby.com"
 
 [vars]
 # Sign in with Apple audience: the native app's bundle id.
@@ -55,13 +57,14 @@ APNS_TEAM_ID = "WDXU8XZ7J6"
 APNS_BUNDLE_ID = "com.krabiclaw.app"
 # Web push (VAPID). The public key is what browsers subscribe with; VAPID_PRIVATE_KEY is its secret.
 NUXT_PUBLIC_VAPID_PUBLIC_KEY = "BG_WwHiB15TZy0I_b0OUKcTFNZk_7PS1gE2ljDNsC0xrLRltELxY8ZpbHtrPPF28CYu702QYvmutaHvbiy2sdCc"
+CF_PLATFORM_ZARAZ_ZONE_ID = "cdde6f2a8040e76dd081c08c18ad41dd"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
-BETTER_AUTH_URL = "https://krabiclaw.com"
-NUXT_PUBLIC_PLATFORM_DOMAIN = "https://krabiclaw.com"
+BETTER_AUTH_URL = "https://blawby.com"
+NUXT_PUBLIC_PLATFORM_DOMAIN = "https://blawby.com"
 NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN = "https://krabiclaw.com"
-NUXT_PUBLIC_APP_NAME = "KrabiClaw"
-NUXT_PUBLIC_SITE_URL = "https://krabiclaw.com"
-NUXT_PUBLIC_HELP_URL = "https://krabiclaw.com/help"
+NUXT_PUBLIC_APP_NAME = "Blawby"
+NUXT_PUBLIC_SITE_URL = "https://blawby.com"
+NUXT_PUBLIC_HELP_URL = "https://blawby.com/help"
 NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 MEDIA_BASE_URL = "https://media.krabiclaw.com"
 # Channex: production uses the Channex staging account (owner decision 2026-10-16) until
@@ -74,7 +77,7 @@ AI_SEARCH_INSTANCE_ID = "krabiclaw-platform-knowledge"
 # (EMAIL_DELIVERY_MODE_REQUIRED / INVALID_EMAIL_DELIVERY_MODE), and WHATSAPP_DELIVERY_MODE
 # likewise. EMAIL_FROM is the required sender; there is no default From address.
 EMAIL_DELIVERY_MODE = "provider"
-EMAIL_FROM = "KrabiClaw <hello@krabiclaw.com>"
+EMAIL_FROM = "Blawby <hello@krabiclaw.com>"
 EMAIL_REPLY_DOMAIN = "reply.krabiclaw.com"
 WHATSAPP_DELIVERY_MODE = "provider"
 # Startup workflow debugging: detailed MCP inputs/results expire after seven days.

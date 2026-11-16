@@ -10,7 +10,7 @@ function betaPricing(spotsLeft: number) {
       notice: `Beta pricing: ${spotsLeft} of 10 spots left. After that, new subscribers pay $12 per home per month. You keep the price you subscribe at for 12 months.`,
       markdownHomes: '- **Homes**: $4 per home per month (beta price; $12 per home per month once the beta spots are taken).' }
     : { homes: '$4 per home per month', chip: null,
-      notice: 'Beta pricing. Prices will rise for new subscribers as KrabiClaw grows; you keep the price you subscribe at for 12 months.',
+      notice: 'Beta pricing. Prices will rise for new subscribers as Blawby grows; you keep the price you subscribe at for 12 months.',
       markdownHomes: '- **Homes**: $4 per home per month. A home is a place to stay.' }
 }
 

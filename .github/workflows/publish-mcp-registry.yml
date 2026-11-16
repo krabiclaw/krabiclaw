@@ -1,0 +1,52 @@
+name: Publish MCP Registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_sha:
+        description: Exact production commit approved for publication
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main' && github.sha == inputs.reviewed_sha
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Check the live issuer and resource
+        run: |
+          set -euo pipefail
+          origin=$(jq -er '.websiteUrl | select(. == "https://blawby.com" or . == "https://krabiclaw.com")' server.json)
+          resource=$(jq -er --arg origin "$origin" '
+            select(.name == "io.github.krabiclaw/krabiclaw" and (.remotes | length) == 1) |
+            .remotes[0] | select(.type == "streamable-http" and .url == ($origin + "/api/mcp")) | .url
+          ' server.json)
+          curl -fsS "$origin/.well-known/oauth-authorization-server" |
+            jq -e --arg issuer "$origin" '.issuer == $issuer'
+          curl -fsS "$origin/.well-known/oauth-protected-resource" |
+            jq -e --arg resource "$resource" '.resource == $resource'
+      - name: Publish reviewed descriptor
+        run: |
+          set -euo pipefail
+          release=https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1
+          archive=mcp-publisher_linux_amd64.tar.gz
+          cd "${RUNNER_TEMP}"
+          curl -fsSLO "$release/$archive"
+          curl -fsSLO "$release/registry_1.8.1_checksums.txt"
+          grep " $archive\$" registry_1.8.1_checksums.txt | sha256sum -c -
+          printf '%s  %s\n' a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc "$archive" | sha256sum -c -
+          tar -xzf "$archive" mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish "${GITHUB_WORKSPACE}/server.json"
