@@ -1,7 +1,9 @@
 <template>
-  <DashboardIndexPanel id="stay-night-calendar" title="Calendar" fill>
+  <DashboardIndexPanel id="stay-night-calendar" :title="homeOption?.internal_name ?? 'Calendar'" fill>
     <template #right>
       <div class="flex w-[calc(100vw-2rem)] flex-wrap items-center gap-2 sm:w-auto">
+        <!-- One home's nights go back to every home's calendar. -->
+        <UButton label="Calendar" icon="i-lucide-arrow-left" color="neutral" variant="outline" :to="`/dashboard/${route.params.org_slug}/calendar`" :disabled="busy" />
         <UButton v-if="manage" label="Add stay" icon="i-lucide-plus" :to="addStayTo" :disabled="busy || Boolean(level.child.value)" />
         <UButton v-if="data && level.mode.value === 'index'" label="Select nights" color="neutral" variant="outline" class="hidden sm:inline-flex" :disabled="busy" @click="openDates" />
         <UDropdownMenu :items="viewItems" :content="{ align: 'end' }">

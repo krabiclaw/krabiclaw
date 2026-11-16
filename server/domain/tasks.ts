@@ -186,7 +186,7 @@ export async function turnoverTaskQueries(db: DbClient, input: { organizationId:
             starts_at, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
           SELECT ?, ?, 'turnover', 'booking', ?, ?, ?, ${jobAssigneeSql('?', '?')}, ?, ?, ?, 'open', ?, 1, ?, ? WHERE (${guard.query})
           ON CONFLICT (dedupe_key) DO NOTHING`,
-        params: [crypto.randomUUID(), organizationId, stay.id, home.product_id, home.location_id, organizationId, home.assigned_member_id,
+        params: [crypto.randomUUID(), organizationId, stay.id, home.product_id, home.location_id, home.assigned_member_id, organizationId,
           startsAt, dueAt, home.timezone, key, now, now, ...guard.params!],
       })
     }

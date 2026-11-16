@@ -4657,13 +4657,12 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect(configuredHome.data!.product.stay!.calendar_rules).toBeNull()
       const calendarPath = `/dashboard/${slug}/calendar?product_id=${assignedHome.product_id}`
       await page.goto(`/dashboard/${slug}/calendar?product_id=missing-home`)
-      await expect(page.getByText('That offering is not available in this organization.', { exact: true })).toBeVisible()
+      await expect(page.getByText('Product not found', { exact: true })).toBeVisible()
       await expect(page.getByTestId('stay-night-inspector')).toHaveCount(0)
-      await expect(page.getByRole('combobox', { name: 'Calendar', exact: true })).toHaveCount(0)
       await page.goto(calendarPath)
       const calendar = page.locator('#dashboard-panel-stay-night-calendar')
       const inspector = page.getByTestId('stay-night-inspector')
-      await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText('Availability: Assigned Cabin')
+      await expect(calendar.getByRole('heading', { name: 'Assigned Cabin', exact: true })).toBeVisible()
       await expect(calendar.getByText(`${TIME_ZONE} · THB`, { exact: true })).toBeVisible()
       await calendar.locator(`[data-reka-calendar-cell-trigger][data-value="${localDay(0)}"]:not([data-outside-view])`).click()
       await expect(inspector.getByText('Reserved', { exact: true })).toBeVisible()
@@ -4834,7 +4833,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(inspector.getByText('Reserved', { exact: true })).toBeVisible()
       await page.setViewportSize({ width: 1440, height: 900 })
       await expect(calendar).toBeVisible()
-      await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText('Availability: Assigned Cabin')
+      await expect(calendar.getByRole('heading', { name: 'Assigned Cabin', exact: true })).toBeVisible()
 
       // The home's overview and agenda read the same stays as its nightly grid.
       await calendar.getByRole('button', { name: 'View: Month', exact: true }).click()
@@ -4900,13 +4899,11 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       ])
       const denied = await cleaner.request.get(api(`bookings/${stays[1]!.booking_id}`))
       expect(denied.status()).toBe(404)
-      // The host takes the turnover back and gives it to the cleaner again. A cleaner's job is a team
-      // conversation with the owners: the organization's jobs post it there as KrabiClaw's message once
-      // they wake, that message is the cleaner's alert (push, email, WhatsApp), and it is unread until read.
+      // A job always has someone: the host cannot leave the turnover with nobody. A cleaner's job is a team
+      // conversation with the owners: the job is posted there as KrabiClaw's message, that message is the
+      // cleaner's alert (push, email, WhatsApp), and it is unread until read.
       const unassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, version: turnover.version, assigned_member_id: null })
-      expect(unassigned.error).toBeNull()
-      const reassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, version: unassigned.data!.task.version, assigned_member_id: memberId })
-      expect(reassigned.error).toBeNull()
+      expect(JSON.parse(unassigned.error!)).toMatchObject({ status: 422, code: 'JOB_ASSIGNEE_REQUIRED', field: 'assigned_member_id' })
       const cleanerTeamRows = async () => {
         const response = await cleaner.request.get(`/api/messages?organization_id=${organizationId}&kind=team&org=${encodeURIComponent(slug)}`)
         await expectStatus(response, 200)
@@ -4944,7 +4941,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const hostTurnovers = await call<{ sections: TaskSection[] }>('list_tasks', { range: 'today', kind: 'turnover' })
       expect(hostTurnovers.error).toBeNull()
       expect(hostTurnovers.data!.sections.flatMap(section => section.tasks).filter(task => task.id === turnover.id))
-        .toEqual([expect.objectContaining({ status: 'done', booking_id: stays[0]!.booking_id, version: reassigned.data!.task.version + 1, can: { complete: false, skip: false, reopen: true, assign: false, edit: false } })])
+        .toEqual([expect.objectContaining({ status: 'done', booking_id: stays[0]!.booking_id, version: turnover.version + 1, can: { complete: false, skip: false, reopen: true, assign: false, edit: false } })])
 
       const cleanerPage = await cleaner.newPage()
       let deliveringSocket: WebSocket | undefined

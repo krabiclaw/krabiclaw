@@ -7,7 +7,7 @@
   -->
   <DashboardIndexPanel
     :id="personalScope ? 'account-calendar' : 'org-calendar'"
-    title="Calendar"
+    :title="sessionProduct?.name ?? 'Calendar'"
     :fill="gridView"
   >
     <template #right>
@@ -46,6 +46,8 @@
       <UAlert v-if="offeringsError" class="mb-6" color="error" variant="soft" title="Offerings could not be loaded" :description="offeringsError" />
       <!-- Calendar chooses bookings or one offering's availability; Location narrows that scope. -->
       <div v-if="!personalScope" class="flex flex-wrap items-center gap-3" :class="gridView ? 'mb-4 sm:mb-8' : 'mb-8'">
+        <!-- One offering's availability goes back to the whole calendar. -->
+        <UButton v-if="sessionProduct" label="Calendar" icon="i-lucide-arrow-left" color="neutral" variant="outline" class="h-10 rounded-full" :to="`/dashboard/${route.params.org_slug}/calendar`" />
         <!-- Every home is its own location, so the Homes view narrows by city instead. -->
         <DashboardLocationFilter v-if="!gridView" v-model="filters.locationId" :items="locationItems" :disabled="Boolean(level.child.value)" />
         <!-- One search for every calendar: homes by name or address, places by name and where, bookings by who, what and where. -->
