@@ -1646,6 +1646,9 @@ test.describe('dashboard pane hierarchy', () => {
     await expectPanes(page, ['organization-integrations', 'google-calendar'])
 
     // Payments is payouts, reached from the Earnings cog; beside a pane it opens How you get paid.
+    const connectReturn = await page.request.get(`${ORG}/payments?tab=payouts&stripe_connect=returned`, { maxRedirects: 0 })
+    expect(connectReturn.status()).toBe(302)
+    expect(connectReturn.headers()['location']).toBe(`${ORG}/payments/payout-method?tab=payouts&stripe_connect=returned`)
     await open(page, `${ORG}/payments`)
     await expect(page).toHaveURL(`${ORG}/payments/payout-method`)
     await expectPanes(page, ['organization-payments', 'organization-payout-method'])
