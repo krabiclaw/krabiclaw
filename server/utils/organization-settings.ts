@@ -504,7 +504,7 @@ async function attemptOrganizationUpdate(
     SITE_RECIPE_KEYS.some(key => updates[key] !== undefined)
   ) {
     if (!env.ORGANIZATION_CACHE) throw new Error('ORGANIZATION_CACHE is not bound; site caches cannot be purged')
-    await purgeOrganizationCaches(db, env.ORGANIZATION_CACHE, organizationId, env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
+    await purgeOrganizationCaches(db, env.ORGANIZATION_CACHE, organizationId, env)
   }
 
   // Zaraz serves analytics only for tenants that are Live, so taking one to

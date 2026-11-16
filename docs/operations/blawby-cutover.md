@@ -115,6 +115,11 @@ audience; the old MCP endpoint declines the old connection without a redirect.
 
 ## Directory handoff
 
+Use the [1024px Blawby logo](../marketing/directory-assets/blawby-logo-1024.png)
+derived from [the SVG master](../../public/platform/blawby.svg). Its three
+mark paths come from the [pinned former Blawby site source](https://github.com/Blawby/blawby-cloudflare-marketing/blob/2da0d89ddd81be0b314d51d2795d012d9ad030be/src/components/logo.tsx).
+Retain the old directory artwork and icon URLs for rollback and existing clients.
+
 After the production pass, update the existing Claude submission in its full
 editor and read back both tabs. For OpenAI, validate the scan and credentials
 on the replacement draft using the regenerated package and prior
