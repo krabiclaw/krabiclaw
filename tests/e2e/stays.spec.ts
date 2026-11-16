@@ -872,7 +872,9 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   await expect(page.getByTestId('reservation-panel').getByText('A', { exact: true })).toBeVisible()
   await expect(page.locator('#dashboard-panel-stay-details img[alt="Ana Silva"]')).toHaveCount(0)
   const overlap = await call('create_product_booking', { product_slug: home.data!.product.slug, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1, guest_name: 'Bo', total_minor: 100_00, idempotency_key: `${slug}-b` })
-  expect(overlap.error).toContain('Another stay or a linked calendar already holds one of these nights')
+  expect(JSON.parse(overlap.error!)).toEqual({
+    status: 409, code: 'STAY_OVERLAP', field: 'check_in_date', message: 'Another stay already holds one of these nights',
+  })
 
   // Calendar owns arrival/departure activity; Today is the actionable quest feed.
   const thread = `/dashboard/${slug}/messages/${stay.data!.record.conversation_id}`

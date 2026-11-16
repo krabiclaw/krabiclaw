@@ -83,7 +83,13 @@ export function jobSubject(row: Pick<TaskRow, 'dedupe_key' | 'kind' | 'subject_t
 }
 
 /** The key of a job's post in its team conversation (messages.payload_json $.key): the one place it is built. */
-export const jobKey = (task: Pick<TaskRow, 'id' | 'product_id'>, after?: string) => `job:${task.id}:${task.product_id}${after ? `:after:${after}` : ''}`
+const JOB_POST_PREFIX = 'job:'
+export const jobKey = (task: Pick<TaskRow, 'id' | 'product_id'>, after?: string) => `${JOB_POST_PREFIX}${task.id}:${task.product_id}${after ? `:after:${after}` : ''}`
+export function jobPostMatchSql(task: string, message: string): string {
+  const key = `json_extract(${message}.payload_json, '$.key')`
+  const base = `('${JOB_POST_PREFIX}' || ${task}.id || ':' || COALESCE(${task}.product_id, 'null'))`
+  return `(${key} = ${base} OR instr(${key}, ${base} || ':after:') = 1)`
+}
 const JOB_END_STATES = ['released', 'cancelled', 'closed'] as const
 export const jobEndKeys = (taskId: string) => JOB_END_STATES.map(state => `${state}:${taskId}`)
 
@@ -308,7 +314,7 @@ export async function taskViewer(principal: MemberAccessPrincipal): Promise<Task
  * they are responsible for; an owner or admin reads every task. The member row
  * is matched in the same statement.
  */
-function taskScopeSql(alias: string, who: () => ViewerTerms): string {
+export function taskScopeSql(alias: string, who: () => ViewerTerms): string {
   const membership = `${alias}.kind IN (SELECT value FROM json_each('${SUPPORTED_TASK_KINDS}')) AND EXISTS (SELECT 1 FROM member m WHERE m.id = ${who().member} AND m.organizationId = ${who().organization} AND m.userId = ${who().user})`
   return `${membership} AND (${who().organizationWide} = 1 OR (NOT (${alias}.kind='booking_review' AND EXISTS (SELECT 1 FROM bookings b WHERE b.id=${alias}.subject_id
       AND b.organization_id=${alias}.organization_id AND b.product_session_id IS NULL)) AND (${alias}.assigned_member_id = ${who().member}

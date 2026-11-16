@@ -16,11 +16,13 @@ import { calendarDate, firstName, providerInstant, transcriptDays } from './gues
 import { conversationHistorySql, conversationMessage, groupConversationEntries, projectConversationHistory, type ConversationHistory, type HistoryRow } from './conversation-history-data'
 import { readConversationEnrichment, threadDeliveriesQuery } from './guest-threads/deliveries'
 import { bookingDay, parseGuestRequest, participantLabel } from './requests'
-import { jobBookingIdSql } from './tasks'
+import { jobBookingIdSql, jobPostMatchSql, taskScopeSql } from './tasks'
 
 type TranscriptViewer = { conversationId: string; userId: string; organizationId?: string }
 type MessageContext = Pick<ConversationHistory, 'photos' | 'deliveriesByMessage'>
-type HistoryContext = { organization_name: string; timezone: string; record_title: string | null; booking_type: 'booking' | 'stay' | null; booking_assigned: number; support: number; airbnb: number; roster: string | null; job: string | null; review: number | null; reservation: string | null }
+type HistoryContext = { organization_name: string; timezone: string; record_title: string | null; booking_type: 'booking' | 'stay' | null; booking_assigned: number; support: number; airbnb: number; roster: string | null; jobs: string | null; review: number | null; reservation: string | null }
+
+type ConversationJob = { task_id: string; version: number; message_id: string | null }
 
 type ReservationFacts = {
   created_at: string; starts_at: string; ends_at: string; timezone: string; party_size: number; status: string; stay: 0 | 1
@@ -197,13 +199,25 @@ export async function loadConversationPage(
         ${head ? `CASE WHEN c.kind = 'team' THEN (SELECT COALESCE(sc.internal_name, p.name) FROM bookings about JOIN products p ON p.organization_id = about.organization_id AND p.id = about.product_id
           LEFT JOIN product_stay_configs sc ON sc.organization_id = p.organization_id AND sc.product_id = p.id
           WHERE about.organization_id = c.organization_id AND about.id = c.booking_id) END` : 'NULL'} AS record_title,
-        -- The job this conversation is about that the viewer closes here: in its team conversation, or in the guest's when it is theirs or nobody's.
-        ${head ? `CASE WHEN c.viewer_role = 'member' AND c.booking_id IS NOT NULL THEN (SELECT json_object('task_id', t.id, 'version', t.version) FROM tasks t
-          WHERE t.organization_id = c.organization_id AND t.status = 'open' AND t.kind IN ('turnover', 'consultation_follow_up', 'consultation_prep')
-            AND (${jobBookingIdSql('t')}) = c.booking_id
-            AND (c.kind = 'team' OR EXISTS (SELECT 1 FROM member vm WHERE vm.organizationId = c.organization_id AND vm.userId = ?
-              AND (vm.id = t.assigned_member_id OR (t.assigned_member_id IS NULL AND vm.role IN ('owner', 'admin')))))
-          ORDER BY t.created_at, t.id LIMIT 1) END` : 'NULL'} AS job,
+        -- A job action belongs to its latest assignment post in the current team's conversation.
+        ${head ? `CASE WHEN c.viewer_role = 'member' AND c.booking_id IS NOT NULL THEN (
+          SELECT json_group_array(json_object('task_id', job.task_id, 'version', job.version, 'message_id', job.message_id))
+          FROM (
+            SELECT t.id AS task_id, t.version, CASE WHEN c.kind = 'team' AND EXISTS (
+              SELECT 1 FROM conversation_participants seat JOIN member assigned
+                ON assigned.id = t.assigned_member_id AND assigned.organizationId = seat.organization_id AND assigned.userId = seat.user_id
+              WHERE seat.conversation_id = c.id AND seat.role = 'member'
+            ) THEN (SELECT m.id FROM messages m WHERE m.conversation_id = c.id AND m.author_kind = 'krabiclaw'
+              AND ${jobPostMatchSql('t', 'm')} ORDER BY m.sequence DESC LIMIT 1) END AS message_id
+            FROM tasks t WHERE t.organization_id = c.organization_id AND t.status = 'open'
+              AND t.kind IN ('turnover', 'consultation_follow_up', 'consultation_prep') AND (${jobBookingIdSql('t')}) = c.booking_id
+              AND (c.kind = 'team' OR c.member_id = t.assigned_member_id OR (t.assigned_member_id IS NULL AND c.member_role IN ('owner', 'admin')))
+              AND ${taskScopeSql('t', () => ({
+                organization: 'c.organization_id', user: '?', member: 'c.member_id', organizationWide: "(c.member_role IN ('owner', 'admin'))",
+              }))}
+            ORDER BY t.created_at, t.id
+          ) job
+        ) END` : 'NULL'} AS jobs,
         ${head ? `CASE WHEN c.viewer_role = 'member' AND c.kind = 'booking' THEN COALESCE(b.status = 'pending', 0) OR EXISTS (SELECT 1 FROM tasks ch
           WHERE ch.organization_id = c.organization_id AND ch.kind = 'booking_change' AND ch.status = 'open' AND ch.subject_id = c.booking_id) END` : 'NULL'} AS review,
         ${head ? `CASE WHEN b.id IS NOT NULL THEN json_object(
@@ -219,7 +233,7 @@ export async function loadConversationPage(
       JOIN organization o ON o.id = c.organization_id
       LEFT JOIN business_locations l ON l.id = c.location_id AND l.organization_id = c.organization_id
       LEFT JOIN bookings b ON c.kind IN ('booking', 'team') AND b.id = c.booking_id AND b.organization_id = c.organization_id`,
-    params: [...(access.params ?? []), ...(head ? [userId, userId, userId, userId, userId, userId, userId] : [])],
+    params: [...(access.params ?? []), ...(head ? [userId, userId, userId, userId, userId, userId, userId, userId, userId] : [])],
   }, {
     query: `WITH authorized AS MATERIALIZED (${access.query}), ${historyQuery.query.slice('WITH '.length)}`,
     params: [...(access.params ?? []), ...(historyQuery.params ?? [])],
@@ -239,6 +253,9 @@ export async function loadConversationPage(
   if (!head) return { conversation_id: conversation.id, ...result }
   if (context.roster === null) throw new Error('Conversation roster was not read')
   const roster = JSON.parse(context.roster) as ConversationParticipantRow[]
+  const jobs = context.jobs === null ? [] : JSON.parse(context.jobs) as ConversationJob[]
+  const job = jobs[0]
+  const jobActions = Object.fromEntries(jobs.flatMap(({ message_id, task_id }) => message_id === null ? [] : [[message_id, task_id] as const]))
   const managesBookingGuests = context.booking_type !== null || (role === 'member' && conversation.kind === 'booking' && conversation.booking_id !== null)
   const activityPath = context.booking_type ? accountActivityPath(context.booking_type, conversation.id) : null
   const [groupCapabilities, bookingScope] = await Promise.all([
@@ -265,6 +282,7 @@ export async function loadConversationPage(
     },
     ...result, viewer_role: role,
     capabilities: { ...groupCapabilities, can_invite_guest: managesBookingGuests && conversation.blocked_at === null },
-    work: context.job ? { type: 'done' as const, ...JSON.parse(context.job) as { task_id: string; version: number } } : context.review ? { type: 'review' as const } : null,
+    work: job ? { type: 'done' as const, task_id: job.task_id, version: job.version } : context.review ? { type: 'review' as const } : null,
+    ...(Object.keys(jobActions).length ? { job_actions: jobActions } : {}),
   }
 }

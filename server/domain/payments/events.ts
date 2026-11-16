@@ -134,7 +134,6 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
 
   const bookingId = hold?.status === 'converted' ? hold.converted_booking_id : null
   const keepPaymentOnly = hold && !hold.organization_exists && (hold.session_id === null || (hold.retained_for_servicing && bookingId))
-  if (payment.subject_type === 'booking' && !keepPaymentOnly && !bookingId) throw new Error('Captured payment has no saved booking')
   if (intent.application_fee_amount) throw new Error('Direct charges carry no application fee')
   const charge = intent.latest_charge
   if (!charge || typeof charge === 'string' || charge.livemode !== Boolean(payment.livemode) || charge.payment_intent !== intent.id || charge.amount !== intent.amount_received) throw new Error('Captured charge financial scope mismatch')
@@ -168,6 +167,8 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
   const capture = write?.results[0] as (Payment & { retained_without_organization: number }) | undefined
   const recorded = capture ?? (captureQueries.length ? await requirePayment(db, payment.organization_id, payment.id) : payment)
   if (!matchesCapture(recorded)) throw new Error('Stored capture does not match Stripe')
+  // Record a confirmed charge for servicing even when the booking is missing.
+  if (payment.subject_type === 'booking' && !keepPaymentOnly && !bookingId) throw new Error('Captured payment has no saved booking')
   const notice = { kind: 'payment_captured' as const, nativeId: intent.id, status: intent.status, amount: intent.amount_received, email: charge.billing_details.email ?? null }
   const finish = async (booking: Extract<DomainEvent, { type: 'payment.captured' }>['booking'] = null) => {
     await publishEvent(env, {

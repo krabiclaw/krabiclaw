@@ -1332,19 +1332,53 @@ export const product_nights = sqliteTable("product_nights", {
 	check("product_nights_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
 
+// Storage retained while the previous Worker can still read linked calendars.
+// The current runtime no longer creates calendar links or checkout night claims.
+export const stay_calendar_links = sqliteTable("stay_calendar_links", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	product_id: text().notNull(),
+	channel: text().$type<'vrbo'>().notNull(),
+	import_url: text().notNull(),
+	export_token: text().notNull(),
+	blocked_json: text().default("[]").notNull(),
+	synced_at: text(),
+	sync_error: text(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	created_by: text().notNull(),
+	updated_by: text().notNull(),
+}, (table) => [
+	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "stay_calendar_links_home_scope_fk" }).onDelete("cascade"),
+	unique("stay_calendar_links_org_product_id_unique").on(table.organization_id, table.product_id, table.id),
+	uniqueIndex("stay_calendar_links_home_channel_unique").on(table.product_id, table.channel),
+	uniqueIndex("stay_calendar_links_export_token_unique").on(table.export_token),
+	check("stay_calendar_links_channel_check", sql`channel = 'vrbo'`),
+	check("stay_calendar_links_import_url_check", sql`import_url LIKE 'https://%'`),
+	check("stay_calendar_links_blocked_check", sql`json_valid(blocked_json) AND json_type(blocked_json) = 'array'`),
+	check("stay_calendar_links_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (synced_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', synced_at, '+0 days') IS synced_at)`),
+]);
+
 // A booking's claim to one night. The primary key allows only one booking
 // to claim each home and date. Claims change in the same batch as the booking.
 // Cancelled and overbooked bookings have no claims.
+// Legacy claimant columns remain readable during the Worker rollout.
 export const stay_nights = sqliteTable("stay_nights", {
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text().notNull(),
 	date: text().notNull(),
-	booking_id: text().notNull(),
+	booking_id: text(),
+	hold_id: text().references(() => payment_checkout_holds.id, { onDelete: "cascade" }),
+	calendar_link_id: text(),
 }, (table) => [
 	primaryKey({ columns: [table.product_id, table.date], name: "stay_nights_pk" }),
 	foreignKey({ columns: [table.organization_id, table.product_id, table.booking_id], foreignColumns: [bookings.organization_id, bookings.product_id, bookings.id], name: "stay_nights_booking_scope_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.organization_id, table.product_id, table.calendar_link_id], foreignColumns: [stay_calendar_links.organization_id, stay_calendar_links.product_id, stay_calendar_links.id], name: "stay_nights_calendar_link_scope_fk" }).onDelete("cascade"),
 	index("stay_nights_booking_idx").on(table.booking_id),
+	index("stay_nights_hold_idx").on(table.hold_id),
+	index("stay_nights_calendar_link_idx").on(table.calendar_link_id),
 	check("stay_nights_date_check", sql`date(date, '+0 days') IS date`),
+	check("stay_nights_claimant_check", sql`(booking_id IS NOT NULL) + (hold_id IS NOT NULL) + (calendar_link_id IS NOT NULL) = 1`),
 ]);
 
 // Row meaning: the host recorded receiving (or, negative, refunding) this
@@ -2930,7 +2964,8 @@ export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  expires_at: text().notNull(),
  created_at: text().notNull(),
  converted_booking_id: text(),
-}, () => [
+}, t => [
+ index("payment_holds_capacity_idx").on(t.session_id, t.status, t.expires_at),
  check("payment_holds_quantity_check", sql`quantity > 0 AND amount > 0`),
  // A session or a stay. For a stay, starts_at and ends_at are the check-in
  // and check-out dates at the home.

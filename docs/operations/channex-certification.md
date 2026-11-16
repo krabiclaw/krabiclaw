@@ -191,6 +191,21 @@ checking 500-night coverage. A full sync preserves the same property and
 channel mapping. After recording, cancel the test stay through the PMS and
 verify its occupied night reopens in Channex.
 
+## Cutover from the revision feed
+
+Before merging the Worker change to staging, verify or register the
+`non_acked_booking` event on its effective Channex webhooks using
+`yarn channex:webhook --env staging`. Repeat against the production account
+before promoting. A property-level registration takes precedence over the
+account registration. Verify a booking revision and its acknowledgement
+through the staging webhook.
+
+After assets converge, **Adopt outstanding work** drains revisions still
+unacknowledged at cutover through the same booking and acknowledgement path
+as the webhook. Verify the drain completed. The next release step
+**Remove one-time Channex revision adoption** deletes this drain from
+deployment adoption.
+
 ## Submitting
 
 1. Collect each test's task IDs from `channel_sync_log`.

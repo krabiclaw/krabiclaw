@@ -15,8 +15,7 @@ import { publishEvent } from '~/server/events'
  * latest revision), so the revision itself is landed as a channel stay and
  * only then acknowledged; the booking is never read by id, which Channex's
  * certification refuses. Anything that stops short of the acknowledgement
- * throws, so the webhook answers non-2xx and Channex's unacknowledged-revision
- * feed brings it back.
+ * throws, so Channex can redeliver and report a revision still unacknowledged.
  *
  * channel_sync_log records each outcome with ids only, never guest details.
  */
@@ -110,8 +109,27 @@ export async function applyBookingRevision(db: DbClient, env: ChannexEnv & Guest
  * thread naming it) is landed before anything is built on it.
  */
 export async function pendingBookingRevisions(env: ChannexEnv, propertyId: string, bookingId: string): Promise<Resource[]> {
-  const revisions = await channexList(env, '/booking_revisions/feed', 'booking_revision', { 'filter[property_id]': propertyId, 'order[inserted_at]': 'asc' })
+  const revisions = await readPendingRevisions(env, { 'filter[property_id]': propertyId })
   return revisions.filter(revision => revision.attributes.booking_id === bookingId)
+}
+
+function readPendingRevisions(env: ChannexEnv, filter?: Record<string, string>): Promise<Resource[]> {
+  return channexList(env, '/booking_revisions/feed', 'booking_revision', { ...filter, 'order[inserted_at]': 'asc' })
+}
+
+/** Handoff from the old revision feed after the webhook event mask has changed. */
+export async function adoptPendingBookingRevisions(env: CloudflareEnv): Promise<void> {
+  const configured = await queryFirst<{ id: string }>(env.DB, 'SELECT organization_id AS id FROM channex_connections WHERE group_id IS NOT NULL LIMIT 1')
+  if (!configured) return
+  const failures: Error[] = []
+  for (const revision of await readPendingRevisions(env)) {
+    try {
+      await landBookingRevision(env.DB, env, revision)
+    } catch (cause) {
+      failures.push(new Error(`Channex revision ${revision.id} could not be acknowledged`, { cause }))
+    }
+  }
+  if (failures.length) throw new AggregateError(failures, 'Outstanding Channex revisions could not be adopted')
 }
 
 /** Land one revision Channex delivered and acknowledge it. */

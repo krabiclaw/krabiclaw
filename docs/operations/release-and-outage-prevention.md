@@ -91,6 +91,34 @@ GitHub workflow runs and Cloudflare's native deployment history are sufficient
 release evidence. Do not invent a second mapping between Git commits and Worker
 version identifiers.
 
+### Queue and webhook cutover
+
+Before the first staging merge for the Events queue, verify that
+`krabiclaw-events-staging` and `krabiclaw-events-staging-dlq` exist and that
+the deployment can bind them. Before the production promotion, verify
+`krabiclaw-events` and `krabiclaw-events-dlq`. Deployment applies database
+migrations before binding the queues.
+
+Register and verify the Channex revision webhook before retiring the feed.
+Verify the Cloudflare SSL for SaaS certificate
+webhook and `CF_CUSTOM_HOSTNAMES_WEBHOOK_SECRET` on the environment receiving
+custom-domain events. Verify that the live platform endpoint subscribes to
+Stripe's report availability event. [Channex cutover](channex-certification.md#cutover-from-the-revision-feed)
+· [Stripe report event](../payments/payments.md#payments-fees)
+
+### Booking inventory cutover
+
+Finish reconciling existing inventory-holding checkouts with Stripe while the
+previous Worker still serves them. Review authorized, processing, and settled
+intents against their checkout records before changing which Worker handles
+settlement.
+
+After the new Worker converges, **Adopt outstanding work** retires the previous
+checkout and Vrbo iCal night claims and marks their Channex inventory for
+delivery in the same batch. Current booking claims are retained. Ship the
+schema contraction in the following release, with the **Remove retired night
+claim adoption** step deleting that deployment cleanup.
+
 ## Browser and MCP verification
 
 Use the browser state appropriate to the behavior. Anonymous public routes may
@@ -152,6 +180,14 @@ migrations apply` before the Worker deploy; new tables, columns and indexes use
 that path. Run `yarn lint:migrations`, `yarn lint:schema-drift` and `yarn
 test:migrations` locally, then check schema drift and `PRAGMA foreign_key_check`
 on each deployed database.
+
+The release that retires checkout inventory and Vrbo iCal keeps the existing
+night-claim schema so the running Worker can finish using it during deployment.
+After asset convergence, **Adopt outstanding work** retires the obsolete
+claims and requeues their prior channel inventory updates together. Once this
+Worker serves both environments, the next release can drop the retired storage
+and remove that adoption step. Booked nights and pending stay requests keep
+their claims.
 
 SQLite cannot alter a CHECK constraint in place. When a constraint on a table
 referenced by other tables must change, Drizzle generates a table rebuild whose

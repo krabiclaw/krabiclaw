@@ -50,10 +50,14 @@ test('a stale domain result changes nothing and permanent subdomain reservations
       }
       if (providerMode === 'live-cutover') {
         assert.equal(request.hostname, 'cloudflare-dns.com')
-        return Response.json({ Status: 0, Answer: request.searchParams.get('name') === 'live.example.org' && request.searchParams.get('type') === 'A' ? [{ type: 1, data: '192.0.2.17' }] : [] })
+        const name = request.searchParams.get('name')
+        const address = name === 'live.example.org' ? '192.0.2.17' : name === 'target.example.test' ? '192.0.2.53' : null
+        return Response.json({ Status: 0, Answer: address && request.searchParams.get('type') === 'A' ? [{ type: 1, data: address }] : [] })
       }
       if (request.hostname === 'cloudflare-dns.com' && providerMode !== 'activate') {
-        return Response.json({ Status: 0, Answer: dnsCutover && request.searchParams.get('type') === 'CNAME' ? [{ type: 5, data: 'target.example.test.' }] : [] })
+        const name = request.searchParams.get('name')
+        const flattened = name === 'custom.example.net' || name === 'target.example.test'
+        return Response.json({ Status: 0, Answer: dnsCutover && flattened && request.searchParams.get('type') === 'A' ? [{ type: 1, data: '192.0.2.53' }] : [] })
       }
       if (providerMode === 'observe') {
         const id = request.pathname.split('/').at(-1)
@@ -94,7 +98,7 @@ test('a stale domain result changes nothing and permanent subdomain reservations
         code: 'DOMAIN_LIVE_CUTOVER',
         live_cutover_warning: {
           hostname: 'live.example.org', records: [{ type: 'A', value: '192.0.2.17' }],
-          message: 'live.example.org currently points elsewhere and may be live. Changing DNS can take it offline until KrabiClaw validation finishes.',
+          message: 'live.example.org already resolves and may be live. Changing DNS can take it offline until KrabiClaw validation finishes.',
         },
       },
     })
@@ -158,7 +162,8 @@ test('a stale domain result changes nothing and permanent subdomain reservations
     const readsBeforeActivationRetry = zarazReads
     await events.runNext(dashboardEnv, 'domain.check_requested')
     const [active] = await getOrganizationDomains(db, 'audit')
-    assert.deepEqual([active?.status, active?.error_message], ['active', null])
+    assert.deepEqual([active?.status, active?.error_message, active?.dns_status, active?.dns_resolved_target],
+      ['active', null, 'valid', 'A:192.0.2.53'])
     assert.ok(zarazReads > readsBeforeActivationRetry)
     assert.equal(await auditCount('domain.verified'), 1)
     assert.equal(events.take('domain.check_requested'), undefined)

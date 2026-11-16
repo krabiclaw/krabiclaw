@@ -51,6 +51,7 @@ extend that model. Never add a second one beside it.
 | Reviews | `reviews` `review_requests` `review_category_ratings` | server/utils/review-requests.ts | KrabiClaw |
 | Payments | `payments` `payment_refunds` `payment_disputes` `payment_orders` `payment_order_lines` `payment_authorizations` `payment_checkout_holds` `offline_payments` `payment_fee_reports` `payment_cost_snapshots` `payment_servicing_tenants` `stripe_connected_accounts` `stripe_connected_customers` `stripe_webhook_events` | server/domain/payments | Stripe |
 | Channex channel | `channex_connections` `product_channel_mappings` `channel_threads` `channel_night_pushes` `channel_sync_log` `airbnb_sync_jobs` | server/integrations/channex | Channex |
+| Retired Vrbo iCal link retained through the Worker cutover | `stay_calendar_links` | server/domain/due-business-work.ts | KrabiClaw |
 | Google Calendar event delivery | `google_calendar_event_links` `google_calendar_cleanup_jobs` | server/utils/google-calendar.ts | Google |
 | Connected provider selection | `organization_integrations` | server/utils/organization-integrations.ts | Better Auth linked accounts |
 | Service agreement | `organization_services` | server/utils/organization-services.ts | KrabiClaw |
@@ -124,6 +125,10 @@ which the Google Maps import also goes through.
 | `member_scheduling.time_off_json` | A person is away. No online slot of theirs is offered in that time |
 | `product_sessions.status = 'cancelled'` | One occurrence of a class or consultation was cancelled. A table's seating is never cancelled by hand: it stops being offered when its location's hours stop covering it |
 | `stay_nights.booking_id` | A booking claims the night. Only one booking can claim each home and date. |
+
+An existing channel reservation whose guest moved to another home still
+occupies its booked listing. `bookings.booked_product_id` identifies that
+listing and its dates come from the stay's claims at the guest's actual home.
 
 Paid checkout keeps the conversation, party size, conversion status and the
 approved stay's payment lock in `payment_checkout_holds`. At Pay, the batch

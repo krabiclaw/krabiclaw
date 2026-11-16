@@ -1,4 +1,4 @@
-import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { StayHome, StayNight } from '~/server/domain/stays'
 import { currencyFractionDigits, type CurrencyCode } from '~/shared/currencies'
 import { channexGet, channexRequest, ChannexError, type ChannexEnv } from './client'
@@ -342,16 +342,25 @@ function addDays(date: string, count: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + count * 86_400_000).toISOString().slice(0, 10)
 }
 
+export function pendingChannelNightsQuery(
+  organizationId: string, productId: string, dates: readonly string[], updatedAt: string, guard?: BatchQuery,
+): BatchQuery {
+  // Move the revision even if the night is pending, so an older delivery cannot clear it.
+  return {
+    query: `INSERT INTO channel_night_pushes (organization_id, product_id, provider, date, state, detail, updated_at)
+      SELECT ?, ?, 'channex', value, 'pending', NULL, ? FROM json_each(?) WHERE ${guard?.query ?? 'true'}
+      ON CONFLICT (product_id, provider, date) DO UPDATE SET state = 'pending', updated_at = excluded.updated_at,
+        detail = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.detail ELSE NULL END`,
+    params: [organizationId, productId, updatedAt, JSON.stringify(dates), ...(guard?.params ?? [])],
+  }
+}
+
 async function queueAndDeliver(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, organizationId: string, home: AriHome, mapping: Mapping, dates: readonly string[], read: StayNightReader): Promise<ChannelPush | null> {
   const from = today(home.timezone)
   const queued = [...new Set(dates.filter(date => date >= from))].sort()
   if (!queued.length) return null
-  // A night already pending keeps the reason it waits. Its updated_at still moves, so a delivery that read the night before this change leaves it pending.
-  await execute(db, `INSERT INTO channel_night_pushes (organization_id, product_id, provider, date, state, detail, updated_at)
-    SELECT ?, ?, 'channex', value, 'pending', NULL, ? FROM json_each(?) WHERE true
-    ON CONFLICT (product_id, provider, date) DO UPDATE SET state = 'pending', updated_at = excluded.updated_at,
-      detail = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.detail ELSE NULL END`,
-  [organizationId, home.product_id, new Date().toISOString(), JSON.stringify(queued)])
+  const pending = pendingChannelNightsQuery(organizationId, home.product_id, queued, new Date().toISOString())
+  await execute(db, pending.query, pending.params)
   const next = await deliver(db, env, organizationId, home, mapping, read)
   if (next !== null) await scheduleBusinessWake(env, organizationId, 'channex_ari', next)
   const rows = await queryAll<{ state: OutboxRow['state']; detail: string | null }>(db, `SELECT state, detail FROM channel_night_pushes

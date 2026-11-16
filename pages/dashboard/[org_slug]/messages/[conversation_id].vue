@@ -71,13 +71,13 @@ watch(level.child, child => { if (child !== null) reservationOpened.value = true
 // A job is done in one tap; its conversation then shows "Done" as the person's own message.
 const closing = ref(false)
 const doneError = ref<unknown>(null)
-async function done() {
-  const work = data.value?.work
-  if (work?.type !== 'done' || !conversation.value) return
+async function done(messageId: string) {
+  const taskId = data.value?.job_actions?.[messageId]
+  if (!taskId || !conversation.value || closing.value) return
   closing.value = true
   doneError.value = null
   try {
-    await applicationFetch(`/api/organizations/${encodeURIComponent(conversation.value.organization_id)}/tasks/${encodeURIComponent(work.task_id)}/complete`, { method: 'POST', body: {}, validate: (value: unknown): value is { task: { id: string } } => isRecord(value) && isRecord(value.task) && value.task.id === work.task_id })
+    await applicationFetch(`/api/organizations/${encodeURIComponent(conversation.value.organization_id)}/tasks/${encodeURIComponent(taskId)}/complete`, { method: 'POST', body: {}, validate: (value: unknown): value is { task: { id: string } } => isRecord(value) && isRecord(value.task) && value.task.id === taskId })
     await refresh()
   } catch (cause) {
     doneError.value = cause

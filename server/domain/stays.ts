@@ -1,4 +1,4 @@
-import { bookingReviewDueAt } from '~/server/utils/review-requests'
+import { bookingReviewDueAt, historicalNoShowAtSql } from '~/server/utils/review-requests'
 import { changedTaskIds, publishEvent, type DomainEvent, type EventsEnv } from '~/server/events'
 import { PUBLIC_PROVIDER_JSON_SQL, PUBLISHED_PROFILE_SQL, RESERVATION_HOST_SQL, type PublicProvider } from '~/shared/member-scheduling'
 import { bookChannelConversationGuest, reconcileGuestListingParticipants } from '~/server/domain/conversation-participants'
@@ -34,7 +34,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { currencyFractionDigits, isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { completeChannelPush, configureStayCalendar, deliverStayNights, pushAirbnbListingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion, type ChannexMapping } from '~/server/integrations/channex/ari'
+import { completeChannelPush, configureStayCalendar, deliverStayNights, pendingChannelNightsQuery, pushAirbnbListingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion, type ChannexMapping } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { bookingContactQuery, bookingConversationQueries, bookingDay, isBookingDay, nightsBoundary, noStayRequestPaymentInFlightSql, requestInsertQueries, stayRequestPayBySql, stayRequestProgress, stayRequestRespondBySql, threadPayloadForGuest, validateGuestRequest } from '~/server/domain/requests'
 import { bookingPolicy, parseBookingPolicy, type BookingPolicy } from '~/server/utils/booking-policy-summary'
@@ -85,6 +85,9 @@ export const STAY_STATUSES = ['pending', 'confirmed', 'cancelled'] as const
 export interface Stay {
   id: string
   product_id: string
+  /** The listing the channel reservation was booked on, when the guest sleeps elsewhere. */
+  booked_product_id: string | null
+  booked_home_name: string | null
   location_id: string
   /** The home's location timezone: its dates and times are read in it. */
   timezone: string
@@ -120,6 +123,8 @@ export interface Stay {
   conversation_id: string
   cancelled_at: string | null
   cancellation_reason: string | null
+  /** An earlier no-show, as recorded in its conversation. */
+  no_show_at: string | null
   request_status: 'awaiting_approval' | 'awaiting_payment' | null
   respond_by: string | null
   pay_by: string | null
@@ -394,10 +399,14 @@ function amount(value: unknown, field: string, allowNegative = false): number {
 /** A nights booking at its home, with its conversation's guest contact: `s` is the booking. */
 const STAY_FROM = `bookings s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
   JOIN conversations r ON r.organization_id = s.organization_id AND r.booking_id = s.id AND r.kind = 'booking'`
-const STAY_COLUMNS = `s.id, s.product_id, s.location_id, s.timezone, s.channel, s.owner, s.status, s.overbooked, s.starts_at, s.ends_at,
+const STAY_COLUMNS = `s.id, s.product_id, s.booked_product_id,
+  (SELECT COALESCE(home.internal_name, p.name) FROM product_stay_configs home
+    JOIN products p ON p.organization_id=home.organization_id AND p.id=home.product_id
+    WHERE home.organization_id=s.organization_id AND home.product_id=s.booked_product_id) AS booked_home_name,
+  s.location_id, s.timezone, s.channel, s.owner, s.status, s.overbooked, s.starts_at, s.ends_at,
   s.adults, s.children, s.infants, s.party_size, json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
   s.user_id, s.total_minor, s.currency, s.private_notes, s.provider, s.external_booking_id, s.channel_booking_id, r.id AS conversation_id, s.cancelled_at, s.cancellation_reason,
-  json_extract(s.policy_json, '$.cancellation') AS cancellation_policy, s.answers, s.version, s.created_at, s.updated_at,
+  json_extract(s.policy_json, '$.cancellation') AS cancellation_policy, ${historicalNoShowAtSql('r')} AS no_show_at, s.answers, s.version, s.created_at, s.updated_at,
   ${stayRequestRespondBySql('s')} AS respond_by, ${stayRequestPayBySql('r.id')} AS pay_by`
 
 function mapStay(row: Record<string, unknown>): Stay {
@@ -1400,13 +1409,20 @@ function homeNightsQueries(organization: BatchQuery, products: BatchQuery, from:
   const window = stayOverlapSql(from, to)
   return [overrides, {
     query: `SELECT product_id, date, booking_id FROM stay_nights
-      WHERE organization_id = ${org} AND product_id IN (${ids}) AND date >= ? AND date < ?`,
-    params: [...organization.params!, ...products.params!, from, to],
+      WHERE organization_id = ${org} AND product_id IN (${ids}) AND date >= ? AND date < ? AND booking_id IS NOT NULL
+      UNION ALL
+      SELECT s.booked_product_id AS product_id, n.date, n.booking_id FROM bookings s
+      JOIN stay_nights n ON n.organization_id = s.organization_id AND n.booking_id = s.id
+      WHERE s.organization_id = ${org} AND s.booked_product_id IN (${ids}) AND s.status = 'confirmed'
+        AND n.date >= ? AND n.date < ?
+        AND NOT EXISTS (SELECT 1 FROM stay_nights own
+          WHERE own.product_id = s.booked_product_id AND own.date = n.date AND own.booking_id IS NOT NULL)`,
+    params: [...organization.params!, ...products.params!, from, to, ...organization.params!, ...products.params!, from, to],
   }, {
-    query: `SELECT id, version, product_id, starts_at, ends_at, timezone FROM bookings s
+    query: `SELECT id, version, product_id, booked_product_id, starts_at, ends_at, timezone FROM bookings s
       WHERE organization_id = ${org} AND owner = 'channel' AND status = 'confirmed' AND overbooked = 1 AND ${window.sql}
-        AND product_id IN (${ids})`,
-    params: [...organization.params!, ...window.params, ...products.params!],
+        AND (product_id IN (${ids}) OR booked_product_id IN (${ids}))`,
+    params: [...organization.params!, ...window.params, ...products.params!, ...products.params!],
   }, ...(channel ? [{
     query: `SELECT product_id, date, state, detail FROM channel_night_pushes WHERE organization_id = ${org} AND product_id IN (${ids}) AND date >= ? AND date < ?`,
     params: [...organization.params!, ...products.params!, from, to],
@@ -1428,7 +1444,7 @@ function homeNightsFrom(homes: ReadonlyArray<Pick<StayHomeCore, 'product_id' | '
   const [overrides, claims = [], overbooked = [], pushes] = results.map(result => result.results) as [
     Array<Record<string, unknown>>,
     Array<{ product_id: string; date: string; booking_id: string }>,
-    Array<OverbookedStay & { product_id: string }>,
+    Array<OverbookedStay & { product_id: string; booked_product_id: string | null }>,
     Array<{ product_id: string; date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null }> | undefined,
   ]
   const pushByNight = pushes && new Map(pushes.map(row => [`${row.product_id} ${row.date}`, { state: row.state, detail: row.detail }]))
@@ -1438,9 +1454,12 @@ function homeNightsFrom(homes: ReadonlyArray<Pick<StayHomeCore, 'product_id' | '
   for (const stay of overbooked) {
     const starts = bookingDay(stay.starts_at, stay.timezone)
     const ends = bookingDay(stay.ends_at, stay.timezone)
-    for (let day = starts < from ? from : starts; day < ends && day < to; day = addDays(day, 1)) {
-      const key = `${stay.product_id} ${day}`
-      if (!bookingByNight.has(key)) bookingByNight.set(key, stay.id)
+    for (const productId of [stay.product_id, stay.booked_product_id]) {
+      if (productId === null) continue
+      for (let day = starts < from ? from : starts; day < ends && day < to; day = addDays(day, 1)) {
+        const key = `${productId} ${day}`
+        if (!bookingByNight.has(key)) bookingByNight.set(key, stay.id)
+      }
     }
   }
   return homes.map((home) => {
@@ -1468,6 +1487,10 @@ function homeNightsFrom(homes: ReadonlyArray<Pick<StayHomeCore, 'product_id' | '
   })
 }
 
+function nightDates(ranges: ReadonlyArray<readonly [string, string]>): string[] {
+  return ranges.flatMap(([from, to]) => Array.from({ length: days(from, to) }, (_, offset) => addDays(from, offset)))
+}
+
 /**
  * Tell the home's channel, if it has one, the current state of these nights:
  * they join its delivery outbox and go now unless Channex's rate limit or a
@@ -1478,8 +1501,7 @@ async function pushNights(db: DbClient, env: ChannexEnv & GuestInboxPublicationE
   try {
     const [home] = await stayHomeRows(db, access.organizationId, productId, { sql: '1 = 1', params: [] })
     if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
-    const dates = ranges.flatMap(([from, to]) => Array.from({ length: days(from, to) }, (_, offset) => addDays(from, offset)))
-    return await pushStayNights(db, env, access.organizationId, home, dates, (from, to) => homeNights(db, access.organizationId, home, from, to))
+    return await pushStayNights(db, env, access.organizationId, home, nightDates(ranges), (from, to) => homeNights(db, access.organizationId, home, from, to))
   } catch (cause) {
     return cause instanceof Error ? cause : new Error(String(cause))
   }
@@ -1705,10 +1727,26 @@ function reconcileNightsQueries(organizationId: string, stayId: string, written:
   // Two writes from one version both name the next one: the stored time, home and ends say whose write committed.
   const committed = 'EXISTS (SELECT 1 FROM bookings b WHERE b.organization_id = ? AND b.id = ? AND b.version = ? AND b.updated_at = ? AND b.product_id = ? AND b.starts_at = ? AND b.ends_at = ?'
   const guard = [organizationId, stayId, written.version, written.updated_at, written.product_id, written.starts_at, written.ends_at]
-  return [{
+  const claimsNights = `${committed} AND b.status <> 'cancelled' AND b.overbooked = 0)`
+  return [assertBookingBatchWrite({
+    // A moved channel guest still takes the original listing's nights. Keep
+    // existing claims and refuse a new claim for any of the nights they hold.
+    query: `NOT EXISTS (SELECT 1 FROM bookings moved
+      JOIN stay_nights n ON n.organization_id = moved.organization_id AND n.booking_id = moved.id
+      WHERE moved.organization_id = ? AND moved.booked_product_id = ? AND moved.id <> ?
+        AND moved.status = 'confirmed' AND n.date >= ? AND n.date < ?
+        AND ${claimsNights} AND NOT EXISTS (SELECT 1 FROM stay_nights own
+          WHERE own.product_id = moved.booked_product_id AND own.date = n.date AND own.booking_id = ?))`,
+    params: [organizationId, written.product_id, stayId, written.check_in_date, written.check_out_date, ...guard, stayId],
+  }), {
     query: `DELETE FROM stay_nights WHERE organization_id = ? AND booking_id = ? AND ${committed}
               AND (b.status = 'cancelled' OR b.overbooked = 1 OR stay_nights.product_id <> ? OR stay_nights.date < ? OR stay_nights.date >= ?))`,
     params: [organizationId, stayId, ...guard, written.product_id, written.check_in_date, written.check_out_date],
+  }, {
+    // The old Worker may still have written an obsolete inventory claim before cutover.
+    query: `DELETE FROM stay_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?
+      AND booking_id IS NULL AND ${claimsNights}`,
+    params: [organizationId, written.product_id, written.check_in_date, written.check_out_date, ...guard],
   }, {
     query: `WITH RECURSIVE night(d) AS (SELECT ? UNION ALL SELECT date(d, '+1 day') FROM night WHERE date(d, '+1 day') < ?)
             INSERT INTO stay_nights (organization_id, product_id, date, booking_id)
@@ -1915,7 +1953,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
       stayDetailQuery(access, id),
     ], { operation: 'Create stay' })
   } catch (error) {
-    if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
+    if (isStayNightConflict(error) || bookingBatchWriteRefused(error)) fail(409, 'STAY_OVERLAP', 'Another stay already holds one of these nights', 'check_in_date')
     if (/UNIQUE constraint failed: bookings\.organization_id, bookings\.idempotency_key/.test(error instanceof Error ? error.message : String(error))) {
       const concurrent = await replay()
       if (concurrent) return publish(concurrent)
@@ -1968,6 +2006,15 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
   const window = stayWindow(fields, home)
   const next = current.version + 1
   const now = new Date().toISOString()
+  const nightsChanged = before.check_in_date !== fields.check_in_date || before.check_out_date !== fields.check_out_date
+  const ranges = nightsChanged ? [[before.check_in_date, before.check_out_date], [fields.check_in_date, fields.check_out_date]] as const : []
+  const today = localDateAt(new Date(now), home.timezone)
+  const dates = [...new Set(nightDates(ranges).filter(day => day >= today))]
+  const ari = dates.length ? [pendingChannelNightsQuery(access.organizationId, current.product_id, dates, now, {
+    query: `EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND version = ? AND updated_at = ?)
+      AND EXISTS (SELECT 1 FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = 1)`,
+    params: [access.organizationId, stayId, next, now, access.organizationId, current.product_id],
+  })] : []
   const turnovers = turnoverTaskQueries({ organizationId: access.organizationId, now, before: current, homes: [home],
     after: { id: stayId, product_id: current.product_id, status: current.status, check_in_date: fields.check_in_date, check_out_date: fields.check_out_date } })
   let results: Awaited<ReturnType<typeof executeBatch>>
@@ -1983,17 +2030,27 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
       bookingContactQuery({ organizationId: access.organizationId, bookingId: stayId, version: next, updatedAt: now, locationId: home.location_id, guest: { name: fields.guest_name, email: fields.guest_email, phone: fields.guest_phone } }),
       ...reconcileNightsQueries(access.organizationId, stayId, { updated_at: now, version: next, product_id: current.product_id, ...window, check_in_date: fields.check_in_date, check_out_date: fields.check_out_date }),
       ...turnovers.queries,
+      ...ari,
       stayDetailQuery(access, stayId),
     ], { operation: 'Update stay' })
   } catch (error) {
-    if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
+    if (isStayNightConflict(error) || bookingBatchWriteRefused(error)) fail(409, 'STAY_OVERLAP', 'Another stay already holds one of these nights', 'check_in_date')
     throw error
   }
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
   const stay = stayDetailFrom(access, results.at(-1)?.results[0])
-  const nightsChanged = current.check_in_date !== stay.check_in_date || current.check_out_date !== stay.check_out_date
-  const ranges = nightsChanged ? [[current.check_in_date, current.check_out_date], [stay.check_in_date, stay.check_out_date]] as const : []
-  await publishStayChange(env, access.organizationId, stay, ranges, nightsChanged, changedTaskIds(results))
+  try {
+    await publishStayChange(env, access.organizationId, stay, ranges, nightsChanged, changedTaskIds(results))
+  } catch (publicationError) {
+    if (ari.length && results.at(-2)?.meta.changes) {
+      try {
+        await scheduleBusinessWake(env, access.organizationId, 'channex_ari', Date.now())
+      } catch (wakeError) {
+        throw new AggregateError([publicationError, wakeError], 'The stay was saved but its event and channel wake both failed', { cause: wakeError })
+      }
+    }
+    throw publicationError
+  }
   return stay
 }
 
@@ -2638,18 +2695,19 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   if (booking.check_out_date <= booking.check_in_date) throw new Error(`Channel booking ${booking.external_booking_id} ends before it starts`)
   if (booking.adults < 1) throw new Error(`Channel booking ${booking.external_booking_id} has no adult guest`)
   if (!/^[A-Z]{3}$/.test(booking.currency)) throw new Error(`Channel booking ${booking.external_booking_id} has an invalid currency`)
-  type ChannelStayRow = { id: string; product_id: string; provider_updated_at: string | null; revision_id: string | null; external_booking_id: string | null; user_id: string | null; conversation_id: string | null }
+  type ChannelStayRow = { id: string; product_id: string; booked_product_id: string | null; provider_updated_at: string | null; revision_id: string | null; external_booking_id: string | null; user_id: string | null; conversation_id: string | null }
   const currentChannelStay = () => queryFirst<ChannelStayRow>(db,
-    `SELECT id, product_id, provider_updated_at, revision_id, external_booking_id, user_id, (SELECT c.id FROM conversations c WHERE c.booking_id = bookings.id AND c.kind = 'booking') AS conversation_id FROM bookings WHERE provider = ? AND external_booking_id = ?`, [booking.provider, booking.external_booking_id])
+    `SELECT id, product_id, booked_product_id, provider_updated_at, revision_id, external_booking_id, user_id, (SELECT c.id FROM conversations c WHERE c.booking_id = bookings.id AND c.kind = 'booking') AS conversation_id FROM bookings WHERE provider = ? AND external_booking_id = ?`, [booking.provider, booking.external_booking_id])
   // The same reservation under a new provider booking id (a re-import after a
   // new Channex account) is the stay it already is: the revision's write moves
   // it onto the new id, when that revision is newer than the stay.
   const existing = await currentChannelStay() ?? (booking.channel_booking_id === null ? null : await queryFirst<ChannelStayRow>(db,
-    `SELECT id, product_id, provider_updated_at, revision_id, external_booking_id, user_id, (SELECT c.id FROM conversations c WHERE c.booking_id = bookings.id AND c.kind = 'booking') AS conversation_id FROM bookings WHERE organization_id = ? AND channel = ? AND channel_booking_id = ?
+    `SELECT id, product_id, booked_product_id, provider_updated_at, revision_id, external_booking_id, user_id, (SELECT c.id FROM conversations c WHERE c.booking_id = bookings.id AND c.kind = 'booking') AS conversation_id FROM bookings WHERE organization_id = ? AND channel = ? AND channel_booking_id = ?
       AND ((provider = ? AND external_booking_id <> ?) OR owner = 'app')`,
     [organizationId, booking.channel, booking.channel_booking_id, booking.provider, booking.external_booking_id]))
-  // A revision names the listing it was booked on; a revision for another listing is a re-map.
-  const landing = productId
+  // An ordinary revision keeps a moved guest where they sleep. A revision for a different listing re-maps the stay.
+  const landing = existing?.booked_product_id === productId ? existing.product_id : productId
+  const bookedProductId = landing === productId ? null : productId
   if (existing?.external_booking_id === null && existing.product_id !== landing) fail(409, 'CHANNEL_MIGRATION_HOME_CONFLICT', 'This reservation was imported into a different occupied home. Resolve its property assignment before accepting the channel revision.', 'product_id')
   const reimported = existing && existing.external_booking_id !== booking.external_booking_id ? existing.external_booking_id : null
   const conversation = await queryFirst<{ organization_id: string; product_id: string; conversation_id: string }>(db,
@@ -2746,8 +2804,8 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   }, {
     query: `INSERT INTO bookings (id, organization_id, user_id, product_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, adults, children, infants,
               channel, owner, status, overbooked, policy_json, total_minor, currency, provider, external_booking_id, channel_booking_id, revision_id,
-              provider_updated_at, cancelled_at, received_at, version, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'channel', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+              provider_updated_at, cancelled_at, received_at, version, created_at, updated_at, booked_product_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'channel', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT (provider, external_booking_id) WHERE external_booking_id IS NOT NULL DO UPDATE SET
               product_id = excluded.product_id, product_variant_id = excluded.product_variant_id, location_id = excluded.location_id, timezone = excluded.timezone,
               starts_at = excluded.starts_at, ends_at = excluded.ends_at, channel = excluded.channel, status = excluded.status, overbooked = excluded.overbooked,
@@ -2755,14 +2813,14 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
               total_minor = excluded.total_minor, currency = excluded.currency, channel_booking_id = excluded.channel_booking_id,
               revision_id = excluded.revision_id, provider_updated_at = excluded.provider_updated_at,
               cancelled_at = CASE WHEN excluded.status = 'cancelled' THEN COALESCE(bookings.cancelled_at, excluded.cancelled_at) ELSE NULL END,
-              version = bookings.version + 1, updated_at = excluded.updated_at
+              version = bookings.version + 1, updated_at = excluded.updated_at, booked_product_id = excluded.booked_product_id
             WHERE bookings.organization_id = excluded.organization_id AND bookings.id = ? AND bookings.product_id = ? AND bookings.version IS ?
               AND (bookings.provider_updated_at IS NULL OR bookings.provider_updated_at < excluded.provider_updated_at)`,
     params: [id, organizationId, guestUserId, landing, home.variant_id, home.location_id, window.starts_at, window.ends_at, home.timezone,
       booking.adults + booking.children, booking.adults, booking.children, booking.infants, booking.channel, booking.cancelled ? 'cancelled' : 'confirmed', overbooked, policy,
       booking.total_minor, booking.currency, booking.provider, booking.external_booking_id, booking.channel_booking_id, booking.revision_id,
       // A booking received as it happened starts the new-reservation messages; the import's history never does. An update keeps the first answer.
-      booking.provider_updated_at, booking.cancelled ? now : null, booking.imported || booking.cancelled ? null : now, now, now, existing?.id ?? null, previous?.product_id ?? null, previous?.version ?? null],
+      booking.provider_updated_at, booking.cancelled ? now : null, booking.imported || booking.cancelled ? null : now, now, now, bookedProductId, existing?.id ?? null, previous?.product_id ?? null, previous?.version ?? null],
   },
   organizationEventQuery({ organizationId, locationId: home.location_id, actorId: null, eventType: existing ? 'stay.updated' : 'stay.created', entityType: 'stay', entityId: id,
     dedupeKey: revisionKey, onlyIfPreviousChangedOneRow: true, metadata: { channel: booking.channel, overbooked: overbooked === 1,
@@ -2777,7 +2835,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   {
     query: `UPDATE conversations SET booking_id = b.id, user_id = b.user_id, location_id = b.location_id FROM bookings b JOIN channel_threads t
         ON t.provider = b.provider AND t.external_booking_id = b.external_booking_id
-        AND t.organization_id = b.organization_id AND t.product_id = b.product_id
+        AND t.organization_id = b.organization_id AND t.product_id = COALESCE(b.booked_product_id, b.product_id)
       WHERE b.id = ? AND b.organization_id = ? AND b.product_id = ? AND b.version = ?
         AND conversations.id = t.conversation_id AND conversations.organization_id = b.organization_id AND conversations.kind = 'booking' AND conversations.booking_id IS NULL
         AND NOT EXISTS (SELECT 1 FROM conversations booked WHERE booked.booking_id = b.id AND booked.kind = 'booking')`,
@@ -2795,7 +2853,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   try {
     writes = await executeBatch(db, write(0), { operation: 'Apply channel booking' })
   } catch (error) {
-    if (!isStayNightConflict(error)) throw error
+    if (!isStayNightConflict(error) && !bookingBatchWriteRefused(error)) throw error
     // Rule 1: another stay holds one of these nights. The channel stay still lands, flagged and holding none.
     writes = await executeBatch(db, write(1), { operation: 'Apply overbooked channel booking' })
   }
@@ -3102,7 +3160,7 @@ export function stayRequestDeadline(now: string, startsAt: string, timezone: str
 
 type StayAvailability = { organizationId: string; productId: string; checkIn: string; checkOut: string }
 type OverbookedStay = { id: string; version: number; starts_at: string; ends_at: string; timezone: string }
-const OVERBOOKED_HOME_SQL = "s.organization_id=? AND s.owner='channel' AND s.status='confirmed' AND s.product_id=? AND s.overbooked=1"
+const OVERBOOKED_HOME_SQL = "s.organization_id=? AND s.owner='channel' AND s.status='confirmed' AND (? IN (s.product_id, s.booked_product_id)) AND s.overbooked=1"
 
 /** Channel stays normally have local-date claims. An overbooking has no claims, so read its dates in its own saved timezone and guard the observation in the write. */
 export async function stayChannelAvailability(db: DbClient, input: StayAvailability) {
@@ -3121,12 +3179,12 @@ function observedStayChannelAvailability({ organizationId, productId, checkIn, c
   }
   return {
     query: `NOT EXISTS (SELECT 1 FROM bookings s JOIN stay_nights n ON n.organization_id=s.organization_id AND n.booking_id=s.id
-      WHERE s.organization_id=? AND s.status<>'cancelled' AND n.date>=? AND n.date<?
-        AND s.product_id=? AND s.owner='channel' AND s.status='confirmed')
+      WHERE s.organization_id=? AND s.status='confirmed' AND n.date>=? AND n.date<?
+        AND ((s.product_id=? AND s.owner='channel') OR s.booked_product_id=?))
       AND NOT EXISTS (SELECT 1 FROM bookings s WHERE ${OVERBOOKED_HOME_SQL} AND ${window.sql}
         AND NOT EXISTS (SELECT 1 FROM json_each(?) observed
           WHERE json_extract(observed.value,'$[0]')=s.id AND json_extract(observed.value,'$[1]')=s.version))`,
-    params: [organizationId, checkIn, checkOut, productId, organizationId, productId, ...window.params, JSON.stringify(candidates.map(({ id, version }) => [id, version]))],
+    params: [organizationId, checkIn, checkOut, productId, productId, organizationId, productId, ...window.params, JSON.stringify(candidates.map(({ id, version }) => [id, version]))],
   }
 }
 

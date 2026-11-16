@@ -105,6 +105,8 @@ export interface ConversationPage extends Omit<ConversationEntriesPage, 'convers
   }
   /** What the viewer does here: Done for the job this conversation is about, or Review a request or change waiting on them. */
   work: { type: 'done'; task_id: string; version: number } | { type: 'review' } | null
+  /** The open task each actionable job message represents, keyed by message ID. */
+  job_actions?: Record<string, string>
 }
 
 export interface ConversationDetails {

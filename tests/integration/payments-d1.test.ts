@@ -1683,6 +1683,40 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
  } finally { await runtime.dispose() }
 })
 
+test('a captured payment without a booking remains serviceable and cannot return a booking receipt', { timeout: 120_000 }, async t => {
+ const { db, runtime, env: bootEnv, events } = await boot()
+ try {
+  const env = { ...stripeEnv(bootEnv), NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_local_boundary' }
+  await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
+  const claim = await confirmable(db, 'settled', inMinutes(30))
+  const calls = fakeStripe(t, () => null, { settled: 'succeeded' })
+  const stripe = getStripe(env)
+  const event = { id: 'evt_settled', type: 'payment_intent.succeeded', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_settled', metadata: { krabiclaw_payment_id: 'settled' } } } } as unknown as Stripe.Event
+
+  await assert.rejects(() => processPaymentEvent(db, stripe, event, env), /Captured payment has no saved booking/u)
+  const recorded = await requirePayment(db, ORG, 'settled')
+  assert.deepEqual([recorded.captured_amount, recorded.stripe_charge_id, recorded.subject_id], [10000, 'ch_settled', null])
+  await assert.rejects(() => processPaymentEvent(db, stripe, event, env), /Captured payment has no saved booking/u)
+  assert.deepEqual(await requirePayment(db, ORG, 'settled'), recorded)
+  assert.deepEqual([calls.capture, calls.cancel, calls.refund, events.pending], [[], [], [], []])
+
+  const app = new H3()
+  app.use((event) => { event.context.organizationId = ORG })
+  app.get('/api/public/payments/:payment_id', paymentHandoffRoute)
+  app.post('/api/public/payments/:payment_id/return', paymentReturnRoute)
+  const base = 'https://payments.proof.example/api/public/payments/settled'
+  for (const request of [
+   new Request(`${base}?claim=${encodeURIComponent(claim)}`),
+   new Request(`${base}/return`, { method: 'POST', headers: { origin: 'https://payments.proof.example', 'content-type': 'application/json' }, body: JSON.stringify({ claim }) }),
+  ]) {
+   const response = await app.request(Object.assign(request, { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+   assert.equal(response.status, 409)
+   assert.equal((await response.json() as { data?: { code?: string } }).data?.code, 'payment_booking_unconfirmed')
+   assert.deepEqual(response.headers.getSetCookie(), [])
+  }
+ } finally { await runtime.dispose() }
+})
+
 test('bank verification begins with a booking, sends the buyer to Stripe, and cancels the booking if verification fails', { timeout: 120_000 }, async t => {
  const { db, runtime, env: bootEnv, events } = await boot()
  try {

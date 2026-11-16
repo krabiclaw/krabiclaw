@@ -52,6 +52,8 @@ export interface OrganizationEvent {
   context?: ReturnType<typeof organizationEventContext> & { tool?: string; oauth_client_id?: string | null }
   /** Read inside the write's transaction, before its mutation, for an atomic snapshot. */
   beforeStateQuery?: BatchQuery
+  /** Read the saved state inside the write's transaction. */
+  afterStateQuery?: BatchQuery
   /**
    * Record the event only when the statement just before it in the batch
    * changed exactly one row. A compare-and-set write that lost its guard
@@ -82,12 +84,14 @@ export function organizationEventQuery(event: OrganizationEvent): BatchQuery {
   const id = event.id ?? crypto.randomUUID()
   const actorKind = actorType === 'cloudflare' ? 'cloudflare' : actorId ? 'member' : 'system'
   const now = new Date().toISOString()
+  const before = event.beforeStateQuery ? `json_set(?, '$.beforeState', json((${event.beforeStateQuery.query})))` : '?'
+  const payload = event.afterStateQuery ? `json_set(${before}, '$.afterState', json((${event.afterStateQuery.query})))` : before
   return {
     query: `
       INSERT INTO activity_entries
         (id, organization_id, location_id, actor_kind, actor_user_id,
          event_name, body, payload_json, occurred_at, created_at, dedupe_key)
-      SELECT ?, ?, ?, ?, ?, ?, ?, ${event.beforeStateQuery ? `json_set(?, '$.beforeState', json((${event.beforeStateQuery.query})))` : '?'}, ?, ?, ?
+      SELECT ?, ?, ?, ?, ?, ?, ?, ${payload}, ?, ?, ?
       ${event.onlyIfPreviousChangedOneRow ? 'WHERE changes() = 1' : ''}
     `,
     params: [id, organizationId, locationId ?? null,
@@ -96,6 +100,7 @@ export function organizationEventQuery(event: OrganizationEvent): BatchQuery {
         beforeState: beforeState ?? null, afterState: afterState ?? null, metadata: metadata ?? null,
         ...(event.context ? { context: event.context } : {}) }),
       ...(event.beforeStateQuery?.params ?? []),
+      ...(event.afterStateQuery?.params ?? []),
       now, now, event.dedupeKey ?? 'audit:' + id],
   }
 }

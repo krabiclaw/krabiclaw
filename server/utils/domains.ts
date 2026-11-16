@@ -413,7 +413,17 @@ export async function inspectDomainResolution(env: DomainEnv, hostname: string, 
     ...aRecords.map((value) => ({ type: 'A' as const, value })),
     ...aaaaRecords.map((value) => ({ type: 'AAAA' as const, value })),
   ]
-  const pointsToSaas = domainRecordsPointToSaas(cnameRecords, aRecords, aaaaRecords, cnameTarget)
+  let pointsToSaas = domainRecordsPointToSaas(cnameRecords, aRecords, aaaaRecords, cnameTarget)
+  if (pointsToSaas === null && cnameTarget) {
+    // Apex CNAME flattening publishes the target's addresses in place of the CNAME.
+    const [targetA, targetAAAA]: [string[], string[]] = await Promise.all([
+      aRecords.length ? queryDnsJson(cnameTarget, 'A', signal) : [],
+      aaaaRecords.length ? queryDnsJson(cnameTarget, 'AAAA', signal) : [],
+    ])
+    if (aRecords.every(address => targetA.includes(address)) && aaaaRecords.every(address => targetAAAA.includes(address))) {
+      pointsToSaas = true
+    }
+  }
   return {
     hostname: normalizedHostname,
     checked_at: new Date().toISOString(),

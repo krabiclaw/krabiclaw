@@ -99,6 +99,7 @@ export function isConversationPage(value: unknown): value is ConversationPage {
     || !isText(value.conversation.id) || !isText(value.conversation.organization_id)
     || !Array.isArray(value.entries) || !value.entries.every(isConversationEntry) || !isRecord(value.page)
     || !isRecord(value.capabilities)) return false
+  if (value.job_actions !== undefined && (!isRecord(value.job_actions) || !Object.values(value.job_actions).every(isText))) return false
   const { can_manage_participants, can_invite_guest, can_leave } = value.capabilities
   if (typeof can_manage_participants !== 'boolean' || typeof can_invite_guest !== 'boolean'
     || typeof can_leave !== 'boolean') return false

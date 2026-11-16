@@ -56,8 +56,10 @@ function lines(view: TaskView): string {
   return [...head, view.notes].filter((line): line is string => Boolean(line)).join('\n')
 }
 
-/** The reminders a job gets, each at its instant, as [key suffix, instant, valid until]. */
-function reminders(task: TaskRow): Array<{ key: string; at: Date; until: Date; kind: 'evening' | 'morning' | 'warning' }> {
+type ReminderTask = Pick<TaskRow, 'id' | 'starts_at' | 'due_at' | 'timezone' | 'kind' | 'subject_type' | 'subject_id' | 'dedupe_key'>
+
+/** The reminders a job gets, each with its key and delivery window. */
+function reminders(task: ReminderTask): Array<{ key: string; at: Date; until: Date; kind: 'evening' | 'morning' | 'warning' }> {
   const anchor = task.starts_at ?? task.due_at
   if (anchor === null) return []
   const day = localDateAt(new Date(anchor), task.timezone)
@@ -72,6 +74,13 @@ function reminders(task: TaskRow): Array<{ key: string; at: Date; until: Date; k
   return out
 }
 
+function startReminder(task: ReminderTask) {
+  const morning = reminders(task).find(reminder => reminder.kind === 'morning')
+  if (!morning) return null
+  const day = localDateAt(morning.at, task.timezone)
+  return { ...morning, key: `task-starting:${task.id}:${day}` }
+}
+
 /** A later send for a task, stored in the outbox under its key: a reminder in the job's conversation, or the start alert of a task that has none. */
 interface PlannedSend { id: string; due_at: string; body: string; conversation_id: string | null }
 
@@ -84,9 +93,12 @@ function plannedSendQueries(task: Pick<TaskRow, 'id' | 'organization_id' | 'time
   }, ...plan.map(send => ({
     query: `INSERT INTO scheduled_guest_messages (id, organization_id, task_id, conversation_id, body, due_at, timezone, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
-      ON CONFLICT (id) DO UPDATE SET conversation_id = excluded.conversation_id, body = excluded.body, due_at = excluded.due_at, updated_at = excluded.updated_at
-        WHERE scheduled_guest_messages.status = 'pending'
-          AND (scheduled_guest_messages.conversation_id IS NOT excluded.conversation_id OR scheduled_guest_messages.body <> excluded.body OR scheduled_guest_messages.due_at <> excluded.due_at)`,
+      ON CONFLICT (id) DO UPDATE SET conversation_id = excluded.conversation_id, body = excluded.body, due_at = excluded.due_at,
+        timezone = excluded.timezone, status = 'pending', reason = NULL, started_at = NULL, updated_at = excluded.updated_at
+        WHERE (scheduled_guest_messages.status = 'cancelled' AND (scheduled_guest_messages.reason IS NULL OR scheduled_guest_messages.reason = 'The job changed'))
+          OR (scheduled_guest_messages.status = 'pending'
+          AND (scheduled_guest_messages.conversation_id IS NOT excluded.conversation_id OR scheduled_guest_messages.body <> excluded.body
+            OR scheduled_guest_messages.due_at <> excluded.due_at OR scheduled_guest_messages.timezone <> excluded.timezone))`,
     params: [send.id, task.organization_id, task.id, send.conversation_id, send.body, send.due_at, task.timezone, now, now],
   }))]
 }
@@ -142,10 +154,9 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
   const stamp = now.toISOString()
   /** The start alert of a task with no conversation, stored for the morning of its day. */
   const startAlert = (task: TaskRow): PlannedSend[] => {
-    const morning = reminders(task).find(reminder => reminder.kind === 'morning')
+    const morning = startReminder(task)
     if (!morning || now >= morning.until || !task.assigned_member_id) return []
-    const day = localDateAt(new Date(task.starts_at ?? task.due_at!), task.timezone)
-    return [{ id: `task-starting:${task.id}:${day}`, due_at: morning.at.toISOString(), body: 'Starts today', conversation_id: null }]
+    return [{ id: morning.key, due_at: morning.at.toISOString(), body: 'Starts today', conversation_id: null }]
   }
   for (const task of tasks) {
     try {
@@ -252,8 +263,9 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
  */
 export async function sendTaskSend(env: CloudflareEnv, db: DbClient, row: { id: string; organization_id: string; task_id: string }, now: string): Promise<'sent' | 'not_due'> {
   // The organization's outbox alarm is the only sender. The post and alert each have a stable delivery key.
-  const send = await queryFirst<{ body: string; conversation_id: string | null; status: string | null; assigned_member_id: string | null; starts_at: string | null; due_at: string | null; timezone: string }>(db,
-    `SELECT m.body, m.conversation_id, t.status, t.assigned_member_id, t.starts_at, t.due_at, t.timezone
+  const send = await queryFirst<ReminderTask & { body: string; conversation_id: string | null; status: TaskRow['status'] | null; assigned_member_id: string | null }>(db,
+    `SELECT m.body, m.conversation_id, t.id, t.status, t.assigned_member_id, t.starts_at, t.due_at, t.timezone,
+      t.kind, t.subject_type, t.subject_id, t.dedupe_key
       FROM scheduled_guest_messages m LEFT JOIN tasks t ON t.organization_id = m.organization_id AND t.id = m.task_id
       WHERE m.id = ? AND m.organization_id = ? AND m.status = 'pending' AND m.due_at <= ?`, [row.id, row.organization_id, now])
   if (!send) return 'not_due'
@@ -262,6 +274,11 @@ export async function sendTaskSend(env: CloudflareEnv, db: DbClient, row: { id: 
     "UPDATE scheduled_guest_messages SET status = ?, message_id = ?, sent_at = ?, started_at = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND due_at <= ?",
     [status, messageId, status === 'sent' ? now : null, now, now, row.id, now])
   if (send.status !== 'open') { await finish('cancelled', null); return 'not_due' }
+  const reminder = send.conversation_id === null ? startReminder(send) : reminders(send).find(item => item.key === row.id)
+  if (!reminder || reminder.key !== row.id || now >= reminder.until.toISOString() || now < reminder.at.toISOString()) {
+    await finish('cancelled', null)
+    return 'not_due'
+  }
   const [organization, members] = await Promise.all([
     queryFirst<{ name: string }>(db, 'SELECT name FROM organization WHERE id = ?', [row.organization_id]),
     queryAll<Member>(db, 'SELECT id, userId, role FROM member WHERE organizationId = ?', [row.organization_id]),
@@ -269,7 +286,7 @@ export async function sendTaskSend(env: CloudflareEnv, db: DbClient, row: { id: 
   if (!organization) throw new Error(`Organization ${row.organization_id} is missing`)
   const doing = members.filter(member => member.id === send.assigned_member_id).map(member => member.userId)
   if (send.conversation_id === null) {
-    await notifyTaskStarting(env, db, { organizationId: row.organization_id, taskId: row.task_id, day: localDateAt(new Date(send.starts_at ?? send.due_at!), send.timezone), recipientUserIds: doing })
+    await notifyTaskStarting(env, db, { organizationId: row.organization_id, taskId: row.task_id, day: localDateAt(reminder.at, send.timezone), recipientUserIds: doing })
     await finish('sent', null)
     return 'sent'
   }

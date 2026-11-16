@@ -1,4 +1,4 @@
-import { execute, queryAllPages, queryFirst } from '~/server/db'
+import { execute, executeBatch, queryAllPages, queryFirst } from '~/server/db'
 import { publishEvent } from '~/server/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { runScheduledManagedAdSpend } from '~/server/domain/payments/ad-spend'
@@ -15,6 +15,17 @@ export const RETENTION_HUB = 'platform:analytics-retention'
 /** Deployment adopts work that has no Worker wake yet, including writes made by the old build. */
 export async function enqueueOutstandingWork(env: CloudflareEnv): Promise<void> {
   const due = Date.now()
+  // The new Worker has converged. Recompute previously published checkout and
+  // calendar claims after retiring them in the same batch.
+  await executeBatch(env.DB, [{
+    query: `UPDATE channel_night_pushes SET state = 'pending', detail = NULL, updated_at = ?
+      WHERE (organization_id, product_id, date) IN (
+        SELECT organization_id, product_id, date FROM stay_nights WHERE booking_id IS NULL
+      )`,
+    params: [new Date(due).toISOString()],
+  }, {
+    query: 'DELETE FROM stay_nights WHERE booking_id IS NULL',
+  }], { operation: 'Retire checkout and linked calendar night claims' })
   const deadlines = await queryAllPages<{
     organization_id: string
     kind: 'reviews' | 'checkout' | 'channex_ari' | 'ad_spend'
@@ -82,6 +93,9 @@ export async function enqueueOutstandingWork(env: CloudflareEnv): Promise<void> 
   for (const { organization_id, id } of jobs) {
     await publishEvent(env, { type: 'airbnb.sync', organization_id, job_id: id })
   }
+  // The release after webhook cutover removes this drain under "Remove one-time Channex revision adoption."
+  const { adoptPendingBookingRevisions } = await import('~/server/integrations/channex/booking-revisions')
+  await adoptPendingBookingRevisions(env)
 }
 
 /** Run the retention window once for its UTC day, only when it has due rows. */

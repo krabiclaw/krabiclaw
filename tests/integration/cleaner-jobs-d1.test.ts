@@ -11,7 +11,7 @@ import { cancelStay, createStay, updateStayHome, type StayAccess } from '../../s
 import { conversationPageFor } from './support/conversation-page.ts'
 import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
 import { createTeamThread } from '../../server/domain/team-messages.ts'
-import { closeTask, jobKey, taskViewForUser, taskViewer, updateTask, type TaskRow } from '../../server/domain/tasks.ts'
+import { closeTask, jobKey, reopenTask, taskViewForUser, taskViewer, updateTask, type TaskRow } from '../../server/domain/tasks.ts'
 import { listConversations, conversationTaskQueries  } from '../../server/domain/guest-threads/repository.ts'
 import { markConversationRead, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { changedTaskIds, publishChangedJobs } from '../../server/events.ts'
@@ -128,6 +128,19 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     // A second wake posts nothing twice.
     await runOrganizationJobs(queue, env, db, ORG, now)
     assert.equal((await automatic(thread.id)).length, 1)
+
+    // Ending and reopening this future job restores its unsent reminders under the same keys.
+    const cleanerViewer = await taskViewer(cleaner)
+    const reminderState = async () => (await db.prepare('SELECT id, status FROM scheduled_guest_messages WHERE task_id = ? ORDER BY due_at')
+      .bind(turnover.id).all<{ id: string; status: string }>()).results
+    const planned = await reminderState()
+    assert.equal(planned.length, 3)
+    const skipped = await closeTask(db, cleanerViewer, turnover.id, { status: 'skipped', env })
+    await runOrganizationJobs(queue, env, db, ORG, now)
+    assert.deepEqual(await reminderState(), planned.map(row => ({ ...row, status: 'cancelled' })))
+    await reopenTask(db, cleanerViewer, turnover.id, { version: skipped.version })
+    await runOrganizationJobs(queue, env, db, ORG, now)
+    assert.deepEqual(await reminderState(), planned)
 
     // The evening before, the morning of, and the warning to the hosts two hours before Lee arrives; each once.
     for (const [when, key, pattern] of [
@@ -256,6 +269,18 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     const attorney = await memberAccessPrincipal({ userId: 'host', role: 'member', memberId: 'host-member', organizationId: ORG } as never, { env })
     const threads = await Promise.all((await db.prepare("SELECT id FROM conversations WHERE kind = 'team' AND booking_id = ?").bind(booking.bookingId).all<{ id: string }>()).results.map(row => readTeamThread(db, attorney, row.id)))
     assert.deepEqual(threads.map(thread => [thread.name, thread.booking_id]), [[null, booking.bookingId]])
+    const consultationPosts = (await db.prepare(`SELECT id AS message_id, json_extract(payload_json, '$.key') AS key FROM messages
+      WHERE conversation_id = ? AND author_kind = 'krabiclaw' AND json_extract(payload_json, '$.key') GLOB 'job:*'`)
+      .bind(threads[0]!.id).all<{ message_id: string; key: string }>()).results
+    const consultationTasks = (await db.prepare('SELECT id, product_id FROM tasks WHERE organization_id = ? AND kind IN (\'consultation_prep\', \'consultation_follow_up\')')
+      .bind(ORG).all<Pick<TaskRow, 'id' | 'product_id'>>()).results
+    assert.equal(consultationPosts.length, 2)
+    const consultationPage = await conversationPageFor(db, attorney, threads[0]!.id)
+    for (const task of consultationTasks) {
+      const post = consultationPosts.find(message => message.key === jobKey(task))
+      assert.ok(post)
+      assert.equal(consultationPage.job_actions?.[post.message_id], task.id)
+    }
     const posts = (await db.prepare("SELECT body FROM messages WHERE conversation_id = ? AND author_kind = 'krabiclaw'").bind(threads[0]!.id).all<{ body: string }>()).results.map(row => row.body)
     assert.equal(posts.filter(body => body === `Today: prepare for consultation with Client${view.when ? `, ${view.when}` : ''}.`).length, 1)
     assert.equal(posts.filter(body => body.includes('arrive')).length, 0)
@@ -306,11 +331,14 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     assert.ok(newThread)
     const reassignedPost = await db.prepare("SELECT id FROM messages WHERE conversation_id = ? AND author_kind = 'krabiclaw' AND json_extract(payload_json, '$.key') GLOB ?")
       .bind(newThread, `job:${prep!.id}:*`).first<string>('id')
+    assert.ok(reassignedPost)
     assert.ok((await messages(newThread)).some(message => message.id === reassignedPost && message.automatic && message.body?.includes('Replacement')))
+    assert.equal((await conversationPageFor(db, attorney, newThread)).job_actions?.[reassignedPost], prep!.id)
     const viewer = await taskViewer(attorney)
     const outcome = 'Done'
     assert.equal((await closeTask(db, viewer, prep!.id, { status: 'done', env })).status, 'done')
     assert.ok((await messages(newThread)).some(message => message.body === outcome))
+    assert.equal((await conversationPageFor(db, attorney, newThread)).job_actions?.[reassignedPost], undefined)
     assert.ok((await messages(oldThread)).every(message => message.body !== outcome))
   } finally { await runtime.dispose() }
 })

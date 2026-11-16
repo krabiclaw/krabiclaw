@@ -34,7 +34,7 @@
                   <div class="rounded-3xl bg-default p-4 shadow-sm">
                     <p class="text-sm text-muted">Job</p>
                     <p class="mt-0.5 whitespace-pre-wrap break-words text-base font-semibold text-highlighted">{{ message.body }}</p>
-                    <UButton v-if="data?.work?.type === 'done'" label="Done" color="neutral" variant="soft" block class="mt-3 rounded-xl" :loading="closing" data-testid="conversation-job-done" @click="emit('done')" />
+                    <UButton v-if="data?.job_actions?.[message.id]" label="Done" color="neutral" variant="soft" block class="mt-3 rounded-xl" :loading="closing" data-testid="conversation-job-done" @click="emit('done', message.id)" />
                   </div>
                 </div>
                 <p v-else class="max-w-md whitespace-pre-wrap text-center text-sm text-muted" :data-team-message="message.id" data-automatic>{{ message.body }}</p>
@@ -136,7 +136,7 @@ import { isScheduledMessageResponse, isSuggestedReplies, useSuggestedReplies } f
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 const props = withDefaults(defineProps<{ threadId: string; personalScope?: boolean; history: ReturnType<typeof useConversation>; reservationTo?: string | null; closing?: boolean }>(), { personalScope: false, closing: false })
-const emit = defineEmits<{ done: [] }>()
+const emit = defineEmits<{ done: [messageId: string] }>()
 
 const dashboard = useDashboardOrganization()
 const route = useRoute()

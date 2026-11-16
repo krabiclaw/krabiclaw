@@ -103,7 +103,7 @@ test('the historical no-show migration requires the original mark in the booking
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
   try {
-    const migration = '0013_deadline_indexes'
+    const migration = '0012_deadline_indexes'
     const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
     for (const entry of journal.entries.slice(0, journal.entries.findIndex(entry => entry.tag === migration))) {
       database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))

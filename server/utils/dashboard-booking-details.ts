@@ -25,6 +25,7 @@ import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { readPaymentDetails } from '~/server/domain/payments'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { canRetryGuestVisitRefund } from '~/server/domain/payments/visit-refund'
+import { historicalNoShowAtSql } from '~/server/utils/review-requests'
 import {paymentStateLabel,paymentDisplay,paymentRefundsDisplay,paymentOrderDisplay,type PaymentDisplay,type PaymentRefundDisplay,type PaymentOrderDisplay} from '~/shared/payment-display'
 
 export type DashboardBookingType = 'booking'
@@ -79,6 +80,7 @@ interface BookingRow {
   advance_notice_minutes: number | null
   review_id: string | null
   private_notes: string | null
+  no_show_at: string | null
 }
 
 
@@ -141,6 +143,7 @@ export interface DashboardBookingDetails {
   policy: FormattedBookingPolicySummary | null
   /** The team's private note on the booking (bookings.private_notes), never shown to the guest; null when there is none or the reader is the guest. */
   private_notes: string | null
+  no_show_at: string | null
   /** The guest's answers to the business's own questions, in the wording they answered. A request made before questions has none. */
   answers: FormAnswerSnapshot[]
   /** A change the business proposed that the guest has not answered; Airbnb's "Change requested". */
@@ -204,7 +207,7 @@ async function loadBookingRow(
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status,
     (SELECT m.body FROM messages m WHERE m.conversation_id = r.id AND m.event_name = '${GUEST_NOTE_EVENT}' ORDER BY m.sequence LIMIT 1) AS notes,
     record.product_id, record.name, record.product_session_id,
-    r.id AS conversation_id, record.answers AS answers_json, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, record.created_at, record.updated_at, (SELECT rv.id FROM reviews rv WHERE rv.organization_id = record.organization_id AND rv.booking_id = record.id ORDER BY rv.created_at LIMIT 1) AS review_id, record.private_notes
+    r.id AS conversation_id, record.answers AS answers_json, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, record.created_at, record.updated_at, ${historicalNoShowAtSql('r')} AS no_show_at, (SELECT rv.id FROM reviews rv WHERE rv.organization_id = record.organization_id AND rv.booking_id = record.id ORDER BY rv.created_at LIMIT 1) AS review_id, record.private_notes
     FROM conversations r
     JOIN organization s ON s.id = r.organization_id
     JOIN (
@@ -506,6 +509,7 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     updated_at: payment.updated_at,
     policy: null,
     private_notes: null,
+    no_show_at: null,
     pending_change: null,
     locations: [],
     payments: [{ payment: paymentDisplay(detail.payment), refunds: paymentRefundsDisplay(detail.refunds), order: paymentOrderDisplay(detail.order) }],

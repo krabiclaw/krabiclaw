@@ -5,7 +5,7 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createProduct, createProductsBatch, getProduct, reconcileProducts, updateProduct } from '../../server/utils/product-management.ts'
-import { cancelStay, createStay, deliverPendingChannelNights, dispatchStayCheckoutDeadlines, readHomeCalendar, readStayHome, setStayNights, updateStayHome, verifyStayCalendarOccupancy, type StayAccess } from '../../server/domain/stays.ts'
+import { cancelStay, createStay, deliverPendingChannelNights, dispatchStayCheckoutDeadlines, readHomeCalendar, readStayHome, setStayNights, updateStay, updateStayHome, verifyStayCalendarOccupancy, type StayAccess } from '../../server/domain/stays.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { captureEvents } from './support/events.ts'
 
@@ -435,6 +435,26 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.equal(offline.channel_push, null)
     assert.deepEqual(offline.nights.map(night => night.channel), [null])
     assert.deepEqual(channex.take(), [])
+
+    // A refused event send still leaves the committed inventory in the delivery outbox.
+    await db.prepare("UPDATE channel_sync_log SET created_at = '2000-01-01T00:00:00.000Z' WHERE direction = 'outbound'").run()
+    const original = await createStay(db, env, manager, { product_id: connected, idempotency_key: 'edit-without-event',
+      check_in_date: day(50), check_out_date: day(52), adults: 2, guest_name: 'Dana', total_minor: 300_00 })
+    await queue.drain(env, 'stay.changed')
+    channex.take()
+    const after = Date.now()
+    await assert.rejects(updateStay(db, { ...env, EVENTS: { async send() { throw new Error('Event send refused') } } }, manager, original.id,
+      { version: original.version, check_in_date: day(53), check_out_date: day(55) }), /Event send refused/)
+    const changes = await readHomeCalendar(db, manager, { productId: connected, from: day(50), to: day(55) })
+    assert.deepEqual(changes.nights.filter(night => night.channel?.state === 'pending').map(night => [night.date, night.booking_id]),
+      [[day(50), null], [day(51), null], [day(53), original.id], [day(54), original.id]])
+    const namespace = env.GUEST_INBOX_HUBS!
+    const wake = await namespace.get(namespace.idFromName(ORG)).fetch('https://guest-inbox.internal/ari-deadline')
+    assert.ok(Number(await wake.json()) >= after)
+    await deliverPendingChannelNights(env, ORG, Date.now())
+    const availability = channex.take().flatMap(call => call.path === '/availability' ? call.values : [])
+    assert.deepEqual(availability.map(value => [value.date_from, value.date_to, value.availability]),
+      [[day(50), day(51), 1], [day(53), day(54), 0]])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

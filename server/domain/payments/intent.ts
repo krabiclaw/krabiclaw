@@ -86,6 +86,9 @@ async function readCheckoutPayment(db: DbClient, organizationId: string, payment
 }
 
 async function readCheckoutIntent(stripe: Stripe, payment: CheckoutPayment, now: string) {
+  if (payment.subject_type === 'booking' && payment.captured_amount > 0 && !payment.subject_id) {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'Payment was received, but the booking could not be confirmed', data: { code: 'payment_booking_unconfirmed' } })
+  }
   const intent = await stripe.paymentIntents.retrieve(payment.stripe_payment_intent_id, { expand: ['latest_charge'] }, { stripeAccount: payment.stripe_account_id })
   const confirming = payment.confirmation_in_flight === 1 && (intent.status === 'requires_confirmation' || intent.status === 'requires_payment_method')
   const state: PaymentHandoffState = payment.captured_amount > 0 ? 'paid'

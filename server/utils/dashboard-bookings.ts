@@ -10,7 +10,7 @@ import { bookedRecordsInRange, businessWideViewer, type BookedRecordInRange } fr
 import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
-import { calendarStays, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, readStayReservationHome, type StayHome, type StayReservationHome } from '~/server/domain/stays'
+import { calendarStays, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, readStayReservationHome, type StayHome, type StayNight, type StayReservationHome } from '~/server/domain/stays'
 import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
 import { loadDashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
@@ -24,6 +24,11 @@ export type TurnoverBookingHome = Pick<StayHome, 'name' | 'internal_name' | 'che
 
 export function nightBooking<T extends { id: string }>({ id, ...record }: T) {
   return { ...record, booking_id: id, unit: 'nights' as const }
+}
+
+/** Released native decoders require both keys. No checkout or linked calendar owns nights now. */
+export function dashboardCalendarNight(night: StayNight) {
+  return { ...night, held_until: null, calendar: null }
 }
 
 async function dashboardBookingsContext(event: H3Event) {
@@ -89,7 +94,7 @@ export async function dashboardBookingDetails(event: H3Event) {
   const channelOwned = isChannelManagedStay(stay)
   const actions = requestActions(record, new Date().toISOString())
   const available_actions = stay.request_status ? actions : stay.status === 'cancelled' || channelOwned ? [] : ['edit', 'cancel']
-  return { booking: { ...nightBooking(stay), available_actions, pending_changes }, manage: true, home, can_message_guest: destination.channel !== null && !conversation.blocked_at }
+  return { booking: { ...nightBooking(stay), available_actions, pending_changes }, manage: true, home: { ...home, image_url: home.photo_urls[0] ?? null }, can_message_guest: destination.channel !== null && !conversation.blocked_at }
 }
 
 interface BookingListQuery { unit?: unknown; from?: unknown; to?: unknown; product_id?: unknown; include_cancelled?: unknown }
@@ -179,7 +184,8 @@ async function dashboardHomesCalendar(event: H3Event, window: BookingWindow) {
   const access = await stayAccessFor(joinedMemberPrincipal({ organizationId: member.organization_id, memberId: member.member_id, role: member.role, userId }, { env, event }))
   const calendar = stayCalendarOf(rest, access.manage, window)
   if (window.productId && !calendar.homes.length) throw new HTTPError({ statusCode: 404, message: 'That place to stay is not in this organization', data: { code: 'HOME_NOT_FOUND' } })
-  return { from: window.from, to: window.to, bookings: calendar.stays, homes: calendar.homes, places: [], manage: access.manage }
+  const homes = calendar.homes.map(entry => ({ ...entry, nights: entry.nights.map(dashboardCalendarNight) }))
+  return { from: window.from, to: window.to, bookings: calendar.stays, homes, places: [], manage: access.manage }
 }
 
 export async function dashboardBookingCalendar(event: H3Event, query: BookingListQuery) {

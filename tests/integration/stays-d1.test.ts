@@ -360,6 +360,27 @@ test('a moved channel revision repairs its audited home scopes without rewriting
     assert.deepEqual([overbooked.id, overbooked.product_id, overbooked.overbooked, overbooked.version], [overlapStay.id, lake.id, true, 2])
     assert.equal(await db.prepare('SELECT count(*) FROM stay_nights WHERE booking_id = ?').bind(overlapStay.id).first('count(*)'), 0)
     assert.equal(await db.prepare('SELECT count(*) FROM stay_nights WHERE booking_id = ?').bind(first.id).first('count(*)'), 2)
+
+    // A historical host move retains the original channel listing while
+    // the booking's local claims identify the home where the guest sleeps.
+    await db.prepare('UPDATE bookings SET booked_product_id = ? WHERE id = ?').bind(cabin.id, first.id).run()
+    const revised = await applyChannelBooking(db, env, ORG, cabin.id, {
+      ...booking, revision_id: 'legacy-move-new-departure', provider_updated_at: '2026-10-16T06:00:00Z', check_out_date: '2027-06-04',
+    })
+    assert.equal(revised.applied, true)
+    const saved = await getStay(db, manager, first.id)
+    assert.deepEqual([saved.product_id, saved.booked_product_id, saved.booked_home_name], [lake.id, cabin.id, 'Cabin'])
+    for (const productId of [cabin.id, lake.id]) {
+      const calendar = await readHomeCalendar(db, manager, { productId, from: '2027-06-03', to: '2027-06-05' })
+      assert.deepEqual(calendar.nights.map(night => [night.date, night.booking_id, night.available]), [
+        ['2027-06-03', first.id, false],
+        ['2027-06-04', null, true],
+      ])
+    }
+    await assert.rejects(createStay(db, env, manager, {
+      product_id: cabin.id, idempotency_key: 'old-channel-listing-conflict', check_in_date: '2027-06-03',
+      check_out_date: '2027-06-04', adults: 1, guest_name: 'Another guest', total_minor: 10_000,
+    }), code('STAY_OVERLAP'))
   } finally {
     await runtime.dispose()
   }

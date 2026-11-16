@@ -11,11 +11,14 @@ export function submittedReviewRequestSql(review: string): string {
 }
 
 /** Historical no-shows remain part of the booking conversation. */
-export function historicalNoShowSql(conversation: string): string {
-  return `EXISTS (SELECT 1 FROM messages m
+export function historicalNoShowAtSql(conversation: string): string {
+  return `(SELECT m.occurred_at FROM messages m
     WHERE m.organization_id = ${conversation}.organization_id AND m.conversation_id = ${conversation}.id
-      AND m.event_name IN ('booking.no_show', 'stay.no_show', 'reservation.no_show'))`
+      AND m.event_name IN ('booking.no_show', 'stay.no_show', 'reservation.no_show')
+    ORDER BY m.sequence LIMIT 1)`
 }
+
+export const historicalNoShowSql = (conversation: string) => `(${historicalNoShowAtSql(conversation)} IS NOT NULL)`
 
 export interface ReviewRequestRow {
   id: string

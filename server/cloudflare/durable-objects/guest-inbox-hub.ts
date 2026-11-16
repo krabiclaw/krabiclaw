@@ -14,6 +14,7 @@ import { sendDueOutbox } from '~/server/domain/scheduled-guest-messages'
 const OUTBOX_ORGANIZATION = 'jobs:organization'
 
 const BUSINESS_WAKES = 'outbox:wakes'
+const ALARM_MAX_RETRIES = 6
 type Wake = { at: number; revision: string }
 type BusinessWakes = Partial<Record<BusinessWakeKind, Wake | null>>
 
@@ -224,7 +225,7 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     throw new Error(`Business wake ${kind} has no processor`)
   }
 
-  override async alarm(): Promise<void> {
+  override async alarm(info?: AlarmInvocationInfo): Promise<void> {
     const organizationId = await this.ctx.storage.get<string>(OUTBOX_ORGANIZATION)
     if (!organizationId) throw new Error('The alarm fired for a hub that holds no organization')
     const now = Date.now()
@@ -235,6 +236,7 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
       return wake && wake.at <= now ? [{ kind, ...wake }] : []
     })
     const failures: unknown[] = []
+    const failedRevisions = new Map<BusinessWakeKind, string>()
     for (const wake of due) this.activeWakes.set(wake.kind, wake.revision)
     try {
       for (const wake of due) {
@@ -243,6 +245,7 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
           next = await this.runWake(organizationId, wake.kind, now)
         } catch (cause) {
           failures.push(new Error(`Business wake ${wake.kind} failed for ${organizationId}`, { cause }))
+          failedRevisions.set(wake.kind, wake.revision)
           await this.ctx.storage.transaction(async (storage) => {
             const pending = await storage.get<BusinessWakes>(BUSINESS_WAKES) ?? wakes
             const current = pending[wake.kind]
@@ -265,15 +268,22 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
           await storage.put(BUSINESS_WAKES, pending)
         })
       }
-      if (failures.length) throw new AggregateError(failures, 'One or more business deadlines failed')
     } finally {
       this.activeWakes.clear()
     }
-    await this.ctx.storage.transaction(async (storage) => {
-      const pending = await storage.get<BusinessWakes>(BUSINESS_WAKES) ?? {}
-      const times = Object.values(pending).flatMap(wake => wake ? [wake.at] : [])
-      if (times.length) await storage.setAlarm(Math.min(...times))
-    })
+    // Cloudflare retries the current alarm. On its last try, give the next
+    // independent wake an alarm of its own even when the current one failed.
+    if (!failures.length || info?.retryCount === ALARM_MAX_RETRIES) {
+      await this.ctx.storage.transaction(async (storage) => {
+        const pending = await storage.get<BusinessWakes>(BUSINESS_WAKES) ?? {}
+        const times = BUSINESS_WAKE_KINDS.flatMap(kind => {
+          const wake = pending[kind]
+          return wake && wake.revision !== failedRevisions.get(kind) ? [wake.at] : []
+        })
+        if (times.length) await storage.setAlarm(Math.min(...times))
+      })
+    }
+    if (failures.length) throw new AggregateError(failures, 'One or more business deadlines failed')
   }
 
   override webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {

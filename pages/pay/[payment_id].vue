@@ -98,22 +98,22 @@
           <p v-if="completing" class="text-sm text-muted">{{ t('payment.verifying') }}</p>
           <UAlert v-if="verificationUrl" color="info" :title="t('payment.bank_verification')" :description="t('payment.bank_verification_help')" :actions="[{ label: t('payment.bank_verification_action'), to: verificationUrl, target: '_blank', color: 'neutral', variant: 'outline' }]" data-bank-verification />
           <UAlert
-            v-else-if="outcome === 'taken' || handoff.state === 'taken'"
+            v-else-if="checkoutState === 'taken'"
             color="warning"
             :title="t('payment.taken')"
             :description="t('payment.taken_help')"
             :actions="[{ label: t('payment.choose_again'), color: 'neutral', variant: 'outline', onClick: chooseAgain }]"
           />
           <UAlert
-            v-else-if="outcome === 'processing' || handoff.state === 'processing'"
+            v-else-if="checkoutState === 'processing'"
             color="info"
             :title="t('payment.processing')"
             :description="t('payment.processing_help')"
             :actions="[{ label: t('payment.check_status'), color: 'neutral', variant: 'outline', loading: completing, onClick: complete }]"
           />
-          <UAlert v-else-if="outcome === 'expired'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
-          <UAlert v-else-if="!completing && (paid || handoff.state === 'paid')" color="success" :title="t('payment.already_paid')" />
-          <UAlert v-else-if="handoff.state !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
+          <UAlert v-else-if="checkoutState === 'expired'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
+          <UAlert v-else-if="!completing && (paid || checkoutState === 'paid')" color="success" :title="t('payment.already_paid')" />
+          <UAlert v-else-if="checkoutState !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
           <template v-else>
             <!-- No frame around Stripe's form: its fields are the only boxes, as on Airbnb's page. -->
             <section class="space-y-4">
@@ -201,8 +201,10 @@ const review = ref<Review | null>(null)
 const completing = ref(false)
 const paid = ref(false)
 const outcome = ref<'processing' | 'taken' | 'expired' | null>(null)
+const checkoutState = computed(() => outcome.value ?? handoff.value?.state)
 const confirmedVerificationUrl = ref<string | null>(null)
-const verificationUrl = computed(() => confirmedVerificationUrl.value ?? handoff.value?.bank_verification_url ?? null)
+const verificationUrl = computed(() => checkoutState.value === 'expired' || checkoutState.value === 'taken'
+  ? null : confirmedVerificationUrl.value ?? handoff.value?.bank_verification_url ?? null)
 let stripe: Stripe | null = null
 let mounting = false
 let elements: StripeElements | null = null

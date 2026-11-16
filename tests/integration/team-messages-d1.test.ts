@@ -540,6 +540,10 @@ test('members talk in team conversations, see unread state and receive recorded 
     // Each departure releases the home, the open turnover that followed the home's assignee, and the tables the cook handled.
     assert.deepEqual((await db.prepare("SELECT json_extract(payload_json, '$.entityType') AS entity, COUNT(*) AS n FROM activity_entries WHERE event_name = 'member.access_scope_revoked' AND actor_kind = 'system' AND organization_id = ? GROUP BY entity ORDER BY entity").bind(ORG).all()).results,
       [{ entity: 'product_booking_configs', n: 3 }, { entity: 'tasks', n: 2 }])
+    assert.deepEqual((await db.prepare(`SELECT json_extract(payload_json, '$.afterState.assigned_member_id') AS assigned_member_id
+      FROM activity_entries WHERE organization_id = ? AND event_name = 'member.access_scope_revoked'
+        AND json_extract(payload_json, '$.entityType') = 'tasks'`).bind(ORG).all()).results,
+    [{ assigned_member_id: 'm-owner' }, { assigned_member_id: 'm-owner' }])
   } finally {
     await runtime.dispose()
   }

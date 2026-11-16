@@ -6,6 +6,7 @@ import { parsePhoneOrThrow } from '~/utils/phone'
 import { oncePerRequest } from '~/server/utils/request-scope'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publishAccessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { changedTaskIds, publishChangedJobs, type EventsEnv } from '~/server/events'
 import type { H3Event } from 'nitro'
 import type { CloudflareEnv, organizationOptions } from '~/server/utils/auth'
 import type { OrganizationPermissions } from '~/utils/organization-access'
@@ -395,9 +396,10 @@ export async function assertResponsibleMember(db: DbClient, organizationId: stri
 }
 
 /** Clear only departed/dangling current targets; booked-person history stays. */
-export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, db: DbClient, input: { organizationId: string }): Promise<void> {
+export async function reconcileResponsibilities(env: GuestInboxPublicationEnv & EventsEnv, db: DbClient, input: { organizationId: string }): Promise<void> {
   const now = new Date().toISOString()
   let changed = false
+  const taskIds: string[] = []
   for (const [table, key] of [['product_booking_configs', 'product_id'], ['tasks', 'id']] as const) {
     // A closed task keeps who did it; only open work is reassigned away from a departed member.
     // A job always has someone: it goes to the owner; a task someone added and an offering are left with nobody.
@@ -413,22 +415,28 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, d
       const chunk = rows.slice(offset, offset + 400)
       const results = await executeBatch(db, chunk.flatMap(row => [{
         query: `UPDATE ${table} SET assigned_member_id = ${released}, updated_at = ?${table === 'tasks' ? ', version = version + 1' : ", updated_by = 'system'"}
-          WHERE organization_id = ? AND ${key} = ? AND assigned_member_id = ? AND ${memberMissing}`,
+          WHERE organization_id = ? AND ${key} = ? AND assigned_member_id = ? AND ${memberMissing}
+          ${table === 'tasks' ? 'RETURNING id AS changed_task_id' : ''}`,
         params: [now, input.organizationId, row.resource_id, row.assigned_member_id],
       }, organizationEventQuery({ organizationId: input.organizationId, actorType: 'system', eventType: 'member.access_scope_revoked', entityType: table, entityId: row.resource_id,
         beforeState: { assigned_member_id: row.assigned_member_id },
-        afterState: { assigned_member_id: table === 'tasks' ? 'the owner for a job, else nobody' : null },
+        afterStateQuery: {
+          query: `SELECT json_object('assigned_member_id', assigned_member_id) FROM ${table} WHERE organization_id = ? AND ${key} = ?`,
+          params: [input.organizationId, row.resource_id],
+        },
         onlyIfPreviousChangedOneRow: true,
       })]), { operation: 'Reconcile departed responsibility targets' })
       if (chunk.some((_row, index) => results[index * 2]?.meta.changes === 1)) changed = true
+      taskIds.push(...changedTaskIds(results))
     }
   }
   if (changed) {
     const { sessionPrepTaskQueries } = await import('~/server/domain/tasks')
-    await executeBatch(db, sessionPrepTaskQueries({
+    const results = await executeBatch(db, sessionPrepTaskQueries({
       query: "SELECT subject_id FROM tasks WHERE organization_id = ? AND kind = 'consultation_prep' AND subject_type = 'product_session' AND status = 'open'",
       params: [input.organizationId],
     }, now), { operation: 'Reconcile session prep after member departure' })
+    taskIds.push(...changedTaskIds(results))
   }
   // Someone who left the organization leaves its conversations: their seats in
   // the team's, and their read positions in the guests'. A guest keeps their own.
@@ -439,6 +447,7 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, d
     params: [input.organizationId],
   }], { operation: 'Remove departed members from conversations' })
   if (Number(left?.meta.changes ?? 0) > 0) changed = true
+  await publishChangedJobs(env, input.organizationId, taskIds)
   if (changed) await publishAccessInvalidation(env, { organizationId: input.organizationId })
 }
 
