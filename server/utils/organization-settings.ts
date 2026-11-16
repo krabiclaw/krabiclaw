@@ -12,14 +12,13 @@ import { ORGANIZATION_FONT_PRESETS, isOrganizationFontPreset, resolveOrganizatio
 import { purgeOrganizationCaches, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import type { UpdateOrganizationSettingsRequest } from '~/server/types/organization'
 import { integrationSummary, listIntegrations } from '~/server/utils/organization-integrations'
-import { execute, executeBatch, queryFirst, type DbClient } from '~/server/db'
+import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 import { buildSingleMediaPlacementQueries, hydrateMediaAssetRefs, readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { applySitePalettePatch, resolveSitePalette } from '~/shared/site-palette'
 import { SITE_RECIPE_KEYS, SITE_RECIPE_OPTIONS, isSiteRecipeValue, parseSiteRecipe } from '~/shared/site-recipe'
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation } from '~/shared/media-placement-contract'
-import { refreshSocialCard, regenerateOrganizationSocialCards } from '~/server/utils/social-card'
-import { organizationAdapter } from '~/server/utils/member-access'
+import { loadOrganizationSocialCardRefresh, refreshSocialCard, queueOrganizationSocialCardRefresh } from '~/server/utils/social-card'
 import { BUSINESS_CURRENCY_FIXED, businessCurrencyFixed, linkedAccountOwner, type CloudflareEnv } from '~/server/utils/auth'
 import { prepareFormQuestionsWrite, readFormQuestions } from '~/server/domain/form-questions'
 import { formQuestionsRevision, type FormQuestion } from '~/shared/form-questions'
@@ -155,6 +154,7 @@ export async function loadSettingsPayload(
     }) : null,
     custom_domain_status: updatedOrganization.custom_domain_status,
     name: updatedOrganization.name,
+    social_card_refresh: await loadOrganizationSocialCardRefresh(db, organizationId),
     brand_description: updatedOrganization.brand_description,
     announcement: updatedOrganization.announcement_json ? { format: 'modal', ...JSON.parse(updatedOrganization.announcement_json) } : null,
     media: [
@@ -316,8 +316,10 @@ async function attemptOrganizationUpdate(
   const params: Array<string | null> = []
   // Extra WHERE terms the UPDATE must still satisfy at the moment it runs.
   const guards: string[] = []
-  const guardParams: string[] = []
+  const guardParams: Array<string | null> = []
   const organizationMedia = updates.media
+  const nameChanged = updates.name !== undefined && updates.name.trim() !== organization.name
+  const socialCardRefresh = nameChanged ? queueOrganizationSocialCardRefresh(organizationId) : null
 
   const settingsPatch: Record<string, unknown> = {}
   if (updates.lodging_booking) {
@@ -342,7 +344,9 @@ async function attemptOrganizationUpdate(
   }
   if (updates.name !== undefined) {
     setParts.push('name = ?', 'subdomain = ?')
-    params.push(updates.name, subdomain)
+    params.push(updates.name.trim(), subdomain)
+    guards.push('name IS ?')
+    guardParams.push(organization.name)
   }
   if (updates.brand_description !== undefined) {
     setParts.push('brand_description = ?')
@@ -453,18 +457,31 @@ async function attemptOrganizationUpdate(
   }
 
   const organizationUpdate = {
-    sql: `
+    query: `
     UPDATE organization
     SET ${setParts.join(', ')}
     WHERE id = ?${guards.map(guard => ` AND ${guard}`).join('')}
   `,
-    values: [...params, organizationId, ...guardParams],
+    params: [...params, organizationId, ...guardParams],
   }
+  const mediaWrites = [...new Set(organizationMedia?.map(item => item.slot))].flatMap(slot => buildSingleMediaPlacementQueries({
+    organizationId,
+    placement: { owner_type: 'organization', owner_id: organizationId, slot },
+    media: (organizationMedia ?? []).filter(item => item.slot === slot && item.asset_id)
+      .map(item => ({ asset_id: String(item.asset_id), presentation: item.presentation ?? null })),
+    now,
+  }))
+  const organizationWrites = [
+    organizationUpdate,
+    ...(guards.length === 0 ? [] : [{ query: "SELECT CASE WHEN changes() = 1 THEN NULL ELSE json_extract('{}', 'ORGANIZATION_SETTINGS_CHANGED') END" }]),
+    ...(socialCardRefresh?.queries ?? []),
+    ...mediaWrites,
+  ]
 
   // A guard that matched nothing means the row no longer answers to this
   // write — a suspended tenant being told to go Live. Reporting success would
   // leave the owner believing they published it.
-  if (guards.length > 0 && setParts.length > 0) {
+  if (updates.status !== undefined && setParts.length > 0) {
     const guarded = await queryFirst<{ status: string }>(db,
       'SELECT status FROM organization WHERE id = ? LIMIT 1', [organizationId])
     if (guarded?.status === 'suspended') {
@@ -473,13 +490,19 @@ async function attemptOrganizationUpdate(
   }
 
   const isRename = updates.name !== undefined && subdomain && subdomain !== organization.subdomain
-  if (isRename && setParts.length > 0) {
-    await createSystemSubdomain(env, db, organizationId, subdomain, { organizationUpdate })
-  } else if (setParts.length > 0) {
-    const result = await execute(db, organizationUpdate.sql, organizationUpdate.values)
-    if (!result.success) {
-      throw new Error('Failed to update organization settings')
+  try {
+    if (isRename && setParts.length > 0) {
+      await createSystemSubdomain(env, db, organizationId, subdomain, { organizationWrites })
+    } else if (setParts.length > 0) {
+      await executeBatch(db, organizationWrites, { operation: 'Update organization settings' })
+    } else if (mediaWrites.length > 0) {
+      await executeBatch(db, mediaWrites, { operation: 'Update organization media' })
     }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('ORGANIZATION_SETTINGS_CHANGED')) {
+      return { status: 409, data: { error: 'Organization settings changed while saving. Read them again.' } }
+    }
+    throw error
   }
 
   // A guarded question write that lost the race changed nothing; saying it saved would hide that.
@@ -491,7 +514,7 @@ async function attemptOrganizationUpdate(
   // A status change adds or removes this site's indexed content. Typography,
   // colors, recipe tokens and announcements affect only its public resource and HTML caches.
   // The inquiry form's questions are part of every public form that renders it.
-  if (updates.status !== undefined || updates.address_visibility !== undefined || updates.inquiry_questions !== undefined) {
+  if (updates.name !== undefined || updates.status !== undefined || updates.address_visibility !== undefined || updates.inquiry_questions !== undefined) {
     await purgePublicResourceCacheNow(env, organizationId)
   } else if (
     updates.lodging_booking !== undefined ||
@@ -509,40 +532,18 @@ async function attemptOrganizationUpdate(
   // website the owner believes is unpublished.
   if (updates.status !== undefined) await reconcileZarazAnalytics(env, db)
 
-  if (organizationMedia !== undefined && organizationMedia.length > 0) {
-    const targetSlots = new Set(organizationMedia.map(item => item.slot))
-    const queries = [...targetSlots].flatMap(slot => buildSingleMediaPlacementQueries({
-      organizationId,
-      
-      placement: { owner_type: 'organization', owner_id: organizationId, slot },
-      media: organizationMedia.filter(item => item.slot === slot && item.asset_id).map(item => ({ asset_id: String(item.asset_id), presentation: item.presentation ?? null })),
-      now,
-    }))
-    await executeBatch(db, queries)
-  }
-
-  const cardInputChanged = updates.name !== undefined
-    || updates.brand_description !== undefined
+  const cardInputChanged = updates.brand_description !== undefined
     || updates.seo_title !== undefined
     || updates.seo_description !== undefined
     || organizationMedia?.some(item => item.slot === 'logo' || item.slot === 'social_share') === true
-  if (cardInputChanged) {
+  if (cardInputChanged && !nameChanged) {
     await refreshSocialCard({ db, env, owner: { owner_type: 'organization', owner_id: organizationId }, actorId: userId })
-  }
-  // The business name is drawn on every card it owns, so a rename redraws them
-  // all here, and a card that did not redraw fails the rename's completion.
-  if (updates.name !== undefined) {
-    const failed: string[] = []
-    for (let after: string | null = null; ;) {
-      const page: Awaited<ReturnType<typeof regenerateOrganizationSocialCards>> = await regenerateOrganizationSocialCards({ db, env, organizationId, actorId: userId, after, limit: 25 })
-      for (const result of page.results) if (result.kind === 'failed') failed.push(`${result.owner.owner_type} ${result.owner.owner_id}: ${result.error}`)
-      if (!page.next_cursor) break
-      after = page.next_cursor
-    }
-    if (failed.length) throw new HTTPError({ statusCode: 502, statusMessage: `The name was saved, but ${failed.length} social card(s) did not redraw: ${failed.join('; ')}`, data: { code: 'POST_WRITE_COMPLETION_FAILED', field: 'social_cards', committed: true } })
   }
 
   const settings = await loadSettingsPayload(db, env, organizationId)
+  if (updates.name !== undefined && (settings.name !== updates.name.trim() || (socialCardRefresh && settings.social_card_refresh?.id !== socialCardRefresh.id))) {
+    return { status: 409, data: { error: 'A newer change superseded this brand name. Read the current organization settings.' } }
+  }
   return {
     status: 200,
     data: {
@@ -698,7 +699,7 @@ export async function updateOrganizationSettingsFields(
   const configError = await updateNonOrganizationConfigFields(db, organizationId, updates)
   if (configError) return configError
   if (updates.name !== undefined) {
-    const baseSlug = buildSlug(updates.name)
+    const baseSlug = updates.name.trim() === organization.name && organization.subdomain ? organization.subdomain : buildSlug(updates.name)
     if (!baseSlug) {
       return {
         status: 400,
@@ -733,14 +734,6 @@ export async function updateOrganizationSettingsFields(
         const message = error instanceof Error ? error.message : String(error)
         if (/UNIQUE constraint failed/i.test(message)) continue
         throw error
-      }
-      // One business, one name. The organization Better Auth holds is that
-      // business, so it takes the brand name a guest sees rather than keeping
-      // a second name of its own. Outside the retry: a failure here is not a
-      // subdomain collision and must not spend another attempt.
-      if (result.status === 200) {
-        const adapter = await organizationAdapter(env)
-        await adapter.updateOrganization(organizationId, { name: updates.name.trim() })
       }
       return result
     }

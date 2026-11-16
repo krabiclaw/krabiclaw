@@ -36,6 +36,9 @@ import { fetchTransformedImageAsDataUri } from '../../server/utils/og-image/fetc
 import { renderOgImagePng } from '../../server/utils/og-image/render.ts'
 import { PostValidationError, POST_TITLE_MAX } from '../../shared/posts.ts'
 import { resolveMembership } from '../../server/utils/member-access.ts'
+import { loadSettingsPayload, updateOrganizationSettingsFields } from '../../server/utils/organization-settings.ts'
+import regenerateSocialCards from '../../server/api/editor/organizations/[organization_id]/social-cards/regenerate.post.ts'
+import { drainPublicResourceCacheInvalidations } from '../../server/utils/public-resource-cache.ts'
 
 /**
  * Publication, channel management and erasure against real local D1, with Meta and
@@ -215,7 +218,7 @@ async function setUp() {
     name: 'social-publication-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
-    env: { DB: { type: 'd1' }, MEDIA_BUCKET: { type: 'r2' }, IMAGES: { type: 'images' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'social-publication-proof', exportName: 'Hub' } },
+    env: { DB: { type: 'd1' }, MEDIA_BUCKET: { type: 'r2' }, IMAGES: { type: 'images' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'social-publication-proof', exportName: 'Hub' } },
   } }] })
   const db = await runtime.getD1Database('DB')
   const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: { tag: string }[] }
@@ -264,7 +267,7 @@ const targets = {
   instagram: (organization = 'org-a') => ({ channel: 'instagram', target_id: IG, connection_revision: `ig-rev-${organization}` }) as PublishTarget,
 }
 
-test('AVIF article and Post pictures render through native Images and retries complete failed social cards', async () => {
+test('AVIF pictures render through native Images and a rename redraws 47 social cards in separate requests', { timeout: 180_000 }, async () => {
   const { runtime, db, env, meta, asset, restore } = await setUp()
   try {
     const source = readFileSync(new URL('../../docs/marketing/publishing-assets/lodging-2026-10-23/new-home.avif', import.meta.url))
@@ -273,9 +276,11 @@ test('AVIF article and Post pictures render through native Images and retries co
     const uploads = new Map<string, Uint8Array>()
     let unavailable = false
     let cancelFailure = false
+    let beforeSource: (() => Promise<void>) | null = null
     globalThis.fetch = async (input, init = {}) => {
       const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
       if (url.href === sourceUrl) {
+        if (beforeSource) await beforeSource()
         if (cancelFailure) return new Response(new ReadableStream({ cancel() { throw new Error('Image response cancellation refused') } }), { headers: { 'content-type': 'text/plain' } })
         return unavailable ? new Response('Picture unavailable', { headers: { 'content-type': 'text/plain' } })
           : new Response(source, { headers: { 'content-type': 'image/avif', 'content-length': String(source.byteLength) } })
@@ -383,6 +388,112 @@ test('AVIF article and Post pictures render through native Images and retries co
     assert.equal(uploads.size, 3, 'completed no-op retries reuse the independently served Post card')
     assert.equal(await db.prepare("SELECT count(*) FROM content_documents WHERE organization_id = 'org-a' AND kind = 'social_post' AND row_role = 'root'").first('count(*)'), 1)
     assert.deepEqual(await db.prepare("SELECT mp.asset_id FROM media_placements mp WHERE mp.owner_type = 'content_document' AND mp.owner_id = ? AND mp.slot = 'cover'").bind(savedPost.id).all<{ asset_id: string }>().then(result => result.results), [{ asset_id: 'avif-source' }])
+
+    const cardEnv = { ...env, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://staging.krabiclaw.com', NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'krabiclaw.test' }
+    await db.prepare("UPDATE organization SET status = 'inactive' WHERE id = 'org-a'").run()
+    await db.prepare("INSERT INTO member(id, organizationId, userId, role) VALUES ('cards-owner', 'org-a', 'owner', 'owner')").run()
+    const session = 'native-social-card-session'
+    await db.prepare('INSERT INTO session(id, token, userId, expiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind('native-social-card', session, 'owner', Date.now() + 180_000, Date.now(), Date.now()).run()
+    const productIds = Array.from({ length: 46 }, (_, index) => `card-product-${String(index).padStart(2, '0')}`)
+    await db.batch(productIds.flatMap((id, index) => [
+      db.prepare("INSERT INTO products (id, organization_id, kind, name, slug, active, created_by, updated_by) VALUES (?, 'org-a', 'dish', ?, ?, 1, 'owner', 'owner')")
+        .bind(id, `Dining option ${index + 1}`, id),
+      db.prepare("INSERT INTO product_publications (organization_id, product_id, published, created_by, updated_by) VALUES ('org-a', ?, 1, 'owner', 'owner')").bind(id),
+    ]))
+    const share = await updateOrganizationSettingsFields(db, cardEnv, 'org-a', { media: [{ slot: 'social_share', asset_id: 'avif-source' }] }, 'owner')
+    assert.equal(share.status, 200)
+    const rootCard = () => db.prepare("SELECT asset_id FROM media_placements WHERE organization_id = 'org-a' AND owner_type = 'organization' AND owner_id = 'org-a' AND slot = 'social_card' AND status = 'active'").first<string>('asset_id')
+    const previousCardId = await rootCard()
+    assert.ok(previousCardId)
+    const previousImageId = await db.prepare('SELECT cloudflare_image_id FROM media_assets WHERE id = ?').bind(previousCardId).first<string>('cloudflare_image_id')
+    assert.ok(previousImageId)
+    const rename = await updateOrganizationSettingsFields(db, cardEnv, 'org-a', { name: 'Updated Dining Brand' }, 'owner')
+    assert.equal(rename.status, 200)
+    assert.equal(uploads.size, 4, 'the rename does not render inside its request')
+    const savedSettings = await loadSettingsPayload(db, cardEnv, 'org-a')
+    const refresh = savedSettings.social_card_refresh
+    assert.equal(savedSettings.name, 'Updated Dining Brand')
+    assert.equal(savedSettings.status, 'inactive')
+    assert.ok(refresh)
+    assert.equal(refresh.status, 'pending')
+
+    const app = new H3()
+    app.post('/api/editor/organizations/:organization_id/social-cards/regenerate', regenerateSocialCards)
+    const renderBatch = (id: string) => app.request(Object.assign(new Request('https://staging.krabiclaw.com/api/editor/organizations/org-a/social-cards/regenerate', {
+        method: 'POST', headers: { authorization: `Bearer ${session}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ refresh_id: id }),
+      }), { runtime: { name: 'cloudflare', cloudflare: { env: cardEnv } } }))
+    const advance = async (id: string) => {
+      const response = await renderBatch(id)
+      assert.equal(response.status, 200, await response.clone().text())
+      return await response.json() as { refresh: typeof refresh; summary: { total: number } }
+    }
+    unavailable = true
+    await assert.rejects(drainPublicResourceCacheInvalidations(db, cardEnv.ORGANIZATION_CACHE!, cardEnv), /OG page media could not be loaded/)
+    const failed = (await loadSettingsPayload(db, cardEnv, 'org-a')).social_card_refresh
+    assert.equal(failed?.status, 'failed')
+    assert.equal(failed.cursor, null)
+    assert.equal(await rootCard(), previousCardId, 'a failed render leaves the previous card active')
+    const retried = await updateOrganizationSettingsFields(db, cardEnv, 'org-a', { name: 'Updated Dining Brand' }, 'owner')
+    assert.equal(retried.status, 200)
+    assert.equal((await loadSettingsPayload(db, cardEnv, 'org-a')).social_card_refresh?.id, refresh.id)
+    unavailable = false
+    const renderStarted = Promise.withResolvers<undefined>()
+    const continueRender = Promise.withResolvers<undefined>()
+    beforeSource = async () => {
+      renderStarted.resolve(undefined)
+      await continueRender.promise
+    }
+    const obsolete = renderBatch(refresh.id)
+    const started = await Promise.race([renderStarted.promise.then(() => true), obsolete.then(() => false)])
+    assert.equal(started, true, 'the old batch reached the actual renderer')
+    let nextRename: Awaited<ReturnType<typeof updateOrganizationSettingsFields>>
+    try {
+      nextRename = await updateOrganizationSettingsFields(db, cardEnv, 'org-a', { name: 'Final Dining Brand' }, 'owner')
+    } finally {
+      beforeSource = null
+      continueRender.resolve(undefined)
+    }
+    assert.equal(nextRename.status, 200)
+    assert.equal((await obsolete).status, 409)
+    assert.equal(await rootCard(), previousCardId, 'an in-flight render for the old name cannot replace the card')
+    const replacement = (await loadSettingsPayload(db, cardEnv, 'org-a')).social_card_refresh
+    assert.ok(replacement)
+    assert.notEqual(replacement.id, refresh.id)
+    const removesPreviousImage = (request: SeenRequest) => request.method === 'DELETE' && request.host === 'api.cloudflare.com'
+      && request.path.endsWith(`/${previousImageId}`)
+    meta.fault('reject', removesPreviousImage)
+    const concurrent = await Promise.all([advance(replacement.id), advance(replacement.id)])
+    assert.equal(concurrent.reduce((count, batch) => count + batch.summary.total, 0), 1, 'simultaneous requests claim one cursor')
+    assert.equal((await loadSettingsPayload(db, cardEnv, 'org-a')).social_card_refresh?.status, 'failed')
+    assert.notEqual(await rootCard(), previousCardId, 'retrying deletion does not discard the replacement')
+
+    for (let request = 1; request <= 47; request++) {
+      const batch = await advance(replacement.id)
+      assert.ok(batch.summary.total <= 1)
+      if (batch.refresh.status === 'complete') break
+      assert.equal(batch.refresh.status, 'pending')
+    }
+    const final = (await loadSettingsPayload(db, cardEnv, 'org-a')).social_card_refresh
+    assert.equal(final?.id, replacement.id)
+    assert.equal(final.status, 'complete', final.error ?? undefined)
+    assert.notEqual(await rootCard(), previousCardId)
+    assert.equal(await db.prepare("SELECT status FROM media_assets WHERE id = ?").bind(previousCardId).first('status'), 'deleted')
+    assert.equal(meta.sent(removesPreviousImage).length, 2, 'the same displaced provider image is deleted on retry')
+    const cards = await db.prepare(`SELECT p.owner_id, a.public_url, a.generation_key FROM media_placements p
+      JOIN media_assets a ON a.organization_id = p.organization_id AND a.id = p.asset_id
+      WHERE p.organization_id = 'org-a' AND p.slot = 'social_card' AND p.status = 'active' AND a.status = 'active'
+        AND (p.owner_id = 'org-a' OR p.owner_id LIKE 'card-product-%') ORDER BY p.owner_id`)
+      .all<{ owner_id: string; public_url: string; generation_key: string }>()
+    assert.deepEqual(cards.results.map(card => card.owner_id), [...productIds, 'org-a'])
+    assert.equal(new Set(cards.results.map(card => card.generation_key)).size, 47)
+    for (const card of cards.results) {
+      const image = await fetch(card.public_url)
+      assert.equal(image.status, 200)
+      const metadata = await sharp(new Uint8Array(await image.arrayBuffer())).metadata()
+      assert.deepEqual([metadata.format, metadata.width, metadata.height], ['png', 1200, 630])
+    }
   } finally {
     restore()
     await runtime.dispose()
