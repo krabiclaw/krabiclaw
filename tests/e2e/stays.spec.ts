@@ -781,10 +781,10 @@ test('a responsible home member reads its stays as turnovers on every surface un
     // KrabiClaw's job message is news to the member until they open the conversation.
     expect((await teamRows()).find(row => row.id === jobThreadId)).toMatchObject({ kind: 'team', unread: true })
     await memberPage.goto(`/dashboard/${slug}/messages/${jobThreadId}?kind=team`)
-    await expect(memberPage.getByText('Sent automatically')).toBeVisible()
-    await expect.poll(async () => (await teamRows()).find(row => row.id === jobThreadId)?.unread).toBe(false)
     const turnoverPost = memberPage.locator('[data-team-message][data-automatic]').filter({ hasText: cleanPost })
     await expect(turnoverPost).toHaveCount(1)
+    await expect(turnoverPost.getByText('Job', { exact: true })).toBeVisible()
+    await expect.poll(async () => (await teamRows()).find(row => row.id === jobThreadId)?.unread).toBe(false)
     // The member's Upcoming is the clean, one card that opens this conversation; nothing of the guest but their first name.
     const upcoming = await memberContext.request.get(api('today?range=upcoming'))
     await expectStatus(upcoming, 200)
@@ -795,7 +795,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
       headline: `Clean up after ${guestName}’s group of 3`, line: 'Cliff Cabin', action: { title: 'Message the host', detail: 'Ask anything before the day' }, to: `/dashboard/${slug}/messages/${jobThreadId}`, draft: null })
     expect(leaks(upcomingBody)).toEqual([])
     // The conversation has Done: one tap closes the job, and "Done" is the member's own message in it.
-    const done = memberPage.getByTestId('conversation-job-done')
+    const done = turnoverPost.getByTestId('conversation-job-done')
     const closed = memberPage.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/organizations/${organizationId}/tasks/${clean!.id.slice('task:'.length)}/complete`)
     await done.click()
     await expectStatus(await closed, 200)
