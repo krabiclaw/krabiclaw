@@ -162,7 +162,9 @@ test('Today shows every booking type as one card for its own business, with the 
     const turnover = String(await db.prepare("SELECT id FROM tasks WHERE kind = 'turnover' AND subject_id = ?").bind(stay.id).first('id'))
     assert.deepEqual(inn.cards.map(shape), [
       { id: `booking:${stay.id}`, headline: 'Diana’s group of 2', line: 'Seaview Cottage', action: { title: 'Share info about your place', detail: 'Help Diana get ready' }, to: `/dashboard/inn/messages/${stay.conversation_id}` },
-      { id: `task:${turnover}`, headline: 'Clean up after Diana’s group of 2', line: 'Seaview Cottage', action: { title: 'Tap Done when it’s finished', detail: 'In Diana’s conversation' }, to: `/dashboard/inn/messages/${stay.conversation_id}` },
+      // The owner's own clean opens the job's conversation, where its Done is.
+      { id: `task:${turnover}`, headline: 'Clean up after Diana’s group of 2', line: 'Seaview Cottage', action: { title: 'Open the job', detail: 'Tap Done when it’s finished' },
+        to: `/dashboard/inn/messages/${await db.prepare("SELECT id FROM conversations WHERE kind = 'team' AND booking_id = ?").bind(stay.id).first('id')}` },
     ])
     assert.equal(inn.title, 'You have 1 upcoming reservation and 1 upcoming home to clean')
     assert.equal(inn.cards[0]!.when, `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).formatRange(new Date(`${inTwoDays}T00:00:00Z`), new Date(`${addLocalDays(inTwoDays, 3)}T00:00:00Z`)).replace(/[\u2009\u202f]/g, ' ')}`)

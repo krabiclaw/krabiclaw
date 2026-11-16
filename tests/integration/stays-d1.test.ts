@@ -176,10 +176,12 @@ test('committed stays report publication failures and idempotent retries publish
     assert.equal(channel.version, 1)
     assert.equal(await db.prepare('SELECT count(*) FROM bookings WHERE external_booking_id = ?').bind(booking.external_booking_id).first('count(*)'), 1)
     const published = await events()
-    assert.deepEqual(published.slice(-3).map(event => ({ type: event.type, ...('booking_id' in event ? { booking_id: event.booking_id, product_id: event.product_id, location_id: event.location_id } : {}) })), [
+    assert.deepEqual(published.slice(-4).map(event => ({ type: event.type, ...('booking_id' in event ? { booking_id: event.booking_id, product_id: event.product_id, location_id: event.location_id } : {}) })), [
       { type: 'stay.changed', booking_id: channel.id, product_id: cabin.id, location_id: 'cabin-site' },
       { type: 'nights.changed', booking_id: channel.id, product_id: cabin.id, location_id: 'cabin-site' },
       { type: 'MESSAGE_UPDATE' },
+      // Its cleaning job, posted in the job's conversation.
+      { type: 'MESSAGE_CREATE' },
     ])
     assert.equal(new Set(published.map(event => event.event_id)).size, published.length)
   } finally {
