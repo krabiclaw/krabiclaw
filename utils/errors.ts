@@ -27,7 +27,7 @@ export function oauthErrorMessage(code: unknown, description?: unknown): string 
       message = 'Authorization was cancelled or denied. Start again and approve the requested access.'
       break
     case 'invalid_client':
-      message = 'The connection client is unrecognized or outdated. If you are connecting an AI assistant (such as ChatGPT or Claude), delete your old connector in assistant settings and connect fresh using https://krabiclaw.com/api/mcp.'
+      message = 'The connection client is unrecognized or outdated. If you are connecting an AI assistant (such as ChatGPT or Claude), delete your old connector in assistant settings and add a fresh connection using the MCP setup guide.'
       break
     case 'account_already_linked_to_different_user':
       message = 'This provider account is already linked to another Blawby user. Choose a different account or sign in as the user who linked it.'

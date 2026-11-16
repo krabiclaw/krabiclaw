@@ -50,6 +50,14 @@ Use the existing release jobs and `wrangler deploy --strict`.
 | OpenAI files | Change the reviewed image fixture URL in `scripts/generate-chatgpt-app-submission.mjs` to `https://blawby.com/templates/saya-preview.jpg`. Regenerate and check with `yarn chatgpt:submission:write` / `yarn chatgpt:submission:check`, and run `yarn mcp:catalog`. Move the existing `public/.well-known/openai-apps-challenge` response out of static assets into the exact-path GET route at `server/routes/.well-known/openai-apps-challenge.get.ts`. Capture the response's actual bytes, MIME and cache directive before removing the static asset. The handler switches on `event.url.hostname`: return only the saved old bytes for `krabiclaw.com`, the replacement draft's exact bytes for `blawby.com`, and 404 for other hosts; preserve MIME and cache policy. Verify each host directly before touching either review. |
 | Production content checks | Update deployed platform assertions to match the final published titles and headlines (including the retained `/docs/create-your-krabiclaw-account` slug). Keep all customer smoke URLs. |
 
+At deploy, the old apex redirects browser visits to login, signup, forgot
+password, the dashboard and invitation entry onto the distinct auth origin.
+The redirect keeps the raw path and query so the new origin starts Better Auth
+OAuth and owns the state cookie. Verify a bookmarked old login and an old
+invitation through provider OAuth. Keep API requests, existing callbacks,
+native returns, and signed token-consumption routes direct. These browser
+entry redirects are separate from the later public SEO redirects.
+
 Do not use this change to move D1 bindings, customer domains or the app
 bundle/scheme. No signing key rotation. The old apex remains a trusted origin
 via the free organization domain. MCP validates the current auth origin and
@@ -64,7 +72,8 @@ audience; the old MCP endpoint declines the old connection without a redirect.
    `concat("https://blawby.com", http.request.uri.path)`, preserve query
    string, and verify both hostnames. Keep other DNS records and TLS intact.
 2. Deploy and wait for the production build asset ID to converge. After the
-   zone and runtime token are active, call `update_organization_settings` on
+   zone and runtime token are active, confirm that the platform has its
+   linked GA4 property and existing GA4 event action. Call `update_organization_settings` on
    `platform` with `name: "Blawby"` and the existing Live status
    (`status: "active"` in the MCP schema). This preserves the subdomain and
    invokes the existing Zaraz reconciliation. Read the unchanged domain
@@ -81,7 +90,8 @@ audience; the old MCP endpoint declines the old connection without a redirect.
    and tenant canaries from #1869; validate Stripe/Resend writes through the
    persisted product surface. Verify both Zaraz consent choices on Blawby and
    the existing NCLS integration, including one accepted pageview and no GA4
-   delivery with consent denied. Run the existing platform-only AI Search
+   delivery with consent denied, plus one ordinary event and the product and
+   checkout ecommerce handoffs. Run the existing platform-only AI Search
    sync after CMS and build convergence and query help search on Blawby.
 3. Activate redirects on the **exact old apex only** after the preceding
    checks. Export its pre-cutover sitemap and enumerate the public paths

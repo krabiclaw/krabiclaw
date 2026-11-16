@@ -148,7 +148,7 @@ export default defineComponent({
                   h(ELink, { href: origin, style: `color:${light.textMuted};text-decoration:underline` }, () => new URL(origin).hostname),
                 ]),
                 props.organizationName && !props.locale
-                  ? h(EText, { class: 'email-footer', style: `margin:6px 0 0;${type.footer};color:${light.textDimmed}` }, () => `Sent by ${props.organizationName} via KrabiClaw.`)
+                  ? h(EText, { class: 'email-footer', style: `margin:6px 0 0;${type.footer};color:${light.textDimmed}` }, () => `Sent by ${props.organizationName} via Blawby.`)
                   : null,
                 // Preferences first: someone who only wants less of one thing
                 // should not have to switch the category off to get it.
