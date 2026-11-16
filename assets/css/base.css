@@ -365,8 +365,6 @@
 }
 
 /* Dark mode wordmark: swap navy text to cream */
-.dark .kc-wordmark__krabi { color: #EEF0F8; }
-.dark .kc-wordmark__tld   { color: #EEF0F8; }
 
 /* ── Platform type utilities ──────────────────────────────── */
 /* Jost carries the complete platform display hierarchy and wordmark. Large
@@ -388,10 +386,7 @@
   font-weight: 400;
   letter-spacing: -0.01em;
 }
-.kc-wordmark__krabi { color: var(--kc-navy); }
-.kc-wordmark__claw  { color: var(--ui-primary); }
-.kc-wordmark__tld   { color: var(--kc-navy); font-size: 0.55em; vertical-align: top; margin-left: 1px; }
-/* Docs and blog carry a contextual word instead of the .com lock-up. */
+/* Docs and blog add a section label to the wordmark. */
 .kc-wordmark__suffix { color: var(--ui-text-muted); font-weight: 500; margin-left: 7px; }
 
 .kc-eyebrow {

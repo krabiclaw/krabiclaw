@@ -82,5 +82,5 @@ watch(realtime.event, async event => {
   try { await navigateTo({ path: listPath.value, query: route.query }, { replace: true }) }
   catch (error) { accessError.value = getErrorMessage(error, 'The conversation could not be closed after access ended') }
 })
-useSeoMeta({ title: 'Messages | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Messages | Blawby', robots: 'noindex, nofollow' })
 </script>

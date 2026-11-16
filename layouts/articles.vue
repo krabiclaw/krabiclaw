@@ -1,6 +1,6 @@
 <template>
   <!--
-    Every blog and KrabiClaw's docs, on every template: the site's own chrome,
+    Every blog and Blawby's docs, on every template: the site's own chrome,
     and inside it one article layout — the collection by category down the
     side, the page beside it. Below the width where the template's header
     collapses, the list moves into that header's menu: one navigation, not a

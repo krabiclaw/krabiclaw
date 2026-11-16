@@ -2,9 +2,9 @@
   "$schema": "https://developers.openai.com/plugins/schemas/chatgpt-app-submission.v1.json",
   "schema_version": 1,
   "app_info": {
-    "display_name": "KrabiClaw",
+    "display_name": "Blawby",
     "subtitle": "Manage your business website",
-    "description": "Create and manage your KrabiClaw business website from ChatGPT. Save a private website draft, publish it once its required details are complete, and add locations. Edit products, prices, announcements, articles, translations and media. Read customer inquiries, manage bookings and legal consultations, and propose changes for guest acceptance. Read guest conversations and reply to guests now or at a time you schedule, by email, Airbnb or their KrabiClaw inbox; set up automatic messages that are sent to every guest at the homes you choose. Read and send internal team messages with the current business members, optionally about an accessible stay or location. Manage stays, nightly availability and prices: add stays you took directly, change or cancel stays kept in KrabiClaw, and move a guest to another of your homes, including an Airbnb reservation, which messages the guest the new address when the stay has a guest conversation. Connected homes update Airbnb through Channex and apply existing automatic guest-message schedules. Adding, changing, moving or cancelling a stay opens, moves or cancels its cleaning job, and a legal practice’s booking changes open or cancel the attorney’s preparation and follow-up jobs; jobs are posted to the team as automatic team messages. Read, add, assign, complete or skip tasks, and read what Today suggests: unfinished setup and a welcome for each booked guest. Read payment reports, transactions and payouts. Read Google Analytics and Search Console reports for the connected accounts. Read Google Ads and Meta Ads campaigns and reports, create paused Google Search and Meta campaigns, pause or enable campaigns and change daily budgets in the connected ad accounts; enabled campaigns can spend the account’s advertising budget. Invite new members by email, which sends an invitation to an address outside the business. Publishing a website emails KrabiClaw operators; live content and uploaded media can be public, and booking actions may email guests. Payment setup, online payment collection, refund preparation and refund execution require the authenticated KrabiClaw dashboard. Publish to connected Facebook, Instagram or Discord destinations, and delete posts from Facebook or Discord, only when requested. A KrabiClaw account is required, with access to each business you manage.",
+    "description": "Create and manage your Blawby business website from ChatGPT. Save a private website draft, publish it once its required details are complete, and add locations. Edit products, prices, announcements, articles, translations and media. Read customer inquiries, manage bookings and legal consultations, and propose changes for guest acceptance. Read guest conversations and reply to guests now or at a time you schedule, by email, Airbnb or their Blawby inbox; set up automatic messages that are sent to every guest at the homes you choose. Read and send internal team messages with the current business members, optionally about an accessible stay or location. Manage stays, nightly availability and prices: add stays you took directly, change or cancel stays kept in Blawby, and move a guest to another of your homes, including an Airbnb reservation, which messages the guest the new address when the stay has a guest conversation. Connected homes update Airbnb through Channex and apply existing automatic guest-message schedules. Adding, changing, moving or cancelling a stay opens, moves or cancels its cleaning job, and a legal practice’s booking changes open or cancel the attorney’s preparation and follow-up jobs; jobs are posted to the team as automatic team messages. Read, add, assign, complete or skip tasks, and read what Today suggests: unfinished setup and a welcome for each booked guest. Read payment reports, transactions and payouts. Read Google Analytics and Search Console reports for the connected accounts. Read Google Ads and Meta Ads campaigns and reports, create paused Google Search and Meta campaigns, pause or enable campaigns and change daily budgets in the connected ad accounts; enabled campaigns can spend the account’s advertising budget. Invite new members by email, which sends an invitation to an address outside the business. Publishing a website emails Blawby operators; live content and uploaded media can be public, and booking actions may email guests. Payment setup, online payment collection, refund preparation and refund execution require the authenticated Blawby dashboard. Publish to connected Facebook, Instagram or Discord destinations, and delete posts from Facebook or Discord, only when requested. A Blawby account is required, with access to each business you manage.",
     "category": "BUSINESS"
   },
   "tools": {
@@ -1133,7 +1133,7 @@
       "justifications": {
         "read_only_justification": "Reads bookable sessions and remaining places; a provider's Google free/busy is read for the window and not cached, though Better Auth may refresh and store an expired Google token on the way.",
         "destructive_justification": "Does not create or edit sessions, allocate places or change provider-authored hours.",
-        "open_world_justification": "Reads the selected offering's sessions and its providers' Google free/busy; it changes nothing outside KrabiClaw."
+        "open_world_justification": "Reads the selected offering's sessions and its providers' Google free/busy; it changes nothing outside Blawby."
       }
     },
     "list_product_bookings": {
@@ -1289,7 +1289,7 @@
       "justifications": {
         "read_only_justification": "Publishes the saved website, persists workspace selection and sends operator email, including on publication retries.",
         "destructive_justification": "Publishes the website and sends an email that cannot be recalled.",
-        "open_world_justification": "Makes the website publicly reachable and emails KrabiClaw operators."
+        "open_world_justification": "Makes the website publicly reachable and emails Blawby operators."
       }
     },
     "put_resource_localization": {
@@ -2038,7 +2038,7 @@
       "description": "Save a real conversation attachment and publish a website-only announcement.",
       "user_prompt": "Use this attached photo for a new announcement on Ember & Slice: “A fresh look for our café.” Publish it on our website and send me the link. Keep it off Facebook and Instagram.",
       "file_attachment_urls": [
-        "https://krabiclaw.com/templates/saya-preview.jpg"
+        "https://blawby.com/templates/saya-preview.jpg"
       ],
       "tools_triggered": "list_organizations, save_media_attachment, create_post, publish_post, get_post",
       "expected_output": "Saves the host-provided image attachment as a public asset, creates the requested announcement, and publishes only the website target after any required confirmation. Opens the returned public URL and verifies the correct image and text. No social-provider post is created.",

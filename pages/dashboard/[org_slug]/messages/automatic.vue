@@ -26,5 +26,5 @@ const offset = ref(0)
 const role = computed(() => dashboard.organization.value?.role as keyof typeof organizationRoles | undefined)
 const manage = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['update'] } })))
 const { data, error, status } = await useAsyncData(() => `automatic-messages:${dashboard.organizationId.value}`, () => api('/api/dashboard/message-templates', { query: { limit: 50, offset: offset.value }, validate: isMessageTemplatePage }), { watch: [offset] })
-useSeoMeta({ title: 'Automatic messages | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Automatic messages | Blawby', robots: 'noindex, nofollow' })
 </script>

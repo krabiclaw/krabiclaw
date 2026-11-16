@@ -85,7 +85,7 @@ if (!dashboard.organization.value || !canOpenPlatformAccounts(dashboard.organiza
   throw createError({ statusCode: 404, statusMessage: 'Page not found' })
 }
 
-useSeoMeta({ title: 'Platform accounts | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Platform accounts | Blawby Dashboard', robots: 'noindex, nofollow' })
 
 interface PlatformUser { id: string; name: string | null; email: string; role?: string | null; banned?: boolean | null }
 

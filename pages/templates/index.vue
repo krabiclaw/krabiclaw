@@ -22,7 +22,7 @@
           <NuxtLink :to="`/templates/${template.slug}`" class="templates-link">Explore {{ template.displayName }} <span aria-hidden="true">↗</span></NuxtLink>
         </div>
         <NuxtLink :to="`/templates/${template.slug}`" class="template-row__visual" :aria-label="`Explore the ${template.displayName} website template`">
-          <img :src="template.previewImageUrl" width="2048" :height="template.slug === 'saya' ? 1340 : 1466" :alt="template.slug === 'saya' ? 'Kikuzuki restaurant website, built with Saya' : 'North Carolina Legal Services website, built with Blawby'" loading="lazy" decoding="async" class="template-row__desktop">
+          <img :src="template.previewImageUrl" width="2048" :height="template.slug === 'saya' ? 1340 : 1466" :alt="template.slug === 'saya' ? 'Kikuzuki restaurant website, built with Saya' : 'North Carolina Legal Services website, built with Blawby Legal'" loading="lazy" decoding="async" class="template-row__desktop">
           <img v-if="template.slug === 'saya'" src="/images/products/pottery-phone.png" width="946" height="1884" alt="Pottery House Krabi experience website on a phone, built with Saya" loading="lazy" decoding="async" class="template-row__phone">
         </NuxtLink>
       </article>
@@ -34,7 +34,7 @@
         <h2>Your website.<br>Your AI assistant.</h2>
       </div>
       <div class="templates-more__copy">
-        <p>Choose your template, add your story, and keep it current from the dashboard or a connected AI assistant. KrabiClaw works with ChatGPT, Claude, and other compatible MCP clients.</p>
+        <p>Choose your template, add your story, and keep it current from the dashboard or a connected AI assistant. Blawby works with ChatGPT, Claude, and other compatible MCP clients.</p>
         <NuxtLink to="/plugin" class="templates-link">Explore AI connections <span aria-hidden="true">↗</span></NuxtLink>
         <NuxtLink to="/pricing" class="templates-more__pricing">Compare plans and what’s included →</NuxtLink>
       </div>
@@ -59,7 +59,7 @@ useSocialMetadata({
   path: '/templates',
   socialImage: organizationSocialImage,
   title: 'Templates',
-  description: 'Website templates for restaurants, experiences, lodging, and law firms. Explore Saya and Blawby, see real websites, and start free with KrabiClaw.',
+  description: 'Website templates for restaurants, experiences, lodging, and law firms. Explore Saya and Blawby Legal, see real websites, and start free with Blawby.',
   schemaPageType: 'CollectionPage',
   breadcrumbs: [
     { name: 'Home', url: '/' },
@@ -69,7 +69,7 @@ useSocialMetadata({
     {
       '@type': 'ItemList',
       '@id': `${organizationUrl}/templates#themes`,
-      name: 'KrabiClaw Templates',
+      name: 'Blawby Templates',
       itemListElement: templates.map((template, index) => ({
         '@type': 'ListItem',
         position: index + 1,

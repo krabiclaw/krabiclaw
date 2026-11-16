@@ -32,13 +32,13 @@ export const PUBLIC_SUPPORT_ROUTE_CARDS: PublicSupportRouteCard[] = [
   },
   {
     title: 'Report a Bug or Request a Feature',
-    description: 'KrabiClaw is open source. File it on GitHub, or ask your AI assistant to file it for you.',
+    description: 'Blawby is open source. File it on GitHub, or ask your AI assistant to file it for you.',
     to: `${KRABICLAW_REPOSITORY_URL}/issues/new/choose`,
   },
 ]
 
 export const PUBLIC_SUPPORT_TOPICS: PublicSupportTopic[] = [
-  { label: 'KrabiClaw Platform', value: 'platform' },
+  { label: 'Blawby Platform', value: 'platform' },
   { label: 'ChowBot', value: 'chowbot' },
 ]
 

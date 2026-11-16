@@ -41,7 +41,7 @@ import { paymentMoney } from '~/shared/payment-display'
 import { formatTimestamp } from '~/utils/timezone'
 
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Payments | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Payments | Blawby', robots: 'noindex, nofollow' })
 
 const PAGE = 10
 const shown = ref(PAGE)
