@@ -88,6 +88,19 @@ const websiteDraftOutputSchema = {
   }, required: ['draft_id', 'updated_at', 'status', 'subdomain', 'name', 'vertical', 'source_locale', 'location', 'products', 'missing_fields'], additionalProperties: false,
 } as const
 
+const socialCardRefreshSchema = {
+  type: ['object', 'null'],
+  description: 'The latest brand-name change’s social-card refresh. Read with get_organization_settings until complete. Failed refreshes can be retried under Website → Brand → Name.',
+  properties: {
+    id: { type: 'string' },
+    status: { type: 'string', enum: ['pending', 'complete', 'failed'] },
+    cursor: { type: ['string', 'null'] },
+    error: { type: ['string', 'null'] },
+  },
+  required: ['id', 'status', 'cursor', 'error'],
+  additionalProperties: false,
+} as const
+
 const ORGANIZATION_SETTINGS_READ_PROPERTIES = {
   id: { type: 'string' },
   inquiry_questions: { ...formQuestionsJsonSchema('read'), description: 'The inquiry form\'s own questions, asked beside name, email, phone and message on every contact form the site places.' },
@@ -99,6 +112,7 @@ const ORGANIZATION_SETTINGS_READ_PROPERTIES = {
   public_url: { type: ['string', 'null'] },
   custom_domain_status: { type: ['string', 'null'] },
   name: { type: ['string', 'null'] },
+  social_card_refresh: socialCardRefreshSchema,
   brand_description: { type: ['string', 'null'] },
   font_preset: { type: 'string', enum: [...ORGANIZATION_FONT_PRESETS] },
   ...Object.fromEntries(SITE_RECIPE_KEYS.map(key => [key, { type: 'string', enum: [...SITE_RECIPE_OPTIONS[key]], description: `${SITE_RECIPE_DESCRIPTIONS[key]} Absent when the site uses the Default.` }])),
@@ -297,6 +311,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
           id: { type: 'string' },
           changed_fields: { type: 'array', items: { type: 'string' } },
           saved_fields: { type: 'object', properties: ORGANIZATION_SETTINGS_READ_PROPERTIES, additionalProperties: false, description: 'Persisted values of only the supplied settings, keyed by changed_fields.' },
+          social_card_refresh: socialCardRefreshSchema,
           address_visibility: { type: 'string', enum: ['visible', 'hidden'] },
           contrast_warnings: { type: 'array', items: { type: 'object', properties: { mode: { type: 'string' }, pair: { type: 'string' }, ratio: { type: 'number' }, minimum: { type: 'number' } }, required: ['mode', 'pair', 'ratio', 'minimum'] } },
           updated_at: { type: 'string' },
@@ -416,6 +431,12 @@ export async function handleOrganizationsTools(ctx: McpExecutorContext): Promise
       assertDomainSuccess(result);
       const settingsResult = (result.data as { settings: Awaited<ReturnType<typeof loadSettingsPayload>> }).settings;
       const updateSettingsContext = await mutationContextPayload(organization);
+      const refresh = updates.name !== undefined ? settingsResult.social_card_refresh : null;
+      const message = refresh?.status === 'pending'
+        ? 'Saved the brand name. Social cards are updating.'
+        : refresh?.status === 'failed'
+          ? 'The brand name is saved. The social-card refresh failed. Retry it in the dashboard.'
+          : 'Updated organization settings.';
       return renderStructuredResponse(
         {
           ok: true,
@@ -423,12 +444,13 @@ export async function handleOrganizationsTools(ctx: McpExecutorContext): Promise
           id: organization.organizationId,
           changed_fields: Object.keys(updates).filter(key => key !== 'expected_inquiry_questions_revision'),
           saved_fields: Object.fromEntries(Object.keys(updates).filter(key => key !== 'expected_inquiry_questions_revision').map(key => [key, settingsResult[key as keyof typeof settingsResult]])),
+          ...(updates.name !== undefined ? { social_card_refresh: settingsResult.social_card_refresh } : {}),
           ...(settingsResult.address_visibility !== undefined ? { address_visibility: settingsResult.address_visibility } : {}),
           contrast_warnings: settingsResult.palette ? paletteContrast(settingsResult.palette).filter(check => check.ratio < check.minimum) : [],
           updated_at: settingsResult.updated_at,
           context: updateSettingsContext,
         },
-        "Updated organization settings.",
+        message,
       );
     }
     case "set_consultation_mode": {

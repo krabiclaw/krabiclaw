@@ -454,6 +454,7 @@
 </template>
 
 <script lang="ts">
+import { isOrganizationSocialCardRefresh, type OrganizationSocialCardRefresh } from '~/utils/social-card-refresh'
 import type { ComputedRef, InjectionKey, Reactive, Ref } from 'vue'
 import type { CurrencyCode } from '~/shared/currencies'
 import type { OrganizationFontPreset } from '~/shared/organization-fonts'
@@ -500,6 +501,7 @@ export interface OrganizationSettingsResponse {
   public_url?: string | null
   status: OrganizationStatus
   name?: string | null
+  social_card_refresh: OrganizationSocialCardRefresh | null
   brand_description?: string | null
   announcement: { headline: string; description: string | null; cta_label: string | null; cta_url: string | null; dismissible: boolean; enabled: boolean; format?: 'modal' | 'banner' | null } | null
   media?: Array<{ asset_id: string; slot: string; public_url?: string | null; presentation?: LogoPresentation | null }>
@@ -536,6 +538,9 @@ export interface OrganizationSettingsEditor {
   editorError: ComputedRef<string | null>
   validationMessage: ComputedRef<string | null>
   nameCharactersRemaining: ComputedRef<number>
+  socialCardRefresh: ComputedRef<OrganizationSocialCardRefresh | null>
+  refreshingSocialCards: Ref<boolean>
+  finishSocialCardRefresh: () => Promise<void>
   descriptionCharactersRemaining: ComputedRef<number>
   theme: ComputedRef<string | undefined>
   /** The organization's vertical (e.g. 'service', 'restaurant', 'lodging', 'experience'). */
@@ -606,6 +611,7 @@ interface SettingsPageResource {
 
 const isSettingsResponse = (value: unknown): value is { success: boolean; settings: OrganizationSettingsResponse } =>
   isRecord(value) && typeof value.success === 'boolean' && isRecord(value.settings)
+  && (value.settings.social_card_refresh === null || isOrganizationSocialCardRefresh(value.settings.social_card_refresh))
   && (value.settings.name === undefined || value.settings.name === null || typeof value.settings.name === 'string')
   && (value.settings.announcement === null || (isRecord(value.settings.announcement) && typeof value.settings.announcement.headline === 'string'))
   && (value.settings.font_preset === undefined || isOrganizationFontPreset(value.settings.font_preset))
@@ -1035,6 +1041,29 @@ async function refreshSettings() {
   await refreshSettingsResource()
   if (settingsResourceError.value) throw settingsResourceError.value
 }
+const refreshingSocialCards = ref(false)
+async function finishSocialCardRefresh() {
+  const refresh = loadedSettings.value?.social_card_refresh
+  if (!refresh || refresh.status === 'complete' || refreshingSocialCards.value) return
+  refreshingSocialCards.value = true
+  editorError.value = null
+  try {
+    const path = `/api/editor/organizations/${encodeURIComponent(organizationId)}/social-cards/regenerate`
+    const validate = (value: unknown): value is { refresh: OrganizationSocialCardRefresh; next_cursor: string | null } =>
+      isRecord(value) && isOrganizationSocialCardRefresh(value.refresh) && value.refresh.id === refresh.id
+      && (value.next_cursor === null || typeof value.next_cursor === 'string')
+    let next: string | null
+    do {
+      const batch = await dashboardApi(path, { method: 'POST', body: { refresh_id: refresh.id }, validate })
+      next = batch.refresh.status === 'pending' ? batch.next_cursor : null
+    } while (next)
+    await refreshSettings()
+  } catch (error) {
+    editorError.value = getErrorMessage(error, 'Failed to advance the social-card refresh')
+  } finally {
+    refreshingSocialCards.value = false
+  }
+}
 async function resetPalette() {
   saving.value = true
   editorError.value = null
@@ -1112,6 +1141,9 @@ provide(organizationSettingsEditorKey, {
   editorError: computed(() => loadError.value ?? editorError.value),
   validationMessage,
   nameCharactersRemaining,
+  socialCardRefresh: computed(() => loadedSettings.value?.social_card_refresh ?? null),
+  refreshingSocialCards,
+  finishSocialCardRefresh,
   descriptionCharactersRemaining,
   theme,
   vertical: computed(() => loadedSettings.value?.vertical ?? dashboard.organization.value?.vertical ?? null),

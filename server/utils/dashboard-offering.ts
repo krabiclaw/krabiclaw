@@ -1516,8 +1516,15 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
   if (['website-brand', 'website-brand-field', 'website-seo', 'website-currency', 'website-announcement', 'website-colors', 'website-color-starter'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Brand not found')
     const settings = await loadSettingsPayload(db, env, organization.id)
+    const nameField = (state: typeof settings) => {
+      const refresh = state.social_card_refresh
+      const hint = refresh?.status === 'pending' ? 'Social cards are updating.'
+        : refresh?.status === 'complete' ? 'Social cards are up to date.'
+          : refresh?.status === 'failed' ? 'Retry the social-card refresh in the web dashboard.' : undefined
+      return field('name', 'Name', 'text', state.name, { hint })
+    }
     const descriptors = [
-      field('name', 'Name', 'text', settings.name),
+      nameField(settings),
       field('brand_description', 'Description', 'textarea', settings.brand_description, { optional: true }),
       field('contact_email', 'Contact email', 'text', settings.contact_email, { optional: true }),
       field('font_preset', 'Website font', 'select', settings.font_preset, { choices: [...ORGANIZATION_FONT_OPTIONS] }),
@@ -1608,6 +1615,11 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     if (item.key === 'font_preset' && !isOrganizationFontPreset(value)) return invalid('Choose a website font')
     const result = await updateOrganizationSettingsFields(db, env, organization.id, patch, userId)
     if (result.status >= 400) throw new HTTPError({ statusCode: result.status, message: String(result.data.error), data: result.data })
+    if (item.key === 'name') {
+      const saved = result.data.settings as typeof settings
+      const savedName = nameField(saved)
+      return { ...screen, fields: [savedName], revision: JSON.stringify([[savedName.key, savedName.value]]) }
+    }
     return screen
   }
   if (['pages', 'page', 'page-add', 'page-delete', 'page-content', 'page-sections', 'page-order', 'page-section-add', 'page-section-remove', 'page-media', 'page-media-item', 'page-media-order', 'page-records', 'page-record', 'page-record-order', 'page-settings', 'page-calculator'].includes(view)) {
