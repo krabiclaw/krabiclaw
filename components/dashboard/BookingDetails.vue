@@ -38,7 +38,7 @@
         />
         <UAlert v-if="!personalScope && guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in KrabiClaw, which requires a guest name, but it has none." />
         <!-- A business's reservation, in Airbnb's order: the photo, what was booked, who is coming, then the dates below. -->
-        <div v-if="!personalScope && !purchase" class="pb-8">
+        <div v-if="!stay && !personalScope && !purchase" class="pb-8">
           <img v-if="recordImage" :src="recordImage" alt="" class="mb-6 aspect-[4/3] w-full rounded-2xl bg-elevated object-cover">
           <h2 class="break-words text-[26px] font-semibold leading-8 tracking-tight text-highlighted">{{ heroSubtitle || heroTitle }}</h2>
           <p class="mt-1 break-words text-base text-muted">{{ heroSubtitle ? heroTitle : '' }}{{ heroDate ? ` · ${heroDate}` : '' }}</p>
@@ -50,13 +50,13 @@
             <span v-if="partySize > 1" class="flex size-10 items-center justify-center rounded-full bg-accented text-xs font-bold text-highlighted" :aria-label="otherGuestLabel">+{{ partySize - 1 }}</span>
           </div>
         </div>
-        <div v-else class="flex flex-col items-center pb-12 text-center" :class="recordImage ? 'pt-2' : 'pt-10'">
+        <div v-else-if="!stay" class="flex flex-col items-center pb-12 text-center" :class="recordImage ? 'pt-2' : 'pt-10'">
           <img v-if="recordImage" :src="recordImage" alt="" class="mb-6 aspect-square w-full max-w-80 rounded-2xl bg-elevated object-cover">
           <h2 class="max-w-full break-words text-[32px] font-semibold leading-9 tracking-tight text-highlighted">{{ heroTitle }}</h2>
           <p v-if="heroDate" class="mt-4 break-words text-base text-muted">{{ heroDate }}</p>
           <p v-if="heroSubtitle" class="mt-1 break-words text-base text-muted">{{ heroSubtitle }}</p>
         </div>
-        <div class="flex flex-col" :class="!personalScope && !purchase ? 'items-start' : 'items-center text-center'">
+        <div class="flex flex-col" :class="stay || (!personalScope && !purchase) ? 'items-start' : 'items-center text-center'">
           <UBadge v-if="stay && (personalScope || (manage && requestStatus))" class="mt-3" :color="stay.status === 'confirmed' ? 'success' : 'neutral'" variant="soft" :label="statusLabel" />
           <div v-if="manage && hostActions.includes('confirm')" class="mt-5 flex flex-wrap justify-center gap-3">
             <UButton color="neutral" size="lg" :label="t('stay.approve_request')" :loading="busy === 'confirm'" :disabled="busy !== null" @click="decide('confirm')" />
@@ -67,7 +67,165 @@
         </div>
 
         <!-- A business's reservation reads as Airbnb's panel does: flat sections under one another, a rule between them. -->
-        <div :class="personalScope || purchase ? 'space-y-4' : flatSections">
+        <!--
+          A stay's reservation, the same for the business and the guest, in Airbnb's order: the photo, the home and who
+          hosts it, who is coming, the dates, the rows about arriving and leaving, then Reservation details, Getting
+          there, Checking in, Rules and instructions, the host and Payment info, a rule between each.
+        -->
+        <section v-if="stay && panel" data-testid="reservation-panel">
+          <img v-if="panel.image" :src="panel.image" alt="" class="mb-6 aspect-[4/3] w-full rounded-2xl bg-elevated object-cover">
+          <h2 class="break-words text-[26px] font-semibold leading-8 tracking-tight text-highlighted">{{ panel.title }}</h2>
+          <p v-if="panel.hostedBy" class="mt-1 text-base text-muted">Hosted by {{ panel.hostedBy }}</p>
+          <div v-if="recordGuestName" class="mt-4 flex items-center -space-x-2">
+            <span class="relative">
+              <UAvatar :src="recordGuestImage || undefined" :alt="recordGuestName" :text="recordGuestName.slice(0, 1).toUpperCase()" size="xl" class="bg-accented ring-2 ring-default" :ui="{ fallback: 'font-semibold text-highlighted' }" />
+              <ChannelMark v-if="detail" :channel="detail.channel" class="absolute -bottom-1 -right-1" />
+            </span>
+            <span v-if="partySize > 1" class="flex size-10 items-center justify-center rounded-full bg-accented text-xs font-bold text-highlighted ring-2 ring-default" :aria-label="otherGuestLabel">+{{ partySize - 1 }}</span>
+          </div>
+
+          <div class="mt-6 grid grid-cols-2 divide-x divide-default rounded-2xl bg-accented/40 p-5">
+            <div class="min-w-0 pe-5">
+              <h3 class="text-base font-semibold text-highlighted">Check-in</h3>
+              <p class="mt-1 text-sm text-muted">{{ panel.checkIn.date }}</p>
+              <p v-if="panel.checkIn.time" class="text-sm text-muted">{{ panel.checkIn.time }}</p>
+            </div>
+            <div class="min-w-0 ps-5 text-right">
+              <h3 class="text-base font-semibold text-highlighted">Checkout</h3>
+              <p class="mt-1 text-sm text-muted">{{ panel.checkOut.date }}</p>
+              <p v-if="panel.checkOut.time" class="text-sm text-muted">{{ panel.checkOut.time }}</p>
+            </div>
+          </div>
+          <p v-if="arrivalTime" class="mt-3 text-sm text-muted">Arriving {{ arrivalTime }}</p>
+
+          <!-- The rows about arriving and leaving: for the business each opens the home's own page; for the guest each goes to its section below. -->
+          <div class="mt-4">
+            <component :is="row.to ? NuxtLink : 'a'" v-for="row in panel.rows" :key="row.label" :to="row.to" :href="row.to ? undefined : row.href" class="flex items-center gap-4 py-3">
+              <UIcon :name="row.icon" class="size-6 shrink-0 text-highlighted" />
+              <span class="min-w-0 flex-1"><span class="block text-base font-medium text-highlighted">{{ row.label }}</span><span class="block truncate text-sm text-muted">{{ row.detail }}</span></span>
+            </component>
+          </div>
+
+          <div class="mt-6 border-t border-default pt-8">
+            <h2 class="text-xl font-semibold text-highlighted">Reservation details</h2>
+            <h3 class="mt-6 text-base font-semibold text-highlighted">Who’s coming</h3>
+            <component :is="guestDetailLink ? NuxtLink : 'p'" :to="guestDetailLink" class="mt-1 block text-base text-muted">{{ panel.guests }}</component>
+            <h3 class="mt-6 text-base font-semibold text-highlighted">Confirmation code</h3>
+            <p class="mt-1 text-base text-muted" data-testid="stay-confirmation-code">{{ panel.code }}</p>
+            <template v-if="policy">
+              <h3 class="mt-6 text-base font-semibold text-highlighted">Cancellation policy</h3>
+              <p class="mt-1 text-base text-muted">{{ policy.label }}</p>
+              <ul class="mt-1 space-y-1 text-base text-muted"><li v-for="term in policy.terms" :key="term">{{ term }}</li></ul>
+            </template>
+            <template v-if="detail?.cancellation_reason">
+              <h3 class="mt-6 text-base font-semibold text-highlighted">Cancellation reason</h3>
+              <p class="mt-1 whitespace-pre-wrap text-base text-muted">{{ detail.cancellation_reason }}</p>
+            </template>
+            <template v-if="!personalScope && detail?.private_notes">
+              <h3 class="mt-6 text-base font-semibold text-highlighted">Private note</h3>
+              <p class="mt-1 whitespace-pre-wrap text-base text-muted">{{ detail.private_notes }}</p>
+            </template>
+            <div class="mt-4">
+              <component :is="action.to ? NuxtLink : 'button'" v-for="action in panel.actions" :key="action.label" :to="action.to" :type="action.to ? undefined : 'button'" class="flex w-full items-center gap-4 py-3 text-left disabled:opacity-50" :disabled="action.to ? undefined : busy !== null" :data-testid="action.testid" @click="action.run?.()">
+                <UIcon :name="action.icon" class="size-5 shrink-0 text-highlighted" /><span class="min-w-0 flex-1 text-base text-highlighted">{{ action.label }}</span><UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+              </component>
+            </div>
+            <p v-if="!personalScope && channelManaged && detail" class="mt-4 text-base text-muted">
+              Payments, changes and cancellations for this stay are managed on
+              <ULink v-if="detail.channel_booking_url" :to="detail.channel_booking_url" target="_blank" rel="noopener noreferrer" class="text-highlighted underline">{{ channelName }}</ULink><template v-else>{{ channelName }}</template>.
+            </p>
+          </div>
+
+          <div v-if="panel.address || panel.directions" id="getting-there" class="mt-8 border-t border-default pt-8">
+            <h2 class="text-xl font-semibold text-highlighted">Getting there</h2>
+            <p v-if="panel.address" class="mt-4 text-base text-muted">{{ panel.address }}</p>
+            <template v-if="panel.directions">
+              <h3 class="mt-6 text-base font-semibold text-highlighted">Directions from your host</h3>
+              <p class="mt-1 whitespace-pre-wrap text-base text-muted">{{ panel.directions }}</p>
+            </template>
+            <a v-if="panel.mapsUrl" :href="panel.mapsUrl" target="_blank" rel="noopener noreferrer" class="mt-4 flex items-center gap-4 py-3">
+              <UIcon name="i-lucide-map-pin" class="size-5 shrink-0 text-highlighted" /><span class="min-w-0 flex-1 text-base text-highlighted">Get directions</span><UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+            </a>
+          </div>
+
+          <div v-if="panel.method || panel.instructions || panel.wifi" id="checking-in" class="mt-8 border-t border-default pt-8">
+            <h2 class="text-xl font-semibold text-highlighted">Checking in</h2>
+            <template v-if="panel.method">
+              <h3 class="mt-6 text-base font-semibold text-highlighted">Check-in method</h3>
+              <p class="mt-1 text-base text-muted">{{ panel.method }}</p>
+            </template>
+            <p v-if="panel.instructions" class="mt-4 whitespace-pre-wrap text-base text-muted">{{ panel.instructions }}</p>
+            <template v-if="panel.wifi">
+              <h3 class="mt-6 text-base font-semibold text-highlighted">Wi-Fi</h3>
+              <p v-if="panel.wifi.network" class="mt-1 text-base text-muted">{{ panel.wifi.network }}</p>
+              <p v-if="panel.wifi.password" class="text-base text-muted">{{ panel.wifi.password }}</p>
+            </template>
+          </div>
+
+          <div v-if="panel.manual || panel.rules.length || panel.safety.length" id="rules-and-instructions" class="mt-8 border-t border-default pt-8">
+            <h2 class="text-xl font-semibold text-highlighted">Rules and instructions</h2>
+            <template v-if="panel.manual">
+              <h3 class="mt-6 text-base font-semibold text-highlighted">House manual</h3>
+              <p class="mt-1 whitespace-pre-wrap text-base text-muted">{{ panel.manual }}</p>
+            </template>
+            <template v-if="panel.rules.length">
+              <h3 class="mt-6 text-base font-semibold text-highlighted">House rules</h3>
+              <ul class="mt-1 space-y-1 text-base text-muted"><li v-for="rule in panel.rules" :key="rule">{{ rule }}</li></ul>
+            </template>
+            <template v-if="panel.safety.length">
+              <h3 class="mt-6 text-base font-semibold text-highlighted">Safety and property</h3>
+              <ul class="mt-1 space-y-1 text-base text-muted"><li v-for="line in panel.safety" :key="line">{{ line }}</li></ul>
+            </template>
+          </div>
+
+          <div v-if="panel.checkout.length" id="checkout-details" class="mt-8 border-t border-default pt-8">
+            <h2 class="text-xl font-semibold text-highlighted">Checkout details</h2>
+            <ul class="mt-4 space-y-4">
+              <li v-for="instruction in panel.checkout" :key="instruction.task" class="flex gap-4">
+                <UIcon :name="STAY_CHECKOUT_TASKS[instruction.task].icon" class="mt-0.5 size-5 shrink-0 text-highlighted" />
+                <span><span class="block text-base text-highlighted">{{ STAY_CHECKOUT_TASKS[instruction.task].label }}</span><span v-if="instruction.details" class="block whitespace-pre-wrap text-base text-muted">{{ instruction.details }}</span></span>
+              </li>
+            </ul>
+          </div>
+
+          <div v-if="panel.hostedBy" class="mt-8 flex items-center gap-4 border-t border-default pt-8">
+            <h2 class="min-w-0 flex-1 text-xl font-semibold text-highlighted">Hosted by {{ panel.hostedBy }}</h2>
+            <UAvatar :src="panel.hostImage || undefined" :alt="panel.hostedBy" :text="panel.hostedBy.slice(0, 1).toUpperCase()" size="xl" class="bg-accented" />
+          </div>
+
+          <div v-if="detail" class="mt-8 border-t border-default pt-8">
+            <h2 class="text-xl font-semibold text-highlighted">Payment info</h2>
+            <h3 class="mt-6 text-base font-semibold text-highlighted">Amount paid</h3>
+            <p class="mt-1 text-base text-muted" data-testid="stay-amount-paid">{{ money(detail.online_payment ? detail.online_payment.captured_minor - detail.online_payment.refunded_minor : detail.paid_minor) }}</p>
+            <template v-if="!personalScope">
+              <ul v-if="!channelManaged && detail.payments.length" class="mt-4 space-y-3">
+                <li v-for="payment in detail.payments" :key="payment.id" class="flex items-center gap-4">
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-base text-highlighted">{{ money(payment.amount_minor) }} · {{ methodLabel(payment.method) }}</span>
+                    <span class="block text-sm text-muted">{{ formatCalendarDate(payment.paid_on, 'en') }}{{ payment.reference ? ` · ${payment.reference}` : '' }}</span>
+                  </span>
+                  <UButton v-if="manage" icon="i-lucide-trash-2" color="neutral" variant="ghost" :aria-label="`Delete payment of ${money(payment.amount_minor)}`" :loading="busy === payment.id" @click="deletePayment(payment.id)" />
+                </li>
+              </ul>
+              <template v-if="manage && !channelManaged && !requestStatus && !detail.online_payment">
+                <h3 class="mt-6 text-base font-semibold text-highlighted">This is an offline booking</h3>
+                <NuxtLink :to="{ path: `${editorPath}/payment`, query: route.query }" class="flex items-center gap-4 py-3" data-testid="stay-record-payment">
+                  <span class="min-w-0 flex-1 text-base text-muted">Add payment details gathered manually</span><UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+                </NuxtLink>
+              </template>
+              <template v-if="detail.online_payment">
+                <NuxtLink :to="paymentPath" class="mt-2 flex items-center gap-4 py-3">
+                  <UIcon name="i-lucide-receipt-text" class="size-5 shrink-0 text-highlighted" /><span class="min-w-0 flex-1 text-base text-highlighted">Get receipt</span><UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+                </NuxtLink>
+                <NuxtLink v-if="manage && detail.online_payment.captured_minor > detail.online_payment.refunded_minor" :to="{ path: `${paymentPath}/refund`, query: { payment: detail.online_payment.payment_id } }" class="flex items-center gap-4 py-3">
+                  <UIcon name="i-lucide-undo-2" class="size-5 shrink-0 text-highlighted" /><span class="min-w-0 flex-1 text-base text-highlighted">Send a refund</span><UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+                </NuxtLink>
+              </template>
+            </template>
+          </div>
+        </section>
+
+        <div v-else :class="personalScope || purchase ? 'space-y-4' : flatSections">
           <p v-if="changeResult" class="text-sm text-highlighted" role="status">{{ changeResult }}</p>
           <UAlert
             v-if="booking?.pending_change"
@@ -114,33 +272,6 @@
             </div>
             <p v-if="stay?.no_show_at && !detail" class="mt-6 border-t border-default pt-4 text-base text-muted" data-testid="stay-no-show">No-show recorded {{ formatCalendarDate(stay.no_show_at.slice(0, 10), 'en') }}.</p>
           </UCard>
-          <!-- What the guest is told about arriving and leaving, each opening the home's own page for it, as Airbnb's rows do. -->
-          <UCard v-if="!personalScope && hostHome && detail" variant="record">
-            <div class="divide-y divide-default">
-              <NuxtLink v-for="row in homeRows" :key="row.label" :to="row.to" class="flex items-center gap-4 py-3.5">
-                <UIcon :name="row.icon" class="size-6 shrink-0 text-highlighted" />
-                <span class="min-w-0 flex-1"><span class="block text-base font-medium text-highlighted">{{ row.label }}</span><span class="block truncate text-sm text-muted">{{ row.detail }}</span></span>
-                <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-              </NuxtLink>
-            </div>
-          </UCard>
-          <h2 v-if="!personalScope && stay" class="pb-1 pt-8 text-xl font-semibold text-highlighted">Reservation details</h2>
-          <UCard v-if="!personalScope && detail" variant="record">
-            <h3 class="text-base font-semibold text-highlighted">Confirmation code</h3>
-            <p class="mt-1 text-base text-muted" data-testid="stay-confirmation-code">{{ detail.channel_booking_id ?? detail.booking_id.slice(0, 8).toUpperCase() }}</p>
-          </UCard>
-
-          <UCard v-if="personalScope && home?.location && (guestAddress || home.location.maps_url)" variant="record">
-            <h2 class="text-base font-semibold text-highlighted">{{ t('stay.where_youll_be') }}</h2>
-            <p v-if="guestAddress" class="mt-3 whitespace-pre-line break-words text-base text-muted">{{ guestAddress }}</p>
-            <UButton v-if="home.location.maps_url" :to="home.location.maps_url" target="_blank" rel="noopener noreferrer" class="mt-4" color="neutral" variant="outline" :label="t('site.experience_detail.open_in_maps')" />
-          </UCard>
-
-          <UCard v-if="personalScope && home?.arrival_guide" variant="record">
-            <h2 class="mb-6 text-base font-semibold text-highlighted">{{ t('stay.arrival_guide') }}</h2>
-            <StayArrivalGuideView :guide="home.arrival_guide" :rules="home.house_rules" :safety="home.safety" />
-          </UCard>
-
           <UCard v-if="booking && !purchase" variant="record">
             <h3 class="text-base font-semibold text-highlighted">Where</h3>
             <p class="mt-1 text-sm text-muted">{{ booking.location_title }}</p>
@@ -217,98 +348,6 @@
             </template>
           </PaymentDetails>
 
-          <template v-if="detail">
-          <UCard v-if="!personalScope && detail.private_notes" variant="record">
-            <h3 class="text-base font-semibold text-highlighted">Private note</h3>
-            <p class="mt-3 whitespace-pre-wrap text-base text-muted">{{ detail.private_notes }}</p>
-          </UCard>
-
-          <!-- The policy the guest booked under, in Airbnb's words: what their own cancellation returns. -->
-          <UCard v-if="policy || detail.cancellation_reason" variant="record">
-          <template v-if="policy">
-            <h2 class="text-base font-semibold text-highlighted">Cancellation policy</h2>
-            <p class="mt-1 text-base text-highlighted">{{ policy.label }}</p>
-            <ul class="mt-2 space-y-1 text-base text-muted">
-              <li v-for="term in policy.terms" :key="term">{{ term }}</li>
-            </ul>
-          </template>
-          <section v-if="detail.cancellation_reason" class="mt-6">
-            <h3 class="text-base font-semibold text-highlighted">Cancellation reason</h3>
-            <p class="mt-2 whitespace-pre-wrap text-base text-muted">{{ detail.cancellation_reason }}</p>
-          </section>
-          </UCard>
-
-          <!-- What the host can do to the reservation, one row each, as Airbnb lists them. -->
-          <UCard v-if="!personalScope && manage && !channelManaged && (hostActions.includes('edit') || hostActions.includes('cancel'))" variant="record">
-            <div class="divide-y divide-default">
-              <NuxtLink v-if="hostActions.includes('edit')" :to="{ path: `${editorPath}/dates`, query: route.query }" class="flex w-full items-center gap-4 py-4" data-testid="stay-change">
-                <UIcon name="i-lucide-pencil" class="size-5 shrink-0 text-highlighted" /><span class="min-w-0 flex-1 text-base text-highlighted">Change reservation</span><UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
-              </NuxtLink>
-              <button v-if="hostActions.includes('cancel')" type="button" class="flex w-full items-center gap-4 py-4 text-left disabled:opacity-50" :disabled="busy !== null" data-testid="stay-cancel" @click="cancelStay">
-                <UIcon name="i-lucide-ban" class="size-5 shrink-0 text-highlighted" /><span class="min-w-0 flex-1 text-base text-highlighted">Cancel reservation</span><UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
-              </button>
-            </div>
-          </UCard>
-          <UCard v-if="personalScope" variant="record">
-          <dl class="space-y-4">
-            <div class="flex items-start justify-between gap-4">
-              <dt class="text-base font-semibold text-highlighted">Total</dt>
-              <dd class="text-right text-base font-semibold text-highlighted">{{ money(detail.total_minor) }}</dd>
-            </div>
-            <div v-if="!channelManaged" class="flex items-start justify-between gap-4 border-t border-default pt-4">
-              <dt class="text-base text-muted">Paid</dt>
-              <dd class="text-right text-base text-highlighted">{{ money(detail.paid_minor) }}</dd>
-            </div>
-          </dl>
-          </UCard>
-
-          <!-- Payment info, in Airbnb's words: what was paid, then where an offline payment is added. -->
-          <UCard v-if="!personalScope" variant="record">
-            <h2 class="text-xl font-semibold text-highlighted">Payment info</h2>
-            <h3 class="mt-6 text-base font-semibold text-highlighted">Amount paid</h3>
-            <p class="mt-1 text-base text-muted" data-testid="stay-amount-paid">{{ money(detail.online_payment ? detail.online_payment.captured_minor - detail.online_payment.refunded_minor : detail.paid_minor) }}</p>
-            <div v-if="detail.online_payment" class="mt-4 divide-y divide-default border-y border-default">
-              <NuxtLink :to="`${paymentPath}`" class="flex items-center gap-4 py-4">
-                <span class="min-w-0 flex-1 text-base text-highlighted">Get receipt</span>
-                <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
-              </NuxtLink>
-              <NuxtLink v-if="manage && detail.online_payment.captured_minor > detail.online_payment.refunded_minor" :to="{ path: `${paymentPath}/refund`, query: { payment: detail.online_payment.payment_id } }" class="flex items-center gap-4 py-4">
-                <span class="min-w-0 flex-1 text-base text-highlighted">Send a refund</span>
-                <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
-              </NuxtLink>
-            </div>
-            <template v-if="!channelManaged && !requestStatus">
-              <ul v-if="detail.payments.length" class="mt-4 divide-y divide-default border-y border-default">
-                <li v-for="payment in detail.payments" :key="payment.id" class="flex items-center gap-4 py-3">
-                  <span class="min-w-0 flex-1">
-                    <span class="block text-base text-highlighted">{{ money(payment.amount_minor) }} · {{ methodLabel(payment.method) }}</span>
-                    <span class="block text-sm text-muted">{{ formatCalendarDate(payment.paid_on, 'en') }}{{ payment.reference ? ` · ${payment.reference}` : '' }}</span>
-                  </span>
-                  <UButton v-if="manage" icon="i-lucide-trash-2" color="neutral" variant="ghost" :aria-label="`Delete payment of ${money(payment.amount_minor)}`" :loading="busy === payment.id" @click="deletePayment(payment.id)" />
-                </li>
-              </ul>
-              <template v-if="manage && !detail.online_payment">
-                <h3 class="mt-6 text-base font-semibold text-highlighted">This is an offline booking</h3>
-                <NuxtLink :to="{ path: `${editorPath}/payment`, query: route.query }" class="mt-2 flex items-center gap-4 border-y border-default py-4" data-testid="stay-record-payment">
-                  <span class="min-w-0 flex-1 text-base text-highlighted">Add payment details gathered manually</span>
-                  <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
-                </NuxtLink>
-              </template>
-            </template>
-          </UCard>
-          <UCard v-if="detail.channel_booking_id || (!personalScope && channelManaged)" variant="record">
-          <dl class="space-y-4">
-            <div v-if="detail.channel_booking_id" class="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-4">
-              <dt class="text-base text-muted">{{ STAY_CHANNEL_LABELS[detail.channel] }} confirmation</dt>
-              <dd class="break-words text-right text-base text-highlighted">{{ detail.channel_booking_id }}</dd>
-            </div>
-          </dl>
-          <p v-if="!personalScope && channelManaged" class="mt-4 text-base text-muted">
-            Payments, changes and cancellations for this stay are managed on
-            <ULink v-if="detail.channel_booking_url" :to="detail.channel_booking_url" target="_blank" rel="noopener noreferrer" class="text-highlighted underline">{{ channelName }}</ULink><template v-else>{{ channelName }}</template>.
-          </p>
-          </UCard>
-          </template>
           <UCard v-if="(booking && (!purchase || availableActions.length)) || (stay && personalScope)" as="button" type="button" variant="record" class="w-full text-left" @click="manageOpen = true">
             <span class="flex items-center gap-4"><span class="min-w-0 flex-1 text-base font-semibold text-highlighted">{{ stay ? t('booking.manage') : `Manage ${noun}` }}</span><UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" /></span>
           </UCard>
@@ -434,9 +473,8 @@ import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardI
 import { getErrorMessage } from '~/utils/errors'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 import { formatPhone } from '~/utils/phone'
-import StayArrivalGuideView from '~/components/booking/StayArrivalGuide.vue'
 import { stayCheckInWindow } from '~/shared/stay-arrival'
-import { STAY_CHECK_IN_METHODS } from '~/shared/stay-listing'
+import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS } from '~/shared/stay-listing'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import { isChannelManagedStay, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
@@ -728,17 +766,54 @@ const channelManaged = computed(() => detail.value !== null && isChannelManagedS
 const manage = computed(() => managedStay.value !== null)
 const home = computed(() => accountStay.value?.home ?? null)
 const hostHome = computed(() => dashboardStay.value?.home ?? null)
-/** The home's arrival and departure pages, as the rows of a reservation: what each says now, and where it is written. */
-const homeRows = computed(() => {
-  const home = hostHome.value, value = detail.value
-  if (!home || !value) return []
+/** A stay's reservation as the one block draws it, for the business and for the guest alike. */
+const panel = computed(() => {
+  const value = stay.value
+  if (!value) return null
+  const guestHome = home.value, host = hostHome.value, full = detail.value
+  const guide = guestHome?.arrival_guide ?? null
+  const method = host?.check_in_method ?? guide?.check_in_method ?? null
+  const day = (date: string) => formatCalendarDate(date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })
+  const clock = (time: string | null | undefined) => time ? formatTime(time, 'en') : null
   const editor = `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/products/${encodeURIComponent(value.product_id)}`
-  return [
-    { label: 'Getting there', icon: 'i-lucide-map-pin', detail: 'Directions for your guests', to: `${editor}/directions` },
-    { label: 'How to get inside', icon: 'i-lucide-key-round', detail: home.check_in_method ? STAY_CHECK_IN_METHODS[home.check_in_method].label : 'Choose a check-in method', to: `${editor}/check-in-method` },
-    { label: 'House rules', icon: 'i-lucide-book-open', detail: 'What guests agree to', to: `${editor}/house-rules` },
-    { label: 'Checkout details', icon: 'i-lucide-door-open', detail: home.check_out_time ? `By ${formatTime(home.check_out_time, 'en')}` : 'How to check out', to: `${editor}/checkout-instructions` },
-  ]
+  const address = props.personalScope ? guestAddress.value || null : host?.address ?? null
+  const guests = full ? full.adults + full.children : guestCount.value
+  // The business writes each of these on the home's own page; the guest reads them in the sections below.
+  const row = (label: string, icon: string, text: string, page: string, section: string) => props.personalScope
+    ? { label, icon, detail: text, to: undefined, href: `#${section}` } : { label, icon, detail: text, to: `${editor}/${page}`, href: undefined }
+  return {
+    image: recordImage.value,
+    title: guestHome?.name ?? host?.internal_name ?? '',
+    hostedBy: props.personalScope ? guestHome?.organization_name ?? null : host?.host?.name ?? null,
+    hostImage: host?.host?.image ?? null,
+    checkIn: { date: day(value.check_in_date), time: clock(recordHome.value?.check_in_time) },
+    checkOut: { date: day(value.check_out_date), time: clock(recordHome.value?.check_out_time) },
+    rows: [
+      row('Getting there', 'i-lucide-map-pin', address ?? 'Address and directions', 'directions', 'getting-there'),
+      row('How to get inside', 'i-lucide-key-round', method ? STAY_CHECK_IN_METHODS[method].label : 'Details for an easy check-in', 'check-in-method', 'checking-in'),
+      row('House rules', 'i-lucide-book-open', 'Review these details for a smooth stay', 'house-rules', 'rules-and-instructions'),
+      row('Checkout details', 'i-lucide-door-open', 'How to check out', 'checkout-instructions', 'checkout-details'),
+    ],
+    guests: `${guests} ${guests === 1 ? 'guest' : 'guests'}`,
+    code: full?.channel_booking_id ?? value.booking_id.slice(0, 8).toUpperCase(),
+    actions: props.personalScope
+      ? [{ label: 'Change or cancel reservation', icon: 'i-lucide-pencil', to: undefined, run: () => { manageOpen.value = true }, testid: 'stay-manage' }]
+      : manage.value && !channelManaged.value ? [
+          ...(hostActions.value.includes('edit') ? [{ label: 'Change reservation', icon: 'i-lucide-pencil', to: { path: `${editorPath.value}/dates`, query: route.query }, run: undefined, testid: 'stay-change' }] : []),
+          ...(hostActions.value.includes('cancel') ? [{ label: 'Cancel reservation', icon: 'i-lucide-ban', to: undefined, run: () => void cancelStay(), testid: 'stay-cancel' }] : []),
+        ] : [],
+    address,
+    mapsUrl: guestHome?.location?.maps_url ?? null,
+    directions: host?.directions ?? guide?.directions ?? null,
+    method: method ? STAY_CHECK_IN_METHODS[method].label : null,
+    instructions: host?.check_in_instructions ?? guide?.check_in_instructions ?? null,
+    manual: host?.house_manual ?? guide?.house_manual ?? null,
+    rules: host?.house_rules ?? guestHome?.house_rules ?? [],
+    // What only the guest's own reservation carries: the Wi-Fi, the safety notes and how to check out.
+    wifi: guide && (guide.wifi_network || guide.wifi_password) ? { network: guide.wifi_network, password: guide.wifi_password } : null,
+    safety: guestHome?.safety ?? [],
+    checkout: guide?.checkout_instructions ?? [],
+  }
 })
 const recordHome = computed(() => home.value ?? hostHome.value)
 const checkInTime = computed(() => recordHome.value?.check_in_time

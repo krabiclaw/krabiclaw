@@ -14,11 +14,15 @@ import { calendarStays, getStay, stayAccessFor, stayCalendarOf, stayCalendarQuer
 import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
 import { loadDashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
-import { isValidCalendarDate, localDateAt } from '~/utils/timezone'
+import { isValidCalendarDate, localDateAt, formatTime  } from '~/utils/timezone'
 import { readProductPhotos } from '~/server/utils/media-placement'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
+import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
+import { stayHouseRuleLines, type ProductDetails } from '~/shared/product-details'
 
-export type BookingHome = Pick<StayHome, 'name' | 'internal_name' | 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'check_in_method' | 'check_in_instructions'> & { image_url: string | null }
+/** The home of a stay as its reservation shows it to the business: what the guest is told about arriving, staying and leaving, and who looks after it. */
+export type BookingHome = Pick<StayHome, 'name' | 'internal_name' | 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'check_in_method' | 'check_in_instructions' | 'directions' | 'house_manual'>
+  & { image_url: string | null; address: string | null; house_rules: string[]; host: { name: string; image: string | null } | null }
 
 export function nightBooking<T extends { id: string }>({ id, ...record }: T) {
   return { ...record, booking_id: id, unit: 'nights' as const }
@@ -52,15 +56,25 @@ export async function dashboardBookingDetails(event: H3Event) {
   }
   const [stay, house, pictures] = await Promise.all([
     getStay(db, access, bookingId),
-    queryFirst<Omit<BookingHome, 'image_url'>>(db, `SELECT p.name, s.internal_name, b.check_in_time, b.check_in_end_time, b.check_out_time,
-      s.check_in_method, s.check_in_instructions FROM product_stay_configs s
+    queryFirst<Omit<BookingHome, 'image_url' | 'address' | 'house_rules' | 'host'> & { details_json: string; location_address: string | null; host_name: string | null; host_image: string | null }>(db, `SELECT p.name, s.internal_name, b.check_in_time, b.check_in_end_time, b.check_out_time,
+      s.check_in_method, s.check_in_instructions, s.directions, s.house_manual, p.details_json, l.address AS location_address, u.name AS host_name, u.image AS host_image
+      FROM product_stay_configs s
       JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
       JOIN product_booking_configs b ON b.organization_id = s.organization_id AND b.product_id = s.product_id
+      JOIN business_locations l ON l.organization_id = s.organization_id AND l.id = s.location_id
+      LEFT JOIN member m ON m.organizationId = b.organization_id AND m.id = b.assigned_member_id
+      LEFT JOIN user u ON u.id = m.userId
       WHERE s.organization_id = ? AND s.product_id = ?`, [organization.id, booking.product_id]),
     readProductPhotos(db, { organizationId: organization.id, productIds: [booking.product_id] }),
   ])
   if (!house) throw new Error('The booking has no home')
-  const home: BookingHome = { ...house, image_url: mediaStillUrl(pictures.get(booking.product_id)?.[0]) }
+  const { details_json, location_address, host_name, host_image, ...facts } = house
+  const address = parsePostalAddress(location_address)
+  const home: BookingHome = {
+    ...facts, image_url: mediaStillUrl(pictures.get(booking.product_id)?.[0]), address: address ? formatPostalAddress(address) : null,
+    house_rules: stayHouseRuleLines(JSON.parse(details_json) as ProductDetails, value => formatTime(value, 'en')),
+    host: host_name === null ? null : { name: host_name, image: host_image },
+  }
   if (!('payments' in stay)) return { booking: nightBooking(stay), manage: false, home }
   const conversation = await getGuestRequest(db, booking.conversation_id, organization.id, 'booking')
   if (!conversation) throw new Error('The booking has no guest conversation')
