@@ -1,3 +1,4 @@
+import { publishEvent } from '~/server/events'
 import { HTTPError } from 'nitro'
 import { bookingStatusQuery } from '~/server/domain/bookings'
 import { visitRefundQueries } from '~/server/domain/payments/visit-refund'
@@ -471,7 +472,7 @@ async function executeSourceMutation(
   if (!applied) return conflict(`"${input.action}" is not a valid action for the current state`)
   if (!entryMatchesRequest(applied, eventName)) return conflict()
   // A confirmed visit's follow-up and prep are in their conversations before the operation answers.
-  await (await import('~/server/domain/cleaner-jobs')).postJobs(input.env, db, input.organizationId)
+  await publishEvent(input.env, { type: 'jobs.changed', organization_id: input.organizationId })
   // A confirmed, declined or cancelled visit's automatic messages follow it.
   if (stay) await stay.publishStayRequest(db, input.env, input.organizationId, context.record.id)
   else await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, context.thread.organization_id, context.record.id)

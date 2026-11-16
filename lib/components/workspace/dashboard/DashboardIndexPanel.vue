@@ -18,12 +18,13 @@
       -->
       <div
         v-if="isSubPage"
-        class="shrink-0 items-center gap-x-3 grid min-h-16 grid-cols-[minmax(2.5rem,auto)_minmax(0,1fr)_minmax(2.5rem,auto)] py-3"
-        :class="dashboardGutterClass"
+        class="shrink-0 items-center gap-x-3 grid min-h-16 py-3"
+        :class="[dashboardGutterClass, column === 'record' ? 'grid-cols-[minmax(0,1fr)_minmax(2.5rem,auto)]' : 'grid-cols-[minmax(2.5rem,auto)_minmax(0,1fr)_minmax(2.5rem,auto)]']"
       >
-        <div class="flex items-center justify-start min-w-[2.5rem]">
+        <!-- A record beside its parent has no Back of its own: its title starts the row, as Airbnb's Reservation panel does. -->
+        <div v-if="column !== 'record'" class="flex items-center justify-start min-w-[2.5rem]">
           <slot name="leading">
-            <DashboardNavbarLeading v-if="column !== 'record'" />
+            <DashboardNavbarLeading />
           </slot>
         </div>
 
@@ -31,8 +32,8 @@
           <h1 class="sr-only">{{ title }}</h1>
           <slot name="center" />
         </div>
-        <div v-else class="min-w-0 text-center">
-          <h1 class="text-base font-semibold text-highlighted truncate">{{ title }}</h1>
+        <div v-else class="min-w-0" :class="column === 'record' ? 'text-left' : 'text-center'">
+          <h1 class="font-semibold text-highlighted truncate" :class="column === 'record' ? 'text-xl' : 'text-base'">{{ title }}</h1>
           <p v-if="lead" class="mt-0.5 text-xs text-muted truncate">{{ lead }}</p>
         </div>
 

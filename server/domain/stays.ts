@@ -1,3 +1,4 @@
+import { publishEvent, type EventsEnv } from '~/server/events'
 import { PUBLISHED_PROFILE_SQL } from '~/shared/member-scheduling'
 import { bookChannelConversationGuest, reconcileGuestListingParticipants } from '~/server/domain/conversation-participants'
 import { HTTPError } from 'nitro'
@@ -2684,8 +2685,8 @@ async function publishStayChange(env: GuestInboxPublicationEnv, db: DbClient, or
     throw new HTTPError({ statusCode: 503, message: 'The stay was saved, but its conversation update could not be published. Reload before retrying.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, booking_id: stay.id, product_id: stay.product_id, version: stay.version, conversation_id: stay.conversation_id }, cause })
   }
-  // The stay's clean is in its conversation, and its reminders are stored, before the write answers.
-  await (await import('~/server/domain/cleaner-jobs')).postJobs(env as CloudflareEnv, db, organizationId)
+  // The stay's clean follows in its conversation: the write only announces that jobs changed.
+  await publishEvent(env as EventsEnv, { type: 'jobs.changed', organization_id: organizationId })
 }
 
 async function storedStay(db: DbClient, organizationId: string, stayId: string): Promise<Stay> {

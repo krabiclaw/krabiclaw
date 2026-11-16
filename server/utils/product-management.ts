@@ -1,3 +1,4 @@
+import { publishEvent } from '~/server/events'
 import { isStayAmenityCodes, NEW_HOME_CANCELLATION_POLICIES, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { assertResponsibleMember, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
@@ -1903,7 +1904,7 @@ export async function updateProduct(db: DbClient, input: {
       || input.booking?.data.assigned_member_id !== undefined) {
       await publishAccessInvalidation(env, { organizationId: input.organizationId })
       // The member's jobs are in their conversations before the write answers.
-      await (await import('~/server/domain/cleaner-jobs')).postJobs(env, db, input.organizationId)
+      await publishEvent(env, { type: 'jobs.changed', organization_id: input.organizationId })
       if (product.kind !== 'stay') await publishBusinessInvalidation(env, input.organizationId)
     }
     let channelPush: ChannelPushCompletion = null

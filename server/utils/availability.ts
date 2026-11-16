@@ -1,3 +1,4 @@
+import { publishEvent } from '~/server/events'
 import { createHash } from 'node:crypto'
 import { assertResponsibleMember } from '~/server/utils/member-access'
 import { jobAssigneeSql, sessionPrepTaskQueries } from '~/server/domain/tasks'
@@ -397,7 +398,7 @@ export async function setProductBookingConfig(db: DbClient, input: Omit<Paramete
     await publishAccessInvalidation(input.env, { organizationId: input.organizationId })
   }
   // A new member's jobs are in their conversations before the write answers.
-  if (input.patch.assigned_member_id !== undefined) await (await import('~/server/domain/cleaner-jobs')).postJobs(input.env!, db, input.organizationId)
+  if (input.patch.assigned_member_id !== undefined) await publishEvent(input.env!, { type: 'jobs.changed', organization_id: input.organizationId })
   if (paymentEnabled || input.patch.assigned_member_id !== undefined) await publishBusinessInvalidation(input.env!, input.organizationId)
   return requireBookingConfig(db, input.organizationId, input.productId)
 }

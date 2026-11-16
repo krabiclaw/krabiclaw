@@ -1,3 +1,4 @@
+import { publishEvent } from '~/server/events'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
 import { CapacityUnavailableError, claimSessionCapacity, paidQuantity, partyPaysOnline, partySizeRefusal, requireBookingConfig, resolveBookingSession, sessionAllocationPredicate } from '~/server/utils/availability'
@@ -432,7 +433,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
 
   if (!operationalBookingId) throw new Error('Booking allocation did not produce an operational ID')
   // A booking's follow-up and prep are in their conversations before it answers.
-  await (await import('~/server/domain/cleaner-jobs')).postJobs(env, db, organization.id)
+  await publishEvent(env, { type: 'jobs.changed', organization_id: organization.id })
   // One instant, one zone: the message the guest reads and the record the
   // host sees are formatted from the same session row.
   // Telling the owner and recording the conversion are independent, so both are

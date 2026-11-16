@@ -213,6 +213,8 @@ export interface CloudflareEnv {
   MEDIA_BUCKET?: R2Bucket
   ORGANIZATION_CACHE?: KVNamespace
   GUEST_INBOX_HUBS?: DurableObjectNamespace
+  /** Cloudflare's queue of what writes announce (server/events.ts). */
+  EVENTS?: { send(_event: import('~/server/events').DomainEvent): Promise<void> }
   db?: ReturnType<typeof createDb>
   [key: string]: ApiValue
 }

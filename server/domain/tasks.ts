@@ -1,3 +1,4 @@
+import { publishEvent } from '~/server/events'
 import { HTTPError } from 'nitro'
 import type { ProductKind } from '~/shared/product-details'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -896,7 +897,7 @@ async function afterWrite(db: DbClient, viewer: TaskViewer, taskId: string, assi
     }
   }
   // A job given out is in its conversation before the write answers.
-  await (await import('~/server/domain/cleaner-jobs')).postJobs(env, db, viewer.principal.organizationId)
+  await publishEvent(env, { type: 'jobs.changed', organization_id: viewer.principal.organizationId })
   await publishBusinessInvalidation(env, viewer.principal.organizationId)
   return getTask(db, viewer, taskId)
 }

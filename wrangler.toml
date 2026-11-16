@@ -124,6 +124,18 @@ new_sqlite_classes = ["GuestThreadCommandObject", "GuestInboxHubObject"]
 tag = "v2_delete_guest_thread_command"
 deleted_classes = ["GuestThreadCommandObject"]
 
+# What a write announces, delivered by Cloudflare to whatever reacts (server/events.ts). No timer looks for it.
+[[queues.producers]]
+binding = "EVENTS"
+queue = "krabiclaw-events"
+
+[[queues.consumers]]
+queue = "krabiclaw-events"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
+dead_letter_queue = "krabiclaw-events-dlq"
+
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
 bucket_name = "krabiclaw-media"
@@ -200,6 +212,17 @@ remote = false
 name = "GUEST_INBOX_HUBS"
 class_name = "GuestInboxHubObject"
 script_name = "krabiclaw-guest-inbox-hub"
+
+# What a write announces, delivered by Cloudflare to whatever reacts (server/events.ts). No timer looks for it.
+[[env.dev.queues.producers]]
+binding = "EVENTS"
+queue = "krabiclaw-events-local"
+
+[[env.dev.queues.consumers]]
+queue = "krabiclaw-events-local"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
 
 [[env.dev.r2_buckets]]
 binding = "MEDIA_BUCKET"
@@ -290,6 +313,18 @@ new_sqlite_classes = ["GuestThreadCommandObject", "GuestInboxHubObject"]
 tag = "v2_delete_guest_thread_command"
 deleted_classes = ["GuestThreadCommandObject"]
 
+# What a write announces, delivered by Cloudflare to whatever reacts (server/events.ts). No timer looks for it.
+[[env.staging.queues.producers]]
+binding = "EVENTS"
+queue = "krabiclaw-events-staging"
+
+[[env.staging.queues.consumers]]
+queue = "krabiclaw-events-staging"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
+dead_letter_queue = "krabiclaw-events-staging-dlq"
+
 [[env.staging.r2_buckets]]
 binding = "MEDIA_BUCKET"
 bucket_name = "krabiclaw-media-staging"
@@ -366,6 +401,17 @@ new_sqlite_classes = ["GuestThreadCommandObject", "GuestInboxHubObject"]
 [[env.e2e.migrations]]
 tag = "v2_delete_guest_thread_command"
 deleted_classes = ["GuestThreadCommandObject"]
+
+# What a write announces, delivered by Cloudflare to whatever reacts (server/events.ts). No timer looks for it.
+[[env.e2e.queues.producers]]
+binding = "EVENTS"
+queue = "krabiclaw-events-local"
+
+[[env.e2e.queues.consumers]]
+queue = "krabiclaw-events-local"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
 
 [[env.e2e.r2_buckets]]
 binding = "MEDIA_BUCKET"
