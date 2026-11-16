@@ -77,16 +77,15 @@ async function main() {
 
     const page = await context.newPage()
     const dashboardPath = `/dashboard/${organizationSlug}`
-    const dashboard = await page.goto(dashboardPath, { waitUntil: 'networkidle' })
+    const dashboard = await page.goto(dashboardPath, { waitUntil: 'domcontentloaded' })
     const loadedPath = new URL(page.url()).pathname
     if (!dashboard?.ok() || (loadedPath !== dashboardPath && !loadedPath.startsWith(`${dashboardPath}/`))) {
       throw new Error(`Dashboard page load failed (${dashboard?.status() ?? 'no_response'})`)
     }
 
-    const bodyText = (await page.locator('body').innerText()).toLowerCase()
-    if (!bodyText.includes('overview') && !bodyText.includes('dashboard')) {
-      throw new Error('Dashboard tenant marker missing (overview/dashboard text not found)')
-    }
+    await page.getByRole('navigation', { name: 'Dashboard', exact: true })
+      .getByRole('link', { name: 'Today', exact: true })
+      .waitFor({ state: 'visible', timeout: 20_000 })
 
     const after = {
       bookings: Number(d1Query(`SELECT COUNT(*) as c FROM conversations WHERE kind = 'booking' AND organization_id = '${sqlEscape(expectedOrgId)}'`)[0]?.c ?? 0),
