@@ -11,6 +11,7 @@ import { ChannexError } from '~/server/integrations/channex/client'
 import { BOOKING_RECORDS_SQL, bookedRecordGuard, bookedRecordWindow, getGuestRequest, readBookedRecord, stayRequestConfirmationKey, type BookedRecord } from './requests'
 import { memberAccessPrincipal, resolveMembership, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { CloudflareEnv } from '~/server/utils/auth'
+import { sendTaskSend } from './cleaner-jobs'
 
 type Plan = Pick<ScheduledGuestMessageRow, 'due_at' | 'status' | 'reason' | 'error_code' | 'error_field'>
 
@@ -375,11 +376,13 @@ async function sendScheduledGuestMessage(db: DbClient, env: SendEnv, row: Pick<S
 /** The production cron: recover automatic plans from persisted sources, then send everything due, each on its own. */
 export async function sendDueScheduledGuestMessages(db: DbClient, env: SendEnv, now = new Date().toISOString()): Promise<{ sent: number; failed: number; needs_review: number }> {
   const failures = await reconcileScheduledGuestMessagePlans(db, now)
-  const due = await queryAllPages<Pick<ScheduledGuestMessageRow, 'id' | 'organization_id' | 'booking_id' | 'author_user_id'>>(db,
-    "SELECT id, organization_id, booking_id, author_user_id FROM scheduled_guest_messages WHERE status = 'pending' AND due_at <= ? ORDER BY due_at, id", [now])
+  const due = await queryAllPages<Pick<ScheduledGuestMessageRow, 'id' | 'organization_id' | 'booking_id' | 'author_user_id'> & { task_id: string | null }>(db,
+    "SELECT id, organization_id, booking_id, author_user_id, task_id FROM scheduled_guest_messages WHERE status = 'pending' AND due_at <= ? ORDER BY due_at, id", [now])
   const counts = { sent: 0, failed: 0, needs_review: 0 }
   for (const row of due) {
     try {
+      // A job's reminder or a task's start alert goes to the team, not to a guest, and is not one of the guest counts.
+      if (row.task_id !== null) { await sendTaskSend(env, db, { ...row, task_id: row.task_id }, now); continue }
       const result = await sendScheduledGuestMessage(db, env, row, now)
       if (result !== 'not_due') counts[result] += 1
     } catch (error) {

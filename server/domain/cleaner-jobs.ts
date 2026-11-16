@@ -1,8 +1,8 @@
-import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { isOrganizationWideRole } from '~/server/utils/member-access'
 import { jobThreadParticipantsKey, postAutomaticTeamMessage, reseatAutomaticThread } from '~/server/domain/team-messages'
 import { JOB_TASK_SQL, SUPPORTED_TASK_KINDS, isJobTask, jobBookingIdSql, jobEndKeys, jobKey, jobSubject, taskViewForUser, type JobSubject, type TaskRow, type TaskView } from '~/server/domain/tasks'
-import { notifyTaskStarting, taskStartingSent } from '~/server/utils/notifications'
+import { notifyTaskStarting } from '~/server/utils/notifications'
 import { addLocalDays, formatTimestamp, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
@@ -14,11 +14,14 @@ import type { CloudflareEnv } from '~/server/utils/auth'
   move or a cancellation is told there at once. Every post has its own key, so
   a wake that runs twice sends nothing twice.
 
-  The organization's hub Durable Object wakes this on every stay or business
-  change and at the next reminder it reports, and re-arms itself to that time.
-  Every job has a conversation, a job an owner keeps for themselves too. A
-  group session's prep has no booking to talk about; its morning-of reminder
-  is the task alert, as it is for every other assigned task with a start time.
+  The write that creates, moves, gives out or closes a job runs this before it
+  answers. What a job says now is posted then; what it says later (its
+  reminders) is stored then as rows of the one outbox, each with its time and
+  its words, and the outbox's sender sends them when they are due. Nothing here
+  runs on a timer. Every job has a conversation, a job an owner keeps for
+  themselves too. A group session's prep has no booking to talk about; its
+  morning-of reminder is the task alert, as it is for every other assigned
+  task with a start time.
 */
 
 const EVENING_BEFORE = '18:00'
@@ -26,8 +29,6 @@ const MORNING_OF = '08:00'
 const WARNING_BEFORE_ARRIVAL_MS = 2 * 3_600_000
 /** How long a closed or cancelled job is still told about in its conversation. */
 const RECENT_MS = 7 * 86_400_000
-/** How far ahead a job's reminders are armed from one wake; a later wake, or the daily one, reaches the rest. */
-const AHEAD_MS = 14 * 86_400_000
 
 interface Member { id: string; userId: string; role: string }
 
@@ -74,33 +75,43 @@ function reminders(task: TaskRow): Array<{ key: string; at: Date; until: Date; k
   return out
 }
 
-/**
- * The write that creates, moves or gives out a job runs this before it
- * answers: the job's conversation and its first message exist when the write
- * returns, so a job is in Messages without waiting for the hub's alarm. A job
- * that could not be told about fails the write.
- */
-export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<void> {
-  const { failures } = await runOrganizationJobs(env, db, organizationId)
-  if (failures.length) throw new AggregateError(failures, `${failures.length} jobs of ${organizationId} could not be posted in their conversations`)
+/** A later send for a task, stored in the outbox under its key: a reminder in the job's conversation, or the start alert of a task that has none. */
+interface PlannedSend { id: string; due_at: string; body: string; conversation_id: string | null }
+
+/** The task's pending sends become exactly these: new ones stored, changed ones rewritten, the rest cancelled. A sent one is never touched. */
+function plannedSendQueries(task: Pick<TaskRow, 'id' | 'organization_id' | 'timezone'>, plan: PlannedSend[], now: string): BatchQuery[] {
+  return [{
+    query: `UPDATE scheduled_guest_messages SET status = 'cancelled', reason = 'The job changed', updated_at = ?
+      WHERE organization_id = ? AND task_id = ? AND status = 'pending' AND id NOT IN (SELECT value FROM json_each(?))`,
+    params: [now, task.organization_id, task.id, d1JsonStringSet(plan.map(send => send.id))],
+  }, ...plan.map(send => ({
+    query: `INSERT INTO scheduled_guest_messages (id, organization_id, task_id, conversation_id, body, due_at, timezone, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+      ON CONFLICT (id) DO UPDATE SET conversation_id = excluded.conversation_id, body = excluded.body, due_at = excluded.due_at, updated_at = excluded.updated_at
+        WHERE scheduled_guest_messages.status = 'pending'
+          AND (scheduled_guest_messages.conversation_id IS NOT excluded.conversation_id OR scheduled_guest_messages.body <> excluded.body OR scheduled_guest_messages.due_at <> excluded.due_at)`,
+    params: [send.id, task.organization_id, task.id, send.conversation_id, send.body, send.due_at, task.timezone, now, now],
+  }))]
 }
 
 /**
- * Posts what the organization's cleaners need to hear now and returns when the
- * next reminder is due, or null when nothing is pending.
+ * The write that creates, moves, gives out or closes a job runs this before it
+ * answers: the job's conversation and its first message exist, and its
+ * reminders are stored, when the write returns. A job that could not be told
+ * about fails the write.
  */
-export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, organizationId: string, now = new Date()): Promise<{ next: Date | null; failures: unknown[] }> {
+export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId: string, now = new Date()): Promise<void> {
   const organization = await queryFirst<{ name: string }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
   if (!organization) throw new Error(`Organization ${organizationId} is missing`)
   const [members, tasks] = await Promise.all([
     queryAll<Member>(db, 'SELECT id, userId, role FROM member WHERE organizationId = ?', [organizationId]),
-    // A job has something to say when its time is near (its reminders, from the evening before to its warning) or it changed lately (its post, release or cancellation); an open job long past says nothing more.
+    // Every open job, and a job closed or changed lately (its release or cancellation is told once).
     queryAll<TaskRow & { job_booking_id: string | null; private_prep: number }>(db, `SELECT t.*, ${jobBookingIdSql('t')} AS job_booking_id,
       (t.subject_type = 'product_session' AND EXISTS (SELECT 1 FROM products p WHERE p.organization_id = t.organization_id AND p.id = t.product_id AND p.kind = 'service')) AS private_prep
       FROM tasks t WHERE t.organization_id = ? AND t.kind IN (SELECT value FROM json_each(?)) AND (${JOB_TASK_SQL('t')} OR t.starts_at IS NOT NULL)
-      AND ((t.status = 'open' AND (COALESCE(t.starts_at, t.due_at, t.created_at) BETWEEN ? AND ? OR t.due_at BETWEEN ? AND ?)) OR t.updated_at >= ?)
+      AND (t.status = 'open' OR t.updated_at >= ?)
       AND (t.assigned_member_id IS NOT NULL OR ${JOB_TASK_SQL('t')}) ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id`,
-    [organizationId, SUPPORTED_TASK_KINDS, new Date(now.getTime() - RECENT_MS).toISOString(), new Date(now.getTime() + AHEAD_MS).toISOString(), new Date(now.getTime() - RECENT_MS).toISOString(), new Date(now.getTime() + AHEAD_MS).toISOString(), new Date(now.getTime() - RECENT_MS).toISOString()]),
+    [organizationId, SUPPORTED_TASK_KINDS, new Date(now.getTime() - RECENT_MS).toISOString()]),
   ])
   const subjectIds = [...new Set(tasks.flatMap(task => task.job_booking_id && (isJobTask(task) || task.subject_type === 'product_session') ? [task.job_booking_id] : []))]
   const prepKeys = tasks.filter(task => task.private_prep).map(task => jobKey(task))
@@ -136,20 +147,19 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
     postsByThread.set(result.threadId, (postsByThread.get(result.threadId) ?? new Map()).set(key, result.messageId))
     return result
   }
-  const pending: Date[] = []
   const failures: unknown[] = []
-  /** The task alert, once, on the morning of: a send the task already has for that day is not repeated. */
-  const alertOnTheDay = async (task: TaskRow, recipients: readonly string[]) => {
+  const stamp = now.toISOString()
+  /** The start alert of a task with no conversation, stored for the morning of its day. */
+  const startAlert = (task: TaskRow): PlannedSend[] => {
     const morning = reminders(task).find(reminder => reminder.kind === 'morning')
-    if (!morning) return
-    if (morning.at > now) { pending.push(morning.at); return }
-    if (now >= morning.until) return
+    if (!morning || now >= morning.until || !task.assigned_member_id) return []
     const day = localDateAt(new Date(task.starts_at ?? task.due_at!), task.timezone)
-    if (!recipients.length || await taskStartingSent(db, task.id, day)) return
-    await notifyTaskStarting(env, db, { organizationId, taskId: task.id, day, recipientUserIds: [...recipients] })
+    return [{ id: `task-starting:${task.id}:${day}`, due_at: morning.at.toISOString(), body: 'Starts today', conversation_id: null }]
   }
   for (const task of tasks) {
     try {
+      // What the job says later; a task that is not open says nothing more.
+      const plan: PlannedSend[] = []
       const prep = Boolean(task.private_prep)
       const subject: JobSubject | null = isJobTask(task) ? jobSubject(task) : prep && task.job_booking_id ? { id: task.job_booking_id, unit: 'slot' } : null
       const jobPrefix = `job:${task.id}:`
@@ -163,13 +173,13 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
         && [...(postsByThread.get(threadId)?.keys() ?? [])].some(isJobPost))
       const roster = subject ? rosterFor(task, members) : null
       if (!subject && !elsewhere.length) {
-        if (task.status === 'open') await alertOnTheDay(task, members.filter(member => member.id === task.assigned_member_id).map(member => member.userId))
+        await executeBatch(db, plannedSendQueries(task, task.status === 'open' ? startAlert(task) : [], stamp), { operation: 'Store task start alert' })
         continue
       }
       const view = roster || task.status === 'open' ? await taskViewForUser(db, organizationId, task.id, roster?.cleaners[0] ?? hostUsers[0] ?? null, now) : null
       // A booking may have changed while loading the card. Re-read on the
       // next alarm instead of using a new client's card in an old thread.
-      if (prep && view && view.version !== task.version) { pending.push(now); continue }
+      if (prep && view && view.version !== task.version) throw new Error(`Prep task ${task.id} changed while its job was being posted`)
       if (prep && view && view.booking_id !== (subject?.id ?? null)) throw new Error(`Prep task ${task.id} does not match its booking conversation`)
       const about = subject?.unit === 'nights' ? 'at' : 'with'
       const targetKey = roster && subject ? await jobThreadParticipantsKey(subject, roster.seats) : null
@@ -203,9 +213,12 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
         const body = `${label}: ${details}.`
         await post({ id: thread.subject_id, unit: subject?.unit ?? 'slot' }, [], endKey, body, seated.filter(userId => !hostUsers.includes(userId)), threadId)
       }
-      if (task.status !== 'open' || !view || !task.assigned_member_id) continue
+      if (task.status !== 'open' || !view || !task.assigned_member_id) {
+        await executeBatch(db, plannedSendQueries(task, plan, stamp), { operation: 'Cancel job reminders' })
+        continue
+      }
       if (!roster || !subject) {
-        await alertOnTheDay(task, members.filter(member => member.id === task.assigned_member_id).map(member => member.userId))
+        await executeBatch(db, plannedSendQueries(task, startAlert(task), stamp), { operation: 'Store task start alert' })
         continue
       }
       const last = heldIn ? lastPost(heldIn) : undefined
@@ -221,8 +234,6 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
         heldIn = result.threadId
       }
       for (const reminder of reminders(task)) {
-        if (postsByThread.get(heldIn!)?.has(reminder.key)) continue
-        if (reminder.at > now) { pending.push(reminder.at); continue }
         if (now >= reminder.until) continue
         const when = view.when ? `, ${view.when}` : ''
         // A clean is "Today: clean Ocean Avenue Studio after the 11:00 AM checkout."
@@ -232,12 +243,49 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
         const body = reminder.kind === 'evening' ? `Tomorrow: ${job}.`
           : reminder.kind === 'morning' ? `Today: ${job}.`
             : `${view.sheet.title} is not marked done and the next guests arrive at ${formatTimestamp(task.due_at!, 'en', task.timezone, { hour: 'numeric', minute: '2-digit' })}.`
-        await post(subject, roster.seats, reminder.key, body, reminder.kind === 'warning' ? roster.hosts : roster.cleaners, heldIn!)
+        plan.push({ id: reminder.key, due_at: reminder.at.toISOString(), body, conversation_id: heldIn! })
       }
+      await executeBatch(db, plannedSendQueries(task, plan, stamp), { operation: 'Store job reminders' })
     } catch (error) {
       failures.push(error)
     }
   }
-  // The jobs that could not be told about are the caller's to report; the next wake still comes from the ones that could.
-  return { next: pending.length ? new Date(Math.min(...pending.map(date => date.getTime()))) : null, failures }
+  if (failures.length) throw new AggregateError(failures, `${failures.length} jobs of ${organizationId} could not be posted in their conversations: ${failures.map(error => error instanceof Error ? error.message : String(error)).join('; ')}`)
+}
+
+/**
+ * The outbox's sender sends a task's due row: a reminder as KrabiClaw's
+ * message in the job's conversation (the warning alerts the hosts, the rest
+ * the person doing the job), or the start alert of a task that has no
+ * conversation. A task no longer open sends nothing.
+ */
+export async function sendTaskSend(env: CloudflareEnv, db: DbClient, row: { id: string; organization_id: string; task_id: string }, now: string): Promise<'sent' | 'not_due'> {
+  const claim = await execute(db, "UPDATE scheduled_guest_messages SET status = 'sending', started_at = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND due_at <= ?", [now, now, row.id, now])
+  if (claim.meta.changes !== 1) return 'not_due'
+  const send = await queryFirst<{ body: string; conversation_id: string | null; status: string; assigned_member_id: string | null; starts_at: string | null; due_at: string | null; timezone: string }>(db,
+    `SELECT m.body, m.conversation_id, t.status, t.assigned_member_id, t.starts_at, t.due_at, t.timezone
+      FROM scheduled_guest_messages m JOIN tasks t ON t.id = m.task_id WHERE m.id = ?`, [row.id])
+  if (!send) throw new Error(`Scheduled task send ${row.id} has no task`)
+  const finish = (status: 'sent' | 'cancelled', messageId: string | null) => execute(db,
+    "UPDATE scheduled_guest_messages SET status = ?, message_id = ?, sent_at = ?, updated_at = ? WHERE id = ? AND status = 'sending'", [status, messageId, status === 'sent' ? now : null, now, row.id])
+  if (send.status !== 'open') { await finish('cancelled', null); return 'not_due' }
+  const [organization, members] = await Promise.all([
+    queryFirst<{ name: string }>(db, 'SELECT name FROM organization WHERE id = ?', [row.organization_id]),
+    queryAll<Member>(db, 'SELECT id, userId, role FROM member WHERE organizationId = ?', [row.organization_id]),
+  ])
+  if (!organization) throw new Error(`Organization ${row.organization_id} is missing`)
+  const doing = members.filter(member => member.id === send.assigned_member_id).map(member => member.userId)
+  if (send.conversation_id === null) {
+    await notifyTaskStarting(env, db, { organizationId: row.organization_id, taskId: row.task_id, day: localDateAt(new Date(send.starts_at ?? send.due_at!), send.timezone), recipientUserIds: doing })
+    await finish('sent', null)
+    return 'sent'
+  }
+  const hosts = members.filter(member => isOrganizationWideRole(member.role)).map(member => member.userId)
+  const conversation = await queryFirst<{ booking_id: string; unit: 'slot' | 'nights' }>(db,
+    "SELECT c.booking_id, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit FROM conversations c JOIN bookings b ON b.id = c.booking_id WHERE c.organization_id = ? AND c.id = ?", [row.organization_id, send.conversation_id])
+  if (!conversation) throw new Error(`Job conversation ${send.conversation_id} of send ${row.id} is missing`)
+  const posted = await postAutomaticTeamMessage(env, db, { organizationId: row.organization_id, subject: { id: conversation.booking_id, unit: conversation.unit }, seatMemberIds: [], body: send.body,
+    idempotencyKey: row.id, alertUserIds: row.id.startsWith('warning:') ? hosts : doing, senderName: organization.name, threadId: send.conversation_id })
+  await finish('sent', posted.messageId)
+  return 'sent'
 }

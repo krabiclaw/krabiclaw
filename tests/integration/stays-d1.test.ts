@@ -60,6 +60,9 @@ import { updateOrganizationSettingsFields } from '../../server/utils/organizatio
 import editNightsRoute from '../../server/api/dashboard/stay-homes/[product_id]/nights.put.ts'
 import { buyStay } from './support/stay-checkout.ts'
 
+// A stay write posts its cleaning job and alerts the person doing it, so every environment here can send: logged, never delivered.
+const JOB_ALERT_ENV = { MEDIA_BASE_URL: 'https://media.example.test', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
+
 
 
 const ORG = 'org'
@@ -81,7 +84,7 @@ async function boot() {
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'stay-billing-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests' } as CloudflareEnv
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), ...JOB_ALERT_ENV, BETTER_AUTH_SECRET: 'stay-billing-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests' } as CloudflareEnv
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
@@ -141,9 +144,9 @@ test('committed stays report publication failures and idempotent retries publish
     const replay = await createStay(db, env, manager, input)
     assert.deepEqual({ id: replay.id, version: replay.version }, persisted)
     assert.equal(await db.prepare('SELECT count(*) FROM bookings WHERE idempotency_key = ?').bind(input.idempotency_key).first('count(*)'), 1)
-    // Every stay has its conversation, which hears the change after the stay's own screens.
-    assert.deepEqual((await events()).slice(-3).map(event => ({ type: event.type, ...('booking_id' in event ? { booking_id: event.booking_id, product_id: event.product_id } : {}) })), [
-      { type: 'stay.changed', booking_id: replay.id, product_id: cabin.id }, { type: 'nights.changed', booking_id: replay.id, product_id: cabin.id }, { type: 'MESSAGE_UPDATE' },
+    // Every stay has its conversation, which hears the change after the stay's own screens; then its cleaning job is posted in the job's conversation.
+    assert.deepEqual((await events()).slice(-4).map(event => ({ type: event.type, ...('booking_id' in event ? { booking_id: event.booking_id, product_id: event.product_id } : {}) })), [
+      { type: 'stay.changed', booking_id: replay.id, product_id: cabin.id }, { type: 'nights.changed', booking_id: replay.id, product_id: cabin.id }, { type: 'MESSAGE_UPDATE' }, { type: 'MESSAGE_CREATE' },
     ])
 
     await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
@@ -229,6 +232,8 @@ test('a moved channel revision repairs its audited home scopes without rewriting
       { type: 'nights.changed', product_id: lake.id, location_id: 'lake-site', booking_id: first.id },
       // The reservation's conversation, which every channel stay has from its first revision.
       { type: 'MESSAGE_UPDATE' },
+      // The cleaning job at the home the stay moved to, posted in its conversation.
+      { type: 'MESSAGE_CREATE' },
     ])
     assert.deepEqual((await audit()).results, appliedAudits.results)
 
@@ -1497,7 +1502,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
   context.mock.timers.enable({ apis: ['Date'], now: duringStay })
   const { runtime, db, env: bindings } = await boot()
   try {
-    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    const env = { ...bindings, ...JOB_ALERT_ENV, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
     // The guest's notices are written in the business's source language.
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
@@ -1709,7 +1714,7 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
   const { runtime, db, env: bindings } = await boot()
   try {
     // A demo business on the live platform pays in Stripe test mode, which bills no usage.
-    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary', STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary' }
+    const env = { ...bindings, ...JOB_ALERT_ENV, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary', STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary' }
     // The guest's notices are written in the business's source language.
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
@@ -1797,7 +1802,7 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
   const { runtime, db, env: bindings } = await boot()
   try {
     const env = {
-      ...bindings, BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
+      ...bindings, ...JOB_ALERT_ENV, BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
       NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://sites.example', EMAIL_REPLY_SECRET: 'local-stay-reply',
       EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary',
       STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary', STRIPE_TEST_PUBLISHABLE_KEY: 'pk_test_mock',
@@ -2115,7 +2120,7 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
   const { runtime, db, env: bindings } = await boot()
   try {
     const env = {
-      ...bindings, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only',
+      ...bindings, ...JOB_ALERT_ENV, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only',
     }
     await db.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status) VALUES('org-en',?,'en',1,'published')").bind(ORG).run()
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })

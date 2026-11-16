@@ -283,7 +283,7 @@ export async function listScheduledGuestMessages(db: DbClient, principal: Member
   if (conversationId !== null) await assertConversationAccess(db, principal, conversationId, true)
   const visible = visibleScheduledMessagesSql('m', access)
   const rows = await queryAll<ScheduledGuestMessageRow>(db, `${SCHEDULED_MESSAGE_VIEW_SQL}
-    WHERE m.organization_id = ? AND ${visible.query} ${conversationId === null ? '' : `AND ${SCHEDULED_MESSAGE_CONVERSATION_SQL} = ?`}
+    WHERE m.organization_id = ? AND m.task_id IS NULL AND ${visible.query} ${conversationId === null ? '' : `AND ${SCHEDULED_MESSAGE_CONVERSATION_SQL} = ?`}
       ${productId === null ? '' : 'AND m.product_id = ?'}
     ORDER BY m.created_at DESC, m.id DESC LIMIT ? OFFSET ?`,
   [access.organizationId, ...visible.params, ...(conversationId === null ? [] : [conversationId]), ...(productId === null ? [] : [productId]), query.limit + 1, query.offset])

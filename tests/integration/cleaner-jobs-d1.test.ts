@@ -14,7 +14,8 @@ import { createTeamThread } from '../../server/domain/team-messages.ts'
 import { closeTask, jobKey, taskViewForUser, taskViewer, updateTask, type TaskRow } from '../../server/domain/tasks.ts'
 import { listConversations, conversationTaskQueries  } from '../../server/domain/guest-threads/repository.ts'
 import { markConversationRead, resolveConversationAccess } from '../../server/domain/conversations.ts'
-import { runOrganizationJobs } from '../../server/domain/cleaner-jobs.ts'
+import { postJobs } from '../../server/domain/cleaner-jobs.ts'
+import { sendDueScheduledGuestMessages } from '../../server/domain/scheduled-guest-messages.ts'
 import { claimSessionCapacity } from '../../server/utils/availability.ts'
 import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { executeBatch } from '../../server/db/index.ts'
@@ -31,6 +32,13 @@ const ORG = 'org'
 const ZONE = 'America/Denver'
 const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
 const at = (date: string, time: string) => localDateTimeToInstant(date, time, ZONE, 'compatible')
+/** A job write and the outbox's sender at one moment: what the write posts now, and what was stored and has come due. `next` is the earliest send still waiting. */
+const runOrganizationJobs = async (env: CloudflareEnv, db: DbClient, organizationId: string, when = new Date()) => {
+  await postJobs(env, db, organizationId, when)
+  await sendDueScheduledGuestMessages(db, env as never, when.toISOString())
+  const next = await db.prepare("SELECT MIN(due_at) AS next FROM scheduled_guest_messages WHERE organization_id = ? AND task_id IS NOT NULL AND status = 'pending'").bind(organizationId).first<string | null>('next')
+  return { next: next ? new Date(next) : null, failures: [] as unknown[] }
+}
 const readTeamThread = async (db: DbClient, viewer: MemberAccessPrincipal, id: string) => {
   const { conversation } = await conversationPageFor(db, viewer, id)
   assert.equal(conversation.kind, 'team')
@@ -155,10 +163,10 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.equal(await isUnread(db, owner, cookThreads[0]!.id), true)
     assert.equal(await isUnread(db, cook, cookThreads[0]!.id), false)
     await assert.rejects(readTeamThread(db, cleaner, cookThreads[0]!.id), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
-    // The cook, given the job at 13:10, was told today's turnover and the warning then; a closed job is told about no more.
-    assert.deepEqual((await automatic(cookThreads[0]!.id)).map(message => message.key), [jobKey(turnover), `reminder:${turnover.id}:morning:${day(3)}`, `warning:${turnover.id}:${turnover.due_at}`])
+    // A reminder is sent once for a job: the cook, given it at 13:10 after today's reminders went, was told the job itself; a closed job is told about no more.
+    assert.deepEqual((await automatic(cookThreads[0]!.id)).map(message => message.key), [jobKey(turnover)])
     await runOrganizationJobs(env, db, ORG, at(day(3), '14:00'))
-    assert.equal((await automatic(cookThreads[0]!.id)).length, 3, 'a job a person closed is not told about again')
+    assert.equal((await automatic(cookThreads[0]!.id)).length, 1, 'a job a person closed is not told about again')
 
     // A cancelled stay cancels its job in the conversation at once.
     const may = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'may', check_in_date: day(6), check_out_date: day(8), adults: 1, guest_name: 'May', total_minor: 30_000 })
@@ -169,18 +177,16 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     await runOrganizationJobs(env, db, ORG, at(day(3), '14:05'))
     assert.deepEqual((await automatic(mayThread.id)).map(message => message.key), [jobKey({ id: (await taskRow(`turnover:${may.id}`))!.id, product_id: cabin.id }), `cancelled:${(await taskRow(`turnover:${may.id}`))!.id}`])
 
-    // A job the owner takes for themselves has no conversation: the task alert goes out on the morning of, once.
+    // A job the owner takes for themselves has its conversation too, with the hosts alone: the job is posted there and its morning reminder follows, once.
     const leeTurnover = (await taskRow(`turnover:${lee.id}`))!
     const ownerViewer = await taskViewer(principal('owner', 'owner'))
     await updateTask(db, ownerViewer, leeTurnover.id, { version: leeTurnover.version, assigned_member_id: 'm-owner' })
     await runOrganizationJobs(env, db, ORG, at(day(5), '08:05'))
     await runOrganizationJobs(env, db, ORG, at(day(5), '08:06'))
-    // Its sends are the task's, keyed by the day: the owner's email, once.
-    const alerts = await db.prepare('SELECT channel FROM guest_thread_deliveries WHERE task_id = ? AND substr(id, 1, length(?)) = ? AND instr(id, ?) > 0').bind(leeTurnover.id, `${leeTurnover.id}:owner_alert:`, `${leeTurnover.id}:owner_alert:`, `:task_starting:${day(5)}:`).all<{ channel: string }>()
-    assert.deepEqual(alerts.results.map(row => row.channel), ['email'])
-    // The cook, who had it, is told; no conversation of hosts alone is opened.
     const leeThreads = (await teamThreads(owner)).filter(item => item.booking_id === lee.id)
-    assert.ok(leeThreads.every(item => item.participants.some(person => person.id === 'cook' || person.id === 'cleaner')))
+    const ownThread = leeThreads.find(item => item.participants.every(person => person.id === 'owner' || person.id === 'admin'))!
+    assert.deepEqual((await automatic(ownThread.id)).map(message => message.key).filter(key => !key.startsWith('reminder:') || key.includes(':morning:')), [jobKey(leeTurnover), `reminder:${leeTurnover.id}:morning:${day(5)}`])
+    // The cook, who had it, is told.
     assert.ok((await automatic(leeThreads.find(item => item.participants.some(person => person.id === 'cook'))!.id)).some(message => message.key === `released:${leeTurnover.id}`))
 
     // A person's own message in a job conversation counts as unread for the others, from where they read.

@@ -7,12 +7,10 @@ import { assertConversationAccess, guestVisibleSql } from '~/server/domain/conve
 import { loadConversationPage } from '~/server/domain/conversation-history'
 import type { ConversationEntriesPage } from '~/shared/messages-contract'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
-import { runOrganizationJobs } from '~/server/domain/cleaner-jobs'
 import { guestInboxTarget, SCHEDULED_AUTHOR_HEADER } from '~/server/cloudflare/guest-inbox-events'
 
 type GuestInboxHubEnv = CloudflareEnv
 
-const JOBS_ORGANIZATION = 'jobs:organization'
 
 interface InboxSocketAttachment {
   organizationId: string | null
@@ -161,30 +159,6 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     return new Response(null, { status: 101, webSocket: client })
   }
 
-  /**
-   * The organization's cleaning jobs. Every stay or business change wakes them
-   * at once (a job given, moved or cancelled is told in its conversation right
-   * away); each wake reads D1, posts what is due and re-arms to the next
-   * reminder. A wake that throws is retried by the alarm itself.
-   */
-  private async wakeJobs(organizationId: string): Promise<void> {
-    await this.ctx.storage.put(JOBS_ORGANIZATION, organizationId)
-    await this.ctx.storage.setAlarm(Date.now())
-  }
-
-  override async alarm(): Promise<void> {
-    const organizationId = await this.ctx.storage.get<string>(JOBS_ORGANIZATION)
-    if (!organizationId) throw new Error('The jobs alarm fired for a hub that holds no organization')
-    const { next, failures } = await runOrganizationJobs(this.env, this.env.DB, organizationId)
-    if (next) {
-      // A change that arrived while this ran has already set an earlier wake.
-      const scheduled = await this.ctx.storage.getAlarm()
-      if (scheduled === null || next.getTime() < scheduled) await this.ctx.storage.setAlarm(next.getTime())
-    }
-    // The other jobs' reminders are armed before a failing one is reported.
-    if (failures.length) throw new AggregateError(failures, `${failures.length} cleaning jobs of ${organizationId} could not be told about: ${failures.map(error => error instanceof Error ? error.message : String(error)).join('; ')}`)
-  }
-
   override webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {
     if (message === 'ping' || (typeof message === 'string' && message === 'ping')) {
       socket.send('pong')
@@ -223,9 +197,6 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     if (scheduleOnly ? scheduledAuthor === null : scheduledAuthor !== null && !scheduledSend) {
       return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid scheduled message audience', SCHEDULED_AUTHOR_HEADER)
     }
-    // A stay, booking or task write is announced this way (a booking's in its guest conversation); the organization's jobs follow it.
-    if (event.type === 'stay.changed' || event.type === 'business.changed' || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.team)) await this.wakeJobs(organizationId)
-
     const accounts = !scheduleOnly && !('team' in event && event.team) ? await guestAudience(this.env, event) : []
     const namespace = this.env.GUEST_INBOX_HUBS
     if (accounts.length && !namespace) return failure(503, 'REALTIME_CONFIGURATION_REQUIRED', 'Guest inbox binding is not configured', 'realtime')

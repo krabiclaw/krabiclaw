@@ -220,7 +220,9 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
       when: at ? visitWhen(at, work.timezone) : range === 'today' ? 'Today' : formatTimestamp(`${day}T12:00:00.000Z`, 'en', 'UTC', { weekday: 'short', month: 'short', day: 'numeric' }),
       image_url: picture('product', work.product_id), icon: iconOf(work.product_kind), headline: headline.charAt(0).toUpperCase() + headline.slice(1),
       line: work.booking_unit === 'nights' ? work.product_name : work.location_id === null ? 'Online' : work.location_title,
-      action: { title: 'Message the host', detail: range === 'today' ? 'Send photos when you’re done' : 'Ask anything before the day' },
+      // The host's own job has nobody to message: it opens the job, where its Done is.
+      action: manage ? { title: 'Open the job', detail: 'Tap Done when it’s finished' }
+        : { title: 'Message the host', detail: range === 'today' ? 'Send photos when you’re done' : 'Ask anything before the day' },
       // The job's conversation is written with the job; a job read before it exists is not linked anywhere else.
       to: team ? guestConversationPath(viewer.slug, team) : null, draft: null,
     })

@@ -2675,8 +2675,6 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
 }
 
 async function publishStayChange(env: GuestInboxPublicationEnv, db: DbClient, organizationId: string, stay: Stay, nightsChanged: boolean): Promise<void> {
-  // The stay's clean is in its conversation before the write answers.
-  await (await import('~/server/domain/cleaner-jobs')).postJobs(env as CloudflareEnv, db, organizationId)
   const input = { organization_id: organizationId, location_id: stay.location_id, product_id: stay.product_id, booking_id: stay.id }
   await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { version: stay.version })
   if (nightsChanged) await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { version: stay.version })
@@ -2686,6 +2684,8 @@ async function publishStayChange(env: GuestInboxPublicationEnv, db: DbClient, or
     throw new HTTPError({ statusCode: 503, message: 'The stay was saved, but its conversation update could not be published. Reload before retrying.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, booking_id: stay.id, product_id: stay.product_id, version: stay.version, conversation_id: stay.conversation_id }, cause })
   }
+  // The stay's clean is in its conversation, and its reminders are stored, before the write answers.
+  await (await import('~/server/domain/cleaner-jobs')).postJobs(env as CloudflareEnv, db, organizationId)
 }
 
 async function storedStay(db: DbClient, organizationId: string, stayId: string): Promise<Stay> {

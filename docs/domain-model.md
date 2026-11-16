@@ -37,7 +37,7 @@ extend that model. Never add a second one beside it.
 | Audit log (who changed what in an organization) | `activity_entries` | server/utils/organization-events.ts | KrabiClaw |
 | Delivery of a message, an audited event or a task to a person (email, WhatsApp, Airbnb, push) | `guest_thread_deliveries` | server/domain/guest-threads/deliveries.ts | KrabiClaw |
 | Guest message template | `message_templates` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
-| Future guest message, one outbox (a booking's automatic messages and a member's own send-later replies, one status machine) | `scheduled_guest_messages` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
+| Future message, one outbox (a booking's automatic messages, a member's own send-later replies, and a job's reminders or a task's start alert by `task_id`; one status machine, one sender) | `scheduled_guest_messages` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
 | Reported content | `content_reports` | server/domain/content-reports.ts | KrabiClaw |
 | Work (one prep per assigned slot session, one follow-up per booking) | `tasks` | server/domain/tasks.ts | KrabiClaw |
 | Provider working hours | `member_scheduling` | server/domain/member-scheduling.ts | KrabiClaw |
