@@ -2,7 +2,7 @@
   <UModal :open="open" :title="title" @update:open="value => { if (!value && !saving) emit('close') }">
     <template #body>
       <form class="space-y-4" @submit.prevent="submit">
-        <p class="text-sm text-muted">{{ description }} KrabiClaw reviews every report within 24 hours.</p>
+        <p class="text-sm text-muted">{{ description }} Blawby reviews every report within 24 hours.</p>
         <UFormField label="What is wrong?" name="report-reason" :error="error ?? undefined">
           <UTextarea v-model="reason" :rows="3" :maxlength="1000" :disabled="saving" class="w-full" />
         </UFormField>

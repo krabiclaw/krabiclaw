@@ -77,7 +77,7 @@ test('resolveRuntimeSeoConfig produces non-indexable configuration for demo host
     hostname: 'krabiclaw.com',
   })
   assert.equal(platformResult.indexable, true)
-  assert.equal(platformResult.name, 'KrabiClaw')
+  assert.equal(platformResult.name, 'Blawby')
 })
 
 test('isTenantOnlySeoPath correctly isolates tenant-specific paths from platform', () => {

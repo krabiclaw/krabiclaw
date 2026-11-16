@@ -1,4 +1,6 @@
 
+export const LODGING_PAGE_SUMMARY = "Manage furnished rentals, direct bookings and turnovers. Eligible Airbnb homes connect through Channex, and linked Vrbo calendars exchange occupied dates."
+
 export type PlatformKnowledgeResultType =
   | 'doc'
   | 'blog'
@@ -59,8 +61,8 @@ export interface PlatformKnowledgePageEntry {
 export const PLATFORM_KNOWLEDGE_FAQ_ENTRIES: PlatformKnowledgeFaqEntry[] = [
   {
     id: 'getting-started-no-tech-skills',
-    title: 'Do I need technical skills to use KrabiClaw?',
-    answer: 'No. KrabiClaw is designed for business owners, not developers. You can launch and update your site through guided flows and conversation.',
+    title: 'Do I need technical skills to use Blawby?',
+    answer: 'No. Blawby is designed for business owners, not developers. You can launch and update your site through guided flows and conversation.',
     keywords: ['technical skills', 'developer', 'beginner', 'easy', 'setup'],
   },
   {
@@ -71,7 +73,7 @@ export const PLATFORM_KNOWLEDGE_FAQ_ENTRIES: PlatformKnowledgeFaqEntry[] = [
   },
   {
     id: 'google-places-optional',
-    title: 'Can I use KrabiClaw without Google Places?',
+    title: 'Can I use Blawby without Google Places?',
     answer: 'Yes. Google Places is optional. You can add your hours, offerings, photos, and content manually, then import public location details from Google Maps later.',
     keywords: ['google places', 'google maps', 'optional', 'manual setup', 'without google'],
   },
@@ -90,13 +92,13 @@ export const PLATFORM_KNOWLEDGE_FAQ_ENTRIES: PlatformKnowledgeFaqEntry[] = [
   {
     id: 'custom-domain',
     title: 'How do I connect my own domain?',
-    answer: 'Upgrade to a plan that includes custom domains, open the site Domains page, and then add the DNS records KrabiClaw provides.',
+    answer: 'Upgrade to a plan that includes custom domains, open the site Domains page, and then add the DNS records Blawby provides.',
     keywords: ['custom domain', 'dns', 'domain setup', 'connect domain'],
   },
   {
     id: 'ssl',
     title: 'Is SSL included?',
-    answer: 'Yes. KrabiClaw sites are served over HTTPS with managed SSL.',
+    answer: 'Yes. Blawby sites are served over HTTPS with managed SSL.',
     keywords: ['ssl', 'https', 'security certificate'],
   },
   {
@@ -179,10 +181,10 @@ export const PLATFORM_KNOWLEDGE_ROUTE_ENTRIES: PlatformKnowledgeRouteEntry[] = [
 export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
   {
     id: 'home',
-    title: 'KrabiClaw Home',
+    title: 'Blawby Home',
     path: '/',
     snippet: 'Overview of the AI website platform for restaurants, experiences, lodging, and law firms.',
-    body: 'KrabiClaw helps restaurants, experience operators, lodging businesses and law firms launch websites, manage content through ChatGPT and the dashboard, and take inquiries and bookings directly on their own site.',
+    body: 'Blawby helps restaurants, experience operators, lodging businesses and law firms launch websites, manage content through ChatGPT and the dashboard, and take inquiries and bookings directly on their own site.',
     icon: 'sparkles',
     section: 'Platform',
     keywords: ['home', 'overview', 'krabiclaw', 'platform', 'what is krabiclaw'],
@@ -203,7 +205,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     id: 'features-page',
     title: 'Products',
     path: '/products',
-    snippet: 'Learn how KrabiClaw handles content, analytics, SEO, speed, and AI-assisted workflows.',
+    snippet: 'Learn how Blawby handles content, analytics, SEO, speed, and AI-assisted workflows.',
     body: 'Products cover website building, ChatGPT and Claude management through MCP, inbox and messaging, experience bookings, direct stays, content, reviews, local presence and analytics.',
     icon: 'star',
     section: 'Platform',
@@ -214,8 +216,8 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     id: 'lodging-page',
     title: 'Mid-Term Rental & Host PMS Software',
     path: '/lodging',
-    snippet: 'Mobile PMS for mid-term and furnished rentals (21+ day stays), two-way Airbnb and Vrbo calendar sync, and zero-commission direct bookings.',
-    body: 'Present furnished homes, photos, amenities, and extended stay rate plans on your own website. Manage 21+ day stays, two-way Airbnb and Vrbo calendar sync, zero OTA fee direct bookings with Stripe, turnovers, and guest conversations through KrabiClaw.',
+    snippet: LODGING_PAGE_SUMMARY,
+    body: `Present furnished homes, photos, amenities, and extended stay rate plans on your own website. ${LODGING_PAGE_SUMMARY} Manage guest conversations in Blawby.`,
     icon: 'calendar',
     section: 'Solutions',
     keywords: ['lodging', 'mid term rental', 'furnished rental', 'mtr', 'pms', 'extended stay', 'airbnb host', 'vrbo', 'direct booking', 'turnover', 'calendar sync'],
@@ -226,7 +228,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     title: 'Templates',
     path: '/templates',
     snippet: 'Explore available presentation styles and platform templates for new sites.',
-    body: 'Templates show the design system options and layout directions available when launching a KrabiClaw site.',
+    body: 'Templates show the design system options and layout directions available when launching a Blawby site.',
     icon: 'layout-template',
     section: 'Platform',
     keywords: ['templates', 'themes', 'design', 'saya', 'blawby', 'layouts'],

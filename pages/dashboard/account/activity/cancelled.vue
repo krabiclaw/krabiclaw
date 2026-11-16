@@ -12,7 +12,7 @@
 <script setup lang="ts">
 import AccountActivityCard from '~/components/dashboard/AccountActivityCard.vue'
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Cancelled | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Cancelled | Blawby', robots: 'noindex, nofollow' })
 const { data, error } = await useAccountActivity()
 const cancelled = computed(() => (data.value?.activities ?? []).filter(item => (item.kind === 'booking' || item.kind === 'stay') && item.status === 'cancelled'))
 </script>

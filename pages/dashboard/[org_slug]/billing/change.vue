@@ -29,7 +29,7 @@ import { BUSINESS_ADDITIONS, BUSINESS_PLAN_ID, GROWTH_PLAN_ID, PAID_PLAN_PRICES 
 import { useOrganizationBilling } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Change plan | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Change plan | Blawby', robots: 'noindex, nofollow' })
 
 const dashboard = useDashboardOrganization()
 const { startOrganizationCheckout } = useOrganizationSubscription()

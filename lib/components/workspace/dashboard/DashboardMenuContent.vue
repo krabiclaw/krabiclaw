@@ -45,7 +45,7 @@
           <UIcon name="i-lucide-smartphone" class="size-6 text-highlighted" />
         </span>
         <div class="min-w-0">
-          <p class="text-base font-semibold text-highlighted">Install KrabiClaw app</p>
+          <p class="text-base font-semibold text-highlighted">Install Blawby app</p>
           <p class="mt-0.5 text-sm text-muted">Add to home screen for full-screen access</p>
         </div>
       </div>

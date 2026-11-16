@@ -26,7 +26,7 @@ import { getErrorMessage } from '~/utils/errors'
 definePageMeta({ layout: 'access', auth: false })
 useResponseHeader('cache-control').value = 'private, no-store'
 useResponseHeader('referrer-policy').value = 'no-referrer'
-useSeoMeta({ title: 'Join a conversation | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Join a conversation | Blawby', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const session = authClient.useSession()

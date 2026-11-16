@@ -292,9 +292,9 @@ export default defineNuxtConfig({
   },
 
   site: {
-    url: 'https://krabiclaw.com',
-    name: 'KrabiClaw | Open-Source Websites, Bookings & Payments',
-    description: 'Beautiful websites powered by AI. Build your business website in minutes with our SaaS platform.',
+    url: process.env.NUXT_PUBLIC_SITE_URL,
+    name: process.env.NUXT_PUBLIC_APP_NAME,
+    description: 'Manage your website, bookings, and customer conversations from one workspace or through ChatGPT and Claude.',
     defaultLocale: 'en',
   },
 

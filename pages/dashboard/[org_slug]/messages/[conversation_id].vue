@@ -70,5 +70,5 @@ async function moved(transition: string) {
   else await refresh()
 }
 
-useSeoMeta({ title: 'Conversation | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Conversation | Blawby', robots: 'noindex, nofollow' })
 </script>
