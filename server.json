@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.krabiclaw/krabiclaw",
+  "description": "Manage and publish restaurant and local business websites through MCP.",
+  "title": "Blawby",
+  "repository": {
+    "url": "https://github.com/krabiclaw/krabiclaw",
+    "source": "github"
+  },
+  "version": "1.0.1",
+  "websiteUrl": "https://blawby.com",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://blawby.com/api/mcp"
+    }
+  ]
+}

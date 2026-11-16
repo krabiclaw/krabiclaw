@@ -17,7 +17,7 @@
       </UFormField>
       <p v-if="draft.filename" class="text-sm text-muted">{{ draft.filename }} · {{ preview?.rows.length ?? 0 }} reservation rows</p>
       <UCheckbox v-model="draft.paused" label="I've paused the affected Airbnb listings for this handover." />
-      <p class="text-sm text-muted">KrabiClaw does not pause or reopen your listings. Manual blocks are reviewed in a separate step because a reservation export may not include them.</p>
+      <p class="text-sm text-muted">Blawby does not pause or reopen your listings. Manual blocks are reviewed in a separate step because a reservation export may not include them.</p>
       <UAlert v-if="context && !context.homes.length" color="warning" variant="soft" title="Add your Airbnb homes first" description="Keep the listings paused, sync the homes you are moving, then return here with your export." />
       <UButton v-if="context && !context.homes.length" :to="airbnbPath" label="Open Airbnb sync" color="neutral" variant="outline" />
     </div>
@@ -53,7 +53,7 @@
       <UAlert v-else-if="preview && !preview.source_listings.length" color="neutral" variant="soft" description="No properties have current or future reservation rows. Select any homes with manual closures below." />
       <div v-for="source in preview?.source_listings ?? []" :key="source" class="space-y-3 border-b border-default pb-6">
         <UFormField :label="source" required>
-          <USelect :model-value="ownHome(source)" :items="homeItems" placeholder="Choose the matching KrabiClaw home" :aria-label="`KrabiClaw home for ${source}`" class="w-full" @update:model-value="setHome(source, String($event))" />
+          <USelect :model-value="ownHome(source)" :items="homeItems" placeholder="Choose the matching Blawby home" :aria-label="`Blawby home for ${source}`" class="w-full" @update:model-value="setHome(source, String($event))" />
         </UFormField>
         <p v-if="mappedHome(source)" class="text-sm text-muted">{{ mappedHome(source)!.timezone }} · {{ mappedHome(source)!.currency }}</p>
       </div>
@@ -130,7 +130,7 @@
         <p class="text-base text-highlighted">{{ receipt.imported }} stays imported · {{ receipt.existing }} already here · {{ receipt.remaining }} remaining · {{ receipt.failed }} failed</p>
         <UAlert v-if="!verification" color="neutral" variant="soft" title="Calendar checks are still required" description="Saved stays and closures must be checked against connected calendars before you reopen." />
         <template v-else>
-          <UAlert :color="verification.state === 'verified' ? 'success' : 'warning'" variant="soft" :title="verification.state === 'verified' ? 'Occupied dates are protected' : 'The handover needs attention'" :description="verification.state === 'verified' ? 'KrabiClaw read the imported stays and checked the covered dates on connected Airbnb calendars.' : 'Keep affected listings paused while you resolve the items below.'" />
+          <UAlert :color="verification.state === 'verified' ? 'success' : 'warning'" variant="soft" :title="verification.state === 'verified' ? 'Occupied dates are protected' : 'The handover needs attention'" :description="verification.state === 'verified' ? 'Blawby read the imported stays and checked the covered dates on connected Airbnb calendars.' : 'Keep affected listings paused while you resolve the items below.'" />
           <ul v-if="verification.issues.length" class="list-disc space-y-2 ps-5 text-sm text-error"><li v-for="issue in verification.issues" :key="issue">{{ issue }}</li></ul>
           <div v-for="home in verification.homes" :key="home.product_id" class="space-y-2 rounded-xl border border-default p-4">
             <p class="font-medium text-highlighted">{{ home.name }}</p>
@@ -143,7 +143,7 @@
             <p class="text-sm text-muted">Review your arrival instructions and any overlapping reservations. When you are ready, reopen the listings in Airbnb and confirm the handover below.</p>
             <UButton to="https://www.airbnb.com/hosting/listings" target="_blank" external label="Open Airbnb listings" color="neutral" variant="outline" icon="i-lucide-external-link" />
             <UCheckbox v-model="unpaused" label="I've reviewed the handover and reopened the listings I want to accept bookings." />
-            <UAlert v-if="unpaused" color="success" variant="soft" title="Checks complete for these homes and records" description="KrabiClaw now holds these stays and blocked dates. Keep the source export with your records." />
+            <UAlert v-if="unpaused" color="success" variant="soft" title="Checks complete for these homes and records" description="Blawby now holds these stays and blocked dates. Keep the source export with your records." />
           </template>
         </template>
       </template>
@@ -211,7 +211,7 @@ function setColumn(field: MigrationField, value: string) {
 function addBlock(productId: string) { draft.value.blocks.push({ product_id: productId, from: '', to: '', note: '' }); draft.value.blocks_reviewed = draft.value.blocks_reviewed.filter(id => id !== productId); invalidate() }
 function removeBlock(index: number) { const productId = draft.value.blocks[index]!.product_id; draft.value.blocks.splice(index, 1); draft.value.blocks_reviewed = draft.value.blocks_reviewed.filter(id => id !== productId); invalidate() }
 function reviewBlocks(productId: string, checked: boolean) { draft.value.blocks_reviewed = draft.value.blocks_reviewed.filter(id => id !== productId); if (checked) draft.value.blocks_reviewed.push(productId); invalidate() }
-const counts = computed(() => [{ label: 'Ready to import', count: preview.value?.counts.ready ?? 0 }, { label: 'Already in KrabiClaw', count: preview.value?.counts.existing ?? 0 }, { label: 'Need attention', count: preview.value?.counts.needs_attention ?? 0 }, { label: 'Skipped with a reason', count: preview.value?.counts.skipped ?? 0 }])
+const counts = computed(() => [{ label: 'Ready to import', count: preview.value?.counts.ready ?? 0 }, { label: 'Already in Blawby', count: preview.value?.counts.existing ?? 0 }, { label: 'Need attention', count: preview.value?.counts.needs_attention ?? 0 }, { label: 'Skipped with a reason', count: preview.value?.counts.skipped ?? 0 }])
 const rowLabel = (state: MigrationRow['state']) => ({ ready: 'Ready', existing: 'Already here', skipped: 'Skipped', needs_attention: 'Needs attention' })[state]
 const outcomeLabels = { imported: 'Imported', existing: 'Already here', skipped: 'Skipped', failed: 'Not saved', pending: 'Waiting to import' }
 const amount = (minor: number, currency: string) => formatMinorAmount(minor, currency)

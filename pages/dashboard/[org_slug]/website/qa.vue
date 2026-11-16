@@ -15,5 +15,5 @@ if (route.query.tab === 'reviews') {
   await navigateTo(`/dashboard/${encodeURIComponent(String(route.params.org_slug))}/website/reviews${locationQuery}`, { replace: true })
 }
 
-useSeoMeta({ title: 'Q&A | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Q&A | Blawby', robots: 'noindex, nofollow' })
 </script>

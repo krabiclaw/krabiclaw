@@ -37,7 +37,7 @@
           Connect your Airbnb host account to sync listings, availability, rates, and guest messages directly to your dashboard.
         </p>
         <UButton icon="i-simple-icons-airbnb" size="xl" block :loading="starting" @click="startConnection">Connect Airbnb</UButton>
-        <p class="text-center text-xs text-dimmed">You can also connect and sync directly within the KrabiClaw app on iOS.</p>
+        <p class="text-center text-xs text-dimmed">You can also connect and sync directly within the Blawby app on iOS.</p>
       </div>
     </IntegrationLeaf>
   </DashboardLeafPanel>
@@ -60,7 +60,7 @@ definePageMeta({ layout: 'dashboard' })
   connected account, checked when it syncs with KrabiClaw. Checking one brings
   it over and turns its sync on; unchecking stops the sync and keeps the home
   as a free draft. The changes apply together from one button, after the plan
-  check, and KrabiClaw runs them in the background (sync.post, then sync.get
+  check, and Blawby runs them in the background (sync.post, then sync.get
   until nothing is waiting). A listing Airbnb left details out of gets them in
   its own dialog first.
 */
@@ -273,7 +273,7 @@ async function addDetails(id: string): Promise<boolean> {
   }
 }
 
-/** Hands the change to KrabiClaw, then follows its progress until nothing is waiting. */
+/** Hands the change to Blawby, then follows its progress until nothing is waiting. */
 async function apply() {
   if (!applyLabel.value) return
   applying.value = true

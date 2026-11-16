@@ -14,7 +14,7 @@
       aria-hidden="true"
     >
       <UIcon v-if="channel === 'airbnb'" name="i-simple-icons-airbnb" class="size-3" />
-      <img v-else src="/platform/krabiclaw-symbol.svg" alt="" class="size-3 brightness-0 invert">
+      <img v-else src="/platform/blawby.svg" alt="" class="size-3 brightness-0 invert">
     </span>
   </span>
 </template>

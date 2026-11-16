@@ -2,7 +2,8 @@ import { execute, queryAll, type BatchQuery, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { purgeOrganizationKvCache } from '~/server/utils/edge-cache'
 import { syncOrganizationSearchIndex } from '~/server/utils/public-search'
-import { isNonProductionHost, normalizeHost } from '~/server/utils/tenant-hosts'
+import { isNonProductionHost, normalizeHost, type TenantHostEnv } from '~/server/utils/tenant-hosts'
+import { PLATFORM_THEME_ID } from '~/utils/site-routing'
 import { publishBusinessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 
 // KV read-through cache for public shell and page resource queries.
@@ -98,7 +99,7 @@ export async function drainPublicResourceCacheInvalidations(
     }
     try {
       const firstForOrganization = !drainedOrganizations.has(row.organization_id)
-      if (firstForOrganization) await purgeOrganizationCaches(db, kv, row.organization_id, freeOrganizationDomain)
+      if (firstForOrganization) await purgeOrganizationCaches(db, kv, row.organization_id, env)
       if (productionSearch && firstForOrganization) {
         const synced = await syncOrganizationSearchIndex(env as CloudflareEnv, db, row.organization_id)
         // A bounded run that left uploads behind is more of the same change, so it goes back on the queue as a new row.
@@ -181,15 +182,22 @@ export async function putPublicResourceCache(
  * the drainer wraps it in claiming and retries, and a write path calls it
  * directly so what it just wrote cannot be read back stale.
  */
-export async function purgeOrganizationCaches(db: DbClient, kv: KVNamespace, organizationId: string, freeOrganizationDomainInput?: string | null): Promise<void> {
-  const freeOrganizationDomain = normalizeHost(freeOrganizationDomainInput)
+export async function purgeOrganizationCaches(db: DbClient, kv: KVNamespace, organizationId: string, env: TenantHostEnv): Promise<void> {
+  const freeOrganizationDomain = normalizeHost(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
   const [domains, organizations] = await Promise.all([
     queryAll<{ domain: string }>(db, "SELECT domain FROM organization_domains WHERE organization_id = ? AND status = 'active'", [organizationId]),
-    queryAll<{ subdomain: string | null }>(db, 'SELECT subdomain FROM organization WHERE id = ? LIMIT 1', [organizationId]),
+    queryAll<{ subdomain: string | null; theme_id: string }>(db, 'SELECT subdomain, theme_id FROM organization WHERE id = ? LIMIT 1', [organizationId]),
   ])
   const hostnames = new Set<string>(domains.map(domain => domain.domain))
-  const subdomain = organizations[0]?.subdomain
-  if (subdomain && freeOrganizationDomain) hostnames.add(`${subdomain}.${freeOrganizationDomain}`)
+  const organization = organizations[0]
+  if (organization?.subdomain && freeOrganizationDomain) hostnames.add(`${organization.subdomain}.${freeOrganizationDomain}`)
+  if (organization?.theme_id === PLATFORM_THEME_ID) {
+    // The platform's configured apex can move without changing the hosted
+    // domain rows that keep the original address and native APIs routable.
+    const platformHost = normalizeHost(env.NUXT_PUBLIC_PLATFORM_DOMAIN)
+    if (!platformHost) throw new Error('NUXT_PUBLIC_PLATFORM_DOMAIN is required to purge platform HTML')
+    hostnames.add(platformHost)
+  }
   await Promise.all([purgePublicResourceCache(kv, organizationId), purgeOrganizationKvCache(kv, [...hostnames])])
 }
 
@@ -216,10 +224,9 @@ export async function purgePublicResourceCacheNow(
   env: unknown,
   organizationId: string,
 ): Promise<void> {
-  const maybeEnv = env as GuestInboxPublicationEnv & {
+  const maybeEnv = env as GuestInboxPublicationEnv & TenantHostEnv & {
     DB?: DbClient
     ORGANIZATION_CACHE?: KVNamespace
-    NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN?: string
   } | null | undefined
   // ORGANIZATION_CACHE is bound in every environment in wrangler.toml. Returning quietly
   // when it is missing meant a deployment that had lost the binding purged
@@ -237,7 +244,7 @@ export async function purgePublicResourceCacheNow(
   const invalidation = publicResourceCacheInvalidationQuery(organizationId, 'write-through-purge')
   await Promise.all([
     execute(db, invalidation.query, invalidation.params),
-    purgeOrganizationCaches(db, kv, organizationId, maybeEnv.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN),
+    purgeOrganizationCaches(db, kv, organizationId, maybeEnv),
   ])
   await publishBusinessInvalidation(maybeEnv, organizationId)
 }

@@ -1,9 +1,12 @@
 import { execute, queryAll, queryFirst } from '~/server/db'
+import { PLATFORM_THEME_ID } from '~/utils/site-routing'
 import type { DomainEnv } from '~/server/utils/domains'
-import { NATIVE_PAGEVIEW_ZARAZ_EVENT, ZARAZ_ANALYTICS_PURPOSE, ZARAZ_ANALYTICS_PURPOSE_ID, ZARAZ_CONSENT_COOKIE_NAME, ZARAZ_CONSENT_MODAL_INTRO_HTML } from '~/utils/zaraz-consent'
+import { NATIVE_PAGEVIEW_ZARAZ_EVENT, ZARAZ_ANALYTICS_PURPOSE, ZARAZ_ANALYTICS_PURPOSE_ID, ZARAZ_CONSENT_COOKIE_NAME, zarazConsentModalIntroHtml } from '~/utils/zaraz-consent'
 
 export interface ZarazEnv extends DomainEnv {
   CLOUDFLARE_API_TOKEN?: string
+  CF_PLATFORM_ZARAZ_ZONE_ID?: string
+  NUXT_PUBLIC_PLATFORM_DOMAIN?: string
   /**
    * `absent` declares that this environment has no Zaraz zone of its own.
    * Staging, preview, local development and E2E run on copies of production's
@@ -76,9 +79,8 @@ type CloudflareEnvelope<T> = {
 const CF_API_BASE = 'https://api.cloudflare.com/client/v4'
 const LOCK_STALE_MS = 60_000
 const LOCK_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000]
-const ANALYTICS_KEY_PREFIX = 'ga-'
 const TENANT_KEY_PREFIX = 'ga-tenant-'
-// Not under ANALYTICS_KEY_PREFIX: it is shared by every GA4 tool and outlives any one tenant's.
+// Not under TENANT_KEY_PREFIX: it is shared by every GA4 tool and outlives any one tenant's.
 const NATIVE_PAGEVIEW_TRIGGER_KEY = 'krabiclaw-native-pageview'
 const GOOGLE_VENDOR_NAME = 'Google Analytics'
 const GOOGLE_VENDOR_POLICY_URL = 'https://policies.google.com/privacy'
@@ -90,8 +92,8 @@ function requireZarazEnv(env: ZarazEnv): ZarazPresence {
     if (env.ZARAZ_ANALYTICS !== 'absent') {
       throw new Error(`ZARAZ_ANALYTICS must be 'absent' or unset, not '${env.ZARAZ_ANALYTICS}'`)
     }
-    if (env.CF_ZONE_ID) {
-      throw new Error('ZARAZ_ANALYTICS=absent declares no Zaraz zone, but CF_ZONE_ID is set')
+    if (env.CF_ZONE_ID || env.CF_PLATFORM_ZARAZ_ZONE_ID) {
+      throw new Error('ZARAZ_ANALYTICS=absent cannot be used with a Zaraz zone binding')
     }
     return 'absent'
   }
@@ -100,12 +102,11 @@ function requireZarazEnv(env: ZarazEnv): ZarazPresence {
   return 'present'
 }
 
-async function zarazRequest<T>(env: ZarazEnv, init: RequestInit = {}): Promise<T> {
-  if (requireZarazEnv(env) === 'absent') throw new Error('Zaraz is declared absent in this environment')
-  const response = await fetch(`${CF_API_BASE}/zones/${env.CF_ZONE_ID}/settings/zaraz/config`, {
+async function zarazRequest<T>(zoneId: string, token: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${CF_API_BASE}/zones/${zoneId}/settings/zaraz/config`, {
     ...init,
     headers: {
-      Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
       ...init.headers,
     },
@@ -116,14 +117,6 @@ async function zarazRequest<T>(env: ZarazEnv, init: RequestInit = {}): Promise<T
     throw new Error(message || `Cloudflare Zaraz API request failed (${response.status})`)
   }
   return payload.result
-}
-
-export async function getZarazConfig(env: ZarazEnv): Promise<ZarazConfig> {
-  return await zarazRequest<ZarazConfig>(env)
-}
-
-export async function putZarazConfig(env: ZarazEnv, config: ZarazConfig): Promise<ZarazConfig> {
-  return await zarazRequest<ZarazConfig>(env, { method: 'PUT', body: JSON.stringify(config) })
 }
 
 async function acquireLock(db: D1Database, zoneId: string): Promise<number> {
@@ -160,7 +153,7 @@ export function tenantPageLocationRegex(hostnames: string[]): string {
   return `^(${hostnames.map(escapeRegex).join('|')})$`
 }
 
-function configureZarazConsentManagement(config: ZarazConfig) {
+function configureZarazConsentManagement(config: ZarazConfig, platformOrigin: string) {
   config.consent ||= {}
   config.consent.enabled = true
   // The site notice asks for a choice on first visit. Cookie preferences opens
@@ -169,8 +162,9 @@ function configureZarazConsentManagement(config: ZarazConfig) {
   config.consent.cookieName = ZARAZ_CONSENT_COOKIE_NAME
   config.consent.defaultLanguage = 'en'
   config.consent.tcfCompliant = false
-  config.consent.consentModalIntroHTML = ZARAZ_CONSENT_MODAL_INTRO_HTML
-  config.consent.consentModalIntroHTMLWithTranslations = { en: ZARAZ_CONSENT_MODAL_INTRO_HTML }
+  const intro = zarazConsentModalIntroHtml(platformOrigin)
+  config.consent.consentModalIntroHTML = intro
+  config.consent.consentModalIntroHTMLWithTranslations = { en: intro }
   config.consent.customCSS = ''
   config.consent.buttonTextTranslations = {
     accept_all: { en: 'Accept' },
@@ -180,6 +174,7 @@ function configureZarazConsentManagement(config: ZarazConfig) {
   config.consent.purposes ||= {}
   config.consent.purposes[ZARAZ_ANALYTICS_PURPOSE_ID] = ZARAZ_ANALYTICS_PURPOSE
   config.consent.purposesWithTranslations = {
+    ...config.consent.purposesWithTranslations,
     [ZARAZ_ANALYTICS_PURPOSE_ID]: {
       name: { en: ZARAZ_ANALYTICS_PURPOSE.name },
       description: { en: ZARAZ_ANALYTICS_PURPOSE.description },
@@ -244,10 +239,10 @@ function zarazFieldMap(value: unknown): Record<string, string | boolean> {
 function upsertGa4Tool(
   config: ZarazConfig,
   key: string,
-  input: { name: string; measurementId: string; triggerKey: string; existing?: ZarazTool },
+  input: { name: string; measurementId: string; triggerKey: string; existing?: ZarazTool; template?: ZarazTool },
 ) {
   const existing = input.existing
-  const template = existing?.defaultFields ? existing : ga4ToolTemplate(config)
+  const template = input.template ?? (existing?.defaultFields ? existing : ga4ToolTemplate(config))
   config.tools[key] = {
     ...template,
     ...existing,
@@ -271,14 +266,14 @@ function upsertGa4Tool(
   }
 }
 
-export function upsertTenantZarazAnalytics(
+function upsertTenantZarazAnalytics(
   config: ZarazConfig,
-  input: { organizationId: string; measurementId: string | null | undefined; hostnames: string[] },
+  input: ZarazAnalyticsTenant,
+  template?: ZarazTool,
 ) {
   if (!input.measurementId || !input.hostnames.length) return
   config.triggers ||= {}
   config.tools ||= {}
-  configureZarazConsentManagement(config)
   // No automatic single-page-application pageviews: the collector sends each one, manually, after the
   // native record accepted it.
   config.historyChange = false
@@ -299,19 +294,20 @@ export function upsertTenantZarazAnalytics(
     measurementId: input.measurementId,
     triggerKey: key,
     existing: config.tools[key],
+    template,
   })
 }
 
 function removeUndesiredAnalyticsConfig(config: ZarazConfig, desiredKeys: Set<string>): number {
   let removedTools = 0
   for (const key of Object.keys(config.tools ?? {})) {
-    if (isGa4Tool(config.tools[key]) && !desiredKeys.has(key)) {
+    if ((key === 'ga-platform' || key.startsWith(TENANT_KEY_PREFIX)) && isGa4Tool(config.tools[key]) && !desiredKeys.has(key)) {
       Reflect.deleteProperty(config.tools, key)
       removedTools += 1
     }
   }
   for (const key of Object.keys(config.triggers ?? {})) {
-    if (key.startsWith(ANALYTICS_KEY_PREFIX) && !desiredKeys.has(key)) {
+    if ((key === 'ga-platform' || key.startsWith(TENANT_KEY_PREFIX)) && !desiredKeys.has(key)) {
       Reflect.deleteProperty(config.triggers, key)
     }
   }
@@ -320,6 +316,7 @@ function removeUndesiredAnalyticsConfig(config: ZarazConfig, desiredKeys: Set<st
 
 interface ActiveTenantAnalyticsRow {
   organization_id: string
+  theme_id: string
   ga4_measurement_id: string
   domain: string
 }
@@ -353,10 +350,17 @@ function stableStringify(value: unknown): string {
       : v)
 }
 
+interface PlatformZarazTemplate {
+  tool: ZarazTool
+  allTracks: ZarazTrigger
+}
+
 export function reconcileZarazAnalyticsConfig(
   config: ZarazConfig,
   input: {
     tenants: ZarazAnalyticsTenant[]
+    platformOrigin: string
+    platformTemplate?: PlatformZarazTemplate
   },
 ): ZarazAnalyticsConfigChanges {
   config.triggers ||= {}
@@ -368,8 +372,12 @@ export function reconcileZarazAnalyticsConfig(
   // reach the GA4 tools' ecommerce action only when the zone enables Zaraz's
   // ecommerce API.
   config.settings = { ...(config.settings as Record<string, unknown> | undefined), ecommerce: true }
+  if (input.tenants.length) configureZarazConsentManagement(config, input.platformOrigin)
+  if (input.platformTemplate && !config.triggers.AllTracks) {
+    config.triggers.AllTracks = structuredClone(input.platformTemplate.allTracks)
+  }
   for (const tenant of input.tenants) {
-    upsertTenantZarazAnalytics(config, tenant)
+    upsertTenantZarazAnalytics(config, tenant, input.platformTemplate?.tool)
   }
   const removedAnalyticsTools = removeUndesiredAnalyticsConfig(config, desiredKeys)
 
@@ -390,6 +398,7 @@ export async function reconcileZarazAnalytics(
 
   const rows = await queryAll<ActiveTenantAnalyticsRow>(db, `
     SELECT o.id AS organization_id,
+           o.theme_id,
            analytics.measurement_id AS ga4_measurement_id,
            domain.domain
       FROM organization o
@@ -419,24 +428,67 @@ export async function reconcileZarazAnalytics(
     })
   }
 
-  const lockedAt = await acquireLock(db, env.CF_ZONE_ID!)
-  try {
-    const config = await getZarazConfig(env)
-    const configuredTenants = [...tenants.entries()].map(([organizationId, tenant]) => ({
-        organizationId,
-        measurementId: tenant.measurementId,
-        hostnames: [...new Set(tenant.hostnames)].sort(),
-      }))
-    const result = reconcileZarazAnalyticsConfig(config, { tenants: configuredTenants })
-    if (result.updated) {
-      await putZarazConfig(env, config)
-      const persisted = await getZarazConfig(env)
-      if (reconcileZarazAnalyticsConfig(persisted, { tenants: configuredTenants }).updated) {
-        throw new Error('Zaraz configuration did not retain the reconciled native analytics settings')
-      }
+  const platformUrl = new URL(env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '')
+  if (platformUrl.protocol !== 'https:') throw new Error('Zaraz requires an HTTPS platform origin')
+  const saasZone = env.CF_ZONE_ID!
+  const token = env.CLOUDFLARE_API_TOKEN!
+  const platformZone = env.CF_PLATFORM_ZARAZ_ZONE_ID
+  const zones = [{ id: saasZone, tenants: [...tenants].map(([organizationId, tenant]) => ({
+    organizationId,
+    measurementId: tenant.measurementId,
+    hostnames: [...new Set(tenant.hostnames)].sort(),
+  })) }]
+  let platformTemplateKey: string | undefined
+  if (platformZone) {
+    if (platformZone === saasZone) throw new Error('CF_PLATFORM_ZARAZ_ZONE_ID must differ from CF_ZONE_ID')
+    const platformIds = new Set(rows.filter(row => row.theme_id === PLATFORM_THEME_ID).map(row => row.organization_id))
+    if (platformIds.size > 1) throw new Error('More than one linked organization runs the platform site')
+    const platformId = [...platformIds][0]
+    const analytics = platformId ? tenants.get(platformId) : undefined
+    if (platformId && analytics?.measurementId) {
+      platformTemplateKey = tenantKey(platformId)
+      zones.push({ id: platformZone, tenants: [{
+        organizationId: platformId,
+        measurementId: analytics.measurementId,
+        hostnames: [platformUrl.hostname],
+      }] })
+    } else {
+      // A disconnected or unpublished platform has no eligible GA4 tool.
+      zones.push({ id: platformZone, tenants: [] })
     }
-    return { status: 'reconciled', ...result }
-  } finally {
-    await releaseLock(db, env.CF_ZONE_ID!, lockedAt)
   }
+
+  const result: ZarazAnalyticsReconciliationResult = {
+    status: 'reconciled', configuredTenants: tenants.size, removedAnalyticsTools: 0, updated: false,
+  }
+  let platformTemplate: PlatformZarazTemplate | undefined
+  for (const zone of zones) {
+    const generation = await acquireLock(db, zone.id)
+    try {
+      const input = { tenants: zone.tenants, platformOrigin: platformUrl.origin, platformTemplate: zone.id === platformZone ? platformTemplate : undefined }
+      const config = await zarazRequest<ZarazConfig>(zone.id, token)
+      const changes = reconcileZarazAnalyticsConfig(config, input)
+      if (changes.updated) {
+        await zarazRequest<ZarazConfig>(zone.id, token, { method: 'PUT', body: JSON.stringify(config) })
+        const persisted = await zarazRequest<ZarazConfig>(zone.id, token)
+        if (reconcileZarazAnalyticsConfig(persisted, input).updated) {
+          throw new Error(`Zaraz zone ${zone.id} did not retain the reconciled native analytics settings`)
+        }
+      }
+      if (zone.id === saasZone && platformTemplateKey) {
+        const tool = config.tools[platformTemplateKey]
+        const allTracks = config.triggers.AllTracks
+        if (!isGa4Tool(tool) || !allTracks || !Array.isArray(allTracks.loadRules)
+          || !Object.values(tool.actions).some(action => action.actionType === 'event' && action.enabled)) {
+          throw new Error('The existing platform Zaraz tool must support ordinary events before it can be configured on the separate platform zone')
+        }
+        platformTemplate = { tool, allTracks: allTracks as ZarazTrigger }
+      }
+      result.removedAnalyticsTools += changes.removedAnalyticsTools
+      result.updated ||= changes.updated
+    } finally {
+      await releaseLock(db, zone.id, generation)
+    }
+  }
+  return result
 }

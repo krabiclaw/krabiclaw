@@ -1,11 +1,11 @@
-/** Public starting designs marketed by KrabiClaw; never used to select site runtime behavior. */
+/** Public starting designs marketed by Blawby; never used to select site runtime behavior. */
 export interface TemplateMarketingFeature {
   label: string
   description: string
 }
 
 export type TemplateMarketingStatus = 'available' | 'coming_soon'
-/** The website recipes KrabiClaw markets at /templates: one for venues, one for law firms. */
+/** The website recipes Blawby markets at /templates: one for venues, one for law firms. */
 export type MarketedTemplateSlug = 'saya' | 'blawby'
 
 export interface TemplateMarketingMetadata {
@@ -90,7 +90,7 @@ export const publicTemplateMarketing: Record<MarketedTemplateSlug, TemplateMarke
   },
   blawby: {
     slug: 'blawby',
-    displayName: 'Blawby',
+    displayName: 'Blawby Legal',
     tagline: 'Your firm.\nA clear way forward.',
     summary: 'A focused website for solo lawyers and small law firms. Help people understand your practice and take the first step.',
     description: 'People looking for a lawyer need to know who you help, who they will work with, and how to get started. Blawby gives your practice areas, your people, and your consultation process room to speak clearly.',
@@ -130,8 +130,8 @@ export const publicTemplateMarketing: Record<MarketedTemplateSlug, TemplateMarke
     ],
     sortOrder: 2,
     seo: {
-      title: 'Blawby — Website Template for Lawyers and Law Firms',
-      description: 'Build a law firm website with Blawby. Present your practice areas, introduce your people, and guide visitors toward a consultation. Included on every KrabiClaw plan.',
+      title: 'Blawby Legal — Website Template for Lawyers and Law Firms',
+      description: 'Build a law firm website with Blawby Legal. Present your practice areas, introduce your people, and guide visitors toward a consultation. Included on every Blawby plan.',
     },
   },
 }

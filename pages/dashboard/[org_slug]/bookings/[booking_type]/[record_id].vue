@@ -7,7 +7,7 @@ import BookingDetails from '~/components/dashboard/BookingDetails.vue'
 import { showNotFound } from '~/utils/errors'
 
 definePageMeta({ layout: 'dashboard', key: route => `${route.params.org_slug}:${route.params.booking_type ?? ''}:${route.params.record_id}` })
-useSeoMeta({ title: 'Booking details | KrabiClaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Booking details | Blawby', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const level = useRouteLevel()

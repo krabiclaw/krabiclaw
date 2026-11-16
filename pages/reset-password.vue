@@ -36,7 +36,7 @@ useSocialMetadata({
   schema: false,
   path: '/reset-password',
   title: 'Choose a new password',
-  description: 'Set a new password for your KrabiClaw account.',
+  description: 'Set a new password for your Blawby account.',
   discoverability: 'private',
 })
 

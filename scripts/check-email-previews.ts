@@ -52,8 +52,8 @@ for (const entry of NOTIFICATION_CATALOG) {
     // The mark is whose mail it is. KrabiClaw's crab is on its own mail only;
     // a tenant's carries its logo, or its name alone — never the crab.
     const tenant = entry.message.organizationName
-    if (!tenant && !html.includes('krabi-claw-logo.png')) failures.push(`${entry.id} is KrabiClaw's mail and does not carry its mark`)
-    if (tenant && html.includes('krabi-claw-logo.png')) failures.push(`${entry.id} is ${tenant}'s mail and carries KrabiClaw's mark`)
+    if (!tenant && !html.includes('/platform/blawby-512.png')) failures.push(`${entry.id} is Blawby's mail and does not carry its mark`)
+    if (tenant && html.includes('/platform/blawby-512.png')) failures.push(`${entry.id} is ${tenant}'s mail and carries Blawby's mark`)
     if (tenant && entry.message.organizationLogoUrl && !html.includes(entry.message.organizationLogoUrl)) {
       failures.push(`${entry.id} is ${tenant}'s mail and does not carry its logo`)
     }
