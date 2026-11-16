@@ -57,8 +57,7 @@ export interface ReviewBookingContext {
   no_show: boolean
   /** When the visit ended: its booking's end instant; null for a stay whose home had no checkout time. */
   completed_at: string | null
-  review_request_sent_at: string | null
-  review_submitted_at: string | null
+  review_request_closed_at: string | null
   review_id: string | null
   organization_name: string | null
   organization_vertical?: string | null
@@ -91,7 +90,7 @@ export function reviewInvitationDue(context: ReviewBookingContext, now = new Dat
   if (context.completed_at === null) return false
   const ended = Date.parse(context.completed_at)
   return context.status === 'confirmed' && !context.no_show
-    && !context.review_request_sent_at && !context.review_submitted_at && !context.review_id
+    && !context.review_request_closed_at && !context.review_id
     && ended + REVIEW_REQUEST_DELAY_HOURS * 3_600_000 <= now.getTime()
     && ended + REVIEW_REQUEST_TTL_DAYS * 86_400_000 > now.getTime()
 }
@@ -133,9 +132,7 @@ export async function getReviewBookingContext(
     r.organization_id, r.location_id, r.user_id,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email,
     b.status, ${historicalNoShowSql('r')} AS no_show, b.ends_at,
-    -- Whether the visit was invited and answered is the review_requests record's, not the thread's.
-    (SELECT MIN(rr.first_sent_at) FROM review_requests rr WHERE rr.booking_id = b.id) AS review_request_sent_at,
-    (SELECT MIN(rr.submitted_at) FROM review_requests rr WHERE rr.booking_id = b.id) AS review_submitted_at,
+    (SELECT MIN(COALESCE(rr.first_sent_at, rr.submitted_at, rr.revoked_at)) FROM review_requests rr WHERE rr.booking_id = b.id) AS review_request_closed_at,
     (SELECT rv.id FROM reviews rv WHERE rv.organization_id = b.organization_id AND rv.booking_id = b.id ORDER BY rv.created_at LIMIT 1) AS review_id,
     s.name AS organization_name, s.vertical AS organization_vertical, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = s.id AND role = 'canonical' AND status = 'active') AS organization_public_url,
     bl.title AS location_title, bl.google_place_id, bl.google_review_url,
@@ -191,9 +188,8 @@ export async function createReviewRequest(
   context: ReviewBookingContext,
   now = new Date().toISOString(),
 ): Promise<{ request: ReviewRequestRow; token: string }> {
-  if (!context.user_id) throw new Error('Booking is not linked to a guest identity')
   if (!reviewInvitationDue(context, new Date(now))) throw new Error('This visit is not due a review invitation')
-  if (!await wantsNotification(db, context.user_id, 'review_requests', 'email')) throw new Error('Guest has opted out of review requests')
+  if (context.user_id && !await wantsNotification(db, context.user_id, 'review_requests', 'email')) throw new Error('Guest has opted out of review requests')
 
   const entitled = await hasOrganizationEntitlement(env, context.organization_id, 'review_requests')
   if (!entitled) throw new Error('Review requests are not enabled for this organization')
@@ -208,7 +204,8 @@ export async function createReviewRequest(
       id, organization_id, location_id, user_id, booking_id,
       token_hash, token, expires_at, send_count, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?
+    WHERE NOT EXISTS (SELECT 1 FROM review_requests WHERE booking_id = ? AND revoked_at IS NOT NULL)
   `, [
     id,
     context.organization_id,
@@ -220,6 +217,7 @@ export async function createReviewRequest(
     expiresAt,
     now,
     now,
+    context.booking_id,
   ])
 
   let request = await queryFirst<ReviewRequestRow>(db, `
@@ -286,19 +284,14 @@ export async function markReviewRequestSendFailure(
   `, [message.slice(0, 1000), new Date().toISOString(), requestId])
 }
 
-/**
- * A no-show or a cancellation ends the visit's invitation: an unsent one is
- * never sent (the record no longer qualifies), and a sent link stops working.
- * Runs in the batch that records the change, after its ledger entry.
- */
-export function revokeReviewRequestQuery(bookingId: string, entryId: string, now: string): BatchQuery {
+/** End active invitations in the caller's cancellation or unsubscribe scope. */
+export function revokeReviewRequestQuery(scope: { query: string; params: unknown[] }, now: string): BatchQuery {
   return {
     query: `
       UPDATE review_requests
-      SET revoked_at = COALESCE(revoked_at, ?), updated_at = ?
-      WHERE booking_id = ? AND submitted_at IS NULL AND revoked_at IS NULL
-        AND EXISTS (SELECT 1 FROM messages WHERE id = ?)
+      SET revoked_at = ?, updated_at = ?
+      WHERE submitted_at IS NULL AND revoked_at IS NULL AND (${scope.query})
     `,
-    params: [now, now, bookingId, entryId],
+    params: [now, now, ...scope.params],
   }
 }

@@ -50,7 +50,6 @@ export async function sendReviewRequestForBooking(
   if (!publicUrl) throw new Error('Organization has no active canonical domain')
 
   const { request, token } = await createReviewRequest(env, db, context)
-  if (!request.user_id) throw new Error('Review request is not linked to a guest identity')
   const reviewUrl = `${publicUrl}/review-submit?token=${encodeURIComponent(token)}`
   const threadId = context.request_id
   const entry = await appendMessage(db, {
@@ -129,9 +128,10 @@ export async function sendDueReviewInvitations(env: CloudflareEnv, organizationI
       WHERE b.organization_id = ? AND b.channel = 'direct' AND b.status = 'confirmed'
         AND NOT ${historicalNoShowSql('r')} AND length(b.ends_at) > 10 AND b.ends_at > ?
         AND NOT EXISTS (SELECT 1 FROM reviews rv WHERE rv.organization_id = b.organization_id AND rv.booking_id = b.id)
-        AND NOT EXISTS (SELECT 1 FROM review_requests rr WHERE rr.booking_id = b.id AND rr.first_sent_at IS NOT NULL)
-        AND json_type(r.payload_json, '$.guest.email') = 'text' AND r.user_id IS NOT NULL
-        AND ${wantsReview.sql}
+        AND NOT EXISTS (SELECT 1 FROM review_requests rr WHERE rr.booking_id = b.id
+          AND COALESCE(rr.first_sent_at, rr.submitted_at, rr.revoked_at) IS NOT NULL)
+        AND json_type(r.payload_json, '$.guest.email') = 'text'
+        AND (r.user_id IS NULL OR ${wantsReview.sql})
     )
     SELECT booking_id, ends_at FROM eligible WHERE ends_at <= ?
     UNION ALL SELECT NULL, MIN(ends_at) FROM eligible WHERE ends_at > ?

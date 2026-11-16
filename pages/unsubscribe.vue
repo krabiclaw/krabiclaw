@@ -6,13 +6,13 @@
       <UButton v-if="state === 'ready'" size="lg" :loading="submitting" @click="submit">
         Unsubscribe
       </UButton>
-      <UButton v-else-if="state === 'done'" to="/dashboard/account/profile/notifications" variant="subtle" size="lg">
+      <UButton v-else-if="state === 'done' && !reviewToken" to="/dashboard/account/profile/notifications" variant="subtle" size="lg">
         Manage all notifications
       </UButton>
 
       <!-- Turning everything in a category off is rarely what someone wants;
            the settings index is one link away before they commit to it. -->
-      <p v-if="state === 'ready'" class="text-sm text-muted">
+      <p v-if="state === 'ready' && !reviewToken" class="text-sm text-muted">
         Or <NuxtLink to="/dashboard/account/profile/notifications" class="underline underline-offset-2">choose exactly what you receive</NuxtLink>.
       </p>
     </div>
@@ -36,11 +36,12 @@ const state = ref<'ready' | 'done' | 'invalid'>('invalid')
 const submitting = ref(false)
 const failure = ref('')
 
+const reviewToken = computed(() => typeof route.query.reviewToken === 'string' ? route.query.reviewToken : '')
 const category = computed(() => (isNotificationCategory(route.query.category) ? route.query.category : null))
 const categoryLabel = computed(() => (category.value ? NOTIFICATION_CATEGORY_LABELS[category.value] : ''))
 
 onMounted(() => {
-  state.value = category.value && typeof route.query.user === 'string' && typeof route.query.token === 'string'
+  state.value = reviewToken.value || (category.value && typeof route.query.user === 'string' && typeof route.query.token === 'string')
     ? 'ready'
     : 'invalid'
 })
@@ -48,11 +49,13 @@ onMounted(() => {
 const heading = computed(() => {
   if (state.value === 'done') return 'You are unsubscribed'
   if (state.value === 'invalid') return 'This link is not valid'
+  if (reviewToken.value) return 'Unsubscribe from this review invitation?'
   return `Unsubscribe from ${categoryLabel.value}?`
 })
 
 const message = computed(() => {
   if (failure.value) return failure.value
+  if (reviewToken.value) return state.value === 'done' ? 'The review link for this visit is closed.' : 'This will close the review link for this visit.'
   if (state.value === 'done') return `You will no longer receive ${categoryLabel.value} emails. Everything else is unchanged.`
   if (state.value === 'invalid') return 'This unsubscribe link is incomplete or has expired. Open your notification settings to change what you receive.'
   return 'You will stop receiving these emails. Other notifications are unaffected.'
@@ -62,13 +65,19 @@ async function submit() {
   submitting.value = true
   failure.value = ''
   try {
-    // Same signed query the List-Unsubscribe header carries, so both routes in
-    // and the API have one contract.
-    await publicApiMutation('/api/public/notifications/unsubscribe', {
-      method: 'POST',
-      query: { user: route.query.user, category: route.query.category, token: route.query.token },
-      validate: (value): value is { success: true; category: string } => isRecord(value) && value.success === true && typeof value.category === 'string' && value.category === route.query.category,
-    })
+    if (reviewToken.value) {
+      await publicApiMutation('/api/public/review-requests/opt-out', {
+        method: 'POST',
+        query: { token: reviewToken.value },
+        validate: (value): value is { opted_out: true } => isRecord(value) && value.opted_out === true,
+      })
+    } else {
+      await publicApiMutation('/api/public/notifications/unsubscribe', {
+        method: 'POST',
+        query: { user: route.query.user, category: route.query.category, token: route.query.token },
+        validate: (value): value is { success: true; category: string } => isRecord(value) && value.success === true && typeof value.category === 'string' && value.category === route.query.category,
+      })
+    }
     state.value = 'done'
   } catch (cause) {
     failure.value = cause instanceof Error ? cause.message : 'Unsubscribing failed. Please try again.'

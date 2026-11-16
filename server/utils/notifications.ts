@@ -184,8 +184,8 @@ interface ReviewRequestNotificationInput extends OrganizationContext {
   partySize: string
   partyLabel?: string
   reviewUrl: string
-  /** Whose review_requests preference governs this email and its unsubscribe link. */
-  userId: string
+  /** The account whose preference governs the email, if the booking is linked. */
+  userId: string | null
   /** The invitation's message in the visit's conversation, which this email is the receipt of. */
   delivery: { conversationId: string; messageId: string }
 }
@@ -1063,6 +1063,8 @@ export async function notifyReviewRequest(
   db: DbClient,
   opts: ReviewRequestNotificationInput
 ): Promise<void> {
+  const reviewToken = new URL(opts.reviewUrl).searchParams.get('token')
+  if (!reviewToken) throw new Error('Review invitation requires a token')
   // The invitation owns one email, even if contact details are edited while
   // completion is pending. Retain any already-recorded receipt for this link.
   const recorded = await queryFirst<{ id: string }>(db, `
@@ -1070,7 +1072,7 @@ export async function notifyReviewRequest(
     WHERE message_id = ? AND channel = 'email' AND purpose = 'status_update'
       AND (email_json IS NULL OR instr(email_json, ?) > 0)
     ORDER BY created_at DESC, id DESC LIMIT 1
-  `, [opts.delivery.messageId, new URL(opts.reviewUrl).searchParams.get('token')])
+  `, [opts.delivery.messageId, reviewToken])
   const restaurant = organizationName(opts)
   const platformDomain = getPlatformDomain(env)
   const logoUrl = await organizationLogo(db, opts.organizationId)
@@ -1084,7 +1086,14 @@ export async function notifyReviewRequest(
     reviewUrl: opts.reviewUrl,
     organizationLogoUrl: logoUrl,
   })
-  const unsubscribe = await buildUnsubscribeUrls(env, { userId: opts.userId, category: message.category }, message.emailPurpose)
+  const origin = platformOrigin(env)
+  const encodedToken = encodeURIComponent(reviewToken)
+  const unsubscribe = opts.userId
+    ? await buildUnsubscribeUrls(env, { userId: opts.userId, category: message.category }, message.emailPurpose)
+    : {
+        pageUrl: `${origin}/unsubscribe?reviewToken=${encodedToken}`,
+        oneClickUrl: `${origin}/api/public/review-requests/opt-out?token=${encodedToken}`,
+      }
   if (!unsubscribe) throw new Error('Review requests require email unsubscribe links')
   const email = await renderNotificationEmail(message, { platformDomain, unsubscribeUrl: unsubscribe.pageUrl })
 

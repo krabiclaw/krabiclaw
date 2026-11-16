@@ -454,7 +454,10 @@ async function executeSourceMutation(
     // An approval closes the booking's review; a cancellation also answers what the guest asked before it.
     ...conversationTaskQueries(context.thread.id, now),
   ]
-  if (plan.afterStatus === 'cancelled') queries.push(revokeReviewRequestQuery(context.record.id, entryId, now))
+  if (plan.afterStatus === 'cancelled') queries.push(revokeReviewRequestQuery({
+    query: 'booking_id = ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)',
+    params: [context.record.id, entryId],
+  }, now))
   queries.push(deliveryReceiptQuery(context, input, entryId, deliveryId, now))
 
   const writes = await executeBatch(db, queries, { operation: `guest thread ${plan.kind}.${plan.action}` })
