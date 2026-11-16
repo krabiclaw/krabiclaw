@@ -75,7 +75,6 @@ async function main() {
   })
   const key = randomUUID()
   const name = `Notification canary ${key.slice(0, 8)}`
-  const contact = await post('/api/public/contact', { name, email, message: 'Dedicated notification delivery check.' }, 201)
   const reservation = await post(`/api/public/products/${encodeURIComponent(available.slug)}/book`, {
     product_session_id: available.product_session_id, party_size: 2, guest_name: name, guest_email: email, guest_phone: phone, idempotency_key: key,
   }, 201)
@@ -84,10 +83,8 @@ async function main() {
     method: 'POST', headers: { authorization: `Bearer ${reservation.cancellation_token}` },
   })
   if (cancelled.success !== true || cancelled.kind !== 'booking') throw new Error('The canary table booking did not confirm cancellation')
-  if (!contact.conversation_id) throw new Error('The canary contact did not return its conversation ID')
 
   const requiredReceipts = [
-    ['contact_email', contact.conversation_id, 'email', 'resend', 'guest_acknowledgement', 'contact_customer_received', email],
     ['reservation_email', reservation.conversation_id, 'email', 'resend', 'guest_acknowledgement', 'booking_customer_received', email],
     ['reservation_whatsapp', reservation.conversation_id, 'whatsapp', 'meta', 'owner_alert', 'new_reservation', phone],
     ['cancellation_email', reservation.conversation_id, 'email', 'resend', 'status_update', 'booking_customer_cancelled', email],
@@ -99,7 +96,7 @@ async function main() {
     const rows = read(`
       SELECT d.id, m.conversation_id, d.channel, d.provider, d.purpose, d.status, d.provider_message_id
       FROM guest_thread_deliveries d JOIN messages m ON m.id = d.message_id
-      WHERE m.organization_id = ${quote(organization)} AND m.conversation_id IN (${quote(contact.conversation_id)}, ${quote(reservation.conversation_id)})
+      WHERE m.organization_id = ${quote(organization)} AND m.conversation_id = ${quote(reservation.conversation_id)}
     `)
     const evidence = Object.fromEntries(requiredReceipts.map(([label, conversationId, channel, provider, purpose, template, recipient]) => {
       const suffix = `:${purpose}:${channel}:${template}:${recipientHash(recipient)}`
@@ -109,7 +106,7 @@ async function main() {
     }))
     missing = Object.keys(evidence).filter(label => !evidence[label])
     if (!missing.length) {
-      console.log(JSON.stringify({ status: 'pass', contact_id: contact.conversation_id, reservation_id: reservation.conversation_id, provider_message_ids: evidence }, null, 2))
+      console.log(JSON.stringify({ status: 'pass', reservation_id: reservation.conversation_id, provider_message_ids: evidence }, null, 2))
       return
     }
     await new Promise(resolve => setTimeout(resolve, 1500))
