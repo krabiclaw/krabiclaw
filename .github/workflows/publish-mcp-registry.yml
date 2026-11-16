@@ -28,10 +28,15 @@ jobs:
       - name: Check the live issuer and resource
         run: |
           set -euo pipefail
-          curl -fsS https://blawby.com/.well-known/oauth-authorization-server |
-            jq -e '.issuer == "https://blawby.com"'
-          curl -fsS https://blawby.com/.well-known/oauth-protected-resource |
-            jq -e '.resource == "https://blawby.com/api/mcp"'
+          origin=$(jq -er '.websiteUrl | select(. == "https://blawby.com" or . == "https://krabiclaw.com")' server.json)
+          resource=$(jq -er --arg origin "$origin" '
+            select(.name == "io.github.krabiclaw/krabiclaw" and (.remotes | length) == 1) |
+            .remotes[0] | select(.type == "streamable-http" and .url == ($origin + "/api/mcp")) | .url
+          ' server.json)
+          curl -fsS "$origin/.well-known/oauth-authorization-server" |
+            jq -e --arg issuer "$origin" '.issuer == $issuer'
+          curl -fsS "$origin/.well-known/oauth-protected-resource" |
+            jq -e --arg resource "$resource" '.resource == $resource'
       - name: Publish reviewed descriptor
         run: |
           set -euo pipefail

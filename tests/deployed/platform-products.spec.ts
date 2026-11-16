@@ -49,11 +49,23 @@ test('Products remains readable on a narrow mobile viewport', async ({ page }) =
 test('Products section links reach their relevant published destinations', async ({ page }) => {
   // The complete destination matrix shares one whole-journey budget.
   test.slow()
+  // The CMS copy changes after the Worker deploy. Compare the visible headings
+  // with the canonical records published at the time of the check.
+  const [connectorResponse, experiencesResponse] = await Promise.all([
+    page.request.get('/api/public/blog/mcp-setup?collection=docs'),
+    page.request.get('/api/public/pages?path=%2Fexperiences'),
+  ])
+  expect(connectorResponse.status()).toBe(200)
+  expect(experiencesResponse.status()).toBe(200)
+  const connector = await connectorResponse.json() as { post: { title: string } }
+  const experiences = await experiencesResponse.json() as { page: { blocks: Array<{ type: string; data: { title: string } }> } }
+  const experienceHero = experiences.page.blocks.find(block => block.type === 'hero')
+  if (!experienceHero?.data.title || !connector.post.title) throw new Error('An authored destination heading is missing')
   const destinations = [
     { label: 'Explore website builder', path: '/templates', heading: /Your business\.\s*Its own kind of beautiful\./ },
-    { label: 'Explore AI management', path: '/docs/mcp-setup', heading: /^Connect (?:KrabiClaw|Blawby) to ChatGPT$/ },
+    { label: 'Explore AI management', path: '/docs/mcp-setup', heading: connector.post.title },
     { label: 'Read the inbox guide', path: '/docs/handle-inquiries-and-reservation-requests', heading: /Handle inquiries and reservation requests/ },
-    { label: 'Explore bookings', path: '/experiences', heading: /^(?:A great day starts\s+with a booking\.|The second brain for your experience business)$/ },
+    { label: 'Explore bookings', path: '/experiences', heading: experienceHero.data.title.replace(/\s+/g, ' ') },
     { label: 'Read the publishing guide', path: '/docs/publish-a-post', heading: /Publish a post/ },
     { label: 'Manage local business details', path: '/docs/update-locations-and-hours', heading: /Update locations and hours/ },
     { label: 'Read the analytics guide', path: '/docs/read-your-site-analytics', heading: /Read your site analytics/ },
