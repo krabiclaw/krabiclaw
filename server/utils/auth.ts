@@ -365,8 +365,6 @@ const NEW_PASSWORD_FIELD: Record<string, 'password' | 'newPassword'> = {
   '/admin/set-user-password': 'newPassword',
 }
 
-const anonymousEmail = () => `anon-${crypto.randomUUID()}@customers.krabiclaw.local`
-
 export function createAuth(env: CloudflareEnv) {
   if (!env?.DB) throw new HTTPError({ statusCode: 503, statusMessage: 'Database unavailable' })
   const d1 = unwrapInstrumentedD1(env.DB)
@@ -737,7 +735,7 @@ function buildAuth(env: CloudflareEnv) {
         },
       }),
       anonymous({
-        generateRandomEmail: anonymousEmail,
+        generateRandomEmail: () => `anon-${crypto.randomUUID()}@customers.krabiclaw.local`,
         // The anonymous user is deleted by the plugin right after this returns,
         // and every domain FK to it is ON DELETE SET NULL. Everything that
         // identifies the person moves to the real user first, in one batch.
@@ -1158,14 +1156,20 @@ export async function ensureInteractionUser(event: H3Event, env: CloudflareEnv):
 }
 
 /**
- * The Better Auth anonymous identity a business records for a guest. No one
- * signs in as this user. A later verified sign-in can claim its bookings.
+ * A business records its guest as a named anonymous user. Revoke the session
+ * Better Auth opens before returning the identity to the booking operation.
+ * A later verified sign-in can claim its bookings.
  */
 export async function createGuestUser(env: CloudflareEnv, name: string): Promise<string> {
-  const { internalAdapter } = await createAuth(env).$context
-  const user = await internalAdapter.createUser({
-    name, email: anonymousEmail(), emailVerified: false, isAnonymous: true,
-  }, { method: 'anonymous' })
-  if (!user?.id) throw new Error('Better Auth did not return an anonymous user')
-  return user.id
+  const auth = createAuth(env)
+  const { headers, response } = await auth.api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
+  const bearerToken = headers.get('set-auth-token')
+  if (!response?.user?.id || !response.token || !bearerToken) throw new Error('Better Auth did not return an anonymous user and session')
+  const sessionHeaders = new Headers({ authorization: `Bearer ${bearerToken}` })
+  try {
+    await auth.api.updateUser({ headers: sessionHeaders, body: { name } })
+  } finally {
+    await auth.api.revokeSession({ headers: sessionHeaders, body: { token: response.token } })
+  }
+  return response.user.id
 }

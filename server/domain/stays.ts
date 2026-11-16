@@ -5,7 +5,7 @@ import { bookChannelConversationGuest, reconcileGuestListingParticipants } from 
 import { HTTPError } from 'nitro'
 import { bookingStatusQuery } from '~/server/domain/bookings'
 import { CURRENT_GUEST_SQL, messageQueries, readGuestConversation } from '~/server/domain/conversations'
-import { turnoverNeighboursSql, turnoverTaskQueries } from '~/server/domain/tasks'
+import { readTurnoverHomes, TURNOVER_HOME_FROM, turnoverHomeColumns, turnoverTaskQueries, type TurnoverHome } from '~/server/domain/tasks'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevision, parseStoredFormQuestions, type FormAnswerSnapshot, type FormQuestion } from '~/shared/form-questions'
 import { validateFormAnswers } from '~/server/domain/form-questions'
@@ -396,17 +396,14 @@ const STAY_COLUMNS = `s.id, s.product_id, s.location_id, s.timezone, s.channel, 
   json_extract(s.policy_json, '$.cancellation') AS cancellation_policy, s.answers, s.version, s.created_at, s.updated_at,
   ${stayRequestRespondBySql('s')} AS respond_by, ${stayRequestPayBySql('r.id')} AS pay_by`
 
-function channelBookingUrl(channel: unknown, code: unknown): string | null {
-  return channel === 'airbnb' && typeof code === 'string' ? `https://www.airbnb.com/hosting/reservations/details/${encodeURIComponent(code)}` : null
-}
-
 function mapStay(row: Record<string, unknown>): Stay {
+  const code = row.channel_booking_id
   const timezone = String(row.timezone)
   if (row.adults === null || row.children === null || row.infants === null || row.total_minor === null || row.currency === null) throw new Error(`Stay ${String(row.id)} has no party breakdown or total`)
   return { ...row, ...stayRequestProgress({ status: row.status as Stay['status'], respond_by: row.respond_by as string | null, pay_by: row.pay_by as string | null }),
     overbooked: Number(row.overbooked) === 1, answers: formAnswerSnapshotsSchema.parse(JSON.parse(String(row.answers))),
     check_in_date: bookingDay(String(row.starts_at), timezone), check_out_date: bookingDay(String(row.ends_at), timezone),
-    channel_booking_url: channelBookingUrl(row.channel, row.channel_booking_id) } as unknown as Stay
+    channel_booking_url: row.channel === 'airbnb' && typeof code === 'string' ? `https://www.airbnb.com/hosting/reservations/details/${encodeURIComponent(code)}` : null } as unknown as Stay
 }
 
 /** The SQL bounds of [from, to) days a stay's stored ends can fall in, widened for ends stored as instants; rows are then kept by their days. */
@@ -1252,34 +1249,34 @@ type StayDetailView<A extends StayAccess> = A extends { manage: true } ? StayDet
 
 export async function getStay<A extends StayAccess>(db: DbClient, access: A, stayId: string): Promise<StayDetailView<A>> {
   const scope = visibleHomes(access)
-  const row = await queryFirst<Record<string, unknown> & Pick<StayDetail, 'guest_image_url'>>(db, `
-    SELECT ${STAY_COLUMNS}, (SELECT u.image FROM user u WHERE u.id = s.user_id) AS guest_image_url
+  const paymentColumns = access.manage ? `,
+    (SELECT json_group_array(json_object('id', id, 'booking_id', booking_id, 'amount_minor', amount_minor, 'currency', currency,
+      'method', method, 'paid_on', paid_on, 'reference', reference, 'note', note, 'created_at', created_at, 'created_by', created_by))
+      FROM (SELECT * FROM offline_payments WHERE organization_id = s.organization_id AND booking_id = s.id ORDER BY paid_on, created_at)
+    ) AS offline_payments_json,
+    (SELECT json_group_array(json_object('payment_id', id, 'currency', currency, 'amount_minor', amount, 'captured_minor', captured_amount,
+      'refunded_minor', refunded_amount, 'receipt_url', receipt_url, 'created_at', created_at))
+      FROM payments WHERE organization_id = s.organization_id AND subject_type = 'booking' AND subject_id = s.id
+    ) AS online_payments_json` : ''
+  const row = await queryFirst<Record<string, unknown> & Pick<StayDetail, 'guest_image_url'> & {
+    offline_payments_json?: string; online_payments_json?: string
+  }>(db, `
+    SELECT ${STAY_COLUMNS}, (SELECT u.image FROM user u WHERE u.id = s.user_id) AS guest_image_url ${paymentColumns}
       FROM ${STAY_FROM}
      WHERE s.organization_id = ? AND s.id = ? AND s.product_session_id IS NULL AND ${scope.sql}`, [access.organizationId, stayId, ...scope.params])
   if (!row) fail(404, 'STAY_NOT_FOUND', 'That stay is not in this organization')
-  const stay = mapStay(row)
+  const { offline_payments_json: offline, online_payments_json: online, guest_image_url, ...record } = row
+  const stay = mapStay(record)
   if (!access.manage) return stayTurnover(stay) as StayDetailView<A>
-  const [payments, online] = await Promise.all([
-    queryAll<StayPayment>(db, `
-      SELECT id, booking_id, amount_minor, currency, method, paid_on, reference, note, created_at, created_by
-        FROM offline_payments WHERE organization_id = ? AND booking_id = ? ORDER BY paid_on, created_at`, [access.organizationId, stayId]),
-    queryAll<{ id: string; currency: string; amount: number; captured_amount: number; refunded_amount: number; receipt_url: string | null; created_at: string }>(db, `
-      SELECT id, currency, amount, captured_amount, refunded_amount, receipt_url, created_at
-        FROM payments WHERE organization_id = ? AND subject_type = 'booking' AND subject_id = ?`, [access.organizationId, stayId]),
-  ])
-  if (online.length > 1) fail(500, 'STAY_PAYMENT_AMBIGUOUS', 'This stay has more than one online payment', 'online_payment')
-  const onlinePayment: StayOnlinePayment | null = online[0] ? {
-    payment_id: online[0].id, currency: online[0].currency, amount_minor: online[0].amount,
-    captured_minor: online[0].captured_amount, refunded_minor: online[0].refunded_amount, receipt_url: online[0].receipt_url, created_at: online[0].created_at,
-  } : null
-  return stayWithPayments(stay, row.guest_image_url, payments, onlinePayment) as StayDetailView<A>
-}
-
-function stayWithPayments(stay: Stay, guestImageUrl: string | null, payments: StayPayment[], onlinePayment: StayOnlinePayment | null): StayDetail {
-  const paid = payments.reduce((sum, payment) => sum + payment.amount_minor, 0) + (onlinePayment ? onlinePayment.captured_minor - onlinePayment.refunded_minor : 0)
+  if (offline === undefined || online === undefined) throw new Error('The stay detail query did not return its payment data')
+  const payments = JSON.parse(offline) as StayPayment[]
+  const onlinePayments = JSON.parse(online) as StayOnlinePayment[]
+  if (onlinePayments.length > 1) fail(500, 'STAY_PAYMENT_AMBIGUOUS', 'This stay has more than one online payment', 'online_payment')
+  const online_payment = onlinePayments[0] ?? null
+  const paid = payments.reduce((sum, payment) => sum + payment.amount_minor, 0) + (online_payment ? online_payment.captured_minor - online_payment.refunded_minor : 0)
   const status = isChannelManagedStay(stay) ? null
     : paid === 0 ? 'unpaid' : paid < stay.total_minor ? 'partial' : paid === stay.total_minor ? 'paid' : 'overpaid'
-  return { ...stay, guest_image_url: guestImageUrl, payments, online_payment: onlinePayment, paid_minor: paid, payment_status: status }
+  return { ...stay, guest_image_url, payments, online_payment, paid_minor: paid, payment_status: status } as StayDetailView<A>
 }
 
 /** The price of an inventory date is the dated price of its home's variant. */
@@ -1816,9 +1813,7 @@ export async function resumeImportedStay(db: DbClient, env: StayMutationEnv, acc
   return publishBookingNights(env, access.organizationId, stay, [], true)
 }
 
-type StayCreationHome = Pick<StayHome,
-  'product_id' | 'location_id' | 'timezone' | 'check_in_time' | 'check_out_time' | 'max_guests' |
-  'assigned_member_id' | 'cancellation_policy' | 'long_term_cancellation_policy'>
+type StayCreationHome = TurnoverHome & Pick<StayHome, 'max_guests' | 'cancellation_policy' | 'long_term_cancellation_policy'>
   & Omit<Parameters<typeof bookingPolicy>[0], 'accessibility_contact_required' | 'online_payment_required'>
   & {
     variant_ids: string
@@ -1827,12 +1822,7 @@ type StayCreationHome = Pick<StayHome,
     accessibility_contact_required: number
     online_payment_required: number
     replay: number
-    turnover_neighbours: string
   }
-
-const STAY_CREATION_HOME_FROM = `product_stay_configs c
-  JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id
-  JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id`
 
 export async function createStay(db: DbClient, env: StayMutationEnv & CloudflareEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; idempotency_key: string }, options?: { imported: HostawayStaySource }): Promise<StayDetail> {
   requireManager(access)
@@ -1844,121 +1834,91 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
   const channelBookingId = imported?.channel_booking_id ?? null
   if (!STAY_CHANNELS.includes(channel) || (channel !== 'direct' && !channelBookingId)) fail(422, 'INVALID_STAY_FIELD', 'An imported channel booking needs its actual channel confirmation reference', 'channel_booking_id')
   const publish = (stay: StayDetail, taskIds: string[] = []) => publishBookingNights(env, access.organizationId, stay, taskIds, imported !== undefined)
-  let guestUserId: string | undefined
-  for (let attempt = 0; ; attempt += 1) {
-    const home = await queryFirst<StayCreationHome>(db, `
-      SELECT c.product_id, c.location_id, l.timezone, o.default_currency AS currency,
-             b.check_in_time, b.check_out_time, b.default_capacity AS max_guests, b.assigned_member_id,
-             b.cancellation_policy, b.long_term_cancellation_policy, b.questions, b.advance_notice_minutes,
-             b.party_size_min, b.party_size_max, b.minimum_guest_age, b.accessibility_contact_required,
-             b.online_payment_required, b.payment_basis, b.payment_min_party_size,
-             (SELECT json_group_array(v.id) FROM product_variants v WHERE v.organization_id = c.organization_id AND v.product_id = c.product_id) AS variant_ids,
-             EXISTS (SELECT 1 FROM bookings s WHERE s.organization_id = c.organization_id AND s.idempotency_key = ?) AS replay,
-             ${turnoverNeighboursSql('c', '?')} AS turnover_neighbours
-        FROM ${STAY_CREATION_HOME_FROM}
-        JOIN organization o ON o.id = c.organization_id
-       WHERE c.organization_id = ? AND c.product_id = ?
-    `, [key, typeof input.check_in_date === 'string' ? input.check_in_date : null, access.organizationId, input.product_id])
-    if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
-    const variants = JSON.parse(home.variant_ids) as string[]
-    if (variants.length !== 1) throw new Error(`Home ${home.product_id} has ${variants.length} variants; a home has exactly one`)
-    if (!isCurrencyCode(home.currency)) throw new Error(`The organization of home ${home.product_id} has an unsupported default currency`)
-    const fields = stayFields(input, home)
-    const window = stayWindow(fields, home)
-    // A payment the guest already made is written with the stay, so a stay never exists without it.
-    const payment = input.payment === undefined || input.payment === null ? null : stayPaymentFields(input.payment, 'payment.', false)
-    // The guest's answers to the home's questions, as the host took them; a retry with other answers is another stay.
-    const answered = JSON.stringify(formAnswersFingerprint(input.answers))
-    const replay = async () => {
-      const existing = await queryFirst<Record<string, unknown>>(db, `SELECT ${STAY_COLUMNS} FROM ${STAY_FROM} WHERE s.organization_id = ? AND s.idempotency_key = ?`, [access.organizationId, key])
-      if (!existing) return null
-      const stored = mapStay(existing)
-      const asked = { ...fields, ...window }
-      const kept = { check_in_date: stored.check_in_date, check_out_date: stored.check_out_date, starts_at: stored.starts_at, ends_at: stored.ends_at, adults: stored.adults, children: stored.children, infants: stored.infants,
-        guest_name: stored.guest_name, guest_email: stored.guest_email, guest_phone: stored.guest_phone, total_minor: stored.total_minor, private_notes: stored.private_notes }
-      if (stored.product_id !== home.product_id || stored.channel !== channel || stored.channel_booking_id !== channelBookingId || Object.entries(kept).some(([field, value]) => asked[field as keyof typeof asked] !== value)
-        || JSON.stringify(formAnswersFingerprint(stored.answers)) !== answered) {
-        fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a stay with different saved details. Reload the stay before another change; a create retry does not edit an existing stay.', 'idempotency_key')
-      }
-      const initialPayment = await queryFirst<StayPaymentFields>(db,
-        'SELECT amount_minor, method, paid_on, reference, note FROM offline_payments WHERE organization_id = ? AND booking_id = ? AND idempotency_key = ?', [access.organizationId, stored.id, `${key}:payment`]) ?? null
-      if ((payment === null) !== (initialPayment === null) || (payment && initialPayment && Object.entries(payment).some(([field, value]) => initialPayment[field as keyof StayPaymentFields] !== value))) {
-        fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a stay with a different saved initial payment', 'idempotency_key')
-      }
-      return getStay(db, access, stored.id)
+  const home = await queryFirst<StayCreationHome>(db, `
+    SELECT ${turnoverHomeColumns('?')}, o.default_currency AS currency, b.default_capacity AS max_guests,
+           b.cancellation_policy, b.long_term_cancellation_policy, b.questions, b.advance_notice_minutes,
+           b.party_size_min, b.party_size_max, b.minimum_guest_age, b.accessibility_contact_required,
+           b.online_payment_required, b.payment_basis, b.payment_min_party_size,
+           (SELECT json_group_array(v.id) FROM product_variants v WHERE v.organization_id = c.organization_id AND v.product_id = c.product_id) AS variant_ids,
+           EXISTS (SELECT 1 FROM bookings s WHERE s.organization_id = c.organization_id AND s.idempotency_key = ?) AS replay
+      FROM ${TURNOVER_HOME_FROM}
+      JOIN organization o ON o.id = c.organization_id
+     WHERE c.organization_id = ? AND c.product_id = ?
+  `, [typeof input.check_in_date === 'string' ? input.check_in_date : null, key, access.organizationId, input.product_id])
+  if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
+  const variants = JSON.parse(home.variant_ids) as string[]
+  if (variants.length !== 1) throw new Error(`Home ${home.product_id} has ${variants.length} variants; a home has exactly one`)
+  if (!isCurrencyCode(home.currency)) throw new Error(`The organization of home ${home.product_id} has an unsupported default currency`)
+  const fields = stayFields(input, home)
+  const window = stayWindow(fields, home)
+  // A payment the guest already made is written with the stay, so a stay never exists without it.
+  const payment = input.payment === undefined || input.payment === null ? null : stayPaymentFields(input.payment, 'payment.', false)
+  // The guest's answers to the home's questions, as the host took them; a retry with other answers is another stay.
+  const answered = JSON.stringify(formAnswersFingerprint(input.answers))
+  const replay = async () => {
+    const existing = await queryFirst<Record<string, unknown>>(db, `SELECT ${STAY_COLUMNS} FROM ${STAY_FROM} WHERE s.organization_id = ? AND s.idempotency_key = ?`, [access.organizationId, key])
+    if (!existing) return null
+    const stored = mapStay(existing)
+    const asked = { ...fields, ...window }
+    const kept = { check_in_date: stored.check_in_date, check_out_date: stored.check_out_date, starts_at: stored.starts_at, ends_at: stored.ends_at, adults: stored.adults, children: stored.children, infants: stored.infants,
+      guest_name: stored.guest_name, guest_email: stored.guest_email, guest_phone: stored.guest_phone, total_minor: stored.total_minor, private_notes: stored.private_notes }
+    if (stored.product_id !== home.product_id || stored.channel !== channel || stored.channel_booking_id !== channelBookingId || Object.entries(kept).some(([field, value]) => asked[field as keyof typeof asked] !== value)
+      || JSON.stringify(formAnswersFingerprint(stored.answers)) !== answered) {
+      fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a stay with different saved details. Reload the stay before another change; a create retry does not edit an existing stay.', 'idempotency_key')
     }
-    if (home.replay) {
-      const earlier = await replay()
-      if (earlier) return publish(earlier)
+    const initialPayment = await queryFirst<StayPaymentFields>(db,
+      'SELECT amount_minor, method, paid_on, reference, note FROM offline_payments WHERE organization_id = ? AND booking_id = ? AND idempotency_key = ?', [access.organizationId, stored.id, `${key}:payment`]) ?? null
+    if ((payment === null) !== (initialPayment === null) || (payment && initialPayment && Object.entries(payment).some(([field, value]) => initialPayment[field as keyof StayPaymentFields] !== value))) {
+      fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a stay with a different saved initial payment', 'idempotency_key')
     }
-    if (!imported) assertStayCheckoutHorizon(fields.check_out_date, homeToday(home.timezone))
-    // A stay the host takes asks the home's questions as its direct booking does; the host's words are in the site's own language.
-    const questions = parseStoredFormQuestions(home.questions)
-    const answers = imported ? [] : validateFormAnswers({ questions, questions_revision: formQuestionsRevision(questions) }, {
-      answers: input.answers, questionsRevision: input.questions_revision, revisionRequired: false })
-    const id = crypto.randomUUID()
-    const now = new Date().toISOString()
-    const cancellation = imported ? null : bookedPolicyFor(days(fields.check_in_date, fields.check_out_date), home)
-    const policy = { ...bookingPolicy({ ...home, accessibility_contact_required: home.accessibility_contact_required === 1,
-      online_payment_required: home.online_payment_required === 1 }, null), cancellation } satisfies BookingPolicy
-    guestUserId ??= await createGuestUser(env, fields.guest_name)
-    const conversationId = crypto.randomUUID()
-    const partySize = fields.adults + fields.children
-    const recordedPayment = payment && { ...payment, id: crypto.randomUUID(), booking_id: id,
-      currency: home.currency, created_at: now, created_by: access.actorId } satisfies StayPayment
-    const turnovers = await turnoverTaskQueries(db, { organizationId: access.organizationId, now, before: null,
-      home, neighbours: home.turnover_neighbours,
-      after: { id, product_id: home.product_id, status: 'confirmed', check_in_date: fields.check_in_date, check_out_date: fields.check_out_date } })
-    let writes: Awaited<ReturnType<typeof executeBatch>>
-    try {
-      writes = await executeBatch(db, [
-        {
-          query: `INSERT INTO bookings (id, organization_id, user_id, product_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, adults, children, infants,
-                    status, answers, private_notes, policy_json, total_minor, currency, idempotency_key, version, channel, owner, channel_booking_id, received_at, created_at, updated_at)
-                  VALUES (CASE WHEN EXISTS (
-                    SELECT 1 FROM ${STAY_CREATION_HOME_FROM} WHERE c.organization_id = ? AND c.product_id = ?
-                      AND (c.location_id, l.timezone, b.check_in_time, b.check_out_time, b.assigned_member_id) IS (?, ?, ?, ?, ?)
-                      AND ${turnoverNeighboursSql('c', '?')} = ?
-                    ) THEN ? END, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, 1, ?, 'app', ?, ?, ?, ?)`,
-          params: [access.organizationId, home.product_id, home.location_id, home.timezone, home.check_in_time, home.check_out_time, home.assigned_member_id,
-            fields.check_in_date, home.turnover_neighbours,
-            id, access.organizationId, guestUserId, home.product_id, variants[0]!, home.location_id, window.starts_at, window.ends_at, home.timezone, partySize, fields.adults, fields.children, fields.infants,
-            JSON.stringify(answers), fields.private_notes, JSON.stringify(policy), fields.total_minor, home.currency, key, channel, channelBookingId, imported ? null : now, now, now],
-        },
-        ...reconcileNightsQueries(access.organizationId, id, { updated_at: now, version: 1, product_id: home.product_id, ...window, check_in_date: fields.check_in_date, check_out_date: fields.check_out_date }),
-        ...bookingConversationQueries({ organizationId: access.organizationId, bookingId: id, requestId: conversationId, locationId: home.location_id, userId: guestUserId, now,
-          guest: { name: fields.guest_name, email: fields.guest_email, phone: fields.guest_phone } }),
-        organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id,
-          context: access.audit, afterState: { ...fields, channel, channel_booking_id: channelBookingId }, ...(imported ? { metadata: { imported } } : {}) }),
-        ...(recordedPayment ? stayPaymentInsert(access, { id, currency: home.currency, location_id: home.location_id }, recordedPayment, `${key}:payment`, now, recordedPayment.id) : []),
-        ...turnovers,
-      ], { operation: 'Create stay' })
-    } catch (error) {
-      // A stale turnover snapshot supplies a null primary key, aborting the whole batch.
-      if (/NOT NULL constraint failed: bookings\.id\b/.test(error instanceof Error ? error.message : String(error))) {
-        if (attempt < 2) continue
-        fail(409, 'STAY_CALENDAR_CHANGED', 'The home calendar changed while saving the stay. Retry with the same idempotency key.', 'check_in_date')
-      }
-      if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
-      if (/UNIQUE constraint failed: bookings\.organization_id, bookings\.idempotency_key/.test(error instanceof Error ? error.message : String(error))) {
-        const concurrent = await replay()
-        if (concurrent) return publish(concurrent)
-      }
-      throw error
-    }
-    const stay: Stay = {
-      id, product_id: home.product_id, location_id: home.location_id, timezone: home.timezone, channel, owner: 'app',
-      status: 'confirmed', overbooked: false, ...window,
-      check_in_date: bookingDay(window.starts_at, home.timezone), check_out_date: bookingDay(window.ends_at, home.timezone),
-      adults: fields.adults, children: fields.children, infants: fields.infants, party_size: partySize,
-      guest_name: fields.guest_name, guest_email: fields.guest_email, guest_phone: fields.guest_phone, user_id: guestUserId,
-      total_minor: fields.total_minor, currency: home.currency, private_notes: fields.private_notes,
-      provider: null, external_booking_id: null, channel_booking_id: channelBookingId, channel_booking_url: channelBookingUrl(channel, channelBookingId),
-      conversation_id: conversationId, cancelled_at: null, cancellation_reason: null, request_status: null, respond_by: null, pay_by: null,
-      cancellation_policy: cancellation, answers, version: 1, created_at: now, updated_at: now,
-    }
-    return publish(stayWithPayments(stay, null, recordedPayment ? [recordedPayment] : [], null), changedTaskIds(writes))
+    return getStay(db, access, stored.id)
   }
+  if (home.replay) {
+    const earlier = await replay()
+    if (earlier) return publish(earlier)
+  }
+  if (!imported) assertStayCheckoutHorizon(fields.check_out_date, homeToday(home.timezone))
+  // A stay the host takes asks the home's questions as its direct booking does; the host's words are in the site's own language.
+  const questions = parseStoredFormQuestions(home.questions)
+  const answers = imported ? [] : validateFormAnswers({ questions, questions_revision: formQuestionsRevision(questions) }, {
+    answers: input.answers, questionsRevision: input.questions_revision, revisionRequired: false })
+  const id = crypto.randomUUID()
+  const now = new Date().toISOString()
+  const cancellation = imported ? null : bookedPolicyFor(days(fields.check_in_date, fields.check_out_date), home)
+  const policy = { ...bookingPolicy({ ...home, accessibility_contact_required: home.accessibility_contact_required === 1,
+    online_payment_required: home.online_payment_required === 1 }, null), cancellation } satisfies BookingPolicy
+  const guestUserId = await createGuestUser(env, fields.guest_name)
+  const conversationId = crypto.randomUUID()
+  const partySize = fields.adults + fields.children
+  const turnovers = turnoverTaskQueries({ organizationId: access.organizationId, now, before: null, homes: [home],
+    after: { id, product_id: home.product_id, status: 'confirmed', check_in_date: fields.check_in_date, check_out_date: fields.check_out_date } })
+  let writes: Awaited<ReturnType<typeof executeBatch>>
+  try {
+    writes = await executeBatch(db, [
+      {
+        query: `INSERT INTO bookings (id, organization_id, user_id, product_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, adults, children, infants,
+                  status, answers, private_notes, policy_json, total_minor, currency, idempotency_key, version, channel, owner, channel_booking_id, received_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, 1, ?, 'app', ?, ?, ?, ?)`,
+        params: [id, access.organizationId, guestUserId, home.product_id, variants[0]!, home.location_id, window.starts_at, window.ends_at, home.timezone, partySize, fields.adults, fields.children, fields.infants,
+          JSON.stringify(answers), fields.private_notes, JSON.stringify(policy), fields.total_minor, home.currency, key, channel, channelBookingId, imported ? null : now, now, now],
+      },
+      ...reconcileNightsQueries(access.organizationId, id, { updated_at: now, version: 1, product_id: home.product_id, ...window, check_in_date: fields.check_in_date, check_out_date: fields.check_out_date }),
+      ...bookingConversationQueries({ organizationId: access.organizationId, bookingId: id, requestId: conversationId, locationId: home.location_id, userId: guestUserId, now,
+        guest: { name: fields.guest_name, email: fields.guest_email, phone: fields.guest_phone } }),
+      organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id,
+        context: access.audit, afterState: { ...fields, channel, channel_booking_id: channelBookingId }, ...(imported ? { metadata: { imported } } : {}) }),
+      ...(payment ? stayPaymentInsert(access, { id, currency: home.currency, location_id: home.location_id }, payment, `${key}:payment`, now) : []),
+      ...turnovers,
+    ], { operation: 'Create stay' })
+  } catch (error) {
+    if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
+    if (/UNIQUE constraint failed: bookings\.organization_id, bookings\.idempotency_key/.test(error instanceof Error ? error.message : String(error))) {
+      const concurrent = await replay()
+      if (concurrent) return publish(concurrent)
+    }
+    throw error
+  }
+  return publish(await getStay(db, access, id), changedTaskIds(writes))
 }
 
 export function assertStayRequestEditable(stay: Pick<Stay, 'status' | 'respond_by'>): void {
@@ -1983,7 +1943,11 @@ function versionChanged(results: unknown): boolean {
 export async function updateStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: Record<string, unknown> & { version: unknown }): Promise<StayDetail> {
   requireManager(access)
   const current = await requireAppStay(db, access, stayId, input.version)
-  const home = await readStayHome(db, access, current.product_id)
+  const earliest = typeof input.check_in_date === 'string' && input.check_in_date < current.check_in_date ? input.check_in_date : current.check_in_date
+  const home = await queryFirst<TurnoverHome & Pick<StayHome, 'max_guests'>>(db, `
+    SELECT ${turnoverHomeColumns('?')}, b.default_capacity AS max_guests FROM ${TURNOVER_HOME_FROM}
+    WHERE c.organization_id = ? AND c.product_id = ?`, [earliest, access.organizationId, current.product_id])
+  if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
   const before: StayFields = { check_in_date: current.check_in_date, check_out_date: current.check_out_date, arrival_time: recordedArrival(current, home), adults: current.adults, children: current.children, infants: current.infants,
     guest_name: current.guest_name ?? '', guest_email: current.guest_email, guest_phone: current.guest_phone, total_minor: current.total_minor, private_notes: current.private_notes }
   const fields = stayFields({ ...before, ...input }, home)
@@ -1994,7 +1958,7 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
   const window = stayWindow(fields, home)
   const next = current.version + 1
   const now = new Date().toISOString()
-  const turnovers = await turnoverTaskQueries(db, { organizationId: access.organizationId, now, before: current,
+  const turnovers = turnoverTaskQueries({ organizationId: access.organizationId, now, before: current, homes: [home],
     after: { id: stayId, product_id: current.product_id, status: current.status, check_in_date: fields.check_in_date, check_out_date: fields.check_out_date } })
   let results: Awaited<ReturnType<typeof executeBatch>>
   try {
@@ -2044,7 +2008,8 @@ export async function cancelStay(db: DbClient, env: StayMutationEnv, access: Sta
     authorizationId: input.authorization_id, financialWritesAllowed: input.financial_writes_allowed, note: reason ?? undefined, now,
     committed: { query: "EXISTS(SELECT 1 FROM bookings WHERE organization_id=? AND id=? AND status='cancelled' AND version=?)", params: [access.organizationId, stayId, next] },
   })
-  const turnovers = await turnoverTaskQueries(db, { organizationId: access.organizationId, now, before: current, after: { ...current, status: 'cancelled' } })
+  const change = { organizationId: access.organizationId, before: current, after: { ...current, status: 'cancelled' as const } }
+  const turnovers = turnoverTaskQueries({ ...change, now, homes: await readTurnoverHomes(db, change) })
   const results = await executeBatch(db, [
     bookingStatusQuery({ organizationId: access.organizationId, bookingId: stayId, status: 'cancelled', reason, now,
       guard: { query: `version = ? AND owner = 'app' AND status <> 'cancelled' AND product_session_id IS NULL AND (${refund.guard?.query ?? '1 = 1'})`,
@@ -2229,7 +2194,8 @@ export async function cancelStayAsGuest(db: DbClient, env: StayMutationEnv & Clo
     const next = stay.version + 1
     // Stripe's full-remaining refund when the policy returns everything still held.
     const amount = quote.refund_minor === payment.captured_amount - payment.refunded_amount ? null : quote.refund_minor
-    const turnovers = await turnoverTaskQueries(db, { organizationId, now, before: stay, after: { ...stay, status: 'cancelled' } })
+    const change = { organizationId, before: stay, after: { ...stay, status: 'cancelled' as const } }
+    const turnovers = turnoverTaskQueries({ ...change, now, homes: await readTurnoverHomes(db, change) })
     const results = await executeBatch(db, [
       bookingStatusQuery({ organizationId, bookingId: stayId, status: 'cancelled', reason: 'guest_cancelled', now,
         guard: { query: `version = ? AND user_id = ? AND owner = 'app' AND channel = 'direct' AND status <> 'cancelled' AND product_session_id IS NULL
@@ -2296,7 +2262,8 @@ function stayPaymentFields(input: unknown, prefix: string, allowRefund: boolean)
   }
 }
 
-function stayPaymentInsert(access: StayAccess, stay: { id: string; currency: string; location_id: string }, payment: StayPaymentFields, key: string, now: string, id = crypto.randomUUID()): BatchQuery[] {
+function stayPaymentInsert(access: StayAccess, stay: { id: string; currency: string; location_id: string }, payment: StayPaymentFields, key: string, now: string): BatchQuery[] {
+  const id = crypto.randomUUID()
   return [
     {
       query: `INSERT INTO offline_payments (id, organization_id, booking_id, amount_minor, currency, method, paid_on, reference, note, idempotency_key, created_at, created_by)
@@ -2691,8 +2658,9 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   const policy = await stayPolicy(db, organizationId, landing, null, null)
   const version = previous ? previous.version + 1 : 1
   const now = new Date().toISOString()
-  const turnovers = await turnoverTaskQueries(db, { organizationId, now, before: previous,
-    after: { id, product_id: landing, status: booking.cancelled ? 'cancelled' : 'confirmed', check_in_date: booking.check_in_date, check_out_date: booking.check_out_date } })
+  const change = { organizationId, before: previous,
+    after: { id, product_id: landing, status: booking.cancelled ? 'cancelled' as const : 'confirmed' as const, check_in_date: booking.check_in_date, check_out_date: booking.check_out_date } }
+  const turnovers = turnoverTaskQueries({ ...change, now, homes: await readTurnoverHomes(db, change) })
   const write = (overbooked: 0 | 1): BatchQuery[] => [...(existing?.external_booking_id === null ? [{
     // An imported OTA confirmation becomes channel-owned when its real revision arrives; keep its one stay and night claims.
     query: `UPDATE bookings SET owner = 'channel', provider = ?, external_booking_id = ? WHERE organization_id = ? AND id = ?

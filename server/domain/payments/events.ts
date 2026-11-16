@@ -15,7 +15,7 @@ import { notifyStayBooked, raiseSettledFailures } from '~/server/utils/notificat
 import { paymentsBillingBasis } from './fx'
 import { deliverPaymentsUsage, paymentUsageEventQuery } from './usage'
 import { isStayPurchase } from './checkout'
-import { turnoverTaskQueries } from '~/server/domain/tasks'
+import { turnoverHomeSql, turnoverTaskQueries, type TurnoverHome } from '~/server/domain/tasks'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { stayRequestConfirmationKey } from '~/server/domain/requests'
@@ -198,7 +198,11 @@ function frozenAnswers(snapshot: Record<string, unknown>): FormAnswerSnapshot[] 
 }
 
 export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Payment,chargedAt:string):Promise<string|null>{
- const hold=await queryFirst<Hold>(db,'SELECT * FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?',[payment.id,payment.organization_id])
+ const hold=await queryFirst<Hold & { turnover_home: string | null; organization_exists: number }>(db,`
+   SELECT h.*, CASE WHEN h.session_id IS NULL AND h.status <> 'converted'
+                    THEN ${turnoverHomeSql('h.organization_id', 'h.product_id', 'h.starts_at')} END AS turnover_home,
+          EXISTS (SELECT 1 FROM organization o WHERE o.id=h.organization_id) AS organization_exists
+     FROM payment_checkout_holds h WHERE h.payment_id=? AND h.organization_id=?`, [payment.id,payment.organization_id])
  if(!hold||!hold.product_id)throw new Error('Booking payment has no durable hold')
  if(hold.status==='converted'){
   if(!hold.converted_booking_id)throw new Error('Converted hold has no booking')
@@ -223,12 +227,14 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
      WHERE v.id=? AND conversations.id=? AND conversations.organization_id=v.organization_id AND conversations.kind='booking' AND conversations.booking_id IS NULL`,params:[bookingId,hold.conversation_id]},
    ...conversationTaskQueries(hold.conversation_id,now)]
  }else{
-  if(!await queryFirst(db,'SELECT id FROM organization WHERE id=?',[payment.organization_id]))return null
+  if(!hold.organization_exists)return null
   const purchase=snapshot.stay
   if(!isStayPurchase(purchase)||purchase.product_id!==hold.product_id||purchase.total_minor!==payment.amount)throw new Error('Stay payment has no valid stay purchase')
   const buyerUserId=payment.buyer_user_id??hold.buyer_user_id
   if(!buyerUserId)throw new Error('Stay payment has no guest account')
-  const turnover = await turnoverTaskQueries(db, { organizationId: payment.organization_id, now, before: null,
+  if (!hold.turnover_home) throw new Error(`Home ${purchase.product_id} has no stay settings`)
+  const turnover = turnoverTaskQueries({ organizationId: payment.organization_id, now, before: null,
+   homes: [JSON.parse(hold.turnover_home) as TurnoverHome],
    after: { id: bookingId, product_id: purchase.product_id, status: 'confirmed', check_in_date: purchase.check_in_date, check_out_date: purchase.check_out_date } })
   if (approval) {
    if (!hold.conversation_id || hold.buyer_user_id !== buyerUserId || !hold.location_id) throw new Error('Approved stay payment has no guest conversation')
