@@ -57,7 +57,7 @@
           <p v-if="heroSubtitle" class="mt-1 break-words text-base text-muted">{{ heroSubtitle }}</p>
         </div>
         <div class="flex flex-col" :class="stay || (!personalScope && !purchase) ? 'items-start' : 'items-center text-center'">
-          <UBadge v-if="stay && (personalScope || (manage && requestStatus))" class="mt-3" :color="stay.status === 'confirmed' ? 'success' : 'neutral'" variant="soft" :label="statusLabel" />
+          <UBadge v-if="stay && (personalScope ? detail?.request_status : manage && requestStatus)" class="mt-3" :color="stay.status === 'confirmed' ? 'success' : 'neutral'" variant="soft" :label="statusLabel" />
           <div v-if="manage && hostActions.includes('confirm')" class="mt-5 flex flex-wrap justify-center gap-3">
             <UButton color="neutral" size="lg" :label="t('stay.approve_request')" :loading="busy === 'confirm'" :disabled="busy !== null" @click="decide('confirm')" />
             <UButton color="neutral" variant="outline" size="lg" :label="t('stay.decline_request')" :loading="busy === 'reject'" :disabled="busy !== null" @click="decide('reject')" />
@@ -75,7 +75,7 @@
         <section v-if="stay && panel" data-testid="reservation-panel">
           <img v-if="panel.image" :src="panel.image" alt="" class="mb-6 aspect-[4/3] w-full rounded-2xl bg-elevated object-cover">
           <h2 class="break-words text-[26px] font-semibold leading-8 tracking-tight text-highlighted">{{ panel.title }}</h2>
-          <p v-if="panel.hostedBy" class="mt-1 text-base text-muted">Hosted by {{ panel.hostedBy }}</p>
+          <p v-if="panel.host" class="mt-1 text-sm text-muted">Hosted by {{ panel.host.name }}</p>
           <div v-if="recordGuestName" class="mt-4 flex items-center -space-x-2">
             <span class="relative">
               <UAvatar :src="recordGuestImage || undefined" :alt="recordGuestName" :text="recordGuestName.slice(0, 1).toUpperCase()" size="xl" class="bg-accented ring-2 ring-default" :ui="{ fallback: 'font-semibold text-highlighted' }" />
@@ -84,7 +84,7 @@
             <span v-if="partySize > 1" class="flex size-10 items-center justify-center rounded-full bg-accented text-xs font-bold text-highlighted ring-2 ring-default" :aria-label="otherGuestLabel">+{{ partySize - 1 }}</span>
           </div>
 
-          <div class="mt-6 grid grid-cols-2 divide-x divide-default rounded-2xl bg-accented/40 p-5">
+          <div class="mt-6 grid grid-cols-2 divide-x divide-default rounded-2xl border border-default bg-accented/40 p-5">
             <div class="min-w-0 pe-5">
               <h3 class="text-base font-semibold text-highlighted">Check-in</h3>
               <p class="mt-1 text-sm text-muted">{{ panel.checkIn.date }}</p>
@@ -188,9 +188,16 @@
             </ul>
           </div>
 
-          <div v-if="panel.hostedBy" class="mt-8 flex items-center gap-4 border-t border-default pt-8">
-            <h2 class="min-w-0 flex-1 text-xl font-semibold text-highlighted">Hosted by {{ panel.hostedBy }}</h2>
-            <UAvatar :src="panel.hostImage || undefined" :alt="panel.hostedBy" :text="panel.hostedBy.slice(0, 1).toUpperCase()" size="xl" class="bg-accented" />
+          <div v-if="panel.host" class="mt-8 border-t border-default pt-8">
+            <div class="flex items-center gap-4">
+              <h2 class="min-w-0 flex-1 text-xl font-semibold text-highlighted">Hosted by {{ panel.host.name }}</h2>
+              <UAvatar :src="panel.host.image || undefined" :alt="panel.host.name" :text="panel.host.name.slice(0, 1).toUpperCase()" size="xl" class="bg-accented" />
+            </div>
+            <div v-if="panel.hostActions.length" class="mt-4">
+              <NuxtLink v-for="action in panel.hostActions" :key="action.label" :to="action.to" class="flex items-center gap-4 py-3" :data-testid="action.testid">
+                <UIcon :name="action.icon" class="size-5 shrink-0 text-highlighted" /><span class="min-w-0 flex-1 text-base text-highlighted">{{ action.label }}</span><UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+              </NuxtLink>
+            </div>
           </div>
 
           <div v-if="detail" class="mt-8 border-t border-default pt-8">
@@ -358,7 +365,7 @@
         </div>
       </template>
     </div>
-    <template v-if="(booking || stay) && !error && (messageTo || contactCallTo)" #footer>
+    <template v-if="booking && !error && (messageTo || contactCallTo)" #footer>
       <div class="flex flex-wrap justify-center gap-3">
         <UButton v-if="messageTo" :to="messageTo" :label="stay && personalScope ? t('stay.message_host') : 'Message'" :aria-label="messageLabel" color="neutral" class="pointer-events-auto h-14 rounded-full px-8 shadow-lg" />
         <UButton v-if="contactCallTo" :to="contactCallTo" label="Call" color="neutral" class="pointer-events-auto h-14 rounded-full px-8 shadow-lg" />
@@ -452,6 +459,7 @@ export const bookingEditorKey = Symbol('booking-editor') as InjectionKey<Booking
 </script>
 
 <script setup lang="ts">
+import type { RouteLocationRaw } from 'vue-router'
 import FormAnswersCard from '~/components/forms/FormAnswersCard.vue'
 import PaymentDetails from '~/components/dashboard/PaymentDetails.vue'
 import ChannelMark from '~/lib/components/workspace/messages/ChannelMark.vue'
@@ -752,50 +760,51 @@ const home = computed(() => accountStay.value?.home ?? null)
 const hostHome = computed(() => dashboardStay.value?.home ?? null)
 /** A stay's reservation as the one block draws it, for the business and for the guest alike. */
 const panel = computed(() => {
-  const value = stay.value
-  if (!value) return null
-  const guestHome = home.value, host = hostHome.value, full = detail.value
-  const guide = guestHome?.arrival_guide ?? null
-  const method = host?.check_in_method ?? guide?.check_in_method ?? null
+  const value = stay.value, place = recordHome.value
+  if (!value || !place) return null
+  const full = detail.value, guide = place.arrival_guide
+  const method = guide?.check_in_method ? STAY_CHECK_IN_METHODS[guide.check_in_method].label : null
   const day = (date: string) => formatCalendarDate(date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })
-  const clock = (time: string | null | undefined) => time ? formatTime(time, 'en') : null
+  const clock = (time: string | null) => time ? formatTime(time, 'en') : null
   const editor = `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/products/${encodeURIComponent(value.product_id)}`
-  const address = props.personalScope ? guestAddress.value || null : host?.address ?? null
+  const address = place.location?.address ? formatPostalAddress(place.location.address) : null
   const guests = full ? full.adults + full.children : guestCount.value
+  const action = (label: string, icon: string, testid: string, target: { to?: RouteLocationRaw; run?: () => void }) => ({ label, icon, testid, to: target.to, run: target.run })
   // The business writes each of these on the home's own page; the guest reads them in the sections below.
   const row = (label: string, icon: string, text: string, page: string, section: string) => props.personalScope
     ? { label, icon, detail: text, to: undefined, href: `#${section}` } : { label, icon, detail: text, to: `${editor}/${page}`, href: undefined }
+  // Beside its own conversation the reservation needs no way back to it.
+  const message = messageTo.value && !route.meta.dashboardThirdPane ? [action(messageLabel.value, 'i-lucide-message-circle', 'stay-message', { to: messageTo.value })] : []
   return {
-    image: recordImage.value,
-    title: guestHome?.name ?? host?.internal_name ?? '',
-    hostedBy: props.personalScope ? guestHome?.organization_name ?? null : host?.host?.name ?? null,
-    hostImage: host?.host?.image ?? null,
-    checkIn: { date: day(value.check_in_date), time: clock(recordHome.value?.check_in_time) },
-    checkOut: { date: day(value.check_out_date), time: clock(recordHome.value?.check_out_time) },
+    image: place.image_url,
+    title: place.name,
+    host: place.host,
+    checkIn: { date: day(value.check_in_date), time: clock(place.check_in_time) },
+    checkOut: { date: day(value.check_out_date), time: clock(place.check_out_time) },
     rows: [
       row('Getting there', 'i-lucide-map-pin', address ?? 'Address and directions', 'directions', 'getting-there'),
-      row('How to get inside', 'i-lucide-key-round', method ? STAY_CHECK_IN_METHODS[method].label : 'Details for an easy check-in', 'check-in-method', 'checking-in'),
+      row('How to get inside', 'i-lucide-key-round', method ?? 'Details for an easy check-in', 'check-in-method', 'checking-in'),
       row('House rules', 'i-lucide-book-open', 'Review these details for a smooth stay', 'house-rules', 'rules-and-instructions'),
       row('Checkout details', 'i-lucide-door-open', 'How to check out', 'checkout-instructions', 'checkout-details'),
     ],
     guests: `${guests} ${guests === 1 ? 'guest' : 'guests'}`,
     code: full?.channel_booking_id ?? value.booking_id.slice(0, 8).toUpperCase(),
     actions: props.personalScope
-      ? [{ label: 'Change or cancel reservation', icon: 'i-lucide-pencil', to: undefined, run: () => { manageOpen.value = true }, testid: 'stay-manage' }]
+      ? [action('Change or cancel reservation', 'i-lucide-pencil', 'stay-manage', { run: () => { manageOpen.value = true } })]
       : manage.value && !channelManaged.value ? [
-          ...(hostActions.value.includes('edit') ? [{ label: 'Change reservation', icon: 'i-lucide-pencil', to: { path: `${editorPath.value}/dates`, query: route.query }, run: undefined, testid: 'stay-change' }] : []),
-          ...(hostActions.value.includes('cancel') ? [{ label: 'Cancel reservation', icon: 'i-lucide-ban', to: undefined, run: () => void cancelStay(), testid: 'stay-cancel' }] : []),
+          ...(hostActions.value.includes('edit') ? [action('Change reservation', 'i-lucide-pencil', 'stay-change', { to: { path: `${editorPath.value}/dates`, query: route.query } })] : []),
+          ...(hostActions.value.includes('cancel') ? [action('Cancel reservation', 'i-lucide-ban', 'stay-cancel', { run: () => void cancelStay() })] : []),
         ] : [],
+    hostActions: props.personalScope ? [...message, ...(contactCallTo.value ? [action('Call host', 'i-lucide-phone', 'stay-call', { to: contactCallTo.value })] : [])] : message,
     address,
-    mapsUrl: guestHome?.location?.maps_url ?? null,
-    directions: host?.directions ?? guide?.directions ?? null,
-    method: method ? STAY_CHECK_IN_METHODS[method].label : null,
-    instructions: host?.check_in_instructions ?? guide?.check_in_instructions ?? null,
-    manual: host?.house_manual ?? guide?.house_manual ?? null,
-    rules: host?.house_rules ?? guestHome?.house_rules ?? [],
-    // What only the guest's own reservation carries: the Wi-Fi, the safety notes and how to check out.
+    mapsUrl: place.location?.maps_url ?? null,
+    directions: guide?.directions ?? null,
+    method,
+    instructions: guide?.check_in_instructions ?? null,
+    manual: guide?.house_manual ?? null,
+    rules: place.house_rules,
     wifi: guide && (guide.wifi_network || guide.wifi_password) ? { network: guide.wifi_network, password: guide.wifi_password } : null,
-    safety: guestHome?.safety ?? [],
+    safety: place.safety,
     checkout: guide?.checkout_instructions ?? [],
   }
 })
@@ -810,7 +819,6 @@ const arrivalTime = computed(() => {
   const local = new Intl.DateTimeFormat('en-GB', { timeZone: value.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value.starts_at))
   return local === recordHome.value?.check_in_time ? null : formatTime(local, 'en')
 })
-const guestAddress = computed(() => home.value?.location?.address ? formatPostalAddress(home.value.location.address) : '')
 const cancellation = computed(() => accountStay.value?.cancellation ?? null)
 const canRequestChange = computed(() => props.personalScope && detail.value !== null && !isChannelManagedStay(detail.value) && Boolean(messageTo.value) && detail.value.status === 'confirmed'
   && (detail.value.ends_at.length === 10 ? detail.value.check_out_date >= localDateAt(new Date(), detail.value.timezone) : Date.parse(detail.value.ends_at) > Date.now()))
@@ -848,7 +856,7 @@ const requestStatus = computed(() => detail.value?.request_status)
 const hostActions = computed(() => managedStay.value?.booking.available_actions ?? [])
 /** A business's panel: the record cards lose their surface and sit under one another with a rule between them. */
 const flatSections = 'divide-y divide-default [&>[data-slot=root]]:rounded-none [&>[data-slot=root]]:bg-transparent [&>[data-slot=root]]:shadow-none [&>[data-slot=root]]:ring-0 [&>[data-slot=root]>[data-slot=body]]:px-0 [&>[data-slot=root]>[data-slot=body]]:py-6'
-const pageTitle = computed(() => stay.value ? props.personalScope ? 'Your stay' : 'Reservation' : timedTitle.value)
+const pageTitle = computed(() => stay.value ? 'Reservation' : timedTitle.value)
 const statusLabel = computed(() => {
   if (!stay.value) return 'Stay'
   if (paymentProcessing.value) return t('payment.processing')

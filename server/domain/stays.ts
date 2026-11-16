@@ -1769,7 +1769,7 @@ function recordedArrival(stay: Pick<Stay, 'starts_at' | 'timezone'>, home: Pick<
   return time === home.check_in_time ? null : time
 }
 
-/** The terms a nights booking is made under: the home's guest terms, its payment, and the cancellation policy a guest paying on the site agreed to. */
+/** The terms a nights booking is made under: the home's guest terms, its payment, and the home's cancellation policy for its length; a stay imported from another channel has that channel's, which KrabiClaw does not hold. */
 async function stayPolicy(db: DbClient, organizationId: string, productId: string, payment: { price: Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'> } | null, cancellation: StayBookedPolicy | null): Promise<string> {
   const config = await requireBookingConfig(db, organizationId, productId)
   return JSON.stringify({ ...bookingPolicy(config, payment?.price ?? null), cancellation } satisfies BookingPolicy)
@@ -1855,7 +1855,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
     locale: null, answers: input.answers, questionsRevision: input.questions_revision, revisionRequired: false })
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
-  const [policy, guestUserId] = await Promise.all([stayPolicy(db, access.organizationId, home.product_id, null, null), createGuestUser(env, fields.guest_name)])
+  const [policy, guestUserId] = await Promise.all([stayPolicy(db, access.organizationId, home.product_id, null, imported ? null : bookedPolicyFor(days(fields.check_in_date, fields.check_out_date), home)), createGuestUser(env, fields.guest_name)])
   const turnovers = await turnoverTaskQueries(db, { organizationId: access.organizationId, now, before: null,
     after: { id, product_id: home.product_id, status: 'confirmed', check_in_date: fields.check_in_date, check_out_date: fields.check_out_date } })
   try {
@@ -2035,7 +2035,7 @@ export interface GuestStay {
   /** The business the stay is with: a business's site shows only its own. */
   organization_id: string
   stay: StayDetail
-  home: { name: string; organization_name: string; check_in_time: string | null; check_out_time: string | null; image_url: string | null; location: { address: PostalAddress | null; latitude: number | null; longitude: number | null; maps_url: string | null } | null; arrival_guide: StayArrivalGuide | null; house_rules: string[]; safety: string[] }
+  home: { name: string; organization_name: string; check_in_time: string | null; check_out_time: string | null; image_url: string | null; location: { address: PostalAddress | null; latitude: number | null; longitude: number | null; maps_url: string | null } | null; arrival_guide: StayArrivalGuide | null; house_rules: string[]; safety: string[]; host: { name: string; image: string | null } | null }
   /** Null once the stay is cancelled, or for a stay not paid on the site. */
   cancellation: StayCancellationQuote | null
   payment_processing: boolean
@@ -2043,8 +2043,9 @@ export interface GuestStay {
 
 /** The account's stay by its activity ID: its conversation's ID, or the stay's own when it has none. */
 export async function readGuestStay(db: DbClient, buyerUserId: string, activityId: string): Promise<GuestStay> {
-  const owned = await queryFirst<{ id: string; conversation_id: string; organization_id: string; product_id: string; status: string; name: string; organization_name: string; check_in_time: string | null; check_out_time: string | null; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; paid_online: number; payment_processing: number }>(db, `
+  const owned = await queryFirst<{ id: string; conversation_id: string; organization_id: string; product_id: string; status: string; name: string; organization_name: string; check_in_time: string | null; check_out_time: string | null; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; host_name: string | null; host_image: string | null; paid_online: number; payment_processing: number }>(db, `
     SELECT s.id, r.id AS conversation_id, s.organization_id, s.product_id, s.status, p.name, o.name AS organization_name, b.check_in_time, b.check_out_time, l.address, l.latitude, l.longitude, l.maps_url,
+           hu.name AS host_name, hu.image AS host_image,
            EXISTS (SELECT 1 FROM payments WHERE organization_id = s.organization_id AND subject_type = 'booking' AND subject_id = s.id AND captured_amount > 0) AS paid_online,
            CASE WHEN s.status='pending' AND ${stayRequestRespondBySql('s')} IS NOT NULL THEN NOT (${noStayRequestPaymentInFlightSql('r.id')}) ELSE 0 END AS payment_processing
       FROM conversations r JOIN bookings s ON s.id = r.booking_id AND s.organization_id = r.organization_id
@@ -2053,6 +2054,8 @@ export async function readGuestStay(db: DbClient, buyerUserId: string, activityI
       JOIN product_booking_configs b ON b.organization_id = s.organization_id AND b.product_id = s.product_id
       JOIN organization o ON o.id = s.organization_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
+      LEFT JOIN member hm ON hm.organizationId = b.organization_id AND hm.id = b.assigned_member_id
+      LEFT JOIN user hu ON hu.id = hm.userId
      WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND s.owner = 'app' AND s.product_session_id IS NULL`, [new Date().toISOString(), activityId, buyerUserId])
   if (!owned) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'booking_id')
   await ownedBuyerRequest(db, buyerUserId, owned.conversation_id)
@@ -2087,7 +2090,7 @@ export async function readGuestStay(db: DbClient, buyerUserId: string, activityI
     houseRules = stayHouseRuleLines(product.details, value => formatTime(value, 'en'))
     safety = [...staySafetyLines(product.details), ...stayAlarmLines(home.amenity_answers, product.details, { includeUnknown: true })]
   }
-  return { organization_id: owned.organization_id, stay, home: { name: owned.name, organization_name: owned.organization_name, check_in_time: owned.check_in_time, check_out_time: owned.check_out_time, image_url: pictures.get(owned.product_id)?.imageUrl ?? null, location, arrival_guide: arrivalGuide, house_rules: houseRules, safety }, cancellation, payment_processing: owned.payment_processing === 1 }
+  return { organization_id: owned.organization_id, stay, home: { name: owned.name, organization_name: owned.organization_name, check_in_time: owned.check_in_time, check_out_time: owned.check_out_time, image_url: pictures.get(owned.product_id)?.imageUrl ?? null, location, arrival_guide: arrivalGuide, house_rules: houseRules, safety, host: owned.host_name === null ? null : { name: owned.host_name, image: owned.host_image } }, cancellation, payment_processing: owned.payment_processing === 1 }
 }
 
 /**
