@@ -17,9 +17,9 @@ jobs:
           echo "curl / status=$status"
           awk 'BEGIN { IGNORECASE=1 } /^(content-type|cf-ray|cf-mitigated):/ { print }' "$RUNNER_TEMP/blawby-home.headers"
           [[ "$status" == 200 ]]
-          rg -qi '^content-type: text/html' "$RUNNER_TEMP/blawby-home.headers"
-          rg -qi '^cf-ray: ' "$RUNNER_TEMP/blawby-home.headers"
-          if rg -qi '^cf-mitigated:|cdn-cgi/challenge-platform' "$RUNNER_TEMP/blawby-home.headers" || rg -qi '<title>Just a moment' "$RUNNER_TEMP/blawby-home.html"; then
+          grep -Eqi '^content-type: text/html' "$RUNNER_TEMP/blawby-home.headers"
+          grep -Eqi '^cf-ray: ' "$RUNNER_TEMP/blawby-home.headers"
+          if grep -Eqi '^cf-mitigated:|cdn-cgi/challenge-platform' "$RUNNER_TEMP/blawby-home.headers" || grep -Eqi '<title>Just a moment' "$RUNNER_TEMP/blawby-home.html"; then
             echo 'Cloudflare challenged the home page'
             exit 1
           fi
