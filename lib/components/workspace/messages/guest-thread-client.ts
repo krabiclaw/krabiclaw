@@ -105,6 +105,7 @@ export function isConversationPage(value: unknown): value is ConversationPage {
   const { conversation, page } = value
   if (!isText(conversation.title) || !Array.isArray(conversation.participants) || !conversation.participants.every(person =>
     isRecord(person) && (isText(person.id) || (value.viewer_role === 'guest' && person.id === null)) && isText(person.name) && isNullableText(person.image)
+    && (person.invitation_id === undefined || isText(person.invitation_id))
     && (person.role === 'guest' || person.role === 'member') && isText(person.title) && typeof person.can_remove === 'boolean')) return false
   if ((conversation.kind !== 'team' && conversation.kind !== 'guest' && conversation.kind !== 'support')
     || typeof conversation.is_group !== 'boolean' || !isNullableText(conversation.name) || !isNullableText(conversation.booking_id)

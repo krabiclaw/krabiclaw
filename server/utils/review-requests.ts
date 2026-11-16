@@ -10,6 +10,13 @@ export function submittedReviewRequestSql(review: string): string {
     AND rr.booking_id = ${review}.booking_id AND rr.submitted_at IS NOT NULL AND ${review}.source = 'direct')`
 }
 
+/** Historical no-shows remain part of the booking conversation. */
+export function historicalNoShowSql(conversation: string): string {
+  return `EXISTS (SELECT 1 FROM messages m
+    WHERE m.organization_id = ${conversation}.organization_id AND m.conversation_id = ${conversation}.id
+      AND m.event_name IN ('booking.no_show', 'stay.no_show', 'reservation.no_show'))`
+}
+
 export interface ReviewRequestRow {
   id: string
   organization_id: string
@@ -47,7 +54,7 @@ export interface ReviewBookingContext {
   guest_name: string | null
   guest_email: string | null
   status: string
-  no_show_at: string | null
+  no_show: boolean
   /** When the visit ended: its booking's end instant; null for a stay whose home had no checkout time. */
   completed_at: string | null
   review_request_sent_at: string | null
@@ -83,7 +90,7 @@ export function addDays(iso: string, days: number): string {
 export function reviewInvitationDue(context: ReviewBookingContext, now = new Date()): boolean {
   if (context.completed_at === null) return false
   const ended = Date.parse(context.completed_at)
-  return context.status === 'confirmed' && context.no_show_at === null
+  return context.status === 'confirmed' && !context.no_show
     && !context.review_request_sent_at && !context.review_submitted_at && !context.review_id
     && ended + REVIEW_REQUEST_DELAY_HOURS * 3_600_000 <= now.getTime()
     && ended + REVIEW_REQUEST_TTL_DAYS * 86_400_000 > now.getTime()
@@ -111,7 +118,7 @@ export function resolveGoogleReviewUrl(location: Pick<ReviewBookingContext, 'goo
   return placeId ? `https://search.google.com/local/writereview?placeid=${encodeURIComponent(placeId)}` : null
 }
 
-type ReviewBookingContextRow = Omit<ReviewBookingContext, 'completed_at' | 'subject'> & { ends_at: string }
+type ReviewBookingContextRow = Omit<ReviewBookingContext, 'completed_at' | 'subject' | 'no_show'> & { ends_at: string; no_show: number }
 
 /**
  * The visit a review is about, read from its booking: a session booking (a
@@ -125,7 +132,7 @@ export async function getReviewBookingContext(
   const row = await queryFirst<ReviewBookingContextRow>(db, `SELECT b.id AS booking_id, r.id AS request_id, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit,
     r.organization_id, r.location_id, r.user_id,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email,
-    b.status, b.no_show_at, b.ends_at,
+    b.status, ${historicalNoShowSql('r')} AS no_show, b.ends_at,
     -- Whether the visit was invited and answered is the review_requests record's, not the thread's.
     (SELECT MIN(rr.first_sent_at) FROM review_requests rr WHERE rr.booking_id = b.id) AS review_request_sent_at,
     (SELECT MIN(rr.submitted_at) FROM review_requests rr WHERE rr.booking_id = b.id) AS review_submitted_at,
@@ -138,10 +145,10 @@ export async function getReviewBookingContext(
     JOIN products p ON p.organization_id = b.organization_id AND p.id = b.product_id
     WHERE b.id = ? AND b.channel = 'direct'`, [bookingId])
   if (!row) return null
-  const { ends_at, ...context } = row
+  const { ends_at, no_show, ...context } = row
   // A stay whose home had no checkout time ends on a day, not at a moment; it is not invited.
   const completedAt = ends_at.length === 10 ? null : ends_at
-  return { ...context, completed_at: completedAt, subject: reviewSubject(row.unit === 'nights' ? 'stay' : 'booking', row.product_kind) }
+  return { ...context, no_show: no_show === 1, completed_at: completedAt, subject: reviewSubject(row.unit === 'nights' ? 'stay' : 'booking', row.product_kind) }
 }
 
 export async function getReviewRequestByToken(
@@ -162,7 +169,7 @@ export async function getReviewRequestByToken(
 
   if (!request) return null
   const context = await getReviewBookingContext(db, request.booking_id)
-  if (!context || context.user_id !== request.user_id) return null
+  if (!context || context.no_show || context.user_id !== request.user_id) return null
 
   if (opts.markClicked && !request.clicked_at) {
     const now = new Date().toISOString()

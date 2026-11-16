@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { publishAccessInvalidation, publishConversationEvent, publishDashboardInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
-import { conversationAccessDenied, participantGuard } from '~/server/domain/conversations'
+import { conversationAccessDenied, currentParticipantSql, CURRENT_GUEST_SQL } from '~/server/domain/conversations'
 import { hashIdentifier } from '~/server/utils/hourly-rate-limit'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 
@@ -142,18 +142,27 @@ export async function setListingMessagingAccess(db: DbClient, env: GuestInboxPub
   return { listing_id: input.listingId, member_id: input.memberId, allowed: input.allowed }
 }
 
-export async function createConversationGuestInvite(db: DbClient, principal: MemberAccessPrincipal, input: { conversationId: string; email: string }) {
+/** The booking account and seated hosts can manage companion access. */
+function bookingGuestManagerSql(actor: string) {
+  return `EXISTS (SELECT 1 FROM conversation_participants seat
+    WHERE seat.conversation_id = c.id AND seat.organization_id = c.organization_id AND seat.user_id = ${actor}
+      AND ${currentParticipantSql('seat')}
+      AND (seat.role = 'member'
+        OR (seat.role = 'guest' AND seat.user_id = c.user_id AND ${CURRENT_GUEST_SQL('c')}
+          AND EXISTS (SELECT 1 FROM bookings b WHERE b.id = c.booking_id AND b.organization_id = c.organization_id AND b.owner = 'app'))))`
+}
+
+export async function createConversationGuestInvite(db: DbClient, principal: Pick<MemberAccessPrincipal, 'organizationId' | 'userId'>, input: { conversationId: string; email: string }) {
   const email = input.email.trim().toLowerCase()
   if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HTTPError({ statusCode: 422, message: 'A valid invite email is required' })
   const token = crypto.randomUUID() + crypto.randomUUID()
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
   const tokenHash = await hashIdentifier(token)
-  const authority = participantGuard('c', principal.userId, 'member')
   const [result] = await executeBatch(db, [{
     query: `INSERT INTO conversation_guest_invites (id, organization_id, conversation_id, email, token_hash, inviter_id, expires_at)
       SELECT ?, c.organization_id, c.id, ?, ?, ?, ? FROM conversations c
-      WHERE c.id = ? AND c.organization_id = ? AND c.kind = 'booking' AND c.booking_id IS NOT NULL AND c.blocked_at IS NULL AND ${authority.sql}`,
-    params: [crypto.randomUUID(), email, tokenHash, principal.userId, expiresAt, input.conversationId, principal.organizationId, ...authority.params],
+      WHERE c.id = ? AND c.organization_id = ? AND c.kind = 'booking' AND c.booking_id IS NOT NULL AND c.blocked_at IS NULL AND ${bookingGuestManagerSql('?')}`,
+    params: [crypto.randomUUID(), email, tokenHash, principal.userId, expiresAt, input.conversationId, principal.organizationId, principal.userId],
   }], { operation: 'Invite traveler to a conversation' })
   if (result?.meta.changes !== 1) throw new HTTPError({ statusCode: 404, message: 'Booking conversation not found' })
   return { token, expires_at: expiresAt, conversation_id: input.conversationId, organization_id: principal.organizationId }
@@ -165,15 +174,14 @@ export async function acceptConversationGuestInvite(db: DbClient, env: GuestInbo
   const hash = await hashIdentifier(input.token)
   const now = new Date().toISOString()
   const userId = input.user.id
-  // The token, verified email, sender's current seat and membership, and booking are checked inside the write.
+  // Check the token, verified recipient and sender's current authority inside the write.
   await executeBatch(db, [{
     query: `UPDATE conversation_guest_invites AS i SET accepted_at = ?, accepted_user_id = ?
       WHERE i.token_hash = ? AND i.expires_at > ? AND i.accepted_at IS NULL
         AND EXISTS (SELECT 1 FROM user u WHERE u.id = ? AND u.emailVerified = 1 AND u.isAnonymous IS NOT 1 AND lower(u.email) = i.email)
-        AND EXISTS (SELECT 1 FROM conversations c JOIN conversation_participants p ON p.conversation_id = c.id AND p.role = 'member'
-          JOIN member m ON m.organizationId = p.organization_id AND m.userId = p.user_id
+        AND EXISTS (SELECT 1 FROM conversations c
           WHERE c.id = i.conversation_id AND c.organization_id = i.organization_id AND c.kind = 'booking' AND c.booking_id IS NOT NULL AND c.blocked_at IS NULL
-            AND p.user_id = i.inviter_id)
+            AND ${bookingGuestManagerSql('i.inviter_id')})
         AND NOT EXISTS (SELECT 1 FROM conversation_participants p WHERE p.conversation_id = i.conversation_id AND p.user_id = ? AND p.role = 'member')`,
     params: [now, userId, hash, now, userId, userId],
   }, {
@@ -192,31 +200,37 @@ export async function acceptConversationGuestInvite(db: DbClient, env: GuestInbo
   return invite
 }
 
-/** A host can revoke an invited traveler's access. The booking account has its own lifecycle. */
-export async function removeConversationGuest(db: DbClient, env: GuestInboxPublicationEnv, input: { conversationId: string; organizationId: string; hostUserId: string; travelerUserId: string }) {
-  const { conversationId, organizationId, hostUserId, travelerUserId } = input
-  const authority = participantGuard('c', hostUserId, 'member')
-  const target = `SELECT c.id FROM conversations c WHERE c.id = ? AND c.organization_id = ? AND c.kind = 'booking' AND c.booking_id IS NOT NULL
-    AND c.user_id IS NOT ? AND ${authority.sql}
-    AND EXISTS (SELECT 1 FROM conversation_guest_invites accepted WHERE accepted.conversation_id = c.id
-      AND accepted.organization_id = c.organization_id AND accepted.accepted_user_id = ?)`
-  const params = [conversationId, organizationId, travelerUserId, ...authority.params, travelerUserId]
+/** Revoke a companion's access while preserving the booking account's seat. */
+export async function removeConversationGuest(db: DbClient, env: GuestInboxPublicationEnv, input: { conversationId: string; organizationId: string; userId: string } & ({ travelerUserId: string } | { invitationId: string })) {
+  const { conversationId, organizationId, userId } = input
+  const byInvitation = 'invitationId' in input
+  const target = `SELECT c.id, accepted.accepted_user_id FROM conversations c
+    JOIN conversation_guest_invites accepted ON accepted.conversation_id = c.id AND accepted.organization_id = c.organization_id
+    WHERE c.id = ? AND c.organization_id = ? AND c.kind = 'booking' AND c.booking_id IS NOT NULL
+      AND accepted.accepted_user_id IS NOT NULL AND c.user_id IS NOT accepted.accepted_user_id
+      AND ${bookingGuestManagerSql('?')} AND ${byInvitation ? 'accepted.id' : 'accepted.accepted_user_id'} = ?
+    LIMIT 1`
+  const params = [conversationId, organizationId, userId, byInvitation ? input.invitationId : input.travelerUserId]
   const now = new Date().toISOString()
   const [authorized] = await executeBatch(db, [{ query: target, params }, {
-    query: `UPDATE conversation_guest_invites AS i SET expires_at = ?
-      WHERE i.conversation_id IN (${target}) AND i.organization_id = ? AND i.expires_at > ?
+    query: `WITH target AS MATERIALIZED (${target})
+      UPDATE conversation_guest_invites AS i SET expires_at = ?
+      WHERE i.conversation_id = (SELECT id FROM target) AND i.organization_id = ? AND i.expires_at > ?
       AND (i.email IN (SELECT accepted.email FROM conversation_guest_invites accepted WHERE accepted.conversation_id = i.conversation_id
-        AND accepted.organization_id = i.organization_id AND accepted.accepted_user_id = ?)
-        OR i.email = (SELECT lower(email) FROM user WHERE id = ? AND emailVerified = 1))`,
-    params: [now, ...params, organizationId, now, travelerUserId, travelerUserId],
+        AND accepted.organization_id = i.organization_id AND accepted.accepted_user_id = (SELECT accepted_user_id FROM target))
+        OR i.email = (SELECT lower(email) FROM user WHERE id = (SELECT accepted_user_id FROM target) AND emailVerified = 1))`,
+    params: [...params, now, organizationId, now],
   }, {
-    query: `DELETE FROM conversation_participants WHERE conversation_id IN (${target}) AND organization_id = ? AND user_id = ? AND role = 'guest'`,
-    params: [...params, organizationId, travelerUserId],
+    query: `WITH target AS MATERIALIZED (${target})
+      DELETE FROM conversation_participants WHERE conversation_id = (SELECT id FROM target) AND organization_id = ?
+        AND user_id = (SELECT accepted_user_id FROM target) AND role = 'guest'`,
+    params: [...params, organizationId],
   }], { operation: 'Remove traveler from a conversation' })
-  if (!authorized?.results.length) conversationAccessDenied()
+  const removed = authorized?.results[0] as { accepted_user_id: string } | undefined
+  if (!removed) conversationAccessDenied()
   try {
     await publishDashboardInvalidation(env, { type: 'CONVERSATION_LEAVE', conversation_id: conversationId, organization_id: organizationId,
-      user_id: travelerUserId, event_id: crypto.randomUUID(), occurred_at: now })
+      user_id: removed.accepted_user_id, event_id: crypto.randomUUID(), occurred_at: now })
     await publishConversationEvent(env, db, { conversationId, type: 'MESSAGE_UPDATE' })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'Traveler access ended, but open apps could not be told. Retry the same operation.',

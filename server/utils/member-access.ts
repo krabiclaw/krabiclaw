@@ -522,10 +522,17 @@ export function assignedGuestThreadScope(alias: string, user: string | { /** Tru
   return { sql, params: typeof user === 'string' ? Array(sql.match(/\?/g)?.length ?? 0).fill(user) : [] }
 }
 
+/** Workspace operators see all bookings; members see bookings for their assigned products. */
+export async function bookingOperationsScope(input: Pick<MemberAccessPrincipal, 'organizationId' | 'role'>): Promise<'manage' | 'assigned' | null> {
+  if (await roleAllows({ ...input, permissions: { operations: ['update'] } })) return 'manage'
+  return await roleAllows({ ...input, permissions: { operations: ['assigned'] } }) ? 'assigned' : null
+}
+
 /** A booking is its product's assigned member's. Who sees a conversation is conversations.ts conversationAccessSql. */
 export async function assertAssignedBookingAccess(db: DbClient, input: MemberAccessPrincipal & { bookingId: string }): Promise<void> {
-  if (await roleAllows({ ...input, permissions: { operations: ['update'] } })) return
-  await assertRoleAllows({ ...input, permissions: { operations: ['assigned'] } })
+  const scope = await bookingOperationsScope(input)
+  if (scope === 'manage') return
+  if (scope === null) await assertRoleAllows({ ...input, permissions: { operations: ['assigned'] } })
   const assigned = await queryFirst(db, `SELECT b.id FROM bookings b
       JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
       WHERE b.organization_id = ? AND b.id = ? AND ${assignedMemberSql('c')}`,

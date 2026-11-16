@@ -4,10 +4,35 @@ import { buildDashboardUrl } from '~/server/utils/dashboard-links'
 import { domainPair, rootDomainForPair } from '~/server/utils/domain-shared'
 import { notifyDomainLifecycle } from '~/server/utils/domain-notifications'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
-import { getOrganizationDomains, groupCustomDomains } from '~/server/utils/domain-read-model'
+import { queryAll, queryFirst } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
+import { publishEvent, type DomainEvent } from '~/server/events'
 
 type DomainActor = { organizationId: string; organizationSlug: string; actorId: string; actorType: 'owner' | 'admin' }
+
+type DomainCheck = Extract<DomainEvent, { type: 'domain.check_requested' }>
+
+async function requestDomainCheck(env: CloudflareEnv, organizationId: string, domains: Array<Pick<DomainRecord, 'id' | 'cloudflare_hostname_id'>>, actor?: DomainActor) {
+  await publishEvent(env, {
+    type: 'domain.check_requested', organization_id: organizationId,
+    domains: domains.map(domain => ({ id: domain.id, cloudflare_hostname_id: domain.cloudflare_hostname_id ?? null })),
+    ...(actor && { actor: { id: actor.actorId, type: actor.actorType, organization_slug: actor.organizationSlug } }),
+  })
+}
+
+export async function reconcileRequestedDomains(env: CloudflareEnv, event: DomainCheck, retry: boolean): Promise<void> {
+  const db = env.DB
+  const dashboardUrl = event.actor && buildDashboardUrl({ env, organizationId: event.organization_id, organizationSlug: event.actor.organization_slug }, 'organization.domains')
+  for (const check of event.domains) {
+    const domain = await queryFirst<DomainRecord>(db, `
+      SELECT * FROM organization_domains WHERE id = ? AND organization_id = ? AND cloudflare_hostname_id IS ?
+        AND type = 'custom' AND desired_state = 'active' AND status NOT IN ('disabled', 'deleted')
+    `, [check.id, event.organization_id, check.cloudflare_hostname_id])
+    if (!domain) continue
+    const synced = await syncDomainWithCloudflare(env, db, domain, event.actor?.type, event.actor?.id, retry)
+    if (dashboardUrl) await notifyDomainLifecycle(env, db, { organizationId: event.organization_id, event: 'synced', domain: synced, dashboardUrl })
+  }
+}
 
 export async function connectDashboardDomain(
   env: CloudflareEnv, db: D1Database, actor: DomainActor,
@@ -38,8 +63,9 @@ export async function connectDashboardDomain(
   }
 
   const domains = await createCustomDomainPair(env, db, {
-    organizationId, domain: requestedDomain, includeWww, actorId, actorType,
+    organizationId, domain: requestedDomain, includeWww, actorId, actorType, resolutions,
   })
+  await requestDomainCheck(env, organizationId, domains)
   const dashboardUrl = buildDashboardUrl({ env, organizationId, organizationSlug }, 'organization.domains')
   for (const domain of domains) {
     await notifyDomainLifecycle(env, db, { organizationId, event: 'added', domain, dashboardUrl })
@@ -47,15 +73,10 @@ export async function connectDashboardDomain(
   return domains
 }
 
-export async function changeDashboardDomain(env: CloudflareEnv, db: D1Database, actor: DomainActor, domain: DomainRecord, action: 'synced' | 'deleted') {
+export async function changeDashboardDomain(env: CloudflareEnv, db: D1Database, actor: DomainActor, domain: DomainRecord, action: 'deleted') {
   const { organizationId, organizationSlug, actorId, actorType } = actor
   if (domain.organization_id !== organizationId || domain.type !== 'custom') throw new HTTPError({ statusCode: 404, message: 'Custom domain not found' })
   const dashboardUrl = buildDashboardUrl({ env, organizationId, organizationSlug }, 'organization.domains')
-  if (action === 'synced') {
-    const synced = await syncDomainWithCloudflare(env, db, domain.id, actorType, actorId, undefined, { forceRevalidation: true })
-    await notifyDomainLifecycle(env, db, { organizationId, event: action, domain: synced, dashboardUrl })
-    return synced
-  }
   await deleteCustomDomain(env, db, domain.id, actorType, actorId)
   await notifyDomainLifecycle(env, db, { organizationId, event: action, domain, dashboardUrl })
   return domain
@@ -64,13 +85,11 @@ export async function changeDashboardDomain(env: CloudflareEnv, db: D1Database, 
 export async function checkDashboardDomainGroup(env: CloudflareEnv, db: D1Database, actor: DomainActor, domain: DomainRecord) {
   if (domain.organization_id !== actor.organizationId || domain.type !== 'custom') throw new HTTPError({ statusCode: 404, message: 'Custom domain not found' })
   const root = rootDomainForPair(domain.domain)
-  const group = groupCustomDomains(await getOrganizationDomains(db, actor.organizationId)).find(item => item.id === root)
-  const targets = group?.domains.filter(item => item.desired_state === 'active' && item.status !== 'disabled') ?? []
+  const targets = await queryAll<Pick<DomainRecord, 'id' | 'cloudflare_hostname_id'>>(db, `
+    SELECT id, cloudflare_hostname_id FROM organization_domains WHERE organization_id = ? AND domain IN (?, ?)
+      AND type = 'custom' AND desired_state = 'active' AND status NOT IN ('disabled', 'deleted')
+    ORDER BY role ASC, id
+  `, [actor.organizationId, root, `www.${root}`])
   if (!targets.some(item => item.id === domain.id)) throw new HTTPError({ statusCode: 409, message: 'This domain can no longer be checked.' })
-  let result = domain
-  for (const target of targets) {
-    const checked = await changeDashboardDomain(env, db, actor, target, 'synced')
-    if (target.id === domain.id) result = checked
-  }
-  return result
+  await requestDomainCheck(env, actor.organizationId, targets, actor)
 }

@@ -54,6 +54,8 @@ export type ConversationEntry =
 
 export interface ConversationParticipant {
   id: string | null
+  /** The booker manages an invited guest by its conversation-scoped invitation ID. */
+  invitation_id?: string
   name: string
   image: string | null
   role: ConversationViewerRole

@@ -7,19 +7,16 @@ interface ScheduledTaskDefinition {
 }
 
 export type ScheduledTaskName =
-  | 'domain-reconciliation'
   | 'google-places-sync'
 
 type TaskLoader = () => Promise<{ default: ScheduledTaskDefinition }>
 
 /** The single source of truth for cron-to-task dispatch in Nitro's scheduled hook. */
 export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName[]>> = {
-  '*/10 * * * *': ['domain-reconciliation'],
   '0 0 * * SUN': ['google-places-sync'],
 }
 
 const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
-  'domain-reconciliation': async () => import('./tasks/domain-reconciliation'),
   'google-places-sync': async () => import('./tasks/google-places-sync'),
 }
 

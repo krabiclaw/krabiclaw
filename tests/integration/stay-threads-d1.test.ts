@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
+import { bindDatabaseEvents } from '../../server/db/index.ts'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { acceptConversationGuestInvite, createConversationGuestInvite, removeConversationGuest, setListingMessagingAccess } from '../../server/domain/conversation-participants.ts'
@@ -9,6 +10,7 @@ import { readGuestConversation, resolveConversationAccess  } from '../../server/
 import { createStay, updateStay, type StayAccess } from '../../server/domain/stays.ts'
 import { getConversationDetails } from '../../server/domain/guest-threads/inbox.ts'
 import { conversationPageFor } from './support/conversation-page.ts'
+import { captureEvents } from './support/events.ts'
 import { executeGuestThreadOperation, sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
 import { listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { findSubmissionByPhone } from '../../server/utils/submission-messages.ts'
@@ -39,9 +41,11 @@ test('a stay opens its guest conversation in the one inbox', async () => {
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+    const queue = captureEvents()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db, EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof',
       EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    bindDatabaseEvents(db, env)
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
@@ -65,6 +69,9 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     const unanswered = { ip_hash: null, cancellation: { token_hash: null, expires_at: null, used_at: null } }
     const ana = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'ana', check_in_date: day(3), check_out_date: day(6), adults: 2,
       guest_name: 'Ana Silva', guest_email: 'ana@example.test', guest_phone: '+61491570150', total_minor: 45_000 })
+    const stayChange = queue.take('stay.changed')
+    assert(stayChange?.body.type === 'stay.changed')
+    assert.deepEqual([stayChange.body.booking_id, stayChange.body.conversation_id], [ana.id, ana.conversation_id])
     const anaThread = await thread(ana.conversation_id)
     assert.deepEqual({ ...anaThread, payload_json: JSON.parse(anaThread!.payload_json) }, {
       kind: 'booking', location_id: 'cabin-site',
@@ -167,8 +174,8 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.equal(await readGuestConversation(db, OUTSIDER, bo.conversation_id), null)
     assert.deepEqual(await listConversations(db, ORG, { userId: OUTSIDER }), [])
     const outstanding = await createConversationGuestInvite(db, host, { conversationId: ana.conversation_id, email: traveler.email })
-    const removal = { organizationId: ORG, conversationId: ana.conversation_id, hostUserId: OWNER, travelerUserId: OUTSIDER }
-    await assert.rejects(removeConversationGuest(db, env, { ...removal, hostUserId: CLEANER }), { statusCode: 404 })
+    const removal = { organizationId: ORG, conversationId: ana.conversation_id, userId: OWNER, travelerUserId: OUTSIDER }
+    await assert.rejects(removeConversationGuest(db, env, { ...removal, userId: CLEANER }), { statusCode: 404 })
     assert.deepEqual(await removeConversationGuest(db, env, removal), { removed: true })
     assert.equal(await readGuestConversation(db, OUTSIDER, ana.conversation_id), null)
     for (const token of [invite.token, outstanding.token]) await assert.rejects(acceptConversationGuestInvite(db, env, { token, user: traveler }), { statusCode: 404 })

@@ -17,6 +17,7 @@ export type DomainEvent =
   | { type: 'booking.status_changed'; organization_id: string; conversation_id: string; message_id: string; delivery_id: string }
   | { type: 'booking.change'; organization_id: string; conversation_id: string; entry_id: string; proposal_id: string }
   | { type: 'business.wake'; organization_id: string; kind: 'reviews' | 'retention' | 'checkout' | 'ad_spend' | 'channex_ari'; due_at: number }
+  | { type: 'domain.check_requested'; organization_id: string; domains: Array<{ id: string; cloudflare_hostname_id: string | null }>; actor?: { id: string; type: 'owner' | 'admin'; organization_slug: string } }
   | { type: 'business.deadlines_backfill' }
   | { type: 'ad_spend.backfill' }
   | { type: 'site.cache_changed'; organization_id: string; invalidation_id: string | null }
@@ -77,7 +78,7 @@ export async function publishChangedJobs(env: EventsEnv, organizationId: string,
 }
 
 /** React to one event. A throw is the delivery's failure: Cloudflare retries it. */
-export async function consumeEvent(env: CloudflareEnv, event: DomainEvent): Promise<void> {
+export async function consumeEvent(env: CloudflareEnv, event: DomainEvent, retry = false): Promise<void> {
   if (event.type === 'airbnb.sync') {
     const { advanceAirbnbSyncJob } = await import('~/server/integrations/channex/airbnb-sync')
     await advanceAirbnbSyncJob(env, event.organization_id, event.job_id)
@@ -113,6 +114,11 @@ export async function consumeEvent(env: CloudflareEnv, event: DomainEvent): Prom
   if (event.type === 'business.deadlines_backfill') {
     const { enqueueOutstandingBusinessDeadlines } = await import('~/server/domain/due-business-work')
     await enqueueOutstandingBusinessDeadlines(env)
+    return
+  }
+  if (event.type === 'domain.check_requested') {
+    const { reconcileRequestedDomains } = await import('~/server/utils/domain-dashboard-actions')
+    await reconcileRequestedDomains(env, event, retry)
     return
   }
   if (event.type === 'site.cache_backfill') {

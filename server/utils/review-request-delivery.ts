@@ -12,6 +12,7 @@ import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events
 import {
   createReviewRequest,
   getReviewBookingContext,
+  historicalNoShowSql,
   markReviewRequestSendFailure,
   markReviewRequestSendSuccess,
   reviewInvitationDue,
@@ -126,7 +127,7 @@ export async function sendDueReviewInvitations(env: CloudflareEnv, organizationI
       SELECT b.id AS booking_id, b.ends_at
       FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.organization_id = b.organization_id AND r.kind = 'booking'
       WHERE b.organization_id = ? AND b.channel = 'direct' AND b.status = 'confirmed'
-        AND b.no_show_at IS NULL AND length(b.ends_at) > 10 AND b.ends_at > ?
+        AND NOT ${historicalNoShowSql('r')} AND length(b.ends_at) > 10 AND b.ends_at > ?
         AND NOT EXISTS (SELECT 1 FROM reviews rv WHERE rv.organization_id = b.organization_id AND rv.booking_id = b.id)
         AND NOT EXISTS (SELECT 1 FROM review_requests rr WHERE rr.booking_id = b.id AND rr.first_sent_at IS NOT NULL)
         AND json_type(r.payload_json, '$.guest.email') = 'text' AND r.user_id IS NOT NULL

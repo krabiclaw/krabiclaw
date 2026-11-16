@@ -3,6 +3,7 @@ import type { GuestStay, StayDetail, StayTurnover } from '~/server/domain/stays'
 import type { BookingHome } from '~/server/utils/dashboard-bookings'
 import type { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
 import { isGuestStay } from '~/shared/stay-arrival'
+import { isPublicProvider } from '~/shared/member-scheduling'
 import { isRecord } from '~/utils/api-clients'
 
 type NightBooking<T> = Omit<T, 'id'> & { booking_id: string; unit: 'nights' }
@@ -33,6 +34,7 @@ export function isBookingDetailsResponse(value: unknown): value is { booking: Da
     && (value.booking.guest_name === null || typeof value.booking.guest_name === 'string')
     && (value.booking.notes === null || typeof value.booking.notes === 'string')
     && Array.isArray(value.booking.resource_photo_urls) && value.booking.resource_photo_urls.every(url => typeof url === 'string')
+    && (value.booking.host === null || isPublicProvider(value.booking.host))
     && Array.isArray(value.booking.answers)
     && (value.booking.policy === null || isRecord(value.booking.policy))
 }
@@ -44,7 +46,8 @@ export function isDashboardBooking(value: unknown): value is DashboardBooking {
     if (!isRecord(home) || typeof home.name !== 'string' || typeof home.internal_name !== 'string' || !home.internal_name.trim()
       || ![home.check_in_time, home.check_in_end_time, home.check_out_time].every(field => field === null || typeof field === 'string')
       || !Array.isArray(home.photo_urls) || !home.photo_urls.every(url => typeof url === 'string')
-      || !Array.isArray(home.house_rules) || !Array.isArray(home.safety)) return false
+      || !Array.isArray(home.house_rules) || !Array.isArray(home.safety)
+      || (home.host !== null && !isPublicProvider(home.host)) || !Array.isArray(home.co_hosts) || !home.co_hosts.every(isPublicProvider)) return false
     if (!value.manage) return true
     const isTerms = (terms: unknown) => isRecord(terms) && typeof terms.dates === 'string' && Number.isInteger(terms.guests) && typeof terms.total === 'string'
     return typeof value.can_message_guest === 'boolean'

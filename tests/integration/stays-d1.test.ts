@@ -1600,7 +1600,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
     const body = await own.json() as GuestStay & { manage_url: string }
     const { location: guestLocation, arrival_guide: arrivalGuide, house_rules: rules, safety, ...guestHome } = body.home
     assert.deepEqual({ organization_id: body.organization_id, id: body.stay.id, email: body.stay.guest_email, policy: body.stay.cancellation_policy, dates: [body.stay.check_in_date, body.stay.check_out_date], home: guestHome, cancellation: body.cancellation },
-      { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: 'moderate', dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', photo_urls: [], listing: null, contact_phone: null, host: { name: OWNER, image: null } },
+      { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: 'moderate', dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', photo_urls: [], listing: null, contact_phone: null, host: { name: OWNER, photo_url: null, bio: null }, co_hosts: [] },
         cancellation: { policy: 'moderate', paid_minor: 45_000, refund_minor: 7_500, currency: 'USD' } })
     assert.equal(body.manage_url, `https://proof.example/dashboard/account/messages/${activityId}/reservation`)
     assert.deepEqual(arrivalGuide, { product_id: cabin.id, ...guide })

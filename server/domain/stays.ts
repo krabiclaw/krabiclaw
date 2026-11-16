@@ -1,6 +1,6 @@
 import { bookingReviewDueAt } from '~/server/utils/review-request-delivery'
 import { changedTaskIds, publishEvent, type DomainEvent, type EventsEnv } from '~/server/events'
-import { PUBLISHED_PROFILE_SQL } from '~/shared/member-scheduling'
+import { PUBLIC_PROVIDER_JSON_SQL, PUBLISHED_PROFILE_SQL, RESERVATION_HOST_SQL, type PublicProvider } from '~/shared/member-scheduling'
 import { bookChannelConversationGuest, reconcileGuestListingParticipants } from '~/server/domain/conversation-participants'
 import { HTTPError } from 'nitro'
 import { bookingStatusQuery } from '~/server/domain/bookings'
@@ -11,7 +11,7 @@ import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevisio
 import { acceptFormAnswers } from '~/server/domain/form-questions'
 import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, STAY_DIRECT_DISCOUNTS, stayChannelCalendarRules, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertResponsibleMember, assertRoleAllows, assignedMemberSql, BATCH_VIEWER, roleAllows, withViewer, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assertResponsibleMember, assertRoleAllows, assignedMemberSql, BATCH_VIEWER, bookingOperationsScope, withViewer, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { bookedRecordsInRange, businessWideViewer, type BookedRecordInRange } from '~/server/domain/product-bookings'
 import { organizationEventQuery, type OrganizationEvent } from '~/server/utils/organization-events'
 import { createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
@@ -73,8 +73,9 @@ type StayMutationEnv = ChannexEnv & GuestInboxPublicationEnv & EventsEnv
 
 /** Resolve a member's stay access from their Better Auth role: operations update manages, operations assigned reads assigned homes. */
 export async function stayAccessFor(principal: MemberAccessPrincipal): Promise<StayAccess> {
-  if (await roleAllows({ ...principal, permissions: { operations: ['update'] } })) return { organizationId: principal.organizationId, actorId: principal.userId, manage: true }
-  await assertRoleAllows({ ...principal, permissions: { operations: ['assigned'] } })
+  const scope = await bookingOperationsScope(principal)
+  if (scope === 'manage') return { organizationId: principal.organizationId, actorId: principal.userId, manage: true }
+  if (scope === null) await assertRoleAllows({ ...principal, permissions: { operations: ['assigned'] } })
   return { organizationId: principal.organizationId, actorId: principal.userId, manage: false, userId: principal.userId }
 }
 
@@ -2026,7 +2027,8 @@ export interface StayReservationHome {
   arrival_guide: StayArrivalGuide | null
   house_rules: string[]
   safety: string[]
-  host: { name: string; image: string | null } | null
+  host: PublicProvider | null
+  co_hosts: PublicProvider[]
 }
 
 /** The same home and host the reservation shows in both inboxes. */
@@ -2039,12 +2041,21 @@ export async function readStayReservationHome(db: DbClient, input: {
   const { organizationId, productId, showLocation, showArrival } = input
   const [house, photos] = await Promise.all([
     queryFirst<Pick<StayHome, 'name' | 'internal_name' | 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'check_in_method' | 'check_in_instructions' | 'wifi_network' | 'wifi_password' | 'directions' | 'house_manual'>
-      & { organization_name: string; listing_slug: string | null; subdomain: string | null; canonical_domain: string | null; contact_phone: string | null; checkout_instructions: string; amenities: string; details_json: string; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; host_name: string | null; host_image: string | null }>(db, `SELECT p.name, c.internal_name, o.name AS organization_name, b.check_in_time, b.check_in_end_time, b.check_out_time,
+      & { organization_name: string; listing_slug: string | null; subdomain: string | null; canonical_domain: string | null; contact_phone: string | null; checkout_instructions: string; amenities: string; details_json: string; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; host_json: string | null; co_hosts_json: string }>(db, `SELECT p.name, c.internal_name, o.name AS organization_name, b.check_in_time, b.check_in_end_time, b.check_out_time,
       c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password, c.directions, c.house_manual, c.checkout_instructions, c.amenities, p.details_json,
       CASE WHEN ${PUBLIC_STAY_SQL} THEN p.slug END AS listing_slug, o.subdomain,
       (SELECT domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS canonical_domain,
       CASE WHEN l.status = 'active' THEN l.phone END AS contact_phone,
-      l.address, l.latitude, l.longitude, l.maps_url, u.name AS host_name, u.image AS host_image
+      l.address, l.latitude, l.longitude, l.maps_url,
+      ${RESERVATION_HOST_SQL} AS host_json,
+      (SELECT json_group_array(json(profile)) FROM (
+        SELECT ${PUBLIC_PROVIDER_JSON_SQL} AS profile
+        FROM listing_message_members grant
+        JOIN member_scheduling ms ON ms.organization_id = grant.organization_id AND ms.member_id = grant.member_id
+        WHERE grant.organization_id = c.organization_id AND grant.listing_id = c.product_id
+          AND grant.member_id IS NOT b.assigned_member_id AND ${PUBLISHED_PROFILE_SQL}
+        ORDER BY lower(ms.public_name), ms.member_id
+      )) AS co_hosts_json
       FROM product_stay_configs c
       JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       JOIN organization o ON o.id = c.organization_id
@@ -2052,6 +2063,7 @@ export async function readStayReservationHome(db: DbClient, input: {
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
       LEFT JOIN member m ON m.organizationId = b.organization_id AND m.id = b.assigned_member_id
       LEFT JOIN user u ON u.id = m.userId
+      LEFT JOIN member_scheduling ms ON ms.organization_id = b.organization_id AND ms.member_id = b.assigned_member_id
       WHERE c.organization_id = ? AND c.product_id = ?`, [organizationId, productId]),
     readProductPhotos(db, { organizationId, productIds: [productId] }),
   ])
@@ -2073,7 +2085,8 @@ export async function readStayReservationHome(db: DbClient, input: {
       checkout_instructions: JSON.parse(house.checkout_instructions) as StayCheckoutInstruction[] } : null,
     house_rules: showLocation ? stayHouseRuleLines(details, value => formatTime(value, 'en')) : [],
     safety: showLocation ? [...staySafetyLines(details), ...stayAlarmLines(parseStayAmenityAnswers(JSON.parse(house.amenities)), details, { includeUnknown: true })] : [],
-    host: house.host_name === null ? null : { name: house.host_name, image: house.host_image },
+    host: house.host_json === null ? null : JSON.parse(house.host_json) as PublicProvider,
+    co_hosts: JSON.parse(house.co_hosts_json) as PublicProvider[],
   }
 }
 

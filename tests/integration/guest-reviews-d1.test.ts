@@ -8,6 +8,7 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { getGuestRequest, requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { nameConversationBooking } from './support/booking-state.ts'
 import { getReviewBookingContext, getReviewRequestByToken, REVIEW_PUBLICATION_PENDING } from '../../server/utils/review-requests.ts'
+import { appendMessage } from '../../server/domain/conversations.ts'
 import { sendDueReviewInvitations, sendReviewRequestForBooking } from '../../server/utils/review-request-delivery.ts'
 import { readInsightsPage } from '../../server/domain/insights.ts'
 import { listOrganizationReviews, setReviewStatus } from '../../server/utils/organization-reviews.ts'
@@ -141,8 +142,9 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     const stayContext = await getReviewBookingContext(db, 'cottage-record')
     assert.equal(stayContext?.completed_at, new Date(`${checkout}T04:00:00.000Z`).toISOString(), 'a stay ends at its home\'s checkout time in the home\'s zone')
 
-    // Older bookings may still carry a no-show recorded before the action was removed.
-    await db.prepare("UPDATE bookings SET no_show_at = ? WHERE id = 'absent-record'").bind(at(-HOUR)).run()
+    // A table no-show from before restaurant reservations joined bookings.
+    await appendMessage(db, { conversationId: T.absent!, authorKind: 'member', authorUserId: 'owner',
+      eventName: 'reservation.no_show', body: 'Marked as a no-show', occurredAt: at(-HOUR) })
     const sendDue = (bindings = env) => sendDueReviewInvitations(bindings, 'org', Date.now())
     const run = await sendDue()
     assert.equal(run.next, Date.parse((await db.prepare("SELECT ends_at FROM bookings WHERE id = 'early-record'").first<string>('ends_at'))!) + 24 * HOUR, 'the early visit sets the next deadline')
@@ -284,12 +286,14 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     // A historic no-show still disqualifies an invitation already on record.
     const lessonToken = await tokenFor('lesson')
     assert.ok(await getReviewRequestByToken(db, lessonToken))
-    const historicalNoShow = at(-HOUR)
-    await db.batch([
-      db.prepare("UPDATE bookings SET no_show_at = ? WHERE id = 'lesson-record'").bind(historicalNoShow),
-      db.prepare("UPDATE review_requests SET revoked_at = ? WHERE booking_id = 'lesson-record'").bind(historicalNoShow),
-    ])
+    await appendMessage(db, { conversationId: T.lesson!, authorKind: 'krabiclaw', authorUserId: 'owner',
+      eventName: 'booking.no_show', body: 'Marked as a no-show', occurredAt: at(-HOUR) })
     assert.equal(await getReviewRequestByToken(db, lessonToken), null)
+    const stayToken = await tokenFor('cottage')
+    assert.ok(await getReviewRequestByToken(db, stayToken))
+    await appendMessage(db, { conversationId: T.cottage!, authorKind: 'krabiclaw', authorUserId: 'owner',
+      eventName: 'stay.no_show', body: 'Marked as a no-show', occurredAt: at(-HOUR) })
+    assert.equal(await getReviewRequestByToken(db, stayToken), null)
 
     const app = new H3()
     app.get('/api/public/review-requests/validate', validateRoute)

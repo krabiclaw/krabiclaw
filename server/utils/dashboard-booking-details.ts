@@ -1,4 +1,4 @@
-import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
+import { MEMBER_NAME_SQL, RESERVATION_HOST_SQL, type PublicProvider } from '~/shared/member-scheduling'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { getGuestRequest, getThreadOperationalRecord, requestActions } from '~/server/domain/requests'
 import { CURRENT_GUEST_SQL, GUEST_NOTE_EVENT, type MessageRow } from '~/server/domain/conversations'
@@ -39,6 +39,8 @@ interface BookingChangeTerms {
 
 interface BookingRow {
   assigned_member_id: string | null
+  assigned_member_name: string | null
+  host_json: string | null
   booking_id: string
   version: number
   organization_id: string
@@ -80,6 +82,7 @@ export interface DashboardBookingDetails {
   payment_id: string | null
   assigned_member_id: string | null
   assigned_member_name: string | null
+  host: PublicProvider | null
   /** A future provider occurrence the caller may reassign through Better Auth. */
   updated_at: string
   booking_id: string | null
@@ -187,6 +190,8 @@ async function loadBookingRow(
   // guest.
   return queryFirst<BookingRow>(db, `SELECT record.id AS booking_id, record.version, r.organization_id, s.name AS organization_name, s.vertical,
     record.assigned_member_id, record.policy_json, record.product_kind, record.advance_notice_minutes, record.location_id, l.slug AS location_slug, l.title AS location_title, l.address AS location_address,
+    ${scope.buyerUserId ? 'NULL' : MEMBER_NAME_SQL} AS assigned_member_name,
+    ${RESERVATION_HOST_SQL} AS host_json,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status,
     (SELECT m.body FROM messages m WHERE m.conversation_id = r.id AND m.event_name = '${GUEST_NOTE_EVENT}' ORDER BY m.sequence LIMIT 1) AS notes,
@@ -200,6 +205,9 @@ async function loadBookingRow(
         LEFT JOIN product_booking_configs cfg ON cfg.product_id = b.product_id AND cfg.organization_id = b.organization_id
     ) record ON record.id = r.booking_id AND record.organization_id = r.organization_id
     LEFT JOIN business_locations l ON l.id = record.location_id
+    LEFT JOIN member_scheduling ms ON ms.organization_id = record.organization_id AND ms.member_id = record.assigned_member_id
+    LEFT JOIN member host_member ON host_member.organizationId = record.organization_id AND host_member.id = record.assigned_member_id
+    LEFT JOIN user u ON u.id = host_member.userId
     WHERE ${lookup === 'booking' ? 'record.id' : 'r.id'} = ? AND record.product_session_id IS NOT NULL AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${CURRENT_GUEST_SQL('r')}` : 'r.organization_id = ?'}`, [bookingId, type, scope.buyerUserId ?? scope.organizationId])
 }
 
@@ -309,7 +317,6 @@ async function composeBookingDetails(
       : queryFirst<{ contactPhone: string | null }>(db, 'SELECT contact_phone AS contactPhone FROM organization WHERE id = ?', [row.organization_id]),
   ])
 
-  const provider=!reader.buyerUserId&&row.assigned_member_id?await queryFirst<{name:string|null}>(db,`SELECT ${MEMBER_NAME_SQL} name FROM member m LEFT JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.id=? AND m.organizationId=?`,[row.assigned_member_id,row.organization_id]):null
   const now = new Date().toISOString()
   const complete = isBookingComplete({ status: row.status as BookingStatus, ends_at: row.ends_at }, now)
   const paymentIds=reader.buyerUserId
@@ -322,7 +329,7 @@ async function composeBookingDetails(
   const guestCanRetryCancellation = Boolean(reader.buyerUserId && row.status === 'cancelled' && row.cancellation_used_at
     && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, bookingId: row.booking_id, requestId: row.conversation_id, buyerUserId: reader.buyerUserId }))
   const { policy_json: _policy, location_address, answers_json, cancellation_used_at: _cancellation, advance_notice_minutes: _notice,
-    review_id: _review, private_notes, location_title, ...booking } = row
+    review_id: _review, private_notes, location_title, host_json, ...booking } = row
   return {
     ...booking,
     unit: 'slot',
@@ -331,7 +338,7 @@ async function composeBookingDetails(
       ...requestActions(await getThreadOperationalRecord(db, row.conversation_id), now).map(action => action === 'change' ? 'move' : action),
     ],
     payment_id: null,
-    assigned_member_name: provider?.name ?? null,
+    host: host_json === null ? null : JSON.parse(host_json) as PublicProvider,
     type,
     location_title: row.location_id === null ? 'Online' : location_title!,
     location_address: location_address ? formatPostalAddress(parsePostalAddress(location_address)) || null : null,
@@ -442,7 +449,7 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
   if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error('Purchase has no immutable title')
   const contact = payment.location_id ? await resolveLocationContact(db, payment.organization_id, payment.location_id) : { contactPhone: payment.contact_phone }
   return {
-    assigned_member_id: null, assigned_member_name: null,
+    assigned_member_id: null, assigned_member_name: null, host: null,
     // A purchase asks no questions.
     answers: [],
     payment_id: paymentId,

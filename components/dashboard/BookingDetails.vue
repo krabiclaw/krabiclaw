@@ -224,10 +224,23 @@
             </a>
           </div>
 
-          <div v-if="panel.host || panel.contact.length" :class="sectionClass">
+          <div v-if="panel.host || panel.coHosts.length || panel.contact.length" :class="sectionClass">
             <div v-if="panel.host" class="flex items-center gap-4">
               <h2 class="min-w-0 flex-1 text-lg font-semibold text-highlighted">Hosted by {{ panel.host.name }}</h2>
-              <UAvatar v-if="panel.host.image" :src="panel.host.image" :alt="panel.host.name" size="xl" class="bg-accented" />
+              <UAvatar :src="panel.host.photo_url ?? undefined" :alt="panel.host.name" size="xl" class="bg-accented" />
+            </div>
+            <div v-if="panel.host?.bio" class="mt-4">
+              <h3 class="text-sm font-semibold text-highlighted">About your host</h3>
+              <p ref="hostPreview" class="mt-1 line-clamp-3 whitespace-pre-wrap break-words text-sm text-muted">{{ panel.host.bio }}</p>
+              <button v-if="hostClipped" type="button" class="mt-1 text-sm font-medium text-highlighted underline" @click="showProfile('About your host', panel.host?.bio)">Show more</button>
+            </div>
+            <div v-for="(coHost, index) in panel.coHosts" :key="index" class="mt-5 flex items-center gap-4">
+              <div class="min-w-0 flex-1">
+                <h3 class="text-sm font-semibold text-highlighted">Co-host</h3>
+                <button v-if="coHost.bio" type="button" class="mt-1 text-sm text-highlighted underline" @click="showProfile(coHost.name, coHost.bio)">{{ coHost.name }}</button>
+                <p v-else class="mt-1 text-sm text-muted">{{ coHost.name }}</p>
+              </div>
+              <UAvatar :src="coHost.photo_url ?? undefined" :alt="coHost.name" size="xl" class="bg-accented" />
             </div>
             <div v-if="panel.contact.length" class="mt-3">
               <NuxtLink v-for="action in panel.contact" :key="action.label" :to="action.to" :class="rowClass" :data-testid="action.testid">
@@ -286,6 +299,14 @@
     </div>
   </DashboardIndexPanel>
 
+  <ReservationItinerary
+    v-if="canPrintItinerary && accountStay && panel?.code"
+    v-model:open="itineraryOpen"
+    :booking="accountStay.booking"
+    :home="accountStay.home"
+    :confirmation-code="panel.code"
+  />
+
   <DashboardListItemDialog v-if="panel?.guide" v-model:open="guideOpen" :title="guideSection ? guideLabels[guideSection] : ''" :show-actions="false">
     <p v-if="guideSection === 'directions'" class="whitespace-pre-wrap text-sm text-muted">{{ panel.guide.directions }}</p>
     <p v-else-if="guideSection === 'manual'" class="whitespace-pre-wrap text-sm text-muted">{{ panel.guide.manual }}</p>
@@ -309,6 +330,10 @@
       </ul>
       <UButton v-if="panel.guide.checkoutEditor" :to="panel.guide.checkoutEditor" label="Edit" color="neutral" variant="outline" class="mt-5" />
     </template>
+  </DashboardListItemDialog>
+
+  <DashboardListItemDialog v-model:open="profileOpen" :title="profile?.title ?? ''" :show-actions="false">
+    <p class="whitespace-pre-wrap break-words text-sm text-muted">{{ profile?.bio }}</p>
   </DashboardListItemDialog>
 
   <DashboardListItemDialog v-model:open="policyOpen" :title="booking?.policy?.heading || 'Cancellation policy'" :show-actions="false">
@@ -388,6 +413,7 @@ import { STAY_PRESENTATION } from '~/utils/product-presentation'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 import FormAnswersCard from '~/components/forms/FormAnswersCard.vue'
 import PaymentDetails from '~/components/dashboard/PaymentDetails.vue'
+import ReservationItinerary from '~/components/dashboard/ReservationItinerary.vue'
 import ChannelMark from '~/lib/components/workspace/messages/ChannelMark.vue'
 import { paymentMoney } from '~/shared/payment-display'
 import { authClient } from '~/lib/auth-client'
@@ -445,6 +471,15 @@ function textPreview() {
 const { element: directionsPreview, clipped: directionsClipped } = textPreview()
 const { element: manualPreview, clipped: manualClipped } = textPreview()
 const { element: rulesPreview, clipped: rulesClipped } = textPreview()
+const { element: hostPreview, clipped: hostClipped } = textPreview()
+const profile = ref<{ title: string; bio: string } | null>(null)
+const profileOpen = computed({
+  get: () => profile.value !== null,
+  set: open => { if (!open) profile.value = null },
+})
+function showProfile(title: string, bio: string | null | undefined) {
+  if (bio) profile.value = { title, bio }
+}
 
 interface PanelLink {
   label: string
@@ -689,6 +724,8 @@ async function runAction(action: string) {
 }
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 const accountStay = computed(() => isAccountNightBooking(data.value) ? data.value : null)
+const canPrintItinerary = computed(() => props.personalScope && accountStay.value?.booking.status === 'confirmed')
+const itineraryOpen = ref(false)
 const dashboardStay = computed(() => isDashboardBooking(data.value) && 'home' in data.value ? data.value : null)
 const managedStay = computed(() => dashboardStay.value?.manage ? dashboardStay.value : null)
 const stay = computed(() => accountStay.value?.booking ?? dashboardStay.value?.booking ?? null)
@@ -710,6 +747,9 @@ const reservationActions = computed<PanelAction[]>(() => {
       }
       if (!channelManaged.value && !paymentProcessing.value && (cancellation.value || requestStatus.value)) {
         actions.push({ label: requestStatus.value ? t('stay.withdraw_request') : 'Cancel reservation', icon: 'i-lucide-ban', run: () => void cancelAsGuest(), testid: 'stay-cancel' })
+      }
+      if (canPrintItinerary.value) {
+        actions.push({ label: 'Get a PDF for visa purposes', icon: 'i-lucide-file-text', run: () => { itineraryOpen.value = true }, testid: 'stay-itinerary' })
       }
     } else if (manage.value && !channelManaged.value) {
       if (hostActions.value.includes('edit')) {
@@ -825,7 +865,8 @@ const panel = computed(() => {
     photos: place?.photo_urls ?? record?.resource_photo_urls ?? [],
     title: place?.name ?? (record?.product_kind === 'table' ? record.location_title : record?.name),
     purchaseDate: purchase && record ? `${record.type === 'order' ? 'Ordered' : 'Paid'} ${formatCreatedAt(record.created_at)}` : null,
-    host: value ? place?.host : record && !purchase ? { name: record.assigned_member_name ?? record.organization_name, image: null } : null,
+    host: value ? place?.host : record?.host,
+    coHosts: place?.co_hosts ?? [],
     when,
     rows,
     guests: guests === null || guests === undefined ? null : value ? `${guests} ${guests === 1 ? 'guest' : 'guests'}` : presentation.value?.formatCount(guests),

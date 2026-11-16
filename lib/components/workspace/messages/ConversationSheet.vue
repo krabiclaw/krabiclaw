@@ -21,13 +21,13 @@
         <UButton type="submit" label="Save name" :loading="groupSaving" :disabled="(name.trim() || null) === page.conversation.name" />
       </UForm>
       <ul>
-        <li v-for="(person, index) in participants" :key="person.id ?? index" class="flex flex-wrap items-center gap-4 py-3">
+        <li v-for="(person, index) in participants" :key="participantTarget(person) ?? index" class="flex flex-wrap items-center gap-4 py-3">
           <UAvatar :src="person.image ?? undefined" :alt="person.name" class="size-12 bg-accented" />
           <span class="min-w-0 flex-1 text-base text-highlighted">{{ person.id === userId ? 'You' : person.name }}<span class="block text-sm font-normal text-muted">{{ person.title }}</span></span>
-          <UButton v-if="((manageGuests && person.can_remove) || (page.capabilities.can_manage_participants && person.id !== userId)) && person.id && removing !== person.id" label="Remove" color="error" variant="ghost" :aria-label="`Remove ${person.name}`" :disabled="savingRemoval" @click="removing = person.id; removalError = null" />
-          <div v-if="person.id && removing === person.id" class="flex w-full flex-wrap items-center gap-2">
+          <UButton v-if="((manageGuests && person.can_remove) || (page.capabilities.can_manage_participants && person.id !== userId)) && participantTarget(person) && removing !== participantTarget(person)" label="Remove" color="error" variant="ghost" :aria-label="`Remove ${person.name}`" :disabled="savingRemoval" @click="removing = participantTarget(person); removalError = null" />
+          <div v-if="removing !== null && removing === participantTarget(person)" class="flex w-full flex-wrap items-center gap-2">
             <p class="w-full text-sm text-muted">Remove {{ person.name }} from this conversation?</p>
-            <UButton label="Remove" color="error" :loading="savingRemoval || groupSaving" @click="removeParticipant(person.id)" />
+            <UButton label="Remove" color="error" :loading="savingRemoval || groupSaving" @click="removeParticipant()" />
             <UButton label="Cancel" color="neutral" variant="ghost" :disabled="savingRemoval" @click="removing = null; removalError = null" />
           </div>
         </li>
@@ -125,7 +125,7 @@
 </template>
 
 <script setup lang="ts">
-import type { ConversationPage } from '~/shared/messages-contract'
+import type { ConversationPage, ConversationParticipant } from '~/shared/messages-contract'
 import InboxAvatar from './InboxAvatar.vue'
 import { authClient } from '~/lib/auth-client'
 import type { TeamMember } from '~/server/domain/team-messages'
@@ -270,9 +270,13 @@ async function operate(operation: TeamGroupOperation) {
   }
 }
 
-async function removeParticipant(userId: string) {
+const participantTarget = (person: ConversationParticipant) => person.invitation_id ?? person.id
+
+async function removeParticipant() {
+  const participantId = removing.value
+  if (!participantId) return
   if (props.page.capabilities.can_manage_participants) {
-    await operate({ action: 'remove', user_id: userId })
+    await operate({ action: 'remove', user_id: participantId })
     return
   }
   if (savingRemoval.value) return
@@ -280,7 +284,7 @@ async function removeParticipant(userId: string) {
   savingRemoval.value = true
   removalError.value = null
   try {
-    await applicationFetch(`/api/messages/${encodeURIComponent(threadId.value)}/participants/${encodeURIComponent(userId)}`, {
+    await applicationFetch(`/api/messages/${encodeURIComponent(threadId.value)}/participants/${encodeURIComponent(participantId)}`, {
       method: 'DELETE',
       validate: (value): value is { removed: true } => isRecord(value) && value.removed === true,
     })

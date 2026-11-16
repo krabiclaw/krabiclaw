@@ -10,7 +10,7 @@ export async function consumeEventBatch(env: CloudflareEnv, batch: MessageBatch)
   const failures: Error[] = []
   for (const message of batch.messages) {
     try {
-      await consumeEvent(env, message.body as DomainEvent)
+      await consumeEvent(env, message.body as DomainEvent, message.attempts > 1)
       message.ack()
     } catch (cause) {
       failures.push(new Error(`Event ${message.id} failed: ${describeFailure(cause)}`, { cause }))

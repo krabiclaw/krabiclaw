@@ -1,7 +1,6 @@
 import { checkDashboardDomainGroup } from '~/server/utils/domain-dashboard-actions'
 import { jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
 import { queryFirst } from '~/server/db'
-import { domainInstructions } from '~/server/utils/domain-read-model'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
 
 import type { DomainRecord } from '~/server/utils/domains'
@@ -26,10 +25,10 @@ export default defineHandler(async (event) => {
   }
 
   try {
-    const domain = await checkDashboardDomainGroup(env, db, {
+    await checkDashboardDomainGroup(env, db, {
       organizationId, organizationSlug: organization.slug, actorId: session.user.id, actorType: organization.member_role as 'owner' | 'admin',
     }, domainRecord)
-    return jsonResponse({ success: true, domain: { ...domain, instructions: domainInstructions(domain) } })
+    return jsonResponse({ success: true }, { status: 202 })
   } catch (error) {
     rethrowHttpError(error)
     const normalizedError = error instanceof Error ? error : new Error('Unknown error')

@@ -3,6 +3,7 @@ import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import type { ConversationEntriesPage, ConversationEntry, ConversationMessage, ConversationPage, ConversationViewerRole } from '~/shared/messages-contract'
 import { accountActivityPath } from '~/shared/account-activity'
 import { formatFormAnswer } from '~/shared/form-questions'
+import { assignedMemberSql, bookingOperationsScope } from '~/server/utils/member-access'
 import {
   conversationAccessDenied, conversationAccessFromRow, conversationAccessQuery, conversationParticipantsSql, guestVisibleSql, isEventMessage, MEMBER_REPLY_EVENT, messageRole,
   MIRRORED_EVENT, OPENING_EVENT, parseMessagePayload, participantGuard, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, SUPPORT_CONVERSATION_SQL,
@@ -18,7 +19,7 @@ import { jobBookingIdSql } from './tasks'
 
 type TranscriptViewer = { conversationId: string; userId: string; organizationId?: string }
 type MessageContext = Pick<ConversationHistory, 'photos' | 'deliveriesByMessage'>
-type HistoryContext = { organization_name: string; timezone: string; record_title: string | null; booking_type: 'booking' | 'stay' | null; support: number; airbnb: number; roster: string | null; job: string | null; review: number | null }
+type HistoryContext = { organization_name: string; timezone: string; record_title: string | null; booking_type: 'booking' | 'stay' | null; booking_assigned: number; support: number; airbnb: number; roster: string | null; job: string | null; review: number | null }
 
 function presentMessage(message: Pick<MessageRow, 'id' | 'sequence' | 'event_name'>, context: MessageContext, input: {
   author: string; viewerRole: ConversationViewerRole; guestName: string; authorUserId: string | null
@@ -163,7 +164,9 @@ export async function loadConversationPage(
           ELSE 0 END AS airbnb,
         ${head ? `CASE WHEN c.viewer_role = 'guest' AND b.owner = 'app' AND b.user_id = ? AND c.user_id = ?
           THEN CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END END` : 'NULL'} AS booking_type,
-        ${head ? `(SELECT json_group_array(json_object('id', p.id, 'name', p.name, 'image', p.image, 'role', p.role, 'title', p.title))
+        ${head ? `(c.viewer_role = 'member' AND EXISTS (SELECT 1 FROM product_booking_configs cfg
+          WHERE cfg.organization_id = b.organization_id AND cfg.product_id = b.product_id AND ${assignedMemberSql('cfg')}))` : '0'} AS booking_assigned,
+        ${head ? `(SELECT json_group_array(json_object('id', p.id, 'name', p.name, 'image', p.image, 'role', p.role, 'title', p.title, 'invitation_id', p.invitation_id))
           FROM (${conversationParticipantsSql('c', 'c.viewer_role')}) p)` : 'NULL'} AS roster,
         -- What a team conversation about a booking is titled by: the home or offering, as its row in the list is.
         ${head ? `CASE WHEN c.kind = 'team' THEN (SELECT COALESCE(sc.internal_name, p.name) FROM bookings about JOIN products p ON p.organization_id = about.organization_id AND p.id = about.product_id
@@ -181,8 +184,8 @@ export async function loadConversationPage(
       FROM authorized c
       JOIN organization o ON o.id = c.organization_id
       LEFT JOIN business_locations l ON l.id = c.location_id AND l.organization_id = c.organization_id
-      LEFT JOIN bookings b ON c.kind = 'booking' AND b.id = c.booking_id AND b.organization_id = c.organization_id`,
-    params: [...(access.params ?? []), ...(head ? [userId, userId, userId, userId, userId] : [])],
+      LEFT JOIN bookings b ON c.kind IN ('booking', 'team') AND b.id = c.booking_id AND b.organization_id = c.organization_id`,
+    params: [...(access.params ?? []), ...(head ? [userId, userId, userId, userId, userId, userId, userId] : [])],
   }, {
     query: `WITH authorized AS MATERIALIZED (${access.query}), ${historyQuery.query.slice('WITH '.length)}`,
     params: [...(access.params ?? []), ...(historyQuery.params ?? [])],
@@ -202,9 +205,13 @@ export async function loadConversationPage(
   if (!head) return { conversation_id: conversation.id, ...result }
   if (context.roster === null) throw new Error('Conversation roster was not read')
   const roster = JSON.parse(context.roster) as ConversationParticipantRow[]
-  const bookingHost = role === 'member' && conversation.kind === 'booking' && conversation.booking_id !== null
+  const managesBookingGuests = context.booking_type !== null || (role === 'member' && conversation.kind === 'booking' && conversation.booking_id !== null)
   const activityPath = context.booking_type ? accountActivityPath(context.booking_type, conversation.id) : null
-  const groupCapabilities = await conversationGroupCapabilities(membership, conversation)
+  const [groupCapabilities, bookingScope] = await Promise.all([
+    conversationGroupCapabilities(membership, conversation),
+    membership && conversation.booking_id ? bookingOperationsScope(membership) : null,
+  ])
+  const canReadBooking = activityPath !== null || bookingScope === 'manage' || (bookingScope === 'assigned' && context.booking_assigned === 1)
   const title = role === 'guest' ? context.organization_name : conversation.name || (conversation.kind === 'team' ? context.record_title : guestName)
     || roster.filter(person => person.id !== userId).map(person => person.name).join(', ') || 'You'
   return {
@@ -212,15 +219,17 @@ export async function loadConversationPage(
       id: conversation.id, organization_id: conversation.organization_id, title, kind: conversation.kind === 'team' ? 'team' : context.support ? 'support' : 'guest',
       name: conversation.name, is_group: conversation.is_group === 1,
       created_by_user_id: role === 'member' ? conversation.created_by_user_id : null,
-      booking_id: role === 'member' || activityPath !== null ? conversation.booking_id : null,
+      booking_id: canReadBooking ? conversation.booking_id : null,
       activity_path: activityPath,
-      participants: roster.map(person => ({
-        ...person, can_remove: bookingHost && person.role === 'guest' && person.id !== conversation.user_id,
-      })),
+      participants: roster.map(({ invitation_id, ...person }) => {
+        const can_remove = managesBookingGuests && person.role === 'guest' && (invitation_id !== null
+          || (role === 'member' && person.id !== null && person.id !== conversation.user_id))
+        return { ...person, can_remove, ...(can_remove && invitation_id !== null ? { invitation_id } : {}) }
+      }),
       composer: { channel: conversation.kind === 'team' ? 'team' : context.airbnb ? 'airbnb' : 'email' },
     },
     ...result, viewer_role: role,
-    capabilities: { ...groupCapabilities, can_invite_guest: bookingHost && conversation.blocked_at === null },
+    capabilities: { ...groupCapabilities, can_invite_guest: managesBookingGuests && conversation.blocked_at === null },
     work: context.job ? { type: 'done' as const, ...JSON.parse(context.job) as { task_id: string; version: number } } : context.review ? { type: 'review' as const } : null,
   }
 }

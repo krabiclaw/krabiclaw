@@ -62,12 +62,19 @@ Checkout: `~/Repos2026/krabiclaw-today-speed`. Read the repository agent instruc
 - After deploying a consumer, send `business.deadlines_backfill`, `site.cache_backfill`, `calendar.backfill`, and `ad_spend.backfill` once. The draft did not send these to any deployed queue.
 - Before deployment, confirm Channex webhook event masks, Stripe platform report webhook subscription, and Vrbo reservations migrated from old iCal feeds. The old deployed queues and quiet backfill for the 21 existing production jobs require owner-directed operations.
 
-## Open
+## Follow-up on the draft
 
-- Custom domain reconciliation remains on its ten-minute schedule. Cloudflare publishes certificate events and still requires hostname activation and the customer's DNS cutover. Google Places ratings retain the weekly scheduled exception.
-- Airbnb parity still lacks the visa PDF, business-trip designation, host bio and co-host directory, and dedicated safety escalation. Guest and host actions follow existing permissions and authored data.
-- Validate Channex and Stripe delivery with non-production provider fixtures before promotion.
-- Historical no-show reads still protect review eligibility. Dropping the column requires the existing replacement-database workflow and verification that historical stamps match their conversation events.
+- The buyer can issue and revoke guest invitations from the shared reservation panel. A verified companion gets the conversation. Buyer removal uses the invitation ID, and hides the companion account ID. Host and co-host names, photos and bios use existing public member profiles and listing participants. A messaging-only member can still use the thread and roster. Opening a reservation requires the same booking access as the detail endpoint.
+- A confirmed stay can print or save an itinerary PDF with the booking location, dates, reference, party size, host and optional traveler names. The reservation read and PDF use the same stored data, with no extra network request for the PDF.
+- Local Chromium scrolled the entire guest and host stay panels and the host panels for a class, a Family Law consultation and a table. The buyer issued a link, the recipient accepted it, and buyer revocation removed the recipient’s conversation access. Browser output was checked as a one-page PDF.
+- Custom domain setup uses the existing Queue. Connect, Check DNS, Retry and authenticated Cloudflare custom hostname certificate notifications check only the matching domains. For a hostname with a prevalidated certificate, the owner uses Check DNS after updating their records. Activate a domain only when DNS points to the SaaS destination and both provider statuses are active.
+- Historical no-show review checks read the original booking conversation events. Migration 0014 verifies that the old stamps and the conversation events agree. The local v28 replacement transferred all 97 application tables and 20 media references, with an empty foreign-key check and no `no_show_at` column.
+
+## Deployment verification still required
+
+- Staging passed health and refused unsigned Stripe and Channex deliveries. Its deployed commit predates this draft. Channex needs the updated event mask. The Stripe staging test endpoint is missing `reporting.report_type.updated`, and its fee report type returned 404 in test mode. Replay signed provider deliveries on the intended configuration after the owner authorizes the staging merge.
+- Configure the SSL for SaaS Custom Hostnames notification to POST to `/api/integrations/cloudflare/custom-hostnames/webhook`. Cloudflare’s webhook secret must match `CF_CUSTOM_HOSTNAMES_WEBHOOK_SECRET` and the sender must match `CF_ACCOUNT_ID` and `CF_ZONE_ID`. Configure the provider destination once the receiver is deployed.
+- The draft still binds v27. Use the repository’s Western North America replacement workflow and run the historical preflight on the target environment before changing the binding.
 - Keep the PR in draft. Delete this handoff before marking it ready.
 
 ## Retired routes

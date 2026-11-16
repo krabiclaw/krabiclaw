@@ -31,7 +31,7 @@ import type { InboxRow } from '../../server/domain/guest-threads/types'
 const TIME_ZONE = 'Asia/Bangkok'
 
 type NightBooking = Omit<StayDetail, 'id'> & { booking_id: string; unit: 'nights' }
-type NightBookingReceipt = Pick<NightBooking, 'booking_id' | 'unit' | 'version'> & { channel_push: unknown }
+type NightBookingReceipt = Pick<NightBooking, 'booking_id' | 'unit' | 'version'>
 
 function nightCalendarPath(from: string, to: string, productId?: string) {
   const query = new URLSearchParams({ unit: 'nights', from, to })
@@ -171,6 +171,9 @@ test('listing messaging grants and verified trip invites use the live conversati
     const currentGrants = await page.request.get(grants, { params: { organization_id: organizationId } })
     await expectStatus(currentGrants, 200)
     expect(await currentGrants.json()).toEqual({ member_ids: [memberId] })
+    const cohostTranscript = await cohost.request.get(path)
+    await expectStatus(cohostTranscript, 200)
+    expect(await cohostTranscript.json()).toMatchObject({ conversation: { booking_id: null }, viewer_role: 'member' })
     const cohostPage = await cohost.newPage()
     // Release the first open after the transcript is on screen.
     // A real reconnect is tested below, with a message written while offline.
@@ -197,6 +200,7 @@ test('listing messaging grants and verified trip invites use the live conversati
     await socketCapture
     await expect(cohostPage.getByText(reply, { exact: true })).toBeVisible()
     await expect(cohostPage.getByRole('textbox', { name: 'Write a message…' })).toBeVisible()
+    await expect(cohostPage.getByRole('link', { name: 'Show reservation', exact: true })).toHaveCount(0)
     await waitForNuxtHydration(cohostPage)
     await expect(cohostPage.locator('html')).toHaveAttribute('data-dashboard-socket-ready', 'true')
     expect(transcriptReads).toBe(1)
@@ -384,6 +388,7 @@ test('listing messaging grants and verified trip invites use the live conversati
     await page.goto(`/dashboard/${slug}/messages/${booking.conversation_id}`)
     await page.getByRole('button', { name: 'In this conversation', exact: true }).click()
     const sheet = page.getByRole('dialog', { name: 'In this conversation', exact: true })
+    await sheet.getByRole('button', { name: 'Manage guests', exact: true }).click()
     await sheet.getByRole('button', { name: `Remove ${findE2eAuthFixture(travelerId).name}`, exact: true }).click()
     const removal = page.waitForResponse(response => response.request().method() === 'DELETE' && new URL(response.url()).pathname === participant)
     await sheet.getByRole('button', { name: 'Remove', exact: true }).click()
@@ -860,7 +865,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
     page.getByRole('button', { name: 'Create stay', exact: true }).click(),
   ])
   await expectStatus(stayCreated, 201)
-  const createdReceipt = await stayCreated.json() as { booking: NightBooking & { channel_push: unknown } }
+  const createdReceipt = await stayCreated.json() as { booking: NightBooking }
   await expect(page).toHaveURL(new RegExp(`/bookings/${createdReceipt.booking.booking_id}$`))
   const stay = await call<{ record: StayDetail }>('get_product_booking', { booking_id: createdReceipt.booking.booking_id })
   expect(stay.error).toBeNull()
@@ -888,7 +893,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   const paid = await call<{ record: StayDetail }>('get_product_booking', { booking_id: stay.data!.record.id })
   expect(paid.error).toBeNull()
   expect(paid.data!.record).toMatchObject({ paid_minor: 100_00, payment_status: 'partial', payments: [{ method: 'cash', amount_minor: 100_00 }] })
-  expect(createdReceipt.booking).toMatchObject({ booking_id: paid.data!.record.id, unit: 'nights', product_id: productId, conversation_id: paid.data!.record.conversation_id, status: 'confirmed', version: 1, check_in_date: checkIn, check_out_date: checkOut, channel_push: null })
+  expect(createdReceipt.booking).toMatchObject({ booking_id: paid.data!.record.id, unit: 'nights', product_id: productId, conversation_id: paid.data!.record.conversation_id, status: 'confirmed', version: 1, check_in_date: checkIn, check_out_date: checkOut })
   const messagingContext = await call<{ conversation_id: string; home: Record<string, unknown>; stay: Record<string, unknown>; record: Record<string, unknown> }>('get_guest_messaging_context', { conversation_id: paid.data!.record.conversation_id })
   expect(messagingContext.error).toBeNull()
   expect(messagingContext.data).toEqual({ conversation_id: paid.data!.record.conversation_id,
@@ -1014,7 +1019,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   // A guest's own account and receipt reads of a stay they bought are covered in stays-d1: only a checkout gives a stay its guest's account.
   await page.goto(`/dashboard/${slug}/bookings/${stay.data!.record.id}`)
 
-  await page.getByRole('button', { name: 'Cancel stay' }).click()
+  await page.getByTestId('reservation-panel').getByRole('button', { name: 'Cancel reservation', exact: true }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel stay' }).click()
   await expect(page.getByText('Cancelled', { exact: true })).toBeVisible()
   const calendar = await call<{ nights: Array<{ date: string; available: boolean }> }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
@@ -1086,7 +1091,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   expect(cancelledRead.status()).toBe(200)
   const savedCancellation = (await cancelledRead.json() as { booking: NightBooking }).booking
   expect(cancelledByMcp.data).toEqual({ booking_id: native.booking_id, unit: 'nights', status: 'cancelled', version: savedCancellation.version,
-    cancelled_at: savedCancellation.cancelled_at, cancellation_reason: 'Contract cancellation', channel_push: null })
+    cancelled_at: savedCancellation.cancelled_at, cancellation_reason: 'Contract cancellation' })
   expect(savedCancellation).toMatchObject({ booking_id: native.booking_id, unit: 'nights', product_id: productId, status: 'cancelled', conversation_id: native.conversation_id,
     check_in_date: later[0], check_out_date: later[1], cancellation_reason: 'Contract cancellation' })
 })
@@ -4836,6 +4841,11 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await stayClose.click()
       await expect(page).toHaveURL(stayThread)
       await page.goto(calendarReturn)
+      // The selected nights are local to the Calendar pane. Reselect them after returning from Messages.
+      await page.getByRole('button', { name: 'Select nights', exact: true }).click()
+      await dates.getByLabel('Start night', { exact: true }).fill(localDay(0))
+      await dates.getByLabel('End night (optional)', { exact: true }).fill(localDay(1))
+      await dates.getByRole('button', { name: 'Edit selected nights', exact: true }).click()
       await expect(inspector.getByText('Reserved', { exact: true })).toBeVisible()
       await page.setViewportSize({ width: 1440, height: 900 })
       await expect(calendar).toBeVisible()
@@ -4966,15 +4976,14 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await cleanerPage.setViewportSize({ width: 390, height: 844 })
       expect((await cleanerPage.goto(`/dashboard/${slug}`))?.status()).toBe(200)
       await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list&month=${localDay(0).slice(0, 7)}`)
-      const stayRecord = `/dashboard/${slug}/bookings/${stays[0]!.booking_id}`
-      const arrival = cleanerPage.locator(`[data-day="${localDay(0)}"] a[href="${stayRecord}"]`)
+      const arrival = cleanerPage.locator(`[data-day="${localDay(0)}"] a[href="${arrivalPath}"]`)
       await expect(arrival).toContainText('Ana')
       await arrival.click()
       await expect(cleanerPage.getByText('Ana · 2 guests', { exact: true })).toBeVisible()
-      await expect(cleanerPage.getByRole('button', { name: 'Cancel stay', exact: true })).toHaveCount(0)
+      await expect(cleanerPage.getByRole('button', { name: 'Cancel reservation', exact: true })).toHaveCount(0)
       await expect(cleanerPage.getByRole('link', { name: 'Record a payment', exact: true })).toHaveCount(0)
       await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list&month=${localDay(2).slice(0, 7)}`)
-      const departure = cleanerPage.locator(`[data-day="${localDay(2)}"] a[href="${stayRecord}"]`)
+      const departure = cleanerPage.locator(`[data-day="${localDay(2)}"] a[href="${arrivalPath}"]`)
       await expect(departure).toContainText('Ana')
       await departure.click()
       await expect(cleanerPage.getByText('Ana · 2 guests', { exact: true })).toBeVisible()
@@ -4986,14 +4995,15 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const current = await call<{ record: { version: number } }>('get_product_booking', { booking_id: stays[0]!.booking_id })
       const renamed = await call<NightBookingReceipt>('update_product_booking', { booking_id: stays[0]!.booking_id, version: current.data!.record.version, guest_name: 'Lia' })
       expect(renamed.error).toBeNull()
-      expect(renamed.data).toMatchObject({ booking_id: stays[0]!.booking_id, unit: 'nights', version: current.data!.record.version + 1, channel_push: null })
+      expect(renamed.data).toMatchObject({ booking_id: stays[0]!.booking_id, unit: 'nights', version: current.data!.record.version + 1 })
+      expect(renamed.data).not.toHaveProperty('channel_push')
       await expect(cleanerPage.getByText('Lia · 2 guests', { exact: true })).toBeVisible()
       await expect(cleanerPage.getByText('Silva')).toHaveCount(0)
       const privateStay = await call<{ record: { version: number } }>('get_product_booking', { booking_id: stays[1]!.booking_id })
       expect((await call('update_product_booking', { booking_id: stays[1]!.booking_id, version: privateStay.data!.record.version, private_notes: 'Other home only' })).error).toBeNull()
       const noted = await call<NightBookingReceipt>('update_product_booking', { booking_id: stays[0]!.booking_id, version: renamed.data!.version, arrival_time: '18:30', private_notes: 'Host-only live note' })
       expect(noted.error).toBeNull()
-      await expect(cleanerPage.getByText(/^6:30\sPM$/u).first()).toBeVisible()
+      await expect(cleanerPage.getByText(/^Arriving 6:30\sPM$/u)).toBeVisible()
       await expect(cleanerPage.getByText('Host-only live note')).toHaveCount(0)
       // The page can render the note before the socket's frame is recorded here.
       await expect.poll(() => liveEvents.filter(event => 'booking_id' in event).length).toBe(2)
@@ -5077,7 +5087,7 @@ test('a stay socket in a service organization closes when Better Auth removes it
     const openedRead = cleanerPage.waitForResponse(response => response.request().method() === 'GET'
       && new URL(response.url()).pathname === `/api/dashboard/bookings/${stay.booking_id}`)
     expect((await cleanerPage.goto(`/dashboard/${slug}/bookings/${stay.booking_id}`))?.status()).toBe(200)
-    await expect(cleanerPage.getByRole('heading', { name: 'Membership', level: 2, exact: true })).toBeVisible()
+    await expect(cleanerPage.getByTestId('reservation-panel').getByText('Membership · 1 guest', { exact: true })).toBeVisible()
     // The real first-open reconciliation read proves the app socket completed
     // its upgrade before the other device publishes the event under assertion.
     expect((await openedRead).status()).toBe(200)
@@ -5085,9 +5095,10 @@ test('a stay socket in a service organization closes when Better Auth removes it
     const renamed = await page.request.patch(api(`bookings/${stay.booking_id}`), { data: { version: stay.version, arrival_time: '18:30' } })
     await expectStatus(renamed, 200)
     const version = (await renamed.json() as { booking: NightBooking }).booking.version
-    await expect(cleanerPage.getByRole('heading', { name: 'Membership', level: 2, exact: true })).toBeVisible()
-    await expect(cleanerPage.getByText(/^6:30\sPM$/u).first()).toBeVisible()
-    await expect.poll(() => liveEvents.filter(event => event.type === 'stay.changed').length).toBe(1)
+    await expect(cleanerPage.getByTestId('reservation-panel').getByText('Membership · 1 guest', { exact: true })).toBeVisible()
+    await expect(cleanerPage.getByText(/^Arriving 6:30\sPM$/u)).toBeVisible()
+    // The queued creation can also arrive after the socket opens. The live panel above proves it read the edited arrival.
+    await expect.poll(() => liveEvents.some(event => event.type === 'stay.changed' && event.booking_id === stay.booking_id)).toBe(true)
     const socket = sockets.find(socket => !socket.isClosed())
     expect(socket).toBeDefined()
     const closed = socket!.waitForEvent('close')

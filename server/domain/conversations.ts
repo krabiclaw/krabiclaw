@@ -23,12 +23,17 @@ export type ConversationKind = 'contact' | 'booking' | 'team'
 export type MessageAuthorKind = 'guest' | 'member' | 'krabiclaw'
 export type MessageChannel = 'web' | 'email' | 'whatsapp' | 'airbnb'
 
-export type ConversationParticipantRow = Omit<ConversationParticipant, 'can_remove'>
+export type ConversationParticipantRow = Omit<ConversationParticipant, 'can_remove' | 'invitation_id'> & { invitation_id: string | null }
 
 /** Only the live roster is shown. Guests never receive internal account or member IDs. */
 export function conversationParticipantsSql(conversation: string, viewerRole: string): string {
   return `SELECT CASE WHEN ${viewerRole} = 'member' OR seat.user_id = ? THEN u.id END AS id,
            u.name, CASE WHEN ${viewerRole} = 'member' OR seat.user_id = ? THEN u.image END AS image, seat.role,
+           CASE WHEN ${viewerRole} = 'guest' AND ${conversation}.kind = 'booking' AND ${conversation}.user_id = ?
+                  AND seat.role = 'guest' AND seat.user_id <> ${conversation}.user_id THEN (
+             SELECT min(invite.id) FROM conversation_guest_invites invite WHERE invite.conversation_id = seat.conversation_id
+               AND invite.organization_id = seat.organization_id AND invite.accepted_user_id = seat.user_id
+           ) END AS invitation_id,
            CASE WHEN seat.role = 'guest' AND ${conversation}.kind = 'booking' AND ${conversation}.user_id = seat.user_id THEN 'Booker'
              WHEN seat.role = 'guest' THEN 'Guest' WHEN m.role = 'owner' THEN 'Host' WHEN m.role = 'admin' THEN 'Co-host' ELSE 'Team' END AS title
       FROM conversation_participants seat
@@ -465,13 +470,15 @@ export const guestConversationSql = (alias: string) => `${alias}.kind IN ('conta
 export type ParticipantRole = 'guest' | 'member'
 
 /** The seat is the grant. A staff seat requires a current Better Auth membership. */
+export const currentParticipantSql = (seat: string) => `(${seat}.role = 'guest' OR (${seat}.role = 'member'
+  AND EXISTS (SELECT 1 FROM member m WHERE m.organizationId = ${seat}.organization_id AND m.userId = ${seat}.user_id)))`
+
 export function participantGuard(alias: string, userId: string, role?: ParticipantRole): { sql: string; params: string[] } {
   return {
     sql: `EXISTS (SELECT 1 FROM conversation_participants seat
       WHERE seat.conversation_id = ${alias}.id AND seat.organization_id = ${alias}.organization_id AND seat.user_id = ?
         ${role ? 'AND seat.role = ?' : ''}
-        AND (seat.role = 'guest' OR (seat.role = 'member'
-          AND EXISTS (SELECT 1 FROM member m WHERE m.organizationId = seat.organization_id AND m.userId = seat.user_id))))`,
+        AND ${currentParticipantSql('seat')})`,
     params: role ? [userId, role] : [userId],
   }
 }
