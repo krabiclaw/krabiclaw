@@ -1,7 +1,6 @@
 import { HTTPError } from 'nitro'
 import { execute, queryAll, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { publishEvent, type EventsEnv } from '~/server/events'
 import { filterEntitledRows } from '~/server/utils/billing-access'
 import { wantsCategoryEmailSql } from '~/server/domain/notification-preferences'
 import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
@@ -100,11 +99,6 @@ export function bookingReviewDueAt(endsAt: string): number | null {
   const due = Date.parse(endsAt) + REVIEW_DELAY_MS
   if (!Number.isFinite(due)) throw new Error('A timed booking needs a valid end instant for its review invitation')
   return due
-}
-
-export async function scheduleBookingReview(env: EventsEnv, organizationId: string, endsAt: string): Promise<void> {
-  const due = bookingReviewDueAt(endsAt)
-  if (due !== null) await publishEvent(env, { type: 'business.wake', organization_id: organizationId, kind: 'reviews', due_at: due })
 }
 
 /** Send the business's due invitations and return the next booking's exact deadline. */

@@ -65,7 +65,20 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
   const approval = approvedStayBooking(snapshot)
   const stayCheckout = isStayPurchase(snapshot.stay)
   const now = new Date().toISOString()
-  const intent = reported.status === 'requires_capture' ? await capturePaymentIntent(stripe, payment, reported) : reported
+  let intent = reported
+  if (reported.status === 'requires_capture') {
+    const charge = reported.latest_charge
+    if (!charge || typeof charge === 'string' || charge.livemode !== Boolean(payment.livemode) || charge.payment_intent !== reported.id) throw new Error('Authorized charge financial scope mismatch')
+    const account = { stripeAccount: payment.stripe_account_id }
+    const expand = ['latest_charge']
+    try {
+      intent = await stripe.paymentIntents.capture(reported.id, { expand }, account)
+    } catch (error) {
+      if (!(error instanceof stripe.errors.StripeInvalidRequestError) || error.code !== 'payment_intent_unexpected_state') throw error
+      // A simultaneous confirmation or webhook may have captured the same authorization.
+      intent = await stripe.paymentIntents.retrieve(reported.id, { expand }, account)
+    }
+  }
   if (intent.status !== 'succeeded') {
     // A debit waiting on its bank verification or clearing keeps its capacity until Stripe says how it ended.
     if (intent.status === 'processing' || intent.next_action?.type === 'verify_with_microdeposits') {
@@ -178,20 +191,6 @@ export async function notifyRecordedPayment(env: CloudflareEnv, event: Extract<D
   }
   const outcomes = await Promise.allSettled([notice, capture(), confirm()])
   raiseSettledFailures('Captured booking delivery', payment.id, outcomes, ['capture notification', 'captured usage and analytics', 'booking follow-up'])
-}
-
-async function capturePaymentIntent(stripe: Stripe, payment: Payment, intent: Stripe.PaymentIntent): Promise<Stripe.PaymentIntent> {
-  const charge = intent.latest_charge
-  if (!charge || typeof charge === 'string' || charge.livemode !== Boolean(payment.livemode) || charge.payment_intent !== intent.id) throw new Error('Authorized charge financial scope mismatch')
-  const account = { stripeAccount: payment.stripe_account_id }
-  const expand = ['latest_charge']
-  try {
-    return await stripe.paymentIntents.capture(intent.id, { expand }, account)
-  } catch (error) {
-    if (!(error instanceof stripe.errors.StripeInvalidRequestError) || error.code !== 'payment_intent_unexpected_state') throw error
-    // A simultaneous confirmation or webhook may have captured the same authorization.
-    return stripe.paymentIntents.retrieve(intent.id, { expand }, account)
-  }
 }
 
 /** The answers a slot checkout froze with its purchase (the data move gives earlier purchases their conversation's); none is a corrupt purchase. */
@@ -325,15 +324,13 @@ export function confirmationHoldUntil(payment:Pick<Payment,'checkout_expires_at'
  return new Date(Math.max(Date.now()+CONFIRMATION_HOLD_MS,buyerWindow)).toISOString()
 }
 
-function unfulfillableKey(intent:Pick<Stripe.PaymentIntent,'id'>):string{return `unfulfillable:${intent.id}`}
-
 /** A checkout captured after it lost its capacity uses the ordinary refund; a redelivery repeats it idempotently. */
 async function refundUnfulfillable(db:DbClient,stripe:Stripe,env:CloudflareEnv,payment:Payment,intent:Stripe.PaymentIntent){
  await execute(db,"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",[payment.id])
  if (isStayPurchase((JSON.parse(payment.price_snapshot_json) as Record<string, unknown>).stay)) {
   await publishEvent(env, { type: 'business.wake', kind: 'checkout', organization_id: payment.organization_id, due_at: Date.now() })
  }
- await executeRefund(db, stripe, payment, null, unfulfillableKey(intent), 'requested_by_customer', null, env)
+ await executeRefund(db, stripe, payment, null, `unfulfillable:${intent.id}`, 'requested_by_customer', null, env)
 }
 
 export function paymentEventKey(event:Pick<Stripe.Event,'id'|'account'|'livemode'>):string{return `payments:${event.account??'unscoped'}:${Number(event.livemode)}:${event.id}`}

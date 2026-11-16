@@ -134,8 +134,9 @@ export const TURNOVER_HOME_FROM = `product_stay_configs c
   JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id
   JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id`
 
-function turnoverHomeFields(checkIn: string) {
-  return {
+/** The clocks and neighbouring stays in a projection that already reads the home. */
+export function turnoverHomeColumns(checkIn: string): string {
+  const fields = {
     product_id: 'c.product_id',
     location_id: 'c.location_id',
     timezone: 'l.timezone',
@@ -150,11 +151,7 @@ function turnoverHomeFields(checkIn: string) {
           AND status = 'confirmed' AND ends_at >= date(${checkIn}, '-401 days')
         ORDER BY id)) || ''`,
   } satisfies Record<keyof TurnoverHome, string>
-}
-
-/** The clocks and neighbouring stays in a projection that already reads the home. */
-export function turnoverHomeColumns(checkIn: string): string {
-  return Object.entries(turnoverHomeFields(checkIn)).map(([key, value]) => `${value} AS ${key}`).join(', ')
+  return Object.entries(fields).map(([key, value]) => `${value} AS ${key}`).join(', ')
 }
 
 type TurnoverAnchor = Pick<StayWindow, 'product_id' | 'check_in_date'>

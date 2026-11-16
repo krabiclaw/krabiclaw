@@ -10,10 +10,7 @@ export default defineHandler(async (event) => {
   const db = env.DB
   if (!db) return jsonResponse({ error: 'Database not available' }, { status: 500 })
 
-  // The footer and RFC 8058 link promise to end only this invitation even if
-  // the booking was linked to an account after the invitation was sent.
-  const invitationToken = cleanString(getQuery(event).token, 300)
-  let token = invitationToken
+  let token = cleanString(getQuery(event).token, 300)
   if (!token) {
     const body = await readBody<unknown>(event)
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -26,8 +23,8 @@ export default defineHandler(async (event) => {
   const result = await getReviewRequestByToken(db, token)
   if (!result) return jsonResponse({ error: 'Review request not found or expired' }, { status: 404 })
 
-  if (!invitationToken && result.request.user_id) {
-    await disableCategoryEmail(db, result.request.user_id, 'review_requests', { origin: 'user', env })
+  if (result.context.user_id) {
+    await disableCategoryEmail(db, result.context.user_id, 'review_requests', { origin: 'user', env })
   } else {
     const now = new Date().toISOString()
     const revoke = revokeReviewRequestQuery({ query: 'id = ? AND expires_at > ?', params: [result.request.id, now] }, now)

@@ -49,13 +49,13 @@ onMounted(() => {
 const heading = computed(() => {
   if (state.value === 'done') return 'You are unsubscribed'
   if (state.value === 'invalid') return 'This link is not valid'
-  if (reviewToken.value) return 'Unsubscribe from this review invitation?'
+  if (reviewToken.value) return 'Unsubscribe from review emails?'
   return `Unsubscribe from ${categoryLabel.value}?`
 })
 
 const message = computed(() => {
   if (failure.value) return failure.value
-  if (reviewToken.value) return state.value === 'done' ? 'The review link for this visit is closed.' : 'This will close the review link for this visit.'
+  if (reviewToken.value) return state.value === 'done' ? 'You’ve unsubscribed from review emails.' : 'Turn off review emails for your account or, for an unlinked booking, close this invitation.'
   if (state.value === 'done') return `You will no longer receive ${categoryLabel.value} emails. Everything else is unchanged.`
   if (state.value === 'invalid') return 'This unsubscribe link is incomplete or has expired. Open your notification settings to change what you receive.'
   return 'You will stop receiving these emails. Other notifications are unaffected.'

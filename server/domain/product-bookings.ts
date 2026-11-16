@@ -114,11 +114,6 @@ function bookingOfferingQuery(organization: BatchQuery, selector: { slug?: strin
   `, params: [...organization.params ?? [], productId ?? slug, slug ?? null, slug ?? null] }
 }
 
-function readBookingOffering(db: DbClient, organizationId: string, selector: { slug?: string; productId?: string }) {
-  const { query, params } = bookingOfferingQuery(bookingParameter(organizationId), selector)
-  return queryFirst<BookingOffering>(db, query, params)
-}
-
 function timedBookingQueries(organization: BatchQuery, product: BatchQuery, input: { sessionId: string; requestedVariantId: string }): BatchQuery[] {
   const variants = { query: `SELECT id,name FROM product_variants WHERE organization_id=${organization.query} AND product_id=${product.query} AND active=1`,
     params: [...organization.params ?? [], ...product.params ?? []] }
@@ -169,8 +164,9 @@ export async function quoteTimedBooking(db: DbClient, env: CloudflareEnv, input:
 }) {
   const selection = readTimedSelection(input)
   if (selection.failure) throwQuoteFailure(selection.failure)
+  const offeringQuery = bookingOfferingQuery(bookingParameter(input.organizationId), input)
   const [offering, organization] = await Promise.all([
-    readBookingOffering(db, input.organizationId, input),
+    queryFirst<BookingOffering>(db, offeringQuery.query, offeringQuery.params),
     queryFirst<{ default_currency: string }>(db, "SELECT default_currency FROM organization WHERE id=? AND status='active'", [input.organizationId]),
   ])
   if (!offering || offering.unit !== 'slot' || offering.on_sale !== 1 || !organization) throw new HTTPError({ statusCode: 404, message: 'Product not found' })

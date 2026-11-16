@@ -62,6 +62,9 @@ export async function enqueueOutstandingWork(env: CloudflareEnv): Promise<void> 
     else if (kind === 'calendar') await publishEvent(env, { type: 'calendar.changed', organization_id, booking_id: null })
     else await publishEvent(env, { type: 'calendar.cleanup', organization_id })
   }
+  // The next release's "Remove one-time outbox and open-job adoption" step
+  // deletes these two scans from the "Adopt outstanding work" handler. Normal
+  // writes already schedule their outbox sends and job reminders.
   const outboxes = await queryAllPages<{ organization_id: string }>(env.DB, `SELECT DISTINCT organization_id
     FROM scheduled_guest_messages WHERE status = 'pending' ORDER BY organization_id`, [])
   for (const { organization_id } of outboxes) await scheduleBusinessWake(env, organization_id, 'outbox', due)
@@ -89,8 +92,12 @@ export function retentionWakeAt(expiresAt: number): number {
   return Math.ceil(expiresAt / 86_400_000) * 86_400_000
 }
 
-/** One retention alarm serves site receipts, Stripe attribution, and MCP calls, including anonymous calls. */
-async function retainAnalytics(env: CloudflareEnv, now: number): Promise<{ next: number | null }> {
+export async function runDueBusinessWork(env: CloudflareEnv, organizationId: string, kind: 'reviews' | 'retention' | 'ad_spend', now: number): Promise<{ next: number | null }> {
+  if (kind === 'ad_spend') return runScheduledManagedAdSpend(env, organizationId, now)
+  if (kind === 'reviews') return sendDueReviewInvitations(env, organizationId, now)
+  if (organizationId !== RETENTION_HUB) throw new Error('Analytics retention requires the platform hub')
+
+  // One retention alarm serves site receipts, Stripe attribution, and all MCP calls.
   const instant = new Date(now)
   await cleanupMcpToolCallEvents(env.DB, instant)
   await expireStripeGa4Intents(env.DB, instant)
@@ -115,11 +122,4 @@ async function retainAnalytics(env: CloudflareEnv, now: number): Promise<{ next:
       FROM public_resource_cache_invalidations WHERE status IN ('processed', 'failed') AND reason NOT LIKE ?
     )`, [socialCardReason])
   return { next: row?.next == null ? null : retentionWakeAt(Date.parse(row.next)) }
-}
-
-export async function runDueBusinessWork(env: CloudflareEnv, organizationId: string, kind: 'reviews' | 'retention' | 'ad_spend', now: number): Promise<{ next: number | null }> {
-  if (kind === 'ad_spend') return runScheduledManagedAdSpend(env, organizationId, now)
-  if (kind === 'reviews') return sendDueReviewInvitations(env, organizationId, now)
-  if (organizationId !== RETENTION_HUB) throw new Error('Analytics retention requires the platform hub')
-  return retainAnalytics(env, now)
 }

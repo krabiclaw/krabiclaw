@@ -44,8 +44,6 @@ export type DashboardOrganizationRow = ResolvedMembership & {
   memberId: string
 } & DashboardOrganizationConfig
 
-const ORGANIZATION_CONFIG_BY_ID_SQL = `SELECT o.id, ${DASHBOARD_ORGANIZATION_COLUMNS} FROM organization o WHERE o.id = ?`
-
 // The dashboard shows the business's mark and nothing else of its media: the
 // sidebar avatar is its `logo` as its owner presents it, or no avatar at all.
 export type DashboardOrganizationMedia = Array<{ asset_id: string, slot: string, public_url: string | null, thumbnail_url: string | null, kind: string | null, presentation: LogoPresentation | null }>
@@ -323,7 +321,7 @@ export async function getDashboardLocationContext(event: H3Event, locationId: st
   // configuration row are read in the same round trip.
   const [membership, configRow] = await Promise.all([
     resolveUserOrganization(env, { userId: session.user.id, organizationId: row.organization_id }, event),
-    queryFirst<DashboardOrganizationConfig & { id: string }>(db, ORGANIZATION_CONFIG_BY_ID_SQL, [row.organization_id]),
+    queryFirst<DashboardOrganizationConfig & { id: string }>(db, `SELECT o.id, ${DASHBOARD_ORGANIZATION_COLUMNS} FROM organization o WHERE o.id = ?`, [row.organization_id]),
   ])
   if (!membership) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
   if (!configRow) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })

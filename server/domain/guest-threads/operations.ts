@@ -361,8 +361,9 @@ export async function deliverBookingStatusUpdate(env: CloudflareEnv, event: Extr
     const { planSourceMessages } = await import('~/server/domain/scheduled-guest-messages')
     await planSourceMessages(db, event.organization_id, record.id)
     if (action === 'confirm' && record.status === 'confirmed') {
-      const { scheduleBookingReview } = await import('~/server/utils/review-request-delivery')
-      await scheduleBookingReview(env, event.organization_id, record.ends_at)
+      const { bookingReviewDueAt } = await import('~/server/utils/review-request-delivery')
+      const due = bookingReviewDueAt(record.ends_at)
+      if (due !== null) await publishEvent(env, { type: 'business.wake', organization_id: event.organization_id, kind: 'reviews', due_at: due })
     }
   }
   if (!isDeliverySent(delivery) && delivery.status !== 'skipped') {
