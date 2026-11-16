@@ -9,6 +9,9 @@ const challengeHeaders = {
 }
 
 export default defineHandler((event) => {
+  if (event.method !== 'GET' && event.method !== 'HEAD') {
+    return textResponse('Method not allowed\n', { status: 405, headers: { allow: 'GET, HEAD', 'cache-control': 'no-store' } })
+  }
   const hostname = event.url.hostname
   if (hostname === 'krabiclaw.com' || hostname === 'staging.krabiclaw.com') {
     return new Response(legacyChallenge, { headers: challengeHeaders })
