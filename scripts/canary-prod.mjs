@@ -14,13 +14,15 @@ function env(name, opts = {}) {
 }
 
 function d1Query(sql) {
-  const res = spawnYarn(['-s', 'wrangler', 'd1', 'execute', 'DB', '--remote', '--json', '--command', sql], {
+  const res = spawnYarn(['wrangler', 'd1', 'execute', 'DB', '--remote', '--json', '--command', sql], {
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',
   })
   if (res.error) throw res.error
-  if (res.status !== 0) throw new Error(res.stderr || `d1Query exited ${res.status}`)
-  return JSON.parse(res.stdout)?.[0]?.results ?? []
+  if (res.status !== 0) throw new Error('Production auth canary database read failed', { cause: res.stderr || res.stdout })
+  const [response] = JSON.parse(res.stdout)
+  if (!response?.success || !Array.isArray(response.results)) throw new Error('Unexpected production auth canary database response')
+  return response.results
 }
 
 function sqlEscape(value) {
