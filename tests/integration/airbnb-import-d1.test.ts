@@ -1334,7 +1334,7 @@ test('slice deadlines cancel provider reads and photo bodies and fail the job wi
     const job = () => db.prepare('SELECT state, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first()
     const consume = () => queue.drain(env, 'airbnb.sync')
     const stalled = (matches: (url: URL, init: RequestInit) => boolean, body = false) => {
-      const provider = Promise.withResolvers<void>()
+      const provider = Promise.withResolvers<undefined>()
       globalThis.fetch = async (input, init = {}) => {
         const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
         if (!matches(url, init)) return channex.fetch(input, init)
@@ -1343,12 +1343,12 @@ test('slice deadlines cancel provider reads and photo bodies and fail the job wi
         if (body) return new Response(new ReadableStream({
           pull(controller) {
             signal.addEventListener('abort', () => controller.error(signal.reason), { once: true })
-            provider.resolve()
+            provider.resolve(undefined)
           },
         }, { highWaterMark: 0 }))
         return new Promise<Response>((_resolve, reject) => {
           signal.addEventListener('abort', () => reject(signal.reason), { once: true })
-          provider.resolve()
+          provider.resolve(undefined)
         })
       }
       return provider.promise
@@ -1404,7 +1404,7 @@ test('a paid home records a failed meter report and reports it again before comp
     await db.prepare('UPDATE organization SET stripeCustomerId = ? WHERE id = ?').bind('cus_paid_host', ORG).run()
     await db.prepare("DELETE FROM subscription WHERE id = 'sub-boot'").run()
     await db.prepare("INSERT INTO subscription (id, plan, referenceId, stripeCustomerId, stripeSubscriptionId, status, seats, periodEnd) VALUES ('sub-paid', 'business', ?, 'cus_paid_host', 'sub-paid', 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
-    let stalled: PromiseWithResolvers<void> | null = Promise.withResolvers()
+    let stalled: PromiseWithResolvers<undefined> | null = Promise.withResolvers()
     let refused = false
     let requests = 0
     const receipts: Array<{ event: string; customer: string; value: string }> = []
@@ -1420,7 +1420,7 @@ test('a paid home records a failed meter report and reports it again before comp
         return new Promise<Response>((_resolve, reject) => {
           if (signal.aborted) reject(signal.reason)
           else signal.addEventListener('abort', () => reject(signal.reason), { once: true })
-          provider.resolve()
+          provider.resolve(undefined)
         })
       }
       if (refused) return Response.json({ error: { type: 'invalid_request_error', message: 'Meter refused' } }, { status: 400 })
@@ -1438,7 +1438,7 @@ test('a paid home records a failed meter report and reports it again before comp
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings').first(), { import_stage: 'reservations', enabled: 1 })
     assert.equal(requests, 1, 'the SDK does not retry beyond the operation deadline')
     await retry()
-    stalled = Promise.withResolvers<void>()
+    stalled = Promise.withResolvers()
     await expectSyncTimeout(t, consume, stalled.promise)
     assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_SLICE_ENDED' })
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings').first(), { import_stage: 'complete', enabled: 1 })
