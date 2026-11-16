@@ -1154,22 +1154,3 @@ export async function ensureInteractionUser(event: H3Event, env: CloudflareEnv):
   }
   return { ...response.user, isAnonymous: true }
 }
-
-/**
- * A business records its guest as a named anonymous user. Revoke the session
- * Better Auth opens before returning the identity to the booking operation.
- * A later verified sign-in can claim its bookings.
- */
-export async function createGuestUser(env: CloudflareEnv, name: string): Promise<string> {
-  const auth = createAuth(env)
-  const { headers, response } = await auth.api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
-  const bearerToken = headers.get('set-auth-token')
-  if (!response?.user?.id || !response.token || !bearerToken) throw new Error('Better Auth did not return an anonymous user and session')
-  const sessionHeaders = new Headers({ authorization: `Bearer ${bearerToken}` })
-  try {
-    await auth.api.updateUser({ headers: sessionHeaders, body: { name } })
-  } finally {
-    await auth.api.revokeSession({ headers: sessionHeaders, body: { token: response.token } })
-  }
-  return response.user.id
-}

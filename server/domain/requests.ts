@@ -334,11 +334,11 @@ export function requestInsertQueries(request: Omit<GuestRequest, 'blocked_at' | 
 /**
  * A booking's conversation, written in the booking's own batch and only where
  * the booking landed and has none yet: every booking has one. Its guest
- * contact is what the booking was made with; the conversation belongs to the
- * booking's guest account.
+ * contact is what the booking was made with. Use the booking's guest account
+ * when it has one.
  */
 export function bookingConversationQueries(input: {
-  organizationId: string; bookingId: string; requestId: string; locationId: string | null; userId: string; now: string
+  organizationId: string; bookingId: string; requestId: string; locationId: string | null; userId: string | null; now: string
   guest: { name: string | null; email: string | null; phone: string | null }
   participant?: { kind: 'channel'; title: string }
 }): BatchQuery[] {

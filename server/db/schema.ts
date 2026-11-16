@@ -85,7 +85,7 @@ export const business_locations = sqliteTable("business_locations", {
 //   organization: a direct conversation, a group, or a job's about a booking).
 // booking_id: the booking it is about, where it has one. A booking has at most
 //   one guest conversation; any number of team conversations may name it.
-// user_id: the guest's Better Auth user (every guest has one); NULL on team.
+// user_id: the guest's Better Auth user when linked; NULL if unclaimed or on team.
 // payload_json: what the guest gave when they wrote or booked (contact,
 //   provenance, the emailed cancellation token); '{}' on team.
 // name/is_group/participants_key/created_by_user_id: team only. A group keeps

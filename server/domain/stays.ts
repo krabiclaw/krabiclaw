@@ -30,7 +30,7 @@ import { staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
 import { formatTime, isValidInstant, isValidTimezone, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { createProduct, getProduct, readStayCalendarRules, setProductPublication, stayImportWrittenQuery, stayWeekendPriceSql, updateProduct, type StayImportWrite } from '~/server/utils/product-management'
 import type { Product, ProductStayConfig, UpdateProductInput } from '~/server/types/products'
-import { createGuestUser, type CloudflareEnv } from '~/server/utils/auth'
+import type { CloudflareEnv } from '~/server/utils/auth'
 import { currencyFractionDigits, isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
@@ -1894,7 +1894,6 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
   const cancellation = imported ? null : bookedPolicyFor(days(fields.check_in_date, fields.check_out_date), home)
   const policy = { ...bookingPolicy({ ...home, accessibility_contact_required: home.accessibility_contact_required === 1,
     online_payment_required: home.online_payment_required === 1 }, null), cancellation } satisfies BookingPolicy
-  const guestUserId = await createGuestUser(env, fields.guest_name)
   const conversationId = crypto.randomUUID()
   const partySize = fields.adults + fields.children
   const turnovers = turnoverTaskQueries({ organizationId: access.organizationId, now, before: null, homes: [home],
@@ -1906,11 +1905,11 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
         query: `INSERT INTO bookings (id, organization_id, user_id, product_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, adults, children, infants,
                   status, answers, private_notes, policy_json, total_minor, currency, idempotency_key, version, channel, owner, channel_booking_id, received_at, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, 1, ?, 'app', ?, ?, ?, ?)`,
-        params: [id, access.organizationId, guestUserId, home.product_id, variants[0]!, home.location_id, window.starts_at, window.ends_at, home.timezone, partySize, fields.adults, fields.children, fields.infants,
+        params: [id, access.organizationId, null, home.product_id, variants[0]!, home.location_id, window.starts_at, window.ends_at, home.timezone, partySize, fields.adults, fields.children, fields.infants,
           JSON.stringify(answers), fields.private_notes, JSON.stringify(policy), fields.total_minor, home.currency, key, channel, channelBookingId, imported ? null : now, now, now],
       },
       ...reconcileNightsQueries(access.organizationId, id, { updated_at: now, version: 1, product_id: home.product_id, ...window, check_in_date: fields.check_in_date, check_out_date: fields.check_out_date }),
-      ...bookingConversationQueries({ organizationId: access.organizationId, bookingId: id, requestId: conversationId, locationId: home.location_id, userId: guestUserId, now,
+      ...bookingConversationQueries({ organizationId: access.organizationId, bookingId: id, requestId: conversationId, locationId: home.location_id, userId: null, now,
         guest: { name: fields.guest_name, email: fields.guest_email, phone: fields.guest_phone } }),
       publicResourceCacheInvalidationQuery(access.organizationId, 'guest-thread-create'),
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id,
@@ -2657,11 +2656,9 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   const [home] = await stayHomesWhere(db, organizationId, landing, { sql: '1 = 1', params: [] })
   if (!home) fail(404, 'STAY_HOME_NOT_FOUND', 'The channel booking home was not found', 'product_id')
   const guestName = [booking.guest_name, booking.guest_surname].map(part => part?.trim()).filter(Boolean).join(' ') || null
-  // Every guest is a Better Auth user, an anonymous one carrying what the channel gave. A channel may send a
-  // reservation naming no one: its conversation is then titled by the reservation, as a channel's own is, and
-  // names no guest. A conversation the channel opened before the booking is the booking's.
+  // A reservation naming no one uses the channel's reservation title.
   const reservation = `${STAY_CHANNEL_LABELS[booking.channel]} reservation ${booking.channel_booking_id ?? booking.external_booking_id}`
-  const guestUserId = existing?.user_id ?? await createGuestUser(env, guestName ?? reservation)
+  const guestUserId = existing?.user_id ?? null
   const window = stayWindow({ check_in_date: booking.check_in_date, check_out_date: booking.check_out_date, arrival_time: null }, home)
   const policy = await stayPolicy(db, organizationId, landing, null, null)
   const version = previous ? previous.version + 1 : 1
