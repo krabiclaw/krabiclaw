@@ -1,4 +1,3 @@
-import { isNonProductionHost } from '../../server/utils/tenant-hosts'
 import { testBaseUrl } from '../e2e/test-env'
 import { expect, test, type Page } from '@playwright/test'
 import { openTenantPage } from '../e2e/helpers'
@@ -93,7 +92,7 @@ test('NCLS home → services → service detail', async ({ page }) => {
 
 for (const [name, baseURL] of [['Strut', strutBaseURL], ['NCLS', blawbyBaseURL]]) {
   test(`${name} home → blog → article uses the shared navigation`, async ({ page }) => {
-    test.skip(name === 'Strut' && isNonProductionHost(new URL(testBaseUrl()).hostname), 'Strut is a production-only tenant; staging has no Strut organization.')
+    test.skip(name === 'Strut' && new URL(testBaseUrl()).hostname !== 'krabiclaw.com', 'Strut is a production-only tenant; staging has no Strut organization.')
     expect((await openTenantPage(page, `${baseURL}/`, {}))?.status()).toBe(200)
     if (name === 'Strut') {
       await expect(page.locator('header a[href^="/locations"], footer a[href^="/locations"]')).toHaveCount(0)

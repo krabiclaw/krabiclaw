@@ -1,7 +1,7 @@
 <template>
  <DashboardLeafPanel id="approve-refund" title="Approve refund" :footer="false">
   <UAlert v-if="error" color="error" :description="error.message" />
-  <template v-else-if="data"><p class="font-semibold">{{ WORDING[data.action].question }} {{ paymentMoney(data.amount,data.currency) }}?</p><p v-if="data.note" class="mt-2 text-muted">“{{ data.note }}”</p><p class="mt-2">The refund comes from your Stripe balance. Blawby Payments fees aren’t returned after a refund or dispute.</p><UButton class="mt-4" color="error" :loading="working" :disabled="done" @click="approve">{{ WORDING[data.action].button }}</UButton><p v-if="done" class="mt-3">Refund submitted to Stripe.</p></template>
+  <template v-else-if="data"><p class="font-semibold">{{ WORDING[data.action].question }} {{ paymentMoney(data.amount,data.currency) }}?</p><p v-if="data.note" class="mt-2 text-muted">“{{ data.note }}”</p><p class="mt-2">The refund comes from your Stripe balance. KrabiClaw Payments fees aren’t returned after a refund or dispute.</p><UButton class="mt-4" color="error" :loading="working" :disabled="done" @click="approve">{{ WORDING[data.action].button }}</UButton><p v-if="done" class="mt-3">Refund submitted to Stripe.</p></template>
   <UAlert v-if="failure" class="mt-4" color="error" :description="failure" />
  </DashboardLeafPanel>
 </template>

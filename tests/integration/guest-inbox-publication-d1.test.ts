@@ -102,7 +102,7 @@ test('inbox publication failures are visible and table booking receipts reflect 
     ].map(statement => db.prepare(statement)))
     const reservationEnv = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests',
-      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     // The dining room's tables: Monday seatings every half hour from 16:00 to 20:00.
     const tables = await createTables(db, reservationEnv, { organizationId: 'healthy', locationId: 'reservation-location', actorId: 'reservation-owner', memberId: 'reservation-member', name: 'Dining tables',
       durationMinutes: 120, seats: 10, weekdays: [1], open: '16:00', lastSeating: '20:00' })

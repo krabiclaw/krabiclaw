@@ -84,5 +84,5 @@ const tiles = computed<OrganizationLocationSelectorItem[]>(() => locations.value
   }
 }))
 
-useSeoMeta({ title: () => `${locationsLabel.value} | Blawby`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${locationsLabel.value} | KrabiClaw`, robots: 'noindex, nofollow' })
 </script>

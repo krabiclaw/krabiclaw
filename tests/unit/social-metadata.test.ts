@@ -15,24 +15,24 @@ test('formatPlatformTitle returns canonical brand title when no title is provide
 
 test('formatPlatformTitle preserves existing brand-prefixed titles without stutter', () => {
   assert.equal(
-    formatPlatformTitle('Blawby | Open-Source Websites, Bookings & Payments'),
-    'Blawby | Open-Source Websites, Bookings & Payments',
+    formatPlatformTitle('KrabiClaw | Open-Source Websites, Bookings & Payments'),
+    'KrabiClaw | Open-Source Websites, Bookings & Payments',
   )
   assert.equal(
-    formatPlatformTitle('Blawby — Open-Source Websites'),
-    'Blawby — Open-Source Websites',
+    formatPlatformTitle('KrabiClaw — Open-Source Websites'),
+    'KrabiClaw — Open-Source Websites',
   )
-  assert.equal(formatPlatformTitle('Blawby'), 'Blawby')
+  assert.equal(formatPlatformTitle('KrabiClaw'), 'KrabiClaw')
 })
 
 test('formatPlatformTitle appends brand suffix for normal page titles', () => {
-  assert.equal(formatPlatformTitle('Pricing'), 'Pricing | Blawby')
-  assert.equal(formatPlatformTitle('Documentation'), 'Documentation | Blawby')
-  assert.equal(formatPlatformTitle('Terms of Service'), 'Terms of Service | Blawby')
+  assert.equal(formatPlatformTitle('Pricing'), 'Pricing | KrabiClaw')
+  assert.equal(formatPlatformTitle('Documentation'), 'Documentation | KrabiClaw')
+  assert.equal(formatPlatformTitle('Terms of Service'), 'Terms of Service | KrabiClaw')
 })
 
 test('truncateForSeo preserves titles within 70 characters without truncation', () => {
-  const brandTitle = 'Blawby | Open-Source Websites, Bookings & Payments'
+  const brandTitle = 'KrabiClaw | Open-Source Websites, Bookings & Payments'
   assert.ok(brandTitle.length <= 70)
   assert.equal(truncateForSeo(brandTitle, 70), brandTitle)
 })

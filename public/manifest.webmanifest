@@ -1,8 +1,8 @@
 {
   "id": "/dashboard",
-  "name": "Blawby",
-  "short_name": "Blawby",
-  "description": "Blawby dashboard",
+  "name": "KrabiClaw",
+  "short_name": "KrabiClaw",
+  "description": "KrabiClaw dashboard",
   "start_url": "/dashboard",
   "scope": "/dashboard",
   "display": "standalone",
@@ -11,31 +11,31 @@
   "theme_color": "#1F2547",
   "icons": [
     {
-      "src": "/platform/blawby.svg",
+      "src": "/platform/krabiclaw-symbol.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "/platform/blawby-192.png",
+      "src": "/krabi-claw-logo-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/platform/blawby-512.png",
+      "src": "/krabi-claw-logo.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/platform/blawby-maskable-192.png",
+      "src": "/krabi-claw-maskable-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/platform/blawby-maskable-512.png",
+      "src": "/krabi-claw-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

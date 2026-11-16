@@ -35,7 +35,7 @@ import { NuxtLink } from '#components'
 import AccountActivityCard from '~/components/dashboard/AccountActivityCard.vue'
 import type { AccountActivityItem } from '~/shared/account-activity'
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
-useSeoMeta({ title: 'Past activity | Blawby', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Past activity | KrabiClaw', robots: 'noindex, nofollow' })
 const level = useRouteLevel()
 const { data, error } = await useAccountActivity()
 const now = Date.now()

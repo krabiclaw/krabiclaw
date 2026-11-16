@@ -56,5 +56,5 @@ async function deleteOrganization() {
   }
 }
 
-useSeoMeta({ title: 'Delete organization | Blawby', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Delete organization | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

@@ -29,7 +29,7 @@ export const migrationKey = Symbol('hostaway-migration') as InjectionKey<{
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 definePageMeta({ layout: 'dashboard', key: route => `hostaway-migration:${route.params.org_slug}` })
-useSeoMeta({ title: 'Migrate from Hostaway | Blawby', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Migrate from Hostaway | KrabiClaw', robots: 'noindex, nofollow' })
 const route = useRoute()
 const orgSlug = String(route.params.org_slug)
 const dashboardApi = useDashboardApi(computed(() => ({ orgSlug })))

@@ -47,7 +47,7 @@ export const PAID_PLAN_PRICES: Readonly<Record<NewSalePlanId, { monthly: number 
   [BUSINESS_PLAN_ID]: Object.freeze({ monthly: 14900 }),
 })
 
-/** Services Blawby's people perform, priced in USD cents per month and sold beside the plan. */
+/** Services KrabiClaw's people perform, priced in USD cents per month and sold beside the plan. */
 export const SERVICE_PRICES = Object.freeze({
   strategy: Object.freeze({ monthly: 200000 }),
 })
@@ -80,7 +80,7 @@ export function homePrice(): string {
 }
 
 /** The pricing page's and its Markdown's beta notice: new subscribers get each later price; a subscription keeps its prices for 12 months. */
-export const PRICING_NOTICE = 'Beta pricing. Prices will rise for new subscribers as Blawby grows; you keep the price you subscribe at for 12 months.'
+export const PRICING_NOTICE = 'Beta pricing. Prices will rise for new subscribers as KrabiClaw grows; you keep the price you subscribe at for 12 months.'
 
 /**
  * Beta spots: each business that starts a paid plan from BETA_STARTED_AT takes

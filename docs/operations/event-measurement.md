@@ -236,12 +236,10 @@ currency, both including tax.
 
 The destination is always the measuring organization's own connected property
 (the `google_analytics` row of `organization_integrations`) on its canonical host. There
-is no environment-level property (`GA4_MEASUREMENT_ID` was removed).
-`reconcileZarazAnalytics` (`server/utils/zaraz-analytics.ts`) manages the tenant
-GA4 tools and sets the zone's `settings.ecommerce`. When a separate platform
-zone is configured, it receives only the platform tenant's linked property and
-inherits that tenant's existing GA4 actions. Unlinking that property withdraws
-the managed tool from both zones.
+is no environment-level property (`GA4_MEASUREMENT_ID` was removed) and no
+platform Zaraz tool: KrabiClaw is configured like any tenant by
+`reconcileZarazAnalytics` (`server/utils/zaraz-analytics.ts`), which deletes any GA4
+tool that is not a tenant's and sets the zone's `settings.ecommerce`.
 
 Every attempt writes its outcome to the native event (`payload.ga4_delivery`),
 surfaced as `coverage.ga4Delivery`:

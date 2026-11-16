@@ -76,7 +76,7 @@ const channelPostObject = {
 export const POSTS_TOOLS: McpToolDefinition[] = [
   organizationTool({
     name: 'get_social_connections',
-    description: "Read the site’s website, Facebook Page, Instagram and Discord channel publishing connections before selecting a publication target. Returns target_id, connection_revision, supported formats and operations, setup links, and problems, including whether Meta currently accepts each connection and whether the Blawby bot can still post to the connected Discord channel. Credentials are not returned.",
+    description: "Read the site’s website, Facebook Page, Instagram and Discord channel publishing connections before selecting a publication target. Returns target_id, connection_revision, supported formats and operations, setup links, and problems, including whether Meta currently accepts each connection and whether the KrabiClaw bot can still post to the connected Discord channel. Credentials are not returned.",
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: {},
@@ -91,7 +91,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'list_channel_posts',
-    description: 'Read live posts directly from the explicitly selected connected Facebook Page, Instagram professional account or Discord channel; for Discord, the Blawby bot\'s messages there. Does not import website posts or media. Read get_social_connections first and supply the exact channel, target_id and connection_revision. next_after is the provider\'s cursor; pass it as after for the next page.',
+    description: 'Read live posts directly from the explicitly selected connected Facebook Page, Instagram professional account or Discord channel; for Discord, the KrabiClaw bot\'s messages there. Does not import website posts or media. Read get_social_connections first and supply the exact channel, target_id and connection_revision. next_after is the provider\'s cursor; pass it as after for the next page.',
     domain: 'posts', minimumRole: 'admin', inputSchema: { ...channelTargetProperties, after: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
     required: channelTargetRequired,
     outputSchema: { type: 'object', properties: { posts: { type: 'array', items: channelPostObject }, next_after: { type: ['string', 'null'] } }, required: ['posts', 'next_after'] },
@@ -105,7 +105,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'delete_channel_post',
-    description: 'Permanently delete exactly the provider_post_id on the explicitly selected connected Facebook Page, or the Blawby bot\'s message in the connected Discord channel. Keeps the website post and marks its publication receipt removed. Read get_social_connections and list_channel_posts first. Instagram deletion is unavailable with this app\'s Instagram Login connection; delete Instagram posts in Instagram. Use delete_post to remove website content separately.',
+    description: 'Permanently delete exactly the provider_post_id on the explicitly selected connected Facebook Page, or the KrabiClaw bot\'s message in the connected Discord channel. Keeps the website post and marks its publication receipt removed. Read get_social_connections and list_channel_posts first. Instagram deletion is unavailable with this app\'s Instagram Login connection; delete Instagram posts in Instagram. Use delete_post to remove website content separately.',
     domain: 'posts', minimumRole: 'admin', inputSchema: { ...channelTargetProperties, channel: { type: 'string', enum: ['facebook', 'discord'] }, provider_post_id: { type: 'string' } },
     required: [...channelTargetRequired, 'provider_post_id'],
     outputSchema: { type: 'object', properties: {

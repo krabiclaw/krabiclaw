@@ -5,7 +5,7 @@
     <template v-else-if="joined">
       <div>
         <h1 class="text-2xl font-semibold tracking-tight text-highlighted">You've joined {{ joined.organizationName }}</h1>
-        <p class="mt-2 text-sm text-muted">You signed in with {{ invitation?.email }}. Add Apple or Google to sign in to this same account with them, here and in the Blawby app.</p>
+        <p class="mt-2 text-sm text-muted">You signed in with {{ invitation?.email }}. Add Apple or Google to sign in to this same account with them, here and in the KrabiClaw app.</p>
       </div>
       <AuthAppleButton label="Also sign in with Apple" :loading="linking === 'apple'" :disabled="linking !== null" @activate="link('apple')" />
       <AuthGoogleButton label="Also sign in with Google" :loading="linking === 'google'" :disabled="linking !== null" @activate="link('google')" />
@@ -17,7 +17,7 @@
       <div>
         <h1 class="text-2xl font-semibold tracking-tight text-highlighted">Join {{ invitation.organizationName }}</h1>
         <p class="mt-2 text-sm text-muted">
-          You've been invited to join {{ invitation.organizationName }} on Blawby as {{ roleLabel }}.
+          You've been invited to join {{ invitation.organizationName }} on KrabiClaw as {{ roleLabel }}.
           The invitation is for {{ invitation.email }} and expires on {{ expiresOn }}.
         </p>
       </div>
@@ -25,7 +25,7 @@
       <p class="text-sm text-muted">Signed in as {{ invitation.email }}.</p>
       <UButton block size="lg" :loading="busy" :disabled="!ready" @click="accept">Accept invitation</UButton>
       <UButton block size="lg" color="neutral" variant="ghost" :disabled="busy || !ready" @click="decline">Decline</UButton>
-      <UButton :to="appUrl" external color="neutral" variant="link" block>Open this invitation in the Blawby app</UButton>
+      <UButton :to="appUrl" external color="neutral" variant="link" block>Open this invitation in the KrabiClaw app</UButton>
       <UAlert v-if="failure" color="error" variant="soft" :description="failure" />
     </template>
 
@@ -34,7 +34,7 @@
       <p class="text-sm text-muted">Sign in or create an account using the email address that received this invitation.</p>
       <UButton :to="loginUrl" block size="lg">Sign in</UButton>
       <UButton :to="signupUrl" block size="lg" color="neutral" variant="outline">Create an account</UButton>
-      <UButton :to="appUrl" external color="neutral" variant="link" block>Open this invitation in the Blawby app</UButton>
+      <UButton :to="appUrl" external color="neutral" variant="link" block>Open this invitation in the KrabiClaw app</UButton>
     </template>
 
     <div v-else-if="declined">
@@ -63,7 +63,7 @@ import { normalizeApiError } from '~/utils/api-clients'
 
 definePageMeta({ layout: 'access', auth: false })
 useResponseHeader('cache-control').value = 'private, no-store'
-useSeoMeta({ title: 'Accept invitation | Blawby', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Accept invitation | KrabiClaw', robots: 'noindex, nofollow' })
 
 type Invitation = { email: string; organizationName: string; organizationSlug: string; role: string; expiresAt: string }
 

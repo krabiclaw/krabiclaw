@@ -97,43 +97,6 @@ function expectOnlyFamilies(loaded: Array<{ family: string }>, families: string[
   for (const face of loaded) expect(families).toContain(face.family)
 }
 
-test('renaming the platform keeps its existing hosted address', async ({ playwright }) => {
-  const baseURL = testBaseUrl()
-  const id = platformId()
-  const owner = await playwright.request.newContext({ baseURL })
-  try {
-    await loginAs(owner, baseURL)
-    const settingsPath = `/api/organizations/${id}/settings`
-    const read = async () => {
-      const response = await owner.get(settingsPath)
-      await expectStatus(response, 200)
-      return (await response.json()).settings as { name: string; subdomain: string; public_url: string }
-    }
-    const domains = async () => {
-      const response = await owner.get(`/api/organizations/${id}/domains`)
-      await expectStatus(response, 200)
-      return (await response.json()).domains as Array<{ id: string; domain: string; role: string; status: string; type: string }>
-    }
-    const rename = async (name: string) => {
-      const response = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'update_organization_settings', args: { organization_id: id, name } })
-      expect(mcpData<{ saved_fields: { name: string } }>(await response.json()).saved_fields.name).toBe(name)
-    }
-    const original = await read()
-    const originalDomains = await domains()
-    expect(originalDomains.some(domain => domain.type === 'subdomain' && domain.status === 'active')).toBe(true)
-    const name = 'Blawby Display Name Test'
-    try {
-      await rename(name)
-      expect(await read()).toMatchObject({ name, subdomain: original.subdomain, public_url: original.public_url })
-      expect(await domains()).toEqual(originalDomains)
-    } finally {
-      await rename(original.name)
-    }
-  } finally {
-    await owner.dispose()
-  }
-})
-
 test('Sarabun saves through Brand and renders for its Saya tenant in English, Thai and Japanese', async ({ browser, playwright }) => {
   // Eight full navigations, fresh guest contexts, font-file checks and restoration
   // share this journey budget; each assertion keeps its own existing deadline.

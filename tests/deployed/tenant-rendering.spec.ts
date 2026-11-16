@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import type { StayQuote } from '../../server/domain/stays'
 import { openTenantPage, waitForNuxtHydration } from '../e2e/helpers'
 import { testBaseUrl } from '../e2e/test-env'
-import { environmentTenantAliasHostname, isNonProductionHost } from '../../server/utils/tenant-hosts'
+import { environmentTenantAliasHostname } from '../../server/utils/tenant-hosts'
 import { blawbyBaseURL, blawbyExtraHeaders, potteryHouseBaseURL, potteryHouseExtraHeaders } from './real-tenants'
 
 // Two tenants stand in for the two verticals' routes this renderer serves:
@@ -58,7 +58,7 @@ test('unknown and retired API routes return JSON 404 without rendering a tenant 
 
 test('Blawby authored contact sections retain their forms and selected locations', async ({ page, request }) => {
   const platform = new URL(testBaseUrl())
-  test.skip(isNonProductionHost(platform.hostname), 'These authored contact pages are production tenants.')
+  test.skip(platform.hostname !== 'krabiclaw.com', 'These authored contact pages are production tenants.')
   const site = `https://cedar-legal.${platform.hostname}`
   const title = 'Office Location & Contact Info'
   const locationIds = ['loc-abce1341-c462-4e8d-ab8c-f4f6657f07cf']

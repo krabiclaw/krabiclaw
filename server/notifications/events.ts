@@ -618,12 +618,12 @@ export interface DomainEventInput {
 
 const DOMAIN_IMPACT: Record<string, string> = {
   active: 'Your site is live at this domain, with HTTPS.',
-  pending: 'Your site is not live at this domain yet. Add the DNS records below at your domain registrar; Blawby checks them and switches the domain on once they are in place.',
+  pending: 'Your site is not live at this domain yet. Add the DNS records below at your domain registrar; KrabiClaw checks them and switches the domain on once they are in place.',
   verifying: 'The DNS records were found and the domain is being verified. Your site goes live at this domain once verification finishes; nothing else is needed from you unless a record is still listed below.',
   blocked: 'This domain cannot serve your site. Review the reason below in domain settings.',
   failed: 'This domain could not be set up, and your site is not live at it. Review the reason below, correct the DNS records, then check the domain again.',
   disabled: 'This domain no longer serves your site.',
-  deleted: 'This domain no longer serves your site. Remove its Blawby DNS records at your registrar if you are not using them elsewhere.',
+  deleted: 'This domain no longer serves your site. Remove its KrabiClaw DNS records at your registrar if you are not using them elsewhere.',
 }
 
 const RECORD_PURPOSE: Record<string, string> = { ownership: 'Proves you own the domain', dcv_delegation: 'Lets the certificate renew', traffic: 'Points the domain at your site', ssl: 'Issues the HTTPS certificate' }
@@ -693,13 +693,13 @@ export function contentReportedMessage(input: ContentReportedInput): MemberAlert
     primaryAction: { url: input.reviewUrl, label: 'Review report' },
     category: 'account_security',
     emailPurpose: 'transactional',
-    emailReason: 'You received this email because you handle content reports for Blawby.',
+    emailReason: 'You received this email because you handle content reports for KrabiClaw.',
   }
 }
 
 export function onboardingCompletedMessage(input: OnboardingCompletedInput): MemberAlertMessage {
   return {
-    title: input.privateSite ? `${input.organizationName} finished setup on Blawby` : `${input.organizationName} is live on Blawby`,
+    title: input.privateSite ? `${input.organizationName} finished setup on KrabiClaw` : `${input.organizationName} is live on KrabiClaw`,
     preheader: `${input.ownerName} finished onboarding`,
     hero: null,
     facts: facts(
@@ -711,7 +711,7 @@ export function onboardingCompletedMessage(input: OnboardingCompletedInput): Mem
     secondaryAction: input.privateSite ? undefined : { url: input.siteUrl, label: 'Open site' },
     category: 'organization_and_billing',
     emailPurpose: 'transactional',
-    emailReason: `You received this email because ${input.organizationName} completed setup and you receive Blawby business onboarding alerts.`,
+    emailReason: `You received this email because ${input.organizationName} completed setup and you receive KrabiClaw business onboarding alerts.`,
   }
 }
 
@@ -747,16 +747,16 @@ export function ownerWelcomeMessage(input: OwnerWelcomeInput): MemberAlertMessag
   const verticalPrompt = welcomeVerticalPrompt(input.vertical, input.organizationName)
   const body = [
     input.privateSite
-      ? `I saw that you set up ${input.organizationName} on Blawby. You can preview and publish your website from Today.`
-      : `I saw that you just launched ${input.organizationName} on Blawby (${input.siteUrl}) — congratulations!`,
-    `I’m Paul, the founder of Blawby. I wanted to reach out personally to welcome you and see how setup went.`,
+      ? `I saw that you set up ${input.organizationName} on KrabiClaw. You can preview and publish your website from Today.`
+      : `I saw that you just launched ${input.organizationName} on KrabiClaw (${input.siteUrl}) — congratulations!`,
+    `I’m Paul, the founder of KrabiClaw. I wanted to reach out personally to welcome you and see how setup went.`,
     verticalPrompt,
-    `Excited to have you on board,\n\n**Paul**  \nFounder, Blawby`,
+    `Excited to have you on board,\n\n**Paul**  \nFounder, KrabiClaw`,
   ].join('\n\n')
 
   return {
-    title: input.privateSite ? 'Welcome to Blawby' : `Welcome to Blawby — congrats on launching ${input.organizationName}!`,
-    preheader: input.privateSite ? 'Your website is ready to preview' : `Welcome to Blawby — your site is live at ${input.siteUrl}`,
+    title: input.privateSite ? 'Welcome to KrabiClaw' : `Welcome to KrabiClaw — congrats on launching ${input.organizationName}!`,
+    preheader: input.privateSite ? 'Your website is ready to preview' : `Welcome to KrabiClaw — your site is live at ${input.siteUrl}`,
     hero: null,
     intro: `Hi ${greeting},`,
     body,
@@ -769,7 +769,7 @@ export function ownerWelcomeMessage(input: OwnerWelcomeInput): MemberAlertMessag
     finePrint: 'You can reply directly to this email to reach me.',
     category: 'organization_and_billing',
     emailPurpose: 'transactional',
-    emailReason: `You received this email because you set up ${input.organizationName} on Blawby.`,
+    emailReason: `You received this email because you set up ${input.organizationName} on KrabiClaw.`,
   }
 }
 
