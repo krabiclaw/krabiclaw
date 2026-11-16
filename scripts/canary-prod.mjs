@@ -1,16 +1,14 @@
 #!/usr/bin/env node
 import { chromium } from 'playwright'
+import { credentialSession } from './utils/e2e-auth.mjs'
 import { spawnYarn } from './utils/spawn-yarn.mjs'
 
 const nowIso = () => new Date().toISOString()
 
-function env(name, opts = {}) {
-  const value = process.env[name]
-  if (!value || !value.trim()) {
-    if (opts.optional) return ''
-    throw new Error(`Missing required env var: ${name}`)
-  }
-  return value.trim()
+function env(name) {
+  const value = process.env[name]?.trim()
+  if (!value) throw new Error(`Missing required env var: ${name}`)
+  return value
 }
 
 function d1Query(sql) {
@@ -29,30 +27,22 @@ function sqlEscape(value) {
   return String(value).replace(/'/g, "''")
 }
 
-async function fetchJson(request, url, options = {}) {
-  const res = await request.fetch(url, options)
-  const text = await res.text()
-  let body
-  try { body = text ? JSON.parse(text) : null } catch { body = null }
-  return { res, body, text }
-}
-
 async function main() {
   const baseUrl = env('CANARY_BASE_URL')
-  const phone = env('CANARY_PHONE_E164')
+  const email = env('CANARY_LOGIN_EMAIL')
   const expectedOrgId = env('CANARY_ORG_ID')
 
   const membershipCheck = d1Query(`
-    SELECT u.id AS user_id, m.role AS role, m.organizationId AS organization_id
+    SELECT u.id AS user_id
     FROM user u
     JOIN member m ON m.userId = u.id
-    WHERE u.phoneNumber = '${sqlEscape(phone)}'
+    WHERE u.email = '${sqlEscape(email)}'
       AND m.organizationId = '${sqlEscape(expectedOrgId)}'
     LIMIT 1
   `)[0]
 
   if (!membershipCheck) {
-    throw new Error(`Canary account is not scoped to the canary organization. Expected phone ${phone} to be a member of ${expectedOrgId}.`)
+    throw new Error('Canary account is not a member of the configured canary organization')
   }
 
   const before = {
@@ -60,68 +50,30 @@ async function main() {
     contacts: Number(d1Query(`SELECT COUNT(*) as c FROM conversations WHERE kind = 'contact' AND organization_id = '${sqlEscape(expectedOrgId)}'`)[0]?.c ?? 0),
   }
 
+  const { cookie } = await credentialSession(baseUrl, { email, organizationId: expectedOrgId })
   const browser = await chromium.launch({ headless: true })
-  const context = await browser.newContext({ baseURL: baseUrl })
-  const request = context.request
-  const page = await context.newPage()
 
   try {
-    const send = await fetchJson(request, `${baseUrl}/api/auth/phone-number/send-otp`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      data: { phoneNumber: phone },
-    })
-    if (send.res.status() >= 400) {
-      throw new Error(`OTP send failed (${send.res.status()}): ${send.text}`)
+    const context = await browser.newContext({ baseURL: baseUrl })
+    await context.addCookies(cookie.split('; ').map((entry) => {
+      const separator = entry.indexOf('=')
+      return { name: entry.slice(0, separator), value: entry.slice(separator + 1), url: baseUrl }
+    }))
+    const session = await context.request.get('/api/auth/get-session')
+    if (!session.ok() || (await session.json())?.user?.id !== membershipCheck.user_id) {
+      throw new Error(`Session does not match the configured canary account (${session.status()})`)
     }
 
-    const digits = phone.replace(/\D/g, '')
-    let otp = ''
-    const otpDeadline = Date.now() + 25_000
-    while (Date.now() < otpDeadline) {
-      const rows = d1Query(`
-        SELECT value, identifier, createdAt
-        FROM verification
-        WHERE (identifier = '${sqlEscape(phone)}' OR replace(identifier, '+', '') = '${sqlEscape(digits)}' OR replace(identifier, ' ', '') = '${sqlEscape(phone.replace(/\s+/g, ''))}')
-          AND expiresAt > unixepoch()
-        ORDER BY createdAt DESC
-        LIMIT 5
-      `)
-      const candidate = rows.find((row) => /^\d{6}(?::\d+)?$/.test(String(row.value ?? '').trim()))
-      if (candidate) {
-        otp = String(candidate.value).trim().split(':')[0] || ''
-        break
-      }
-      await new Promise((r) => setTimeout(r, 1000))
-    }
-    if (!otp) {
-      throw new Error('Failed to read OTP from D1 verification table for canary phone number')
-    }
+    const contextRes = await context.request.get('/api/dashboard/context')
+    if (contextRes.status() !== 200) throw new Error(`Dashboard context failed (${contextRes.status()})`)
+    const dashboardContext = await contextRes.json()
 
-    const verify = await fetchJson(request, `${baseUrl}/api/auth/phone-number/verify`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      data: { phoneNumber: phone, code: otp },
-    })
-    if (verify.res.status() >= 400) {
-      throw new Error(`OTP verify failed (${verify.res.status()}): ${verify.text}`)
-    }
-
-    const session = await fetchJson(request, `${baseUrl}/api/auth/get-session`)
-    if (session.res.status() >= 400 || !session.body?.user?.id) {
-      throw new Error(`Authenticated session missing after OTP login (${session.res.status()})`)
-    }
-
-    const contextRes = await fetchJson(request, `${baseUrl}/api/dashboard/context`)
-    if (contextRes.res.status() !== 200 || !contextRes.body?.organization?.id) {
-      throw new Error(`Dashboard context failed (${contextRes.res.status()}): ${contextRes.text}`)
-    }
-
-    const orgId = String(contextRes.body.organization.id)
+    const orgId = dashboardContext.organization?.id
     if (orgId !== expectedOrgId) {
       throw new Error(`Canary org mismatch: expected ${expectedOrgId}, got ${orgId}`)
     }
 
+    const page = await context.newPage()
     const dashboard = await page.goto(`${baseUrl}/dashboard`, { waitUntil: 'networkidle' })
     if (!dashboard || dashboard.status() >= 400) {
       throw new Error(`Dashboard page load failed (${dashboard?.status() ?? 'no_response'})`)
@@ -147,7 +99,7 @@ async function main() {
       base_url: baseUrl,
       organization_id: orgId,
       read_only_counts: before,
-      user_id: session.body.user.id,
+      user_id: membershipCheck.user_id,
     }
 
     console.log(JSON.stringify(summary, null, 2))
