@@ -492,7 +492,7 @@ export interface OrganizationSettingsForm {
   stay_confirmation_mode: LodgingConfirmationMode | null
 }
 
-/** Live and Draft are the tenant's; Suspended is KrabiClaw's hold. */
+/** Live and Draft are the tenant's; Suspended is Blawby's hold. */
 export type OrganizationStatus = 'active' | 'inactive' | 'suspended'
 
 export interface OrganizationSettingsResponse {
@@ -658,7 +658,7 @@ const statusDotClass = computed(() => {
 })
 const statusDescription = computed(() => {
   if (form.status === 'active') return 'Anyone can visit the website, and search engines can list it.'
-  if (form.status === 'suspended') return 'KrabiClaw has suspended this website. Contact support to restore it.'
+  if (form.status === 'suspended') return 'Blawby has suspended this website. Contact support to restore it.'
   return 'Your website is in draft mode and not visible to the public or search engines. Publish to go live.'
 })
 

@@ -774,7 +774,7 @@ export async function notifyOwner(
     surfaceDeliveryFailures?: boolean
     /** Explicit assignment audience from the event snapshot. When supplied, no later assignee is inferred. */
     memberIds?: string[]
-    /** KrabiClaw operator addresses copied on operational mail: routing, not a person's preference, so no opt-out link. */
+    /** Blawby operator addresses copied on operational mail: routing, not a person's preference, so no opt-out link. */
     operatorEmails?: string[]
     /** A conversation whose responsible members are recipients, without the event being a fact on it. */
     responsibleRequestId?: string
@@ -1503,7 +1503,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
 export async function notifyBookingCancelled(
   env: NotificationEnv,
   db: DbClient,
-  /** cancellationMessageId: the one KrabiClaw message the cancellation wrote in the booking's conversation. */
+  /** cancellationMessageId: the one Blawby message the cancellation wrote in the booking's conversation. */
   opts: BookingNotificationInput & { cancellationMessageId: string }
 ) {
   const confirmed = Boolean(opts.wasConfirmed)
@@ -1752,7 +1752,7 @@ async function alertedMessage(db: DbClient, thread: GuestRequest, entry: Message
   }
 }
 
-/** Channex marks an Airbnb agent's message with the role AGENT (read from a live thread, 2026-10-23); the mirror records it as KrabiClaw's relay. */
+/** Channex marks an Airbnb agent's message with the role AGENT (read from a live thread, 2026-10-23); the mirror records it as Blawby's relay. */
 export function isAirbnbSupportMessage(entry: MessageRow): boolean {
   const meta = entry.channel === 'airbnb' ? parseMessagePayload(entry).meta : null
   return entry.author_kind === 'krabiclaw' && isRecord(meta) && meta.role === 'AGENT'
@@ -1927,7 +1927,7 @@ export async function notifyOrganizationInvited(
       deep_link: inviteUrl,
     },
     email: {
-      subject: `You're invited to join ${opts.organizationName} on KrabiClaw`,
+      subject: `You're invited to join ${opts.organizationName} on Blawby`,
       ...rendered,
     },
   })

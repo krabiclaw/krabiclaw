@@ -44,7 +44,7 @@ export async function sendPasswordResetEmail(
 
   await sendAuthEmail(env, {
     to: opts.email,
-    subject: 'Reset your KrabiClaw password',
+    subject: 'Reset your Blawby password',
     ...email,
   })
 }
@@ -58,7 +58,7 @@ export async function sendVerificationEmail(
 
   await sendAuthEmail(env, {
     to: opts.email,
-    subject: 'Verify your KrabiClaw email',
+    subject: 'Verify your Blawby email',
     ...email,
   })
 }

@@ -19,7 +19,6 @@ import { applySitePalettePatch, resolveSitePalette } from '~/shared/site-palette
 import { SITE_RECIPE_KEYS, SITE_RECIPE_OPTIONS, isSiteRecipeValue, parseSiteRecipe } from '~/shared/site-recipe'
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation } from '~/shared/media-placement-contract'
 import { refreshSocialCard, regenerateOrganizationSocialCards } from '~/server/utils/social-card'
-import { organizationAdapter } from '~/server/utils/member-access'
 import { BUSINESS_CURRENCY_FIXED, businessCurrencyFixed, linkedAccountOwner, type CloudflareEnv } from '~/server/utils/auth'
 import { prepareFormQuestionsWrite, readFormQuestions } from '~/server/domain/form-questions'
 import { formQuestionsRevision, type FormQuestion } from '~/shared/form-questions'
@@ -341,8 +340,12 @@ async function attemptOrganizationUpdate(
     guardParams.push(JSON.stringify(current))
   }
   if (updates.name !== undefined) {
-    setParts.push('name = ?', 'subdomain = ?')
-    params.push(updates.name, subdomain)
+    setParts.push('name = ?')
+    params.push(updates.name.trim())
+    if (subdomain !== null) {
+      setParts.push('subdomain = ?')
+      params.push(subdomain)
+    }
   }
   if (updates.brand_description !== undefined) {
     setParts.push('brand_description = ?')
@@ -491,7 +494,7 @@ async function attemptOrganizationUpdate(
   // A status change adds or removes this site's indexed content. Typography,
   // colors, recipe tokens and announcements affect only its public resource and HTML caches.
   // The inquiry form's questions are part of every public form that renders it.
-  if (updates.status !== undefined || updates.address_visibility !== undefined || updates.inquiry_questions !== undefined) {
+  if (updates.name !== undefined || updates.status !== undefined || updates.address_visibility !== undefined || updates.inquiry_questions !== undefined) {
     await purgePublicResourceCacheNow(env, organizationId)
   } else if (
     updates.lodging_booking !== undefined ||
@@ -610,7 +613,7 @@ export async function updateOrganizationSettingsFields(
   // what is stored is always complete and validated before anything is written.
   if (updates.palette !== undefined) {
     if (organization.theme_id === PLATFORM_THEME_ID) {
-      return { status: 400, data: { error: "KrabiClaw's own site has fixed colors" } }
+      return { status: 400, data: { error: "Blawby's own site has fixed colors" } }
     }
     if (updates.palette !== null) {
       const current = resolveSitePalette((await getConfig(db, organizationId)).palette)
@@ -706,6 +709,12 @@ export async function updateOrganizationSettingsFields(
       }
     }
 
+    // The platform hostname is deployment configuration. Its stored alias
+    // remains routable across a display name change.
+    if (organization.theme_id === PLATFORM_THEME_ID) {
+      return attemptOrganizationUpdate(db, env, organization, organizationId, updates, userId, null)
+    }
+
     for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt += 1) {
       const subdomain = attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`
 
@@ -718,31 +727,13 @@ export async function updateOrganizationSettingsFields(
       if (existing) continue
       if (await isSystemSubdomainSpent(env, db, subdomain)) continue
 
-      let result: OrganizationSettingsUpdateResult
       try {
-        result = await attemptOrganizationUpdate(
-          db,
-          env,
-          organization,
-          organizationId,
-          updates,
-          userId,
-          subdomain
-        )
+        return await attemptOrganizationUpdate(db, env, organization, organizationId, updates, userId, subdomain)
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         if (/UNIQUE constraint failed/i.test(message)) continue
         throw error
       }
-      // One business, one name. The organization Better Auth holds is that
-      // business, so it takes the brand name a guest sees rather than keeping
-      // a second name of its own. Outside the retry: a failure here is not a
-      // subdomain collision and must not spend another attempt.
-      if (result.status === 200) {
-        const adapter = await organizationAdapter(env)
-        await adapter.updateOrganization(organizationId, { name: updates.name.trim() })
-      }
-      return result
     }
 
     return {

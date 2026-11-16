@@ -344,5 +344,5 @@ async function savePageLocalization(locale: string, submitted: Record<string, un
   }
 }
 
-useSeoMeta({ title: 'Page | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Page | Blawby Dashboard', robots: 'noindex, nofollow' })
 </script>

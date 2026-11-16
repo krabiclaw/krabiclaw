@@ -1,6 +1,7 @@
 <template>
   <div class="min-h-screen bg-default flex items-center justify-center px-6 py-12">
     <main class="w-full max-w-md">
+      <img src="/platform/blawby.svg" alt="Blawby" width="40" height="40" class="mb-5 rounded-lg">
       <slot />
     </main>
   </div>

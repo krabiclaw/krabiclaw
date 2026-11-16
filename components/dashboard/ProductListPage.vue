@@ -125,5 +125,5 @@ const firstHomeChoices = computed(() => firstHomeSetup.value ? [
   { ...firstHomeSetup.value.airbnb, icon: 'i-simple-icons-airbnb' },
 ] : [])
 
-useSeoMeta({ title: 'Catalog | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Catalog | Blawby Dashboard', robots: 'noindex, nofollow' })
 </script>

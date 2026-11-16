@@ -104,9 +104,8 @@ export default defineComponent({
               h('table', { role: 'presentation', cellPadding: '0', cellSpacing: '0', style: 'border-collapse:collapse' }, [
                 h('tbody', null, [
                   h('tr', null, [
-                    // The mark is whose mail this is: a tenant's logo, or on
-                    // KrabiClaw's own mail the crab. A tenant with no logo is
-                    // named alone; KrabiClaw's mark never stands in for it.
+                    // Platform mail uses the Blawby mark. Tenant mail uses its
+                    // own logo or the tenant name alone.
                     orgName
                       ? (orgLogo
                           ? h('td', { style: 'vertical-align:middle;line-height:0' }, [
@@ -121,8 +120,8 @@ export default defineComponent({
                           : null)
                       : h('td', { style: 'vertical-align:middle;line-height:0' }, [
                           h(EImg, {
-                            src: `${origin}/krabi-claw-logo.png`,
-                            alt: 'KrabiClaw',
+                            src: `${origin}/platform/blawby-512.png`,
+                            alt: 'Blawby',
                             width: '32',
                             height: '32',
                             style: 'display:inline-block;vertical-align:middle;width:32px;height:32px',
@@ -145,8 +144,8 @@ export default defineComponent({
               h('div', { class: 'email-divider', style: `border-top:1px solid ${light.border};padding-top:24px` }, [
                 h(EText, { class: 'email-footer', style: `margin:0 0 10px;${type.footer};color:${light.textDimmed}` }, () => props.emailReason),
                 h(EText, { class: 'email-footer', style: `margin:0;${type.footer};color:${light.textDimmed}` }, () => [
-                  `© ${year} KrabiClaw · `,
-                  h(ELink, { href: origin, style: `color:${light.textMuted};text-decoration:underline` }, () => 'krabiclaw.com'),
+                  `© ${year} Blawby · `,
+                  h(ELink, { href: origin, style: `color:${light.textMuted};text-decoration:underline` }, () => new URL(origin).hostname),
                 ]),
                 props.organizationName && !props.locale
                   ? h(EText, { class: 'email-footer', style: `margin:6px 0 0;${type.footer};color:${light.textDimmed}` }, () => `Sent by ${props.organizationName} via KrabiClaw.`)

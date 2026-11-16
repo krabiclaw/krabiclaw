@@ -108,7 +108,7 @@ export interface IntegrationLeafConnection {
   image?: string | null
   /** Null while the provider has not finished connecting. */
   connectedAt: string | null
-  /** The KrabiClaw user who linked the account. */
+  /** The Blawby user who linked the account. */
   through?: { email: string | null; name: string | null } | null
   /** Active, not active yet (disabled), or failing; null while the provider has not finished connecting. */
   status?: 'active' | 'disabled' | 'error' | null

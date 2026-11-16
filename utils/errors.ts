@@ -30,7 +30,7 @@ export function oauthErrorMessage(code: unknown, description?: unknown): string 
       message = 'The connection client is unrecognized or outdated. If you are connecting an AI assistant (such as ChatGPT or Claude), delete your old connector in assistant settings and connect fresh using https://krabiclaw.com/api/mcp.'
       break
     case 'account_already_linked_to_different_user':
-      message = 'This provider account is already linked to another KrabiClaw user. Choose a different account or sign in as the user who linked it.'
+      message = 'This provider account is already linked to another Blawby user. Choose a different account or sign in as the user who linked it.'
       break
     case 'unable_to_get_user_info':
       message = 'The provider could not return your account information. Start again; if it still fails, check your provider account access.'

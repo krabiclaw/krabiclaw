@@ -2256,7 +2256,7 @@ async function saveProductLocalization(locale: string, submitted: Record<string,
   productLocalizationState = { productId: row.id, locale, values: structuredClone(response.localization.values) }
 }
 
-useSeoMeta({ title: () => `${pageTitle.value} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${pageTitle.value} | Blawby Dashboard`, robots: 'noindex, nofollow' })
 provide(productEditorKey, {
   reload,
   form,

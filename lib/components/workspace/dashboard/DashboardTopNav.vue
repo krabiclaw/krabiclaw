@@ -8,14 +8,14 @@
   >
     <NuxtLink :to="homeTo" class="group flex w-fit shrink-0 items-center gap-2.5 no-underline">
       <img
-        src="/platform/krabiclaw-symbol.svg"
-        alt="KrabiClaw"
+        src="/platform/blawby.svg"
+        alt="Blawby"
         width="36"
         height="36"
         class="size-8 rounded-[9px] transition-transform duration-200 group-hover:rotate-12"
       >
       <span class="kc-wordmark hidden text-xl lg:inline">
-        <span class="kc-wordmark__krabi">krabi</span><span class="kc-wordmark__claw">claw</span>
+        Blawby
       </span>
     </NuxtLink>
 
