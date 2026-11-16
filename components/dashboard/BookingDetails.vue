@@ -106,7 +106,7 @@
               <dd v-if="entry.detail" class="mt-0.5 text-xs text-muted">{{ entry.detail }}</dd>
             </div>
           </dl>
-          <p v-if="arrivalTime && !turnoverHome" class="mt-3 text-xs text-muted">Arriving {{ arrivalTime }}</p>
+          <p v-if="arrivalTime" class="mt-3 text-xs text-muted">Arriving {{ arrivalTime }}</p>
 
           <div v-if="panel.rows.length" class="mt-3">
             <component :is="row.to ? NuxtLink : row.href ? 'a' : 'button'" v-for="row in panel.rows" :key="row.label" :to="row.to" :href="row.href" :type="row.run ? 'button' : undefined" class="flex w-full items-start gap-4 py-3 text-left" @click="row.run?.()">
@@ -862,7 +862,7 @@ const panel = computed(() => {
     {
       label: 'Check-in',
       value: reservationDay(value.check_in_date),
-      detail: (turnover && arrivalTime.value) || (home?.check_in_time ? formatTime(home.check_in_time, 'en') : null),
+      detail: home?.check_in_time ? formatTime(home.check_in_time, 'en') : null,
     },
     { label: 'Checkout', value: reservationDay(value.check_out_date), detail: home?.check_out_time ? formatTime(home.check_out_time, 'en') : null },
   ] : record && !purchase ? [

@@ -669,7 +669,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     await expectStatus(memberList, 200)
     // The bookings list, the host Calendar and the calendar tool draw a member's stay as its days, status, party and the guest's first name.
     const { product_id, status, guest_name, adults, children, check_in_date, check_out_date } = turnoverFields
-    const calendarRow = { unit: 'nights', booking_id: stay.booking_id, product_id, status, guest_name, adults, children, check_in_date, check_out_date }
+    const calendarRow = { unit: 'nights', booking_id: stay.booking_id, conversation_id: null, product_id, status, guest_name, adults, children, check_in_date, check_out_date }
     expect(await memberList.json()).toEqual({ bookings: [{ ...calendarRow, name: 'Cliff Cabin' }], manage: false })
     for (const product of [undefined, productId]) {
       const calendar = await memberContext.request.get(api(nightCalendarPath(localDay(0), localDay(3), product)))
@@ -734,7 +734,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const details = memberPage.locator('#dashboard-panel-stay-details')
     await expect(details.getByRole('heading', { name: 'Reservation', level: 1, exact: true })).toBeVisible()
     await expect(details.getByText(`${guestName} · 3 guests`, { exact: true })).toBeVisible()
-    await expect(details.getByText(/^3:30\sPM$/u)).toBeVisible()
+    await expect(details.getByText(/^Arriving 3:30\sPM$/u)).toBeVisible()
     await expect(details.getByText('Cliff Cabin', { exact: true })).toBeVisible()
     for (const hidden of [surname, guestEmail, notes]) await expect(memberPage.getByText(hidden)).toHaveCount(0)
     await expect(details.getByRole('heading', { name: 'Payment info', exact: true })).toHaveCount(0)
