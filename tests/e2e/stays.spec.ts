@@ -997,20 +997,25 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
     expect(toAccount.headers().location).toBe('/dashboard/account')
     await expectStatus(await tableGuest.request.get(`${baseURL}/api/post-login?plan=business`, { maxRedirects: 0 }), 409)
     const personal = await tableGuest.newPage()
+    await personal.setViewportSize({ width: 1440, height: 900 })
     const landed = await personal.goto(`${baseURL}/api/post-login`)
     expect(landed?.status()).toBe(200)
     await expect(personal).toHaveURL(`${baseURL}/dashboard/account`)
     await waitForNuxtHydration(personal)
     // The guest's own reservation, its conversation and calendar: the Personal pages that hold something.
-    for (const path of ['/dashboard/account/activity', `/dashboard/account/activity/booking/${reservationId}`, `/dashboard/account/messages/${reservationId}`, `/dashboard/account/calendar/${slot!.date}`]) {
+    for (const path of ['/dashboard/account/activity', `/dashboard/account/activity/booking/${reservationId}`, `/dashboard/account/calendar/${slot!.date}`]) {
       const response = await personal.goto(`${baseURL}${path}`)
       expect(response?.status(), path).toBe(200)
       await waitForNuxtHydration(personal)
       await expect(personal).toHaveURL(`${baseURL}${path}`)
     }
     expect((await personal.goto(`${baseURL}/dashboard/account/notifications`))?.status()).toBe(404)
-    await personal.goto(`${baseURL}/dashboard/account/messages/${reservationId}`)
-    await expect(personal.getByText(/Table for 2 on /u).first()).toBeVisible()
+    const conversationPath = `/dashboard/account/messages/${reservationId}`
+    expect((await personal.goto(`${baseURL}${conversationPath}`))?.status()).toBe(200)
+    await waitForNuxtHydration(personal)
+    await expect(personal).toHaveURL(`${baseURL}${conversationPath}/reservation`)
+    await expect(personal.locator('#dashboard-panel-organization-messages-thread').getByText(/^Table for 2 on /u)).toBeVisible()
+    await expect(personal.getByTestId('reservation-panel')).toBeVisible()
   } finally {
     await tableGuest.close()
   }
