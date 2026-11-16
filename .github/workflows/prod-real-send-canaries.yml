@@ -1,6 +1,12 @@
-name: Blawby Pages edge preflight
+name: Blawby edge verification
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      expected_build_id:
+        description: Expected deployed Nuxt build UUID. Omit while Pages serves the apex.
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -23,8 +29,10 @@ jobs:
             echo 'Cloudflare challenged the home page'
             exit 1
           fi
-      - name: Replay the Node build lookup against the Pages origin
+      - name: Replay the Node build lookup
         if: always()
+        env:
+          EXPECTED_BUILD_ID: ${{ inputs.expected_build_id }}
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict'
@@ -35,6 +43,14 @@ jobs:
           console.log(JSON.stringify({ path: url.pathname, status: response.status, ...headers }))
           assert.equal(headers['cf-mitigated'], null)
           assert.ok(headers['cf-ray'])
-          assert.equal(response.status, 404)
-          assert.doesNotMatch(await response.text(), /<title>Just a moment/i)
+          const expected = process.env.EXPECTED_BUILD_ID?.trim()
+          if (expected) {
+            assert.match(expected, /^[a-f0-9-]{36}$/i)
+            assert.equal(response.status, 200)
+            assert.match(headers['content-type'] ?? '', /^application\/json/i)
+            assert.equal((await response.json()).id, expected)
+          } else {
+            assert.equal(response.status, 404)
+            assert.doesNotMatch(await response.text(), /<title>Just a moment/i)
+          }
           NODE
