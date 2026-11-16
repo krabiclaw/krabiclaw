@@ -14,7 +14,7 @@ import { calendarStays, getStay, stayAccessFor, stayCalendarOf, stayCalendarQuer
 import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
 import { loadDashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
-import { addLocalDays, isValidCalendarDate, localDateAt } from '~/utils/timezone'
+import { isValidCalendarDate, localDateAt } from '~/utils/timezone'
 import { readProductPhotos } from '~/server/utils/media-placement'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 
@@ -86,8 +86,8 @@ interface BookingListQuery { unit?: unknown; from?: unknown; to?: unknown; produ
 function bookingListWindow(query: BookingListQuery) {
   const { unit, from, to, product_id: productId } = query
   if (unit !== undefined && unit !== 'slot' && unit !== 'nights') throw new HTTPError({ statusCode: 422, message: 'Invalid booking unit' })
-  if (!isValidCalendarDate(from) || !isValidCalendarDate(to) || to <= from || to > addLocalDays(from, 62)) {
-    throw new HTTPError({ statusCode: 422, message: 'Choose a booking date range of at most 62 days' })
+  if (!isValidCalendarDate(from) || !isValidCalendarDate(to) || to <= from) {
+    throw new HTTPError({ statusCode: 422, message: 'Choose calendar dates with to after from' })
   }
   if (productId !== undefined && (typeof productId !== 'string' || !productId)) throw new HTTPError({ statusCode: 422, message: 'Invalid product ID' })
   return { unit, from, to, productId, includeCancelled: query.include_cancelled === 'true' }

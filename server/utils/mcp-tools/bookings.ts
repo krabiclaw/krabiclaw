@@ -57,7 +57,7 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
   }),
 
   organizationTool({ name: 'list_product_booking_sessions', outputSchema: { type: 'object', properties: { sessions: { type: 'array', items: session }, page_info: pageInfoObject }, required: ['sessions', 'page_info'] }, domain: 'bookings', minimumRole: 'member', description: 'Read scheduled times and remaining places for a product, including shared calendar conflicts. Choose a returned session ID to create or change a booking.',
-    inputSchema: { product_id: { type: 'string' }, from: { type: 'string', description: 'Inclusive ISO UTC instant.' }, to: { type: 'string', description: 'Exclusive ISO UTC instant, at most 93 days after from.' }, ...paginationInputSchema }, required: ['product_id', 'from', 'to'],
+    inputSchema: { product_id: { type: 'string' }, from: { type: 'string', description: 'Inclusive ISO UTC instant.' }, to: { type: 'string', description: 'Exclusive ISO UTC instant.' }, ...paginationInputSchema }, required: ['product_id', 'from', 'to'],
   }),
   organizationTool({ name: 'list_product_bookings', outputSchema: { type: 'object', properties: { bookings: { type: 'array', items: booking }, page_info: pageInfoObject }, required: ['bookings', 'page_info'] }, domain: 'bookings', minimumRole: 'member', description: 'Read bookings for tables, experiences, legal consultations and stays. Use get_product_booking for guest contact details and booking_id plus version to make changes.',
     inputSchema: { unit: { type: 'string', enum: ['slot', 'nights'] }, assigned_member_id: {type: 'string'}, location_id: { type: ['string', 'null'] }, product_id: { type: 'string' }, status: { type: 'string', enum: ['pending', 'confirmed', 'completed', 'cancelled'] }, from: { type: 'string', description: 'Inclusive session start instant.' }, to: { type: 'string', description: 'Exclusive session start instant.' }, ...paginationInputSchema },
@@ -133,7 +133,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     const from = requiredString(args, 'from')
     const to = requiredString(args, 'to')
     const start = Date.parse(from), end = Date.parse(to)
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 93 * 86400000) throw new HTTPError({ statusCode: 400, message: 'A valid date range of at most 93 days is required' })
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) throw new HTTPError({ statusCode: 400, message: 'A valid date range with to after from is required' })
     const productId = requiredString(args, 'product_id')
     await assertProductAccess(db, { ...principal, productId })
     const product = await queryFirst(db, 'SELECT id FROM products WHERE id = ? AND organization_id = ?', [productId, organizationId])

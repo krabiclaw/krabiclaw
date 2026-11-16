@@ -7,7 +7,7 @@ import { notifyStayReady, stayReadyRevisionQueries, stayReadyTaskQueries, turnov
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevision, parseStoredFormQuestions, type FormAnswerSnapshot, type FormQuestion } from '~/shared/form-questions'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
-import { AVAILABILITY_PAGE_DAYS, MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, STAY_DIRECT_DISCOUNTS, stayChannelCalendarRules, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, STAY_DIRECT_DISCOUNTS, stayChannelCalendarRules, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertResponsibleMember, assertRoleAllows, assignedMemberSql, BATCH_VIEWER, roleAllows, withViewer, type MemberAccessPrincipal } from '~/server/utils/member-access'
@@ -329,8 +329,6 @@ export interface StayNight {
   channel: { state: 'pending' | 'pushed' | 'needs_review'; detail: string | null } | null
 }
 
-/** Every home's nights at once: three months, a window a multi-calendar pages through. */
-const MAX_HOMES_CALENDAR_DAYS = 92
 const MAX_CALENDAR_BYTES = 2_000_000
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -371,11 +369,12 @@ function assertStayCheckoutHorizon(checkOut: string, today: string) {
   if (checkOut > addDays(today, STAY_CALENDAR_DAYS)) fail(422, 'STAY_TOO_FAR_AHEAD', `Stays can be booked up to ${STAY_CALENDAR_DAYS} days ahead`, 'check_out_date')
 }
 
-function range(input: { from: unknown; to: unknown }, max: number): { from: string; to: string } {
+function range(input: { from: unknown; to: unknown }, max?: number): { from: string; to: string } {
   const from = date(input.from, 'from')
   const to = date(input.to, 'to')
   const span = days(from, to)
-  if (span < 1 || span > max) fail(422, 'INVALID_RANGE', `to must be after from and at most ${max} days later`, 'to')
+  if (span < 1) fail(422, 'INVALID_RANGE', 'to must be after from', 'to')
+  if (max !== undefined && span > max) fail(422, 'INVALID_RANGE', `to must be at most ${max} days after from`, 'to')
   return { from, to }
 }
 
@@ -1294,7 +1293,7 @@ const STAY_NIGHT_PRICE_SQL = `(SELECT pr.unit_amount FROM product_variants v JOI
  * batch the host Calendar reads. A night's booking_id names its booking.
  */
 export async function readStayCalendar(db: DbClient, access: StayAccess, input: { productId?: string; from: unknown; to: unknown }): Promise<{ from: string; to: string } & ReturnType<typeof stayCalendarOf>> {
-  const { from, to } = range(input, input.productId ? STAY_CALENDAR_DAYS : MAX_HOMES_CALENDAR_DAYS)
+  const { from, to } = range(input)
   const viewer: BatchQuery = { query: 'SELECT ? AS organization_id, ? AS user_id, NULL AS member_id, ? AS organization_wide', params: [access.organizationId, access.actorId, access.manage ? 1 : 0] }
   const calendar = stayCalendarOf(await executeBatch(db, stayCalendarQueries(viewer, { from, to, productId: input.productId ?? null }), { operation: 'Read homes calendar' }), access.manage, { from, to })
   if (input.productId && !calendar.homes.length) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
@@ -2978,7 +2977,7 @@ function publicNight(night: Omit<StayNight, 'channel'>, today: string, lastDepar
 export async function readPublicStayCalendar(db: DbClient, organizationId: string, productId: string, input: { from: unknown; to: unknown }): Promise<PublicStayCalendar> {
   const [home] = await stayHomeRows(db, organizationId, productId, { sql: PUBLIC_STAY_SQL, params: [] })
   if (!home) fail(404, 'STAY_NOT_FOUND', 'That place to stay is not open for booking', 'slug')
-  const { from, to } = range(input, AVAILABILITY_PAGE_DAYS)
+  const { from, to } = range(input)
   const today = homeToday(home.timezone)
   const lastDeparture = addDays(today, STAY_CALENDAR_DAYS)
   const start = from < today ? today : from

@@ -781,7 +781,6 @@ async function sessionLocationGuard(db: DbClient, input: SessionAllocationInput)
 /** The public booking window, expressed as instants in the product's timezone. */
 export function bookingWindow(timezone: string, days = BOOKING_HORIZON_DAYS, now = new Date().toISOString()): InstantRange {
   if (!isValidTimezone(timezone)) throw new HTTPError({ statusCode: 409, statusMessage: 'Set the timezone before offering bookings' })
-  if (days > BOOKING_HORIZON_DAYS) badRequest('Booking window is too long')
   const today = localNow(timezone, new Date(now)).date
   return {
     fromInstant: now,
@@ -1201,7 +1200,7 @@ export function bookableSessions(schedule: SlotSchedule, sessions: BookableSessi
 /** The bookable times in a range, read with one batch. */
 export async function listBookableSessions(db: DbClient, input: SlotRange & { env: CloudflareEnv }, scope: SlotReadScope = 'bookable'): Promise<BookableSession[]> {
   const from = Date.parse(input.fromInstant), to = Date.parse(input.toInstant)
-  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from || to - from > 94 * 86_400_000) badRequest('Choose a valid availability range of at most 93 days')
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) badRequest('Choose valid instants with to after from')
   const now = input.now ?? new Date().toISOString()
   const calendar = await readSlotCalendar(db, input.env, { ...input, now, scope })
   return bookableSessions(calendar.schedule, (await calendar.places()).sessions, now)

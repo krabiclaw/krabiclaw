@@ -22,8 +22,8 @@ function availabilityRequest(input: AvailabilityInput, now: Date) {
   const requested = input.location_id
   if (requested !== undefined && typeof requested !== 'string') throw new HTTPError({ statusCode: 422, statusMessage: 'Invalid location_id' })
   if ((input.from !== undefined || input.to !== undefined)
-    && (!isValidCalendarDate(input.from) || !isValidCalendarDate(input.to) || input.to <= input.from || input.to > addLocalDays(input.from, AVAILABILITY_PAGE_DAYS))) {
-    throw new HTTPError({ statusCode: 422, statusMessage: `Request up to ${AVAILABILITY_PAGE_DAYS} days with from and exclusive to dates` })
+    && (!isValidCalendarDate(input.from) || !isValidCalendarDate(input.to) || input.to <= input.from)) {
+    throw new HTTPError({ statusCode: 422, statusMessage: 'Request calendar dates with from and an exclusive to after it' })
   }
   if (input.time_zone !== undefined && (typeof input.time_zone !== 'string' || !isValidTimezone(input.time_zone))) throw new HTTPError({ statusCode: 422, statusMessage: 'Invalid time_zone' })
   const from = typeof input.from === 'string' ? input.from : undefined

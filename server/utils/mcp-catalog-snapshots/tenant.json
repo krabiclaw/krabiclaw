@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:6f47a82c8e4a414b23ac80d483c64a8b57f86d6e05332e819547511bf7a5186e",
-  "documentationFingerprint": "sha256:25fd0861f1b9b3ec646802f8eac3d6c1285317af55be4bd6307dd47fccdc50bf",
+  "fingerprint": "sha256:7a287e2b1dcd17a4e3bc77a58b4014e02ec144a9b347ad73f95a6acb2fa66534",
+  "documentationFingerprint": "sha256:5c8d2e3caaacedeb2c638f9f4561fec715b1c18eb8557c15250ce5622a99598a",
   "tools": [
     {
       "name": "add_organization_language",
@@ -46573,7 +46573,7 @@
     {
       "name": "get_calendar",
       "title": "Get calendar",
-      "description": "Read the business’s bookings (table reservations, classes and consultations), guest arrivals and departures, published posts and unavailable dates when the user wants to review its calendar. Dates are inclusive local calendar days, with at most 62 days per call. Use kinds to filter the agenda.",
+      "description": "Read the business’s bookings (table reservations, classes and consultations), guest arrivals and departures, published posts and unavailable dates when the user wants to review its calendar. Dates are inclusive local calendar days. Use kinds to filter the agenda.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -64027,7 +64027,7 @@
             "type": "string"
           },
           "to": {
-            "description": "Exclusive; at most 500 days after from.",
+            "description": "Exclusive.",
             "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
             "type": "string"
           }
@@ -68914,7 +68914,7 @@
             "type": "string"
           },
           "to": {
-            "description": "Exclusive ISO UTC instant, at most 93 days after from.",
+            "description": "Exclusive ISO UTC instant.",
             "type": "string"
           }
         },
@@ -125722,7 +125722,7 @@
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
-        "list_product_booking_sessions": "sha256:06526c6170e88700736a723c638488475c76c1db82bcc7082ab478e28ce83a51",
+        "list_product_booking_sessions": "sha256:3649a6bc69afde8d124ed5c8452177c30a70dad2c9301cc7d3f10c9522536376",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93"
       }
@@ -125831,7 +125831,7 @@
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
-        "list_product_booking_sessions": "sha256:06526c6170e88700736a723c638488475c76c1db82bcc7082ab478e28ce83a51",
+        "list_product_booking_sessions": "sha256:3649a6bc69afde8d124ed5c8452177c30a70dad2c9301cc7d3f10c9522536376",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "replace_product_weekly_schedule": "sha256:114e8115176adaa1707ba8ca9cae7026ffd2ab4803fa566c727b7bd7c2c83e9b",
         "set_product_booking_config": "sha256:50969e4450fa9d51c05b4a5b2901f3ceac78a3df29d96e77fc48bfea8d2b21fe",
@@ -125873,7 +125873,7 @@
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversations": "sha256:563552eb6b0af82a762e138edf26711d2560e62fdb2cee2a757e19106704fbad",
-        "list_product_booking_sessions": "sha256:06526c6170e88700736a723c638488475c76c1db82bcc7082ab478e28ce83a51",
+        "list_product_booking_sessions": "sha256:3649a6bc69afde8d124ed5c8452177c30a70dad2c9301cc7d3f10c9522536376",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "publish_post": "sha256:752fb1e9c0267e6ba03088081fa8a0e5c5f8034640f03df3c52078a8df8f95d4",
         "send_message": "sha256:4cac8008e1434c5ec878d41deec75950ca99aad5e6f94092a3e5fdf0731a85ec",

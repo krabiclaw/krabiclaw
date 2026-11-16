@@ -235,19 +235,15 @@ const { data, error, status, refresh } = await useAsyncData(
     if (initialError.value || !ranges.length) return null
     const chunks: CalendarPayload[] = []
     for (const range of ranges) {
-      for (let from = range.from; from < range.to;) {
-        const limit = addLocalDays(from, 62)
-        const to = limit < range.to ? limit : range.to
-        const result = await api('/api/dashboard/bookings/calendar', { query: { unit: 'nights', product_id: props.productId, from, to }, signal,
-          validate: (value): value is { homes: [{ home: Home; nights: StayNight[] }]; bookings: CalendarStay[] } =>
-            isRecord(value) && Array.isArray(value.homes) && value.homes.length === 1 && isRecord(value.homes[0])
-              && isCalendar({ ...value.homes[0], bookings: value.bookings }),
-        })
-        const payload = { ...result.homes[0], bookings: result.bookings }
-        if (payload.nights.length !== parseDate(to).compare(parseDate(from)) || payload.nights.some((night, index) => night.date !== addLocalDays(from, index))) throw new Error('The calendar did not return every requested night in order.')
-        chunks.push(payload)
-        from = to
-      }
+      const { from, to } = range
+      const result = await api('/api/dashboard/bookings/calendar', { query: { unit: 'nights', product_id: props.productId, from, to }, signal,
+        validate: (value): value is { homes: [{ home: Home; nights: StayNight[] }]; bookings: CalendarStay[] } =>
+          isRecord(value) && Array.isArray(value.homes) && value.homes.length === 1 && isRecord(value.homes[0])
+            && isCalendar({ ...value.homes[0], bookings: value.bookings }),
+      })
+      const payload = { ...result.homes[0], bookings: result.bookings }
+      if (payload.nights.length !== parseDate(to).compare(parseDate(from)) || payload.nights.some((night, index) => night.date !== addLocalDays(from, index))) throw new Error('The calendar did not return every requested night in order.')
+      chunks.push(payload)
     }
     return { home: chunks[0]!.home, nights: chunks.flatMap(chunk => chunk.nights), bookings: [...new Map(chunks.flatMap(chunk => chunk.bookings).map(stay => [stay.booking_id, stay])).values()] }
   },

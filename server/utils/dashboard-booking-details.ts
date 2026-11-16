@@ -401,8 +401,8 @@ export async function listDashboardBookingChangeSessions(event: H3Event, input: 
   if (!target) throw new HTTPError({ statusCode: 404, message: 'That location takes no table bookings' })
   const from = input.from ?? localDateOf(row)
   const to = input.to ?? (isValidCalendarDate(from) ? addLocalDays(from, 7) : null)
-  if (!isValidCalendarDate(from) || !isValidCalendarDate(to) || to <= from || to > addLocalDays(from, 31)) {
-    throw new HTTPError({ statusCode: 422, message: 'Request up to 31 calendar days' })
+  if (!isValidCalendarDate(from) || !isValidCalendarDate(to) || to <= from) {
+    throw new HTTPError({ statusCode: 422, message: 'Choose calendar dates with to after from' })
   }
   const locationId = elsewhere ? input.locationId as string : row.location_id
   const sessions = await listBookableSessions(context.db, { env: context.env, organizationId: row.organization_id, productId: target.product_id, locationId,

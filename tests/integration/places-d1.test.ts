@@ -159,7 +159,7 @@ test('the places calendar reads each location, experience and consultation with 
     await db.prepare('UPDATE product_booking_configs SET assigned_member_id = ? WHERE product_id = ?').bind(`m-${STAFF}`, 'class').run()
     assert.deepEqual((await readPlacesCalendar(db, staff, { from: FROM, to: TO })).places.map(entry => entry.place.id), ['brooklyn', 'williamsburg', 'class'])
 
-    for (const input of [{ from: 'soon', to: TO }, { from: TO, to: FROM }, { from: FROM, to: '2028-02-01' }]) await assert.rejects(readPlacesCalendar(db, owner, input), code('INVALID_PLACE_DATES'))
+    for (const input of [{ from: 'soon', to: TO }, { from: TO, to: FROM }]) await assert.rejects(readPlacesCalendar(db, owner, input), code('INVALID_PLACE_DATES'))
   } finally {
     await runtime.dispose()
   }

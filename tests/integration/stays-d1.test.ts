@@ -1318,7 +1318,6 @@ test('the multi-calendar reads every home the caller looks after, each night as 
     assert.deepEqual(assigned.homes[0]!.nights, cabinNights)
     assert.deepEqual(assigned.stays.map(stay => stay.booking_id), [cabinStay.id])
     assert.deepEqual(await readStayCalendar(db, outsider, window), { ...window, homes: [], stays: [] })
-    await assert.rejects(readStayCalendar(db, manager, { from: '2026-11-01', to: '2027-02-02' }), code('INVALID_RANGE'))
   } finally {
     await runtime.dispose()
   }

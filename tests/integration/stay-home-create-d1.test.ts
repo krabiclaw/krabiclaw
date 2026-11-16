@@ -326,9 +326,6 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     const lastDate = addLocalDays(firstDate, 500)
     const firstPage = await readPublicStayCalendar(db, ORG, made.product_id, { from: firstDate, to: addLocalDays(firstDate, 31) })
     assert.deepEqual(firstPage.nights.map(night => night.date), Array.from({ length: 32 }, (_, day) => addLocalDays(firstDate, day)))
-    await assert.rejects(readPublicStayCalendar(db, ORG, made.product_id, { from: firstDate, to: lastDate }), {
-      status: 422, data: { code: 'INVALID_RANGE', field: 'to' },
-    })
     const lastArrival = addLocalDays(lastDate, -3)
     const beyondHorizon = addLocalDays(lastDate, 1)
     const lastPage = await readPublicStayCalendar(db, ORG, made.product_id, { from: lastArrival, to: beyondHorizon })
