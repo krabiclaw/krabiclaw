@@ -27,17 +27,27 @@ test('unknown sites render an unbranded 404 while resolved tenant errors retain 
 })
 
 test('the platform publishes its localized homepage and includes its canonical URL in the sitemap', async ({ page, request, baseURL }) => {
-  const response = await page.goto('/ja/')
-  expect(response?.status()).toBe(200)
-  await expect(page.locator('html')).toHaveAttribute('lang', 'ja')
-  await expect(page.getByRole('heading', { level: 1, name: 'ウェブサイトを数分で公開' })).toBeVisible()
-  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', new URL('/ja', baseURL).href)
-  await expect(page.locator('link[rel="alternate"][hreflang="en"]')).toHaveAttribute('href', new URL('/', baseURL).href)
-
+  const translations = [
+    ['ja', 'ウェブサイトを数分で公開'],
+    ['zh-Hans', '几分钟内发布网站'],
+    ['zh-Hant', '幾分鐘內發佈網站'],
+  ] as const
   const sitemap = await request.get('/sitemap.xml')
   expect(sitemap.status()).toBe(200)
   const xml = await sitemap.text()
-  expect(xml).toContain(`<loc>${new URL('/ja', baseURL).href}</loc>`)
+  for (const [locale, heading] of translations) {
+    const response = await page.goto(`/${locale}/`)
+    expect(response?.status()).toBe(200)
+    await expect(page.locator('html')).toHaveAttribute('lang', locale)
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+    const canonical = new URL(`/${locale}`, baseURL).href
+    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', canonical)
+    await expect(page.locator('link[rel="alternate"][hreflang="en"]')).toHaveAttribute('href', new URL('/', baseURL).href)
+    for (const [alternate] of translations) {
+      await expect(page.locator(`link[rel="alternate"][hreflang="${alternate}"]`)).toHaveAttribute('href', new URL(`/${alternate}`, baseURL).href)
+    }
+    expect(xml).toContain(`<loc>${canonical}</loc>`)
+  }
   expect(xml).not.toContain(`<loc>${new URL('/zz', baseURL).href}</loc>`)
   const unknown = await request.get('/zz/')
   expect(unknown.status()).toBe(404)
