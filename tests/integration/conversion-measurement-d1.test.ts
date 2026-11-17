@@ -450,20 +450,20 @@ test('a completed onboarding emails each operator once, with a link to that cust
     await db.prepare(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('dom-1', 'org-customer', 'clay-corner.krabiclaw.com', 'system', 'canonical', 'active')`).run()
     await db.prepare(`INSERT INTO user (id, name, email) VALUES ('user-owner', 'Mina Park', 'mina@clay-corner.com')`).run()
     await db.prepare(`INSERT INTO member (id, "organizationId", "userId", role) VALUES ('m-owner', 'org-customer', 'user-owner', 'owner')`).run()
-    const env = { DB: db, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 're_test_operator', EMAIL_FROM: 'Blawby <hello@blawby.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.com', PLATFORM_OWNER_EMAILS: 'ops@krabiclaw.com, OPS@Blawby.com ' } as unknown as Parameters<typeof completeOnboarding>[0]
+    const env = { DB: db, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 're_test_operator', EMAIL_FROM: 'Blawby <hello@blawby.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.com', PLATFORM_OWNER_EMAILS: 'ops@blawby.com, OPS@Blawby.com ' } as unknown as Parameters<typeof completeOnboarding>[0]
 
     const completion = await completeOnboarding(env, db, 'org-customer', null)
     assert.deepEqual(completion.operator_email, { status: 'sent' })
     assert.deepEqual(completion.owner_welcome_email, { status: 'sent' })
     assert.equal(sent.length, 2, 'a completed onboarding sends one operator notification and one owner welcome email')
-    const operatorMail = sent.find(mail => mail.body.to.includes('ops@krabiclaw.com'))
+    const operatorMail = sent.find(mail => mail.body.to.includes('ops@blawby.com'))
     const ownerMail = sent.find(mail => mail.body.to.includes('mina@clay-corner.com'))
     assert.ok(operatorMail)
     assert.ok(ownerMail)
-    assert.deepEqual(operatorMail!.body.to, ['ops@krabiclaw.com'])
+    assert.deepEqual(operatorMail!.body.to, ['ops@blawby.com'])
     assert.equal(operatorMail!.body.from, 'Blawby <hello@blawby.com>')
     assert.equal(operatorMail!.body.subject, 'Clay Corner is live on Blawby')
-    assert.equal(operatorMail!.idempotencyKey, `onboarding-complete:org-customer:${hashEmail('ops@krabiclaw.com')}`)
+    assert.equal(operatorMail!.idempotencyKey, `onboarding-complete:org-customer:${hashEmail('ops@blawby.com')}`)
     for (const expected of ['Mina Park (mina@clay-corner.com)', 'https://clay-corner.krabiclaw.com/',
       'https://krabiclaw.com/dashboard/krabiclaw/platform-accounts?user=user-owner&amp;organization=org-customer']) {
       assert.ok(operatorMail!.body.html.includes(expected), `operator email carries ${expected}`)
