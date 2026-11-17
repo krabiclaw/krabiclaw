@@ -104,5 +104,5 @@ start date.
 
 ## Logo
 
-`public/platform/krabiclaw-symbol.svg` is the only master. Use the symbol
-without "Blawby" text beside it.
+`public/platform/blawby.svg`, the Blawby shield, is the only master. Use the
+mark without "Blawby" text beside it.
