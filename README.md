@@ -1,6 +1,6 @@
-# KrabiClaw
+# Blawby
 
-[KrabiClaw](https://krabiclaw.com) runs the website, bookings, payments and messaging
+[Blawby](https://blawby.com) runs the website, bookings, payments and messaging
 for restaurants, experience operators, law firms and lodging hosts, managed from
 the dashboard or from ChatGPT and Claude through one MCP service. Lodging includes
 homes, nightly availability and prices, direct stay bookings and guest messaging.
@@ -10,7 +10,7 @@ Open source under [AGPL-3.0](LICENSE).
 - **Report a bug or request a feature:** [open an issue](https://github.com/krabiclaw/krabiclaw/issues/new/choose).
   Assistants filing for a user can prefill the form; see the field ids in
   [.github/ISSUE_TEMPLATE](.github/ISSUE_TEMPLATE).
-- **Account, billing or private data:** [krabiclaw.com/help](https://krabiclaw.com/help).
+- **Account, billing or private data:** [blawby.com/help](https://blawby.com/help).
 - **Security:** [SECURITY.md](SECURITY.md).
 - **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md).
 

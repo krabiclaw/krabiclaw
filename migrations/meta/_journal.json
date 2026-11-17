@@ -96,8 +96,22 @@
     {
       "idx": 13,
       "version": "6",
-      "when": 1794878508749,
-      "tag": "0013_drop_payment_orders",
+      "when": 1794876283658,
+      "tag": "0013_retire_stay_inventory_claimants",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1794876442568,
+      "tag": "0014_remove_historical_booking_no_show",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1794879319698,
+      "tag": "0015_drop_payment_orders",
       "breakpoints": true
     }
   ]

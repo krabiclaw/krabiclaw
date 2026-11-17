@@ -56,7 +56,7 @@ export async function connectDashboardDomain(
   const liveResolution = resolutions.find(result => result.records.length > 0 && result.points_to_saas !== true)
   if (liveResolution && acknowledgeCutover !== true) {
     const routing = liveResolution.resolves_elsewhere ? 'currently points elsewhere' : 'already resolves'
-    const message = `${liveResolution.hostname} ${routing} and may be live. Changing DNS can take it offline until KrabiClaw validation finishes.`
+    const message = `${liveResolution.hostname} ${routing} and may be live. Changing DNS can take it offline until Blawby validation finishes.`
     throw new HTTPError({ statusCode: 409, message, data: {
       code: 'DOMAIN_LIVE_CUTOVER', live_cutover_warning: { hostname: liveResolution.hostname, records: liveResolution.records,
         message },

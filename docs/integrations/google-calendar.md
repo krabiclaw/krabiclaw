@@ -1,14 +1,16 @@
 # Google Calendar sync
 
 Google Calendar sync is a Business plan feature (`calendar_sync` in
-`server/utils/billing-entitlements.ts`). KrabiClaw owns scheduling and capacity.
-Connect Google Calendar to create or reuse one **KrabiClaw** calendar for the
-business. All upcoming pending and confirmed Bookings and Reservations are
+`server/utils/billing-entitlements.ts`). Blawby owns scheduling and capacity.
+Connect Google Calendar to create one **Blawby** calendar or reuse the
+existing calendar for the business. Blawby updates the original default name
+on reconnect, a manual sync request, or a booking sync. A custom name stays
+in place. All upcoming pending and confirmed Bookings and Reservations are
 included automatically. Calendar-group allocation rules govern booking
 availability, not which bookings appear in Google. Cancelled records and
 payment holds are excluded.
 
-The sync runs one way. Bookings change in KrabiClaw and their events follow;
+The sync runs one way. Bookings change in Blawby and their events follow;
 editing or deleting an event in Google does not change its booking. Each event
 carries a **Manage** link where the booking has one (see [Privacy](#privacy)).
 
@@ -176,12 +178,12 @@ reservations and availability through Channex.
 Creates, meaningful updates and cancellations use `sendUpdates=all`, asking
 Google to send invitations/updates to all actual participants. Retained
 attendees keep their provider RSVP; a new attendee starts at `needsAction`.
-No proposed replacement attorney is invited by KrabiClaw before acceptance.
+No proposed replacement attorney is invited by Blawby before acceptance.
 An invitation does not grant Google calendar writer access. Guest edit
 permission is event-wide, so it remains off; staff edit the managed calendar
 through their existing writer/owner access. The app grants no blanket calendar
 access to organization members. Google RSVP is
-independent of KrabiClaw proposal consent. Google invitations originate from
+independent of Blawby proposal consent. Google invitations originate from
 the calendar organizer, and [recipient invitation settings](https://developers.google.com/workspace/calendar/api/concepts/inviting-attendees-to-events)
 determine whether the event appears automatically or needs an email RSVP.
 The API does not prove inbox delivery; local qualification records exact

@@ -1,4 +1,4 @@
-import { execute, executeBatch, queryAllPages, queryFirst } from '~/server/db'
+import { execute, queryAllPages, queryFirst } from '~/server/db'
 import { publishEvent } from '~/server/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { runScheduledManagedAdSpend } from '~/server/domain/payments/ad-spend'
@@ -8,24 +8,12 @@ import { sendDueReviewInvitations } from '~/server/utils/review-request-delivery
 import { REVIEW_REQUEST_TTL_DAYS } from '~/server/utils/review-requests'
 import { CACHE_INVALIDATION_TERMINAL_RETENTION_DAYS } from '~/server/utils/public-resource-cache'
 import { SOCIAL_CARD_REFRESH_PREFIX } from '~/server/utils/social-card'
-import { scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
 
 export const RETENTION_HUB = 'platform:analytics-retention'
 
-/** Deployment adopts work that has no Worker wake yet, including writes made by the old build. */
+/** Recover pending work after the deployed Worker has converged. */
 export async function enqueueOutstandingWork(env: CloudflareEnv): Promise<void> {
   const due = Date.now()
-  // The new Worker has converged. Recompute previously published checkout and
-  // calendar claims after retiring them in the same batch.
-  await executeBatch(env.DB, [{
-    query: `UPDATE channel_night_pushes SET state = 'pending', detail = NULL, updated_at = ?
-      WHERE (organization_id, product_id, date) IN (
-        SELECT organization_id, product_id, date FROM stay_nights WHERE booking_id IS NULL
-      )`,
-    params: [new Date(due).toISOString()],
-  }, {
-    query: 'DELETE FROM stay_nights WHERE booking_id IS NULL',
-  }], { operation: 'Retire checkout and linked calendar night claims' })
   const deadlines = await queryAllPages<{
     organization_id: string
     kind: 'reviews' | 'checkout' | 'channex_ari' | 'ad_spend'
@@ -70,32 +58,11 @@ export async function enqueueOutstandingWork(env: CloudflareEnv): Promise<void> 
     else if (kind === 'calendar') await publishEvent(env, { type: 'calendar.changed', organization_id, booking_id: null })
     else await publishEvent(env, { type: 'calendar.cleanup', organization_id })
   }
-  // The next release's "Remove one-time outbox and open-job adoption" step
-  // deletes these two scans from the "Adopt outstanding work" handler. Normal
-  // writes already schedule their outbox sends and job reminders.
-  const outboxes = await queryAllPages<{ organization_id: string }>(env.DB, `SELECT DISTINCT organization_id
-    FROM scheduled_guest_messages WHERE status = 'pending' ORDER BY organization_id`, [])
-  for (const { organization_id } of outboxes) await scheduleBusinessWake(env, organization_id, 'outbox', due)
-
-  // Open tasks from the old timer need a reminder in the outbox even if the task never changes again.
-  const tasks = await queryAllPages<{ organization_id: string; task_ids: string }>(env.DB, `
-    WITH upcoming AS (
-      SELECT organization_id, id, (row_number() OVER (PARTITION BY organization_id ORDER BY id) - 1) / 100 AS page
-      FROM tasks WHERE status='open' AND assigned_member_id IS NOT NULL AND COALESCE(due_at, starts_at) >= ?
-    )
-    SELECT organization_id, json_group_array(id) AS task_ids FROM upcoming GROUP BY organization_id, page ORDER BY organization_id, page`,
-  [new Date(due - 43_200_000).toISOString()])
-  for (const { organization_id, task_ids } of tasks) {
-    await publishEvent(env, { type: 'jobs.changed', organization_id, task_ids: JSON.parse(task_ids) as string[], quiet: true })
-  }
   const jobs = await queryAllPages<{ organization_id: string; id: string }>(env.DB,
     "SELECT organization_id, id FROM airbnb_sync_jobs WHERE state = 'pending' ORDER BY id", [])
   for (const { organization_id, id } of jobs) {
     await publishEvent(env, { type: 'airbnb.sync', organization_id, job_id: id })
   }
-  // The release after webhook cutover removes this drain under "Remove one-time Channex revision adoption."
-  const { adoptPendingBookingRevisions } = await import('~/server/integrations/channex/booking-revisions')
-  await adoptPendingBookingRevisions(env)
 }
 
 /** Run the retention window once for its UTC day, only when it has due rows. */

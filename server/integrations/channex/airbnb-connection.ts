@@ -79,7 +79,7 @@ export interface ImportContentReport {
   truncated_fields: Array<{ field: string; limit: number; length: number }>
   /** Airbnb rooms not created as photo rooms: Airbnb's photos name no room, so no tour can be assembled from them. */
   photo_rooms_skipped: number
-  /** Fields the host changed in KrabiClaw since Airbnb's value was last written: kept as the host has them. */
+  /** Fields the host changed in Blawby since Airbnb's value was last written: kept as the host has them. */
   kept_host_edits: string[]
 }
 
@@ -384,16 +384,16 @@ export class AirbnbConnection {
       }
       if (!row.group_id) {
         await this.save(row, { pending_step: 'create_group' })
-        const group = await channexCreate(this.env, '/groups', { group: { title: `KrabiClaw ${this.organizationId}` } }, 'group')
+        const group = await channexCreate(this.env, '/groups', { group: { title: `Blawby ${this.organizationId}` } }, 'group')
         await this.save(row, { group_id: group.id, pending_step: null })
       }
       if (!row.setup_property_id) {
         await this.save(row, { pending_step: 'create_setup_property' })
-        const property = await channexCreate(this.env, '/properties', { property: { title: 'KrabiClaw connection setup', currency: 'USD', property_type: 'apartment', group_id: row.group_id } }, 'property')
+        const property = await channexCreate(this.env, '/properties', { property: { title: 'Blawby connection setup', currency: 'USD', property_type: 'apartment', group_id: row.group_id } }, 'property')
         await this.save(row, { setup_property_id: property.id, pending_step: null })
       }
       const state = crypto.randomUUID() + crypto.randomUUID()
-      const title = `KrabiClaw ${crypto.randomUUID()}`
+      const title = `Blawby ${crypto.randomUUID()}`
       await this.save(row, {
         state_hash: await digest(state), authorization_user_id: this.userId, authorization_title: title,
         authorization_expires_at: new Date(Date.now() + SIGN_IN_LIFETIME_MS).toISOString(), pending_step: 'connection_link',

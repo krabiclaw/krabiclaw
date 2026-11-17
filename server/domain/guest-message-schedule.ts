@@ -50,7 +50,7 @@ export function parseGuestMessageSchedule(value: unknown, stored = false): Guest
   const scope = { product_ids: ids as string[] }
   const only = (keys: string[]) => { if (Object.keys(schedule).some(key => ![...keys, 'trigger', 'product_ids'].includes(key))) invalid('The schedule contains unsupported fields', 'schedule') }
   if (schedule.trigger === 'booking_received') {
-    if (schedule.delay_minutes !== 5) invalid('New-booking messages send 5 minutes after KrabiClaw receives an eligible new booking', 'schedule.delay_minutes')
+    if (schedule.delay_minutes !== 5) invalid('New-booking messages send 5 minutes after Blawby receives an eligible new booking', 'schedule.delay_minutes')
     only(['delay_minutes'])
     return { trigger: 'booking_received', delay_minutes: 5, ...scope }
   }

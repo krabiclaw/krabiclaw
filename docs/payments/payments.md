@@ -163,11 +163,11 @@ refund, dispute, receipt and usage servicing is independent of new-sale entitlem
 The platform's canonical Docs collection owns these articles. They were created
 and published through MCP on October 7, 2026 under **Payments and payouts**:
 
-- [When you'll get your payout](https://krabiclaw.com/docs/when-youll-get-your-payout)
-- [How refunds work](https://krabiclaw.com/docs/how-refunds-work)
-- [Fees and invoices](https://krabiclaw.com/docs/fees-and-invoices)
-- [Disputes](https://krabiclaw.com/docs/disputes)
-- [Changing your bank account](https://krabiclaw.com/docs/changing-your-bank-account)
+- [When you'll get your payout](https://blawby.com/docs/when-youll-get-your-payout)
+- [How refunds work](https://blawby.com/docs/how-refunds-work)
+- [Fees and invoices](https://blawby.com/docs/fees-and-invoices)
+- [Disputes](https://blawby.com/docs/disputes)
+- [Changing your bank account](https://blawby.com/docs/changing-your-bank-account)
 
 `PaymentsHelp` links these stable platform URLs from Earnings, Paid, payout
 details and Payments → Payouts. The articles remain CMS content; dashboard
@@ -175,7 +175,7 @@ components own only their links. Absolute platform URLs keep tenant-hosted
 dashboards pointed at the same articles. Go to your transactions remains scoped
 to the selected business.
 
-Stripe's settlement timing and payout schedule are separate. KrabiClaw does not
+Stripe's settlement timing and payout schedule are separate. Blawby does not
 apply Airbnb check-in payout-release rules. Bank changes use Stripe Express;
 sent payouts cannot be redirected. Merchant refunds require authenticated browser
 approval. A paid visit's rejection or cancellation, a guest's own cancellation of
@@ -195,10 +195,10 @@ The 1.4% captured-volume fee remains billable after refunds/disputes; actual Str
 costs and subscription billing remain separate.
 
 The customer articles follow the provider help structure, with the relevant
-steps, timing, status explanations and troubleshooting mapped to KrabiClaw's
+steps, timing, status explanations and troubleshooting mapped to Blawby's
 actual screens. They are complete task guidance rather than external-source
-summaries. Their links point only to related KrabiClaw articles and support.
-The dispute notification opens KrabiClaw payment details, not Stripe; the article
+summaries. Their links point only to related Blawby articles and support.
+The dispute notification opens Blawby payment details, not Stripe; the article
 explains the separate Stripe Express Payments → Disputes response workflow.
 The booking refund guide names Amount, Reason, Review refund and the final
 Approve and send refund action, including the 10-minute approval expiry.
@@ -216,7 +216,7 @@ Provider references for future operator maintenance (reviewed October 7, 2026):
 - [Stripe Express bank-change verification recovery](https://support.stripe.com/express/questions/how-do-i-update-my-payout-account-details-if-i-dont-have-my-previous-bank-or-card-details)
 - [Stripe Express wrong-bank payout troubleshooting](https://support.stripe.com/express/questions/my-payout-was-sent-to-the-wrong-bank-account)
 
-Amounts and KrabiClaw-specific rules come from the native financial contract
+Amounts and Blawby-specific rules come from the native financial contract
 and the Stripe billing above. Recheck both the provider guidance and the actual
 application actions before changing these articles; preserve their stable paths.
 
@@ -239,7 +239,7 @@ receipts and refunds belong inside that detail. Both audiences use the same
 payment presentation; tenant management actions use the existing financial
 authorization. Messages links back to the same record. One-time orders have
 their immutable items, without a calendar occurrence or manufactured booking
-conversation; the merchant arranges fulfillment outside KrabiClaw.
+conversation; the merchant arranges fulfillment outside Blawby.
 
 Buyer reads authorize the current Better Auth user against the targeted record.
 The buyer conversation excludes internal notes, staff controls and delivery
@@ -282,9 +282,9 @@ reconciliation: the connected-account webhook owns capture, refund, dispute and
 payout state, and Stripe's own redelivery is the retry. Nothing here issues or
 collects an invoice.
 
-## KrabiClaw plan emails
+## Blawby plan emails
 
-KrabiClaw emails a business's owners and admins when its plan starts, changes,
+Blawby emails a business's owners and admins when its plan starts, changes,
 or is set to end without renewal, including during a free trial. Better Auth
 Stripe's signed [event hook](https://www.better-auth.com/docs/plugins/stripe)
 sends these notices after the plugin handles subscription state. Stripe
@@ -306,7 +306,7 @@ the sandbox used for testing:
   **Send emails when card payments fail**
   ([customer emails](https://docs.stripe.com/billing/revenue-recovery/customer-emails)).
 
-KrabiClaw sends none of these itself, so turning them on sends nothing twice.
+Blawby sends none of these itself, so turning them on sends nothing twice.
 
 The preserved local environment intentionally has no automatic cron schedule and
 uses log-only customer mail. Its existing Stripe CLI listeners forward the native
@@ -362,7 +362,7 @@ No application-liability fallback exists. Refund/dispute principal follows Strip
 native semantics. Captured-volume usage remains billable after refunds/disputes.
 
 The supported path uses Stripe-hosted onboarding, an Express Dashboard login-link
-handoff, Radar and the native full service agreement. KrabiClaw never accepts the
+handoff, Radar and the native full service agreement. Blawby never accepts the
 merchant's agreement or stores KYC answers. Payments/Connect explicitly select the
 central `2026-09-30.preview` pin in the existing Stripe client factory; default
 Better Auth/billing callers retain `2026-08-26.dahlia`. Better Auth's separate inbound
@@ -518,14 +518,14 @@ relationships without retaining merchant credentials or recreating the tenant.
 
 ### Saved cards
 
-A buyer's cards are saved with each business, never on KrabiClaw. On a business's
+A buyer's cards are saved with each business, never on Blawby. On a business's
 pay page a signed-in buyer pays as their Customer on that business's connected
 account (`stripe_connected_customers`) through a Stripe customer session; the
 Payment Element's own checkbox saves a new card there, offers those saved cards
 again at that business only, and lets the buyer remove them. A Customer on the connected account is also what lets that
 business charge a saved card later, as Stripe's recurring-payment guidance
 requires. A guest pays without a Customer; Link remains Stripe's way to reuse cards
-across businesses. KrabiClaw creates no platform Customer for buyers: the Better
+across businesses. Blawby creates no platform Customer for buyers: the Better
 Auth Stripe plugin's customers are the businesses' operating customers for their
 subscriptions.
 
@@ -584,7 +584,7 @@ connected Google Ads account's USD currency before recording consent. A missing
 or invalid prerequisite leaves no agreement. Setup is Upgrade to Business and
 Manage billing (Stripe's portal, where the card is kept) in Plan and billing;
 connecting Ads and reading Insights remain free. An active agreement must be
-ended before disconnecting Ads. Stripe's portal manages the card, so KrabiClaw
+ended before disconnecting Ads. Stripe's portal manages the card, so Blawby
 does not guard its removal. Ending the service remains available when a provider cannot be
 read, and preserves its previously billable days. The connection remains until
 the intersecting managed days have actual daily spend receipts, including zero
@@ -600,8 +600,8 @@ Provider reporting contracts: [Google Ads reporting](https://developers.google.c
 
 ### Payments fees
 
-KrabiClaw Payments: **1.4% of payment volume, plus Stripe fees.** Billed at the
-end of each period on the Business subscription. KrabiClaw Payments fees aren't
+Blawby Payments: **1.4% of payment volume, plus Stripe fees.** Billed at the
+end of each period on the Business subscription. Blawby Payments fees aren't
 returned after a refund or dispute. Public pricing follows the Stripe wording
 standard in `AGENTS.md`.
 
