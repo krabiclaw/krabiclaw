@@ -7,7 +7,7 @@ import { H3 } from 'nitro/h3'
 import { hashPassword } from 'better-auth/crypto'
 import * as schema from '../../server/db/schema.ts'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
-import { AirbnbConnection, type ImportContentReport } from '../../server/integrations/channex/airbnb-connection.ts'
+import { ChannexConnection, type ImportContentReport } from '../../server/integrations/channex/channel-connection.ts'
 import { createStayHome, readStayHome, stayHomeInput, updateStayHome } from '../../server/domain/stays.ts'
 import { getMediaAsset } from '../../server/utils/media-asset-manager.ts'
 import { getProduct } from '../../server/utils/product-management.ts'
@@ -142,6 +142,7 @@ class FakeChannex {
       const rows = this.roomTypes.filter(room => room.property_id === url.searchParams.get('filter[property_id]'))
       return json({ data: rows.map(room => ({ id: room.id, type: 'room_type', attributes: room, relationships: { property: { data: { type: 'property', id: room.property_id } } } })), meta: { total: rows.length } })
     }
+    if (method === 'GET' && path === '/channels' && url.searchParams.get('filter[channel]') === 'VRB') return Response.json({ data: [], meta: { total: 0 } })
     if (method === 'GET' && path === '/rate_plans/options') {
       const rows = [...this.ratePlans].filter(([, plan]) => plan.property_id === url.searchParams.get('filter[property_id]'))
       return json({ data: rows.map(([id, plan]) => ({ id, type: 'rate_plan', attributes: { id, title: plan.title, property_id: plan.property_id, room_type_id: plan.room_type_id } })) })
@@ -286,7 +287,7 @@ async function boot() {
 }
 
 async function connected(db: D1Database, env: CloudflareEnv, channex: FakeChannex) {
-  const connection = new AirbnbConnection(db, env, ORG, OWNER)
+  const connection = new ChannexConnection(db, env, ORG, OWNER)
   await connection.start()
   await connection.complete(channex.token, 'chan-1')
   return connection
@@ -303,7 +304,7 @@ async function track(db: D1Database, channex: FakeChannex, productId: string): P
 }
 
 /** Advance until the import rests at `until`. */
-async function advanceTo(connection: AirbnbConnection, db: D1Database, channex: FakeChannex, productId: string, until: 'draft' | 'complete'): Promise<void> {
+async function advanceTo(connection: ChannexConnection, db: D1Database, channex: FakeChannex, productId: string, until: 'draft' | 'complete'): Promise<void> {
   for (let step = 0; step < 14; step++) {
     await track(db, channex, productId)
     if ((await connection.advance(productId)).stage === until) return
@@ -687,7 +688,7 @@ test('a sync request is checked against the plan once, then Blawby imports, acti
     assert.deepEqual([channex.channel.ratePlans, await countActiveHomes(db, ORG)], [[], 2])
     // A home found partway through activation (as one interrupted at `messages`) is carried to complete. A provider
     // failure on the way fails the listing with Channex's answer; asking again carries on from the same stage.
-    const connection = new AirbnbConnection(db, env, ORG, OWNER)
+    const connection = new ChannexConnection(db, env, ORG, OWNER)
     await connection.activate(productId)
     for (let step = 0; step < 6 && (await connection.advance(productId)).stage !== 'messages'; step++);
     assert.equal(await db.prepare('SELECT import_stage FROM product_channel_mappings WHERE product_id = ?').bind(productId).first('import_stage'), 'messages')
@@ -747,7 +748,7 @@ test('a sync request is checked against the plan once, then Blawby imports, acti
     await db.prepare('UPDATE organization SET stripeCustomerId = NULL WHERE id = ?').bind(ORG).run()
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
     const disconnectStart = channex.seen.length
-    assert.deepEqual(await new AirbnbConnection(db, env, ORG, OWNER).disconnect(), { disconnected: false })
+    assert.deepEqual(await new ChannexConnection(db, env, ORG, OWNER).disconnect(), { disconnected: false })
     assert.deepEqual([channex.seen.slice(disconnectStart).filter(request => request.method !== 'GET'), await db.prepare('SELECT status FROM channex_connections').first('status')], [[], 'disconnecting'])
     await failSync()
     assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: productId, last_error_code: 'NOT_CONNECTED' })

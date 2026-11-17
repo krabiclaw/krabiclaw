@@ -107,7 +107,7 @@ class FakeChannex {
   }
 }
 
-async function boot() {
+async function boot(airbnbConnected = true) {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'channex-ari-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: `
@@ -154,6 +154,7 @@ async function boot() {
       await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
         VALUES (?, ?, 'channex', ?, 'chan-1', ?, ?, ?, 'complete', ?)`).bind(ORG, productId, `listing-${listing}`, `prop-${listing}`, `room-${listing}`, `rate-${listing}`, enabled).run()
     }
+    if (airbnbConnected) await db.prepare("INSERT INTO channex_connections (organization_id,status,group_id,channel_id,connected_at) VALUES (?, 'connected', 'group-1','chan-1', ?)").bind(ORG, new Date().toISOString()).run()
     return { runtime, db, env, queue, connected, unpriced, local }
   } catch (error) {
     await runtime.dispose()
@@ -510,7 +511,7 @@ test('catalog price and minimum-stay writes use the same channel completion and 
 })
 
 test('migration verification reads Airbnb availability and refuses missing channel or uncovered dates', { timeout: 120_000 }, async () => {
-  const { runtime, db, env, connected, local } = await boot()
+  const { runtime, db, env, connected, local } = await boot(false)
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch

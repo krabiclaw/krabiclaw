@@ -116,3 +116,19 @@ export async function channexList(env: ChannexEnv, path: string, type: string, f
     if (body.data.length === 0) throw new ChannexError(`Channex returned an empty page before the total for ${path}`, 502, { code: 'INVALID_PROVIDER_RESPONSE', field: 'data', resource: type })
   }
 }
+
+export const VRBO_CHANNEL = 'VRB'
+
+export async function propertyChannels(env: ChannexEnv, propertyId: string, channelCode?: string) {
+  const channels = await channexList(env, '/channels', 'channel', {
+    'filter[property_id]': propertyId,
+    ...(channelCode ? { 'filter[channel]': channelCode } : {}),
+  })
+  return channels.filter(channel => channelCode === undefined || channel.attributes.channel === channelCode)
+    .map(channel => ({ ...channel, ...channelInventory(channel) }))
+    .filter(channel => channel.properties.includes(propertyId))
+}
+
+export function mapsActiveRate(channel: ReturnType<typeof channelInventory>, ratePlanId: string): boolean {
+  return channel.active && channel.ratePlans.some(mapping => mapping.rate_plan_id === ratePlanId)
+}

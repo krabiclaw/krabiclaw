@@ -19,7 +19,7 @@ export default defineHandler(async (event) => {
   if (typeof body?.product_id !== 'string' || !body.product_id.trim()) {
     throw new HTTPError({ statusCode: 422, message: 'Select a home to connect', data: { code: 'VALIDATION_ERROR', field: 'product_id' } })
   }
-  return jsonResponse(await startVrboSetup(db, env, organization.id, body.product_id, session.user.name), {
+  return jsonResponse(await startVrboSetup(db, env, organization.id, body.product_id, session.user.id, session.user.name), {
     headers: { 'cache-control': 'no-store' },
   })
 })

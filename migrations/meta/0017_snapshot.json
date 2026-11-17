@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "16fe3fd9-f68d-4c6d-bc5a-61ca78261ce8",
+  "id": "c7c423be-ff31-46f8-b862-1708a37ea3e7",
   "prevId": "18833708-e414-4c6a-9c30-5bf52426619a",
   "tables": {
     "account": {
@@ -9463,6 +9463,199 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "payment_order_lines": {
+      "name": "payment_order_lines",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "variant_id": {
+          "name": "variant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "price_id": {
+          "name": "price_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "unit_amount": {
+          "name": "unit_amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "quantity": {
+          "name": "quantity",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tax_behavior": {
+          "name": "tax_behavior",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "payment_order_lines_order_id_payment_orders_id_fk": {
+          "name": "payment_order_lines_order_id_payment_orders_id_fk",
+          "tableFrom": "payment_order_lines",
+          "tableTo": "payment_orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "payment_order_lines_amount_check": {
+          "name": "payment_order_lines_amount_check",
+          "value": "unit_amount >= 0 AND quantity > 0"
+        }
+      }
+    },
+    "payment_orders": {
+      "name": "payment_orders",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "buyer_user_id": {
+          "name": "buyer_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "payment_id": {
+          "name": "payment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "amount": {
+          "name": "amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "payment_orders_payment_id_unique": {
+          "name": "payment_orders_payment_id_unique",
+          "columns": [
+            "payment_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "payment_orders_buyer_user_id_user_id_fk": {
+          "name": "payment_orders_buyer_user_id_user_id_fk",
+          "tableFrom": "payment_orders",
+          "tableTo": "user",
+          "columnsFrom": [
+            "buyer_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "payment_orders_payment_id_payments_id_fk": {
+          "name": "payment_orders_payment_id_payments_id_fk",
+          "tableFrom": "payment_orders",
+          "tableTo": "payments",
+          "columnsFrom": [
+            "payment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "payment_refunds": {
       "name": "payment_refunds",
       "columns": {
@@ -11106,14 +11299,14 @@
           "name": "listing_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "channel_id": {
           "name": "channel_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "property_id": {
@@ -11290,6 +11483,10 @@
           "name": "product_channel_mappings_stage_check",
           "value": "import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'content', 'draft', 'mapping', 'activate', 'reservations', 'messages', 'complete')"
         },
+        "product_channel_mappings_airbnb_ids_check": {
+          "name": "product_channel_mappings_airbnb_ids_check",
+          "value": "(listing_id IS NULL) = (channel_id IS NULL) AND (listing_id IS NOT NULL OR import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'complete'))"
+        },
         "product_channel_mappings_ids_check": {
           "name": "product_channel_mappings_ids_check",
           "value": "(import_stage = 'property' OR property_id IS NOT NULL) AND (import_stage IN ('property', 'room') OR room_type_id IS NOT NULL) AND (import_stage IN ('property', 'room', 'rate') OR rate_plan_id IS NOT NULL)"
@@ -11308,7 +11505,7 @@
         },
         "product_channel_mappings_enabled_check": {
           "name": "product_channel_mappings_enabled_check",
-          "value": "enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'messages', 'complete'))"
+          "value": "enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('draft', 'mapping', 'activate', 'reservations', 'messages', 'complete'))"
         },
         "product_channel_mappings_instants_check": {
           "name": "product_channel_mappings_instants_check",
