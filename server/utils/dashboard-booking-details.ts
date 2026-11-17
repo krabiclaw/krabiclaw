@@ -26,11 +26,11 @@ import { readPaymentDetails } from '~/server/domain/payments'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { canRetryGuestVisitRefund } from '~/server/domain/payments/visit-refund'
 import { historicalNoShowAtSql } from '~/server/utils/review-requests'
-import {paymentStateLabel,paymentDisplay,paymentRefundsDisplay,paymentOrderDisplay,type PaymentDisplay,type PaymentRefundDisplay,type PaymentOrderDisplay} from '~/shared/payment-display'
+import {paymentStateLabel,paymentDisplay,paymentRefundsDisplay,type PaymentDisplay,type PaymentRefundDisplay} from '~/shared/payment-display'
 
 export type DashboardBookingType = 'booking'
-/** What the record screen can show: a visit, or a purchase that stands on its own (an order, or a payment whose visit is gone). */
-export type DashboardRecordType = DashboardBookingType | 'order' | 'payment'
+/** What the record screen can show: a visit, or a payment whose visit is gone. */
+export type DashboardRecordType = DashboardBookingType | 'payment'
 
 interface BookingChangeTerms {
   when_label: string
@@ -149,7 +149,7 @@ export interface DashboardBookingDetails {
   /** A change the business proposed that the guest has not answered; Airbnb's "Change requested". */
   pending_change: { message_id: string; before: BookingChangeTerms; after: BookingChangeTerms } | null
   locations: Array<{ id: string; title: string; image_url: string | null }>
-  payments: Array<{payment:PaymentDisplay;refunds:PaymentRefundDisplay[];order:PaymentOrderDisplay|null}> | null
+  payments: Array<{payment:PaymentDisplay;refunds:PaymentRefundDisplay[]}> | null
   /** The guest's own self-service cancellation is still open. */
   guest_can_cancel: boolean
   /** An interrupted deposit refund can resume the already-recorded guest cancellation. */
@@ -260,7 +260,7 @@ export async function loadDashboardBookingDetails(
   input: { type: DashboardRecordType; bookingId: string; organizationSlug?: string | null; lookup?: 'booking' | 'conversation' },
 ): Promise<DashboardBookingDetails> {
   const context = await bookingContext(event, input.organizationSlug)
-  if (input.type === 'order' || input.type === 'payment') {
+  if (input.type === 'payment') {
     if (!await roleAllows({ organizationId: context.organization.id, role: context.organization.role, permissions: { payments: ['read'] } })) throw new HTTPError({ statusCode: 403, message: 'Payments access is required' })
     return composePurchaseDetails(context.db, context.env, { organizationId: context.organization.id }, input.bookingId)
   }
@@ -298,7 +298,7 @@ export async function loadBuyerBookingDetails(
   bookingId: string,
   lookup: 'booking' | 'conversation' = 'conversation',
 ): Promise<DashboardBookingDetails> {
-  if (type === 'order' || type === 'payment') return composePurchaseDetails(db, env, { buyerUserId: userId }, bookingId)
+  if (type === 'payment') return composePurchaseDetails(db, env, { buyerUserId: userId }, bookingId)
   const row = await loadBookingRow(db, { buyerUserId: userId }, type, bookingId, lookup)
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   return composeBookingDetails(db, row, type, { env, buyerUserId: userId })
@@ -341,7 +341,7 @@ async function composeBookingDetails(
     :reader.canReadPayments?await queryAll<{id:string}>(db,"SELECT id FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? ORDER BY created_at,id",[row.organization_id,row.booking_id]):[]
   const payments=await Promise.all(paymentIds.map(async ({id})=>{
     const detail=await readPaymentDetails(db,reader.env,row.organization_id,id)
-    return {payment:paymentDisplay(detail.payment),refunds:paymentRefundsDisplay(detail.refunds),order:paymentOrderDisplay(detail.order)}
+    return {payment:paymentDisplay(detail.payment),refunds:paymentRefundsDisplay(detail.refunds)}
   }))
   const guestCanRetryCancellation = Boolean(reader.buyerUserId && row.status === 'cancelled' && row.cancellation_used_at
     && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, bookingId: row.booking_id, requestId: row.conversation_id, buyerUserId: reader.buyerUserId }))
@@ -437,12 +437,12 @@ export function isDashboardBookingType(value: string | undefined): value is Dash
 }
 
 export function isDashboardRecordType(value: string | undefined): value is DashboardRecordType {
-  return isDashboardBookingType(value) || value === 'order' || value === 'payment'
+  return isDashboardBookingType(value) || value === 'payment'
 }
 
 /**
- * A purchase on the same screen as a visit: an order, or a payment whose visit
- * no longer exists, read by the business that took it or the account that paid.
+ * A purchase on the same screen as a visit: a payment whose visit no longer
+ * exists, read by the business that took it or the account that paid.
  * It has no party, time, policy or conversation, and nothing left to decide —
  * what remains is what was bought, when, from whom, and the money.
  */
@@ -458,10 +458,8 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
   if (!payment) throw new HTTPError({ statusCode: 404, message: 'Purchase not found' })
   const detail = await readPaymentDetails(db, env, payment.organization_id, paymentId)
   const snapshot: unknown = JSON.parse(detail.payment.price_snapshot_json)
-  const line = detail.order ? await queryFirst<{ product_id: string | null }>(db, 'SELECT product_id FROM payment_order_lines WHERE order_id = ? ORDER BY rowid LIMIT 1', [detail.order.id]) : null
-  // A purchase keeps the item's own photo or the place it was sold.
-  const resourceImageUrl = (line?.product_id ? (await loadOwnerPictures(db, payment.organization_id, 'product', [line.product_id], { organizationFallback: false })).get(line.product_id)?.imageUrl : null)
-    ?? (payment.location_id ? (await loadOwnerPictures(db, payment.organization_id, 'business_location', [payment.location_id], { organizationFallback: false })).get(payment.location_id)?.imageUrl : null)
+  // A purchase keeps the photo of the place it was sold.
+  const resourceImageUrl = (payment.location_id ? (await loadOwnerPictures(db, payment.organization_id, 'business_location', [payment.location_id], { organizationFallback: false })).get(payment.location_id)?.imageUrl : null)
     ?? null
   if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error('Purchase has no immutable title')
   const contact = payment.location_id ? await resolveLocationContact(db, payment.organization_id, payment.location_id) : { contactPhone: payment.contact_phone }
@@ -474,7 +472,7 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     version: null,
     unit: null,
     available_actions: [],
-    type: detail.order ? 'order' : 'payment',
+    type: 'payment',
     organization_id: payment.organization_id,
     organization_name: payment.organization_name,
     vertical: payment.vertical,
@@ -512,7 +510,7 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     no_show_at: null,
     pending_change: null,
     locations: [],
-    payments: [{ payment: paymentDisplay(detail.payment), refunds: paymentRefundsDisplay(detail.refunds), order: paymentOrderDisplay(detail.order) }],
+    payments: [{ payment: paymentDisplay(detail.payment), refunds: paymentRefundsDisplay(detail.refunds) }],
     guest_can_cancel: false,
     guest_can_retry_cancellation: false,
     guest_cancel_refunds: false,

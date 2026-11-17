@@ -1,11 +1,4 @@
 <template>
-  <div v-if="order" class="mt-5">
-    <h3 class="text-sm font-semibold text-highlighted">Order details</h3>
-    <div v-for="line in order.lines" :key="line.id" class="mt-4 flex items-start justify-between gap-4 text-sm">
-      <span class="text-highlighted">{{ line.title }} <span class="text-muted">× {{ line.quantity }}</span></span>
-      <span class="shrink-0 text-muted">{{ paymentMoney(line.quantity * line.unit_amount, line.currency) }}</span>
-    </div>
-  </div>
   <div class="mt-5">
     <div class="mt-4">
       <p class="text-sm font-medium text-highlighted">{{ amountLabel }}</p>
@@ -33,9 +26,9 @@
 </template>
 
 <script setup lang="ts">
-import {paymentMoney,paymentStateLabel,type PaymentDisplay,type PaymentRefundDisplay,type PaymentOrderDisplay} from '~/shared/payment-display'
+import {paymentMoney,paymentStateLabel,type PaymentDisplay,type PaymentRefundDisplay} from '~/shared/payment-display'
 
-const props=withDefaults(defineProps<{payment:PaymentDisplay;refunds?:PaymentRefundDisplay[];order?:PaymentOrderDisplay|null}>(),{refunds:()=>[],order:null})
+const props=withDefaults(defineProps<{payment:PaymentDisplay;refunds?:PaymentRefundDisplay[]}>(),{refunds:()=>[]})
 // Money that has landed reads "Amount paid"; anything else reads its state.
 const amountLabel=computed(()=>props.payment.captured_amount>0?'Amount paid':paymentStateLabel(props.payment))
 // A succeeded refund is in the refunded amount and shows again only for what the business said; the rest are still moving or did not.

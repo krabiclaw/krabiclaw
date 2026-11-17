@@ -10,7 +10,7 @@
   >
     <span class="flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-elevated sm:size-28">
       <img v-if="item.image_url" :src="item.image_url" alt="" class="size-full object-cover" loading="lazy">
-      <UIcon v-else :name="item.kind === 'order' ? 'i-lucide-shopping-bag' : item.kind === 'payment' ? 'i-lucide-receipt' : 'i-lucide-calendar-days'" class="size-8 text-dimmed" />
+      <UIcon v-else :name="item.kind === 'payment' ? 'i-lucide-receipt' : 'i-lucide-calendar-days'" class="size-8 text-dimmed" />
     </span>
     <span class="min-w-0 flex-1">
       <span class="block truncate text-lg font-semibold text-highlighted">{{ item.title }}</span>
@@ -19,7 +19,7 @@
       <span class="mt-3 flex items-center gap-2">
         <UAvatar :src="session.data?.user.image || undefined" :alt="session.data?.user.name ?? ''" icon="i-lucide-user" size="sm" />
         <UBadge v-if="item.status === 'cancelled'" color="error" variant="subtle" size="sm" label="Cancelled" />
-        <span v-else-if="item.kind === 'order' || item.kind === 'payment'" class="text-xs text-dimmed">{{ purchaseLabel(item.status) }}</span>
+        <span v-else-if="item.kind === 'payment'" class="text-xs text-dimmed">{{ purchaseLabel(item.status) }}</span>
       </span>
     </span>
   </UCard>
@@ -37,5 +37,5 @@ const session = authClient.useSession()
 const purchaseLabel = (state: string) => paymentStateLabel({ captured_amount: state === 'captured' || state === 'refunded' ? 1 : 0, refunded_amount: state === 'refunded' ? 1 : 0 })
 const dateLabel = computed(() => props.item.starts_at && props.item.timezone
   ? props.item.starts_at.includes('T') ? formatTimestamp(props.item.starts_at, 'en', props.item.timezone, { dateStyle: 'medium', timeStyle: 'short' }) : formatCalendarDate(props.item.starts_at, 'en')
-  : `${props.item.kind === 'order' ? 'Ordered ' : ''}${formatTimestamp(props.item.created_at, 'en', 'UTC', { dateStyle: 'medium' })}`)
+  : `${formatTimestamp(props.item.created_at, 'en', 'UTC', { dateStyle: 'medium' })}`)
 </script>

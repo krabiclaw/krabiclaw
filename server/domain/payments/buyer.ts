@@ -19,14 +19,14 @@ type ActivityRow = {
  starts_at:string; ends_at:string; timezone:string; created_at:string; location_id:string|null;
  location_title:string|null; product_id:string|null; party_size:number
 }
-type BuyerPaymentRow = {id:string;organization_id:string;organization_name:string|null;organization_slug:string|null;currency:string;captured_amount:number;refunded_amount:number;subject_type:string;subject_id:string;price_snapshot_json:string;created_at:string;order_id:string|null;order_product_id:string|null;hold_conversation_id:string|null;hold_starts_at:string|null;hold_ends_at:string|null;hold_timezone:string|null}
+type BuyerPaymentRow = {id:string;organization_id:string;organization_name:string|null;organization_slug:string|null;currency:string;captured_amount:number;refunded_amount:number;subject_type:string;subject_id:string;price_snapshot_json:string;created_at:string;hold_conversation_id:string|null;hold_starts_at:string|null;hold_ends_at:string|null;hold_timezone:string|null}
 async function buyerActivityRows(db:DbClient,userId:string) {
  // Every booking the account made on a business's site, one row each: a stay's ends are its stored instants, or its days where its home had no time.
  const [visits,payments]=await Promise.all([
   queryAll<ActivityRow>(db,`SELECT CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END kind,COALESCE(r.id,b.id) id,r.id conversation_id,b.id booking_id,b.organization_id,o.name organization_name,o.slug organization_slug,p.name title,b.status,b.starts_at,b.ends_at,b.timezone,b.created_at,b.location_id,l.title location_title,b.product_id,b.party_size
    FROM bookings b LEFT JOIN conversations r ON r.booking_id=b.id AND r.kind='booking' JOIN organization o ON o.id=b.organization_id JOIN products p ON p.id=b.product_id AND p.organization_id=b.organization_id LEFT JOIN business_locations l ON l.id=b.location_id AND l.organization_id=b.organization_id
    WHERE b.user_id=? AND b.owner='app' AND (r.id IS NULL OR (r.organization_id=b.organization_id AND r.kind='booking' AND r.user_id=? AND ${CURRENT_GUEST_SQL('r')}))`,[userId,userId]),
-  queryAll<BuyerPaymentRow>(db,`SELECT p.id,p.organization_id,o.name organization_name,o.slug organization_slug,p.currency,p.captured_amount,p.refunded_amount,p.subject_type,p.subject_id,p.price_snapshot_json,p.created_at,po.id order_id,(SELECT l.product_id FROM payment_order_lines l JOIN payment_orders lo ON lo.id=l.order_id WHERE lo.payment_id=p.id ORDER BY l.rowid LIMIT 1) order_product_id,r.id hold_conversation_id,h.starts_at hold_starts_at,h.ends_at hold_ends_at,COALESCE(s.timezone,CASE WHEN h.session_id IS NOT NULL THEN h.timezone END) hold_timezone FROM payments p LEFT JOIN organization o ON o.id=p.organization_id LEFT JOIN payment_orders po ON po.payment_id=p.id AND po.buyer_user_id=p.buyer_user_id AND po.organization_id=p.organization_id LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id AND h.buyer_user_id=p.buyer_user_id LEFT JOIN conversations r ON r.id=h.conversation_id AND r.organization_id=p.organization_id AND r.user_id=p.buyer_user_id AND ${CURRENT_GUEST_SQL('r')} LEFT JOIN product_sessions s ON s.id=h.session_id AND s.organization_id=p.organization_id WHERE p.buyer_user_id=? ORDER BY p.created_at DESC`,[userId]),
+  queryAll<BuyerPaymentRow>(db,`SELECT p.id,p.organization_id,o.name organization_name,o.slug organization_slug,p.currency,p.captured_amount,p.refunded_amount,p.subject_type,p.subject_id,p.price_snapshot_json,p.created_at,r.id hold_conversation_id,h.starts_at hold_starts_at,h.ends_at hold_ends_at,COALESCE(s.timezone,CASE WHEN h.session_id IS NOT NULL THEN h.timezone END) hold_timezone FROM payments p LEFT JOIN organization o ON o.id=p.organization_id LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id AND h.buyer_user_id=p.buyer_user_id LEFT JOIN conversations r ON r.id=h.conversation_id AND r.organization_id=p.organization_id AND r.user_id=p.buyer_user_id AND ${CURRENT_GUEST_SQL('r')} LEFT JOIN product_sessions s ON s.id=h.session_id AND s.organization_id=p.organization_id WHERE p.buyer_user_id=? ORDER BY p.created_at DESC`,[userId]),
  ])
  return {visits,payments}
 }
@@ -36,12 +36,10 @@ function visitActivity(row:ActivityRow):AccountActivityItem {
 function paymentActivity(row:BuyerPaymentRow):AccountActivityItem {
  const snapshot:unknown=JSON.parse(row.price_snapshot_json)
  if(!snapshot||typeof snapshot!=='object'||!('title' in snapshot)||typeof snapshot.title!=='string'||!snapshot.title.trim())throw new Error('Owned payment has no immutable title')
- const kind=row.order_id?'order':'payment'
- if(kind==='order'&&row.subject_type!=='order')throw new Error('Owned order does not match its payment subject')
  // An ended/deleted session supplies no timezone. The retained hold is not an
  // operational booking; it never manufactures a calendar occurrence.
- const scheduled=kind==='payment'&&!!row.hold_timezone
- return {kind,id:row.id,conversation_id:kind==='payment'?row.hold_conversation_id:null,booking_id:null,payment_id:row.id,organization_id:row.organization_id,organization_name:row.organization_name,organization_slug:row.organization_slug,title:snapshot.title,status:row.captured_amount===0?'pending':row.refunded_amount===row.captured_amount?'refunded':'captured',starts_at:scheduled?row.hold_starts_at:null,ends_at:scheduled?row.hold_ends_at:null,timezone:scheduled?row.hold_timezone:null,created_at:row.created_at,image_url:null,location_title:null,party_size:null}
+ const scheduled=!!row.hold_timezone
+ return {kind:'payment',id:row.id,conversation_id:row.hold_conversation_id,booking_id:null,payment_id:row.id,organization_id:row.organization_id,organization_name:row.organization_name,organization_slug:row.organization_slug,title:snapshot.title,status:row.captured_amount===0?'pending':row.refunded_amount===row.captured_amount?'refunded':'captured',starts_at:scheduled?row.hold_starts_at:null,ends_at:scheduled?row.hold_ends_at:null,timezone:scheduled?row.hold_timezone:null,created_at:row.created_at,image_url:null,location_title:null,party_size:null}
 }
 function resolvePaymentActivity(rows:Awaited<ReturnType<typeof buyerActivityRows>>,payment:BuyerPaymentRow):AccountActivityItem {
  const visits=rows.visits.filter(row=>payment.subject_type==='booking'&&row.organization_id===payment.organization_id&&(row.booking_id===payment.subject_id||(row.kind==='stay'&&row.conversation_id!==null&&row.conversation_id===payment.hold_conversation_id)))
@@ -53,7 +51,7 @@ export async function buyerActivities(db:DbClient,userId:string):Promise<Account
  const activities=rows.visits.map(visitActivity)
  for(const payment of rows.payments){
   const item=resolvePaymentActivity(rows,payment)
-  if(item.kind==='payment'||item.kind==='order')activities.push(item)
+  if(item.kind==='payment')activities.push(item)
  }
  for(const item of activities){
   const visit=rows.visits.find(row=>row.kind===item.kind&&row.id===item.id)
@@ -77,8 +75,8 @@ export async function buyerPayments(db:DbClient,userId:string):Promise<{entries:
   const item=resolvePaymentActivity(rows,payment),snapshot:unknown=JSON.parse(payment.price_snapshot_json)
   if(!snapshot||typeof snapshot!=='object'||!('title' in snapshot)||typeof snapshot.title!=='string'||!snapshot.title.trim())throw new Error('Owned payment has no immutable title')
   const visit=rows.visits.find(row=>row.kind===item.kind&&row.id===item.id)
-  const ownerType:'product'|'business_location'=visit&&!visit.product_id?'business_location':'product'
-  const ownerId=visit?(visit.product_id??visit.location_id):payment.order_product_id
+  const ownerType:'product'|'business_location'=visit?.product_id?'product':'business_location'
+  const ownerId=visit?(visit.product_id??visit.location_id):null
   return {payment,visit,title:snapshot.title,to:accountActivityPath(item.kind,item.id),owner:ownerId?{key:`${payment.organization_id}\u0000${ownerType}`,organizationId:payment.organization_id,ownerType,ownerId}:null}
  })
  const owners=new Map<string,{organizationId:string;ownerType:'product'|'business_location';ids:string[]}>()
@@ -109,7 +107,7 @@ export async function buyerPaymentActivityPath(db:DbClient,userId:string,payment
 export async function buyerRequestActivityPath(db: DbClient, input: { organizationId: string; conversationId: string; userId?: string }): Promise<string | null> {
   const params = [input.conversationId, input.organizationId]
   if (input.userId !== undefined) params.push(input.userId)
-  const rows = await queryAll<{ kind: AccountActivityKind; id: string; subject_type: string | null }>(db, `
+  const rows = await queryAll<{ kind: AccountActivityKind; id: string }>(db, `
     WITH owned AS (
       SELECT c.id, c.organization_id, c.user_id, c.booking_id FROM conversations c
       WHERE c.id = ? AND c.organization_id = ? AND c.kind = 'booking' AND ${CURRENT_GUEST_SQL('c')}
@@ -118,17 +116,16 @@ export async function buyerRequestActivityPath(db: DbClient, input: { organizati
       SELECT CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END AS kind, c.id
       FROM owned c JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id AND b.user_id = c.user_id AND b.owner = 'app'
     ), checkout AS (
-      SELECT p.id, p.organization_id, p.buyer_user_id, p.subject_type, p.subject_id, po.id AS order_id
+      SELECT p.id, p.organization_id, p.buyer_user_id, p.subject_type, p.subject_id
       FROM owned c JOIN payments p ON p.buyer_user_id = c.user_id AND p.organization_id = c.organization_id
       JOIN payment_checkout_holds h ON h.payment_id = p.id AND h.organization_id = p.organization_id AND h.buyer_user_id = p.buyer_user_id AND h.conversation_id = c.id
-      LEFT JOIN payment_orders po ON po.payment_id = p.id AND po.organization_id = p.organization_id AND po.buyer_user_id = p.buyer_user_id
       WHERE NOT EXISTS (SELECT 1 FROM visit)
       LIMIT 2
     )
-    SELECT kind, id, NULL AS subject_type FROM visit
+    SELECT kind, id FROM visit
     UNION ALL
     SELECT CASE WHEN b.id IS NOT NULL THEN CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END
-      WHEN p.order_id IS NOT NULL THEN 'order' ELSE 'payment' END AS kind, COALESCE(r.id, b.id, p.id) AS id, p.subject_type
+      ELSE 'payment' END AS kind, COALESCE(r.id, b.id, p.id) AS id
     FROM checkout p
     LEFT JOIN bookings b ON p.subject_type = 'booking' AND b.id = p.subject_id AND b.organization_id = p.organization_id AND b.user_id = p.buyer_user_id AND b.owner = 'app'
       AND NOT EXISTS (SELECT 1 FROM conversations other WHERE other.booking_id = b.id AND other.kind = 'booking'
@@ -138,7 +135,6 @@ export async function buyerRequestActivityPath(db: DbClient, input: { organizati
   if (rows.length > 1) return '/dashboard/account/activity'
   const activity = rows[0]
   if (!activity) return null
-  if (activity.kind === 'order' && activity.subject_type !== 'order') throw new Error('Owned order does not match its payment subject')
   return accountActivityPath(activity.kind, activity.id)
 }
 export async function tokenHash(token:string):Promise<string>{return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token)))).map(v=>v.toString(16).padStart(2,'0')).join('')}
@@ -169,7 +165,6 @@ export async function claimCheckoutReturn(db:DbClient,userId:string,token:string
  const claimedConversation={query:`c.id=${conversationId} AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)`,params:[claim.payment_id,claim.payment_id,hash,userId,now]}
  const result=await executeBatch(db,[
   {query:'UPDATE payments SET claimed_at=?,claimed_user_id=?,buyer_user_id=? WHERE return_token_hash=? AND return_expires_at>? AND claimed_at IS NULL AND captured_amount>0 AND (buyer_user_id IS NULL OR buyer_user_id=? OR EXISTS(SELECT 1 FROM user u WHERE u.id=payments.buyer_user_id AND u.isAnonymous=1))',params:[now,userId,userId,hash,now,userId]},
-  {query:'UPDATE payment_orders SET buyer_user_id=? WHERE payment_id=? AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)',params:[userId,claim.payment_id,hash,userId,now]},
   {query:'UPDATE payment_checkout_holds SET buyer_user_id=? WHERE payment_id=? AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)',params:[userId,claim.payment_id,hash,userId,now]},
   {query:"UPDATE bookings SET user_id=? WHERE id=(SELECT subject_id FROM payments WHERE id=? AND subject_type='booking') AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)",params:[userId,claim.payment_id,hash,userId,now]},
   // The booking's conversation: a session booking's checkout waited in it, a stay's opened with the booking.

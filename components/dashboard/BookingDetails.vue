@@ -285,7 +285,7 @@
               </a>
             </template>
             <p v-else-if="booking?.payments?.length === 0" class="mt-4 text-sm text-muted">No payments recorded.</p>
-            <PaymentDetails v-for="entry in booking?.payments" :key="entry.payment.id" :payment="entry.payment" :refunds="entry.refunds" :order="entry.order">
+            <PaymentDetails v-for="entry in booking?.payments" :key="entry.payment.id" :payment="entry.payment" :refunds="entry.refunds">
               <template v-if="!personalScope && entry.payment.captured_amount > entry.payment.refunded_amount" #actions>
                 <NuxtLink :to="{ path: `${editorPath}/refund`, query: { ...route.query, payment: entry.payment.id } }" :class="rowClass">
                   <UIcon name="i-lucide-undo-2" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Send a refund</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
@@ -874,7 +874,7 @@ const panel = computed(() => {
   return {
     photos: place?.photo_urls ?? (turnover?.image_url ? [turnover.image_url] : record?.resource_photo_urls ?? []),
     title: home?.name ?? (record?.product_kind === 'table' ? record.location_title : record?.name),
-    purchaseDate: purchase && record ? `${record.type === 'order' ? 'Ordered' : 'Paid'} ${formatCreatedAt(record.created_at)}` : null,
+    purchaseDate: purchase && record ? `Paid ${formatCreatedAt(record.created_at)}` : null,
     host: value ? place?.host : record?.host,
     coHosts: place?.co_hosts ?? [],
     when,
