@@ -227,7 +227,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     }
     // Prep is the host's own preparation for a visit already on their list.
     if (work.kind === 'consultation_prep') {
-      if (work.booking_id && byBooking.has(work.booking_id)) continue
+      if (manage || work.product_kind !== 'service' || (work.booking_id && byBooking.has(work.booking_id))) continue
       add({ id: `task:${work.id}`, noun: 'task', order: [1, at ?? ''], bookings: [], day,
         when: at ? visitWhen(at, work.timezone) : null, image_url: picture('product', work.product_id), icon: 'i-lucide-list-checks',
         headline: 'Prepare for consultation', line: work.product_name, action: { title: 'Mark as done', detail: 'One tap when it’s finished' },
@@ -258,12 +258,12 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   cards.sort((a, b) => a.order[0] - b.order[0] || a.order[1].localeCompare(b.order[1]) || a.id.localeCompare(b.id))
   return {
     title: heading(cards, range), cards: cards.map(({ noun: _noun, order: _order, bookings: _bookings, day: _day, ...card }) => card),
-    claim_options: manage ? {
-      roles: (staffAccessWrites ? rolesForVertical(viewer.vertical) : [])
+    ...(manage && staffAccessWrites ? { claim_options: {
+      roles: rolesForVertical(viewer.vertical)
         .filter(role => rolesAllowing({ task: ['claim'] }).includes(role) && organizationRoleCards[role].access.includes('tasks'))
         .map(value => ({ value, label: organizationRoleCards[value].label })),
       listings: (listingResult?.results ?? []) as NonNullable<BusinessToday['claim_options']>['listings'],
-    } : null,
+    } } : {}),
     assignees: taskAssignees(assigneeResult!.results, input.userId), resolved_at: now.toISOString(),
   }
 }

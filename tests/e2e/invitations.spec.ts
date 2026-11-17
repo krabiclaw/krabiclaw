@@ -166,6 +166,7 @@ for (const [key, role, kind] of [['legal', 'paralegal', 'service'], ['experience
       if (key !== 'restaurant') return
 
       const tasks = `/api/organizations/${tenant.organizationId}/tasks`
+      const offering = screen.listings.find((item: { listing_id: string }) => item.listing_id === listing.id).label
       const created = await request.post(tasks, { headers, data: {
         title: 'Prepare for dinner service', notes: 'Private work instructions', product_id: listing.id, claim_role: role, idempotency_key: crypto.randomUUID(),
       } })
@@ -177,7 +178,7 @@ for (const [key, role, kind] of [['legal', 'paralegal', 'service'], ['experience
         expect(await visible.json()).toMatchObject({ task: { notes: null, action: { type: 'claim' } } })
         const today = await user.get('/api/dashboard/today', { params: { org: tenant.slug } })
         expect(today.status(), await today.text()).toBe(200)
-        expect(await today.json()).toMatchObject({ cards: expect.arrayContaining([expect.objectContaining({ id: `task:${task.id}`, claim: expect.objectContaining({ version: task.version }) })]) })
+        expect(await today.json()).toMatchObject({ cards: expect.arrayContaining([expect.objectContaining({ id: `task:${task.id}`, line: offering, claim: expect.objectContaining({ version: task.version }) })]) })
       }
       const outcomes = await Promise.all(users.map(({ user }) => user.patch(`${tasks}/${task.id}`, { headers, data: { version: task.version, claim: true } })))
       expect(outcomes.map(response => response.status()).sort()).toEqual([200, 409])

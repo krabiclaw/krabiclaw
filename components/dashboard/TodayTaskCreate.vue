@@ -39,7 +39,7 @@ import type { BusinessToday } from '~/shared/dashboard-today'
 import type { TaskPerson, TaskView } from '~/server/domain/tasks'
 import { getErrorMessage } from '~/utils/errors'
 
-const props = defineProps<{ organizationId: string; assignees: TaskPerson[]; claimOptions: BusinessToday['claim_options'] }>()
+const props = defineProps<{ organizationId: string; assignees: TaskPerson[]; claimOptions: BusinessToday['claim_options'] | null }>()
 const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ created: [task: TaskView] }>()
 

@@ -869,7 +869,7 @@ export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
           AND t.kind IN ('turnover', 'consultation_follow_up', 'consultation_prep', 'message_delivery', 'booking_change', 'custom')
           AND ${taskScopeSql('t', () => viewer)}) x
       LEFT JOIN bookings b ON b.organization_id = x.organization_id AND b.id = x.booking_id
-      LEFT JOIN products p ON p.organization_id = b.organization_id AND p.id = b.product_id
+      LEFT JOIN products p ON p.organization_id = x.organization_id AND p.id = COALESCE(b.product_id, x.product_id)
       LEFT JOIN product_stay_configs sc ON b.product_session_id IS NULL AND sc.organization_id = b.organization_id AND sc.product_id = b.product_id
       LEFT JOIN business_locations l ON l.organization_id = b.organization_id AND l.id = COALESCE(b.location_id, sc.location_id)
       LEFT JOIN conversations r ON r.organization_id = b.organization_id AND r.booking_id = b.id AND r.kind = 'booking'

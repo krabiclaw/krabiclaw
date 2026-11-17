@@ -76,6 +76,6 @@ export interface BusinessToday {
   cards: TodayItem[]
   /** Who an owner or admin can give a task to; empty for a member. */
   assignees: TaskPerson[]
-  claim_options: { roles: Array<{ value: string; label: string }>; listings: Array<{ listing_id: string; label: string }> } | null
+  claim_options?: { roles: Array<{ value: string; label: string }>; listings: Array<{ listing_id: string; label: string }> }
   resolved_at: string
 }
