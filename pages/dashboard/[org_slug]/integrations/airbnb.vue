@@ -424,9 +424,13 @@ async function startConnection() {
 async function disconnect() {
   failure.value = ''
   try {
-    if ((await dashboardApi(`${api}/disconnect`, { method: 'POST', validate: isDisconnect })).disconnected) await Promise.all([refreshStatus(), integrations.refresh()])
+    const result = await dashboardApi(`${api}/disconnect`, {
+      method: 'POST', body: { retry: Boolean(status.value?.disconnect_error) }, validate: isDisconnect,
+    })
+    if (result.disconnected) await Promise.all([refreshStatus(), integrations.refresh()])
     else await watchDisconnect()
   } catch (cause) {
+    await refreshStatus()
     failure.value = getErrorMessage(cause, 'Could not disconnect Airbnb.')
   }
 }

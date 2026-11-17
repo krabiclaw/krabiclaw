@@ -1184,16 +1184,29 @@ export class ChannexConnection {
    * disconnect between the steps already queued. `disconnected: false` means
    * it is under way; the connection status reads not_connected when it is done.
    */
-  async disconnect(): Promise<{ disconnected: boolean }> {
+  async disconnect(retry = false): Promise<{ disconnected: boolean }> {
     const row = await this.row()
     if (!row?.channel_id) return { disconnected: true }
-    const { status, disconnect_error: error } = row
-    await this.save(row, { status: 'disconnecting', disconnect_error: null })
+    if (row.status === 'disconnecting') return { disconnected: false }
+    if (row.status !== 'connected') fail(409, 'DISCONNECT_UNAVAILABLE', 'The Airbnb connection is not ready to disconnect.')
+    if (row.disconnect_error && !retry) fail(409, 'DISCONNECT_FAILED', row.disconnect_error)
+    const channelId = row.channel_id
+    const started = await execute(this.db, `UPDATE channex_connections SET status = 'disconnecting', disconnect_error = NULL, updated_at = ?
+      WHERE organization_id = ? AND channel_id = ? AND status = 'connected' AND disconnect_error IS ?`,
+    [now(), this.organizationId, channelId, row.disconnect_error])
+    if (!started.meta.changes) {
+      const current = await this.row()
+      if (!current?.channel_id) return { disconnected: true }
+      if (current.channel_id === channelId) {
+        if (current.status === 'disconnecting') return { disconnected: false }
+        if (current.disconnect_error) fail(409, 'DISCONNECT_FAILED', current.disconnect_error)
+      }
+      fail(409, 'DISCONNECT_CHANGED', 'The Airbnb connection changed. Refresh and try again.')
+    }
     try {
-      await publishAirbnbSync(this.env, { type: 'airbnb.disconnect', organization_id: this.organizationId, user_id: this.userId, channel_id: row.channel_id })
+      await publishAirbnbSync(this.env, { type: 'airbnb.disconnect', organization_id: this.organizationId, user_id: this.userId, channel_id: channelId })
     } catch (cause) {
-      // Not queued, so not asked: the connection reads as it did and the request fails.
-      await this.save(row, { status, disconnect_error: error })
+      await this.disconnectFailed(channelId, cause instanceof Error ? cause.message : String(cause))
       throw cause
     }
     return { disconnected: false }

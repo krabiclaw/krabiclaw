@@ -208,20 +208,27 @@ test('a disconnect that fails on the queue shows its reason with the connection,
     await owner.start()
     assert.deepEqual(await owner.complete(channex.token!, 'chan-1'), { connected: true })
     channex.channel.active = true
-    // A disconnect the queue did not take is not asked: the request fails and the connection reads as before.
+    // A disconnect the queue did not take is visible to both the caller and another client reading status.
     const unqueued = new ChannexConnection(db, { ...queued, AIRBNB_SYNC: { send: async () => { throw new Error('Queue unavailable') } } } as unknown as CloudflareEnv, ORG, OWNER)
     await assert.rejects(unqueued.disconnect(), /Queue unavailable/)
-    assert.deepEqual([(await owner.status()).status, (await owner.status()).disconnect_error], ['connected', null])
+    const rejected = await owner.status()
+    assert.deepEqual([rejected.status, rejected.disconnect_error], ['connected', 'Queue unavailable'])
     channex.failDeactivate = true
-    assert.deepEqual(await owner.disconnect(), { disconnected: false })
+    const requests = await Promise.all([owner.disconnect(true), owner.disconnect(true)])
+    assert.deepEqual(requests, [{ disconnected: false }, { disconnected: false }])
+    assert.deepEqual(await owner.disconnect(), { disconnected: false }, 'a repeated POST observes the pending disconnect')
+    assert.equal(syncs.pending.length, 1, 'only one request starts the disconnect')
     assert.equal((await owner.status()).status, 'disconnecting')
     await syncs.drain(queued)
     const failed = await owner.status()
     assert.deepEqual([failed.status, failed.disconnect_error], ['connected', 'Channex answered 500 to POST /channels/chan-1/deactivate: {"errors":{"title":"Channel is busy"}}'])
+    await assert.rejects(owner.disconnect(), { status: 409, message: failed.disconnect_error! })
+    assert.equal(syncs.pending.length, 0, 'a repeated POST does not restart a failed disconnect')
     channex.failDeactivate = false
-    assert.deepEqual(await owner.disconnect(), { disconnected: false })
+    assert.deepEqual(await owner.disconnect(true), { disconnected: false })
     assert.equal((await owner.status()).disconnect_error, null)
     await syncs.drain(queued)
+    assert.deepEqual(await owner.disconnect(), { disconnected: true })
     assert.deepEqual(await owner.status(), { status: 'not_connected', connected_at: null, listing_count: 0, channel_active: false, disconnect_error: null })
     assert.equal(channex.channelExists, false)
   } finally {
