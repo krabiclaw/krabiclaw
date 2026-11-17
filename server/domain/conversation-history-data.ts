@@ -78,11 +78,12 @@ export function conversationHistorySql(
     ), display AS MATERIALIZED (
       SELECT page.*, sequence <> min(sequence) OVER () OR count(*) OVER () <= ? AS enrich FROM page
     ), authors AS MATERIALIZED (
-      SELECT u.id, u.name FROM user u WHERE u.id IN (
+      SELECT u.id, u.name, u."isAnonymous" AS anonymous FROM user u WHERE u.id IN (
         SELECT m.author_user_id FROM display m WHERE m.enrich AND m.author_user_id IS NOT NULL ${visibleAuthors}
       )
     )
-    SELECT m.*, a.name AS author_name,
+    -- An anonymous author on a conversation is its guest, named by what they typed (the guest snapshot), not the "Anonymous" Better Auth names the account.
+    SELECT m.*, CASE WHEN a.anonymous = 1 THEN COALESCE((SELECT c.payload_json ->> '$.guest.name' FROM conversations c WHERE c.id = m.conversation_id), a.name) ELSE a.name END AS author_name,
       CASE WHEN m.enrich THEN (SELECT json_group_array(json_object('owner_id', p.owner_id, 'id', p.id, 'public_url', p.public_url,
         'thumbnail_url', p.thumbnail_url, 'alt_text', p.alt_text, 'width', p.width, 'height', p.height)) FROM (${photos}) p) END AS photo_rows,
       ${receipts} AS delivery_rows

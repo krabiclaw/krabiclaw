@@ -62,5 +62,5 @@ test('the terms frozen on a booking are the offering\'s, at the price it was mad
   assert.deepEqual(parseBookingPolicy(JSON.stringify(tablePolicy({ payment: null, cancellation: 'moderate' }))).cancellation, 'moderate')
   assert.throws(() => parseBookingPolicy(JSON.stringify({ ...tablePolicy(), cancellation: 'lenient' })), /invalid frozen policy/)
   assert.throws(() => parseBookingPolicy(JSON.stringify({ ...tablePolicy(), payment: { basis: 'per_seat', unit_amount: 1, currency: 'USD', tax_behavior: 'inclusive', min_party_size: null } })), /invalid frozen policy/)
-  assert.throws(() => formatBookingPolicySummary(tablePolicy(), 'fr', 'table'), /No platform locale catalog/)
+  assert.throws(() => formatBookingPolicySummary(tablePolicy(), 'zz', 'table'), /No platform locale catalog/)
 })

@@ -435,9 +435,9 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
     // The assigned member's phone opens the guest conversation.
     assert.equal(pushes.length, 1)
     assert.equal(pushes[0]!.url, `https://api.sandbox.push.apple.com/3/device/${deviceToken}`)
-    // A system cancellation alone does not put a stay in the unread inbox.
+    // The cancellation is unread in the stay's conversation, which the inbox lists like every booking's.
     assert.deepEqual(pushes[0]!.body, {
-      aps: { alert: { title: memberSubject, body: `Turnover Cabin · ${checkInLabel} – ${checkOutLabel}` }, sound: 'default', badge: 0, 'thread-id': stay.conversation_id },
+      aps: { alert: { title: memberSubject, body: `Turnover Cabin · ${checkInLabel} – ${checkOutLabel}` }, sound: 'default', badge: 1, 'thread-id': stay.conversation_id },
       organization_id: access.organizationId, user_id: 'cleaner-turnover', kind: 'guest', conversation_id: stay.conversation_id,
     })
   } finally {
