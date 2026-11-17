@@ -852,6 +852,7 @@ test('Better Auth returns the Instagram account it linked to the native Connecti
     const provider = new URL(authorization.headers.get('location')!)
     assert.equal(provider.hostname, 'www.instagram.com')
     const callback = new URL(provider.searchParams.get('redirect_uri')!)
+    assert.equal(callback.pathname, '/api/auth/callback/instagram')
     callback.search = new URLSearchParams({ state: provider.searchParams.get('state')!, code: 'fixture-instagram-code' }).toString()
     const cookies = authorization.headers.getSetCookie().map(entry => entry.split(';')[0]).join('; ')
     const completed = await createAuth(env).handler(new Request(callback, { headers: { cookie: cookies } }))
