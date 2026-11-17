@@ -17,7 +17,7 @@ plans. The form's single-unit allowance applies: tests 4 to 8 run on two homes,
 each standing in for one room type, and the Bed & Breakfast rate plans are not
 modelled; test 3 (several rate plans on one date) is reported as not
 applicable, since a home has one room type and one rate plan. Availability is
-0 or 1 and follows bookings, checkout holds and linked calendars alone. A host
+0 or 1 and follows nights claimed by bookings. A host
 closing a night is `stop_sell: true` on the rate plan, one restrictions call
 and nothing else; opening it is `stop_sell: false` alone. The property is
 created with `min_stay_type: arrival`, and its Airbnb channel uses `Arrival`.
@@ -200,11 +200,9 @@ before promoting. A property-level registration takes precedence over the
 account registration. Verify a booking revision and its acknowledgement
 through the staging webhook.
 
-After assets converge, **Adopt outstanding work** drains revisions still
-unacknowledged at cutover through the same booking and acknowledgement path
-as the webhook. Verify the drain completed. The next release step
-**Remove one-time Channex revision adoption** deletes this drain from
-deployment adoption.
+At cutover, **Adopt outstanding work** drained revisions still unacknowledged
+through the same booking and acknowledgement path as the webhook. The
+`booking` and `non_acked_booking` webhook events now deliver revisions.
 
 ## Submitting
 

@@ -51,7 +51,6 @@ extend that model. Never add a second one beside it.
 | Reviews | `reviews` `review_requests` `review_category_ratings` | server/utils/review-requests.ts | KrabiClaw |
 | Payments | `payments` `payment_refunds` `payment_disputes` `payment_orders` `payment_order_lines` `payment_authorizations` `payment_checkout_holds` `offline_payments` `payment_fee_reports` `payment_cost_snapshots` `payment_servicing_tenants` `stripe_connected_accounts` `stripe_connected_customers` `stripe_webhook_events` | server/domain/payments | Stripe |
 | Channex channel | `channex_connections` `product_channel_mappings` `channel_threads` `channel_night_pushes` `channel_sync_log` `airbnb_sync_jobs` | server/integrations/channex | Channex |
-| Retired Vrbo iCal link retained through the Worker cutover | `stay_calendar_links` | server/domain/due-business-work.ts | KrabiClaw |
 | Google Calendar event delivery | `google_calendar_event_links` `google_calendar_cleanup_jobs` | server/utils/google-calendar.ts | Google |
 | Connected provider selection | `organization_integrations` | server/utils/organization-integrations.ts | Better Auth linked accounts |
 | Service agreement | `organization_services` | server/utils/organization-services.ts | KrabiClaw |
@@ -70,7 +69,6 @@ Each of these columns exists on its owner table only.
 |---|---|
 | `assigned_member_id` | `product_booking_configs` `tasks` |
 | `party_size` | `bookings` |
-| `no_show_at` | `bookings` |
 | `cancellation_reason` | `bookings` |
 | `website_source` | `bookings` |
 | `duration_minutes` | `product_booking_configs` |
