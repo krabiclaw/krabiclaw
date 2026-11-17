@@ -5,29 +5,34 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { appendMessage, markConversationRead, markConversationUnread } from '../../server/domain/conversations.ts'
-import { listConversations, readGuestInbox, readWorkspaceInbox, unreadBadge } from '../../server/domain/guest-threads/repository.ts'
+import { loadConversationPage } from '../../server/domain/conversation-history.ts'
+import { setListingMessagingAccess } from '../../server/domain/conversation-participants.ts'
+import { archiveConversation, listConversations, readGuestInbox, readWorkspaceInbox, unreadBadge } from '../../server/domain/guest-threads/repository.ts'
+import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { joinedMemberPrincipal, listOrganizationNotificationMembers } from '../../server/utils/member-access.ts'
 
 // Unread is one statement (conversations.ts unreadSql): a message from someone
 // else newer than the person's read position. Every surface reads it: the list
 // rows, the Unread filter, the filter counts and the app badge, for a guest's
 // conversation and the team's alike.
 
-const ORG = 'org', OWNER = 'owner', CLEANER = 'cleaner', GUEST = 'guest'
+const ORG = 'org', OWNER = 'owner', CLEANER = 'cleaner', GUEST = 'guest', ADMIN = 'admin', SUCCESSOR = 'successor'
 const NOW = '2026-11-01T00:00:00.000Z'
 
 test('unread is a message from someone else after your read position, the same count everywhere, for guest and team conversations alike', { timeout: 120_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'conversation-unread-proof', compatibilityDate: '2024-11-01',
-    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
-    env: { DB: { type: 'd1' } },
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'conversation-unread-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     await db.batch([
       `INSERT INTO organization (id,name,slug,default_currency,timezone) VALUES ('${ORG}','Proof','proof','USD','UTC')`,
-      ...[[OWNER, 'Owner'], [CLEANER, 'Cleaner'], [GUEST, 'Guest']].map(([id, name]) => `INSERT INTO user (id,name,email,emailVerified) VALUES ('${id}','${name}','${id}@proof.example',1)`),
-      `INSERT INTO member (id,organizationId,userId,role,createdAt) VALUES ('m-owner','${ORG}','${OWNER}','owner',0), ('m-cleaner','${ORG}','${CLEANER}','member',0)`,
+      ...[[OWNER, 'Owner'], [CLEANER, 'Cleaner'], [GUEST, 'Guest'], [ADMIN, 'Admin'], [SUCCESSOR, 'Successor']].map(([id, name]) => `INSERT INTO user (id,name,email,emailVerified) VALUES ('${id}','${name}','${id}@proof.example',1)`),
+      `INSERT INTO member (id,organizationId,userId,role,createdAt) VALUES ('m-owner','${ORG}','${OWNER}','owner',0), ('m-cleaner','${ORG}','${CLEANER}','member',0), ('m-admin','${ORG}','${ADMIN}','admin',0), ('m-successor','${ORG}','${SUCCESSOR}','member',0)`,
       `INSERT INTO business_locations (id,organization_id,slug,title,timezone) VALUES ('loc','${ORG}','loc','Studio','UTC')`,
       `INSERT INTO products (kind,id,organization_id,name,slug,created_by,updated_by) VALUES ('experience','class','${ORG}','Class','class','${OWNER}','${OWNER}')`,
       `INSERT INTO product_variants (id,organization_id,product_id,name,created_by,updated_by) VALUES ('seat','${ORG}','class','Seat','${OWNER}','${OWNER}')`,
@@ -105,6 +110,80 @@ test('unread is a message from someone else after your read position, the same c
     assert.deepEqual([await surfaces(OWNER), await surfaces(CLEANER)], [['team'], ['team']])
     // The guest conversation is the business's, never the cleaner's.
     assert.equal((await listConversations(db, ORG, { userId: CLEANER })).some(row => row.kind !== 'team'), false)
+
+    const transcript = (userId: string, conversationId: string) =>
+      loadConversationPage(db, { userId, conversationId }, { before: null, limit: 40 })
+    const guestThreads = async (userId: string, mailbox: 'current' | 'past' = 'current') =>
+      (await readWorkspaceInbox(db, ORG, { userId, mailbox, kind: 'guest' }, new Date('2026-12-03T00:00:00.000Z'))).threads.map(row => row.id).sort()
+    const adminThread = { organizationId: ORG, conversationId: 'booking-conversation', userId: ADMIN }
+    assert.deepEqual(await surfaces(ADMIN), ['booking-conversation'], 'admin sees a guest thread without an assigned role or seat')
+    const history = await transcript(ADMIN, adminThread.conversationId)
+    assert.equal(history.viewer_role, 'member')
+    assert(history.entries.some(entry => entry.type === 'message' && entry.body === 'See you then'))
+    await assert.rejects(transcript(ADMIN, 'team'), { statusCode: 404 })
+    await markConversationRead(db, adminThread)
+    assert.deepEqual(await surfaces(ADMIN), [])
+    await archiveConversation(db, { ...adminThread, archived: true })
+    assert.deepEqual(await guestThreads(ADMIN), [])
+    assert((await guestThreads(ADMIN, 'past')).includes(adminThread.conversationId))
+    assert.deepEqual(await guestThreads(OWNER), [adminThread.conversationId], 'archive belongs to the reader')
+    await archiveConversation(db, { ...adminThread, archived: false })
+
+    const assignedProducts = [['home', 'stay'], ['consultation', 'service'], ['dining', 'table']] as const
+    await db.batch(assignedProducts.flatMap(([id, kind]) => [
+      `INSERT INTO products (kind,id,organization_id,name,slug,created_by,updated_by) VALUES ('${kind}','${id}','${ORG}','${id}','${id}','${OWNER}','${OWNER}')`,
+      `INSERT INTO product_variants (id,organization_id,product_id,name,created_by,updated_by) VALUES ('${id}-variant','${ORG}','${id}','${id}','${OWNER}','${OWNER}')`,
+      `INSERT INTO product_locations (organization_id,product_id,location_id,created_by,updated_by) VALUES ('${ORG}','${id}','loc','${OWNER}','${OWNER}')`,
+      `INSERT INTO product_booking_configs (product_id,organization_id,unit,duration_minutes,default_capacity,min_nights,scheduling_mode,assigned_member_id,created_by,updated_by)
+        VALUES ('${id}','${ORG}',${kind === 'stay' ? "'nights',NULL,4,1" : "'slot',60,4,NULL"},'${kind === 'service' ? 'provider' : 'business'}','m-cleaner','${OWNER}','${OWNER}')`,
+      ...(kind === 'stay' ? [
+        `INSERT INTO product_stay_configs (product_id,organization_id,location_id,created_by,updated_by) VALUES ('${id}','${ORG}','loc','${OWNER}','${OWNER}')`,
+      ] : [
+        `INSERT INTO product_sessions (id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)
+          SELECT '${id}-session',organization_id,'${id}',location_id,timezone,starts_at,ends_at,capacity,created_by,updated_by FROM product_sessions WHERE id = 'session'`,
+      ]),
+      `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,location_id,starts_at,ends_at,timezone,user_id,party_size,policy_json,status,total_minor,currency)
+        SELECT '${id}-booking',organization_id,'${id}',${kind === 'stay' ? 'NULL' : `'${id}-session'`},'${id}-variant',location_id,starts_at,ends_at,timezone,user_id,party_size,policy_json,status,0,'USD' FROM bookings WHERE id = 'booking'`,
+    ].map(statement => db.prepare(statement))))
+    for (const [id] of assignedProducts) {
+      await db.batch(requestInsertQueries({ id: `${id}-conversation`, kind: 'booking', organization_id: ORG, location_id: 'loc', booking_id: `${id}-booking`, user_id: GUEST,
+        payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@proof.example' }), created_at: NOW }, undefined, { opening: `Booking for ${id}`, note: 'Looking forward to it' })
+        .map(write => db.prepare(write.query).bind(...write.params)))
+    }
+    assert.deepEqual(await guestThreads(CLEANER), ['consultation-conversation', 'dining-conversation', 'home-conversation'])
+    await assert.rejects(transcript(CLEANER, 'booking-conversation'), { statusCode: 404 })
+    await db.prepare("UPDATE product_booking_configs SET assigned_member_id = 'm-cleaner' WHERE product_id = 'class'").run()
+    const assigned = ['booking-conversation', 'consultation-conversation', 'dining-conversation', 'home-conversation']
+    assert.deepEqual(await guestThreads(CLEANER), assigned)
+    for (const id of assigned) assert.equal((await transcript(CLEANER, id)).viewer_role, 'member')
+    await markConversationRead(db, { ...adminThread, userId: CLEANER })
+
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth',
+      BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests' }
+    const owner = joinedMemberPrincipal({ userId: OWNER, organizationId: ORG, memberId: 'm-owner', role: 'owner' }, { env })
+    const coHostGrant = { listingId: 'home', memberId: 'm-cleaner' }
+    await setListingMessagingAccess(db, env, owner, { ...coHostGrant, allowed: true })
+    await db.prepare("UPDATE product_booking_configs SET assigned_member_id = 'm-successor' WHERE assigned_member_id = 'm-cleaner'").run()
+    assert.deepEqual(await guestThreads(ADMIN), assigned)
+    assert.deepEqual(await guestThreads(SUCCESSOR), assigned)
+    assert.deepEqual(await guestThreads(CLEANER), ['home-conversation'], 'an independent host grant survives reassignment of that home')
+    assert.equal((await transcript(CLEANER, 'home-conversation')).viewer_role, 'member')
+    await assert.rejects(transcript(CLEANER, 'booking-conversation'), { statusCode: 404 })
+    await assert.rejects(markConversationRead(db, { ...adminThread, userId: CLEANER }), { statusCode: 404 })
+    const recipients = async (requestId: string) =>
+      (await listOrganizationNotificationMembers(env, ORG, { guestMessage: true, requestId })).map(recipient => recipient.userId).sort()
+    assert.deepEqual(await recipients('consultation-conversation'), [ADMIN, OWNER, SUCCESSOR])
+    assert.deepEqual(await recipients('home-conversation'), [ADMIN, CLEANER, OWNER, SUCCESSOR])
+    await setListingMessagingAccess(db, env, owner, { ...coHostGrant, allowed: false })
+    assert.deepEqual(await guestThreads(CLEANER), [])
+    assert.equal((await transcript(CLEANER, 'team')).conversation.kind, 'team')
+
+    await db.prepare("INSERT INTO organization (id,name,slug,default_currency,timezone) VALUES ('other-org','Other','other','USD','UTC')").run()
+    await db.batch(requestInsertQueries({ id: 'other-contact', kind: 'contact', organization_id: 'other-org', location_id: null, booking_id: null, user_id: null,
+      payload: { guest: { name: 'Walk-in', email: 'walk@proof.example', phone: null }, subject: null, consent_at: null, ip_hash: null, answers: [] }, created_at: NOW }, undefined, { words: 'Hello' })
+      .map(write => db.prepare(write.query).bind(...write.params)))
+    await assert.rejects(readWorkspaceInbox(db, 'other-org', { userId: ADMIN }), { statusCode: 404 })
+    await assert.rejects(transcript(ADMIN, 'other-contact'), { statusCode: 404 })
   } finally {
     await runtime.dispose()
   }

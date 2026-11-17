@@ -7,6 +7,7 @@ import { oncePerRequest } from '~/server/utils/request-scope'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publishAccessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { changedTaskIds, publishChangedJobs, type EventsEnv } from '~/server/events'
+import { guestConversationMemberSql } from '~/server/domain/conversations'
 import type { H3Event } from 'nitro'
 import type { CloudflareEnv, organizationOptions } from '~/server/utils/auth'
 import type { OrganizationPermissions } from '~/utils/organization-access'
@@ -315,11 +316,11 @@ export async function listOrganizationNotificationMembers(
   const included = new Set(options.includeMemberIds)
   if (options.guestMessage) {
     if (!options.requestId) throw new Error('Guest message notifications require a conversation')
-    const seats = await queryAll<{ id: string }>(env.DB, `SELECT m.id FROM conversation_participants seat
-      JOIN member m ON m.userId = seat.user_id AND m.organizationId = seat.organization_id
-      WHERE seat.organization_id = ? AND seat.conversation_id = ? AND seat.role = 'member'`, [organizationId, options.requestId])
+    const recipients = await queryAll<{ id: string }>(env.DB, `SELECT m.id FROM conversations c
+      JOIN member m ON m.organizationId = c.organization_id
+      WHERE c.organization_id = ? AND c.id = ? AND ${guestConversationMemberSql('c', 'm')}`, [organizationId, options.requestId])
     included.clear()
-    for (const seat of seats) included.add(seat.id)
+    for (const recipient of recipients) included.add(recipient.id)
   } else if (options.requestId) {
     const scope = assignedGuestThreadScope('r', { column: 'recipient.userId' })
     const responsible = await queryAll<{ id: string }>(env.DB, `SELECT recipient.id FROM member recipient JOIN conversations r ON r.organization_id = recipient.organizationId

@@ -40,7 +40,7 @@ import { formAnswerSnapshotsSchema, formAnswersFingerprint } from '~/shared/form
 import type { ProductKind } from '~/shared/product-details'
 import { assignedMemberSql, BATCH_VIEWER, memberAccessPrincipal, withViewer, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
 import type { dashboardMemberQuery } from '~/server/utils/dashboard-context'
-import { CURRENT_GUEST_SQL } from '~/server/domain/conversations'
+import { conversationMemberSql, CURRENT_GUEST_SQL } from '~/server/domain/conversations'
 import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 
 export interface BookingCreationContext {
@@ -742,7 +742,7 @@ export function bookedRecordsInRange(viewer: ViewerTerms, range: { from: string;
           + (SELECT COALESCE(SUM(pay.captured_amount - pay.refunded_amount), 0) FROM payments pay WHERE pay.organization_id = b.organization_id AND pay.subject_type = 'booking' AND pay.subject_id = b.id) AS paid_minor,
         c.assigned_member_id, (SELECT ${MEMBER_NAME_SQL} FROM member m JOIN user u ON u.id = m.userId LEFT JOIN member_scheduling ms ON ms.member_id = m.id AND ms.organization_id = m.organizationId
           WHERE m.id = c.assigned_member_id AND m.organizationId = b.organization_id) AS assigned_member_name, r.id AS conversation_id,
-        EXISTS (SELECT 1 FROM conversation_participants seat WHERE seat.conversation_id = r.id AND seat.user_id = ${viewer.user} AND seat.role = 'member') AS viewer_seated
+        ${conversationMemberSql('r', viewer.user)} AS viewer_seated
       FROM bookings b
       JOIN organization org ON org.id = b.organization_id
       JOIN products p ON p.organization_id = b.organization_id AND p.id = b.product_id

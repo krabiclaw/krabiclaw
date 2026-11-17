@@ -43,7 +43,7 @@ export async function getConversationDetails(db: DbClient, conversation: Convers
   const [factsResult, photosResult] = await executeBatch(db, [
     { query: `SELECT c.blocked_at, c.last_message_at, seat.archived_at, b.ends_at, ${SUPPORT_CONVERSATION_SQL('c')} AS support
         FROM conversations c
-        JOIN conversation_participants seat ON seat.conversation_id = c.id AND seat.user_id = ?
+        LEFT JOIN conversation_participants seat ON seat.conversation_id = c.id AND seat.organization_id = c.organization_id AND seat.user_id = ?
         LEFT JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id
         WHERE c.id = ? AND c.organization_id = ? AND ${guard.sql}`, params: [userId, id, organizationId, ...guard.params] },
     { query: messagePhotoRowsSql(
