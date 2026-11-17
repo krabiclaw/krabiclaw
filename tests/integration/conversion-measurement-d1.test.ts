@@ -438,7 +438,7 @@ test('checkout attribution uses the newest matching intent even when attribution
 
 test('a completed onboarding emails each operator once, with a link to that customer, whatever the measurement does', { timeout: 60_000 }, async (t) => {
   const { runtime, db } = await openDb()
-  const sent: Array<{ idempotencyKey: string | null; body: { to: string[]; subject: string; html: string; text: string } }> = []
+  const sent: Array<{ idempotencyKey: string | null; body: { to: string[]; from: string; reply_to?: string; subject: string; html: string; text: string } }> = []
   t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
     assert.equal(url, 'https://api.resend.com/emails')
     sent.push({ idempotencyKey: new Headers(init.headers).get('Idempotency-Key'), body: JSON.parse(String(init.body)) })
@@ -450,7 +450,7 @@ test('a completed onboarding emails each operator once, with a link to that cust
     await db.prepare(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('dom-1', 'org-customer', 'clay-corner.krabiclaw.com', 'system', 'canonical', 'active')`).run()
     await db.prepare(`INSERT INTO user (id, name, email) VALUES ('user-owner', 'Mina Park', 'mina@clay-corner.com')`).run()
     await db.prepare(`INSERT INTO member (id, "organizationId", "userId", role) VALUES ('m-owner', 'org-customer', 'user-owner', 'owner')`).run()
-    const env = { DB: db, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 're_test_operator', EMAIL_FROM: 'Blawby <hello@krabiclaw.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.com', PLATFORM_OWNER_EMAILS: 'ops@krabiclaw.com, OPS@KrabiClaw.com ' } as unknown as Parameters<typeof completeOnboarding>[0]
+    const env = { DB: db, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 're_test_operator', EMAIL_FROM: 'Blawby <hello@blawby.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.com', PLATFORM_OWNER_EMAILS: 'ops@krabiclaw.com, OPS@KrabiClaw.com ' } as unknown as Parameters<typeof completeOnboarding>[0]
 
     const completion = await completeOnboarding(env, db, 'org-customer', null)
     assert.deepEqual(completion.operator_email, { status: 'sent' })
@@ -461,6 +461,7 @@ test('a completed onboarding emails each operator once, with a link to that cust
     assert.ok(operatorMail)
     assert.ok(ownerMail)
     assert.deepEqual(operatorMail!.body.to, ['ops@krabiclaw.com'])
+    assert.equal(operatorMail!.body.from, 'Blawby <hello@blawby.com>')
     assert.equal(operatorMail!.body.subject, 'Clay Corner is live on Blawby')
     assert.equal(operatorMail!.idempotencyKey, `onboarding-complete:org-customer:${hashEmail('ops@krabiclaw.com')}`)
     for (const expected of ['Mina Park (mina@clay-corner.com)', 'https://clay-corner.krabiclaw.com/',
@@ -469,6 +470,8 @@ test('a completed onboarding emails each operator once, with a link to that cust
     }
 
     assert.deepEqual(ownerMail!.body.to, ['mina@clay-corner.com'])
+    assert.equal(ownerMail!.body.from, 'Paul at Blawby <hello@blawby.com>')
+    assert.equal(ownerMail!.body.reply_to, 'hello@blawby.com')
     assert.equal(ownerMail!.body.subject, 'Welcome to Blawby — congrats on launching Clay Corner!')
     assert.equal(ownerMail!.idempotencyKey, `onboarding-welcome:org-customer:${hashEmail('mina@clay-corner.com')}`)
     for (const expected of ['Hi Mina,', 'Clay Corner', 'https://clay-corner.krabiclaw.com/', 'https://krabiclaw.com/dashboard/clay-corner', 'dining experience or cuisine', 'Paul', 'Founder, Blawby']) {

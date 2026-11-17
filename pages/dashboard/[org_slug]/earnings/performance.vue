@@ -91,7 +91,7 @@ const { data, error } = await useAsyncData(
     const requestedMonth = month.value
     const performance = await api<EarningsPerformance>('/api/dashboard/payments', { query: { view: 'performance', year: year.value, month: requestedMonth }, validate: isEarningsPerformance })
     if (!performance.months.some(row => row.month === requestedMonth)) {
-      throw createError({ statusCode: 502, statusMessage: `Krabiclaw did not return earnings for ${requestedMonth}`, data: { code: 'EARNINGS_MONTH_MISSING', field: `months.${requestedMonth}` } })
+      throw createError({ statusCode: 502, message: `Earnings are missing for ${requestedMonth}`, data: { code: 'EARNINGS_MONTH_MISSING', field: `months.${requestedMonth}` } })
     }
     return performance
   },

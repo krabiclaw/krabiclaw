@@ -8,7 +8,7 @@ Current lodging, MCP and template claim reconciliation: 2026-10-23 against the s
 |---|---|---|
 | Public company/product name | Blawby | Public brand after #1869; runtime/repository identifiers retain their spelling |
 | Website | https://blawby.com | Production platform site |
-| Contact email | hello@krabiclaw.com | Cloudflare forwarding verified end to end on 2026-09-07 |
+| Contact email | hello@blawby.com | General contact, routed through Cloudflare |
 | Founder / listing owner | Paul Chris Luke | Repository history and signed-in directory profiles |
 | Founder LinkedIn | https://www.linkedin.com/in/paulchrisluke/ | Supplied by the owner on 2026-09-07 |
 | Start date | May 2026 | First repository commit that renamed the project to KrabiClaw: 2026-05-03 |
@@ -23,7 +23,7 @@ Owner-approved company facts ([#941](https://github.com/paulchrisluke/krabiclaw/
 
 Public team: 4 people, founder + 3 employees. Use first names only: Paul — Founder & Product; Julia — Design & Customer Operations; Kaze — Payments Engineering; Rich — Legal Counsel & Office Cheerleader. Approved headshot links live in #941; do not infer biographies or surnames. Paul owns final launch approval, Julia creative approval, Kaze billing accuracy, and Rich legal/policy claims.
 
-Public contacts approved in #941: hello@krabiclaw.com (general), privacy@krabiclaw.com, legal@krabiclaw.com. Product support uses `/help`; do not publish an unverified support mailbox or promise a support SLA. Contact approval is not fresh delivery verification.
+General contact is hello@blawby.com. The privacy and legal contacts approved in #941 are privacy@krabiclaw.com and legal@krabiclaw.com. Product support uses `/help`; do not publish an unverified support mailbox or promise a support SLA. Contact approval is not fresh delivery verification.
 
 ## Positioning
 
