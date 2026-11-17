@@ -1,6 +1,6 @@
 <template>
-  <span role="img" :aria-label="nightMinimumLabel(nights)" class="inline-flex h-4 min-w-4 shrink-0 items-center justify-center self-start rounded-full px-0.5 text-[10px] font-medium leading-none tabular-nums ring-1 ring-inset ring-current">
-    {{ nights }}
+  <span role="img" :aria-label="nightMinimumLabel(nights)" class="h-4 shrink-0 self-start whitespace-nowrap text-[10px] font-medium leading-4 tabular-nums">
+    Min {{ nights }}
   </span>
 </template>
 

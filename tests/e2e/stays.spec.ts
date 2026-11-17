@@ -5178,8 +5178,8 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(grid.locator(`[data-stay="${stayIds[0]}"]`)).toHaveAttribute('data-channel', 'direct')
   await expect(night(bay, 3).getByText('฿3,200', { exact: true })).toBeVisible()
   await expect(night(bay, 3)).toHaveAttribute('aria-label', /THB\s3,200\.00/)
-  await expect(night(bay, 3).getByText('1', { exact: true })).toBeVisible()
-  await expect(night(sea, 3).getByText('21', { exact: true })).toBeVisible()
+  await expect(night(bay, 3).getByText('Min 1', { exact: true })).toBeVisible()
+  await expect(night(sea, 3).getByText('Min 21', { exact: true })).toBeVisible()
   // The grid scrolls inside itself; the phone page does not scroll sideways.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   // Scrolled to its last row, the grid keeps the day header pinned at its top and the home column at its left, so the dates stay readable.
@@ -5273,7 +5273,9 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   const homeInspector = page.locator('#dashboard-panel-stay-night-calendar').getByTestId('stay-night-inspector')
   await expect(homeInspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('3 nights')
   await expect(homeInspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('Home default: 2 nights')
-  await expect(page.getByTestId(`stay-night-${localDay(4)}`).locator('[aria-label="Minimum stay: 3 nights"]')).toBeVisible()
+  const homeMinimum = page.getByTestId(`stay-night-${localDay(4)}`).locator('[aria-label="Minimum stay: 3 nights"]')
+  await expect(homeMinimum).toBeVisible()
+  await expect(homeMinimum).toHaveText('Min 3')
 
   // Dragging down over all three homes selects the same week on each; unchecking one leaves it out.
   // The window opens on night 8, so the whole week sits inside the grid's scroll area for the pointer.
