@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { hashPassword } from 'better-auth/crypto'
 import { H3 } from 'nitro/h3'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import registerRoute from '../../server/api/dashboard/devices/index.post.ts'
 import unregisterRoute from '../../server/api/dashboard/devices/index.delete.ts'
 import { registerDevice } from '../../server/domain/devices.ts'
+import { applySchema } from './support/schema.ts'
 
 const BASE = 'https://devices-proof.example'
 const PASSWORD = 'DeviceProof123!'
@@ -21,8 +20,7 @@ test('device registration requires the current session and cascades with that se
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-    await db.batch(statements.map(statement => db.prepare(statement)))
+    await applySchema(db)
     for (const id of ['first-user', 'second-user']) {
       await db.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, 0, 0)').bind(id, id, `${id}@devices-proof.example`).run()
       await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES (?, ?, 'credential', ?, ?, 0, 0)")

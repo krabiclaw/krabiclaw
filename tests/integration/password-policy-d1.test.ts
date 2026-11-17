@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { hashPassword } from 'better-auth/crypto'
-import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
+import { applySchema } from './support/schema.ts'
 
 // The password policy applies where a password is chosen, and sign-in answers
 // the same for an email with no password as for a wrong one.
@@ -19,8 +18,7 @@ test('sign-in does not apply the password policy; choosing a password does', asy
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-    await db.batch(statements.map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('with-password', 'A', 'with-password@proof.example', 1, 0, 0), ('without-password', 'B', 'without-password@proof.example', 1, 0, 0)").run()
     await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('credential', 'with-password', 'credential', 'with-password', ?, 0, 0)").bind(await hashPassword('ProofPassword123!')).run()
     const auth = createAuth({

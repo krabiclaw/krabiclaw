@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
-import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { acceptConversationGuestInvite, createConversationGuestInvite, removeConversationGuest, setListingMessagingAccess } from '../../server/domain/conversation-participants.ts'
 import { readGuestConversation, resolveConversationAccess  } from '../../server/domain/conversations.ts'
@@ -16,6 +14,7 @@ import { listConversations } from '../../server/domain/guest-threads/repository.
 import { findSubmissionByPhone } from '../../server/utils/submission-messages.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { applySchema } from './support/schema.ts'
 
 // A stay's guest conversation lives in the one inbox: a host stay with a guest
 // email or phone opens it, the listing's messaging participants see it,
@@ -46,7 +45,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof',
       EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     bindDatabaseEvents(db, env)
-    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()

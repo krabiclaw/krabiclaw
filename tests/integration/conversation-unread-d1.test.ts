@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { appendMessage, markConversationRead, markConversationUnread } from '../../server/domain/conversations.ts'
 import { loadConversationPage } from '../../server/domain/conversation-history.ts'
@@ -10,6 +8,7 @@ import { setListingMessagingAccess } from '../../server/domain/conversation-part
 import { archiveConversation, listConversations, readGuestInbox, readWorkspaceInbox, unreadBadge } from '../../server/domain/guest-threads/repository.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { joinedMemberPrincipal, listOrganizationNotificationMembers } from '../../server/utils/member-access.ts'
+import { applySchema } from './support/schema.ts'
 
 // Unread is one statement (conversations.ts unreadSql): a message from someone
 // else newer than the person's read position. Every surface reads it: the list
@@ -28,7 +27,7 @@ test('unread is a message from someone else after your read position, the same c
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.batch([
       `INSERT INTO organization (id,name,slug,default_currency,timezone) VALUES ('${ORG}','Proof','proof','USD','UTC')`,
       ...[[OWNER, 'Owner'], [CLEANER, 'Cleaner'], [GUEST, 'Guest'], [ADMIN, 'Admin'], [SUCCESSOR, 'Successor']].map(([id, name]) => `INSERT INTO user (id,name,email,emailVerified) VALUES ('${id}','${name}','${id}@proof.example',1)`),

@@ -2,8 +2,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
 import { HTTPError } from 'nitro'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
-import * as schema from '../../server/db/schema.ts'
 import { executeBatch } from '../../server/db/index.ts'
 import { buildMediaPlacementInsertQuery } from '../../server/utils/media-asset-manager.ts'
 import { createArticleCategory, updateArticleCategory } from '../../server/utils/content/article-categories.ts'
@@ -12,6 +10,7 @@ import {
   createContentDocumentWithBlocks, getContentDocumentById, listBlocksForDocument,
   prepareContentDocumentUpdate, prepareContentDocumentDeletion, updateContentDocument,
 } from '../../server/utils/content/documents.ts'
+import { applySchema } from './support/schema.ts'
 
 test('document scopes, translations, block ownership and concurrent edits persist through real D1', async () => {
   const miniflare = new Miniflare({ workers: [{ config: {
@@ -22,9 +21,7 @@ test('document scopes, translations, block ownership and concurrent edits persis
   } }] })
   try {
     const db = await miniflare.getD1Database('DB')
-    const empty = await generateSQLiteDrizzleJson({})
-    const currentSchema = await generateSQLiteDrizzleJson(schema)
-    for (const statement of await generateSQLiteMigration(empty, currentSchema)) await db.prepare(statement).run()
+    await applySchema(db)
     for (const id of ['one', 'two']) {
       await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES (?, ?, ?, ?, 'USD', 'UTC')`).bind(id, id, id, id).run()
       for (const locale of ['en', 'th']) await db.prepare('INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES (?, ?, ?, ?, ?)')
@@ -194,8 +191,7 @@ test('category names and hierarchy remain valid during concurrent D1 writes', as
   } }] })
   try {
     const db = await miniflare.getD1Database('DB')
-    const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-    await db.batch(statements.map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('category-org', 'Category org', 'category-org', 'USD', 'UTC')").run()
     await db.prepare("INSERT INTO user (id, name, email) VALUES ('category-author', 'Category author', 'category@example.test')").run()
     const create = (name: string, parentId?: string) => createArticleCategory(db, {

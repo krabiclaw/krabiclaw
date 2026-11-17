@@ -67,7 +67,7 @@ definePageMeta({ layout: 'dashboard' })
   its own dialog first.
 */
 interface AirbnbStatus {
-  status: 'not_connected' | 'authorizing' | 'connected' | 'disconnecting' | 'needs_review'
+  status: 'not_connected' | 'authorizing' | 'connected' | 'disconnecting'
   connected_at: string | null
   listing_count: number
   channel_active: boolean
@@ -99,7 +99,7 @@ const detailsDialog = useOverlay().create(AirbnbListingDetailsDialog)
 
 const isStage = (value: unknown): value is ImportStage => typeof value === 'string' && (IMPORT_STAGES as readonly string[]).includes(value)
 const isStatus = (value: unknown): value is AirbnbStatus =>
-  isRecord(value) && ['not_connected', 'authorizing', 'connected', 'disconnecting', 'needs_review'].includes(String(value.status))
+  isRecord(value) && ['not_connected', 'authorizing', 'connected', 'disconnecting'].includes(String(value.status))
   && (value.connected_at === null || typeof value.connected_at === 'string') && typeof value.listing_count === 'number'
 const isListing = (value: unknown): value is AirbnbListing =>
   isRecord(value) && typeof value.id === 'string' && typeof value.title === 'string' && isRecord(value.import)
@@ -161,8 +161,7 @@ const connection = computed<IntegrationLeafConnection | null>(() => {
     connectedAt: s.connected_at,
     through: null,
     // Connected but not active yet on Channex's side is the host's wait, said on the account line.
-    status: s.status === 'connected' ? (s.channel_active ? 'active' : 'disabled') : s.status === 'needs_review' ? 'error' : null,
-    lastError: s.status === 'needs_review' ? 'The Airbnb connection needs review. Contact support to finish it.' : null,
+    status: s.status === 'connected' ? (s.channel_active ? 'active' : 'disabled') : null,
     note: s.status === 'authorizing' ? 'Finishing Airbnb sign-in' : s.status === 'disconnecting' ? 'Disconnecting…' : null,
   }
 })

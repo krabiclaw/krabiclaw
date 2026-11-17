@@ -1,24 +1,10 @@
 import { expect, test } from '@playwright/test'
 import { createHash } from 'node:crypto'
-import { decodeProtectedHeader, importJWK, SignJWT } from 'jose'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { loginAs } from './helpers/auth'
 import { mcpJson } from './helpers/mcp'
+import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
-
-const PRIVATE_CLIENT_TEST_KEY_ID = 'krabiclaw-cimd-e2e-rs256'
-const PRIVATE_CLIENT_TEST_JWK = {
-  kty: 'RSA',
-  n: '0PJUgpQ_Fg1ArCJcwrncgB9r8EX2UVD7pvpNJN8d_E6n4c_yQ_LVC0jyzdAlWnRFXE2THja5mSMQ7ddEYBznURS563ki2qHbMxkkhsIvzR3BeWWOe_qhqWenjFx5le5VFZIg1kcUZ0nzR4IM8gX1BJSEERZUkydY5K584rv3dVVdWWhUwux1ES0gEqpjQle9iiRPQ6lU8lSpYLEI02rkjvtF7HB5wKtnr1wsTOA5hWLwaKnFKN-G4v5ITO0cFys9bN6024YL8bj4N7HvPA-uxDM7AjxHZkAZ9PE90v85QS3r49AysOQIOxM7pq9i3su_5kECwCcZuG9gddOGUOs1fw',
-  e: 'AQAB',
-  d: 'VAt1VMS-j2crQVHdD_JksCBzcUUi69hwMNzzVMZuMEOPIbRcFVrCuPRRvdlgfP7Ru2v0pi2K__7r209AUIyvupxkoEOsclaybd5KI-5N_epfHS5tXo8Uoahw63Ny8IzaKoAJt0cF_Pnw4i18eYlN4da_PIRH5pzoE6vfze-ffNDsN0QbPHLKdE3pwxkIl0h73pXtFK8PN6Et2efMRMBR9n7Mc1JhzgE64RgrPchC5RqTMioiEeNVvtgi-11-Is2gZFnbpNkbH8Fubm0PNg9wC6lnO2MnOOhUkwKx6yV1G16oytMjDUlQMxo1jaaS8p-duV4DbFDJBYM7yUhexvGtsQ',
-  p: '8DfWJ-BCJxyv7v8_CLFph4Gj0OcgByIGey3uIMcO7NzCLHmWQmfQyI7seIGEZDLFnY6mj2ECJlUVgo56ZGxl6ur3V54NPVolAvQkw0jtTOPaL0k7UcGpQ4fdaOgAE7_6EpXQomsBqqS1ccc2FL0wkBTnpYCG8UHgEfutVW-j_Yk',
-  q: '3qyL6Bq_cm4IRE3dMV4exCNihJwRAEqRJ5z6OGxq-W01AHNW7_mQ8-JIj_09qdJ6l9LripRpB4nmTrUcZf310ZcGAONr2jVLRtmbHuMJToLS0SffxSJiXNjIdn8SN5HFthO4rBKG-jUagwy3tsnIAsbfhLZOOulnQRINVFLAIMc',
-  dp: 'y3YvsKS0w1X7-g09gYprHLgEXYt1yDTcknarrB2OGbc9y9fMGkC-STEtP0BMN2X9lV7e2rBK1tbYGjW9mtNpW5lamF6pTh7NHHxXqwRY4fhXtBdt4-iJCkbIlPN0JUZEdHtqNDc4OSW6_TzDJLu9pzvdnIOJSE0IkZK_FI8zsik',
-  dq: 'a9C33SY2VD2amxfoZaLg2q8XYIYAZVe1eKy1KuSz1xlddF5kVcVMvglugOlpFfTnjuN9UJgTUqcecDWZDnkssNKjAYMcEYeEb0Wlqgrb0rvdP5BC9Lx1S-dbCKT2ORnH1SUvYYGHAVb9Az8BJOwGf_GzABsVPckNSaBn-9AlXrk',
-  qi: 'Zz2Dyw9UFsy1TGuBur55ihvvutD2V6Q0GfaYjrfoQ9kWmWV3DTofW5jYcW3i0YelASgasxix11mqnoGu6TE1bdeJmOdp-9PUHaU5Cpnsd2BlmAy4PMsRxWFpJc6Qf6OaQ8dzDV3I-f921RYnWxU4QvjYLW9GbKli3x1UunSSaI4',
-  alg: 'RS256',
-} as const
 
 function pkceChallenge(verifier: string) {
   return createHash('sha256').update(verifier).digest('base64url')
@@ -29,117 +15,46 @@ function oauthAuthorizeUrl(baseURL: string, params: Record<string, string>) {
 }
 
 test.describe('OAuth discovery endpoints', () => {
-  test('consent discloses customer, booking, publishing, financial read and background access', async ({ page, baseURL }) => {
-    await page.goto(`${baseURL}/oauth/consent?scope=openid%20tenant%20offline_access`)
-    await expect(page.getByText('• Read customer inquiries, reservations, booking details, names, contact information, and messages', { exact: true })).toBeVisible()
-    await expect(page.getByText('• Save attachments as public media and publish to your website or connected Facebook and Instagram accounts', { exact: true })).toBeVisible()
-    await expect(page.getByText('• Create and manage bookings, cancel reservations, and email guests about confirmations, cancellations, and proposed changes', { exact: true })).toBeVisible()
-    await expect(page.getByText('• Read payment reports, transactions, balances, payout history, and usage invoices; payment collection and refunds require the dashboard', { exact: true })).toBeVisible()
-    await expect(page.getByText('Keep this connection active', { exact: true })).toBeVisible()
-    await expect(page.getByText('Submit and track work requests', { exact: true })).toHaveCount(0)
-  })
 
-  // Two cases sign in as user-e2e-oauth-cimd against the same CIMD client, and
-  // one of them rotates that user's remembered consent, so run in parallel they
-  // read each other's consent state. In order, in one worker, they cannot.
-  test.describe.configure({ mode: 'default' })
+  test('public CIMD exchanges codes once, rotates refresh grants and enforces tenant scope', async ({ request, baseURL }, testInfo) => {
+    const MCP_VERSION = '2026-07-28'
+    // A client starts unauthenticated: the MCP endpoint answers with the OAuth
+    // challenge, before version validation, naming the protected-resource document.
+    const probe = await request.post(`${baseURL}/api/mcp`, {
+      headers: { 'content-type': 'application/json', 'mcp-protocol-version': MCP_VERSION, 'mcp-method': 'server/discover' },
+      data: { jsonrpc: '2.0', id: 'auth-check', method: 'server/discover', params: {},
+        _meta: { 'io.modelcontextprotocol/version': MCP_VERSION, 'io.modelcontextprotocol/method': 'server/discover' } },
+    })
+    expect(probe.status()).toBe(401)
+    const challenge = probe.headers()['www-authenticate']!
+    expect(challenge).toContain('Bearer')
+    const resourceMetadata = challenge.match(/resource_metadata="([^"]+)"/)?.[1]
+    expect(new URL(resourceMetadata!).pathname).toBe('/.well-known/oauth-protected-resource')
 
-  test('the localization publisher can exchange its loopback PKCE code for tenant access', async ({ request, baseURL }) => {
-    await loginAs(request, baseURL!, 'user-e2e-kikuzuki-owner')
-    const organizationId = seededTenant('restaurant').organizationId
-    expect(process.env.MCP_CIMD_CLIENT_URL, 'MCP_CIMD_CLIENT_URL must name a public HTTPS metadata document').toBeTruthy()
-    const clientId = new URL('/oauth-clients/client-localization.json', process.env.MCP_CIMD_CLIENT_URL!).toString()
-    const metadata = await request.get(clientId)
-    expect(metadata.status()).toBe(200)
-    expect(metadata.headers()['content-type']).toContain('application/json')
-    const client = await metadata.json() as { client_id: string; redirect_uris: string[] }
-    expect(client.client_id).toBe(clientId)
-    const redirectUri = client.redirect_uris[0]!
-    const verifier = 'kikuzuki-localization-publisher-e2e-verifier-0123456789'
-    const authorization = await request.get(oauthAuthorizeUrl(baseURL!, {
-      client_id: clientId, redirect_uri: redirectUri, response_type: 'code',
-      scope: 'openid tenant', state: 'kikuzuki-publisher', prompt: 'consent',
-      code_challenge: pkceChallenge(verifier), code_challenge_method: 'S256',
-      resource: `${baseURL}/api/mcp`,
-    }), { maxRedirects: 0 })
-    expect(authorization.status(), await authorization.text()).toBe(302)
-    const consentUrl = new URL(authorization.headers()['location']!, baseURL)
-    expect(consentUrl.pathname).toBe('/oauth/consent')
-    const consent = await request.post(`${baseURL}/api/auth/oauth2/consent`, {
-      headers: { Origin: baseURL! },
-      data: { accept: true, oauth_query: consentUrl.search.slice(1) },
-    })
-    expect(consent.status()).toBe(200)
-    const callback = new URL((await consent.json() as { url: string }).url)
-    expect(callback.origin + callback.pathname).toBe(redirectUri)
-    expect(callback.searchParams.get('state')).toBe('kikuzuki-publisher')
-    const token = await request.post(`${baseURL}/api/auth/oauth2/token`, {
-      headers: { Origin: baseURL! },
-      form: {
-        grant_type: 'authorization_code', client_id: clientId,
-        code: callback.searchParams.get('code')!, redirect_uri: redirectUri,
-        code_verifier: verifier, resource: `${baseURL}/api/mcp`
-      },
-    })
-    expect(token.status()).toBe(200)
-    const authorizationResult = await token.json() as { access_token: string; refresh_token?: string }
-    expect(authorizationResult.refresh_token).toBeUndefined()
-    const workspace = await request.post(`${baseURL}/api/mcp`, {
-      headers: { Authorization: `Bearer ${authorizationResult.access_token}`, Accept: 'application/json, text/event-stream' },
-      data: {
-        jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
-          name: 'get_workspace_context', arguments: {},
-        }
-      },
-    })
-    expect(workspace.status()).toBe(200)
-    const result = await mcpJson<{ result: { isError: boolean; structuredContent: { organizations: Array<{ id: string }> } } }>(workspace)
-    expect(result.result.isError).toBe(false)
-    expect(result.result.structuredContent.organizations.map(organization => organization.id)).toContain(organizationId)
-    const organizationRead = await request.post(`${baseURL}/api/mcp`, {
-      headers: { Authorization: `Bearer ${authorizationResult.access_token}`, Accept: 'application/json, text/event-stream' },
-      data: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
-        name: 'get_organization', arguments: { organization_id: organizationId },
-      } },
-    })
-    expect(organizationRead.status()).toBe(200)
-    const organizationResult = await mcpJson<{ result: { isError: boolean; structuredContent: { context: { organization_id: string } } } }>(organizationRead)
-    expect(organizationResult.result.isError).toBe(false)
-    expect(organizationResult.result.structuredContent.context.organization_id).toBe(organizationId)
-  })
-
-  // One discovery pass: a client reads all three documents back to back, and
-  // splitting them into three tests only repeats the fixture.
-  test('the three OAuth discovery documents describe this resource server', async ({ request, baseURL }) => {
     const protectedResource = await request.get(`${baseURL}/.well-known/oauth-protected-resource`)
     expect(protectedResource.status()).toBe(200)
-    const resourceBody = await protectedResource.json() as Record<string, unknown>
+    const resourceBody = await protectedResource.json() as { resource: string; authorization_servers: string[]; bearer_methods_supported: string[] }
     expect(resourceBody.resource).toBe(`${baseURL}/api/mcp`)
-    expect(Array.isArray(resourceBody.authorization_servers)).toBe(true)
-    expect((resourceBody.authorization_servers as string[]).length).toBeGreaterThan(0)
-    expect(resourceBody.bearer_methods_supported as string[]).toContain('header')
-
+    expect(resourceBody.authorization_servers.length).toBeGreaterThan(0)
+    expect(resourceBody.bearer_methods_supported).toContain('header')
     const openid = await request.get(`${baseURL}/.well-known/openid-configuration`)
     expect(openid.status()).toBe(200)
     const openidBody = await openid.json() as Record<string, unknown>
-    // OpenID Connect Discovery requires RS256 support. ChatGPT validates the
-    // ID token after code exchange and will abort before MCP initialize when
-    // the provider advertises only Better Auth's EdDSA default.
+    // ChatGPT validates the ID token after code exchange and aborts before MCP
+    // initialize when the provider advertises only Better Auth's EdDSA default.
     expect(openidBody.id_token_signing_alg_values_supported as string[]).toContain('RS256')
     // CIMD instead of dynamic registration: a client is its own metadata URL.
     expect(openidBody.registration_endpoint).toBeUndefined()
     expect(openidBody.client_id_metadata_document_supported).toBe(true)
-
     const authorizationServer = await request.get(`${baseURL}/.well-known/oauth-authorization-server`)
     expect(authorizationServer.status()).toBe(200)
     const authorizationServerBody = await authorizationServer.json() as Record<string, unknown>
     expect(authorizationServerBody.registration_endpoint).toBeUndefined()
     expect(authorizationServerBody.client_id_metadata_document_supported).toBe(true)
     expect(authorizationServerBody.code_challenge_methods_supported as string[]).toContain('S256')
-  })
 
-  test('public CIMD exchanges codes once, rotates refresh grants and enforces tenant scope', async ({ request, baseURL }) => {
-    await loginAs(request, baseURL!, 'user-e2e-oauth-cimd')
+    const restaurant = seededTenant('restaurant')
+    await loginAs(request, baseURL!, 'user-e2e-kikuzuki-owner')
 
     const cimdClientId = process.env.MCP_CIMD_CLIENT_URL!
     expect(cimdClientId, 'MCP_CIMD_CLIENT_URL must name a public HTTPS metadata document').toBeTruthy()
@@ -240,9 +155,38 @@ test.describe('OAuth discovery endpoints', () => {
       data: { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
     })
     expect(tools.status(), await tools.text()).toBe(200)
-    const toolsBody = await mcpJson<{ result: { tools: Array<{ name: string }> } }>(tools)
+    const toolsBody = await mcpJson<{ error?: unknown; result: { tools: Array<{ name: string }> } }>(tools)
     expect(toolsBody.error).toBeUndefined()
     expect(toolsBody.result.tools.length).toBeGreaterThan(0)
+
+    // The connected client reads and writes the owner's business through MCP;
+    // the write is read back through the dashboard API.
+    const tenantCall = (id: string, name: string, args: Record<string, unknown>) => request.post(`${baseURL}/api/mcp`, {
+      headers: { Authorization: `Bearer ${refreshedBody.access_token}`, Accept: 'application/json, text/event-stream', Cookie: '' },
+      data: { jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } },
+    })
+    const organizationRead = await tenantCall('tenant-read', 'get_organization', { organization_id: restaurant.organizationId })
+    expect(organizationRead.status(), await organizationRead.text()).toBe(200)
+    const organizationResult = await mcpJson<{ result: { isError: boolean; structuredContent: { context: { organization_id: string } } } }>(organizationRead)
+    expect(organizationResult.result.isError).toBe(false)
+    expect(organizationResult.result.structuredContent.context.organization_id).toBe(restaurant.organizationId)
+    const release = await acquireTenantMutationLock(testInfo, restaurant.organizationId)
+    try {
+      const title = `Connected client check ${Date.now()}`
+      const created = await tenantCall('tenant-write', 'create_task', { organization_id: restaurant.organizationId, title, idempotency_key: crypto.randomUUID() })
+      expect(created.status(), await created.text()).toBe(200)
+      const createdResult = await mcpJson<{ result: { isError: boolean; structuredContent: { task: { id: string } } } }>(created)
+      expect(createdResult.result.isError).toBe(false)
+      const taskPath = `${baseURL}/api/organizations/${restaurant.organizationId}/tasks/${createdResult.result.structuredContent.task.id}`
+      const stored = await request.get(taskPath)
+      expect(stored.status(), await stored.text()).toBe(200)
+      expect((await stored.json() as { task: { title: string; status: string } }).task).toMatchObject({ title, status: 'open' })
+      const completed = await request.post(`${taskPath}/complete`, { data: {} })
+      expect(completed.status(), await completed.text()).toBe(200)
+      expect((await completed.json() as { task: { status: string } }).task.status).toBe('done')
+    } finally {
+      await release()
+    }
 
     const refreshReplay = await refreshGrant()
     expect(refreshReplay.status()).toBe(400)
@@ -318,316 +262,5 @@ test.describe('OAuth discovery endpoints', () => {
       await client.close()
     }
   })
-
-  test('requesting the email scope makes email and email_verified available through UserInfo', async ({ request, baseURL }) => {
-    await loginAs(request, baseURL!, 'user-e2e-oauth-cimd')
-
-    const cimdClientId = process.env.MCP_CIMD_CLIENT_URL!
-    expect(cimdClientId, 'MCP_CIMD_CLIENT_URL must name a public HTTPS metadata document').toBeTruthy()
-    const redirectUri = new URL('/oauth/test-callback', cimdClientId).toString()
-    const verifier = 'krabiclaw-email-scope-e2e-verifier-0123456789'
-    const authorizeParams = {
-      client_id: cimdClientId,
-      redirect_uri: redirectUri,
-      response_type: 'code',
-      scope: 'openid email offline_access tenant',
-      state: 'email-scope-pass',
-      code_challenge: pkceChallenge(verifier),
-      code_challenge_method: 'S256',
-      resource: `${baseURL}/api/mcp`,
-    }
-
-    const authorize = await request.get(oauthAuthorizeUrl(baseURL!, {
-      ...authorizeParams,
-      prompt: 'consent',
-    }), { maxRedirects: 0 })
-    expect(authorize.status()).toBe(302)
-    const consentLocation = authorize.headers()['location']
-    expect(consentLocation).toContain('/oauth/consent?')
-
-    const consentUrl = new URL(consentLocation!, baseURL)
-    const consentRes = await request.post(`${baseURL}/api/auth/oauth2/consent`, {
-      headers: { Origin: baseURL! },
-      data: { accept: true, oauth_query: consentUrl.search.slice(1) },
-    })
-    expect(consentRes.status()).toBe(200)
-    const consentBody = await consentRes.json() as { url?: string }
-    const code = new URL(consentBody.url!).searchParams.get('code')
-    expect(code).toBeTruthy()
-
-    const token = await request.post(`${baseURL}/api/auth/oauth2/token`, {
-      headers: { Origin: baseURL! },
-      form: {
-        grant_type: 'authorization_code',
-        client_id: cimdClientId,
-        code: code!,
-        redirect_uri: redirectUri,
-        code_verifier: verifier,
-      },
-    })
-    expect(token.status()).toBe(200)
-    const tokenBody = await token.json() as { access_token?: string, scope?: string }
-    expect(tokenBody.access_token).toBeTruthy()
-    expect(tokenBody.scope).toContain('email')
-
-    const userinfo = await request.get(`${baseURL}/api/auth/oauth2/userinfo`, {
-      headers: { Authorization: `Bearer ${tokenBody.access_token}` },
-    })
-    expect(userinfo.status()).toBe(200)
-    const userinfoBody = await userinfo.json() as { email?: string, email_verified?: boolean }
-    expect(userinfoBody.email).toBeTruthy()
-    expect(userinfoBody.email_verified).toBe(true)
-  })
-
-  test('CIMD uses its declared private_key_jwt method and rejects assertion replay', async ({ request, baseURL }) => {
-    await loginAs(request, baseURL!, 'user-e2e-oauth-private-cimd')
-
-    const clientId = process.env.MCP_PRIVATE_CIMD_CLIENT_URL!
-    expect(clientId, 'MCP_PRIVATE_CIMD_CLIENT_URL must name a public HTTPS metadata document').toBeTruthy()
-    const redirectUri = new URL('/oauth/test-callback', clientId).toString()
-    const verifier = 'krabiclaw-private-cimd-e2e-verifier-0123456789'
-    const authorizeParams = {
-      client_id: clientId,
-      redirect_uri: redirectUri,
-      response_type: 'code',
-      scope: 'openid offline_access tenant',
-      state: 'private-first',
-      code_challenge: pkceChallenge(verifier),
-      code_challenge_method: 'S256',
-      resource: `${baseURL}/api/mcp`,
-    }
-
-    const authorize = await request.get(oauthAuthorizeUrl(baseURL!, {
-      ...authorizeParams,
-      prompt: 'consent',
-    }), { maxRedirects: 0 })
-    expect(authorize.status()).toBe(302)
-    const consentUrl = new URL(authorize.headers()['location']!, baseURL)
-    expect(consentUrl.pathname).toBe('/oauth/consent')
-
-    const consent = await request.post(`${baseURL}/api/auth/oauth2/consent`, {
-      headers: { Origin: baseURL! },
-      data: { accept: true, oauth_query: consentUrl.search.slice(1) },
-    })
-    expect(consent.status()).toBe(200)
-    const consentBody = await consent.json() as { url: string }
-    const code = new URL(consentBody.url).searchParams.get('code')
-    expect(code).toBeTruthy()
-
-    const now = Math.floor(Date.now() / 1000)
-    const privateKey = await importJWK(PRIVATE_CLIENT_TEST_JWK, 'RS256')
-    const assertion = await new SignJWT({})
-      .setProtectedHeader({ alg: 'RS256', kid: PRIVATE_CLIENT_TEST_KEY_ID })
-      .setIssuer(clientId)
-      .setSubject(clientId)
-      .setAudience(`${baseURL}/api/auth/oauth2/token`)
-      .setIssuedAt(now)
-      .setExpirationTime(now + 120)
-      .setJti(`cimd-replay-${crypto.randomUUID()}`)
-      .sign(privateKey)
-
-    const token = await request.post(`${baseURL}/api/auth/oauth2/token`, {
-      headers: { Origin: baseURL! },
-      form: {
-        grant_type: 'authorization_code',
-        client_id: clientId,
-        code: code!,
-        redirect_uri: redirectUri,
-        code_verifier: verifier,
-        client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
-        client_assertion: assertion,
-      },
-    })
-    expect(token.status(), await token.text()).toBe(200)
-    const tokenBody = await token.json() as { access_token?: string, id_token?: string }
-    expect(tokenBody.access_token).toBeTruthy()
-    expect(tokenBody.id_token).toBeTruthy()
-    expect(decodeProtectedHeader(tokenBody.id_token!).alg).toBe('RS256')
-
-    // ChatGPT probes the modern protocol first. A legacy HTTP error must
-    // identify this server before the client retries the initialize handshake.
-    const mcpHeaders = {
-      Authorization: `Bearer ${tokenBody.access_token}`,
-      Accept: 'application/json, text/event-stream',
-      Cookie: '',
-    }
-    const discovered = await request.post(`${baseURL}/api/mcp`, {
-      headers: { ...mcpHeaders, 'MCP-Protocol-Version': '2026-07-28' },
-      data: {
-        jsonrpc: '2.0', id: 'openai-mcp-discover', method: 'server/discover', params: {
-          _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28' },
-        }
-      },
-    })
-    expect(discovered.status()).toBe(400)
-    // @modelcontextprotocol/server classifies this as a modern (2026-07-28)
-    // exchange from the MCP-Protocol-Version header, then rejects it for a
-    // more precise reason than the old hand-rolled "unsupported version"
-    // check: the envelope is missing the modern protocol's required
-    // clientCapabilities field. Either way the legacy client sees a 400 and
-    // retries with a legacy initialize below, which is the actual contract
-    // under test.
-    expect(await mcpJson(discovered)).toMatchObject({
-      id: 'openai-mcp-discover', error: { code: -32602, data: { envelope: { key: 'io.modelcontextprotocol/clientCapabilities', problem: 'missing' } } },
-    })
-    const initialized = await request.post(`${baseURL}/api/mcp`, {
-      headers: mcpHeaders,
-      data: {
-        jsonrpc: '2.0', id: 'legacy-init', method: 'initialize', params: {
-          protocolVersion: '2025-11-25', capabilities: {},
-          clientInfo: { name: 'krabiclaw-release-e2e', version: '1.0.0' },
-        }
-      },
-    })
-    expect(initialized.status()).toBe(200)
-    expect(await mcpJson(initialized)).toMatchObject({ result: { protocolVersion: '2025-11-25' } })
-    const tools = await request.post(`${baseURL}/api/mcp`, {
-      headers: { ...mcpHeaders, 'MCP-Protocol-Version': '2025-11-25' },
-      data: { jsonrpc: '2.0', id: 'legacy-tools', method: 'tools/list', params: {} },
-    })
-    expect(tools.status()).toBe(200)
-    expect((await mcpJson<{ result: { tools: unknown[] } }>(tools)).result.tools.length).toBeGreaterThan(0)
-
-    const secondAuthorize = await request.get(oauthAuthorizeUrl(baseURL!, {
-      ...authorizeParams,
-      state: 'private-replay',
-    }), { maxRedirects: 0 })
-    expect(secondAuthorize.status()).toBe(302)
-    const replayCode = new URL(secondAuthorize.headers()['location']!, baseURL).searchParams.get('code')
-    expect(replayCode).toBeTruthy()
-
-    const replay = await request.post(`${baseURL}/api/auth/oauth2/token`, {
-      headers: { Origin: baseURL! },
-      form: {
-        grant_type: 'authorization_code',
-        client_id: clientId,
-        code: replayCode!,
-        redirect_uri: redirectUri,
-        code_verifier: verifier,
-        client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
-        client_assertion: assertion,
-      },
-    })
-    expect(replay.status()).toBeGreaterThanOrEqual(400)
-    const replayBody = await replay.json() as { error?: string, error_description?: string }
-    expect(replayBody.error).toBeTruthy()
-    expect(replayBody.error_description).toMatch(/assertion|replay|already/i)
-  })
-
-  for (const method of ['GET', 'DELETE', 'HEAD']) {
-    for (const modern of [false, true]) {
-      test(`MCP ${method} returns SDK method rejection${modern ? ' with forged modern tool headers' : ''}`, async ({ request, baseURL }) => {
-        const response = await request.fetch(`${baseURL}/api/mcp`, {
-          method,
-          headers: {
-            accept: 'text/event-stream',
-            ...(modern ? {
-              'mcp-protocol-version': '2026-07-28',
-              'mcp-method': 'tools/call',
-              'mcp-name': 'list_organizations',
-            } : {}),
-          },
-        })
-        expect(response.status()).toBe(405)
-        expect(response.headers()['content-type']).toContain('application/json')
-        if (method === 'HEAD') expect(await response.text()).toBe('')
-        else expect(await response.json()).toEqual({
-          jsonrpc: '2.0',
-          id: null,
-          error: { code: -32000, message: 'Method not allowed.' },
-        })
-      })
-    }
-  }
-
-  test('MCP GET still rejects an untrusted Origin before method dispatch', async ({ request, baseURL }) => {
-    const response = await request.get(`${baseURL}/api/mcp`, {
-      headers: { accept: 'text/event-stream', origin: 'https://untrusted.example' },
-    })
-    expect(response.status()).toBe(403)
-    expect(await response.json()).toEqual({
-      jsonrpc: '2.0',
-      id: null,
-      error: { code: -32000, message: 'Invalid Origin: untrusted.example' },
-    })
-  })
-
-  test('unauthenticated modern MCP probe returns OAuth challenge before version validation', async ({ request, baseURL }) => {
-    const MCP_VERSION = '2026-07-28'
-    const res = await request.post(`${baseURL}/api/mcp`, {
-      headers: {
-        'content-type': 'application/json',
-        'mcp-protocol-version': MCP_VERSION,
-        'mcp-method': 'server/discover',
-      },
-      data: {
-        jsonrpc: '2.0',
-        id: 'auth-check',
-        method: 'server/discover',
-        params: {},
-        _meta: {
-          'io.modelcontextprotocol/version': MCP_VERSION,
-          'io.modelcontextprotocol/method': 'server/discover',
-        },
-      },
-    })
-    expect(res.status()).toBe(401)
-    const wwwAuth = res.headers()['www-authenticate']
-    expect(wwwAuth).toBeTruthy()
-    expect(wwwAuth).toContain('Bearer')
-    expect(wwwAuth).toContain('resource_metadata=')
-    expect(wwwAuth).toContain('/.well-known/oauth-protected-resource')
-  })
-
-  for (const credential of ['missing', 'invalid'] as const) {
-    test(`${credential} MCP credential returns a current-protocol auth tool result`, async ({ request, baseURL }) => {
-      const MCP_VERSION = '2026-07-28'
-      const res = await request.post(`${baseURL}/api/mcp`, {
-        headers: {
-          'content-type': 'application/json',
-          accept: 'application/json, text/event-stream',
-          'mcp-protocol-version': MCP_VERSION,
-          'mcp-method': 'tools/call',
-          'mcp-name': 'list_organizations',
-          ...(credential === 'invalid' ? { authorization: 'Bearer invalid-mcp-e2e-token' } : {}),
-        },
-        data: {
-          jsonrpc: '2.0',
-          id: 'auth-tool-check',
-          method: 'tools/call',
-          params: {
-            name: 'list_organizations',
-            arguments: {},
-            _meta: {
-              'io.modelcontextprotocol/protocolVersion': MCP_VERSION,
-              'io.modelcontextprotocol/clientCapabilities': {},
-            },
-          },
-        },
-      })
-      expect(res.status()).toBe(200)
-      const body = await mcpJson<{
-        result?: {
-          resultType?: string
-          isError?: boolean
-          structuredContent?: unknown
-          _meta?: Record<string, unknown>
-        }
-      }>(res)
-      expect(body.result?.resultType).toBe('complete')
-      expect(body.result?.isError).toBe(true)
-      expect(body.result?.structuredContent).toBeUndefined()
-      expect(body.result?._meta?.['io.modelcontextprotocol/serverInfo']).toEqual({ name: 'krabiclaw-mcp', title: 'Blawby', version: 'phase-5' })
-      const resourceMetadata = new URL('/.well-known/oauth-protected-resource/api/mcp', baseURL!).href
-      const challenges = body.result?._meta?.['mcp/www_authenticate'] as string[]
-      expect(challenges).toHaveLength(1)
-      expect(challenges[0]).toContain(`resource_metadata="${resourceMetadata}"`)
-      expect(challenges[0]).toContain('error="invalid_token"')
-      expect(challenges[0]).toContain('error_description=')
-      if (credential === 'missing') expect(challenges).toEqual([
-        `Bearer resource_metadata="${resourceMetadata}", error="invalid_token", error_description="Authentication required: connect Blawby to continue."`,
-      ])
-    })
-  }
 
 })

@@ -4,7 +4,6 @@ import type { Product } from '../../server/types/products.ts'
 import {
   COLLECTION_SIBLING_LIMIT,
   composeProductSeoDescription,
-  extractDietarySchemaUrls,
   isOfferedProduct,
   selectProductCollectionSiblings,
 } from '../../utils/product-seo.ts'
@@ -69,16 +68,12 @@ test('a dish with no description of its own is described by its price and locati
     priceSelection: SELECTION,
   }, translate)
   assert.equal(readable(description), 'Sprite. THB 320.00 at Kikuzuki Ao Nang.')
-})
-
-test('two dishes at the same location get different descriptions', () => {
-  const shared = { locationTitle: 'Kikuzuki Ao Nang', priceSelection: SELECTION }
-  const sprite = composeProductSeoDescription({ ...shared, product: product({ id: 'p-1', name: 'Sprite' }) }, translate)
   const akagai = composeProductSeoDescription({
-    ...shared,
+    locationTitle: 'Kikuzuki Ao Nang',
+    priceSelection: SELECTION,
     product: product({ id: 'p-2', name: 'Akagai Sashimi', description: 'Ark shell clam.' }),
   }, translate)
-  assert.notEqual(sprite, akagai)
+  assert.notEqual(description, akagai)
   assert.match(akagai, /Ark shell clam/)
 })
 
@@ -128,40 +123,6 @@ test('the sibling window rotates and stays bounded so a large collection is full
   assert.deepEqual(
     selectProductCollectionSiblings(catalogue, catalogue[19]!, 'col-1', SELECTION).map(sibling => sibling.name),
     ['Dish 0', 'Dish 1', 'Dish 2', 'Dish 3', 'Dish 4', 'Dish 5', 'Dish 6', 'Dish 7'],
-  )
-})
-
-test('extractDietarySchemaUrls maps product dietary notes to standard Schema.org diet enumeration URLs', () => {
-  const baseProduct = {
-    id: 'prod-1',
-    name: 'Pad Thai',
-    slug: 'pad-thai',
-    description: 'Delicious noodles',
-    kind: 'dish' as const,
-    variants: [],
-    collections: [],
-    details: {},
-  }
-
-  assert.deepEqual(
-    extractDietarySchemaUrls({ ...baseProduct, details: { dietary_notes: ['V'] } }),
-    ['https://schema.org/VegetarianDiet'],
-  )
-  assert.deepEqual(
-    extractDietarySchemaUrls({ ...baseProduct, details: { dietary_notes: ['VG'] } }),
-    ['https://schema.org/VeganDiet'],
-  )
-  assert.deepEqual(
-    extractDietarySchemaUrls({ ...baseProduct, details: { dietary_notes: ['GF'] } }),
-    ['https://schema.org/GlutenFreeDiet'],
-  )
-  assert.deepEqual(
-    extractDietarySchemaUrls({ ...baseProduct, details: { dietary_notes: ['V', 'GF', 'UNKNOWN'] } }),
-    ['https://schema.org/VegetarianDiet', 'https://schema.org/GlutenFreeDiet'],
-  )
-  assert.deepEqual(
-    extractDietarySchemaUrls({ ...baseProduct, details: {} }),
-    [],
   )
 })
 

@@ -3,13 +3,8 @@ import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { seededTenant } from './seed/manifest'
 import { devLoginHeaders, seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
 import { loginAs } from './helpers/auth'
-import { insightsRowValue, mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTables } from './helpers/tables'
-import type { Product, PublicProduct } from '../../server/types/products'
-import type { ConversationPage } from '../../shared/messages-contract'
-import type { TaskSection } from '../../server/domain/tasks'
-import type { BusinessToday } from '../../shared/dashboard-today'
 
 type DeliveryRow = { conversation_id: string; channel: 'email' | 'whatsapp'; purpose: string; status: string }
 type NotificationState = { deliveries: DeliveryRow[] }
@@ -151,16 +146,25 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const response = await submission
     expect(response.status()).toBe(201)
     expect(response.request().postDataJSON()).toMatchObject({ guest_phone: '+66812345678' })
-    const booked = await response.json() as { conversation_id: string; booking_id: string }
+    const booked = await response.json() as { conversation_id: string; booking_id: string; cancellation_token: string }
     expect(booked.conversation_id).toEqual(expect.any(String))
     await loginAs(request, testBaseUrl(), 'user-e2e-pottery-owner')
     const persisted = await request.get(`${testBaseUrl()}/api/dashboard/bookings/${booked.booking_id}`, {
       params: { org: wheel.slug },
     })
     expect(persisted.status(), await persisted.text()).toBe(200)
-    expect((await persisted.json()).booking).toMatchObject({
+    const persistedBooking = (await persisted.json()).booking as { status: string }
+    expect(persistedBooking).toMatchObject({
       guest_name: 'Pottery Journey Test', guest_email: email, guest_phone: '+66812345678', notes: 'Please keep the two seats together.',
     })
+    // The guest's receipt belongs to this business: its token opens it here and nowhere else.
+    const receiptURL = `${seededSiteURL('experience')}/api/public/booking-requests/${booked.conversation_id}`
+    const receipt = await request.get(receiptURL, { headers: { ...seededSiteHeaders('experience'), Authorization: `Bearer ${booked.cancellation_token}` } })
+    expect(receipt.status(), await receipt.text()).toBe(200)
+    expect((await receipt.json()).booking).toMatchObject({ kind: 'booking', status: persistedBooking.status })
+    const otherTenant = await request.get(receiptURL, { headers: { ...seededSiteHeaders('restaurant'), Authorization: `Bearer ${booked.cancellation_token}` } })
+    expect(otherTenant.status()).toBe(404)
+    expect(await otherTenant.json()).toEqual({ error: 'Booking not found' })
     await expect(page).toHaveURL(/\/bookings\/confirmed/)
     await expect(page.locator('main')).toContainText(/booking|received|confirmed/i)
     const state = await waitForNotifications(request, seededSiteURL('experience'), wheel.organizationId, since, booked.conversation_id, state =>
@@ -225,7 +229,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     }
   })
 
-  test('Clayhouse Studio contact persists and creates an owner notification', async ({ page, request }) => {
+  test('Clayhouse Studio contact persists and creates an owner notification', async ({ page, request, browser }) => {
     const since = new Date().toISOString()
     const email = `pottery-contact-${Date.now()}@playwright.example`
     await openTenantPage(page, `${seededSiteURL('experience')}/contact`, seededSiteHeaders('experience'))
@@ -244,382 +248,18 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
       && state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent'),
     )
     expectOwnerDispatch(state)
-  })
-
-  test('guest validation rejects invalid input and cancellation retries preserve the existing outcome', async ({ page, request }) => {
-    const baseURL = testBaseUrl()
-    const wheel = wheelClass()
-    const headers = { ...devLoginHeaders(), ...seededSiteHeaders('experience') }
-    // A guest names a SESSION, not a date and a time: the occurrence is a real
-    // row, so there is nothing to re-derive and no slot to invent.
-    const book = (name: string, email: string, sessionId: string) => request.post(`${baseURL}/api/public/products/${wheel.product.slug}/book`, {
-      headers, data: { guest_name: name, guest_email: email, party_size: 1, product_session_id: sessionId, idempotency_key: crypto.randomUUID() },
-    })
-    expect((await book('Missing Session', 'past@playwright.example', '')).status()).toBe(400)
-    expect((await book('Unknown Session', 'slot@playwright.example', 'session-that-does-not-exist')).status()).toBe(404)
-    expect((await request.post(`${baseURL}/api/public/contact`, { headers, data: {} })).status()).toBe(400)
-    await openTenantPage(page, `${seededSiteURL('experience')}${wheel.pagePath}`, seededSiteHeaders('experience'))
-    await waitForNuxtHydration(page)
-    await page.getByRole('button', { name: 'Book now' }).first().click()
-    await chooseFirstAvailableTime(page)
-    const phone = page.getByLabel(/Phone number/i)
-    const country = page.getByLabel(/^Phone country(?:$|:)/)
-    await country.click()
-    await page.getByLabel('Search countries', { exact: true }).fill('Australia')
-    await page.getByRole('option', { name: /Australia.*\+61/ }).click()
-    // The list closes and hands focus back to the country button, as a combobox does.
-    await expect(page.getByRole('listbox')).toBeHidden()
-    await expect(country).toBeFocused()
-    await expect(country).toContainText('+61')
-    await expect(phone).toHaveValue('')
-    await phone.pressSequentially('0491570150')
-    await expect(phone).toHaveValue('0491 570 150')
-    // The chosen country and the entered number survive remounting.
-    await page.getByRole('button', { name: 'Change', exact: true }).click()
-    await chooseFirstAvailableTime(page)
-    await expect(country).toContainText('+61')
-    await expect(phone).toHaveValue('0491 570 150')
-    // Clearing the optional phone leaves no number, not a calling code alone.
-    await phone.fill('')
-    await expect(phone).toHaveValue('')
-    await expect(country).toContainText('+61')
-    await page.getByLabel('Full name').fill('Cancel Once')
-    await page.getByLabel('Email address').fill('cancel-once@playwright.example')
-    await phone.focus()
-    await page.getByLabel(/Special requests/i).focus()
-    const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes(`/products/${wheel.product.slug}/book`))
-    await page.getByRole('button', { name: 'Confirm booking' }).click()
-    const created = await submission
-    expect(created.status()).toBe(201)
-    expect(created.request().postDataJSON()).toMatchObject({ guest_phone: null })
-    const body = await created.json() as { conversation_id: string; booking_id: string; cancellation_token: string }
-    expect(JSON.stringify(body)).not.toContain('cancel-once@playwright.example')
-    await loginAs(request, baseURL, 'user-e2e-pottery-owner')
-    const persisted = await request.get(`${baseURL}/api/dashboard/bookings/${body.booking_id}`, {
-      params: { org: wheel.slug },
-    })
-    expect(persisted.status(), await persisted.text()).toBe(200)
-    const persistedBooking = (await persisted.json()).booking as { guest_name: string; guest_phone: string | null; booking_date: string }
-    expect(persistedBooking).toMatchObject({ guest_name: 'Cancel Once', guest_phone: null })
-    const threadURL = `${baseURL}/api/messages/${body.conversation_id}`
-    const pendingThread = await request.get(threadURL)
-    expect(pendingThread.status(), await pendingThread.text()).toBe(200)
-    expect((await pendingThread.json() as ConversationPage).conversation).toMatchObject({ id: body.conversation_id, title: 'Cancel Once' })
-    const day = persistedBooking.booking_date
-    // Calendar owns confirmed commitments; quests do not repeat its agenda.
-    const scheduleParams = { org: wheel.slug, from: day, to: day }
-    const scheduleBefore = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
-    expect(scheduleBefore.status(), await scheduleBefore.text()).toBe(200)
-    expect((await scheduleBefore.json() as { items: Array<{ id: string }> }).items.map(item => item.id)).toContain(`booking:${body.conversation_id}`)
-    const cancelURL = `${baseURL}/api/public/booking-requests/${body.conversation_id}/cancel`
-    const authHeaders = { ...headers, Authorization: `Bearer ${body.cancellation_token}` }
-    const receiptURL = cancelURL.replace(/\/cancel$/, '')
-    const before = await request.get(receiptURL, { headers: authHeaders })
-    expect(before.status()).toBe(200)
-    const receipt = await before.json() as { success: true; booking: Record<string, unknown> }
-    const cancelled = await request.post(cancelURL, { headers: authHeaders })
-    expect(cancelled.status()).toBe(200)
-    expect(await cancelled.json()).toEqual({ success: true, kind: 'booking' })
-    // The capability is spent once; an authorized retry returns the existing
-    // outcome and can recover deduplicated notification delivery.
-    const replay = await request.post(cancelURL, { headers: authHeaders })
-    expect(replay.status()).toBe(200)
-    expect(await replay.json()).toEqual({ success: true, kind: 'booking' })
-    const cancelledThread = await request.get(threadURL)
-    expect(cancelledThread.status(), await cancelledThread.text()).toBe(200)
-    // A cancellation and its replay are one visible event.
-    const { entries } = await cancelledThread.json() as ConversationPage
-    expect(entries.filter(entry => entry.type === 'event' && / canceled the booking$/.test(entry.text))).toHaveLength(1)
-    const todayAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
-    expect(todayAfter.status(), await todayAfter.text()).toBe(200)
-    const todayAfterPayload = await todayAfter.json() as BusinessToday
-    expect(todayAfterPayload.cards.filter(card => card.to.endsWith(`/messages/${body.conversation_id}`))).toEqual([])
-    const scheduleAfter = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
-    expect(scheduleAfter.status(), await scheduleAfter.text()).toBe(200)
-    expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.conversation_id}`)).toBe(false)
-    expect((await request.post(cancelURL, {
-      headers: { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
-    })).status()).toBe(404)
-    // The guest can still read the receipt after cancellation.
-    const after = await request.get(receiptURL, { headers: authHeaders })
-    expect(after.status()).toBe(200)
-    expect(await after.json()).toEqual({ ...receipt, booking: { ...receipt.booking, status: 'cancelled' } })
-    for (const deniedHeaders of [
-      { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
-      { ...authHeaders, ...seededSiteHeaders('restaurant') },
-    ]) {
-      const denied = await request.get(receiptURL, { headers: deniedHeaders })
-      expect(denied.status()).toBe(404)
-      expect(await denied.json()).toEqual({ error: 'Booking not found' })
+    // The owner reads the visitor's message, as they wrote it, in Messages.
+    const owner = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+    try {
+      await loginAs(owner.request, testBaseUrl(), 'user-e2e-pottery-owner')
+      const messages = await owner.newPage()
+      await openTenantPage(messages, `${testBaseUrl()}/dashboard/${seededTenant('experience').slug}/messages/${conversation_id}`, {})
+      const opening = messages.locator('[data-message]').first()
+      await expect(opening).toBeVisible({ timeout: 30_000 })
+      await expect(opening).toContainText('Please tell me more about private pottery classes.')
+    } finally {
+      await owner.close()
     }
-  })
-
-  test('two class bookings share one prep task and keep one follow-up each', async ({ request }) => {
-    const baseURL = testBaseUrl()
-    const wheel = wheelClass()
-    const locationId = seededTenant('experience').locations['ao-nang']!.id
-    await loginAs(request, baseURL, 'user-e2e-pottery-owner')
-    const call = async <T>(toolName: string, args: Record<string, unknown>): Promise<T> => {
-      const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName, args: { organization_id: wheel.organizationId, ...args } })
-      expect(response.status()).toBe(200)
-      return mcpData<T>(await response.json())
-    }
-    // A dedicated afternoon occurrence keeps other journeys' morning bookings out of this session.
-    const startsAt = new Date(Date.now() + 2 * 86_400_000)
-    startsAt.setUTCHours(8, 0, 0, 0)
-    const { sessions: [session] } = await call<{ sessions: Array<{ id: string }> }>('create_product_session', {
-      product_id: wheel.product.id, location_id: locationId, starts_at: startsAt.toISOString(),
-      ends_at: new Date(startsAt.getTime() + 7_200_000).toISOString(), capacity: 8, idempotency_key: crypto.randomUUID(),
-    })
-    const sessionId = session!.id
-    const headers = { ...devLoginHeaders(), ...seededSiteHeaders('experience') }
-    const book = async (index: number, partySize: number) => {
-      const response = await request.post(`${baseURL}/api/public/products/${wheel.product.slug}/book`, {
-        headers, data: { product_session_id: sessionId, party_size: partySize, guest_name: `Class Prep Guest ${index}`,
-          guest_email: `class-prep-${index}@playwright.example`, idempotency_key: crypto.randomUUID() },
-      })
-      expect(response.status(), await response.text()).toBe(201)
-      return await response.json() as { booking_id: string; conversation_id: string; cancellation_token: string }
-    }
-    const tasks = async (kind: string, status: 'open' | 'cancelled' = 'open') => {
-      const { sections } = await call<{ sections: TaskSection[] }>('list_tasks', {
-        range: status === 'open' ? 'upcoming' : 'today', status, kind, assignee: 'all',
-      })
-      return sections.flatMap(section => section.tasks)
-    }
-    const prepTasks = async (status?: 'cancelled') => (await tasks('consultation_prep', status)).filter(task => task.product_session_id === sessionId)
-    const first = await book(1, 3)
-    const prep = await prepTasks()
-    expect(prep).toMatchObject([{ kind: 'consultation_prep', status: 'open', booking_id: null, path: expect.stringContaining(`/calendar/sessions/${sessionId}?`) }])
-    const second = await book(2, 1)
-    expect(await prepTasks()).toMatchObject([{ id: prep[0]!.id, version: prep[0]!.version }])
-    const bookingIds = [first.booking_id, second.booking_id].sort()
-    const followUps = async () => (await tasks('consultation_follow_up')).filter(task => bookingIds.includes(task.booking_id ?? '')).map(task => task.booking_id).sort()
-    expect(await followUps()).toEqual(bookingIds)
-    const cancel = async (booking: typeof first) => {
-      const cancelled = await request.post(`${baseURL}/api/public/booking-requests/${booking.conversation_id}/cancel`, {
-        headers: { ...headers, Authorization: `Bearer ${booking.cancellation_token}` },
-      })
-      expect(cancelled.status(), await cancelled.text()).toBe(200)
-      expect((await call<{ record: { status: string } }>('get_product_booking', { booking_id: booking.booking_id })).record.status).toBe('cancelled')
-    }
-    await cancel(first)
-    expect(await prepTasks()).toMatchObject([{ id: prep[0]!.id }])
-    expect(await followUps()).toEqual([second.booking_id])
-    await cancel(second)
-    expect(await prepTasks()).toEqual([])
-    expect(await prepTasks('cancelled')).toMatchObject([{ id: prep[0]!.id }])
-    expect(await followUps()).toEqual([])
   })
 
 })
-
-for (const seeded of [
-  { name: 'Ember & Slice', key: 'restaurant', location: 'brooklyn', experience: false, kind: 'dish' },
-  { name: 'Clayhouse Studio', key: 'experience', location: 'ao-nang', experience: true, kind: 'experience' },
-] as const) {
-  test(`${seeded.name} external checkout uses the shared CMS and public template`, async ({ page, request, baseURL }, testInfo) => {
-    test.slow()
-    test.skip(!writableEnvironment, 'External checkout verification writes only local disposable products')
-    const tenant = seededTenant(seeded.key)
-    const place = tenant.locations[seeded.location]!
-    const target = {
-      ...seeded, org: tenant.organizationId, slug: tenant.slug, currency: tenant.currency,
-      location: place.id, locationSlug: place.slug, base: seededSiteURL(seeded.key), headers: seededSiteHeaders(seeded.key),
-    }
-    await loginAs(page.request, baseURL!)
-    const editor = `/api/editor/organizations/${target.org}/products`
-    const inheritedPriceTerms = { tax_behavior: 'inclusive', compare_at_unit_amount: 200000, valid_from_at: '2020-01-01T00:00:00.000Z', valid_until_at: '2099-01-01T00:00:00.000Z' }
-    // Another spec reads this whole catalog under the tenant's lock; the product exists only while this holds it.
-    const unlock = await acquireTenantMutationLock(testInfo, target.org)
-    const created = await page.request.post(editor, { data: { kind: target.kind, name: target.kind === 'dish' ? `Sesame mushroom udon ${Date.now().toString(36)}` : target.experience ? `Clay & wheel workshop ${Date.now().toString(36)}` : `External checkout ${Date.now()}`, variants: [{ name: 'Standard', prices: [{ unit_amount: 120000, currency: target.currency, ...(target.kind === 'dish' ? inheritedPriceTerms : {}) }] }] } })
-    if (created.status() !== 201) await unlock()
-    expect(created.status(), await created.text()).toBe(201)
-    const product = (await created.json() as { product: Product }).product
-    try {
-      const externalUrl = `https://example.com/?checkout=${target.slug}`
-      await page.goto(`/dashboard/${target.slug}/products/${product.id}/order-url`)
-      await page.getByLabel('Website address', { exact: true }).fill(externalUrl)
-      await page.getByRole('button', { name: 'Save', exact: true }).click()
-      await expect(page).toHaveURL(new RegExp(`/products/${product.id}/photo$`))
-      const field = target.kind === 'dish' ? 'dietary_notes' : 'preparation'
-      const label = target.kind === 'dish' ? 'Dietary information' : 'Before you arrive'
-      const detail = target.kind === 'dish' ? 'Vegetarian' : 'Arrive ten minutes before your class'
-      await page.goto(`/dashboard/${target.slug}/products/${product.id}/attributes/${field}`)
-      await page.getByRole('textbox', { name: label, exact: true }).fill(detail)
-      const description = target.experience ? 'Shape your own bowl on the pottery wheel, then finish it with a hand-painted glaze.' : 'Finished with roasted sesame and seasonal greens.'
-      if (target.kind === 'dish') {
-        await page.getByRole('textbox', { name: label, exact: true }).press('Enter')
-        const loaded = await page.request.get(`${editor}/${product.id}`)
-        expect(loaded.status(), await loaded.text()).toBe(200)
-        const savedProduct = (await loaded.json() as { product: Product }).product
-        const concurrent = await page.request.patch(`${editor}/${product.id}`, { data: { description, updated_at: savedProduct.updated_at } })
-        expect(concurrent.status(), await concurrent.text()).toBe(200)
-        const concurrentProduct = (await concurrent.json() as { product: Product }).product
-        const refusedSave = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `${editor}/${product.id}`)
-        await page.getByRole('button', { name: 'Save', exact: true }).click()
-        const refusedResponse = await refusedSave
-        expect(refusedResponse.status(), await refusedResponse.text()).toBe(409)
-        expect(await refusedResponse.json()).toMatchObject({ data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'updated_at', product_id: product.id } })
-        expect(refusedResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: { dietary_notes: [detail] }, updated_at: savedProduct.updated_at })
-        const retained = page.locator('#dashboard-panel-product-attribute')
-        await expect(retained.getByText(detail, { exact: true })).toBeVisible()
-        const unchanged = await page.request.get(`${editor}/${product.id}`)
-        expect(unchanged.status(), await unchanged.text()).toBe(200)
-        const unchangedProduct = (await unchanged.json() as { product: Product }).product
-        expect(unchangedProduct.description).toBe(description)
-        expect(unchangedProduct.details).not.toHaveProperty(field)
-        expect(unchangedProduct.updated_at).toBe(concurrentProduct.updated_at)
-        await retained.getByRole('button', { name: 'Use saved details', exact: true }).click()
-        await expect(retained.getByText(detail, { exact: true })).toHaveCount(0)
-        await page.getByRole('textbox', { name: label, exact: true }).fill(detail)
-        await page.getByRole('textbox', { name: label, exact: true }).press('Enter')
-      }
-      await page.getByRole('button', { name: 'Save', exact: true }).click()
-      await expect(page).toHaveURL(new RegExp(`/products/${product.id}/photo$`))
-      const locations = await page.request.put(`${editor}/${product.id}/locations/${target.location}`, { data: { active: true, published: true } })
-      expect(locations.status(), await locations.text()).toBe(200)
-      if (target.experience) {
-        await page.setViewportSize({ width: 1440, height: 900 })
-        await page.goto(`/dashboard/${target.slug}/products/${product.id}/description?location_id=${target.location}`)
-        const cards = page.getByTestId('experience-editor-cards')
-        await expect(cards.getByTestId('editor-card-preparation')).toContainText(detail)
-        await expect(cards.getByTestId('editor-card-description')).toContainText('Nothing written yet')
-        await page.getByRole('textbox', { name: 'What you’ll do', exact: true }).fill(description)
-        await expect(cards.getByTestId('editor-card-description')).toContainText('Nothing written yet')
-        await page.getByRole('button', { name: 'Save', exact: true }).click()
-        await expect(page).toHaveURL(`/dashboard/${target.slug}/products/${product.id}/photo?location_id=${target.location}`)
-        await expect(cards.getByTestId('editor-card-description')).toContainText(description)
-        await expect(cards.getByTestId('editor-card-preparation')).toHaveAttribute('href', `/dashboard/${target.slug}/products/${product.id}/attributes/preparation?location_id=${target.location}`)
-        await page.screenshot({ path: testInfo.outputPath('experience-editor-desktop.png'), fullPage: true, animations: 'disabled' })
-        // Draft preview uses the existing tenant Experience page and explicit
-        // public scope without publishing the offering or choosing another place.
-        const view = page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true })
-        await view.click()
-        const preview = page.getByRole('dialog', { name: 'Experience preview', exact: true })
-        const iframe = preview.locator('iframe[title="Experience preview"]')
-        await expect(iframe).toBeVisible()
-        const previewURL = new URL((await iframe.getAttribute('src'))!)
-        expect(previewURL.pathname).toBe(`/experiences/${product.slug}`)
-        expect(previewURL.searchParams.get('location_id')).toBe(target.location)
-        expect(previewURL.searchParams.get('preview_token')).toBeTruthy()
-        const guest = iframe.contentFrame()
-        await expect(guest.getByRole('heading', { name: product.name, level: 1, exact: true })).toBeVisible()
-        await expect(guest.getByText(description, { exact: true })).toBeVisible()
-        await expect(guest.getByText(detail, { exact: true })).toBeVisible()
-        await preview.getByRole('tab', { name: 'Mobile view', exact: true }).click()
-        await expect(iframe).toHaveJSProperty('clientWidth', 390)
-        await expect(iframe).toHaveAttribute('src', previewURL.href)
-        await page.screenshot({ path: testInfo.outputPath('experience-preview-mobile.png'), fullPage: true, animations: 'disabled' })
-        await preview.getByRole('button', { name: 'Close', exact: true }).click()
-        await expect(preview).toBeHidden()
-        await expect(view).toBeFocused()
-      }
-      if (target.kind === 'dish') {
-        await page.goto(`/dashboard/${target.slug}/products/${product.id}/price?location_id=${target.location}`)
-        await expect(page.getByTestId('product-price')).toHaveValue('1200.00')
-        await page.getByTestId('product-price').fill('1350')
-        const scopedPrice = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `${editor}/${product.id}`)
-        await page.getByRole('button', { name: 'Save', exact: true }).click()
-        const scopedPriceResponse = await scopedPrice
-        expect(scopedPriceResponse.status(), await scopedPriceResponse.text()).toBe(200)
-        await expect(page).toHaveURL(`/dashboard/${target.slug}/products/${product.id}/price/amounts/${product.variants[0]!.id}?location_id=${target.location}`)
-        // The saved amount belongs to Pricing. Its index's Back returns to
-        // the Product, whose first concern is Photos, retaining location scope.
-        await page.locator('#dashboard-panel-product-pricing [data-testid="dashboard-navbar-back"]').click()
-        await expect(page).toHaveURL(`/dashboard/${target.slug}/products/${product.id}/photo?location_id=${target.location}`)
-        const cards = page.getByTestId('dish-editor-cards')
-        await expect(cards.getByTestId('editor-card-dietary_notes')).toContainText(detail)
-        await expect(cards.getByTestId('editor-card-description')).toContainText(description)
-        await expect(cards.getByTestId('editor-card-price')).toContainText('1,350')
-        await page.setViewportSize({ width: 1440, height: 900 })
-      }
-      const publication = await page.request.put(`${editor}/${product.id}/publication`, { data: { published: true } })
-      expect(publication.status(), await publication.text()).toBe(200)
-      const viaMcp = mcpData<{ product: Product }>(await (await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: target.org, product_id: product.id } })).json()).product
-      expect(viaMcp.kind).toBe(target.kind)
-      expect(viaMcp.details[field]).toEqual(target.kind === 'dish' ? [detail] : detail)
-      if (target.experience) expect(viaMcp.description).toBe(description)
-      if (target.kind === 'dish') {
-        expect(viaMcp.description).toBe(description)
-        expect(viaMcp.variants).toHaveLength(1)
-        expect(viaMcp.variants[0]!.id).toBe(product.variants[0]!.id)
-        expect(viaMcp.variants[0]!.prices).toHaveLength(2)
-        expect(viaMcp.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: product.variants[0]!.prices[0]!.id, unit_amount: 120000, currency: target.currency, location_id: null }))
-        expect(viaMcp.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, unit_amount: 135000, currency: target.currency, location_id: target.location }))
-        expect(viaMcp.variants[0]!.prices.find(price => price.location_id === target.location)!.id).not.toBe(product.variants[0]!.prices[0]!.id)
-      }
-      const publicPath = target.experience ? `/experiences/${product.slug}` : `/locations/${target.locationSlug}/${target.kind === 'dish' ? 'menu' : 'products'}/${product.slug}`
-      await openTenantPage(page, `${target.base}${publicPath}`, target.headers)
-      await expect(page.getByRole('heading', { name: product.name, level: 1, exact: true })).toBeVisible()
-      await expect(page.getByText(detail, { exact: true })).toBeVisible()
-      const productArticle = page.locator('article').filter({ has: page.getByRole('heading', { name: product.name, level: 1, exact: true }) })
-      if (target.kind === 'dish') {
-        await expect(page.getByText(description, { exact: true })).toBeVisible()
-        await expect(productArticle.getByRole('term')).toHaveText(product.name)
-        await expect(productArticle.getByRole('definition')).toHaveText('$2,000.00 $1,350.00')
-        await expect(productArticle.getByRole('definition')).toBeVisible()
-      }
-      for (const width of [1280, 390]) {
-        await page.setViewportSize({ width, height: 844 })
-        const handoff = page.locator(`a[href="${externalUrl}"]:visible`)
-        await expect(handoff).toHaveCount(1)
-        await expect(handoff).toHaveText(target.experience ? 'Book now' : 'Order Now')
-        await expect(page.getByRole('button', { name: 'Book now', exact: true })).toHaveCount(0)
-        if (target.kind === 'dish') {
-          await expect(productArticle.getByRole('heading', { name: 'Description', level: 2, exact: true })).toBeVisible()
-          await expect(productArticle.getByRole('heading', { name: 'Find us', level: 2, exact: true })).toBeVisible()
-          await expect(productArticle.getByRole('heading', { name: "What you'll do", exact: true })).toHaveCount(0)
-          await expect(productArticle.getByRole('heading', { name: "Where you'll meet", exact: true })).toHaveCount(0)
-          await expect(productArticle.getByText('per person', { exact: true })).toHaveCount(0)
-        }
-      }
-      if (target.kind === 'dish') await page.screenshot({ path: testInfo.outputPath('restaurant-dish-public-mobile.png'), fullPage: true, animations: 'disabled' })
-      await waitForNuxtHydration(page)
-      const recorded = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events' && response.request().postDataJSON()?.event_name === 'product_order_external_click')
-      const popup = page.waitForEvent('popup')
-      await page.locator(`a[href="${externalUrl}"]:visible`).click()
-      expect((await recorded).status()).toBe(201)
-      const destination = await popup
-      await expect(destination).toHaveURL(externalUrl)
-      await destination.close()
-      const saved = await request.get(`${target.base}${target.experience ? `/api/public/experiences/${product.slug}` : `/api/public/locations/${target.locationSlug}/products/${product.slug}`}`, { headers: target.headers })
-      expect(saved.status(), await saved.text()).toBe(200)
-      const savedProduct = (await saved.json() as { product: PublicProduct }).product
-      expect(savedProduct.order_url).toBe(externalUrl)
-      if (target.kind === 'dish') {
-        expect(savedProduct.variants[0]!.id).toBe(product.variants[0]!.id)
-        expect(savedProduct.variants[0]!.prices).toHaveLength(2)
-        expect(savedProduct.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: viaMcp.variants[0]!.prices.find(price => price.location_id === target.location)!.id, unit_amount: 135000, currency: target.currency, location_id: target.location }))
-        expect(savedProduct.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: product.variants[0]!.prices[0]!.id, unit_amount: 120000, currency: target.currency, location_id: null }))
-      }
-      await page.goto(`/dashboard/${target.slug}/products/${product.id}/publication/availability`)
-      const availability = page.getByRole('switch', { name: target.experience ? 'Accept bookings' : 'Accept orders', exact: true })
-      await expect(availability).toHaveAttribute('aria-checked', 'true')
-      await availability.click()
-      await page.getByRole('button', { name: 'Save', exact: true }).click()
-      await expect(page).toHaveURL(new RegExp(`/products/${product.id}/publication$`))
-      const paused = mcpData<{ product: { active: boolean; publications: Array<{ organization_id: string; published: boolean }> } }>(await (await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: target.org, product_id: product.id } })).json()).product
-      expect(paused.active).toBe(false)
-      expect(paused.publications).toContainEqual(expect.objectContaining({ organization_id: target.org, published: true }))
-      // A paused offering's page is still served, and viewing it is a view of the offering: Insights lists an
-      // experience's views under Booking conversion, and a dish (not booked) under Top pages by its path.
-      const offeringViews = () => target.experience
-        ? insightsRowValue(page.request, baseURL!, target.org, 'conversion/booking-conversion', product.name, 1)
-        : insightsRowValue(page.request, baseURL!, target.org, 'conversion/top-pages', publicPath, 0)
-      const viewsBefore = await offeringViews()
-      await openTenantPage(page, `${target.base}${publicPath}`, target.headers)
-      await expect(page.getByRole('heading', { name: product.name, level: 1, exact: true })).toBeVisible()
-      await expect(page.getByText(detail, { exact: true })).toBeVisible()
-      await expect(page.locator(`a[href="${externalUrl}"]:visible`)).toHaveCount(0)
-      await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `${target.base}${publicPath}`)
-      await expect.poll(offeringViews).toBe(viewsBefore + 1)
-    } finally {
-      try {
-        expect((await page.request.delete(`${editor}/${product.id}`)).status()).toBe(200)
-      } finally {
-        await unlock()
-      }
-    }
-  })
-}

@@ -1,1 +1,0 @@
-DROP TABLE `guest_thread_invites`;

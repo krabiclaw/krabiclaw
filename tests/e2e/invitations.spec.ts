@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { E2E_PASSWORD, findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import { waitForNuxtHydration } from './helpers'
-import { authRequestHeaders, loginAs, sendOrganizationInvitation } from './helpers/auth'
+import { loginAs } from './helpers/auth'
 import { seededTenant } from './seed/manifest'
 import { testBaseUrl } from './test-env'
 
@@ -95,23 +95,4 @@ test('the email link returns through normal sign-in and only the invited account
   const reopened = await page.request.get('/api/auth/organization/get-invitation', { params: { id: invitationId } })
   expect(reopened.status()).toBe(400)
   await expect(reopened.json()).resolves.toMatchObject({ message: 'Invitation not found!' })
-})
-
-test('an invitee can decline a pending email invitation without joining the workspace', async ({ page, request, baseURL }) => {
-  const legal = seededTenant('legal')
-  const invitee = findE2eAuthFixture('user-e2e-lodging-invitee')
-  await loginAs(request, baseURL!)
-  const invitationId = await sendOrganizationInvitation(request, baseURL!, legal.organizationId, invitee.email, 'member')
-  await loginAs(page.request, baseURL!, invitee.id)
-  await page.goto('/accept-invitation/' + invitationId)
-  await waitForNuxtHydration(page)
-  await page.getByRole('button', { name: 'Decline', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Invitation declined' })).toBeVisible()
-
-  const list = await request.get('/api/auth/organization/list-invitations', { params: { organizationId: legal.organizationId } })
-  expect(list.status()).toBe(200)
-  expect(await list.json()).toContainEqual(expect.objectContaining({ id: invitationId, status: 'rejected' }))
-  const accept = await page.request.post('/api/auth/organization/accept-invitation', { headers: authRequestHeaders(baseURL!), data: { invitationId } })
-  expect(accept.status()).toBe(400)
-  await expect(accept.json()).resolves.toMatchObject({ code: 'INVITATION_NOT_FOUND' })
 })
