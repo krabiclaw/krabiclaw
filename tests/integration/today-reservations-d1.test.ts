@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { captureEvents } from './support/events.ts'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { hashPassword } from 'better-auth/crypto'
 import { H3, H3Event } from 'h3'
-import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { createSession, listBookableSessions, setProductBookingConfig } from '../../server/utils/availability.ts'
@@ -20,6 +18,7 @@ import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/t
 import type { BusinessToday, TodayItem } from '../../shared/dashboard-today.ts'
 import type { OpportunityView } from '../../server/domain/opportunities.ts'
 import todayRoute from '../../server/api/dashboard/today.get.ts'
+import { applySchema } from './support/schema.ts'
 
 // Today's cards are the business's own bookings, read from the stored booked
 // records in one round trip, with the welcome as the card's action for each
@@ -46,7 +45,7 @@ async function boot() {
   const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: events.binding, BETTER_AUTH_SECRET: 'today-reservations-proof-secret-long-enough', BETTER_AUTH_URL: 'https://proof.example',
     STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'today-reservations-reply-secret',
     PREVIEW_SECRET: 'today-reservations-preview-proof-secret', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
-  await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+  await applySchema(db)
   await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner', 'owner@proof.example', 1, 0, 0)").bind(OWNER).run()
   await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('owner-account', ?, 'credential', ?, ?, 0, 0)").bind(OWNER, OWNER, await hashPassword(PASSWORD)).run()
   // Every day 08:00–22:00, so a reservation or a session can be booked on any day.

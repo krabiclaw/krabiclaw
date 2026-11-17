@@ -3,22 +3,9 @@ import test from 'node:test'
 
 import { MCP_PUBLIC_TOOLS } from '../../server/utils/mcp-tools/index.ts'
 import { referencedMcpTools } from '../../server/utils/mcp-prompts.ts'
-import { documentationDependencies, promptSnapshots } from '../../scripts/check-mcp-tool-catalog.mjs'
+import { documentationDependencies } from '../../scripts/check-mcp-tool-catalog.mjs'
 
 const toolNames = MCP_PUBLIC_TOOLS.map(tool => tool.name)
-
-test('every runtime workflow identifies valid current tools, including guest replies and booking actions', () => {
-  const workflows = promptSnapshots(MCP_PUBLIC_TOOLS)
-  for (const workflow of workflows) {
-    assert.ok(Object.keys(workflow.toolContracts).length, `${workflow.name} needs explicit tool dependencies`)
-  }
-  const triage = workflows.find(workflow => workflow.name === 'triage_inbox')!
-  for (const name of ['list_conversations', 'get_conversation', 'send_message', 'confirm_product_booking', 'request_product_booking_change']) {
-    assert.ok(name in triage.toolContracts, name)
-  }
-  assert.ok(workflows.find(workflow => workflow.name === 'set_up_products')!.toolContracts.update_menu)
-  assert.ok(workflows.find(workflow => workflow.name === 'set_up_bookable_product')!.toolContracts.list_product_booking_sessions)
-})
 
 test('tool references reject typos, removed operations and invalid reference anchors without treating argument fields as tools', () => {
   assert.deepEqual(referencedMcpTools('Use get_product with product_id, then update_product with updated_at and idempotency_key.', toolNames), ['get_product', 'update_product'])

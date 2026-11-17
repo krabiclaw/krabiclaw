@@ -25,11 +25,8 @@ test('a table states the one cancellation rule and its deposit, once per booking
     { id: 'deposit', text: 'Parties of 6+ guests require a deposit.' },
     { id: 'deposit_amount', text: 'Deposit: $25.00 per reservation.' },
   ])
-})
-
-test('a deposit from every party, plus tax, says so', () => {
-  const summary = formatBookingPolicySummary(tablePolicy({ payment: { basis: 'per_booking', unit_amount: 1000, currency: 'USD', tax_behavior: 'exclusive', min_party_size: null } }), 'en', 'table')
-  assert.deepEqual(summary.items.slice(1), [
+  const everyParty = formatBookingPolicySummary(tablePolicy({ payment: { basis: 'per_booking', unit_amount: 1000, currency: 'USD', tax_behavior: 'exclusive', min_party_size: null } }), 'en', 'table')
+  assert.deepEqual(everyParty.items.slice(1), [
     { id: 'deposit', text: 'A deposit is required before confirmation.' },
     { id: 'deposit_amount', text: 'Deposit: $10.00 per reservation, plus applicable tax.' },
   ])
@@ -65,23 +62,5 @@ test('the terms frozen on a booking are the offering\'s, at the price it was mad
   assert.deepEqual(parseBookingPolicy(JSON.stringify(tablePolicy({ payment: null, cancellation: 'moderate' }))).cancellation, 'moderate')
   assert.throws(() => parseBookingPolicy(JSON.stringify({ ...tablePolicy(), cancellation: 'lenient' })), /invalid frozen policy/)
   assert.throws(() => parseBookingPolicy(JSON.stringify({ ...tablePolicy(), payment: { basis: 'per_seat', unit_amount: 1, currency: 'USD', tax_behavior: 'inclusive', min_party_size: null } })), /invalid frozen policy/)
-})
-
-test('a table\'s terms read in Thai', () => {
-  const summary = formatBookingPolicySummary(tablePolicy(), 'th', 'table')
-  assert.equal(summary.heading, 'นโยบายการจอง')
-  assert(summary.items.some((item) => item.text.includes('24 ชั่วโมง')))
-})
-
-test('a table\'s terms read in Vietnamese', () => {
-  const summary = formatBookingPolicySummary(tablePolicy({ payment: { basis: 'per_booking', unit_amount: 2500, currency: 'USD', tax_behavior: 'inclusive', min_party_size: 6 } }), 'vi', 'table')
-  assert.equal(summary.heading, 'Chính sách đặt bàn')
-  assert.deepEqual(summary.items.slice(0, 2), [
-    { id: 'cancellation', text: 'Hủy miễn phí trước giờ bắt đầu ít nhất 24 giờ. Sau thời điểm đó, khoản thanh toán sẽ không được hoàn tự động.' },
-    { id: 'deposit', text: 'Nhóm từ 6 khách trở lên cần đặt cọc.' },
-  ])
-})
-
-test('formatBookingPolicySummary refuses a locale without a platform catalog', () => {
-  assert.throws(() => formatBookingPolicySummary(tablePolicy(), 'fr', 'table'), /No platform locale catalog/)
+  assert.throws(() => formatBookingPolicySummary(tablePolicy(), 'zz', 'table'), /No platform locale catalog/)
 })

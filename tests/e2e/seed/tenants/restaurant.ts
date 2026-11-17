@@ -2,7 +2,7 @@ import type { CreateTenant } from '../seed.ts'
 import { SEED_SUBDOMAINS, type SeedTenant } from '../manifest.ts'
 import { seedArticle, everyDay, publishProfile, recordProduct, seedLocation, seedMedia, toolFor } from './common.ts'
 
-// Ember & Slice is Blawby's fictional pizzeria: two New York locations with
+// Ember & Slice is Blawby's fictional pizzeria: a Brooklyn dining room with
 // tables to book, a menu and a kitchen blog.
 export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTenant> {
   const { owner, tenant } = await createTenant({
@@ -13,31 +13,27 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     const tool = toolFor(owner, tenant)
     const address = (street: string) => ({ regionCode: 'US', addressLines: [street], locality: 'Brooklyn', administrativeArea: 'NY', postalCode: '11201' })
     const brooklyn = await seedLocation(tool, tenant, 'brooklyn', { title: 'Ember & Slice Brooklyn', email: 'brooklyn@ember-slice.example', phone: '+12025550123', hours: everyDay(11, 22), address: address('120 Atlantic Avenue') })
-    const williamsburg = await seedLocation(tool, tenant, 'williamsburg', { title: 'Ember & Slice Williamsburg', email: 'williamsburg@ember-slice.example', phone: '+12025550124', hours: everyDay(11, 22), address: address('88 Bedford Avenue') })
 
-    // Each dining room's tables: one table product per location, seated through its opening hours with a
-    // 90-minute seating every half hour that still ends by close, forty guests per seating, no deposit.
+    // The dining room's tables: one table product, seated through its opening hours with a 90-minute
+    // seating every half hour that still ends by close, forty guests per seating, no deposit.
     const chefMemberId = tenant.memberIds['user-e2e-demo-owner']
     if (!chefMemberId) throw new Error('The Ember & Slice chef is not a member')
-    const tables: Record<string, { id: string; slug: string }> = {}
-    for (const [key, place] of [['brooklyn', brooklyn], ['williamsburg', williamsburg]] as const) {
-      const { product } = await tool<{ product: { id: string; slug: string; name: string; kind: string } }>('create_product', {
-        kind: 'table', name: `${place.title} tables`, active: true, idempotency_key: `seed-restaurant-tables-${key}`,
-        variants: [{ name: 'Table', prices: [{ unit_amount: 0, currency: 'USD' }] }],
-        booking: {
-          location_id: place.id, duration_minutes: 90, seating_interval_minutes: 30, default_capacity: 40, confirmation_mode: 'instant', scheduling_mode: 'business', assigned_member_id: chefMemberId,
-        },
-      })
-      await tool('set_product_location', { product_id: product.id, location_id: place.id, active: true, published: true })
-      await tool('set_product_publication', { product_id: product.id, published: true })
-      tables[key] = recordProduct(tenant, `tables-${key}`, product)
-    }
+    const { product: tableProduct } = await tool<{ product: { id: string; slug: string; name: string; kind: string } }>('create_product', {
+      kind: 'table', name: `${brooklyn.title} tables`, active: true, idempotency_key: 'seed-restaurant-tables-brooklyn',
+      variants: [{ name: 'Table', prices: [{ unit_amount: 0, currency: 'USD' }] }],
+      booking: {
+        location_id: brooklyn.id, duration_minutes: 90, seating_interval_minutes: 30, default_capacity: 40, confirmation_mode: 'instant', scheduling_mode: 'business', assigned_member_id: chefMemberId,
+      },
+    })
+    await tool('set_product_location', { product_id: tableProduct.id, location_id: brooklyn.id, active: true, published: true })
+    await tool('set_product_publication', { product_id: tableProduct.id, published: true })
+    const tables = recordProduct(tenant, 'tables-brooklyn', tableProduct)
     // A seating's session, read back as the owner's assistant reads it before booking.
     const seating = async (date: string, time: string) => {
       // The local day lies within a day either side of its UTC midnight: two days of seatings fit one page.
       const midnight = Date.parse(`${date}T00:00:00.000Z`)
       const { sessions } = await tool<{ sessions: Array<{ id: string; starts_at: string; is_full: boolean }> }>('list_product_booking_sessions', {
-        product_id: tables.brooklyn!.id, from: new Date(midnight - 43_200_000).toISOString(), to: new Date(midnight + 129_600_000).toISOString(), limit: 100 })
+        product_id: tables.id, from: new Date(midnight - 43_200_000).toISOString(), to: new Date(midnight + 129_600_000).toISOString(), limit: 100 })
       const local = (instant: string) => new Intl.DateTimeFormat('en-CA', { timeZone: tenant.timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(instant)).replace(',', '')
       return sessions.find(session => local(session.starts_at) === `${date} ${time}`) ?? null
     }
@@ -46,7 +42,7 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     const dinner = await seating(nextWeek, '19:00')
     if (!dinner) throw new Error('Ember & Slice Brooklyn has no 19:00 seating next week')
     await tool('create_product_booking', {
-      product_slug: tables.brooklyn!.slug, product_session_id: dinner.id, party_size: 4, guest_name: 'Maya Chen', guest_email: 'maya.chen@playwright.example',
+      product_slug: tables.slug, product_session_id: dinner.id, party_size: 4, guest_name: 'Maya Chen', guest_email: 'maya.chen@playwright.example',
       guest_phone: '+12025550188', idempotency_key: 'seed-restaurant-reservation', source: 'phone', guest_acknowledgement: false,
     })
 
@@ -64,7 +60,7 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
       const session = await seating(today, p.time)
       if (!session || session.is_full || Date.parse(session.starts_at) <= Date.now() + 10 * 60_000) continue
       await tool('create_product_booking', {
-        product_slug: tables.brooklyn!.slug, product_session_id: session.id, party_size: p.party_size, guest_name: p.guest_name, guest_email: p.guest_email,
+        product_slug: tables.slug, product_session_id: session.id, party_size: p.party_size, guest_name: p.guest_name, guest_email: p.guest_email,
         guest_phone: p.guest_phone, idempotency_key: p.key, source: 'phone', guest_acknowledgement: false,
       })
     }
@@ -75,9 +71,6 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     await tool('set_media', { placement: { owner_type: 'business_location', owner_id: brooklyn.id, slot: 'hero' }, asset_id: diningRoom.id })
     const logo = await seedMedia(owner, tenant, 'logo', 'dish.avif', 'Ember & Slice')
     await tool('set_media', { placement: { owner_type: 'organization', owner_id: tenant.organizationId, slot: 'logo' }, asset_id: logo.id })
-    for (const asset of [burrata, diningRoom]) {
-      await tool('attach_media', { placement: { owner_type: 'business_location', owner_id: williamsburg.id, slot: 'gallery' }, asset_id: asset.id })
-    }
 
     const dish = async (key: string, name: string, cents: number, image?: { id: string }) => {
       const { product } = await tool<{ product: { id: string; slug: string; name: string; kind: string } }>('create_product', {
@@ -88,7 +81,7 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
         await tool('set_media', { placement: { owner_type: 'product', owner_id: product.id, slot: 'image' }, asset_id: image.id })
         await tool('attach_media', { placement: { owner_type: 'product', owner_id: product.id, slot: 'gallery' }, asset_id: image.id })
       }
-      for (const place of [brooklyn, williamsburg]) await tool('set_product_location', { product_id: product.id, location_id: place.id, active: true, published: true })
+      await tool('set_product_location', { product_id: product.id, location_id: brooklyn.id, active: true, published: true })
       await tool('set_product_publication', { product_id: product.id, published: true })
       return recordProduct(tenant, key, product)
     }
@@ -131,7 +124,7 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     if (!hero) throw new Error('Ember & Slice\'s home page has no hero')
     await tool('replace_content_block', {
       block_id: hero.id, updated_at: hero.updated_at,
-      data: { title: hero.data.title ?? 'Ember & Slice', subtitle: 'Wood-fired pizza in Brooklyn and Williamsburg.', cta_label: 'Reserve a table', cta_url: '/reservations', secondary_label: 'View menu', secondary_url: '/menu' },
+      data: { title: hero.data.title ?? 'Ember & Slice', subtitle: 'Wood-fired pizza in Brooklyn.', cta_label: 'Reserve a table', cta_url: '/reservations', secondary_label: 'View menu', secondary_url: '/menu' },
     })
 
     // Its posts appear on the home page as they are published.
@@ -139,8 +132,8 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
 
     // The site is also published in Japanese and Thai for visitors, each starting with its homepage.
     const translations = {
-      ja: { title: 'エンバー＆スライス', subtitle: 'ブルックリンとウィリアムズバーグの薪窯ピザ。', cta_label: 'テーブルを予約', secondary_label: 'メニューを見る' },
-      th: { title: 'เอมเบอร์ แอนด์ สไลซ์', subtitle: 'พิซซ่าเตาฟืนในบรูคลินและวิลเลียมส์เบิร์ก', cta_label: 'จองโต๊ะ', secondary_label: 'ดูเมนู' },
+      ja: { title: 'エンバー＆スライス', subtitle: 'ブルックリンの薪窯ピザ。', cta_label: 'テーブルを予約', secondary_label: 'メニューを見る' },
+      th: { title: 'เอมเบอร์ แอนด์ สไลซ์', subtitle: 'พิซซ่าเตาฟืนในบรูคลิน', cta_label: 'จองโต๊ะ', secondary_label: 'ดูเมนู' },
     }
     for (const [locale, copy] of Object.entries(translations)) {
       await tool('add_organization_language', { locale })
@@ -148,10 +141,8 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
         page_id: home.page_id, locale, path: '/', title: copy.title,
         blocks: [{ type: 'hero', source_block_id: hero.id, data: { ...copy, cta_url: '/reservations', secondary_url: '/menu' } }],
       })
-      // Its locations carry the language too, so their pages (reservations among them) exist in it.
-      for (const place of [brooklyn, williamsburg]) {
-        await tool('put_resource_localization', { resource_type: 'business_location', resource_id: place.id, locale, values: { title: place.title } })
-      }
+      // Its location carries the language too, so its pages (reservations among them) exist in it.
+      await tool('put_resource_localization', { resource_type: 'business_location', resource_id: brooklyn.id, locale, values: { title: brooklyn.title } })
       await tool('publish_organization_language', { locale })
     }
 

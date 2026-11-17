@@ -170,16 +170,16 @@ export const conversation_participants = sqliteTable("conversation_participants"
 	check("conversation_participants_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND (archived_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', archived_at, '+0 days') IS archived_at)`),
 ]);
 
-// A per-home messaging grant for additional co-hosts. The grant references a
-// Better Auth membership and is independent of the home's assignment.
+// Access a Better Auth member has on a selected bookable listing.
 export const listing_message_members = sqliteTable("listing_message_members", {
 	organization_id: text().notNull(),
 	listing_id: text().notNull(),
 	member_id: text().notNull(),
+	access: text({ enum: ["messaging", "tasks", "calendar", "calendar_and_messaging", "operations"] }).default("messaging").notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, table => [
 	primaryKey({ columns: [table.organization_id, table.listing_id, table.member_id] }),
-	foreignKey({ columns: [table.organization_id, table.listing_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "listing_message_members_listing_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.organization_id, table.listing_id], foreignColumns: [products.organization_id, products.id], name: "listing_message_members_listing_fk" }).onDelete("cascade"),
 	foreignKey({ columns: [table.member_id, table.organization_id], foreignColumns: [member.id, member.organizationId], name: "listing_message_members_membership_fk" }).onDelete("cascade"),
 	index("listing_message_members_member_idx").on(table.member_id, table.organization_id),
 ]);
@@ -292,6 +292,7 @@ export const invitation = sqliteTable("invitation", {
 	organizationId: text().notNull().references(() => organization.id, { onDelete: "cascade" } ),
 	email: text().notNull(),
 	role: text(),
+	listing_access: text(),
 	status: text().default("pending").notNull(),
 	expiresAt: integer({ mode: "timestamp" }).notNull(),
 	inviterId: text().notNull().references(() => user.id, { onDelete: "cascade" } ),
@@ -328,6 +329,7 @@ export const tasks = sqliteTable('tasks', {
   title: text(),
   notes: text(),
   assigned_member_id: text(),
+  claim_role: text(),
   starts_at: text(),
   due_at: text(),
   timezone: text().notNull(),
@@ -1638,12 +1640,11 @@ export const organization_integrations = sqliteTable("organization_integrations"
 // An organization's Airbnb account, connected through Channex. It is one row
 // per organization with its own lifecycle: a Channex group and a temporary
 // setup property, a single-use sign-in bound to the person who started it,
-// then the connected channel. operation_id is the lock one setup step holds;
-// pending_step names a provider write that was sent and may have applied, so
-// a failure there is held for review instead of being repeated.
+// then the connected channel.
 export const channex_connections = sqliteTable("channex_connections", {
 	organization_id: text().primaryKey().references(() => organization.id, { onDelete: "cascade" }),
-	status: text().$type<'not_connected' | 'authorizing' | 'connected' | 'disconnecting' | 'needs_review'>().notNull(),
+	status: text().$type<'not_connected' | 'authorizing' | 'connected' | 'disconnecting'>().notNull(),
+	// Unread since #1916; dropped, with needs_review below, by the release after the Worker that stopped using them is live.
 	operation_id: text(),
 	pending_step: text(),
 	group_id: text(),
@@ -1655,6 +1656,8 @@ export const channex_connections = sqliteTable("channex_connections", {
 	authorization_expires_at: text(),
 	channel_id: text(),
 	connected_at: text(),
+	// Why the last disconnect failed, shown with the connection; cleared when Disconnect is asked again.
+	disconnect_error: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [

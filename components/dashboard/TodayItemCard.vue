@@ -7,8 +7,8 @@
       <span class="ti-what">{{ item.headline }}</span>
       <span v-if="item.line" class="ti-where">{{ item.line }}</span>
     </component>
-    <button v-if="item.done" type="button" class="ti-strip" :disabled="busy" data-testid="today-item-done" @click="emit('done', item)">
-      <span class="min-w-0"><b>{{ item.action.title }}</b><small>{{ item.action.detail }}</small></span>
+    <button v-if="item.done || item.claim" type="button" class="ti-strip" :disabled="busy" :data-testid="item.claim ? 'today-item-claim' : 'today-item-done'" @click="emit('done', item)">
+      <span class="min-w-0"><b>{{ item.claim?.label ?? item.action.title }}</b><small v-if="item.action.detail">{{ item.action.detail }}</small></span>
       <UIcon :name="busy ? 'i-lucide-loader-circle' : 'i-lucide-circle-check'" class="size-6 shrink-0" :class="{ 'animate-spin': busy }" aria-hidden="true" />
     </button>
     <!-- One keyboard stop: the strip repeats the card's link, and the link is described by its action. -->

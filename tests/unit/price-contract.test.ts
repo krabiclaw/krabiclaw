@@ -20,6 +20,7 @@ const AT = '2026-06-01T00:00:00.000Z'
 
 test('no applicable offer returns null, never a substitute', () => {
   assert.equal(selectPrice([], { currency: 'THB', location_id: null, at: AT }), null)
+  assert.equal(selectPrice([p('free', { unit_amount: 0 })], { currency: 'THB', location_id: null, at: AT })!.unit_amount, 0, 'zero is an explicit offer')
   assert.equal(selectPrice([p('a')], { currency: 'USD', location_id: null, at: AT }), null, 'must not fall back to another currency')
   assert.equal(selectPrice([p('a', { active: false })], { currency: 'THB', location_id: null, at: AT }), null)
   assert.equal(selectPrice([p('a', { valid_until_at: '2026-05-01T00:00:00.000Z' })], { currency: 'THB', location_id: null, at: AT }), null, 'must not use a lapsed offer')
@@ -46,11 +47,6 @@ test('billing recurrence is never confused with anything else', () => {
   assert.equal(selectPrice([weekly, once], { currency: 'THB', location_id: null, at: AT })!.id, 'o', 'default asks for one-time')
   assert.equal(selectPrice([weekly, once], { currency: 'THB', location_id: null, at: AT, billing: { type: 'recurring', interval: 'week', interval_count: 1 } })!.id, 'w')
   assert.equal(selectPrice([weekly], { currency: 'THB', location_id: null, at: AT, billing: { type: 'recurring', interval: 'month', interval_count: 1 } }), null)
-})
-
-test('zero is an explicit offer, absence is not free', () => {
-  assert.equal(selectPrice([p('free', { unit_amount: 0 })], { currency: 'THB', location_id: null, at: AT })!.unit_amount, 0)
-  assert.equal(selectPrice([], { currency: 'THB', location_id: null, at: AT }), null)
 })
 
 test('shape validation rejects malformed offers', () => {

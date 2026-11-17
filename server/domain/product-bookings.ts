@@ -1,3 +1,5 @@
+import { listingGrantSql } from '~/server/domain/listing-access'
+import { assignedOperationsRoles, roleMatchesSql, workspaceManagementRoles } from '~/utils/organization-access'
 import { publishEvent } from '~/server/events'
 import { bookingReviewDueAt } from '~/server/utils/review-requests'
 import { publishConversationEvent, scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
@@ -38,7 +40,7 @@ import { accountActivityPath } from '~/shared/account-activity'
 import { localizeStoredFormQuestions, validateFormAnswers } from '~/server/domain/form-questions'
 import { formAnswerSnapshotsSchema, formAnswersFingerprint } from '~/shared/form-questions'
 import type { ProductKind } from '~/shared/product-details'
-import { assignedMemberSql, BATCH_VIEWER, memberAccessPrincipal, withViewer, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
+import { assertCanOperateBookingProduct, assignedMemberSql, BATCH_VIEWER, memberAccessPrincipal, withViewer, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
 import type { dashboardMemberQuery } from '~/server/utils/dashboard-context'
 import { conversationMemberSql, CURRENT_GUEST_SQL } from '~/server/domain/conversations'
 import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
@@ -287,6 +289,7 @@ export async function createMemberBooking(event: H3Event, input: {
     const stay = await createStay(db, env, access, { ...body, product_id: productId, idempotency_key: operator.idempotencyKey })
     return { kind: 'stay' as const, stay, status: 201 as const }
   }
+  await assertCanOperateBookingProduct(db, principal, productId)
   const result = await createBookingFrom(event, env, {
     organizationId, slug: product.slug, productId, body,
     financialWritesAllowed: input.financialWritesAllowed, operator: { ...operator, userId },
@@ -718,28 +721,26 @@ export interface BookedRecordInRange {
  * their account shows them. Today, the Agenda, the host Calendar and the
  * bookings list read it.
  */
-/**
- * A viewer for `bookedRecordsInRange` that reads every booked record of the
- * membership's business, for a caller that keeps a member's own rows itself:
- * the homes calendar and the bookings list, whose member rows include the
- * stays at homes they look after.
- */
-export function businessWideViewer(membership: BatchQuery): BatchQuery {
-  return { query: `SELECT organization_id, user_id, member_id, 1 AS organization_wide FROM (${membership.query})`, params: membership.params }
-}
-
-export function bookedRecordsInRange(viewer: ViewerTerms, range: { from: string; to: string; pending?: boolean; cancelled?: boolean; guest?: boolean }): BatchQuery {
+export function bookedRecordsInRange(viewer: ViewerTerms, range: { from: string; to: string; pending?: boolean; cancelled?: boolean; guest?: boolean; includeAssignedStays?: boolean; includeCalendarGrants?: boolean; includePayments?: boolean }): BatchQuery {
   const wideFrom = `${addLocalDays(range.from, -1)}T00:00:00.000Z`, wideTo = `${addLocalDays(range.to, 1)}T23:59:59.999Z`
+  const assigned = `(${range.includeAssignedStays ? '1' : 'b.product_session_id IS NOT NULL'}
+    AND ${assignedMemberSql('c', viewer.user)}${viewer.role ? ` AND ${roleMatchesSql(viewer.role, assignedOperationsRoles)}` : ''})`
+  const known = `(${viewer.organizationWide} = 1 OR ${assigned}${viewer.role ? ` OR ${listingGrantSql('b.organization_id', 'b.product_id', viewer.member, 'details', viewer.role)}` : ''})`
+  const calendar = range.includeCalendarGrants && viewer.role ? listingGrantSql('b.organization_id', 'b.product_id', viewer.member, 'calendar', viewer.role) : '0'
+  const privateColumn = (expression: string) => range.guest ? expression : `CASE WHEN ${known} THEN ${expression} END`
+  const paid = range.includePayments && viewer.role ? `CASE WHEN ${roleMatchesSql(viewer.role, workspaceManagementRoles)} THEN
+    (SELECT COALESCE(SUM(o.amount_minor), 0) FROM offline_payments o WHERE o.organization_id = b.organization_id AND o.booking_id = b.id)
+      + (SELECT COALESCE(SUM(pay.captured_amount - pay.refunded_amount), 0) FROM payments pay WHERE pay.organization_id = b.organization_id AND pay.subject_type = 'booking' AND pay.subject_id = b.id)
+    ELSE 0 END` : '0'
   const whose = range.guest
     ? `r.user_id = ${viewer.user} AND ${CURRENT_GUEST_SQL('r')} AND (b.product_session_id IS NOT NULL OR (b.owner = 'app' AND b.user_id = r.user_id))`
-    : `b.organization_id = ${viewer.organization} AND (${viewer.organizationWide} = 1 OR (b.product_session_id IS NOT NULL AND ${assignedMemberSql('c', viewer.user)}))`
+    : `b.organization_id = ${viewer.organization} AND (${known} OR ${calendar})`
   return {
     query: `SELECT b.id, b.organization_id, org.name AS organization_name, org.vertical, b.status, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit, b.product_id, p.kind AS product_kind,
         ${range.guest ? 'p.name' : 'COALESCE(sc.internal_name, p.name)'} AS product_name, b.product_session_id, COALESCE(b.location_id, sc.location_id) AS location_id, l.title AS location_title,
-        b.starts_at, b.ends_at, b.timezone, b.party_size, b.adults, b.children, b.party_size_is_minimum, json_extract(r.payload_json, '$.guest.name') AS guest_name,
-        (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, b.owner, b.channel, b.overbooked, b.total_minor, b.currency,
-        (SELECT COALESCE(SUM(o.amount_minor), 0) FROM offline_payments o WHERE o.organization_id = b.organization_id AND o.booking_id = b.id)
-          + (SELECT COALESCE(SUM(pay.captured_amount - pay.refunded_amount), 0) FROM payments pay WHERE pay.organization_id = b.organization_id AND pay.subject_type = 'booking' AND pay.subject_id = b.id) AS paid_minor,
+        b.starts_at, b.ends_at, b.timezone, b.party_size, b.adults, b.children, b.party_size_is_minimum, ${privateColumn("json_extract(r.payload_json, '$.guest.name')")} AS guest_name,
+        ${privateColumn('(SELECT u.image FROM user u WHERE u.id = r.user_id)')} AS guest_image_url, b.owner, b.channel, b.overbooked, b.total_minor, org.default_currency AS currency,
+        ${paid} AS paid_minor,
         c.assigned_member_id, (SELECT ${MEMBER_NAME_SQL} FROM member m JOIN user u ON u.id = m.userId LEFT JOIN member_scheduling ms ON ms.member_id = m.id AND ms.organization_id = m.organizationId
           WHERE m.id = c.assigned_member_id AND m.organizationId = b.organization_id) AS assigned_member_name, r.id AS conversation_id,
         ${conversationMemberSql('r', viewer.user)} AS viewer_seated

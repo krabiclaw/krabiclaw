@@ -1,76 +1,94 @@
 <template>
   <DashboardLeafPanel
+    v-if="screen"
     id="organization-members-invite"
-    title="Invite a team member"
-    :save-label="savedInvitation ? 'Resend invite' : 'Send invite'"
+    :title="screen.title"
+    :save-label="savedInvitation ? screen.resend_label : screen.save_label"
     :saving="inviting"
-    :disabled="!inviteForm.email.trim() || !inviteForm.role"
-    :error="inviteError ?? ''"
+    :disabled="!email.trim() || !selectedRole"
+    :error="inviteError"
     @cancel="resetInvite"
     @save="sendInvite"
   >
     <div class="space-y-6">
-      <UFormField label="Email address" required>
-        <UInput v-model="inviteForm.email" type="email" placeholder="teammate@example.com" autofocus class="w-full" />
+      <UFormField :label="screen.email_label" required>
+        <UInput v-model="email" type="email" autocomplete="email" :disabled="inviting" autofocus class="w-full" />
       </UFormField>
-      <UFormField label="Role">
-        <USelect v-model="inviteForm.role" :items="roleOptions" class="w-full" />
-      </UFormField>
+      <fieldset class="space-y-2" :disabled="inviting">
+        <legend class="mb-2 font-medium">{{ screen.role_label }}</legend>
+        <label v-for="choice in screen.roles" :key="choice.value" class="flex cursor-pointer items-start gap-3 rounded-lg border border-default p-3">
+          <input v-model="role" type="radio" :value="choice.value" name="staff-role" class="mt-1">
+          <span><span class="block font-medium">{{ choice.label }}</span><span class="text-sm text-muted">{{ choice.description }}</span></span>
+        </label>
+      </fieldset>
+      <fieldset v-if="selectedRole?.access.length && screen.listings.length" class="space-y-3" :disabled="inviting">
+        <legend class="mb-2 font-medium">{{ screen.listing_label }}</legend>
+        <UFormField v-for="listing in screen.listings" :key="listing.listing_id" :label="listing.label">
+          <USelect v-model="grants[listing.listing_id]" :items="[{ value: 'none', label: screen.no_access_label }, ...selectedRole.access]" class="w-full" />
+        </UFormField>
+      </fieldset>
     </div>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
 import { authClient } from '~/lib/auth-client'
-import { isOrganizationMembersData, organizationMembersKey } from '~/utils/organization-members'
+import { staffInviteScreen } from '~/shared/staff-invite'
+import { isOrganizationMembersData, organizationMembersKey, type OrganizationMembersData } from '~/utils/organization-members'
 
 definePageMeta({ layout: 'dashboard' })
-
 const route = useRoute()
 const level = useRouteLevel()
 const dashboard = useDashboardOrganization()
 const dashboardApi = useDashboardApi()
 const toast = useToast()
-
-const { data, error } = await useAsyncData(
-  () => organizationMembersKey(String(route.params.org_slug)),
-  () => dashboardApi('/api/dashboard/members', { validate: isOrganizationMembersData }),
+const rosterKey = organizationMembersKey(String(route.params.org_slug))
+const { data: roster } = useNuxtData<OrganizationMembersData>(rosterKey)
+const { data: screen, error } = await useAsyncData(
+  () => `staff-invite:${String(route.params.org_slug)}`,
+  () => dashboardApi('/api/dashboard/members', { query: { view: 'invite' }, validate: (value): value is ReturnType<typeof staffInviteScreen.parse> => staffInviteScreen.safeParse(value).success }),
 )
 if (error.value) throw error.value
-const roleOptions = computed(() => data.value?.inviteRoles ?? [])
-const inviteForm = reactive({ email: '', role: roleOptions.value[0]?.value })
+
+const email = ref('')
+const role = ref(screen.value?.default_role)
+const selectedRole = computed(() => screen.value?.roles.find(choice => choice.value === role.value))
+const grants = ref<Record<string, string>>({})
 const inviting = ref(false)
-const inviteError = ref<string | null>(null)
+const inviteError = ref('')
 const savedInvitation = ref<string | null>(null)
-watch(() => [inviteForm.email,inviteForm.role], () => { savedInvitation.value = null })
+watch(role, () => { grants.value = {} })
+watch([email, role, grants], () => { savedInvitation.value = null }, { deep: true })
 
 function resetInvite() {
-  Object.assign(inviteForm, { email: '', role: roleOptions.value[0]?.value })
-  inviteError.value = null
+  email.value = ''
+  role.value = screen.value?.default_role
+  grants.value = {}
+  inviteError.value = ''
   savedInvitation.value = null
 }
 
 async function sendInvite() {
   inviting.value = true
-  inviteError.value = null
+  inviteError.value = ''
   try {
-    const organizationId = dashboard.organization.value?.id
-    if (!organizationId || !inviteForm.role) throw new Error('Invitation details are unavailable')
-    const result = await authClient.organization.inviteMember({
-      email: inviteForm.email,
-      role: inviteForm.role,
-      organizationId,
-      resend: Boolean(savedInvitation.value),
+    const organizationId = screen.value?.organization_id
+    if (!organizationId || organizationId !== dashboard.organization.value?.id || !selectedRole.value) throw new Error('Invitation details are unavailable')
+    const listingAccess = Object.entries(grants.value).filter(([, access]) => access !== 'none').map(([listing_id, access]) => ({ listing_id, access }))
+    const result = await authClient.$fetch<{ id: string }>('/organization/invite-member', {
+      method: 'POST', body: {
+        email: email.value.trim(), role: selectedRole.value.value, organizationId, resend: Boolean(savedInvitation.value),
+        ...(listingAccess.length ? { listing_access: JSON.stringify(listingAccess) } : {}),
+      },
     })
     if (result.error) throw new Error(result.error.message || 'Failed to send invite.')
     if (!result.data) throw new Error('The invitation could not be read back')
     savedInvitation.value = result.data.id
-    const members = await dashboardApi('/api/dashboard/members', {validate:isOrganizationMembersData})
-    const delivery = members.invitations.find(invitation => invitation.id === result.data!.id)?.delivery
-    await refreshNuxtData(organizationMembersKey(String(route.params.org_slug ?? '')))
+    const members = await dashboardApi('/api/dashboard/members', { validate: isOrganizationMembersData })
+    roster.value = members
+    const delivery = members.invitations.find(invitation => invitation.id === savedInvitation.value)?.delivery
     if (!delivery?.sent) throw new Error(delivery?.message ?? 'Invitation saved. Email delivery is unconfirmed.')
     toast.add({ title: 'Invitation sent', color: 'success' })
-    resetInvite()
     await navigateTo(level.to.value ?? '/dashboard')
   } catch (error) {
     inviteError.value = error instanceof Error ? error.message : 'Failed to send invite.'

@@ -17,6 +17,7 @@ export type IntegrationKey =
   | 'google-search-console'
   | 'google-calendar'
   | 'airbnb'
+  | 'vrbo'
   | 'facebook'
   | 'instagram'
   | 'discord'
@@ -49,6 +50,10 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
   {
     key: 'airbnb', name: 'Airbnb sync', logo: 'i-simple-icons-airbnb', group: 'sync', entitlement: 'channel_sync', feature: 'stays', items: { noun: 'listing', selection: 'many' },
     purpose: 'Reservations, nightly rates and open dates stay in step with Airbnb, so no night is sold twice.',
+  },
+  {
+    key: 'vrbo', name: 'Vrbo sync', logo: 'i-lucide-house', group: 'sync', entitlement: 'channel_sync', feature: 'stays',
+    purpose: 'Connect Vrbo through Channex to sync reservations, rates and availability.',
   },
   {
     key: 'google-maps', name: 'Google Maps sync', logo: 'i-logos-google-maps', group: 'sync', entitlement: 'google_places', items: { noun: 'location', selection: 'many' },

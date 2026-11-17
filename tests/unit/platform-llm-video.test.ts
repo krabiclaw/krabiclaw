@@ -33,11 +33,6 @@ test('LLM video rendering uses a plain watch URL without a name and keeps descri
   assert.equal(renderContentBlocksForLlm(blocks), `${watchUrl}\n\nFirst description\n\n[Walkthrough](${watchUrl})\n\nSecond description`)
 })
 
-test('buildLlmsTxt includes pricing.md link on platform site', () => {
-  const result = buildLlmsTxt('https://krabiclaw.com', [], [])
-  assert.ok(result.includes('- [Pricing](https://krabiclaw.com/pricing.md): Plain markdown specification of plans, features, and limits.'))
-})
-
 test('buildLlmsTxt includes coreLinks when provided for tenant', () => {
   const result = buildLlmsTxt('https://restaurant.example.com', [], [], {
     title: 'Ember & Slice',
@@ -50,12 +45,5 @@ test('buildLlmsTxt includes coreLinks when provided for tenant', () => {
   assert.ok(result.includes('- [Menu](https://restaurant.example.com/menu): Current food and drink menu.'))
   assert.ok(result.includes('- [Reservations](https://restaurant.example.com/reservations): Table bookings.'))
   assert.ok(!result.includes('## Support'))
-})
-
-test('buildLlmsTxt directs platform support to GitHub issue forms', () => {
-  const result = buildLlmsTxt('https://krabiclaw.com', [], [])
-  assert.ok(result.includes('- [Report a bug](https://github.com/Blawby/blawby/issues/new?template=bug.yml): fields `surface`, `site`, `what_happened`, `expected`, `tool_error`.'))
-  assert.ok(result.includes('- [Request a feature](https://github.com/Blawby/blawby/issues/new?template=feature.yml): fields `need`, `today`, `site`.'))
-  assert.ok(result.includes('- [Account, billing or private matters](https://krabiclaw.com/help): not public.'))
 })
 

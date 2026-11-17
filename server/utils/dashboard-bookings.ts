@@ -1,3 +1,5 @@
+import { listingGrantSql } from '~/server/domain/listing-access'
+import { assignedOperationsRoles, roleMatchesSql } from '~/utils/organization-access'
 import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
@@ -6,7 +8,7 @@ import { dashboardMemberQuery, dashboardOrgQueryParam, getDashboardMemberContext
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { assignedMemberSql, BATCH_VIEWER, joinedMemberPrincipal, memberAccessPrincipal, membershipBySlugQuery, withViewer } from '~/server/utils/member-access'
-import { bookedRecordsInRange, businessWideViewer, type BookedRecordInRange } from '~/server/domain/product-bookings'
+import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
 import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
@@ -38,12 +40,15 @@ async function dashboardBookingsContext(event: H3Event) {
   return { ...context, principal, access }
 }
 
-export async function dashboardBookingContext(event: H3Event) {
+export async function dashboardBookingContext(event: H3Event, action: 'read' | 'update' = 'read') {
   const { env, db, session, userId, membership, organizationFrom } = await dashboardMemberQuery(event)
   const bookingId = getRouterParam(event, 'booking_id')
   if (!bookingId) throw new HTTPError({ statusCode: 400, message: 'Booking ID is required' })
   const [memberResult, bookingResult] = await executeBatch(db, [membership, withViewer(membership, {
-    query: `SELECT b.unit, c.id AS conversation_id, b.status, b.respond_by, b.product_id, ${assignedMemberSql('b', BATCH_VIEWER.user)} AS assigned
+    query: `SELECT b.unit, c.id AS conversation_id, b.status, b.respond_by, b.product_id,
+        (${roleMatchesSql(BATCH_VIEWER.role!, assignedOperationsRoles)} AND ${assignedMemberSql('b', BATCH_VIEWER.user)}) AS assigned,
+        ${listingGrantSql('b.organization_id', 'b.product_id', BATCH_VIEWER.member, 'details', BATCH_VIEWER.role)} AS granted,
+        ${listingGrantSql('b.organization_id', 'b.product_id', BATCH_VIEWER.member, 'update', BATCH_VIEWER.role)} AS operates
       FROM ${BOOKING_RECORDS_SQL} b
       JOIN conversations c ON c.booking_id=b.id AND c.organization_id=b.organization_id AND c.kind='booking'
       WHERE b.organization_id = ${BATCH_VIEWER.organization} AND b.id = ?`,
@@ -51,9 +56,15 @@ export async function dashboardBookingContext(event: H3Event) {
   })], { operation: 'Read dashboard booking access' })
   const organization = organizationFrom(memberResult?.results[0])
   const principal = memberAccessPrincipal(organization, { env, event })
-  const access = await stayAccessFor(principal)
-  const booking = bookingResult?.results[0] as Pick<BookedRecord, 'unit' | 'status' | 'respond_by' | 'product_id'> & { conversation_id: string; assigned: number } | undefined
-  if (!booking || (!access.manage && !booking.assigned)) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
+  const workspace = await stayAccessFor(principal)
+  const booking = bookingResult?.results[0] as Pick<BookedRecord, 'unit' | 'status' | 'respond_by' | 'product_id'>
+    & { conversation_id: string; assigned: number; granted: number; operates: number } | undefined
+  if (!booking || (!workspace.manage && !booking.assigned && !(action === 'update' ? booking.operates : booking.granted))) {
+    throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
+  }
+  const access = !workspace.manage && booking.operates
+    ? { ...workspace, manage: true as const, listingId: booking.product_id, operationalOnly: true }
+    : workspace
   return { db, env, session, userId, organization, principal, access, bookingId, booking }
 }
 
@@ -123,9 +134,9 @@ function timedBookings(records: BookedRecordInRange[], { productId, from, to }: 
 }
 
 /** The booked records of the window the caller may see, in one statement: a member's are those of the offerings and homes they are named on. */
-async function readBookedRecords({ db, access, organization, userId }: DashboardBookingsContext, window: BookingWindow) {
-  const [records] = await executeBatch(db, [withViewer(businessWideViewer(membershipBySlugQuery(organization.slug, userId)), bookedRecordsInRange(BATCH_VIEWER, { ...window, cancelled: window.includeCancelled }))], { operation: 'Read booked records' })
-  return (records!.results as BookedRecordInRange[]).filter(record => access.manage || record.assigned_member_id === organization.memberId)
+async function readBookedRecords({ db, organization, userId }: DashboardBookingsContext, window: BookingWindow) {
+  const [records] = await executeBatch(db, [withViewer(membershipBySlugQuery(organization.slug, userId), bookedRecordsInRange(BATCH_VIEWER, { ...window, cancelled: window.includeCancelled, includeAssignedStays: true }))], { operation: 'Read booked records' })
+  return (records!.results as BookedRecordInRange[])
 }
 
 export async function dashboardBookingList(event: H3Event, query: BookingListQuery) {
@@ -154,7 +165,7 @@ async function dashboardPlacesCalendar(event: H3Event, window: BookingWindow) {
   const membership = membershipBySlugQuery(slug, userId)
   const [memberResult, records, ...places] = await executeBatch(env.DB, [
     membership,
-    withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, { ...window, cancelled: window.includeCancelled })),
+    withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, { ...window, cancelled: window.includeCancelled, includeCalendarGrants: true })),
     ...placesCalendarQueries(organization, userId, days),
   ], { operation: 'Read host calendar' })
   const member = memberResult?.results[0] as { organization_id: string; member_id: string; role: string } | undefined

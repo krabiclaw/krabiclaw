@@ -1,3 +1,4 @@
+import type { StoredListingAccess } from '~/utils/organization-access'
 import { HTTPError, type H3Event } from 'nitro'
 import { getQuery, getRouterParam } from 'nitro/h3'
 import { resolveConversationAccess } from '~/server/domain/conversations'
@@ -25,20 +26,20 @@ export function conversationIdParam(event: H3Event): string {
   return id
 }
 
-export async function listingMessagingContext(event: H3Event) {
+export async function listingAccessContext(event: H3Event) {
   const organizationId = getQuery(event).organization_id
-  const listingId = getRouterParam(event, 'listing_id')
+  const listingId = getRouterParam(event, 'listing_id', { decode: true })
   if (typeof organizationId !== 'string' || !organizationId || !listingId) {
     throw new HTTPError({ statusCode: 400, message: 'A listing and workspace are required', data: { code: 'INVALID_LISTING', field: 'listing_id' } })
   }
   const context = await requireOrganizationPrincipal(event, organizationId)
   if (!context.principal.role.split(',').includes('owner')) {
-    throw new HTTPError({ statusCode: 403, message: 'Only a workspace owner can manage listing messaging access', data: { code: 'FORBIDDEN', field: 'listing_id' } })
+    throw new HTTPError({ statusCode: 403, message: 'Only a workspace owner can manage listing access', data: { code: 'FORBIDDEN', field: 'listing_id' } })
   }
-  if (!await queryFirst(context.db, 'SELECT 1 FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, listingId])) {
+  if (!await queryFirst(context.db, "SELECT 1 FROM products WHERE organization_id = ? AND id = ? AND kind IN ('stay', 'table', 'service', 'experience')", [organizationId, listingId])) {
     throw new HTTPError({ statusCode: 404, message: 'Listing not found', data: { code: 'LISTING_NOT_FOUND', field: 'listing_id' } })
   }
-  const memberIds = async () => (await queryAll<{ member_id: string }>(context.db,
-    'SELECT member_id FROM listing_message_members WHERE organization_id = ? AND listing_id = ? ORDER BY member_id', [organizationId, listingId])).map(row => row.member_id)
-  return { ...context, listingId, memberIds }
+  const grants = () => queryAll<{ member_id: string; access: StoredListingAccess }>(context.db,
+    'SELECT member_id, access FROM listing_message_members WHERE organization_id = ? AND listing_id = ? ORDER BY member_id', [organizationId, listingId])
+  return { ...context, listingId, grants }
 }

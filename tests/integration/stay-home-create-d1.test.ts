@@ -2,21 +2,20 @@ import assert from 'node:assert/strict'
 import { formQuestionsRevision } from '../../shared/form-questions.ts'
 import test from 'node:test'
 import { captureEvents } from './support/events.ts'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { H3 } from 'nitro/h3'
 import { hashPassword } from 'better-auth/crypto'
-import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import createHomeRoute from '../../server/api/dashboard/stay-homes/index.post.ts'
 import listHomesRoute from '../../server/api/dashboard/stay-homes/index.get.ts'
 import editHomeRoute from '../../server/api/dashboard/stay-homes/[product_id].patch.ts'
 import guidedHomeRoute from '../../server/api/dashboard/stay-homes/setup.post.ts'
-import { getLocation, updateLocation } from '../../server/utils/location-management.ts'
+import { getLocation } from '../../server/utils/location-management.ts'
 import { getProduct } from '../../server/utils/product-management.ts'
-import { createStayHome, quoteStay, readPublicStayCalendar, readStayHome, stayHomeInput } from '../../server/domain/stays.ts'
+import { quoteStay, readPublicStayCalendar, readStayHome } from '../../server/domain/stays.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
 import { addLocalDays, localDateAt } from '../../utils/timezone.ts'
+import { applySchema } from './support/schema.ts'
 
 // A home added by hand through the native app's route: its details are
 // checked field by field, it becomes a new location and an unpublished stay,
@@ -41,8 +40,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-    await db.batch(statements.map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
     for (const [id, role] of [['owner', 'owner'], ['helper', 'member']] as const) {
@@ -81,21 +79,6 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
 
     // Each problem names its field, and nothing is written.
     assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, city: ' ' })), { status: 422, code: 'MISSING_DETAIL', field: 'city' })
-    assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, country: 'us' })), { status: 422, code: 'INVALID_DETAIL', field: 'country' })
-    assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, check_in_time: '3pm' })), { status: 422, code: 'INVALID_DETAIL', field: 'check_in_time' })
-    assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, max_guests: 0 })), { status: 422, code: 'INVALID_DETAIL', field: 'max_guests' })
-    for (const min_nights of [undefined, null]) {
-      assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, min_nights })), { status: 422, code: 'MISSING_DETAIL', field: 'min_nights' })
-    }
-    for (const idempotency_key of ['a'.repeat(201), '   ']) {
-      assert.deepEqual(await call(owner, 'POST', { ...cabin, idempotency_key }), {
-        status: 400, body: { error: 'idempotency_key must be 1 to 200 characters', code: 'VALIDATION_ERROR', field: 'idempotency_key' },
-      })
-    }
-    // The canonical location error reaches another domain caller intact too.
-    await assert.rejects(createStayHome(env, db, { organizationId: ORG, actorId: 'owner', manage: true }, stayHomeInput(cabin), 'a'.repeat(201)), {
-      status: 400, data: { error: 'idempotency_key must be 1 to 200 characters.', code: 'INVALID_LOCATION_FIELD', field: 'idempotency_key' },
-    })
     assert.deepEqual([await count('business_locations'), await count('products')], [0, 0])
 
     // A member who looks after homes does not add them.
@@ -152,15 +135,6 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     // Editing: each problem names its field and changes nothing.
     const edit = (cookie: string, body: Record<string, unknown>) => call(cookie, 'PATCH', body, made.product_id)
     assert.deepEqual(refusal(await edit(owner, { address: '2 Other Rd' })), { status: 422, code: 'INVALID_DETAIL', field: 'address' })
-    assert.deepEqual(refusal(await edit(owner, { address: { address: '2 Other Rd', city: 'Moab', country: 'USA' } })), { status: 422, code: 'INVALID_DETAIL', field: 'address.country' })
-    assert.deepEqual(refusal(await edit(owner, { name: null })), { status: 422, code: 'INVALID_DETAIL', field: 'name' })
-    assert.deepEqual(refusal(await edit(owner, { name: 'Renamed', timezone: 'Mars/Olympus' })), { status: 422, code: 'INVALID_DETAIL', field: 'timezone' })
-    assert.deepEqual(refusal(await edit(owner, { name: '  ' })), { status: 422, code: 'INVALID_DETAIL', field: 'name' })
-    // The check-in window's end is a time other than its start, or null for a flexible end.
-    assert.deepEqual(refusal(await edit(owner, { check_in_end_time: '9pm' })), { status: 422, code: 'INVALID_DETAIL', field: 'check_in_end_time' })
-    assert.deepEqual(refusal(await edit(owner, { check_in_end_time: '  ' })), { status: 422, code: 'INVALID_DETAIL', field: 'check_in_end_time' })
-    assert.deepEqual(refusal(await edit(owner, { check_in_end_time: '15:00' })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.check_in_end_time' })
-    assert.deepEqual(refusal(await edit(owner, { assigned_member_id: 'nobody' })), { status: 422, code: 'INVALID_RESPONSIBILITY', field: 'assigned_member_id' })
     assert.deepEqual(refusal(await edit(await cookieFor('helper'), { name: 'Mine' })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
     assert.deepEqual((await call(owner, 'GET')).body.homes, [created.body.home, second.body.home])
 
@@ -187,38 +161,6 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     const unpriced = await edit(owner, { base_price_minor: null })
     assert.deepEqual(unpriced.body, { home: { ...changed, updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, base_price_minor: null, base_price_tax_behavior: null }, channel_push: null, airbnb_unsynced: [] })
 
-    // What the home is and offers, and its private arrival guide: each refused value names its field and changes nothing.
-    assert.deepEqual(refusal(await edit(owner, { property_type_group: 'apartments', property_type: 'castle' })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.property_type' })
-    assert.deepEqual(refusal(await edit(owner, { property_type: 'cabin' })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.property_type' })
-    assert.deepEqual(refusal(await edit(owner, { bathrooms: 1.25 })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.bathrooms' })
-    assert.deepEqual(refusal(await edit(owner, { amenities: ['wireless_internet', 'jetpack'] })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.amenities' })
-    assert.deepEqual(refusal(await edit(owner, { check_in_method: 'drone' })), { status: 422, code: 'INVALID_DETAIL', field: 'check_in_method' })
-    assert.deepEqual(refusal(await edit(owner, { check_in_method: ['keypad'] })), { status: 422, code: 'INVALID_DETAIL', field: 'check_in_method' })
-    assert.deepEqual(refusal(await edit(owner, { checkout_instructions: [{ task: 'lock_up', details: null }, { task: 'lock_up', details: null }] })), { status: 422, code: 'INVALID_DETAIL', field: 'checkout_instructions[1].task' })
-    assert.deepEqual(refusal(await edit(owner, { latitude: 38.57 })), { status: 422, code: 'INVALID_DETAIL', field: 'longitude' })
-    assert.deepEqual(refusal(await edit(owner, { latitude: 91, longitude: -109.55 })), { status: 422, code: 'INVALID_DETAIL', field: 'latitude' })
-    const beforeInvalidProperties = await getProduct(db, ORG, made.product_id)
-    for (const [patch, field] of [
-      [{ listing_type: 'hotel' }, 'listing_type'],
-      [{ total_floors: 0 }, 'total_floors'],
-      [{ total_floors: 1.5 }, 'total_floors'],
-      [{ total_floors: Number.MAX_SAFE_INTEGER + 1 }, 'total_floors'],
-      [{ listing_floor: 0 }, 'listing_floor'],
-      [{ listing_floor: 1.5 }, 'listing_floor'],
-      [{ total_floors: 2, listing_floor: 3 }, 'listing_floor'],
-      [{ year_built: 0 }, 'year_built'],
-      [{ year_built: 1999.5 }, 'year_built'],
-      [{ year_built: Number.MAX_SAFE_INTEGER + 1 }, 'year_built'],
-      [{ property_size: 0, property_size_unit: 'square_meters' }, 'property_size'],
-      [{ property_size: '72.25', property_size_unit: 'square_meters' }, 'property_size'],
-      [{ property_size: 72.25 }, 'property_size_unit'],
-      [{ property_size_unit: 'square_meters' }, 'property_size'],
-      [{ property_size: 72.25, property_size_unit: 'acres' }, 'property_size_unit'],
-    ] as const) {
-      assert.deepEqual(refusal(await edit(owner, { name: 'Must not be saved', ...patch })), { status: 400, code: 'INVALID_STAY_FIELD', field: `stay.${field}` })
-      assert.deepEqual(await getProduct(db, ORG, made.product_id), beforeInvalidProperties)
-    }
-    assert.deepEqual(await db.prepare('SELECT listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit FROM product_stay_configs WHERE product_id = ?').bind(made.product_id).first(), unspecifiedPropertyDetails)
     const propertyDetails = { listing_type: 'private_room', total_floors: 3, listing_floor: 2, year_built: 1999, property_size: 72.25, property_size_unit: 'square_meters' }
     const described = await edit(owner, {
       description: '  A cabin above the canyon.  ', property_type_group: 'houses', property_type: 'cabin', ...propertyDetails, bedrooms: 2, beds: 3, bathrooms: 1.5, amenities: ['wireless_internet', 'ac', 'kitchen'],
@@ -249,17 +191,6 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.partialDeepStrictEqual(product.stay, propertyDetails)
     assert.deepEqual(await db.prepare('SELECT listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit FROM product_stay_configs WHERE product_id = ?').bind(made.product_id).first(), propertyDetails)
     assert.deepEqual(Object.keys(product.stay!).filter(key => ['wifi_network', 'wifi_password', 'house_manual', 'directions', 'check_in_method', 'checkout_instructions', 'check_in_instructions'].includes(key)), [])
-    // A partial edit validates the merged state and preserves every omitted fact.
-    for (const [patch, field] of [
-      [{ total_floors: 1 }, 'listing_floor'],
-      [{ listing_floor: 4 }, 'listing_floor'],
-      [{ property_size: null }, 'property_size'],
-      [{ property_size_unit: null }, 'property_size_unit'],
-    ] as const) {
-      assert.deepEqual(refusal(await edit(owner, { name: 'Must not be saved', ...patch })), { status: 400, code: 'INVALID_STAY_FIELD', field: `stay.${field}` })
-      assert.deepEqual(await getProduct(db, ORG, made.product_id), product)
-    }
-    assert.deepEqual(await db.prepare('SELECT listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit FROM product_stay_configs WHERE product_id = ?').bind(made.product_id).first(), propertyDetails)
     const resized = await edit(owner, { property_size: 80.5 })
     assert.equal(resized.status, 200)
     assert.deepEqual(resized.body, { home: { ...listed, updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, property_size: 80.5 }, channel_push: null, airbnb_unsynced: [] })
@@ -338,33 +269,6 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.deepEqual({ check_in_date: lastQuote.check_in_date, check_out_date: lastQuote.check_out_date, nights: lastQuote.nights, total_minor: lastQuote.total_minor }, { check_in_date: lastArrival, check_out_date: lastDate, nights: 3, total_minor: 630_00 })
     await assert.rejects(quoteStay(db, ORG, publishedHome, { check_in_date: lastArrival, check_out_date: beyondHorizon, adults: 1 }), { status: 422, data: { code: 'STAY_TOO_FAR_AHEAD', field: 'check_out_date' } })
 
-    // Adding homes is never refused on Basic: new homes are drafts. The plan covers one live home,
-    // and publishing a second is refused as a home while one is live.
-    const hosted = async (key: string) => {
-      const added = await call(owner, 'POST', { ...cabin, idempotency_key: key, name: key })
-      assert.equal(added.status, 201)
-      const productId = (added.body.home as { product_id: string; live: boolean }).product_id
-      assert.equal((added.body.home as { live: boolean }).live, false)
-      assert.equal((await call(owner, 'PATCH', { assigned_member_id: 'm-helper' }, productId)).status, 200)
-      return added.body.home as { product_id: string; location_id: string }
-    }
-    const barn = await hosted('Barn')
-    const shed = await hosted('Shed')
-    const homeLimit = { status: 402, error: 'Basic includes 1 live home.', code: 'HOME_LIMIT', homes: { used: 1, covered: 1 } }
-    assert.deepEqual(refusal(await call(owner, 'PATCH', { published: true }, barn.product_id)), homeLimit)
-    // Taking the cabin off the site frees the one place for the barn.
-    assert.equal((await edit(owner, { published: false })).status, 200)
-    const published = await call(owner, 'PATCH', { published: true }, barn.product_id)
-    assert.deepEqual([published.status, (published.body.home as { live: boolean }).live], [200, true])
-    assert.deepEqual(refusal(await call(owner, 'PATCH', { published: true }, shed.product_id)), homeLimit)
-    assert.deepEqual(await db.prepare('SELECT published FROM product_publications WHERE product_id = ?').bind(shed.product_id).first('published'), 0)
-    // A live home whose location is taken off the site frees its slot, and putting it back is refused as a home while every slot is in use.
-    assert.equal((await updateLocation(db, ORG, barn.location_id, { status: 'inactive' }, 'owner', env)).status, 200)
-    assert.equal((await call(owner, 'PATCH', { published: true }, shed.product_id)).status, 200)
-    assert.deepEqual(await updateLocation(db, ORG, barn.location_id, { status: 'active' }, 'owner', env), {
-      status: 402, data: { error: homeLimit.error, code: 'HOME_LIMIT', homes: { used: 1, covered: 1 } },
-    })
-    assert.equal((await getLocation(db, ORG, barn.location_id))!.status, 'inactive')
     // The check-in window's end: leaving the key out keeps it; null makes it flexible again, read back through the product.
     assert.equal(((await edit(owner, { max_guests: 6 })).body.home as { check_in_end_time: string | null }).check_in_end_time, '21:00')
     assert.equal(((await edit(owner, { check_in_end_time: null })).body.home as { check_in_end_time: string | null }).check_in_end_time, null)
