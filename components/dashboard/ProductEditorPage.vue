@@ -1614,13 +1614,25 @@ const sectionUnchanged = computed(() => {
 
 const creationNoun = computed(() => form.kind === 'service' ? 'practice area' : itemLabel.value.toLowerCase())
 const newTitle = computed(() => newRecordLabels(creationNoun.value).title)
+const stayDefaultIntent = computed(() => {
+  if (!stayEditor.value) return null
+  if (editorKey.value === 'availability') return JSON.stringify([productId.value, 'availability', form.min_nights])
+  if (editorKey.value !== 'price') return null
+  const discounts = Object.keys(STAY_DIRECT_DISCOUNTS).map(key => form.direct_discounts[key as keyof typeof STAY_DIRECT_DISCOUNTS] ?? 0)
+  return JSON.stringify([productId.value, 'price', form.variants[0]?.price_major.trim(), form.weekend_price_major.trim(), discounts])
+})
+// A saved change can still owe its Airbnb update. Replay the submitted body,
+// including its original version, even after re-reading the saved listing.
+const stayDefaultAttempt = shallowRef<{ intent: string; body: ReturnType<typeof payload>; key: string } | null>(null)
+const retryStayDefault = computed(() => stayDefaultAttempt.value?.intent === stayDefaultIntent.value ? stayDefaultAttempt.value : null)
 const saveDisabled = computed(() => saving.value
   || (homeQuoted.value && !homeLive.value && editorKey.value === 'publication'
     && form.active && ((form.published && !published.value) || product.value?.active === false)
     && (homeQuotePending.value || Boolean(homeQuoteError.value) || !homeQuote.value))
   || (isNew.value
   ? !createdProductId.value && (!form.kind || !form.name.trim() || Boolean(creationPriceError.value) || form.kind === 'stay' && (stayIncomplete() || Boolean(locationsError.value)))
-  : !product.value || Boolean(loadError.value) || editVersion.value !== product.value.updated_at || !sectionValid.value || sectionUnchanged.value && !saveError.value))
+  : !product.value || Boolean(loadError.value) || !sectionValid.value
+    || !retryStayDefault.value && (editVersion.value !== product.value.updated_at || sectionUnchanged.value && !saveError.value)))
 const pageTitle = computed(() => isNew.value ? newTitle.value : (experienceEditor.value ? product.value?.name : form.name) || itemLabel.value)
 // Saving a draft never makes it publicly available or enables consultations.
 const saveLabel = computed(() => isNew.value ? `${createdProductId.value ? 'Finish creating' : creationSubmitted.value && saveError.value ? 'Retry creating' : 'Create'} ${creationNoun.value}` : 'Save')
@@ -1759,9 +1771,16 @@ async function commit(concern?: ProductConcern) {
     } else if (editorKey.value === 'locations') {
       await saveLocation()
     } else {
+      const intent = stayDefaultIntent.value
+      const attempt = intent === null ? null : retryStayDefault.value ?? {
+        intent, body: cloneFnJSON({ ...payload(), updated_at: editVersion.value! }), key: crypto.randomUUID(),
+      }
+      if (attempt) stayDefaultAttempt.value = attempt
       await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
-        method: 'PATCH', body: payload(), validate: isMutation,
+        method: 'PATCH', body: attempt?.body ?? payload(), validate: isMutation,
+        ...(attempt ? { headers: { 'Idempotency-Key': attempt.key } } : {}),
       })
+      if (attempt) stayDefaultAttempt.value = null
     }
     if (removesOnlineScope) {
       const result = await navigateTo({ path: route.path, query: { ...route.query, location_id: undefined }, hash: route.hash }, { replace: true })

@@ -18,7 +18,6 @@ import type { PublicLocationDisclosure } from '../../types/public-location'
 import type { StayPhotoRoom } from '../../shared/stay-photos'
 import type { BusinessToday } from '../../shared/dashboard-today'
 import type { StayHomeAccessibility } from '../../shared/stay-accessibility'
-import { formatMinorAmount } from '../../shared/prices'
 import type { TaskSection } from '../../server/domain/tasks'
 import type { ConversationPage } from '../../shared/messages-contract'
 import type { InboxRow } from '../../server/domain/guest-threads/types'
@@ -532,7 +531,7 @@ test('a home keeps its operator name independent from its public title across CM
   await waitForNuxtHydration(page)
   await expect(page.getByRole('link', { name: 'Calendar', exact: true })).toBeVisible()
   await expect(grid.locator(`[data-home="${productId}"]`)).toContainText(internalName)
-  expect(await grid.locator('[data-row-index] button').first().evaluate(element => element.getBoundingClientRect().height)).toBe(64)
+  expect(await grid.locator('[data-row-index] button').first().evaluate(element => element.getBoundingClientRect().height)).toBe(76)
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-calendar-default.png') })
 
   const created = await request.post(api('bookings'), { data: { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 3, children: 0, infants: 0,
@@ -5139,15 +5138,18 @@ test('a stay socket in a service organization closes when Better Auth removes it
 test('a host selects nights across homes on the multi-calendar and edits them in place', async ({ page, baseURL }) => {
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, headers, slug, api, productId, ownerMemberId } = await createStayHome(page, baseURL!)
-  const makeHome = async (name: string, address: string, city: string, minNights: number, price: number) => {
+  const makeHome = async (name: string, address: string, city: string, minNights: number, price: number, weekdayMinimums?: number[]) => {
     const made = await request.post(api('stay-homes'), { headers, data: { name, timezone: TIME_ZONE, address, city, country: 'TH',
       state: null, zip_code: null, phone: null, email: null, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: minNights,
-      base_price_minor: price, assigned_member_id: ownerMemberId, idempotency_key: crypto.randomUUID() } })
+      base_price_minor: price, assigned_member_id: ownerMemberId, idempotency_key: crypto.randomUUID(),
+      ...(weekdayMinimums ? { calendar_rules: { day_of_week_min_nights: weekdayMinimums } } : {}), } })
     await expectStatus(made, 201)
     return (await made.json() as { home: { product_id: string } }).home.product_id
   }
   const bay = await makeHome('Bay House', '1 Bay Road', 'Krabi', 1, 320_000)
-  const sea = await makeHome('Sea Loft', '9 Sea Road', 'Ao Nang', 21, 200_000)
+  const weekdayMinimums = Array<number>(7).fill(-1)
+  weekdayMinimums[(new Date(`${localDay(4)}T00:00:00Z`).getUTCDay() + 6) % 7] = 4
+  const sea = await makeHome('Sea Loft', '9 Sea Road, Unit 21', 'Ao Nang', 21, 200_000, weekdayMinimums)
   const stayIds: string[] = []
   for (const [checkIn, checkOut] of [[2, 4], [7, 9]] as const) {
     const made = await request.post(api('bookings'), { headers, data: { product_id: productId, check_in_date: localDay(checkIn), check_out_date: localDay(checkOut), adults: 1,
@@ -5172,18 +5174,24 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   expect(read.homes[0]!.nights.map(night => night.price_minor)).toEqual(Array(7).fill(320_000))
 
   const gridPath = `/dashboard/${slug}/calendar?view=homes&from=${localDay(1)}`
-  // A free night reads its home's price as the grid formats it: the shared formatter, whole amounts without .00.
-  const gridPrice = (minor: number) => formatMinorAmount(minor, 'THB').replace(/\.00$/, '')
   const grid = page.getByTestId('stay-homes-grid')
   const night = (home: string, offset: number) => grid.locator(`div[role="rowheader"]:has([data-home="${home}"]) + div [data-night="${localDay(offset)}"]`)
   const inspector = page.getByTestId('stay-night-inspector')
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(gridPath)
-  await expect(grid.locator(`[data-home="${bay}"] span`)).toHaveText(['Bay House', '1 Bay Road, Krabi'])
+  await expect(grid.locator(`[data-home="${bay}"] span`)).toHaveText(['Bay House', '1 Bay Road, Krabi', 'Default minimum 1 night'])
+  await expect(grid.locator(`[data-home="${productId}"] span`)).toHaveText(['Cliff Cabin', 'No address', 'Default minimum 2 nights'])
+  await expect(grid.locator(`[data-home="${sea}"] span`)).toHaveText(['Sea Loft', '9 Sea Road, Unit 21, Ao Nang', 'Default minimum 21 nights'])
   // A bar leads with its channel's mark and counts adults and children as guests.
   await expect(grid.locator(`[data-stay="${stayIds[0]}"]`)).toHaveText('Grid Guest · 1 guest')
   await expect(grid.locator(`[data-stay="${stayIds[0]}"]`)).toHaveAttribute('data-channel', 'direct')
-  await expect(night(bay, 3)).toHaveText(gridPrice(320_000))
+  await expect(night(bay, 3).getByText('฿3,200', { exact: true })).toBeVisible()
+  await expect(night(bay, 3)).toHaveAttribute('aria-label', /THB\s3,200\.00/)
+  await expect(night(bay, 3).getByText('Min 1', { exact: true })).toHaveCount(0)
+  await expect(night(sea, 3).getByText('Min 21', { exact: true })).toHaveCount(0)
+  await expect(night(sea, 3)).toHaveAttribute('aria-label', /Minimum stay: 21 nights/)
+  await expect(night(sea, 4).getByText('Min 4', { exact: true })).toHaveAttribute('title', '4-night minimum for arrivals on this date')
+  await expect(night(sea, 4)).toHaveAttribute('aria-label', /Minimum stay: 4 nights/)
   // The grid scrolls inside itself; the phone page does not scroll sideways.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   // Scrolled to its last row, the grid keeps the day header pinned at its top and the home column at its left, so the dates stay readable.
@@ -5270,6 +5278,7 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(inspector.getByRole('spinbutton', { name: 'Minimum nights on arrival', exact: true })).toHaveValue('3')
   await inspector.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(inspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('3 nights')
+  await expect(night(productId, 4).getByText('Min 3', { exact: true })).toBeVisible()
   expect((await nightsAt(productId, 3, 10)).map(entry => [entry.date, entry.min_stay_arrival])).toEqual([3, 4, 5, 6, 7, 8, 9].map(offset => [localDay(offset), offset >= 4 && offset <= 6 ? 3 : 2]))
   // The home's own calendar reads the same three nights back.
   await inspector.getByRole('link', { name: 'Open calendar', exact: true }).click()
@@ -5277,12 +5286,18 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   const homeInspector = page.locator('#dashboard-panel-stay-night-calendar').getByTestId('stay-night-inspector')
   await expect(homeInspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('3 nights')
   await expect(homeInspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('Home default: 2 nights')
+  await expect(page.getByText('Default minimum 2 nights', { exact: true })).toBeVisible()
+  const homeNight = page.getByTestId(`stay-night-${localDay(4)}`)
+  await expect(homeNight.locator('[aria-label="Minimum stay: 3 nights"]')).toHaveText('Min 3')
+  await expect(homeNight.locator('..')).toHaveAccessibleDescription('Minimum stay: 3 nights')
+  const defaultNight = page.getByTestId(`stay-night-${localDay(3)}`)
+  await expect(defaultNight.getByText('Min 2', { exact: true })).toHaveCount(0)
+  await expect(defaultNight.locator('..')).toHaveAccessibleDescription('Minimum stay: 2 nights')
 
   // Dragging down over all three homes selects the same week on each; unchecking one leaves it out.
   // The window opens on night 8, so the whole week sits inside the grid's scroll area for the pointer.
   await page.goto(`/dashboard/${slug}/calendar?view=homes&from=${localDay(8)}`)
   await drag(night(bay, 10), night(sea, 16))
-  await expect(inspector.getByRole('button', { name: 'Select nights' })).toHaveCount(0)
   await expect(inspector.getByText(/3 homes · 7 nights/).first()).toBeVisible()
   await expect(grid.getByTestId('stay-homes-selection')).toHaveCount(3)
   // Three homes make no one stay: Add stay is absent.
@@ -5292,6 +5307,33 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(page).toHaveURL(url => url.searchParams.get('homes') === `${bay},${sea}` && url.searchParams.get('nights') === `${localDay(10)}..${localDay(17)}`)
   // The selection is the URL's: a reload keeps it.
   await page.reload()
+  await expect(inspector.getByText(/2 homes · 7 nights/).first()).toBeVisible()
+  const selectNights = inspector.getByRole('button', { name: 'Select nights' })
+  const exactNights = page.getByRole('dialog', { name: 'Select nights' })
+  const startNight = exactNights.getByLabel('Start night', { exact: true })
+  const endNight = exactNights.getByLabel('End night (optional)', { exact: true })
+  const submitNights = exactNights.getByRole('button', { name: 'Edit selected nights' })
+  await selectNights.click()
+  await expect(startNight).toHaveValue(localDay(10))
+  await expect(endNight).toHaveValue(localDay(16))
+  await startNight.fill(localDay(39))
+  await exactNights.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(night(bay, 10)).toHaveAttribute('aria-selected', 'true')
+
+  // Typed nights can cross the initial calendar window, without changing the homes or their saved settings.
+  await selectNights.click()
+  await startNight.fill(localDay(39))
+  await endNight.fill(localDay(70))
+  await submitNights.click()
+  await expect(inspector.getByText(/2 homes · 32 nights/).first()).toBeVisible()
+  await expect(night(bay, 39)).toHaveAttribute('aria-selected', 'true')
+  await expect(night(sea, 70)).toHaveAttribute('aria-selected', 'true')
+  await expect(night(productId, 39)).toHaveAttribute('aria-selected', 'false')
+  expect((await nightsAt(bay, 39, 71)).every(entry => entry.source === null)).toBe(true)
+  await selectNights.click()
+  await startNight.fill(localDay(10))
+  await endNight.fill(localDay(16))
+  await submitNights.click()
   await expect(inspector.getByText(/2 homes · 7 nights/).first()).toBeVisible()
   await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('Mixed prices')
   await expect(inspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('Mixed')
@@ -5306,8 +5348,13 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   const unchecked = await nightsAt(productId, 10, 17)
   expect(unchecked).toHaveLength(7)
   expect(unchecked.every(entry => entry.source === null)).toBe(true)
-  await expect(night(bay, 12)).toHaveText(gridPrice(288_000))
-  await expect(night(sea, 12)).toHaveText(gridPrice(180_000))
+  await expect(night(bay, 12).getByText('฿2,880', { exact: true })).toBeVisible()
+  await expect(night(sea, 12).getByText('฿1,800', { exact: true })).toBeVisible()
+  await grid.getByRole('checkbox', { name: 'Include Sea Loft', exact: true }).click()
+  await expect(inspector.getByRole('button', { name: /^Nightly price for selected dates/ })).toContainText('2,880')
+  await expect(inspector.getByText(/^Default nightly price:/)).toContainText('3,200')
+  await expect(inspector.getByRole('link', { name: 'Edit default price', exact: true })).toHaveAttribute('href', `/dashboard/${slug}/products/${bay}/price`)
+  await expect(inspector.getByRole('link', { name: 'Edit internal name', exact: true })).toHaveAttribute('href', `/dashboard/${slug}/products/${bay}/internal-name`)
 
   // A gap no arrival can fill says so, as Airbnb's calendar blocker does: three free nights under a week's minimum.
   await page.goto(gridPath)
