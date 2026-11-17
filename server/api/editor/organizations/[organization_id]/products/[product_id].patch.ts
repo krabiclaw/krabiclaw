@@ -16,8 +16,12 @@ export default defineHandler(async (event) => {
     // catalog is organization-wide, and an editor scoped to one site must not
     // reach another site's product through it.
     await requireOrganizationProduct(db, { organizationId: organization.id, productId })
+    const idempotencyKey = event.req.headers.get('idempotency-key')?.trim()
+    if (idempotencyKey !== undefined && (!idempotencyKey || idempotencyKey.length > 200)) {
+      return jsonResponse({ error: 'Idempotency-Key must be 1 to 200 characters', code: 'VALIDATION_ERROR', field: 'idempotency_key' }, { status: 400 })
+    }
     const product = await updateProduct(db, {
-      organizationId: organization.id, productId, patch: body, actor: { actorId: session.user.id }, env,
+      organizationId: organization.id, productId, patch: body, actor: { actorId: session.user.id }, env, idempotencyKey,
     })
     return jsonResponse({ success: true, product })
   } catch (error) {

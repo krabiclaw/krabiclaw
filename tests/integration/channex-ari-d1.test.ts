@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { hashPassword } from 'better-auth/crypto'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
+import { H3 } from 'nitro/h3'
+import productPatchRoute from '../../server/api/editor/organizations/[organization_id]/products/[product_id].patch.ts'
 import * as schema from '../../server/db/schema.ts'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createProduct, createProductsBatch, getProduct, reconcileProducts, updateProduct } from '../../server/utils/product-management.ts'
 import { cancelStay, createStay, deliverPendingChannelNights, dispatchStayCheckoutDeadlines, readHomeCalendar, readStayHome, setStayNights, updateStay, updateStayHome, verifyStayCalendarOccupancy, type StayAccess } from '../../server/domain/stays.ts'
-import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { captureEvents } from './support/events.ts'
 
 // A connected home's night changes reach Channex: closed nights, prices and
@@ -88,9 +91,10 @@ class FakeChannex {
     if ((init.method ?? 'GET') === 'GET' && /^\/channels\/chan-1\/mappings\/map-\d\/availability_settings$/.test(path)) return Response.json({ data: { id: path.split('/')[4], type: 'airbnb_listing_availability_settings', attributes: AIRBNB_AVAILABILITY } })
     if (init.method === 'PUT' && (/^\/channels\/chan-1\/mappings\/map-\d\/availability_settings$/.test(path) || (path as string) === '/channels/chan-1/execute/update_booking_setting')) {
       const settings = JSON.parse(init.body as string) as { availability_settings?: { default_min_nights: number } }
-      if (settings.availability_settings) this.minimums.set(`listing-${path.split('/')[4]!.split('-')[1]}`, settings.availability_settings.default_min_nights)
       this.settings.push({ path, body: settings })
-      return this.settingsAnswer ? this.settingsAnswer() : Response.json({ data: {} })
+      const response = this.settingsAnswer ? this.settingsAnswer() : Response.json({ data: {} })
+      if (response.ok && settings.availability_settings) this.minimums.set(`listing-${path.split('/')[4]!.split('-')[1]}`, settings.availability_settings.default_min_nights)
+      return response
     }
     assert.equal(init.method, 'POST')
     assert.ok(path === '/restrictions' || path === '/availability', `unexpected ${path}`)
@@ -534,6 +538,58 @@ test('Airbnb settings preflight the whole catalog and unchanged settings do not 
     assert.deepEqual(replayedCatalog[0]!.channel_push, { state: 'pushed', detail: null })
     assert.equal(channex.settings.length, 4, 'a replay completes only the booking section the committed plan changed')
     assert.deepEqual(channex.take(), [])
+
+    const inheritedDate = day(10)
+    const overrideDate = day(11)
+    const previousDefault = await updateProduct(db, {
+      env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { stay: { min_nights: 300 } },
+    })
+    assert.equal(byNight(channex.take().find(call => call.path === '/restrictions')!.values).get(inheritedDate)?.min_stay_arrival, 300)
+    await setStayNights(db, env, manager, { product_id: connected, from: overrideDate, to: day(12), min_stay_arrival: 3, price_minor: 75_00 })
+    assert.deepEqual(channex.take(), [{ path: '/restrictions', values: [{
+      property_id: 'prop-1', rate_plan_id: 'rate-1', date_from: overrideDate, date_to: overrideDate, rate: '75.00', min_stay_arrival: 3,
+    }] }])
+
+    const password = 'Local-Calendar-Settings-Only-42'
+    await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('a-owner', ?, 'credential', ?, ?, 0, 0)")
+      .bind(OWNER, OWNER, await hashPassword(password)).run()
+    const login = await createAuth(env).api.signInEmail({ body: { email: 'o@example.test', password }, asResponse: true })
+    assert.equal(login.status, 200, await login.clone().text())
+    const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    const app = new H3()
+    app.patch('/api/editor/organizations/:organization_id/products/:product_id', productPatchRoute)
+    const patchDefault = () => app.request(Object.assign(new Request(`https://proof.example/api/editor/organizations/${ORG}/products/${connected}`, {
+      method: 'PATCH',
+      headers: { cookie, origin: 'https://proof.example', 'content-type': 'application/json', 'idempotency-key': 'minimum-repair' },
+      body: JSON.stringify({ updated_at: previousDefault.updated_at, stay: { min_nights: 21 } }),
+    }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    const calendar = () => readHomeCalendar(db, manager, { productId: connected, from: inheritedDate, to: day(12) })
+
+    channex.settingsAnswer = () => Response.json({ errors: { detail: 'Settings refused' } }, { status: 422 })
+    const failed = await patchDefault()
+    assert.equal(failed.status, 503)
+    assert.partialDeepStrictEqual(await failed.json(), { data: { code: 'CHANNEL_PUSH_FAILED', committed: true } })
+    const committed = await getProduct(db, ORG, connected)
+    assert.equal(committed.stay!.min_nights, 21)
+    assert.equal(channex.minimums.get('listing-1'), 300)
+    assert.deepEqual(channex.take(), [], 'the dates were never sent after the settings refusal')
+    assert.deepEqual((await calendar()).nights.map(night => [night.date, night.price_minor, night.min_stay_arrival, night.channel]), [
+      [inheritedDate, 150_00, 21, { state: 'needs_review', detail: 'Blawby has a 21-night minimum. Channex last confirmed a 300-night minimum.' }],
+      [overrideDate, 75_00, 3, { state: 'pushed', detail: null }],
+    ])
+
+    channex.settingsAnswer = undefined
+    const retried = await patchDefault()
+    assert.equal(retried.status, 200, await retried.clone().text())
+    assert.partialDeepStrictEqual(await retried.json(), { product: { updated_at: committed.updated_at, channel_push: { state: 'pushed', detail: null } } })
+    assert.equal(channex.minimums.get('listing-1'), 21)
+    const repaired = byNight(channex.take().find(call => call.path === '/restrictions')!.values)
+    assert.deepEqual(repaired.get(inheritedDate), { min_stay_arrival: 21 })
+    assert.equal(repaired.has(overrideDate), false)
+    assert.deepEqual((await calendar()).nights.map(night => [night.date, night.price_minor, night.min_stay_arrival, night.channel]), [
+      [inheritedDate, 150_00, 21, { state: 'pushed', detail: null }],
+      [overrideDate, 75_00, 3, { state: 'pushed', detail: null }],
+    ])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
