@@ -19,7 +19,7 @@ import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { STAY_ARRIVAL_TEXT_LIMITS } from '~/shared/stay-arrival'
 import { isStayAmenity, type StayAmenity, type StayCheckInMethod } from '~/shared/stay-listing'
-import { channexCreate, channexGet, channexList, channexRequest, ChannexError, type ChannexEnv } from './client'
+import { channelInventory, channexCreate, channexGet, channexList, channexRequest, ChannexError, type ChannexEnv } from './client'
 import { ChannexDataError, object, relationship, string, type JsonRecord, type Resource } from './data'
 import { PHOTO_WIDTH, minorUnits, listingCalendar, listingContent, listingDetails, type DescriptionField, type ListingDetails, type ListingImage, type OrganizationContact, type ListingNight } from './airbnb-listing'
 import { DETAIL_FIELDS, IMPORT_STAGES, type DetailField, type ImportStage } from '~/shared/airbnb-import'
@@ -221,25 +221,15 @@ export class AirbnbConnection {
     const allowedProperties = new Set(mappings.flatMap(mapping => mapping.property_id ? [mapping.property_id] : []))
     const allowedRatePlans = new Set(mappings.flatMap(mapping => mapping.rate_plan_id ? [mapping.rate_plan_id] : []))
     return provided(() => {
-      const attributes = channel.attributes
-      if (!Array.isArray(attributes.properties) || !Array.isArray(attributes.rate_plans) || typeof attributes.is_active !== 'boolean') {
-        fail(502, 'INVALID_PROVIDER_RESPONSE', 'The Airbnb channel has invalid properties, mappings or activation state.')
-      }
-      const properties = attributes.properties.map(id => string(id, 'Channel property id'))
-      const ratePlans = attributes.rate_plans.map((value) => {
-        const mapping = object(value, 'Airbnb mapping')
-        string(mapping.id, 'Mapping id')
-        string(mapping.rate_plan_id, 'Mapping rate plan id')
-        return mapping
-      })
+      const { properties, ratePlans, active } = channelInventory(channel)
       const allowed = new Set(allowedProperties)
       if (row.setup_property_id) allowed.add(row.setup_property_id)
-      if (attributes.channel !== 'AirBNB' || relationship(channel, 'group') !== row.group_id
+      if (channel.attributes.channel !== 'AirBNB' || relationship(channel, 'group') !== row.group_id
         || properties.length === 0 || properties.some(id => !allowed.has(id))) {
         fail(403, 'CHANNEL_NOT_OWNED', 'This Airbnb connection does not belong to this organization')
       }
       if (ratePlans.some(mapping => !allowedRatePlans.has(String(mapping.rate_plan_id)))) fail(403, 'CHANNEL_NOT_OWNED', 'This Airbnb connection maps a listing outside this organization')
-      return { ...channel, properties, ratePlans, active: attributes.is_active }
+      return { ...channel, properties, ratePlans, active }
     })
   }
 

@@ -181,6 +181,7 @@ export interface CloudflareEnv {
   APPLE_TEAM_ID?: string
   APPLE_KEY_ID?: string
   APPLE_PRIVATE_KEY?: string
+  CHANNEX_VRBO_ENABLED?: string
   CHANNEX_BASE_URL?: string
   CHANNEX_API_KEY?: string
   CHANNEX_WEBHOOK_SECRET?: string

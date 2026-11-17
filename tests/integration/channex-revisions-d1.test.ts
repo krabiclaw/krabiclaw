@@ -6,6 +6,7 @@ import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { applyChannelBooking, createStay } from '../../server/domain/stays.ts'
 import { applyBookingRevision } from '../../server/integrations/channex/booking-revisions.ts'
+import { startVrboSetup, vrboHomes } from '../../server/integrations/channex/hosted-channel.ts'
 import { captureEvents } from './support/events.ts'
 import { applySchema } from './support/schema.ts'
 
@@ -20,7 +21,7 @@ const channexEnv = { CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_AP
 
 // A booking is its revisions: each carries the booking whole at its own time,
 // and only that time tells a later state from an earlier one.
-interface Booking { id: string; property_id: string; status: string; arrival: string; departure: string; amount: string; revision: string; code?: string }
+interface Booking { id: string; property_id: string; status: string; arrival: string; departure: string; amount: string; revision: string; code?: string; ota_name?: 'AirBNB' | 'VRBO' }
 
 class FakeChannex {
   /** Each revision as Channex serves it: the booking as the channel sent it, at that revision's time. */
@@ -59,7 +60,7 @@ class FakeChannex {
   /** A revision: the booking as the channel states it, revised at `at`. */
   revise(revision: string, booking: Booking, at: string) {
     this.revisions.set(revision, {
-      booking_id: booking.id, property_id: booking.property_id, status: booking.status, ota_name: 'AirBNB', ota_reservation_code: booking.code ?? `HM${booking.id}`,
+      booking_id: booking.id, property_id: booking.property_id, status: booking.status, ota_name: booking.ota_name ?? 'AirBNB', ota_reservation_code: booking.code ?? `HM${booking.id}`,
       inserted_at: at, arrival_date: booking.arrival, departure_date: booking.departure, amount: booking.amount, currency: 'USD',
       customer: { name: 'Lee', surname: 'Park', mail: 'lee@example.test', phone: null }, occupancy: { adults: 2, children: 1, infants: 0 },
     })
@@ -165,6 +166,63 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
     channex.revise('rev-code-moved', { ...coded, id: 'bk-code-moved' }, '2026-10-15T05:00:00Z')
     assert.deepEqual(await applyBookingRevision(db, env, 'rev-code-moved'), { status: 'acknowledged', booking_id: first.booking_id, overbooked: false })
     assert.deepEqual((await db.prepare("SELECT id, external_booking_id FROM bookings WHERE channel_booking_id = 'HMCODE'").all()).results, [{ id: first.booking_id, external_booking_id: 'bk-code-moved' }])
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('Vrbo hosts open only the selected mapped property and bookings use the shared Channex availability path', { timeout: 120_000 }, async () => {
+  const { runtime, db, env, queue, productId } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  let tokenRequests = 0
+  let active = false
+  globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+    if (url.pathname === '/api/v1/auth/one_time_token') {
+      tokenRequests += 1
+      assert.equal(init.method, 'POST')
+      assert.deepEqual(JSON.parse(String(init.body)), { one_time_token: { property_id: 'prop-1', username: 'Owner' } })
+      return Response.json({ data: { token: 'channex-test-token' } })
+    }
+    if (url.pathname === '/api/v1/channels') {
+      assert.equal(url.searchParams.get('filter[property_id]'), 'prop-1')
+      assert.equal(url.searchParams.get('filter[channel]'), 'VRB')
+      return Response.json({ data: [{ id: 'vrbo-channel', type: 'channel', attributes: {
+        channel: 'VRB', properties: ['prop-1'], is_active: active,
+        rate_plans: [{ id: 'vrbo-rate-mapping', rate_plan_id: 'rate-1' }],
+      } }], meta: { total: 1 } })
+    }
+    return await channex.fetch(input, init)
+  }) as typeof fetch
+  try {
+    await assert.rejects(startVrboSetup(db, env, ORG, 'unmapped-home', 'Owner'), { data: { code: 'CHANNEL_MAPPING_REQUIRED', field: 'product_id' } })
+    assert.equal(tokenRequests, 0)
+    const setup = new URL((await startVrboSetup(db, env, ORG, productId, 'Owner')).url)
+    assert.equal(setup.origin + setup.pathname, 'https://channex.test/auth/exchange')
+    assert.equal(setup.searchParams.get('oauth_session_key'), 'channex-test-token')
+    assert.equal(setup.searchParams.get('channels'), 'VRB')
+    assert.equal(setup.searchParams.get('property_id'), 'prop-1')
+    assert.deepEqual(await vrboHomes(db, env, ORG), [{ product_id: productId, name: 'Cabin', status: 'needs_review' }])
+    active = true
+    assert.deepEqual(await vrboHomes(db, env, ORG), [{ product_id: productId, name: 'Cabin', status: 'connected' }])
+    channex.revise('vrbo-revision', {
+      id: 'vrbo-booking', property_id: 'prop-1', ota_name: 'VRBO', status: 'new',
+      arrival: '2027-01-10', departure: '2027-01-13', amount: '450.50', revision: 'vrbo-revision',
+    }, '2026-10-15T01:00:00Z')
+    const result = await applyBookingRevision(db, env, 'vrbo-revision')
+    assert.equal(result.status, 'acknowledged')
+    assert.deepEqual(channex.acked, ['vrbo-revision'])
+    const stored = await db.prepare('SELECT channel, status FROM bookings WHERE external_booking_id = ?').bind('vrbo-booking').first()
+    assert.deepEqual(stored, { channel: 'vrbo', status: 'confirmed' })
+    assert.deepEqual(await nights(db, result.booking_id), ['2027-01-10', '2027-01-11', '2027-01-12'])
+    await createStay(db, env, { organizationId: ORG, actorId: OWNER, manage: true }, {
+      product_id: productId, idempotency_key: 'vrbo-property-host-stay', check_in_date: '2027-02-01',
+      check_out_date: '2027-02-03', adults: 1, guest_name: 'Host guest', total_minor: 10_000,
+    })
+    await queue.drain(env, 'stay.changed')
+    assert.deepEqual(channex.availability.map(value => [value.date_from, value.date_to, value.availability]), [['2027-02-01', '2027-02-02', 0]])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
