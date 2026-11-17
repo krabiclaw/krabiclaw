@@ -1,7 +1,7 @@
 # Security
 
 Report vulnerabilities privately through
-[GitHub private vulnerability reporting](https://github.com/krabiclaw/krabiclaw/security/advisories/new).
+[GitHub private vulnerability reporting](https://github.com/Blawby/blawby/security/advisories/new).
 Do not open a public issue.
 
 Include the affected URL or code path, how to reproduce it, and what an attacker

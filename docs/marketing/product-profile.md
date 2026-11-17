@@ -17,7 +17,7 @@ Current lodging, MCP and template claim reconciliation: 2026-10-23 against the s
 | Business model | Free Basic, Growth and Business subscriptions | PRODUCT.md; paid display name and prices belong to Stripe |
 | Primary audience | Restaurants, experience operators, law firms and lodging hosts | Four verticals in `utils/vertical-copy.ts`; `service` means Legal Services |
 | MCP endpoint | https://blawby.com/api/mcp | `docs/mcp.md` |
-| MCP registry identity | io.github.krabiclaw/krabiclaw | Published 2026-10-16 under the krabiclaw GitHub org; the former io.github.paulchrisluke/krabiclaw entry was deleted to release the endpoint URL |
+| MCP Registry identity | `io.github.Blawby/blawby` | Publish from the Blawby GitHub organization. The existing `io.github.krabiclaw/krabiclaw` listing remains available at the same MCP endpoint. |
 
 Owner-approved company facts ([#941](https://github.com/paulchrisluke/krabiclaw/issues/941), reviewed 2026-10-04): bootstrapped/self-funded; no outside investment to date; open to investment; Salt Lake City, Utah, USA; global from day one. Do not publish a street address for general marketing.
 

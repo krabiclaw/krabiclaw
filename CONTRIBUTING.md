@@ -5,7 +5,7 @@ can be merged, sign the [Contributor License Agreement](https://cla-assistant.io
 the CLA check on the pull request links to it. You keep the copyright in your
 contribution; the agreement lets KrabiClaw use, relicense and commercialize it.
 
-- **Bugs and feature requests:** use the [issue forms](https://github.com/krabiclaw/krabiclaw/issues/new/choose).
+- **Bugs and feature requests:** use the [issue forms](https://github.com/Blawby/blawby/issues/new/choose).
 - **Security:** see [SECURITY.md](SECURITY.md).
 - **Code:** branch from `staging` and open the pull request against `staging`.
   Reference the issue (`#123`) in the title or body.
