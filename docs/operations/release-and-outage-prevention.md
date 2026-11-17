@@ -73,13 +73,14 @@ redeploy a healthy production Worker to repeat browser checks.
 
 After asset convergence, the deployment workflow sends one outstanding-work
 message to that environment’s `EVENTS` queue. The consumer reads eligible
-review bookings, checkout holds and pending stay requests, enabled Channex
+review bookings, pending stay requests, enabled Channex
 mappings, managed ad agreements and undelivered ad charges, pending Airbnb
-imports, pending or failed site invalidations, Calendar integrations, orphaned
-Calendar cleanup records, pending outbox sends, and open tasks with reminders.
+imports, pending or failed site invalidations, Calendar integrations, and
+orphaned Calendar cleanup records.
 It sends scoped messages for those records and schedules the platform retention
-alarm. This runs on every deployment
-that reaches the step, including a retried verification job.
+alarm. This runs on every deployment that reaches the step, including a
+retried verification job. Outbox writes and job changes schedule their own
+sends and reminders.
 
 For every iOS App Store submission, select **Automatically release this
 version** in App Store Connect and verify the selection before submitting for
@@ -108,16 +109,10 @@ Stripe's report availability event. [Channex cutover](channex-certification.md#c
 
 ### Booking inventory cutover
 
-Finish reconciling existing inventory-holding checkouts with Stripe while the
-previous Worker still serves them. Review authorized, processing, and settled
-intents against their checkout records before changing which Worker handles
-settlement.
-
-After the new Worker converges, **Adopt outstanding work** retires the previous
-checkout and Vrbo iCal night claims and marks their Channex inventory for
-delivery in the same batch. Current booking claims are retained. Ship the
-schema contraction in the following release, with the **Remove retired night
-claim adoption** step deleting that deployment cleanup.
+At cutover, **Adopt outstanding work** retired the checkout and Vrbo iCal
+night claims and marked their Channex inventory updates pending together. The
+inventory schema retains nights claimed by bookings, including pending stay
+requests.
 
 ## Browser and MCP verification
 
@@ -180,14 +175,6 @@ migrations apply` before the Worker deploy; new tables, columns and indexes use
 that path. Run `yarn lint:migrations`, `yarn lint:schema-drift` and `yarn
 test:migrations` locally, then check schema drift and `PRAGMA foreign_key_check`
 on each deployed database.
-
-The release that retires checkout inventory and Vrbo iCal keeps the existing
-night-claim schema so the running Worker can finish using it during deployment.
-After asset convergence, **Adopt outstanding work** retires the obsolete
-claims and requeues their prior channel inventory updates together. Once this
-Worker serves both environments, the next release can drop the retired storage
-and remove that adoption step. Booked nights and pending stay requests keep
-their claims.
 
 SQLite cannot alter a CHECK constraint in place. When a constraint on a table
 referenced by other tables must change, Drizzle generates a table rebuild whose

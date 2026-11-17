@@ -102,34 +102,17 @@ export async function applyBookingRevision(db: DbClient, env: ChannexEnv & Guest
   return landBookingRevision(db, env, revision)
 }
 
-
 /**
  * The revisions of one booking that Channex has not had acknowledged, oldest
  * first, from its feed: how a booking that arrived some other way (a message
  * thread naming it) is landed before anything is built on it.
  */
 export async function pendingBookingRevisions(env: ChannexEnv, propertyId: string, bookingId: string): Promise<Resource[]> {
-  const revisions = await readPendingRevisions(env, { 'filter[property_id]': propertyId })
+  const revisions = await channexList(env, '/booking_revisions/feed', 'booking_revision', {
+    'filter[property_id]': propertyId,
+    'order[inserted_at]': 'asc',
+  })
   return revisions.filter(revision => revision.attributes.booking_id === bookingId)
-}
-
-function readPendingRevisions(env: ChannexEnv, filter?: Record<string, string>): Promise<Resource[]> {
-  return channexList(env, '/booking_revisions/feed', 'booking_revision', { ...filter, 'order[inserted_at]': 'asc' })
-}
-
-/** Handoff from the old revision feed after the webhook event mask has changed. */
-export async function adoptPendingBookingRevisions(env: CloudflareEnv): Promise<void> {
-  const configured = await queryFirst<{ id: string }>(env.DB, 'SELECT organization_id AS id FROM channex_connections WHERE group_id IS NOT NULL LIMIT 1')
-  if (!configured) return
-  const failures: Error[] = []
-  for (const revision of await readPendingRevisions(env)) {
-    try {
-      await landBookingRevision(env.DB, env, revision)
-    } catch (cause) {
-      failures.push(new Error(`Channex revision ${revision.id} could not be acknowledged`, { cause }))
-    }
-  }
-  if (failures.length) throw new AggregateError(failures, 'Outstanding Channex revisions could not be adopted')
 }
 
 /** Land one revision Channex delivered and acknowledge it. */

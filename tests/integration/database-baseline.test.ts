@@ -99,13 +99,14 @@ test('the migration chain applies from zero and builds every table the schema de
   }
 })
 
-test('the historical no-show migration requires the original mark in the booking conversation', () => {
+test('the migrations require and preserve the original no-show mark in the booking conversation', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
   try {
     const migration = '0012_deadline_indexes'
     const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
-    for (const entry of journal.entries.slice(0, journal.entries.findIndex(entry => entry.tag === migration))) {
+    const migrationIndex = journal.entries.findIndex(entry => entry.tag === migration)
+    for (const entry of journal.entries.slice(0, migrationIndex)) {
       database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
     }
     const stamped = '2026-11-01T00:00:00.000Z'
@@ -135,8 +136,13 @@ test('the historical no-show migration requires the original mark in the booking
     assert.throws(verify, /historical_no_show_transcript_check/)
     database.prepare('UPDATE bookings SET no_show_at = ? WHERE id = ?').run(stamped, 'reservation')
     verify()
-    assert.equal(database.prepare('SELECT occurred_at FROM messages WHERE id = ?').pluck().get('mark'), stamped)
-    assert.equal(database.prepare('SELECT no_show_at FROM bookings WHERE id = ?').pluck().get('reservation'), stamped)
+    for (const entry of journal.entries.slice(migrationIndex + 1)) {
+      database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
+    }
+    assert.deepEqual(database.prepare(`SELECT c.booking_id, m.event_name, m.occurred_at
+      FROM messages m JOIN conversations c ON c.organization_id = m.organization_id AND c.id = m.conversation_id
+      WHERE m.id = ?`).get('mark'), { booking_id: 'reservation', event_name: 'booking.no_show', occurred_at: stamped })
+    assert.equal(database.prepare("SELECT count(*) FROM pragma_table_info('bookings') WHERE name = 'no_show_at'").pluck().get(), 0)
     assert.equal(database.prepare("SELECT count(*) FROM sqlite_schema WHERE name = '__historical_no_show_check'").pluck().get(), 0)
     assert.deepEqual(database.pragma('foreign_key_check'), [])
   } finally {
@@ -1387,7 +1393,7 @@ test('a v21 replacement preserves booked descendants and auth, completes manual 
     assert.deepEqual(initial.target_migrations, current)
     const target = new Database(initialPath, { readonly: true })
     try {
-      // A later forward migration may add a column (bookings.no_show_at); every value the v21 row held is still the same.
+      // Compare the recorded v21 columns to check every original value.
       for (const table of unchangedTables) {
         const columns = Object.keys(recorded[table]![0] as Record<string, unknown>)
           .map(column => table === 'bookings' && column === 'assigned_member_id'
