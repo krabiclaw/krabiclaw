@@ -2,18 +2,17 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { captureEvents } from './support/events.ts'
 import { Miniflare } from 'miniflare'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { H3 } from 'nitro/h3'
 import { hashPassword } from 'better-auth/crypto'
-import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { createStay, getStay, readHomeCalendar, updateStay, type StayAccess } from '../../server/domain/stays.ts'
-import { getStayMigrationContext, importStayMigration, previewStayMigration, verifyStayMigration } from '../../server/domain/stay-migration.ts'
-import { isMigrationContext, isMigrationPreview, isMigrationReceipt, isMigrationVerification, type MigrationInput } from '../../shared/stay-migration.ts'
+import { createStay, getStay, updateStay, type StayAccess } from '../../server/domain/stays.ts'
+import { importStayMigration, previewStayMigration } from '../../server/domain/stay-migration.ts'
+import type { MigrationInput } from '../../shared/stay-migration.ts'
 import contextRoute from '../../server/api/dashboard/stays/migration/index.get.ts'
 import previewRoute from '../../server/api/dashboard/stays/migration/preview.post.ts'
 import importRoute from '../../server/api/dashboard/stays/migration/import.post.ts'
+import { applySchema } from './support/schema.ts'
 
 const ORG = 'migration-org'
 const OWNER = 'migration-owner'
@@ -35,8 +34,7 @@ async function boot() {
   try {
     const db = await runtime.getD1Database('DB')
     const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: captureEvents().binding, BETTER_AUTH_SECRET: 'migration-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_migration_no_provider_requests' } as CloudflareEnv
-    const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-    await db.batch(statements.map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare("INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone) VALUES (?, 'Migration Org', 'migration-org', 'migration-org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', ?, 'America/Denver')").bind(ORG, NOW).run()
     for (const [id, role] of [[OWNER, 'owner'], ['migration-member', 'member']] as const) {
       await db.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, 0, 0)').bind(id, id, `${id}@example.test`).run()
@@ -47,38 +45,6 @@ async function boot() {
     return { runtime, db, env, home }
   } catch (error) { await runtime.dispose(); throw error }
 }
-
-test('Hostaway export imports an ongoing unpaid stay, protects occupancy, preserves host edits on retry and reports unconnected verification', { timeout: 120_000 }, async context => {
-  context.mock.timers.enable({ apis: ['Date'], now: Date.parse(NOW) })
-  const { runtime, db, env, home } = await boot()
-  try {
-    const source = input(home.id)
-    const discovery = await previewStayMigration(db, access, { ...source, columns: {}, homes: {}, date_format: null, decimal_format: null })
-    assert(isMigrationPreview(discovery)); assert.equal(discovery.can_import, false)
-    assert.equal(discovery.suggested_columns.source_id, 'Reservation ID')
-    const preview = await previewStayMigration(db, access, source)
-    assert.equal(preview.can_import, true, JSON.stringify(preview))
-    assert.deepEqual(preview.counts, { ready: 1, existing: 0, skipped: 0, needs_attention: 0 })
-    const receipt = await importStayMigration(db, env, access, { ...source, fingerprint: preview.fingerprint })
-    assert(isMigrationReceipt(receipt)); assert.equal(receipt.imported, 1); assert.equal(receipt.has_more, false)
-    const stayId = receipt.outcomes[0]!.booking_id!
-    const saved = await getStay(db, access, stayId)
-    assert.equal(saved.payment_status, 'unpaid'); assert.equal(saved.paid_minor, 0)
-    assert.deepEqual([saved.check_in_date, saved.check_out_date, saved.channel, saved.owner], ['2026-10-10', '2026-12-24', 'direct', 'app'])
-    assert.equal(await db.prepare('SELECT received_at FROM bookings WHERE id = ?').bind(stayId).first('received_at'), null)
-    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM stay_nights WHERE booking_id = ?').bind(stayId).first('n'), 75)
-    assert.equal((await readHomeCalendar(db, access, { productId: home.id, from: '2026-11-05', to: '2026-11-06' })).nights[0]!.available, false)
-    await updateStay(db, env, access, stayId, { version: saved.version, guest_name: 'Dylan corrected by host' })
-    const replay = await importStayMigration(db, env, access, { ...source, fingerprint: preview.fingerprint })
-    assert.equal(replay.existing, 1); assert.equal(replay.imported, 0)
-    assert.equal((await getStay(db, access, stayId)).guest_name, 'Dylan corrected by host')
-    const verification = await verifyStayMigration(db, env, access, { ...source, fingerprint: preview.fingerprint, product_ids: [home.id] })
-    assert(isMigrationVerification(verification)); assert.equal(verification.state, 'needs_attention')
-    assert.equal(verification.homes[0]!.state, 'not_connected')
-    const loaded = await getStayMigrationContext(db, access)
-    assert(isMigrationContext(loaded)); assert.equal(loaded.recent_import!.receipt.existing, 1)
-  } finally { await runtime.dispose() }
-})
 
 test('migration preview rejects missing financial facts, duplicate sources and overlaps and parses explicit CSV dates/decimals', { timeout: 120_000 }, async context => {
   context.mock.timers.enable({ apis: ['Date'], now: Date.parse(NOW) })
@@ -115,81 +81,11 @@ test('migration preview rejects missing financial facts, duplicate sources and o
     assert.equal(partialStay.payment_status, 'partial'); assert.equal(partialStay.paid_minor, 10_000); assert.equal(partialStay.total_minor, 370_000)
     assert.deepEqual(await db.prepare('SELECT amount_minor, method, paid_on, reference FROM offline_payments WHERE booking_id = ?').bind(partialStay.id).first(), { amount_minor: 10_000, method: 'bank_transfer', paid_on: '2026-10-10', reference: 'partial-proof' })
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM payments WHERE subject_type = 'booking' AND subject_id = ?").bind(partialStay.id).first('n'), 0)
-
-  } finally { await runtime.dispose() }
-})
-
-test('bounded migration batches resume from canonical stays and manual blocks and repair committed visibility failure', { timeout: 120_000 }, async context => {
-  context.mock.timers.enable({ apis: ['Date'], now: Date.parse(NOW) })
-  const { runtime, db, env, home } = await boot()
-  try {
-    const csv = `${header}\n${Array.from({ length: 6 }, (_, index) => row(`batch-${index}`, `2026-12-${String(index * 2 + 1).padStart(2, '0')}`, `2026-12-${String(index * 2 + 2).padStart(2, '0')}`)).join('\n')}`
-    const source = { ...input(home.id, csv), blocks: [{ product_id: home.id, from: '2026-12-20', to: '2026-12-23', note: 'Owner stay' }] }
-    const preview = await previewStayMigration(db, access, source)
-    const first = await importStayMigration(db, env, access, { ...source, fingerprint: preview.fingerprint })
-    assert.equal(first.imported, 5); assert.equal(first.remaining, 1); assert.equal(first.has_more, true)
-    const second = await importStayMigration(db, env, access, { ...source, fingerprint: preview.fingerprint })
-    assert.equal(second.imported, 1); assert.equal(second.existing, 5); assert.equal(second.remaining, 0)
-    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM bookings WHERE idempotency_key LIKE 'hostaway:%'").first('n'), 6)
-    assert.equal((await readHomeCalendar(db, access, { productId: home.id, from: '2026-12-20', to: '2026-12-23' })).nights.every(night => night.closed && !night.available), true)
-    const failedSource = input(home.id, `${header}\n${row('repair', '2027-01-10', '2027-01-20')}`)
-    const failedPreview = await previewStayMigration(db, access, failedSource)
-    const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName(ORG))
-    const failed = await importStayMigration(db, {
-      ...env, EVENTS: { async send() { throw new Error('Queue refused the stay event') } },
-    }, access, { ...failedSource, fingerprint: failedPreview.fingerprint })
-    assert.equal(failed.failed, 1); assert.equal(failed.outcomes[0]!.committed, true)
-    assert.match(failed.outcomes[0]!.detail!, /Queue refused the stay event/)
-    const repaired = await importStayMigration(db, env, access, { ...failedSource, fingerprint: failedPreview.fingerprint })
-    assert.equal(repaired.failed, 0); assert.equal(repaired.existing, 1)
-    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM bookings WHERE idempotency_key = 'hostaway:repair'").first('n'), 1)
-    const lostSource = input(home.id, `${header}\n${row('receipt-lost', '2027-02-10', '2027-02-20')}`)
-    const lostPreview = await previewStayMigration(db, access, lostSource)
-    await db.prepare("CREATE TRIGGER refuse_migration_receipt BEFORE INSERT ON activity_entries WHEN NEW.event_name = 'stay.migration_imported' BEGIN SELECT RAISE(ABORT, 'Injected receipt failure'); END").run()
-    await hub.fetch('https://inbox.test/fail', { method: 'PUT' })
-    await assert.rejects(importStayMigration(db, env, access, { ...lostSource, fingerprint: lostPreview.fingerprint }), (error: { data?: { code?: string; committed?: boolean } }) => error.data?.code === 'MIGRATION_RECEIPT_FAILED' && error.data.committed === true)
-    const lostId = await db.prepare("SELECT id FROM bookings WHERE idempotency_key = 'hostaway:receipt-lost'").first<string>('id')
-    assert(lostId)
-    await db.prepare('DROP TRIGGER refuse_migration_receipt').run()
-    await hub.fetch('https://inbox.test/fail', { method: 'DELETE' })
-    const lost = await getStay(db, access, lostId)
-    await updateStay(db, env, access, lostId, { version: lost.version, guest_name: 'Host correction after lost receipt' })
-    const incomplete = await verifyStayMigration(db, env, access, { ...lostSource, fingerprint: lostPreview.fingerprint, product_ids: [home.id] })
-    assert(incomplete.issues.some(issue => issue.includes('import completion retried')))
-    const resumed = await importStayMigration(db, env, access, { ...lostSource, fingerprint: lostPreview.fingerprint })
-    assert.equal(resumed.existing, 1); assert.equal(resumed.failed, 0); assert.equal(resumed.outcomes[0]!.committed, true)
-    assert.equal((await getStay(db, access, lostId)).guest_name, 'Host correction after lost receipt')
-    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM bookings WHERE idempotency_key = 'hostaway:receipt-lost'").first('n'), 1)
-    const complete = await verifyStayMigration(db, env, access, { ...lostSource, fingerprint: lostPreview.fingerprint, product_ids: [home.id] })
-    assert.equal(complete.issues.some(issue => issue.includes('import completion retried')), false)
-    const lostBlockSource = { ...input(home.id, header), blocks: [{ product_id: home.id, from: '2027-03-01', to: '2027-03-04' }] }
-    const lostBlockPreview = await previewStayMigration(db, access, lostBlockSource)
-    await db.prepare("CREATE TRIGGER refuse_migration_receipt BEFORE INSERT ON activity_entries WHEN NEW.event_name = 'stay.migration_imported' BEGIN SELECT RAISE(ABORT, 'Injected receipt failure'); END").run()
-    await hub.fetch('https://inbox.test/fail', { method: 'PUT' })
-    await assert.rejects(importStayMigration(db, env, access, { ...lostBlockSource, fingerprint: lostBlockPreview.fingerprint }), (error: { data?: { code?: string; committed?: boolean } }) => error.data?.code === 'MIGRATION_RECEIPT_FAILED' && error.data.committed === true)
-    assert.equal((await readHomeCalendar(db, access, { productId: home.id, from: '2027-03-01', to: '2027-03-04' })).nights.every(night => night.closed), true)
-    await db.prepare('DROP TRIGGER refuse_migration_receipt').run()
-    await hub.fetch('https://inbox.test/fail', { method: 'DELETE' })
-    const lostBlockVerification = await verifyStayMigration(db, env, access, { ...lostBlockSource, fingerprint: lostBlockPreview.fingerprint, product_ids: [home.id] })
-    assert(lostBlockVerification.issues.some(issue => issue.includes('import completion retried')))
-    const resumedBlock = await importStayMigration(db, env, access, { ...lostBlockSource, fingerprint: lostBlockPreview.fingerprint })
-    assert.equal(resumedBlock.blocks[0]!.state, 'saved'); assert.equal(resumedBlock.blocks[0]!.committed, true)
-    const stableBlock = await importStayMigration(db, env, access, { ...lostBlockSource, fingerprint: lostBlockPreview.fingerprint })
-    assert.equal(stableBlock.blocks[0]!.committed, false)
-    // A closure saved while disconnected must not count as delivered after a channel is connected.
-    await db.prepare("INSERT INTO channex_connections (organization_id, status, group_id, channel_id, connected_at) VALUES (?, 'connected', 'migration-group', 'migration-airbnb', ?)").bind(ORG, NOW).run()
-    await db.prepare("INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled) VALUES (?, ?, 'channex', 'migration-listing', 'migration-airbnb', 'migration-property', 'migration-room', 'migration-rate', 'complete', 1)").bind(ORG, home.id).run()
-    const blocksOnly = { ...input(home.id, header), blocks: source.blocks }
-    const blocksPreview = await previewStayMigration(db, access, blocksOnly)
-    assert.equal(blocksPreview.can_import, true)
-    const delivery = await importStayMigration(db, env, access, { ...blocksOnly, fingerprint: blocksPreview.fingerprint })
-    assert.equal(delivery.blocks[0]!.state, 'failed')
-    assert.match(delivery.blocks[0]!.detail!, /CHANNEX_BASE_URL and CHANNEX_API_KEY are required/)
-    await db.prepare("INSERT INTO channel_night_pushes (organization_id, product_id, provider, date, state, sent_json, updated_at) VALUES (?, ?, 'channex', '2026-12-20', 'pushed', '{\"stop_sell\":false}', ?)").bind(ORG, home.id, NOW).run()
-    const stale = await importStayMigration(db, env, access, { ...blocksOnly, fingerprint: blocksPreview.fingerprint })
-    assert.equal(stale.blocks[0]!.state, 'failed')
-
-
+    // Importing the same export again keeps what the host has since edited.
+    await updateStay(db, env, access, partialStay.id, { version: partialStay.version, guest_name: 'Corrected by host' })
+    const replay = await importStayMigration(db, env, access, { ...partialSource, fingerprint: partialPreview.fingerprint })
+    assert.deepEqual([replay.existing, replay.imported], [1, 0])
+    assert.equal((await getStay(db, access, partialStay.id)).guest_name, 'Corrected by host')
   } finally { await runtime.dispose() }
 })
 

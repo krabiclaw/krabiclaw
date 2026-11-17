@@ -1,3 +1,5 @@
+import { listingGrantSql } from '~/server/domain/listing-access'
+import { assignedOperationsRoles, roleMatchesSql, workspaceManagementRoles, workspaceOperationsRoles } from '~/utils/organization-access'
 import { HTTPError } from 'nitro';
 
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -111,7 +113,7 @@ export async function findLocation(
 }
 
 export function isOrganizationWideRole(role: string): boolean {
-  return role === 'owner' || role === 'admin'
+  return role.split(',').some(value => workspaceManagementRoles.some(management => management === value.trim()))
 }
 
 /**
@@ -312,6 +314,8 @@ export async function listOrganizationNotificationMembers(
   const members = await listAllOrganizationMembers(adapter, organizationId)
   // Keyed by user, not by member row: a duplicated membership must not become
   // a duplicated alert.
+  const workspaceRoles = options.requestId ? workspaceOperationsRoles : workspaceManagementRoles
+  const isWorkspaceRecipient = (role: string) => role.split(',').some(value => workspaceRoles.some(allowed => allowed === value.trim()))
   const byUserId = new Map<string, { id: string; email: string; organizationWide: boolean }>()
   const included = new Set(options.includeMemberIds)
   if (options.guestMessage) {
@@ -328,8 +332,8 @@ export async function listOrganizationNotificationMembers(
     for (const member of responsible) included.add(member.id)
   }
   for (const member of members) {
-    if (!included.has(member.id) && (options.guestMessage || !isOrganizationWideRole(member.role))) continue
-    const organizationWide = isOrganizationWideRole(member.role) || byUserId.get(member.user.id)?.organizationWide === true
+    if (!included.has(member.id) && (options.guestMessage || !isWorkspaceRecipient(member.role))) continue
+    const organizationWide = isWorkspaceRecipient(member.role) || byUserId.get(member.user.id)?.organizationWide === true
     byUserId.set(member.user.id, { id: member.user.id, email: member.user.email, organizationWide })
   }
   if (byUserId.size === 0) return []
@@ -459,10 +463,10 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv & 
  * BATCH_VIEWER reads them from the `viewer` row `withViewer` puts in front of a
  * statement, so a batch resolves the membership and its data in one round trip.
  */
-export interface ViewerTerms { organization: string; user: string; member: string; organizationWide: string }
+export interface ViewerTerms { organization: string; user: string; member: string; organizationWide: string; role?: string }
 export const BATCH_VIEWER: ViewerTerms = {
   organization: '(SELECT organization_id FROM viewer)', user: '(SELECT user_id FROM viewer)',
-  member: '(SELECT member_id FROM viewer)', organizationWide: '(SELECT organization_wide FROM viewer)',
+  member: '(SELECT member_id FROM viewer)', role: '(SELECT role FROM viewer)', organizationWide: '(SELECT organization_wide FROM viewer)',
 }
 
 export const DASHBOARD_ORGANIZATION_COLUMNS = `o.theme_id, o.vertical, o.subdomain,
@@ -473,7 +477,7 @@ export const DASHBOARD_ORGANIZATION_COLUMNS = `o.theme_id, o.vertical, o.subdoma
 function membershipQuery(field: 'slug' | 'id', value: string, userId: string): BatchQuery {
   return {
     query: `SELECT o.id AS organization_id, o.name, o.slug, m.id AS member_id, m.userId AS user_id, m.role,
-        m.role IN ('owner', 'admin') AS organization_wide, ${DASHBOARD_ORGANIZATION_COLUMNS}
+        ${roleMatchesSql('m.role', workspaceOperationsRoles)} AS organization_wide, ${DASHBOARD_ORGANIZATION_COLUMNS}
       FROM organization o JOIN member m ON m.organizationId = o.id AND m.userId = ? WHERE o.${field} = ?`,
     params: [userId, value],
   }
@@ -553,18 +557,32 @@ export function assignedGuestThreadScope(alias: string, user: string | { /** Tru
 /** Workspace operators see all bookings; members see bookings for their assigned products. */
 export async function bookingOperationsScope(input: Pick<MemberAccessPrincipal, 'organizationId' | 'role'>): Promise<'manage' | 'assigned' | null> {
   if (await roleAllows({ ...input, permissions: { operations: ['update'] } })) return 'manage'
-  return await roleAllows({ ...input, permissions: { operations: ['assigned'] } }) ? 'assigned' : null
+  return (await roleAllows({ ...input, permissions: { operations: ['assigned'] } })
+    || await roleAllows({ ...input, permissions: { operations: ['listing_calendar'] } })) ? 'assigned' : null
+}
+
+/** A booking operation follows the assignee or an explicit listing grant. */
+export function bookingListingScopeSql(organization: string, product: string, member: string, role: string, action: 'details' | 'update') {
+  return `((${roleMatchesSql(role, assignedOperationsRoles)} AND EXISTS (SELECT 1 FROM product_booking_configs cfg
+    WHERE cfg.organization_id = ${organization} AND cfg.product_id = ${product} AND cfg.assigned_member_id = ${member}))
+    OR ${listingGrantSql(organization, product, member, action, role)})`
+}
+
+export async function assertCanOperateBookingProduct(db: DbClient, principal: MemberAccessPrincipal, productId: string) {
+  if (await roleAllows({ ...principal, permissions: { operations: ['update'] } })) return
+  const product = await queryFirst(db, `SELECT 1 FROM products p JOIN member m ON m.organizationId = p.organization_id AND m.id = ?
+    WHERE p.organization_id = ? AND p.id = ? AND ${bookingListingScopeSql('p.organization_id', 'p.id', 'm.id', 'm.role', 'update')}`,
+  [principal.memberId, principal.organizationId, productId])
+  if (!product) throw new HTTPError({ statusCode: 404, message: 'Offering not found or access denied' })
 }
 
 /** A booking is its product's assigned member's. Who sees a conversation is conversations.ts conversationAccessSql. */
-export async function assertAssignedBookingAccess(db: DbClient, input: MemberAccessPrincipal & { bookingId: string }): Promise<void> {
-  const scope = await bookingOperationsScope(input)
-  if (scope === 'manage') return
-  if (scope === null) await assertRoleAllows({ ...input, permissions: { operations: ['assigned'] } })
-  const assigned = await queryFirst(db, `SELECT b.id FROM bookings b
-      JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
-      WHERE b.organization_id = ? AND b.id = ? AND ${assignedMemberSql('c')}`,
-    [input.organizationId, input.bookingId, input.userId])
+export async function assertAssignedBookingAccess(db: DbClient, input: MemberAccessPrincipal & { bookingId: string; action?: 'read' | 'update' }): Promise<void> {
+  if (await roleAllows({ ...input, permissions: { operations: ['update'] } })) return
+  const action = input.action === 'update' ? 'update' : 'details'
+  const assigned = await queryFirst(db, `SELECT 1 FROM bookings b JOIN member m ON m.organizationId = b.organization_id AND m.id = ?
+    WHERE b.organization_id = ? AND b.id = ? AND ${bookingListingScopeSql('b.organization_id', 'b.product_id', 'm.id', 'm.role', action)}`,
+  [input.memberId, input.organizationId, input.bookingId])
   if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Conversation not found or access denied', data: { code: 'THREAD_NOT_FOUND', field: 'bookingId' } })
 }
 

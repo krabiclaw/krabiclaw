@@ -49,7 +49,7 @@ export interface AgendaItem {
   resource_image_url: string | null
   name: string | null
   party_size: number | null
-  to: string
+  to: string | null
 }
 
 export interface TodayAgendaPayload extends AgendaPayload {
@@ -120,6 +120,7 @@ interface SourceRow {
   resource_title: string | null
   party_size: number | null
   viewer_seated: number
+  viewer_can_read_details: number
 }
 
 interface LocationRow {
@@ -159,7 +160,9 @@ export async function listAgenda(
 
   const staff = query.principal && !await roleAllows({ ...query.principal.membership, permissions: { operations: ['read'] } })
     ? query.principal.membership : null
-  if (staff) await assertRoleAllows({ ...staff, permissions: { operations: ['assigned'] } })
+  if (staff && !await roleAllows({ ...staff, permissions: { operations: ['listing_calendar'] } })) {
+    await assertRoleAllows({ ...staff, permissions: { operations: ['assigned'] } })
+  }
   const assignedRequests = staff ? assignedGuestThreadScope('rq', staff.userId) : null
 
   const wants = (kind: AgendaKind) => !query.kinds?.length || query.kinds.includes(kind)
@@ -182,14 +185,13 @@ export async function listAgenda(
       ORDER BY l.title, l.id`, params: [scope.organizationId, ...(staff ? [...assignedRequests!.params, staff.userId, staff.userId] : [])],
   }) - 1 : -1
   const viewer: BatchQuery = scope.buyerUserId
-    ? { query: 'SELECT NULL AS organization_id, ? AS user_id, NULL AS member_id, 0 AS organization_wide', params: [scope.buyerUserId] }
-    : { query: 'SELECT ? AS organization_id, ? AS user_id, NULL AS member_id, 1 AS organization_wide', params: [scope.organizationId, query.principal?.membership.userId ?? null] }
-  const readBookings = (wants('booking') || wants('stay'))
-    && (!staff || !query.assignedMemberId || staff.memberId === query.assignedMemberId)
+    ? { query: 'SELECT NULL AS organization_id, ? AS user_id, NULL AS member_id, NULL AS role, 0 AS organization_wide', params: [scope.buyerUserId] }
+    : { query: 'SELECT ? AS organization_id, ? AS user_id, ? AS member_id, ? AS role, ? AS organization_wide', params: [scope.organizationId, query.principal?.membership.userId ?? null, staff?.memberId ?? null, staff?.role ?? null, staff ? 0 : 1] }
+  const readBookings = wants('booking') || (wants('stay') && !query.assignedMemberId)
   const bookingIndex = readBookings ? queries.push(withViewer(viewer, bookedRecordsInRange(BATCH_VIEWER, {
     from: query.from, to: query.to, guest: Boolean(scope.buyerUserId),
-    organizationId: query.organizationId, slotLocationId: query.locationId,
-    assignedMemberId: staff?.memberId ?? query.assignedMemberId,
+    includeAssignedStays: true, includeCalendarGrants: true,
+    organizationId: query.organizationId, timedLocationId: query.locationId, assignedMemberId: query.assignedMemberId,
   }))) - 1 : -1
   const showPosts = Boolean(scope.organizationId && !staff)
   const postIndex = showPosts && wants('post') && !query.assignedMemberId ? queries.push({
@@ -197,7 +199,8 @@ export async function listAgenda(
     SELECT NULL AS assigned_member_id, NULL AS assigned_member_name, p.id, NULL AS operational_id, NULL AS product_id, 'post' AS kind,
            p.published_at AS starts_at, NULL AS ends_at, NULLIF(p.title, '') AS title, NULL AS party_size_is_minimum, NULL AS party_size, p.status,
            p.organization_id, s.name AS organization_name, s.vertical, p.location_id, l.title AS location_title, s.timezone, NULL AS guest_image_url,
-           'content_document' AS picture_owner_type, p.id AS picture_owner_id, COALESCE(l.title, s.name, s.subdomain, s.id) AS resource_title, 0 AS viewer_seated
+           'content_document' AS picture_owner_type, p.id AS picture_owner_id, COALESCE(l.title, s.name, s.subdomain, s.id) AS resource_title,
+           0 AS viewer_seated, 0 AS viewer_can_read_details
       FROM content_documents p
       JOIN organization s ON s.id = p.organization_id
       LEFT JOIN business_locations l ON l.id = p.location_id AND l.organization_id = p.organization_id
@@ -224,6 +227,7 @@ export async function listAgenda(
       assigned_member_id: record.assigned_member_id, assigned_member_name: record.assigned_member_name, id: record.conversation_id!, operational_id: record.id,
       product_id: record.product_id, kind: 'booking', starts_at: record.starts_at, ends_at: record.ends_at, title: record.guest_name ?? '',
       party_size_is_minimum: record.party_size_is_minimum, party_size: record.party_size, status: record.status, organization_id: record.organization_id, viewer_seated: record.viewer_seated,
+      viewer_can_read_details: record.viewer_can_read_details,
       organization_name: record.organization_name, vertical: record.vertical, location_id: record.location_id, location_title: record.location_title, timezone: record.timezone,
       guest_image_url: record.guest_image_url,
       picture_owner_type: !table ? 'product' : record.location_id === null ? 'organization' : 'business_location',
@@ -280,13 +284,14 @@ export async function listAgenda(
       ? guestConversationPath('account', row.id)
       : row.kind === 'post'
         ? postEditorPath(organizationPath!, row.id)
-        : bookingConversationOrRecordPath(organizationPath!, row.operational_id!, row.viewer_seated ? row.id : null)
+        : row.viewer_can_read_details ? bookingConversationOrRecordPath(organizationPath!, row.operational_id!, row.viewer_seated ? row.id : null) : null
     return [{
       assigned_member_id:row.assigned_member_id,assigned_member_name:row.assigned_member_name,
-      id: `${row.kind}:${row.id}`, conversation_id: row.kind === 'post' ? null : row.id, booking_id: row.kind === 'booking' ? row.operational_id : null, product_id: row.product_id, stay_channel: null, stay_moment: null, kind: row.kind, starts_at,
+      id: `${row.kind}:${row.kind === 'booking' && !row.viewer_can_read_details ? row.operational_id : row.id}`,
+      conversation_id: row.viewer_can_read_details ? row.id : null, booking_id: row.kind === 'booking' ? row.operational_id : null, product_id: row.product_id, stay_channel: null, stay_moment: null, kind: row.kind, starts_at,
       ends_at: row.ends_at === null ? null : instantDate(row.ends_at).toISOString(),
       day_key, timezone, show_time_zone: false,
-      title: scope.buyerUserId ? row.resource_title ?? row.title : row.title,
+      title: scope.buyerUserId || (row.kind === 'booking' && !row.viewer_can_read_details) ? row.resource_title ?? row.title : row.title,
       subtitle: scope.buyerUserId ? row.organization_name : row.party_size === null ? null : partyLabel(row.vertical, row.party_size, row.party_size_is_minimum === 1),
       status: row.status, organization_id: row.organization_id,
       location_id: row.location_id, location_title: row.location_title,
@@ -303,7 +308,7 @@ export async function listAgenda(
     if (!stay.product_name?.trim()) throw new Error(`Home ${stay.product_id} has no name for this agenda`)
     // Only a channel's conversation may name no guest. A member reads the guest as their turnover names them: by first name.
     const named = staff ? stayGuestFirstName(stay.guest_name) ?? '' : stay.guest_name ?? ''
-    if (!named && (stay.owner !== 'channel' || stay.channel === 'direct')) throw new HTTPError({ statusCode: 500, message: `Stay ${stay.id} has no guest name`, data: { code: 'INVALID_STAY', field: 'guest_name', booking_id: stay.id } })
+    if (stay.viewer_can_read_details && !named && (stay.owner !== 'channel' || stay.channel === 'direct')) throw new HTTPError({ statusCode: 500, message: `Stay ${stay.id} has no guest name`, data: { code: 'INVALID_STAY', field: 'guest_name', booking_id: stay.id } })
     const guest = named || `Name not provided by ${STAY_CHANNEL_LABELS[stay.channel]}`
     // Rule 1: a channel stay that landed on held nights shows flagged wherever its arrival and
     // departure do, for the managers who resolve it; a member's turnover carries no booking state.
@@ -319,12 +324,12 @@ export async function listAgenda(
       if (!scope.buyerUserId && (day < query.from || day > query.to)) continue
       items.push({
         assigned_member_id: null, assigned_member_name: null, id: scope.buyerUserId ? `stay:${stay.id}` : `stay:${stay.id}:${moment}`, conversation_id: staff ? null : stay.conversation_id, booking_id: stay.id, product_id: stay.product_id, stay_channel: stay.channel, stay_moment: moment === 'departure' && turnover ? 'turnover' : moment, kind: 'stay', starts_at: instant, ends_at: scope.buyerUserId || moment === 'current' ? stay.ends_at : null, day_key: day, timezone: stay.timezone, show_time_zone: false,
-        title: scope.buyerUserId ? stay.product_name : title, subtitle: scope.buyerUserId ? stay.organization_name : [moment === 'arrival' ? 'Checking in' : moment === 'departure' ? 'Checking out' : 'Currently hosting', partyLabel(stay.vertical, stay.party_size, false), moment === 'departure' && turnover ? 'Next guests arrive the same day' : null].filter(Boolean).join(' · '),
+        title: scope.buyerUserId || !stay.viewer_can_read_details ? stay.product_name : title, subtitle: scope.buyerUserId ? stay.organization_name : [moment === 'arrival' ? 'Checking in' : moment === 'departure' ? 'Checking out' : 'Currently hosting', partyLabel(stay.vertical, stay.party_size, false), moment === 'departure' && turnover ? 'Next guests arrive the same day' : null].filter(Boolean).join(' · '),
         status: stay.status, organization_id: stay.organization_id, location_id: stay.location_id, location_title: stay.location_title,
         guest_image_url: stay.guest_image_url, guest_first_name: scope.buyerUserId ? null : stayGuestFirstName(stay.guest_name), overbooked: !staff && Number(stay.overbooked) === 1, check_out_date: stay.check_out_date,
         resource_image_url: pictures.get(`${stay.organization_id}\nproduct\n${stay.product_id}`) ?? null, name: stay.product_name, party_size: stay.party_size,
         to: scope.buyerUserId ? guestConversationPath('account', stay.conversation_id)
-          : bookingConversationOrRecordPath(organizationPath!, stay.id, stay.viewer_seated ? stay.conversation_id : null),
+          : stay.viewer_can_read_details ? bookingConversationOrRecordPath(organizationPath!, stay.id, stay.viewer_seated ? stay.conversation_id : null) : null,
       })
     }
   }

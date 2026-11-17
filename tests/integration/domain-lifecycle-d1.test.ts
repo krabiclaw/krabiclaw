@@ -3,21 +3,19 @@ import test from 'node:test'
 import { Miniflare } from 'miniflare'
 import { H3 } from 'nitro/h3'
 import domainWebhook from '../../server/api/integrations/cloudflare/custom-hostnames/webhook.post.ts'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
-import * as schema from '../../server/db/schema.ts'
 import { createSystemSubdomain, isSystemSubdomainSpent, ensureDomainAvailable, syncDomainWithCloudflare, deleteCustomDomain } from '../../server/utils/domains.ts'
 import { listDashboardEvents } from '../../server/utils/dashboard-events.ts'
 import { checkDashboardDomainGroup, connectDashboardDomain } from '../../server/utils/domain-dashboard-actions.ts'
 import { getOrganizationDomains, groupCustomDomains } from '../../server/utils/domain-read-model.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { captureEvents } from './support/events.ts'
+import { applySchema } from './support/schema.ts'
 
 test('a stale domain result changes nothing and permanent subdomain reservations survive organization deletion', async (t) => {
   const miniflare = new Miniflare({ workers: [{ config: { name: 'owner-domain-test', compatibilityDate: '2024-11-01', manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } }, env: { DB: { type: 'd1' } } } }] })
   try {
     const db = await miniflare.getD1Database('DB')
-    const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-    await db.batch(statements.map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare("INSERT INTO organization(id,name,slug, default_currency, timezone) VALUES('org','Org','org', 'USD', 'UTC'),('other','Other','other', 'USD', 'UTC'),('audit','Audit','audit', 'USD', 'UTC')").run()
     await db.prepare("INSERT INTO user(id,name,email) VALUES('operator','Operator','operator@example.test')").run()
     const env = { NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'example.test', CF_ZONE_ID: 'zone', CF_CUSTOM_HOSTNAMES_API_TOKEN: 'test', CF_SAAS_CNAME_TARGET: 'target.example.test' }

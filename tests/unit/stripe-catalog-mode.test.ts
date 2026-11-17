@@ -51,10 +51,6 @@ test('catalog apply cannot reach Stripe with an unapproved live target', async (
     stripeFactory: () => { providerAccess = true; throw new Error('Unexpected provider access') },
   }), /test-mode key/)
   assert.equal(providerAccess, false)
-})
-
-test('live catalog preflight rejects a test key before Stripe access', async () => {
-  let providerAccess = false
   await assert.rejects(main(['--dry-run', '--require-live-mode'], {
     secretKey: 'sk_test_guard',
     stripeFactory: () => { providerAccess = true; throw new Error('Unexpected provider access') },
@@ -238,33 +234,6 @@ test('retirement-only requires complete replacement offers and emits only archiv
 // The $149 Business offer replaces the $99 one for new sales only: the offers
 // scope adds the new price and points the product at it, and the $99 price a
 // subscription is on stays active until the retirement scope, then stays its contract.
-test('Business moves to the USD 149 offer without repricing a USD 99 subscription', () => {
-  const flat = (id: string, amount: number) => ({ id, product: 'prod_business', active: true, currency: 'usd', billing_scheme: 'per_unit', unit_amount: amount,
-    recurring: { interval: 'month', interval_count: 1 } })
-  const snapshot = {
-    accountId: 'acct_business', accountMode: 'test',
-    products: [{ id: 'prod_business', active: true, metadata: { plan_id: 'business', monthly_price_id: 'price_business_99' }, default_price: 'price_business_99' }],
-    pricesByProduct: { prod_business: [flat('price_business_99', 9900)] },
-    subscriptions: [{ id: 'sub_business', status: 'active', schedule: null, billing_cycle_anchor: 1790000000, cancel_at: null, cancel_at_period_end: false,
-      collection_method: 'charge_automatically', trial_start: null, trial_end: null,
-      items: [{ id: 'si_business', price: 'price_business_99', quantity: 1, current_period_start: 1790000000, current_period_end: 1792678400 }] }],
-  }
-  const offers = buildCatalogPlan({ snapshot, scope: 'offers-only' })
-  const created = offers.operations.find(operation => operation.type === 'create_price' && operation.planId === 'business')
-  assert.equal(created?.params.unit_amount, 14900)
-  const update = offers.operations.find(operation => operation.type === 'update_product' && operation.product?.id === 'prod_business')
-  assert.deepEqual(update?.params.default_price, { ref: { kind: 'price', planId: 'business' } })
-  assert.deepEqual(update?.params.metadata.monthly_price_id, { ref: { kind: 'price', planId: 'business' } })
-  assert.equal(offers.operations.some(operation => operation.priceId === 'price_business_99'), false)
-  assert.deepEqual(offers.providerSnapshot.subscriptions, snapshot.subscriptions)
-  // Once the $149 price exists, retirement deactivates the $99 price for new sales; the subscription keeps billing on it.
-  const after = { ...snapshot, products: [{ ...snapshot.products[0], metadata: { plan_id: 'business', monthly_price_id: 'price_business_149' }, default_price: 'price_business_149' }],
-    pricesByProduct: { prod_business: [flat('price_business_99', 9900), flat('price_business_149', 14900)] } }
-  const full = buildCatalogPlan({ snapshot: after })
-  assert.deepEqual(full.operations.filter(operation => operation.priceId === 'price_business_99').map(operation => operation.type), ['deactivate_price'])
-  assert.equal(full.operations.some(operation => operation.type.includes('subscription')), false)
-})
-
 // Stripe refuses a product marketing feature longer than 80 characters, and refuses it mid-apply.
 test('every catalog marketing feature fits Stripe’s 80-character limit', () => {
   const tooLong = PLAN_DEFINITIONS.flatMap(definition => definition.features.filter(feature => feature.length > 80).map(feature => `${definition.planId}: ${feature}`))

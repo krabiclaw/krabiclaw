@@ -82,11 +82,8 @@ test('article index titles and summaries are editable on every site', () => {
   }
 })
 
-test('a venue owns /reservations, which no tenant could author before', () => {
-  assert.equal(allows('venue', '/reservations'), true)
-})
-
 test('a claimed route the site does not map is refused', () => {
+  assert.equal(allows('venue', '/reservations'), true)
   assert.equal(allows('venue', '/menu'), false)
   assert.equal(allows('legal', '/menu'), false)
   assert.equal(allows('venue', '/docs/anything/deeper'), false)

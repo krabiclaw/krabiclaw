@@ -1,6 +1,6 @@
 import type { MessageBatch } from '@cloudflare/workers-types'
 import { bindDatabaseEvents } from '~/server/db'
-import { consumeEvent, type DomainEvent } from '~/server/events'
+import { consumeEvent, isAirbnbSyncMessage, type DomainEvent } from '~/server/events'
 import { describeFailure } from '~/server/scheduled-tasks'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
@@ -10,7 +10,9 @@ export async function consumeEventBatch(env: CloudflareEnv, batch: MessageBatch)
   const failures: Error[] = []
   for (const message of batch.messages) {
     try {
-      await consumeEvent(env, message.body as DomainEvent)
+      // AIRBNB_SYNC carries only its own messages; EVENTS carries domain events.
+      if (isAirbnbSyncMessage(message.body)) await (await import('~/server/integrations/channex/airbnb-sync')).consumeAirbnbSync(env, message.body)
+      else await consumeEvent(env, message.body as DomainEvent)
       message.ack()
     } catch (cause) {
       failures.push(new Error(`Event ${message.id} failed: ${describeFailure(cause)}`, { cause }))

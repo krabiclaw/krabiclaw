@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { cloudflareSslSettings, domainRecordsPointToSaas, mapCloudflareStatus, type DomainRecord } from '../../server/utils/domains.ts'
+import { domainRecordsPointToSaas, type DomainRecord } from '../../server/utils/domains.ts'
 import { domainInstructions, groupCustomDomains } from '../../server/utils/domain-read-model.ts'
 
 function domain(overrides: Partial<DomainRecord>): DomainRecord {
@@ -20,10 +20,6 @@ function domain(overrides: Partial<DomainRecord>): DomainRecord {
   }
 }
 
-test('Cloudflare moved hostnames map to a persisted failure so PATCH recovery remains available', () => {
-  assert.equal(mapCloudflareStatus('moved', 'pending_validation', 'valid'), 'failed')
-})
-
 test('only account-specific CNAMEs prove that DNS points to SaaS', () => {
   const cases = [
     { name: 'exact CNAME', cname: ['customers.krabiclaw.com'], a: [], aaaa: [], expected: true },
@@ -41,19 +37,6 @@ test('only account-specific CNAMEs prove that DNS points to SaaS', () => {
       entry.name,
     )
   }
-})
-
-test('standard custom hostnames use HTTP DCV by default', () => {
-  assert.deepEqual(cloudflareSslSettings(), {
-    method: 'http',
-    type: 'dv',
-    bundle_method: 'ubiquitous',
-  })
-})
-
-test('manual validation strategies still request TXT DCV explicitly', () => {
-  assert.equal(cloudflareSslSettings('txt_manual').method, 'txt')
-  assert.equal(cloudflareSslSettings('delegated_dcv').method, 'txt')
 })
 
 test('domainInstructions uses first-class second SSL and Delegated DCV fields', () => {

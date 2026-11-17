@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { HTTPError } from 'nitro'
-import * as schema from '../../server/db/schema.ts'
 import { createContentDocumentWithBlocks, updateContentDocument } from '../../server/utils/content/documents.ts'
 import { buildPlatformKnowledgeDocuments, buildTenantBlogDocuments } from '../../server/utils/public-search.ts'
 import { listSocialCardOwners } from '../../server/utils/social-card.ts'
@@ -15,6 +13,7 @@ import { findResourceLocalization, putLocalizationForAuthoring, putResourceLocal
 import { createTenantPage, getPublishedTenantPage } from '../../server/utils/content/pages.ts'
 import { createProduct, setProductLocation } from '../../server/utils/product-management.ts'
 import { addOrganizationLanguage, disableOrganizationLanguage, publishOrganizationLanguage } from '../../server/utils/organization-languages.ts'
+import { applySchema } from './support/schema.ts'
 
 test('public discovery resolves translations through current publication owners', { timeout: 60_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -26,8 +25,7 @@ test('public discovery resolves translations through current publication owners'
     const db = await runtime.getD1Database('DB')
     const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' }
-    const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-    await db.batch(statements.map(statement => db.prepare(statement)))
+    await applySchema(db)
     for (const id of ['platform', 'tenant', 'other']) {
       // Blawby's own organization is the one running the platform template.
       // Public sites: discovery serves only a tenant that finished onboarding.

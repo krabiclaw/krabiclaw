@@ -6,7 +6,7 @@ import { setBookingNote } from '~/server/domain/bookings'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 
 export default defineHandler(async event => {
-  const { db, env, access, organization, bookingId, booking } = await dashboardBookingContext(event)
+  const { db, env, access, organization, bookingId, booking } = await dashboardBookingContext(event, 'update')
   const body = await readRequiredBody<Record<string, unknown>>(event)
   if (booking.unit === 'nights' && Object.keys(body).some(field => field !== 'version' && field !== 'private_notes')) {
     return jsonResponse({ booking: nightBooking(await updateStay(db, env, access, bookingId, { ...body, version: body.version })) })

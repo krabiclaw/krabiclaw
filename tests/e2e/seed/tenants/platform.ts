@@ -20,8 +20,27 @@ export async function seedPlatform(owner: SeedClient, platformOrganizationId: st
     block_id: hero.id, updated_at: hero.updated_at,
     data: { title: 'Your business, online in minutes', subtitle: 'Websites, bookings and messages for local businesses.', cta_label: 'Start free', cta_url: '/signup' },
   })
-  for (const slot of ['media', ...PARALLAX_LAYERS.flatMap(layer => PARALLAX_SIZES.map(size => `parallax_${layer}_${size}`))]) {
+  const homepageSlots = ['media', ...PARALLAX_LAYERS.flatMap(layer => PARALLAX_SIZES.map(size => `parallax_${layer}_${size}`))]
+  for (const slot of homepageSlots) {
     await tool('set_media', { placement: { owner_type: 'content_block', owner_id: hero.id, slot }, asset_id: artwork.id })
+  }
+
+  for (const [locale, title, heading] of [
+    ['ja', 'Blawby 日本語', 'ウェブサイトを数分で公開'],
+    ['zh-Hans', 'Blawby 简体中文', '几分钟内发布网站'],
+    ['zh-Hant', 'Blawby 繁體中文', '幾分鐘內發佈網站'],
+  ]) {
+    await tool('add_organization_language', { locale })
+    await tool('create_site_page', {
+      page_id: home.id, path: '/', locale, title,
+      blocks: [{
+        type: 'hero',
+        source_block_id: hero.id,
+        data: { title: heading },
+        media: homepageSlots.map(slot => ({ asset_id: artwork.id, slot, sort_order: 0 })),
+      }],
+    })
+    await tool('publish_organization_language', { locale })
   }
 
   for (const [path, title] of [['/plugin', 'Blawby for your AI assistant'], ['/products', 'Your website is just the beginning']]) {

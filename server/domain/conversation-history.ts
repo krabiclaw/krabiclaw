@@ -1,3 +1,4 @@
+import { roleMatchesSql, workspaceOperationsRoles } from '~/utils/organization-access'
 import { HTTPError } from 'nitro'
 import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import type { ConversationEntriesPage, ConversationEntry, ConversationHeader, ConversationMessage, ConversationPage, ConversationViewerRole } from '~/shared/messages-contract'
@@ -217,7 +218,7 @@ export async function loadConversationPage(
               AND t.kind IN ('turnover', 'consultation_follow_up', 'consultation_prep') AND (${jobBookingIdSql('t')}) = c.booking_id
               AND (c.kind = 'team' OR c.member_id = t.assigned_member_id OR (t.assigned_member_id IS NULL AND c.member_role IN ('owner', 'admin')))
               AND ${taskScopeSql('t', () => ({
-                organization: 'c.organization_id', user: '?', member: 'c.member_id', organizationWide: "(c.member_role IN ('owner', 'admin'))",
+                organization: 'c.organization_id', user: '?', member: 'c.member_id', organizationWide: roleMatchesSql('c.member_role', workspaceOperationsRoles),
               }))}
             ORDER BY t.created_at, t.id
           ) job
@@ -238,7 +239,7 @@ export async function loadConversationPage(
       JOIN organization o ON o.id = c.organization_id
       LEFT JOIN business_locations l ON l.id = c.location_id AND l.organization_id = c.organization_id
       LEFT JOIN bookings b ON c.kind IN ('booking', 'team') AND b.id = c.booking_id AND b.organization_id = c.organization_id`,
-    params: [...(access.params ?? []), ...(head ? [userId, userId, userId, userId, userId, userId, userId, userId, userId] : [])],
+    params: [...(access.params ?? []), ...(head ? [userId, userId, userId, userId, userId, userId, userId] : [])],
   }, {
     query: `WITH authorized AS MATERIALIZED (${access.query}), ${historyQuery.query.slice('WITH '.length)}`,
     params: [...(access.params ?? []), ...(historyQuery.params ?? [])],

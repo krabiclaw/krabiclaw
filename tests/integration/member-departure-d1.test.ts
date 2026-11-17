@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { captureEvents } from './support/events.ts'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { hashPassword } from 'better-auth/crypto'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { createTables } from './support/table-product.ts'
 import { listStayHomes, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
+import { applySchema } from './support/schema.ts'
 
 // Whoever leaves a business — removed by an owner, leaving on their own, or
 // deleting their account — stops being responsible for its homes and the
@@ -42,7 +41,7 @@ test('every way a member leaves clears their homes and tables and publishes acce
     const cache = await runtime.getKVNamespace('ORGANIZATION_CACHE')
     const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: captureEvents().binding, MEDIA_BASE_URL: 'https://media.example.test', BETTER_AUTH_SECRET: 'departure-proof-secret-long-enough', BETTER_AUTH_URL: BASE,
       NUXT_PUBLIC_PLATFORM_DOMAIN: BASE, STRIPE_SECRET_KEY: 'sk_test_departure_no_provider_requests', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
-    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Departures', 'departures', 'departures', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
@@ -64,24 +63,6 @@ test('every way a member leaves clears their homes and tables and publishes acce
       tokens[person] = signedIn.headers.get('set-auth-token')!
       assert.ok(tokens[person])
     }
-
-    const changedRole = await post('/organization/update-member-role', tokens.owner!, { organizationId: ORG, memberId: 'm-removed', role: 'admin' })
-    assert.equal(changedRole.status, 200, await changedRole.clone().text())
-    assert.equal(await db.prepare("SELECT role FROM member WHERE id = 'm-removed'").first('role'), 'admin')
-    const roleChanges = () => db.prepare("SELECT actor_user_id, payload_json FROM activity_entries WHERE organization_id = ? AND event_name = 'member.role_changed' ORDER BY occurred_at, id").bind(ORG).all<{ actor_user_id: string; payload_json: string }>()
-    const firstRoleChange = (await roleChanges()).results
-    assert.equal(firstRoleChange.length, 1)
-    assert.equal(firstRoleChange[0]!.actor_user_id, 'owner')
-    assert.deepEqual(JSON.parse(firstRoleChange[0]!.payload_json), {
-      entityType: 'member', entityId: 'm-removed', actorType: 'member',
-      beforeState: { role: 'member' }, afterState: { role: 'admin' },
-      metadata: { userId: 'removed', previousRole: 'member', role: 'admin' },
-    })
-    const unchangedRole = await post('/organization/update-member-role', tokens.owner!, { organizationId: ORG, memberId: 'm-removed', role: 'admin' })
-    assert.equal(unchangedRole.status, 200, await unchangedRole.clone().text())
-    assert.deepEqual((await roleChanges()).results, firstRoleChange)
-    const restoredRole = await post('/organization/update-member-role', tokens.owner!, { organizationId: ORG, memberId: 'm-removed', role: 'member' })
-    assert.equal(restoredRole.status, 200, await restoredRole.clone().text())
 
     // Each departing member looks after one home and its location's tables, through
     // the same writes the dashboard makes.

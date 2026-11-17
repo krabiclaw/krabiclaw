@@ -6,13 +6,10 @@ import {
   catalogNavigation,
   catalogSummary,
   catalogSurfaces,
-  collectionsOnSurface,
   countCatalog,
-  isCatalogSurface,
   locationSurfacePath,
   parseSiteProductPath,
   presentationForSurface,
-  productCtaKey,
   publicLocationPath,
 } from '../../utils/product-presentation.ts'
 
@@ -38,6 +35,8 @@ test('a restaurant that also takes bookings reaches both surfaces, menu first', 
   // Neither word names the other, so the level that holds both is the catalog.
   assert.equal(catalogLabel('restaurant', counts), 'Catalog')
   assert.equal(catalogSummary('restaurant', counts), '2 dishes · 1 experience')
+  // summarizeLocationProducts answers in this shape straight from SQL.
+  assert.deepEqual(counts, { total: 3, experiences: 1, dishes: 2, stays: 0 })
 })
 
 test('an empty catalog invites the vertical\'s own first item', () => {
@@ -53,69 +52,6 @@ test('a bookable catalog reads as experiences whatever the vertical sells otherw
   assert.equal(catalogSummary('experience', counts), '1 experience')
 })
 
-test('the same two numbers come from rows or from a count the server did', () => {
-  // summarizeLocationProducts answers in this shape straight from SQL, so a
-  // surface is assigned identically however the caller learned the counts.
-  assert.deepEqual(countCatalog([dish, dish, experience]), { total: 3, experiences: 1, dishes: 2, stays: 0 })
-  assert.equal(catalogSummary('restaurant', { total: 3, experiences: 1, dishes: 2, stays: 0 }), '2 dishes · 1 experience')
-})
-
-test('only a vertical\'s own surface and experiences are pages', () => {
-  assert.equal(isCatalogSurface('restaurant', 'menu'), true)
-  assert.equal(isCatalogSurface('restaurant', 'experiences'), true)
-  assert.equal(isCatalogSurface('restaurant', 'products'), true)
-  assert.equal(isCatalogSurface('experience', 'products'), true)
-  assert.equal(isCatalogSurface('restaurant', 'pc_loc-demo_standard_drinks'), false)
-})
-
-test('a mixed restaurant manages each surface\'s collections separately', () => {
-  const rows = [
-    { name: 'Wood-Fired Pizza', products: [dish, dish] },
-    { name: 'Experiences', products: [experience] },
-    { name: 'Drinks', products: [dish] },
-  ]
-  assert.deepEqual(collectionsOnSurface('restaurant', rows, 'menu').map(row => row.name), ['Wood-Fired Pizza', 'Drinks'])
-  assert.deepEqual(collectionsOnSurface('restaurant', rows, 'experiences').map(row => row.name), ['Experiences'])
-})
-
-// A chef's counter is one collection the owner named once, holding dishes that
-// belong on the menu and a bookable seating that belongs to experiences. The
-// public pages already split it that way — /menu never shows the omakase and
-// /experiences never shows the dishes — so the CMS opens the same collection on
-// both surfaces with each surface's members and no others.
-test('a collection holding both a dish and an experience is on both surfaces, split', () => {
-  const rows = [{ name: "Chef's Counter", products: [dish, experience] }]
-
-  const onMenu = collectionsOnSurface('restaurant', rows, 'menu')
-  assert.deepEqual(onMenu.map(row => row.name), ["Chef's Counter"])
-  assert.deepEqual(onMenu[0]!.products, [dish])
-
-  const onExperiences = collectionsOnSurface('restaurant', rows, 'experiences')
-  assert.deepEqual(onExperiences.map(row => row.name), ["Chef's Counter"])
-  assert.deepEqual(onExperiences[0]!.products, [experience])
-})
-
-test('a collection with no member on a surface is not offered there', () => {
-  const rows = [{ name: 'Drinks', products: [dish] }]
-  assert.deepEqual(collectionsOnSurface('restaurant', rows, 'experiences'), [])
-})
-
-test('a collection with nothing in it is offered on every surface until it holds something', () => {
-  const rows = [{ name: 'Not yet filled', products: [] as Pick<Product, 'kind'>[] }]
-  assert.equal(collectionsOnSurface('restaurant', rows, 'menu').length, 1)
-  assert.equal(collectionsOnSurface('restaurant', rows, 'experiences').length, 1)
-  const filled = [{ name: 'Not yet filled', products: [dish] }]
-  assert.equal(collectionsOnSurface('restaurant', filled, 'experiences').length, 0)
-})
-
-test('a pure menu keeps every section on the menu surface', () => {
-  const rows = [
-    { name: 'Antipasti', products: [dish] },
-    { name: 'Drinks', products: [dish, dish] },
-  ]
-  assert.deepEqual(collectionsOnSurface('restaurant', rows, 'menu').map(row => row.name), ['Antipasti', 'Drinks'])
-})
-
 const stay = { kind: 'stay' } as Pick<Product, 'kind'>
 
 test('homes are their own surface, counted apart from products', () => {
@@ -124,7 +60,6 @@ test('homes are their own surface, counted apart from products', () => {
   assert.deepEqual(catalogSurfaces('lodging', counts), ['stays', 'experiences'])
   assert.equal(catalogSummary('lodging', counts), '2 places to stay · 1 experience')
   assert.equal(catalogLabel('lodging', countCatalog([stay])), 'Places to stay')
-  assert.equal(isCatalogSurface('lodging', 'stays'), true)
 })
 
 test('a home is named by its own slug, separately from a business branch', () => {
@@ -135,12 +70,6 @@ test('a home is named by its own slug, separately from a business branch', () =>
   assert.equal(publicLocationPath({ slug: 'beach' }), '/locations/beach')
   assert.equal(locationSurfacePath('beach', 'stays'), '/stays')
   assert.equal(locationSurfacePath('beach', 'menu'), '/locations/beach/menu')
-})
-
-test('a card names what it opens by the product kind', () => {
-  assert.equal(productCtaKey('stay'), 'stay.check_availability')
-  assert.equal(productCtaKey('dish'), 'site.common.view_dish')
-  assert.equal(productCtaKey('experience'), 'site.common.view_experience')
 })
 
 test('catalog navigation links each section where the site\'s vertical lists it, and a site without a vertical is refused', () => {

@@ -4,7 +4,7 @@ import { dashboardBookingContext, dashboardBookingDetails, nightBooking } from '
 import { changeBooking } from '~/server/domain/guest-threads/booking-changes'
 
 export default defineHandler(async event => {
-  const { db, env, access, organization, bookingId, userId } = await dashboardBookingContext(event)
+  const { db, env, access, organization, bookingId, userId } = await dashboardBookingContext(event, 'update')
   const body = await readRequiredBody<Record<string, unknown>>(event)
   const result = await changeBooking(db, env, {
     organizationId: organization.id, bookingId, actorUserId: userId, body, apply: body.apply !== false, stayAccess: access,

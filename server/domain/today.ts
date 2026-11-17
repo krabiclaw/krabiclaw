@@ -1,8 +1,10 @@
+import { staffListingsQuery } from '~/server/domain/listing-access'
+import { organizationRoleCards, rolesAllowing, rolesForVertical, roleMatchesSql, workspaceManagementRoles } from '~/utils/organization-access'
 import { HTTPError } from 'nitro'
 import { executeBatch, type DbClient } from '~/server/db'
 import { assertRoleAllows, BATCH_VIEWER, membershipBySlugQuery, withViewer } from '~/server/utils/member-access'
-import { bookedRecordsInRange, type BookedRecordInRange, type BookedRecordWithAmounts } from '~/server/domain/product-bookings'
-import { openWorkQuery, taskAssignees, taskAssigneesQuery, type OpenWorkRow } from '~/server/domain/tasks'
+import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
+import { openWorkQuery, taskUpdatePath, taskAssignees, taskAssigneesQuery, type OpenWorkRow } from '~/server/domain/tasks'
 import { bookingWelcomesQuery, bookingWelcomeViews, setupQueries, setupViews } from '~/server/domain/opportunities'
 import { bookingDay } from '~/server/domain/requests'
 import { groupMediaPlacements, mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
@@ -44,8 +46,8 @@ type Noun = keyof typeof NOUNS
 /** A card as it is built: what it counts as, where it sorts, the bookings it stands for and the local day it is on. */
 interface Card extends TodayItem { noun: Noun; order: [number, string]; bookings: string[]; day: string }
 
-export async function readToday(db: DbClient, input: { slug: string; userId: string; range: Range; now: Date }): Promise<BusinessToday> {
-  const { range, now } = input
+export async function readToday(db: DbClient, input: { slug: string; userId: string; range: Range; now: Date; staffAccessWrites?: boolean }): Promise<BusinessToday> {
+  const { range, now, staffAccessWrites = true } = input
   const utcDay = now.toISOString().slice(0, 10)
   const from = utcDay, to = range === 'today' ? utcDay : addLocalDays(utcDay, UPCOMING_RESERVATION_DAYS + 1)
   const wideFrom = `${addLocalDays(from, -1)}T00:00:00.000Z`, wideTo = `${addLocalDays(to, 1)}T23:59:59.999Z`
@@ -54,9 +56,10 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   const window = `(starts_at <= ? AND ends_at >= ?${range === 'today' ? " OR status = 'pending'" : ''})`
   // What only an owner or admin reads: a member's statements name no organization and read nothing.
   const managed = { sql: `CASE WHEN ${BATCH_VIEWER.organizationWide} = 1 THEN ${org} END` }
-  const [viewerResult, recordResult, workResult, productResult, locationResult, welcomeResult, factResult, unpricedResult, assigneeResult] = await executeBatch(db, [
+  const management = { sql: `CASE WHEN ${roleMatchesSql(BATCH_VIEWER.role!, workspaceManagementRoles)} THEN ${org} END` }
+  const [viewerResult, recordResult, workResult, productResult, locationResult, welcomeResult, factResult, unpricedResult, assigneeResult, listingResult] = await executeBatch(db, [
     membership,
-    withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, { from, to, pending: range === 'today', amounts: true })),
+    withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, { from, to, pending: range === 'today', includePayments: true })),
     withViewer(membership, openWorkQuery(BATCH_VIEWER, to)),
     withViewer(membership, mediaPlacementsQuery({ organizationId: { sql: org }, ownerType: 'product', owners: {
       sql: `SELECT product_id FROM bookings WHERE organization_id = ${org} AND status <> 'cancelled' AND ${window}
@@ -65,13 +68,15 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
       sql: `SELECT location_id FROM bookings WHERE organization_id = ${org} AND location_id IS NOT NULL AND status <> 'cancelled' AND ${window}`, params: [wideTo, wideFrom] } })),
     withViewer(membership, bookingWelcomesQuery(managed, { now })),
     // The setup the business has not finished is Today's, after the day's cards.
-    ...setupQueries(range === 'today' ? managed : { sql: 'NULL' }, { now }).map(query => withViewer(membership, query)),
+    ...setupQueries(range === 'today' ? management : { sql: 'NULL' }, { now }).map(query => withViewer(membership, query)),
     withViewer(membership, taskAssigneesQuery(managed)),
+    ...(staffAccessWrites ? [withViewer(membership, staffListingsQuery(managed.sql, '(SELECT vertical FROM viewer)'))] : []),
   ], { operation: 'Read Today' })
   const viewer = viewerResult!.results[0] as { organization_id: string; slug: string; vertical: string | null; role: string; organization_wide: number } | undefined
   if (!viewer) throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
   await assertRoleAllows({ organizationId: viewer.organization_id, role: viewer.role, permissions: { task: ['read'] } })
   const manage = viewer.organization_wide === 1
+  const administration = viewer.role.split(',').some(value => workspaceManagementRoles.some(role => role === value.trim()))
   const products = groupMediaPlacements(productResult!.results), locations = groupMediaPlacements(locationResult!.results)
   const picture = (ownerType: 'product' | 'business_location', id: string | null) => id === null ? null
     : ownerPicture(ownerType, (ownerType === 'product' ? products : locations).get(id) ?? [], [])?.imageUrl ?? null
@@ -103,7 +108,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     return card
   }
 
-  for (const record of (recordResult!.results as BookedRecordWithAmounts[])) {
+  for (const record of (recordResult!.results as BookedRecordInRange[])) {
     const zone = record.timezone
     const start = bookingDay(record.starts_at, zone), end = bookingDay(record.ends_at, zone)
     const guest = first(record.guest_name)
@@ -112,7 +117,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     const image = record.product_kind === 'table' ? picture('business_location', record.location_id) : picture('product', record.product_id)
     // A visit with no location is held online, as its booking reads it.
     const place = record.unit === 'nights' ? record.product_name : [record.product_kind === 'table' ? null : record.product_name, record.location_id === null ? 'Online' : record.location_title].filter(Boolean).join(' · ') || null
-    const line = [place, manage ? money(record) : null].filter(Boolean).join(' · ') || null
+    const line = [place, administration ? money(record) : null].filter(Boolean).join(' · ') || null
     const to = recordPath(record.id, record.conversation_id, record.viewer_seated)
     const welcome = record.conversation_id ? welcomes.get(record.conversation_id) : undefined
     const opens = record.conversation_id && record.viewer_seated
@@ -162,7 +167,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
       action })
   }
   for (const [, held] of byClass) {
-    const record = (recordResult!.results as BookedRecordWithAmounts[]).find(row => row.id === held.card.bookings[0])!
+    const record = (recordResult!.results as BookedRecordInRange[]).find(row => row.id === held.card.bookings[0])!
     // A class is named by itself; its line is where and how many people are booked.
     held.card.headline = record.product_name
     held.card.line = [record.location_id === null ? 'Online' : record.location_title, `${held.party} ${held.party === 1 ? 'guest' : 'guests'}`].filter(Boolean).join(' · ')
@@ -180,14 +185,16 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     const to = work.booking_id ? recordPath(work.booking_id, work.guest_conversation_id, work.viewer_seated) : null
     if (work.kind === 'custom') {
       // A task someone added: the viewer's, or nobody's for an owner or admin; closed in one tap from its card.
-      if (!(work.assigned_to_viewer || (work.assigned_member_id === null && manage))) continue
+      const available = !manage && work.claim_role !== null && work.assigned_member_id === null
+      if (!(available || work.assigned_to_viewer || (work.assigned_member_id === null && manage))) continue
       if (day === null ? range !== 'today' : range === 'today' ? day > today(work.timezone) : !shows(day, work.timezone)) continue
       if (!work.title) throw new Error(`Task ${work.id} has no title`)
       add({ id: `task:${work.id}`, noun: 'task', order: [1, at ?? ''], bookings: [], day: day ?? today(work.timezone),
         when: at ? visitWhen(at, work.timezone) : null, image_url: picture('product', work.product_id), icon: 'i-lucide-list-checks', headline: work.title,
-        line: work.created_by_viewer ? 'Added by you' : work.creator_name ? `Added by ${first(work.creator_name)}` : null,
-        action: { title: 'Mark as done', detail: 'One tap when it’s finished' }, to: null, draft: null,
-        done: { path: `/api/organizations/${encodeURIComponent(viewer.organization_id)}/tasks/${encodeURIComponent(work.id)}/complete` } })
+        line: available ? work.product_name : work.created_by_viewer ? 'Added by you' : work.creator_name ? `Added by ${first(work.creator_name)}` : null,
+        action: available ? { title: 'Available to claim', detail: '' } : { title: 'Mark as done', detail: work.notes ?? 'One tap when it’s finished' }, to: null, draft: null,
+        ...(available ? { claim: { path: taskUpdatePath(viewer.organization_id, work.id), version: work.version, label: 'Claim' } } : {}),
+        done: available ? null : { path: `/api/organizations/${encodeURIComponent(viewer.organization_id)}/tasks/${encodeURIComponent(work.id)}/complete` } })
       continue
     }
     if (!job) {
@@ -219,7 +226,14 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
       continue
     }
     // Prep is the host's own preparation for a visit already on their list.
-    if (work.kind === 'consultation_prep') continue
+    if (work.kind === 'consultation_prep') {
+      if (manage || work.product_kind !== 'service' || (work.booking_id && byBooking.has(work.booking_id))) continue
+      add({ id: `task:${work.id}`, noun: 'task', order: [1, at ?? ''], bookings: [], day,
+        when: at ? visitWhen(at, work.timezone) : null, image_url: picture('product', work.product_id), icon: 'i-lucide-list-checks',
+        headline: 'Prepare for consultation', line: work.product_name, action: { title: 'Mark as done', detail: 'One tap when it’s finished' },
+        to: null, draft: null, done: { path: taskUpdatePath(viewer.organization_id, work.id) + '/complete' } })
+      continue
+    }
     const headline = work.kind === 'turnover' ? `Clean up after ${group}` : `Follow up with ${group}`
     const team = work.team_conversation_id
     add({
@@ -244,6 +258,12 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   cards.sort((a, b) => a.order[0] - b.order[0] || a.order[1].localeCompare(b.order[1]) || a.id.localeCompare(b.id))
   return {
     title: heading(cards, range), cards: cards.map(({ noun: _noun, order: _order, bookings: _bookings, day: _day, ...card }) => card),
+    ...(manage && staffAccessWrites ? { claim_options: {
+      roles: rolesForVertical(viewer.vertical)
+        .filter(role => rolesAllowing({ task: ['claim'] }).includes(role) && organizationRoleCards[role].access.includes('tasks'))
+        .map(value => ({ value, label: organizationRoleCards[value].label })),
+      listings: (listingResult?.results ?? []) as NonNullable<BusinessToday['claim_options']>['listings'],
+    } } : {}),
     assignees: taskAssignees(assigneeResult!.results, input.userId), resolved_at: now.toISOString(),
   }
 }
@@ -264,7 +284,7 @@ function heading(cards: Card[], range: Range): string {
 }
 
 /** What an owner or admin reads of a booking's money, only when there is some: "$1,240 paid", "$200 of $380 paid", "free", a request's price. */
-function money(record: Pick<BookedRecordWithAmounts, 'status' | 'unit' | 'owner' | 'channel' | 'total_minor' | 'currency' | 'paid_minor' | 'id'>): string | null {
+function money(record: Pick<BookedRecordInRange, 'status' | 'unit' | 'owner' | 'channel' | 'total_minor' | 'currency' | 'paid_minor' | 'id'>): string | null {
   if (record.unit === 'nights' && isChannelManagedStay(record)) return record.channel === 'direct' ? null : `Paid through ${STAY_CHANNEL_LABELS[record.channel]}`
   if (record.total_minor === 0) return 'free'
   const format = (amount: number) => {

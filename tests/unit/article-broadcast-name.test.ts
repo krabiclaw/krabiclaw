@@ -8,8 +8,5 @@ test('a Resend broadcast name never exceeds the 70 characters Resend accepts', (
   const name = broadcastName(title)
   assert.equal(name.length, 70)
   assert.ok(name.startsWith('Article: What’s New in Blawby'))
-})
-
-test('a short title keeps its whole name', () => {
   assert.equal(broadcastName('Hello'), 'Article: Hello')
 })

@@ -16,9 +16,6 @@ test('locale query selection is limited to public data APIs', () => {
     localeQueryMiddleware(event('https://tenant.example/api/public/page?locale=th')),
     undefined,
   )
-})
-
-test('a dashboard translation keeps its locale in the URL', () => {
   assert.equal(
     localeQueryMiddleware(event('https://krabiclaw.example/dashboard/kikuzuki/website/brand?editMode=translations&locale=th')),
     undefined,

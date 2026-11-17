@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import { requestInsertQueries } from '../../server/domain/requests.ts'
 import { appendMessage } from '../../server/domain/conversations.ts'
 import { sendEmail } from '../../server/utils/email-delivery.ts'
@@ -17,6 +15,7 @@ import { reconcileProductNewsContacts, reconcileProductNewsFromProvider, syncPro
 import { disableCategoryEmail, getNotificationPreferences, setNotificationPreference } from '../../server/domain/notification-preferences.ts'
 import { runArticleBroadcast } from '../../server/domain/article-broadcast.ts'
 import { buildUnsubscribeUrls } from '../../server/utils/unsubscribe.ts'
+import { applySchema } from './support/schema.ts'
 
 const SEGMENT = 'segment-product-news'
 const TOPIC = 'topic-product-news'
@@ -183,7 +182,7 @@ async function runtimeWithSchema() {
     env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'resend-native-proof', exportName: 'Hub' } },
   } }] })
   const db = await runtime.getD1Database('DB')
-  await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+  await applySchema(db)
   const bindings = await runtime.getBindings<{ GUEST_INBOX_HUBS: DurableObjectNamespace }>()
   return { runtime, db, hubs: bindings.GUEST_INBOX_HUBS }
 }
