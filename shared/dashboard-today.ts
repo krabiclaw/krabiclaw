@@ -66,6 +66,7 @@ export interface TodayItem {
   draft: string | null
   /** A task someone added closes from its card: POST `{}` to this path. */
   done: { path: string } | null
+  claim?: { path: string; version: number; label: string }
 }
 
 /** GET /api/dashboard/today: one list for the person looking, in the order the day happens. */
@@ -75,5 +76,6 @@ export interface BusinessToday {
   cards: TodayItem[]
   /** Who an owner or admin can give a task to; empty for a member. */
   assignees: TaskPerson[]
+  claim_options: { roles: Array<{ value: string; label: string }>; listings: Array<{ listing_id: string; label: string }> } | null
   resolved_at: string
 }

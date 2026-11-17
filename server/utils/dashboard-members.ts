@@ -1,8 +1,10 @@
+import { HTTPError } from 'nitro'
+import { staffListings } from '~/server/domain/listing-access'
 import { organizationOptions, type CloudflareEnv } from '~/server/utils/auth'
 import { listAllOrganizationMembers, organizationAdapter, roleAllows } from '~/server/utils/member-access'
 import { createDb, queryAll, type DbClient } from '~/server/db'
 import { isDeliverySent } from '~/server/domain/guest-threads/deliveries'
-import { organizationRoleLabel } from '~/utils/organization-access'
+import { listingAccessLevels, organizationRoleCards, organizationRoleLabel, rolesForVertical } from '~/utils/organization-access'
 import type { GuestThreadDeliveryRow } from '~/server/domain/guest-threads/types'
 
 type InvitationDelivery = Pick<GuestThreadDeliveryRow, 'status' | 'provider' | 'provider_message_id' | 'error'>
@@ -24,7 +26,7 @@ export async function getInvitationDeliveries(db: DbClient, organizationId: stri
   return new Map(rows.map(({ invitationId, ...delivery }) => [invitationId, delivery]))
 }
 
-export async function getOrganizationMembersData(env: CloudflareEnv, organization: { id: string; role: string }, userId: string) {
+export async function getOrganizationMembersData(env: CloudflareEnv, organization: { id: string; role: string; vertical: string | null }, userId: string) {
   const principal = { organizationId: organization.id, role: organization.role }
   const [canInvite, canCancel, canUpdate, canRemove] = await Promise.all([
     roleAllows({ ...principal, permissions: { invitation: ['create'] } }),
@@ -36,10 +38,11 @@ export async function getOrganizationMembersData(env: CloudflareEnv, organizatio
   const hasCreatorRole = (role: string) => role.split(',').map(value => value.trim()).includes(creatorRole)
   const roleLabel = (role: string) => role.split(',').map(value => organizationRoleLabel(value.trim())).join(', ')
   const canGrantOwner = hasCreatorRole(organization.role)
-  const roleChoices = (['member', 'admin', creatorRole] as const)
+  const memberRoles = rolesForVertical(organization.vertical)
+  const roleChoices = memberRoles
     .filter(role => role !== creatorRole || canGrantOwner)
     .map(value => ({ value, label: organizationRoleLabel(value) }))
-  const inviteRoles = canInvite ? roleChoices : []
+  const inviteRoles = canInvite ? roleChoices.filter(({ value }) => !organizationRoleCards[value].vertical) : []
   const canViewInvitations = canInvite || canCancel
   const adapter = await organizationAdapter(env)
   const [memberRows, invitationRows] = await Promise.all([
@@ -84,4 +87,28 @@ export async function getOrganizationMembersData(env: CloudflareEnv, organizatio
     })
 
   return { members, invitations, inviteRoles, canViewInvitations }
+}
+
+export async function getStaffInviteScreen(db: DbClient, organization: { id: string; role: string; vertical: string | null }) {
+  const canInvite = await roleAllows({ organizationId: organization.id, role: organization.role, permissions: { invitation: ['create'] } })
+  if (!canInvite) throw new HTTPError({ statusCode: 403, message: 'You cannot invite staff to this workspace', data: { code: 'FORBIDDEN' } })
+  const roles = rolesForVertical(organization.vertical)
+    .filter(role => role !== 'owner' || organization.role.split(',').some(value => value.trim() === 'owner'))
+    .map(value => {
+      const { label, description, access } = organizationRoleCards[value]
+      return { value, label, description, access: access.map(level => ({ value: level, label: listingAccessLevels[level] })) }
+    })
+  return {
+    organization_id: organization.id,
+    title: 'Invite a team member',
+    email_label: 'Email address',
+    role_label: 'Role',
+    listing_label: 'Listing access',
+    no_access_label: 'No additional access',
+    save_label: 'Send invite',
+    resend_label: 'Resend invite',
+    default_role: 'member',
+    roles,
+    listings: await staffListings(db, organization),
+  }
 }

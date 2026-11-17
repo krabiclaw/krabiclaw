@@ -14,7 +14,7 @@ import { sendGuestThreadReply, sendScheduledGuestReply } from '../../server/doma
 import { conversationPageFor } from './support/conversation-page.ts'
 import { listConversations, readWorkspaceInbox } from '../../server/domain/guest-threads/repository.ts'
 import { appendMessage, assertConversationAccess, type MessageRow } from '../../server/domain/conversations.ts'
-import { setListingMessagingAccess } from '../../server/domain/conversation-participants.ts'
+import { setListingAccess } from '../../server/domain/conversation-participants.ts'
 import { createDeliveryReceipt, listThreadDeliveries, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { getGuestRequest } from '../../server/domain/requests.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -528,7 +528,7 @@ test('a reply is sent with the message id Channex returns, and any Channex error
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('retry-cohost-member', ?, 'retry-cohost', 'member', 0)").bind(ORG).run()
     const owner = joinedMemberPrincipal({ userId: OWNER, organizationId: ORG, memberId: 'owner-member', role: 'owner' }, { env })
     const grant = { listingId: productId, memberId: 'retry-cohost-member' }
-    await setListingMessagingAccess(db, env, owner, { ...grant, allowed: true })
+    await setListingAccess(db, env, owner, { ...grant, access: 'messaging' })
     const cohostRetry = { ...refusedInput, actorUserId: 'retry-cohost' }
     await assert.rejects(sendGuestThreadReply(db, cohostRetry), code('IDEMPOTENCY_CONFLICT'))
     assert.deepEqual(await sendGuestThreadReply(db, { ...cohostRetry, retryMessageId: 'missing-message' }),
@@ -552,7 +552,7 @@ test('a reply is sent with the message id Channex returns, and any Channex error
     }
     assert.equal(provider.sends - sendsBefore, 1, 'concurrent retries send once')
     assert.equal(await db.prepare('SELECT author_user_id FROM messages WHERE id = ?').bind(refusedEntry.id).first('author_user_id'), OWNER)
-    await setListingMessagingAccess(db, env, owner, { ...grant, allowed: false })
+    await setListingAccess(db, env, owner, { ...grant, access: null })
     assert.deepEqual(await sendGuestThreadReply(db, explicitRetry), { ok: false, status: 404, reason: 'thread_not_found' })
     assert.equal(provider.sends - sendsBefore, 1, 'a revoked cohost cannot replay the delivered message')
     assert.deepEqual(await db.prepare('SELECT status, provider_message_id, error FROM guest_thread_deliveries WHERE message_id = ?').bind(refusedEntry.id).first(),

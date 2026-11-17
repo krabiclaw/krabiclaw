@@ -1,3 +1,5 @@
+import { canGrantListingAccess, listingLevelSql } from '~/server/domain/listing-access'
+import type { StoredListingAccess } from '~/utils/organization-access'
 import { HTTPError } from 'nitro'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { publishAccessInvalidation, publishConversationEvent, publishDashboardInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
@@ -89,7 +91,7 @@ function insertListingParticipants(organizationId: string, scope: BatchQuery): B
   return {
     query: `INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role, host_listing_id, created_at)
       SELECT c.id, c.organization_id, m.userId, 'member', grant.listing_id, grant.created_at FROM conversations c
-      JOIN listing_message_members grant ON grant.organization_id = c.organization_id AND grant.listing_id = ${listingOfConversation}
+      JOIN listing_message_members grant ON grant.organization_id = c.organization_id AND grant.listing_id = ${listingOfConversation} AND ${listingLevelSql('grant', 'reply')}
       JOIN member m ON m.organizationId = grant.organization_id AND m.id = grant.member_id
       WHERE c.organization_id = ? AND ${GUEST_THREAD} AND (${scope.query}) AND m.userId IS NOT c.user_id
       ON CONFLICT (conversation_id, user_id) DO UPDATE SET role = 'member', host_listing_id = excluded.host_listing_id
@@ -103,38 +105,43 @@ export function initialListingParticipants(organizationId: string, conversationI
   return insertListingParticipants(organizationId, { query: 'c.id = ?', params: [conversationId] })
 }
 
-export async function setListingMessagingAccess(db: DbClient, env: GuestInboxPublicationEnv, principal: MemberAccessPrincipal, input: { listingId: string; memberId: string; allowed: boolean }) {
+export async function setListingAccess(db: DbClient, env: GuestInboxPublicationEnv, principal: MemberAccessPrincipal, input: { listingId: string; memberId: string; access: StoredListingAccess | null }) {
   const { organizationId, userId } = principal
+  const { listingId, memberId } = input
   const owner = `EXISTS (SELECT 1 FROM member m WHERE m.organizationId = ? AND m.userId = ? AND ${OWNER_ROLE})`
   const ownerParams = [organizationId, userId]
   if (!await queryFirst(db, `SELECT 1 WHERE ${owner}`, ownerParams)) {
-    throw new HTTPError({ statusCode: 403, message: 'Only a workspace owner can manage listing messaging access' })
+    throw new HTTPError({ statusCode: 403, message: 'Only a workspace owner can manage listing access' })
   }
-  const subject = await queryFirst<{ user_id: string }>(db, `SELECT m.userId AS user_id FROM product_stay_configs listing
-    JOIN member m ON m.organizationId = listing.organization_id WHERE listing.organization_id = ? AND listing.product_id = ? AND m.id = ?`,
+  const subject = await queryFirst<{ user_id: string; role: string }>(db, `SELECT m.userId AS user_id, m.role FROM products listing
+    JOIN member m ON m.organizationId = listing.organization_id WHERE listing.organization_id = ? AND listing.id = ? AND listing.kind IN ('stay', 'table', 'service', 'experience') AND m.id = ?`,
   [organizationId, input.listingId, input.memberId])
   if (!subject) throw new HTTPError({ statusCode: 404, message: 'The listing or workspace member was not found' })
+  if (input.access && !canGrantListingAccess(subject.role, input.access)) {
+    throw new HTTPError({ statusCode: 422, message: 'This role does not allow that listing access', data: { code: 'INVALID_LISTING_ACCESS' } })
+  }
   const guard = {
     query: `SELECT CASE WHEN ${owner}
-      AND EXISTS (SELECT 1 FROM member WHERE id = ? AND organizationId = ? AND userId = ?)
-      AND EXISTS (SELECT 1 FROM product_stay_configs WHERE product_id = ? AND organization_id = ?)
+      AND EXISTS (SELECT 1 FROM member WHERE id = ? AND organizationId = ? AND userId = ? AND role = ?)
+      AND EXISTS (SELECT 1 FROM products WHERE id = ? AND organization_id = ?)
       THEN 1 ELSE json('LISTING_MESSAGING_ACCESS_CHANGED') END`,
-    params: [...ownerParams, input.memberId, organizationId, subject.user_id, input.listingId, organizationId],
+    params: [...ownerParams, memberId, organizationId, subject.user_id, subject.role, listingId, organizationId],
   }
   const grant = [organizationId, input.listingId, input.memberId]
   const selector: BatchQuery = { query: `${listingOfConversation} = ?`, params: [input.listingId] }
-  await executeBatch(db, [guard, ...(input.allowed ? [{
-    query: 'INSERT INTO listing_message_members (organization_id, listing_id, member_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING',
-    params: grant,
-  }, ...reconcileGuestListingParticipants(organizationId, selector)] : [{
+  await executeBatch(db, [guard, {
     query: "UPDATE conversation_participants SET role = NULL, host_listing_id = NULL WHERE organization_id = ? AND host_listing_id = ? AND user_id = ? AND role = 'member'",
-    params: [organizationId, input.listingId, subject.user_id],
-  }, {
+    params: [organizationId, listingId, subject.user_id],
+  }, input.access ? {
+    query: `INSERT INTO listing_message_members (organization_id, listing_id, member_id, access) VALUES (?, ?, ?, ?)
+      ON CONFLICT (organization_id, listing_id, member_id) DO UPDATE SET access = excluded.access`,
+    params: [...grant, input.access],
+  } : {
     query: 'DELETE FROM listing_message_members WHERE organization_id = ? AND listing_id = ? AND member_id = ?',
     params: grant,
-  }])], { operation: input.allowed ? 'Grant listing messaging access' : 'Revoke listing messaging access' })
+  }, ...reconcileGuestListingParticipants(organizationId, selector)], { operation: 'Change listing access' })
   await publishAccessInvalidation(env, { organizationId })
-  return { listing_id: input.listingId, member_id: input.memberId, allowed: input.allowed }
+  return { listing_id: listingId, member_id: memberId, access: input.access }
 }
 
 /** The booking account and current staff with conversation access can manage companions. */
