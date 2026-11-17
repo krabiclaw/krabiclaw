@@ -4,9 +4,9 @@
       "type": "http",
       "url": "https://ui.nuxt.com/mcp"
     },
-    "krabiclaw": {
+    "blawby": {
       "type": "http",
-      "url": "https://krabiclaw.com/api/mcp"
+      "url": "https://blawby.com/api/mcp"
     }
   }
 }
