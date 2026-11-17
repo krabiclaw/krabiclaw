@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { publishAccessInvalidation, publishConversationEvent, publishDashboardInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
-import { conversationAccessDenied, conversationProductSql, currentParticipantSql, CURRENT_GUEST_SQL } from '~/server/domain/conversations'
+import { conversationAccessDenied, conversationMemberSql, conversationProductSql, CURRENT_GUEST_SQL } from '~/server/domain/conversations'
 import { hashIdentifier } from '~/server/utils/hourly-rate-limit'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 
@@ -137,14 +137,12 @@ export async function setListingMessagingAccess(db: DbClient, env: GuestInboxPub
   return { listing_id: input.listingId, member_id: input.memberId, allowed: input.allowed }
 }
 
-/** The booking account and seated hosts can manage companion access. */
+/** The booking account and current staff with conversation access can manage companions. */
 function bookingGuestManagerSql(actor: string) {
-  return `EXISTS (SELECT 1 FROM conversation_participants seat
-    WHERE seat.conversation_id = c.id AND seat.organization_id = c.organization_id AND seat.user_id = ${actor}
-      AND ${currentParticipantSql('seat')}
-      AND (seat.role = 'member'
-        OR (seat.role = 'guest' AND seat.user_id = c.user_id AND ${CURRENT_GUEST_SQL('c')}
-          AND EXISTS (SELECT 1 FROM bookings b WHERE b.id = c.booking_id AND b.organization_id = c.organization_id AND b.owner = 'app'))))`
+  return `(${conversationMemberSql('c', actor)} OR EXISTS (SELECT 1 FROM conversation_participants seat
+    WHERE seat.conversation_id = c.id AND seat.organization_id = c.organization_id
+      AND seat.user_id = ${actor} AND seat.user_id = c.user_id AND seat.role = 'guest' AND ${CURRENT_GUEST_SQL('c')}
+      AND EXISTS (SELECT 1 FROM bookings b WHERE b.id = c.booking_id AND b.organization_id = c.organization_id AND b.owner = 'app')))`
 }
 
 export async function createConversationGuestInvite(db: DbClient, principal: Pick<MemberAccessPrincipal, 'organizationId' | 'userId'>, input: { conversationId: string; email: string }) {
@@ -157,7 +155,7 @@ export async function createConversationGuestInvite(db: DbClient, principal: Pic
     query: `INSERT INTO conversation_guest_invites (id, organization_id, conversation_id, email, token_hash, inviter_id, expires_at)
       SELECT ?, c.organization_id, c.id, ?, ?, ?, ? FROM conversations c
       WHERE c.id = ? AND c.organization_id = ? AND c.kind = 'booking' AND c.booking_id IS NOT NULL AND c.blocked_at IS NULL AND ${bookingGuestManagerSql('?')}`,
-    params: [crypto.randomUUID(), email, tokenHash, principal.userId, expiresAt, input.conversationId, principal.organizationId, principal.userId],
+    params: [crypto.randomUUID(), email, tokenHash, principal.userId, expiresAt, input.conversationId, principal.organizationId, principal.userId, principal.userId],
   }], { operation: 'Invite traveler to a conversation' })
   if (result?.meta.changes !== 1) throw new HTTPError({ statusCode: 404, message: 'Booking conversation not found' })
   return { token, expires_at: expiresAt, conversation_id: input.conversationId, organization_id: principal.organizationId }
@@ -176,9 +174,9 @@ export async function acceptConversationGuestInvite(db: DbClient, env: GuestInbo
         AND EXISTS (SELECT 1 FROM user u WHERE u.id = ? AND u.emailVerified = 1 AND u.isAnonymous IS NOT 1 AND lower(u.email) = i.email)
         AND EXISTS (SELECT 1 FROM conversations c
           WHERE c.id = i.conversation_id AND c.organization_id = i.organization_id AND c.kind = 'booking' AND c.booking_id IS NOT NULL AND c.blocked_at IS NULL
-            AND ${bookingGuestManagerSql('i.inviter_id')})
+            AND ${bookingGuestManagerSql('i.inviter_id')} AND NOT ${conversationMemberSql('c', '?')})
         AND NOT EXISTS (SELECT 1 FROM conversation_participants p WHERE p.conversation_id = i.conversation_id AND p.user_id = ? AND p.role = 'member')`,
-    params: [now, userId, hash, now, userId, userId],
+    params: [now, userId, hash, now, userId, userId, userId],
   }, {
     query: `INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role, created_at)
       SELECT i.conversation_id, i.organization_id, i.accepted_user_id, 'guest', i.accepted_at FROM conversation_guest_invites i
@@ -205,7 +203,7 @@ export async function removeConversationGuest(db: DbClient, env: GuestInboxPubli
       AND accepted.accepted_user_id IS NOT NULL AND c.user_id IS NOT accepted.accepted_user_id
       AND ${bookingGuestManagerSql('?')} AND ${byInvitation ? 'accepted.id' : 'accepted.accepted_user_id'} = ?
     LIMIT 1`
-  const params = [conversationId, organizationId, userId, byInvitation ? input.invitationId : input.travelerUserId]
+  const params = [conversationId, organizationId, userId, userId, byInvitation ? input.invitationId : input.travelerUserId]
   const now = new Date().toISOString()
   const [authorized] = await executeBatch(db, [{ query: target, params }, {
     query: `WITH target AS MATERIALIZED (${target})

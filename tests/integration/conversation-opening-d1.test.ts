@@ -152,6 +152,10 @@ test('a table booking opens with its own message and the guest note, written onc
     assert(!(await page(booker.id)).conversation.participants.some(person => person.name === traveler.name))
     await assert.rejects(page(traveler.id), { statusCode: 404 })
     await assert.rejects(acceptConversationGuestInvite(db, publication, { token: invite.token, user: traveler }), { statusCode: 404 })
+
+    // In the other reservation the same account is a workspace admin with no stored seat.
+    const hostInvite = await createConversationGuestInvite(db, { organizationId: ORG, userId: booker.id }, { conversationId: 'new', email: traveler.email })
+    assert.deepEqual(await acceptConversationGuestInvite(db, publication, { token: hostInvite.token, user: traveler }), { conversation_id: 'new', organization_id: ORG })
   } finally {
     await runtime.dispose()
   }

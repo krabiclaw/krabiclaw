@@ -510,10 +510,6 @@ export function guestConversationMemberSql(conversation: string, member: string)
           AND grant.listing_id = ${product} AND grant.member_id = ${member}.id)))`
 }
 
-/** An explicit roster seat for staff requires a current Better Auth membership. */
-export const currentParticipantSql = (seat: string) => `(${seat}.role = 'guest' OR (${seat}.role = 'member'
-  AND EXISTS (SELECT 1 FROM member m WHERE m.organizationId = ${seat}.organization_id AND m.userId = ${seat}.user_id)))`
-
 /** Workspace access for a trusted SQL expression naming the authenticated user. */
 export function conversationMemberSql(conversation: string, userExpression: string): string {
   return `EXISTS (SELECT 1 FROM member staff WHERE staff.organizationId = ${conversation}.organization_id AND staff.userId = ${userExpression}
