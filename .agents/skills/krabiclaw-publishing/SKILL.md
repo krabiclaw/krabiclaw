@@ -100,7 +100,7 @@ Create the handoff issue using the GitHub CLI, assigning the confirmed writer:
 
 ```bash
 gh issue create \
-  --repo krabiclaw/krabiclaw \
+  --repo Blawby/blawby \
   --assignee bamboochow \
   --title "Launch Brief: [Working Title]" \
   --body "$(cat <<'EOF'
