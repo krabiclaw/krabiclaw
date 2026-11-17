@@ -12,6 +12,7 @@ import { isRecord } from '~/server/utils/type-guards'
   write waits on what reacts to it.
 */
 export type DomainEvent =
+  /** Sent to EVENTS by the Worker before the AIRBNB_SYNC queue existed; forwarded there, never run here. */
   | { type: 'airbnb.sync'; organization_id: string; job_id: string }
   | { type: 'booking.created'; organization_id: string; conversation_id: string }
   | { type: 'booking.status_changed'; organization_id: string; conversation_id: string; message_id: string; delivery_id: string }
@@ -59,6 +60,26 @@ export type DomainEvent =
 type EventDeliveryOptions = { delaySeconds: number }
 export interface EventsEnv { EVENTS?: { send(_event: DomainEvent, _options?: EventDeliveryOptions): Promise<void> } }
 
+/**
+ * What the AIRBNB_SYNC queue carries, consumed one delivery at a time
+ * (server/integrations/channex/airbnb-sync.ts): one step of a listing's job,
+ * or one step of disconnecting the account.
+ */
+export type AirbnbSyncMessage =
+  | { type: 'airbnb.sync_step'; organization_id: string; job_id: string }
+  | { type: 'airbnb.disconnect'; organization_id: string; user_id: string }
+
+export interface AirbnbSyncEnv { AIRBNB_SYNC?: { send(_message: AirbnbSyncMessage, _options?: { delaySeconds: number }): Promise<void> } }
+
+export function isAirbnbSyncMessage(value: unknown): value is AirbnbSyncMessage {
+  return typeof value === 'object' && value !== null && 'type' in value && (value.type === 'airbnb.sync_step' || value.type === 'airbnb.disconnect')
+}
+
+export async function publishAirbnbSync(env: AirbnbSyncEnv, message: AirbnbSyncMessage, options?: { delaySeconds: number }): Promise<void> {
+  if (!env.AIRBNB_SYNC) throw new Error('The AIRBNB_SYNC queue is not bound: an Airbnb sync step could not be queued')
+  await env.AIRBNB_SYNC.send(message, options)
+}
+
 /** Announce what a write did. The write's own batch has already committed; this is one queue send, no database work. */
 export async function publishEvent(env: EventsEnv, event: DomainEvent, options?: EventDeliveryOptions): Promise<void> {
   if (!env.EVENTS) throw new Error('The EVENTS queue is not bound: a write could not announce what it did')
@@ -78,8 +99,7 @@ export async function publishChangedJobs(env: EventsEnv, organizationId: string,
 /** React to one event. A throw is the delivery's failure: Cloudflare retries it. */
 export async function consumeEvent(env: CloudflareEnv, event: DomainEvent): Promise<void> {
   if (event.type === 'airbnb.sync') {
-    const { advanceAirbnbSyncJob } = await import('~/server/integrations/channex/airbnb-sync')
-    await advanceAirbnbSyncJob(env, event.organization_id, event.job_id)
+    await publishAirbnbSync(env, { type: 'airbnb.sync_step', organization_id: event.organization_id, job_id: event.job_id })
     return
   }
   if (event.type === 'booking.change') {

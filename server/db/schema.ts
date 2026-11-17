@@ -1654,6 +1654,8 @@ export const channex_connections = sqliteTable("channex_connections", {
 	authorization_expires_at: text(),
 	channel_id: text(),
 	connected_at: text(),
+	// Why the last disconnect failed, shown with the connection; cleared when Disconnect is asked again.
+	disconnect_error: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [

@@ -140,6 +140,20 @@ max_batch_timeout = 1
 max_retries = 5
 dead_letter_queue = "krabiclaw-events-dlq"
 
+# Airbnb sync and disconnect steps (server/integrations/channex/airbnb-sync.ts): one delivery at a time,
+# so a repeated delivery reads the stage the earlier one saved and never sends the same Channex create twice.
+[[queues.producers]]
+binding = "AIRBNB_SYNC"
+queue = "blawby-airbnb-sync"
+
+[[queues.consumers]]
+queue = "blawby-airbnb-sync"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
+max_concurrency = 1
+dead_letter_queue = "blawby-airbnb-sync-dlq"
+
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
 bucket_name = "krabiclaw-media"
@@ -222,6 +236,12 @@ script_name = "krabiclaw-guest-inbox-hub"
 [[env.dev.queues.producers]]
 binding = "EVENTS"
 queue = "krabiclaw-events-local"
+
+# Airbnb sync and disconnect steps (server/integrations/channex/airbnb-sync.ts): one delivery at a time,
+# so a repeated delivery reads the stage the earlier one saved and never sends the same Channex create twice.
+[[env.dev.queues.producers]]
+binding = "AIRBNB_SYNC"
+queue = "blawby-airbnb-sync-local"
 
 [[env.dev.r2_buckets]]
 binding = "MEDIA_BUCKET"
@@ -322,6 +342,20 @@ max_batch_timeout = 1
 max_retries = 5
 dead_letter_queue = "krabiclaw-events-staging-dlq"
 
+# Airbnb sync and disconnect steps (server/integrations/channex/airbnb-sync.ts): one delivery at a time,
+# so a repeated delivery reads the stage the earlier one saved and never sends the same Channex create twice.
+[[env.staging.queues.producers]]
+binding = "AIRBNB_SYNC"
+queue = "blawby-airbnb-sync-staging"
+
+[[env.staging.queues.consumers]]
+queue = "blawby-airbnb-sync-staging"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
+max_concurrency = 1
+dead_letter_queue = "blawby-airbnb-sync-staging-dlq"
+
 [[env.staging.r2_buckets]]
 binding = "MEDIA_BUCKET"
 bucket_name = "krabiclaw-media-staging"
@@ -410,6 +444,19 @@ queue = "krabiclaw-events-local"
 max_batch_size = 10
 max_batch_timeout = 1
 max_retries = 5
+
+# Airbnb sync and disconnect steps (server/integrations/channex/airbnb-sync.ts): one delivery at a time,
+# so a repeated delivery reads the stage the earlier one saved and never sends the same Channex create twice.
+[[env.e2e.queues.producers]]
+binding = "AIRBNB_SYNC"
+queue = "blawby-airbnb-sync-local"
+
+[[env.e2e.queues.consumers]]
+queue = "blawby-airbnb-sync-local"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
+max_concurrency = 1
 
 [[env.e2e.r2_buckets]]
 binding = "MEDIA_BUCKET"

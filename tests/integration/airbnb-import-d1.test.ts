@@ -18,6 +18,7 @@ import { returnExtrasToDraftsForPlanEnd } from '../../server/utils/billing-plan-
 import syncPostRoute from '../../server/api/organizations/[organization_id]/integrations/airbnb/sync.post.ts'
 import syncGetRoute from '../../server/api/organizations/[organization_id]/integrations/airbnb/sync.get.ts'
 import { captureEvents } from './support/events.ts'
+import type { AirbnbSyncMessage } from '../../server/events.ts'
 
 // An Airbnb listing imported as a home, through every stage, against a fake
 // Channex: the location, the stay product and its price, the imported nights,
@@ -122,13 +123,27 @@ class FakeChannex {
     this.seen.push({ method, path })
     const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200 })
     const resource = (type: string, attributes: Record<string, unknown> = {}) => json({ data: { id: `${type}-${++this.ids}`, type, attributes } })
+    if (method === 'GET' && path === '/groups') return json({ data: [], meta: { total: 0 } })
     if (method === 'POST' && path === '/groups') return json({ data: { id: 'grp-1', type: 'group', attributes: {} } })
     if (method === 'POST' && path === '/properties') {
       if (body!.property.title === 'Blawby connection setup') return json({ data: { id: 'setup-1', type: 'property', attributes: {} } })
       const id = `prop-${++this.ids}`
-      const property = { ...body!.property, id }
+      const property: Record<string, unknown> = { ...body!.property, id }
       this.properties.push(property)
       return json({ data: { id, type: 'property', attributes: property } })
+    }
+    // Exact-title and per-property lists, which a create stage reads before creating.
+    if (method === 'GET' && path === '/properties') {
+      const rows = this.properties.filter(property => property.title === url.searchParams.get('filter[title]'))
+      return json({ data: rows.map(({ group_id: group, ...property }) => ({ id: property.id, type: 'property', attributes: property, relationships: { groups: { data: [{ type: 'group', id: group }] } } })), meta: { total: rows.length } })
+    }
+    if (method === 'GET' && path === '/room_types') {
+      const rows = this.roomTypes.filter(room => room.property_id === url.searchParams.get('filter[property_id]'))
+      return json({ data: rows.map(room => ({ id: room.id, type: 'room_type', attributes: room, relationships: { property: { data: { type: 'property', id: room.property_id } } } })), meta: { total: rows.length } })
+    }
+    if (method === 'GET' && path === '/rate_plans/options') {
+      const rows = [...this.ratePlans].filter(([, plan]) => plan.property_id === url.searchParams.get('filter[property_id]'))
+      return json({ data: rows.map(([id, plan]) => ({ id, type: 'rate_plan', attributes: { id, title: plan.title, property_id: plan.property_id, room_type_id: plan.room_type_id } })) })
     }
     if ((method === 'GET' || method === 'PUT') && /^\/properties\/[^/]+$/.test(path)) {
       const property = this.properties.find(property => property.id === path.split('/').pop())
@@ -169,9 +184,9 @@ class FakeChannex {
     }
     // The room type and rate plan the inventory reads are about are the last ones created.
     if (method === 'POST' && path === '/room_types') {
-      this.roomTypes.push((JSON.parse(String(init.body)) as { room_type: Record<string, unknown> }).room_type)
-      this.roomType = `room_type-${this.ids + 1}`
-      return resource('room_type')
+      this.roomType = `room_type-${++this.ids}`
+      this.roomTypes.push({ id: this.roomType, ...(JSON.parse(String(init.body)) as { room_type: Record<string, unknown> }).room_type })
+      return json({ data: { id: this.roomType, type: 'room_type', attributes: {} } })
     }
     if (method === 'POST' && path === '/rate_plans') {
       this.ratePlan = `rate_plan-${this.ids + 1}`
@@ -245,8 +260,9 @@ async function boot() {
   try {
     const db = await runtime.getD1Database('DB')
     const queue = captureEvents()
+    const syncs = captureEvents<AirbnbSyncMessage>()
     const env = {
-      ...await runtime.getBindings<CloudflareEnv>(), DB: db, EVENTS: queue.binding, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k', STRIPE_SECRET_KEY: 'sk_test_local_d1',
+      ...await runtime.getBindings<CloudflareEnv>(), DB: db, EVENTS: queue.binding, AIRBNB_SYNC: syncs.binding, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k', STRIPE_SECRET_KEY: 'sk_test_local_d1',
       BETTER_AUTH_URL: BASE, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', GOOGLE_CLIENT_ID: 'test-google-client',
       GOOGLE_CLIENT_SECRET: 'test-google-secret', APPLE_APP_BUNDLE_ID: 'com.krabiclaw.app', APPLE_SERVICES_ID: 'com.krabiclaw.web', MEDIA_BASE_URL: 'https://media.proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-airbnb-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
     } as unknown as CloudflareEnv
@@ -260,7 +276,7 @@ async function boot() {
     // Airbnb sync is Business; a test about the plan lapsing cancels this subscription first.
     await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, seats, periodEnd) VALUES ('sub-boot', 'business', ?, 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
     await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('a-owner', ?, 'credential', ?, ?, 0, 0)").bind(OWNER, OWNER, await hashPassword(PASSWORD)).run()
-    return { runtime, db, env, queue }
+    return { runtime, db, env, queue, syncs }
   } catch (error) {
     await runtime.dispose()
     throw error
@@ -335,6 +351,14 @@ test('a listing imports through every stage into a home Channex and Blawby agree
     const stages: string[] = []
     for (let step = 0; step < 14; step++) {
       await track(db, channex, productId)
+      const at = await db.prepare('SELECT import_stage FROM product_channel_mappings WHERE product_id = ?').bind(productId).first<string>('import_stage')
+      if (at === 'property' || at === 'room' || at === 'rate') {
+        // The Worker ends after Channex created the resource and before its id is saved.
+        await db.prepare(`CREATE TRIGGER lose_created_id BEFORE UPDATE OF import_stage ON product_channel_mappings BEGIN SELECT RAISE(ABORT, 'Worker ended'); END`).run()
+        await assert.rejects(connection.advance(productId), (error: Error) => String(error.cause).includes('Worker ended'))
+        await db.prepare('DROP TRIGGER lose_created_id').run()
+        await track(db, channex, productId)
+      }
       const result = await connection.advance(productId)
       stages.push(result.stage)
       if (result.stage === 'content') {
@@ -399,6 +423,9 @@ test('a listing imports through every stage into a home Channex and Blawby agree
     assert.deepEqual({ start: filled.check_in_time, end: filled.check_in_end_time, checkout: filled.check_out_time }, { start: '16:00', end: '21:00', checkout: '10:00' })
     // Channex's child-only beds and infant cots are 0: Airbnb counts neither.
     assert.deepEqual(channex.roomTypes.map(room => [room.occ_adults, room.occ_children, room.occ_infants]), [[4, 0, 0]])
+    // A Worker that ended after Channex created the property, room type or rate plan and before its id was saved
+    // left the stage to run again: that run found the resource in Channex and created nothing twice.
+    assert.deepEqual([channex.properties.length, channex.roomTypes.length, channex.ratePlans.size], [1, 1, 1])
     assert.deepEqual({ bedrooms: filled.bedrooms, beds: filled.beds, bathrooms: filled.bathrooms, amenities: filled.amenities }, { bedrooms: 2, beds: 3, bathrooms: 1, amenities: ['wireless_internet', 'smoke_detector', 'mountain_view'] })
     assert.deepEqual({ method: filled.check_in_method, check_in: filled.check_in_instructions, manual: filled.house_manual, directions: filled.directions, wifi: filled.wifi_network, password: filled.wifi_password, rooms: filled.photo_rooms }, {
       method: 'smart_lock', check_in: 'Door code 0126', manual: 'Unit 63A. Shoes off, please.', directions: 'Behind the capitol.', wifi: '5 Star', password: 'open sesame', rooms: [],
@@ -518,7 +545,7 @@ test('a listing priced in another currency stops before anything is created', { 
 })
 
 test('a sync request is checked against the plan once, then Blawby imports, activates and stops listings in the background', { timeout: 120_000 }, async () => {
-  const { runtime, db, env, queue } = await boot()
+  const { runtime, db, env, queue, syncs } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
@@ -545,7 +572,7 @@ test('a sync request is checked against the plan once, then Blawby imports, acti
         { runtime: { name: 'cloudflare', cloudflare: { env } } }))
       return { status: response.status, body: await response.json() as Record<string, unknown> }
     }
-    const runSyncs = () => queue.drain(env, 'airbnb.sync')
+    const runSyncs = () => syncs.drain(env)
     const failSync = async () => {
       await assert.rejects(runSyncs)
       await runSyncs()
@@ -592,16 +619,28 @@ test('a sync request is checked against the plan once, then Blawby imports, acti
     assert.deepEqual(await db.prepare('SELECT state, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), yielded)
     assert.equal(await count(db, 'product_channel_mappings'), 0)
     assert.equal(channex.seen.filter(request => request.method === 'POST' && request.path === '/properties').length, propertyCreatesBefore, 'HTTP does not begin the import')
-    const nextSyncs = () => queue.pending.filter(item => item.body.type === 'airbnb.sync').map(({ body, delaySeconds }) => ({ body, delaySeconds }))
-    const step = { body: { type: 'airbnb.sync', organization_id: ORG, job_id: queuedId }, delaySeconds: 0 }
+    const nextSyncs = () => syncs.pending.map(({ body, delaySeconds }) => ({ body, delaySeconds }))
+    const step = { body: { type: 'airbnb.sync_step', organization_id: ORG, job_id: queuedId }, delaySeconds: 0 }
     assert.deepEqual(nextSyncs(), [step])
-    await queue.runNext(env, 'airbnb.sync')
+    await syncs.runNext(env)
     assert.deepEqual(await db.prepare('SELECT state, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), yielded)
     assert.equal(await db.prepare('SELECT import_stage FROM product_channel_mappings').first('import_stage'), 'property')
     assert.equal(channex.seen.filter(request => request.method === 'POST' && request.path === '/properties').length, propertyCreatesBefore, 'one delivery performs one provider step')
     assert.deepEqual(nextSyncs(), [step], 'the next delivery names the same persisted job')
     assert.deepEqual(((await call('GET')).body.listings as Array<Record<string, unknown>>).map(listing => [listing.status, listing.stage]), [['running', 'property']])
-    await runSyncs()
+    // A step the Worker before AIRBNB_SYNC left on EVENTS is forwarded, never run there.
+    await queue.binding.send({ type: 'airbnb.sync', organization_id: ORG, job_id: String(queuedId) })
+    const createsBefore = channex.seen.filter(request => request.method === 'POST').length
+    await queue.drain(env, 'airbnb.sync')
+    assert.equal(channex.seen.filter(request => request.method === 'POST').length, createsBefore)
+    assert.deepEqual(nextSyncs(), [step, step])
+    // Every step is delivered twice, one after the other as AIRBNB_SYNC delivers them: each create reaches Channex once.
+    for (let item = syncs.take(); item; item = syncs.take()) {
+      await syncs.deliver(env, item)
+      await syncs.deliver(env, { ...item, id: crypto.randomUUID() })
+    }
+    const creates = (path: string) => channex.seen.filter(request => request.method === 'POST' && request.path === path).length
+    assert.deepEqual([creates('/properties') - propertyCreatesBefore, creates('/room_types'), creates('/rate_plans'), creates('/channels/chan-1/mappings')], [1, 1, 1, 1])
     assert.equal(await db.prepare('SELECT id FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first('id'), queuedId)
     const done = await job()
     assert.deepEqual({ ...done, product_id: null }, { action: 'sync', state: 'done', product_id: null, last_error_code: null })
@@ -675,6 +714,19 @@ test('a sync request is checked against the plan once, then Blawby imports, acti
     assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: productId, last_error_code: 'REQUESTER_REMOVED' })
     assert.deepEqual(channex.seen.slice(removedAccessStart), [])
 
+    // Disconnecting while a sync is queued: the request writes nothing to Channex. It marks the connection
+    // disconnecting, so the queued step refuses, and AIRBNB_SYNC runs the disconnect after it.
+    await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-owner-again', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
+    // No Stripe customer: disconnecting reports no metered homes to Stripe here.
+    await db.prepare('UPDATE organization SET stripeCustomerId = NULL WHERE id = ?').bind(ORG).run()
+    assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
+    const disconnectStart = channex.seen.length
+    assert.deepEqual(await new AirbnbConnection(db, env, ORG, OWNER).disconnect(), { disconnected: false })
+    assert.deepEqual([channex.seen.slice(disconnectStart).filter(request => request.method !== 'GET'), await db.prepare('SELECT status FROM channex_connections').first('status')], [[], 'disconnecting'])
+    await failSync()
+    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: productId, last_error_code: 'NOT_CONNECTED' })
+    assert.deepEqual(await db.prepare('SELECT status, channel_id FROM channex_connections').first(), { status: 'not_connected', channel_id: null })
+    assert.deepEqual(channex.seen.slice(disconnectStart).filter(request => request.method !== 'GET').map(request => `${request.method} ${request.path}`), ['POST /channels/chan-1/deactivate', 'DELETE /channels/chan-1'])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

@@ -71,6 +71,8 @@ interface AirbnbStatus {
   connected_at: string | null
   listing_count: number
   channel_active: boolean
+  /** Why the last disconnect failed; null when none did. */
+  disconnect_error: string | null
 }
 
 type ListingImport = { status: 'not_imported' } | { status: 'imported'; product_id: string; stage: ImportStage; syncing: boolean }
@@ -101,6 +103,7 @@ const isStage = (value: unknown): value is ImportStage => typeof value === 'stri
 const isStatus = (value: unknown): value is AirbnbStatus =>
   isRecord(value) && ['not_connected', 'authorizing', 'connected', 'disconnecting'].includes(String(value.status))
   && (value.connected_at === null || typeof value.connected_at === 'string') && typeof value.listing_count === 'number'
+  && (value.disconnect_error === null || typeof value.disconnect_error === 'string')
 const isListing = (value: unknown): value is AirbnbListing =>
   isRecord(value) && typeof value.id === 'string' && typeof value.title === 'string' && isRecord(value.import)
   && (value.import.status === 'not_imported' || (value.import.status === 'imported' && typeof value.import.product_id === 'string' && isStage(value.import.stage) && typeof value.import.syncing === 'boolean'))
@@ -161,7 +164,8 @@ const connection = computed<IntegrationLeafConnection | null>(() => {
     connectedAt: s.connected_at,
     through: null,
     // Connected but not active yet on Channex's side is the host's wait, said on the account line.
-    status: s.status === 'connected' ? (s.channel_active ? 'active' : 'disabled') : null,
+    status: s.disconnect_error ? 'error' : s.status === 'connected' ? (s.channel_active ? 'active' : 'disabled') : null,
+    lastError: s.disconnect_error ? `Disconnecting failed: ${s.disconnect_error}` : null,
     note: s.status === 'authorizing' ? 'Finishing Airbnb sign-in' : s.status === 'disconnecting' ? 'Disconnecting…' : null,
   }
 })
@@ -421,10 +425,16 @@ async function disconnect() {
   disconnecting.value = true
   failure.value = ''
   try {
-    // Disconnecting goes step by step; each answer says whether another step remains.
-    let finished = false
-    while (!finished) finished = (await dashboardApi(`${api}/disconnect`, { method: 'POST', validate: isDisconnect })).disconnected
+    // Blawby disconnects in the background, between sync steps; the status reads not_connected when it is done.
+    let finished = (await dashboardApi(`${api}/disconnect`, { method: 'POST', validate: isDisconnect })).disconnected
+    while (!finished) {
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      await refreshStatus()
+      if (statusError.value) throw statusError.value
+      finished = status.value?.status !== 'disconnecting'
+    }
     await Promise.all([refreshStatus(), integrations.refresh()])
+    if (status.value?.disconnect_error) failure.value = `Disconnecting failed: ${status.value.disconnect_error}`
   } catch (cause) {
     failure.value = getErrorMessage(cause, 'Could not disconnect Airbnb.')
   } finally {
