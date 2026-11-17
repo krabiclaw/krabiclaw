@@ -3,7 +3,7 @@ import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
-import { AirbnbConnection, AIRBNB_CALLBACK } from '../../server/integrations/channex/airbnb-connection.ts'
+import { ChannexConnection, AIRBNB_CALLBACK } from '../../server/integrations/channex/channel-connection.ts'
 
 // The Airbnb connection's own rules, against a fake Channex: a single-use
 // sign-in bound to the person who started it, the channel verified as theirs,
@@ -41,6 +41,7 @@ class FakeChannex {
       return new Response('{"errors":{}}', { status })
     }
     const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } })
+    if (method === 'GET' && path === '/channels') return json({ data: [], meta: { total: 0 } })
     if (method === 'POST' && path === '/groups') return json({ data: { id: 'grp-1', type: 'group', attributes: { title: 'x' } } })
     if (method === 'POST' && path === '/properties') return json({ data: { id: 'setup-1', type: 'property', attributes: { title: 'x' } } })
     if (method === 'POST' && path === '/meta/airbnb/connection_link') {
@@ -116,8 +117,8 @@ test('an Airbnb sign-in completes only for its own person and state, and an unce
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
   try {
-    const owner = new AirbnbConnection(db, env, ORG, OWNER)
-    const other = new AirbnbConnection(db, env, ORG, OTHER)
+    const owner = new ChannexConnection(db, env, ORG, OWNER)
+    const other = new ChannexConnection(db, env, ORG, OTHER)
 
     const started = await owner.start()
     assert.equal(started.authorization_url, 'https://www.airbnb.com/oauth2/auth?client_id=x')
@@ -151,7 +152,7 @@ test('a refused provider write releases the lock; one that may have applied keep
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
   try {
-    const owner = new AirbnbConnection(db, env, ORG, OWNER)
+    const owner = new ChannexConnection(db, env, ORG, OWNER)
     channex.failNext = { path: '/groups', status: 422 }
     await assert.rejects(owner.start(), (error: unknown) => (error as { providerStatus?: number; status?: number }).providerStatus === 422 && (error as { status?: number }).status === 502)
     assert.deepEqual(await db.prepare('SELECT status, operation_id, pending_step, group_id FROM channex_connections').first(), { status: 'not_connected', operation_id: null, pending_step: null, group_id: null })
@@ -160,7 +161,7 @@ test('a refused provider write releases the lock; one that may have applied keep
     await assert.rejects(owner.start(), (error: unknown) => (error as { uncertain?: boolean }).uncertain === true)
     assert.deepEqual(await db.prepare('SELECT status, pending_step FROM channex_connections').first(), { status: 'needs_review', pending_step: 'create_group' })
     const groupsBefore = channex.seen.filter(request => request.path === '/groups').length
-    await assert.rejects(owner.start(), { status: 409, message: 'This Airbnb connection needs support review before continuing.', data: { code: 'CONNECTION_NEEDS_REVIEW' } })
+    await assert.rejects(owner.start(), { status: 409, message: 'This Channex connection needs support review before continuing.', data: { code: 'CONNECTION_NEEDS_REVIEW' } })
     assert.equal(channex.seen.filter(request => request.path === '/groups').length, groupsBefore)
   } finally {
     globalThis.fetch = realFetch
@@ -174,7 +175,7 @@ test('a lock its request abandoned is released when no write was named, and held
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
   try {
-    const owner = new AirbnbConnection(db, env, ORG, OWNER)
+    const owner = new ChannexConnection(db, env, ORG, OWNER)
     const stale = new Date(Date.now() - 16 * 60 * 1000).toISOString()
     // A request ended between taking the lock and naming any provider write.
     await db.prepare("INSERT INTO channex_connections (organization_id, status, operation_id, updated_at) VALUES (?, 'not_connected', 'dead-request', ?)").bind(ORG, stale).run()
@@ -184,7 +185,7 @@ test('a lock its request abandoned is released when no write was named, and held
     await assert.rejects(owner.start(), code('CONNECTION_BUSY'))
     // A request ended after naming a provider write that may have applied.
     await db.prepare("UPDATE channex_connections SET operation_id = 'dead-writer', pending_step = 'create_group', updated_at = ? WHERE organization_id = ?").bind(stale, ORG).run()
-    await assert.rejects(owner.start(), { status: 409, message: 'This Airbnb connection needs support review before continuing.', data: { code: 'CONNECTION_NEEDS_REVIEW' } })
+    await assert.rejects(owner.start(), { status: 409, message: 'This Channex connection needs support review before continuing.', data: { code: 'CONNECTION_NEEDS_REVIEW' } })
     assert.deepEqual(await db.prepare('SELECT status, operation_id, pending_step FROM channex_connections').first(), { status: 'needs_review', operation_id: 'dead-writer', pending_step: 'create_group' })
   } finally {
     globalThis.fetch = realFetch
@@ -198,7 +199,7 @@ test('deleting the organization releases its Airbnb channel, every property in i
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
   try {
-    const owner = new AirbnbConnection(db, env, ORG, OWNER)
+    const owner = new ChannexConnection(db, env, ORG, OWNER)
     await owner.start()
     assert.deepEqual(await owner.complete(channex.token!, 'chan-1'), { connected: true })
     channex.channel.active = true
@@ -236,7 +237,7 @@ test('a channel Channex already deleted counts as disconnected, and the group is
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
   try {
-    const owner = new AirbnbConnection(db, env, ORG, OWNER)
+    const owner = new ChannexConnection(db, env, ORG, OWNER)
     await owner.start()
     assert.deepEqual(await owner.complete(channex.token!, 'chan-1'), { connected: true })
     channex.channelExists = false

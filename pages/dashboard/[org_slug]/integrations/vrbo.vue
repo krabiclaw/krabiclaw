@@ -9,10 +9,10 @@
   >
     <p v-if="pending" role="status">Checking Vrbo…</p>
     <p v-else-if="data?.entitled === false">Vrbo sync is included with the Business plan.</p>
-    <p v-else-if="data && !data.homes.length">Set up Channex sync for a home to connect its Vrbo listing.</p>
+    <p v-else-if="data && !data.homes.length">Add a home in Catalog, then return here to connect it to Vrbo.</p>
     <template v-else-if="data">
       <template v-if="setupUrl">
-        <UButton color="neutral" variant="outline" class="mb-4" @click="closeSetup">Done with Channex</UButton>
+        <UButton color="neutral" variant="outline" class="mb-4" :loading="closing" @click="closeSetup">Done with Channex</UButton>
         <iframe :src="setupUrl" class="min-h-[640px] w-full rounded-xl border border-default" title="Channex Vrbo setup" referrerpolicy="no-referrer" />
       </template>
       <template v-else>
@@ -24,7 +24,7 @@
               <p class="text-sm text-muted">{{ states[home.status] }}</p>
             </div>
             <UButton :loading="opening === home.product_id" :disabled="opening !== null" @click="start(home.product_id)">
-              {{ home.status === 'not_connected' ? 'Connect Vrbo' : 'Manage in Channex' }}
+              {{ opening === home.product_id ? 'Preparing home…' : home.status === 'not_connected' ? 'Connect Vrbo' : 'Manage in Channex' }}
             </UButton>
           </li>
         </ul>
@@ -61,17 +61,28 @@ const { data, pending, refresh, error: loadError } = await useAsyncData(
 
 const opening = ref<string | null>(null)
 const setupUrl = ref<string | null>(null)
+const setupHome = ref<string | null>(null)
+const closing = ref(false)
 const error = ref('')
 async function start(productId: string) {
   opening.value = productId
   error.value = ''
   try {
-    const response = await dashboardApi(`${api}/start`, {
-      method: 'POST',
-      body: { product_id: productId },
-      validate: (value): value is { url: string } => isRecord(value) && typeof value.url === 'string' && value.url.startsWith('https://'),
-    })
-    setupUrl.value = response.url
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const response = await dashboardApi(`${api}/start`, {
+        method: 'POST',
+        body: { product_id: productId },
+        validate: (value): value is { url: string } | { preparing: true } => isRecord(value)
+          && ((typeof value.url === 'string' && value.url.startsWith('https://')) || value.preparing === true),
+      })
+      if ('url' in response) {
+        setupHome.value = productId
+        setupUrl.value = response.url
+        return
+      }
+      await new Promise(resolve => setTimeout(resolve, 2000))
+    }
+    error.value = 'Channex is still confirming the calendar. Try again to continue setup.'
   } catch (cause) {
     error.value = getErrorMessage(cause, 'Could not open Channex setup.')
   } finally {
@@ -80,7 +91,22 @@ async function start(productId: string) {
 }
 
 async function closeSetup() {
-  setupUrl.value = null
-  await refresh()
+  if (setupHome.value === null) return
+  closing.value = true
+  error.value = ''
+  try {
+    await dashboardApi(`${api}/complete`, {
+      method: 'POST',
+      body: { product_id: setupHome.value },
+      validate: (value): value is { success: true } => isRecord(value) && value.success === true,
+    })
+    setupUrl.value = null
+    setupHome.value = null
+    await refresh()
+  } catch (cause) {
+    error.value = getErrorMessage(cause, 'Could not verify the updated Channex connection.')
+  } finally {
+    closing.value = false
+  }
 }
 </script>

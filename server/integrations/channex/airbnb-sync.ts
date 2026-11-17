@@ -4,7 +4,7 @@ import { scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
 import { execute, executeBatch, MAX_D1_BATCH_STATEMENTS, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { countActiveHomes, homeAllowance, homesQuote, homeLimit, liveHomeSql, reportBillingUsage } from '~/server/utils/billing'
-import { AirbnbConnection, type ImportStage } from './airbnb-connection'
+import { ChannexConnection, type ImportStage } from './channel-connection'
 import { ChannexError } from './client'
 import { assertRoleAllows, resolveOrganizationMembership } from '~/server/utils/member-access'
 
@@ -14,7 +14,7 @@ import { assertRoleAllows, resolveOrganizationMembership } from '~/server/utils/
  * not yet, then made live) and homes to stop syncing (back to free drafts).
  * The plan is checked for the whole change before anything is queued. Each
  * listing is one row of airbnb_sync_jobs. EVENTS advances it through the
- * AirbnbConnection steps recorded in the mapping's import_stage. The job's
+ * ChannexConnection steps recorded in the mapping's import_stage. The job's
  * terminal result stays visible until a new request names the listing.
  */
 
@@ -90,7 +90,7 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
   const stop = ids(body.stop, 'stop')
   if (!sync.length && !stop.length) fail(422, 'VALIDATION_ERROR', 'Name listings to sync or homes to stop', { field: 'sync' })
   if (sync.length + stop.length > MAX_D1_BATCH_STATEMENTS) fail(422, 'VALIDATION_ERROR', `Name at most ${MAX_D1_BATCH_STATEMENTS} listings and homes in one change`, { field: 'sync' })
-  const connection = new AirbnbConnection(db, env, organizationId, userId)
+  const connection = new ChannexConnection(db, env, organizationId, userId)
   // Starting a sync is Business; stopping one never needs a plan.
   if (sync.length) await connection.requireChannelSync()
   const listings = await connection.listings()
@@ -188,7 +188,7 @@ export async function readAirbnbSync(db: DbClient, organizationId: string): Prom
 
 type Step = 'done' | 'continue' | 'later'
 
-/** One step of a job: what the listing needs next to reach what was asked, as one AirbnbConnection call. */
+/** One step of a job: what the listing needs next to reach what was asked, as one ChannexConnection call. */
 async function step(env: CloudflareEnv, db: DbClient, job: JobRow, signal: AbortSignal): Promise<Step> {
   // A sync acts for the person who asked; a stop writes nothing of theirs, so one Blawby asked for, or whose requester left, still runs.
   if (job.action === 'sync') {
@@ -197,7 +197,7 @@ async function step(env: CloudflareEnv, db: DbClient, job: JobRow, signal: Abort
     if (!membership) fail(409, 'REQUESTER_REMOVED', 'The person who asked for this sync is no longer a member; ask again')
     await assertRoleAllows({ organizationId: membership.organizationId, role: membership.role, permissions: { integrations: ['update'] }, message: 'The person who asked for this sync no longer has permission to manage Airbnb; ask again' })
   }
-  const connection = new AirbnbConnection(db, env, job.organization_id, job.requested_by ?? 'system', signal)
+  const connection = new ChannexConnection(db, env, job.organization_id, job.requested_by ?? 'system', signal)
   const mapping = await queryFirst<{ product_id: string; import_stage: ImportStage; enabled: number; channel_id: string; connected_channel_id: string | null }>(db,
     `SELECT m.product_id, m.import_stage, m.enabled, m.channel_id, c.channel_id AS connected_channel_id FROM product_channel_mappings m
       LEFT JOIN channex_connections c ON c.organization_id = m.organization_id

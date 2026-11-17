@@ -4,7 +4,7 @@ import { executeWithinCapacity, hasOrganizationEntitlement, requireHomeCapacity 
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createStayHome, importStayNights, placeStayHomePhotosFirst, readStayHome, stayHomeInput, syncStayCalendar, updateStayHome, type StayAccess } from '~/server/domain/stays'
-import { isCurrencyCode } from '~/shared/currencies'
+import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 import { isValidTimezone } from '~/utils/timezone'
 import { memberAccessPrincipal, resolveOrganizationMembership } from '~/server/utils/member-access'
 import { getMediaUploadReplay, replaceR2ImageFile, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
@@ -18,7 +18,7 @@ import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { STAY_ARRIVAL_TEXT_LIMITS } from '~/shared/stay-arrival'
 import { isStayAmenity, type StayAmenity, type StayCheckInMethod } from '~/shared/stay-listing'
-import { channelInventory, channexCreate, channexGet, channexRequest, ChannexError, type ChannexEnv } from './client'
+import { channelInventory, channexCreate, channexGet, channexRequest, ChannexError, mapsActiveRate, propertyChannels, VRBO_CHANNEL, type ChannexEnv } from './client'
 import { ChannexDataError, object, relationship, string, type JsonRecord, type Resource } from './data'
 import { PHOTO_WIDTH, minorUnits, listingCalendar, listingContent, listingDetails, type DescriptionField, type ListingDetails, type ListingImage, type OrganizationContact, type ListingNight } from './airbnb-listing'
 import { DETAIL_FIELDS, IMPORT_STAGES, type DetailField, type ImportStage } from '~/shared/airbnb-import'
@@ -31,10 +31,9 @@ import { publishBusinessInvalidation, publishStayInvalidation } from '~/server/c
 import { requireStays } from '~/server/utils/cms-capabilities'
 
 /**
- * An organization's Airbnb account, connected through Channex: start a
- * single-use sign-in, complete it from the callback, read the account's
- * listings, disconnect, and release everything in Channex when the organization
- * is deleted.
+ * An organization's Channex group and property inventory, including Airbnb's
+ * account authorization and listing import. Organization deletion releases
+ * its provider resources.
  *
  * Mutating steps hold the row's operation lock. Resource lifecycle changes name
  * their pending_step so an uncertain result is held for review. Settings PUTs
@@ -108,19 +107,22 @@ interface MappingRow {
   enabled: number
 }
 
+type InventoryMapping = Pick<MappingRow, 'product_id' | 'property_id' | 'room_type_id' | 'rate_plan_id' | 'import_stage' | 'import_property'>
+type MappingProgress = Partial<Pick<MappingRow, 'property_id' | 'room_type_id' | 'rate_plan_id' | 'import_stage' | 'import_property' | 'import_content' | 'import_written' | 'enabled'>>
+
 /** The listing details the host approved; the Channex property, room type and rate plan are created from these. */
 interface ImportProperty {
   title: string
   currency: string
   timezone: string
   property_type?: string
-  email: string
-  phone: string
-  country: string
-  state: string
-  city: string
-  address: string
-  zip_code: string
+  email?: string
+  phone?: string
+  country?: string
+  state?: string
+  city?: string
+  address?: string
+  zip_code?: string
   max_guests: number
   default_occupancy: number
   nightly_rate: string
@@ -227,7 +229,7 @@ async function digest(value: string): Promise<string> {
 
 const now = () => new Date().toISOString()
 
-export class AirbnbConnection {
+export class ChannexConnection {
   private readonly db: DbClient
   private readonly env: CloudflareEnv & ChannexEnv
   private readonly organizationId: string
@@ -257,7 +259,7 @@ export class AirbnbConnection {
       UPDATE channex_connections SET ${[...entries.map(([key]) => `${key} = ?`), 'updated_at = ?'].join(', ')}
        WHERE organization_id = ? AND operation_id = ?`,
     [...entries.map(([, value]) => value ?? null), now(), this.organizationId, row.operation_id])
-    if (!result.meta.changes) fail(409, 'CONNECTION_CHANGED', 'The Airbnb connection changed. Refresh and try again.')
+    if (!result.meta.changes) fail(409, 'CONNECTION_CHANGED', 'The Channex connection changed. Refresh and try again.')
     Object.assign(row, values)
     try {
       await check?.()
@@ -282,20 +284,20 @@ export class AirbnbConnection {
       WHERE organization_id = ? AND (operation_id IS NULL OR (pending_step IS NULL AND updated_at < ?))`,
     [operationId, now(), this.organizationId, abandonedBefore])
     if (!taken.meta.changes) {
-      if ((await this.row())?.status === 'needs_review') fail(409, 'CONNECTION_NEEDS_REVIEW', 'This Airbnb connection needs support review before continuing.')
-      fail(409, 'CONNECTION_BUSY', 'Airbnb setup is running. Refresh before continuing.')
+      if ((await this.row())?.status === 'needs_review') fail(409, 'CONNECTION_NEEDS_REVIEW', 'This Channex connection needs support review before continuing.')
+      fail(409, 'CONNECTION_BUSY', 'Channex setup is running. Refresh before continuing.')
     }
     const row = (await this.row())!
     let refusedWrite = false
     try {
-      if (row.status === 'needs_review') fail(409, 'CONNECTION_NEEDS_REVIEW', 'This Airbnb connection needs support review before continuing.')
+      if (row.status === 'needs_review') fail(409, 'CONNECTION_NEEDS_REVIEW', 'This Channex connection needs support review before continuing.')
       this.checkSlice()
       const result = await withLeaseHeartbeat(ABANDONED_LOCK_MS / 3, async () => {
         try {
           const renewed = await execute(this.db, 'UPDATE channex_connections SET updated_at = ? WHERE organization_id = ? AND operation_id = ?', [now(), this.organizationId, operationId])
-          return renewed.meta.changes === 1 ? null : new HTTPError({ statusCode: 409, message: 'The Airbnb connection changed. Refresh and try again.', data: { code: 'CONNECTION_CHANGED' } })
+          return renewed.meta.changes === 1 ? null : new HTTPError({ statusCode: 409, message: 'The Channex connection changed. Refresh and try again.', data: { code: 'CONNECTION_CHANGED' } })
         } catch (cause) {
-          throw new HTTPError({ statusCode: 503, message: 'The Airbnb update could not continue. Refresh to check the connection status.', data: { code: 'CONNECTION_RENEWAL_FAILED' }, cause })
+          throw new HTTPError({ statusCode: 503, message: 'The Channex update could not continue. Refresh to check the connection status.', data: { code: 'CONNECTION_RENEWAL_FAILED' }, cause })
         }
       }, async (check) => {
         this.operationCheck = check
@@ -362,6 +364,14 @@ export class AirbnbConnection {
     return { status: row.status, connected_at: row.connected_at, listing_count: channel.ratePlans.length, channel_active: channel.active }
   }
 
+  private async ensureGroup(row: ConnectionRow): Promise<string> {
+    if (row.group_id) return row.group_id
+    await this.save(row, { pending_step: 'create_group' })
+    const group = await channexCreate(this.env, '/groups', { group: { title: `Blawby ${this.organizationId}` } }, 'group')
+    await this.save(row, { group_id: group.id, pending_step: null })
+    return group.id
+  }
+
   /** A single-use Airbnb sign-in link for the person asking. */
   async start(): Promise<{ authorization_url: string }> {
     await requireStays(this.db, this.organizationId)
@@ -372,11 +382,7 @@ export class AirbnbConnection {
         if (!row.authorization_expires_at || row.authorization_expires_at <= now()) fail(409, 'SIGN_IN_EXPIRED', 'The Airbnb sign-in link expired. Contact support to review the unfinished connection.')
         return { authorization_url: row.authorization_url }
       }
-      if (!row.group_id) {
-        await this.save(row, { pending_step: 'create_group' })
-        const group = await channexCreate(this.env, '/groups', { group: { title: `Blawby ${this.organizationId}` } }, 'group')
-        await this.save(row, { group_id: group.id, pending_step: null })
-      }
+      await this.ensureGroup(row)
       if (!row.setup_property_id) {
         await this.save(row, { pending_step: 'create_setup_property' })
         const property = await channexCreate(this.env, '/properties', { property: { title: 'Blawby connection setup', currency: 'USD', property_type: 'apartment', group_id: row.group_id } }, 'property')
@@ -449,7 +455,7 @@ export class AirbnbConnection {
     const [listings, mappings] = await Promise.all([this.accountListings(row), this.mappings()])
     return listings.map((listing) => {
       const mapping = mappings.find(candidate => candidate.listing_id === listing.id && candidate.channel_id === row.channel_id)
-      return { ...listing, import: mapping ? { status: 'imported', product_id: mapping.product_id, stage: mapping.import_stage, syncing: mapping.enabled === 1, content: mapping.import_stage === 'content' ? null : contentReport(mapping) } : { status: 'not_imported' } }
+      return { ...listing, import: mapping ? { status: 'imported', product_id: mapping.product_id, stage: mapping.import_stage, syncing: mapping.enabled === 1 && ['reservations', 'messages', 'complete'].includes(mapping.import_stage), content: mapping.import_stage === 'content' ? null : contentReport(mapping) } : { status: 'not_imported' } }
     })
   }
 
@@ -513,7 +519,13 @@ export class AirbnbConnection {
         if (existing.organization_id !== this.organizationId) fail(409, 'LISTING_LINKED_ELSEWHERE', 'This Airbnb listing is already linked to another organization')
         if (existing.channel_id === channelId) return { product_id: existing.product_id, stage: existing.import_stage, waiting: false }
         // A reconnected account re-pushes the inventory of a home it already imported.
-        if (existing.enabled || !existing.property_id || !existing.room_type_id || !existing.rate_plan_id) fail(409, 'IMPORT_NEEDS_REVIEW', 'The previous listing connection needs review before reconnecting')
+        if (!existing.property_id || !existing.room_type_id || !existing.rate_plan_id) fail(409, 'IMPORT_NEEDS_REVIEW', 'The previous listing connection needs review before reconnecting')
+        if (existing.enabled) {
+          if (!await this.hasVrbo(existing)) fail(409, 'IMPORT_NEEDS_REVIEW', 'The previous listing connection needs review before reconnecting')
+          await execute(this.db, `UPDATE product_channel_mappings SET channel_id = ?, import_stage = 'draft', updated_at = ?
+            WHERE organization_id = ? AND product_id = ? AND provider = 'channex'`, [channelId, now(), this.organizationId, existing.product_id])
+          return { product_id: existing.product_id, stage: 'draft', waiting: false }
+        }
       }
 
       const details = await listingDetails(this.env, channelId, listingId, await this.organizationContact())
@@ -595,75 +607,21 @@ export class AirbnbConnection {
     return await this.locked(async (row) => {
       if (row.status !== 'connected' || !row.channel_id || !row.group_id) fail(409, 'NOT_CONNECTED', 'Connect Airbnb before importing listings.')
       const channelId = row.channel_id
-      const groupId = row.group_id
       await this.channel(row, channelId)
       const mapping = await queryFirst<MappingRow>(this.db, "SELECT * FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex'", [this.organizationId, productId])
       if (!mapping || mapping.channel_id !== channelId) fail(404, 'IMPORT_NOT_FOUND', 'Listing import not found')
       const stage = mapping.import_stage
-      const required = stage === 'property' ? [] : stage === 'room' ? [mapping.property_id] : stage === 'rate' ? [mapping.property_id, mapping.room_type_id] : [mapping.property_id, mapping.room_type_id, mapping.rate_plan_id]
-      if (required.some(id => !id)) throw new Error(`Import of ${productId} at ${stage} is missing a Channex id`)
-      const property = mapping.import_property ? JSON.parse(mapping.import_property) as ImportProperty : null
-      const save = async (values: Partial<Pick<MappingRow, 'property_id' | 'room_type_id' | 'rate_plan_id' | 'import_stage' | 'import_property' | 'import_content' | 'import_written' | 'enabled'>>) => {
-        const entries = Object.entries(values)
-        const result = await execute(this.db, `UPDATE product_channel_mappings SET ${entries.map(([column]) => `${column} = ?`).join(', ')}, updated_at = ? WHERE product_id = ? AND provider = 'channex' AND import_stage = ?`,
-          [...entries.map(([, value]) => value ?? null), now(), productId, stage])
-        if (!result.meta.changes) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.')
-        Object.assign(mapping, values)
-      }
+      const save = (values: MappingProgress) => this.saveMapping(mapping, values)
       const path = `/channels/${encodeURIComponent(channelId)}`
       const wrote = (step: string | null) => this.save(row, { pending_step: step })
       switch (stage) {
-        case 'property': {
-          if (!property) throw new Error(`Import of ${productId} has no approved listing details`)
-          await wrote('import_property')
-          const created = await channexCreate(this.env, '/properties', { property: {
-            title: property.title, currency: property.currency, timezone: property.timezone, group_id: groupId, property_type: property.property_type,
-            email: property.email, phone: property.phone, country: property.country, state: property.state, city: property.city,
-            address: property.address, zip_code: property.zip_code, settings: { state_length: STAY_CALENDAR_DAYS, min_stay_type: 'arrival' },
-          } }, 'property')
-          await save({ property_id: created.id, import_stage: 'room' })
+        case 'property':
+        case 'room':
+        case 'rate':
+        case 'inventory':
+        case 'verify_inventory':
+          if (await this.advanceInventory(row, mapping, 'content')) return { product_id: productId, stage, waiting: true, content: null }
           break
-        }
-        case 'room': {
-          if (!property) throw new Error(`Import of ${productId} has no approved listing details`)
-          await wrote('import_room')
-          const created = await channexCreate(this.env, '/room_types', { room_type: {
-            property_id: mapping.property_id, title: 'Entire home', count_of_rooms: 1, occ_adults: property.max_guests,
-            // Channex's child-only beds and infant cots; Airbnb counts neither, and Channex says to send 0 when there are none.
-            occ_children: 0, occ_infants: 0, default_occupancy: property.default_occupancy, room_kind: 'room',
-          } }, 'room_type')
-          await save({ room_type_id: created.id, import_stage: 'rate' })
-          break
-        }
-        case 'rate': {
-          if (!property) throw new Error(`Import of ${productId} has no approved listing details`)
-          await wrote('import_rate')
-          const home = await readStayHome(this.db, this.manager(), productId)
-          const created = await channexCreate(this.env, '/rate_plans', { rate_plan: {
-            property_id: mapping.property_id, room_type_id: mapping.room_type_id, title: 'Standard rate', currency: property.currency,
-            rate_mode: 'manual', sell_mode: 'per_room', min_stay_arrival: calendarMinimumDefaults(home),
-            options: [{ occupancy: property.default_occupancy, is_primary: true, rate: property.nightly_rate }],
-          } }, 'rate_plan')
-          await save({ rate_plan_id: created.id, import_stage: 'inventory' })
-          break
-        }
-        case 'inventory': {
-          // The full sync: the home's calendar ahead through the delivery outbox, as every
-          // night change goes, to a rate plan Channex has nothing confirmed for yet (a new
-          // property has no outbox rows; a reconnect emptied them). One restrictions and
-          // one availability call, each logged with its task; a stage asked again sends
-          // what is due, honouring the outbox's retry times.
-          const waiting = (await this.deliverCalendar(row, mapping)).state === 'pending'
-          if (waiting) return { product_id: productId, stage, waiting: true, content: null }
-          await save({ import_stage: 'verify_inventory' })
-          break
-        }
-        case 'verify_inventory': {
-          const matches = await this.inventoryMatches(mapping as MappingRow & ChannexMapping)
-          if (!matches) return { product_id: productId, stage, waiting: true, content: null }
-          await save({ import_stage: 'content' })
-          break
-        }
         case 'content': {
           // Reads Airbnb and writes the home; nothing is written to Channex, so no pending step.
           // A few photos per call: until all are stored the stage is asked again, keeping the report so far.
@@ -800,6 +758,7 @@ export class AirbnbConnection {
       if (mapping.import_stage === 'draft') return { product_id: productId, stage: 'draft', waiting: false }
       if (mapping.import_stage !== 'complete') fail(409, 'IMPORT_IN_PROGRESS', 'This listing is still being imported or activated. Finish that first.')
       const propertyId = string(mapping.property_id, 'property_id')
+      const alsoVrbo = await this.hasVrbo(mapping)
       const path = `/channels/${encodeURIComponent(channelId)}`
       const mapped = (await this.channel(row, channelId)).ratePlans.find(entry => entry.rate_plan_id === mapping.rate_plan_id)
       if (mapped) {
@@ -813,9 +772,9 @@ export class AirbnbConnection {
       await this.save(row, { pending_step: null })
       // The home stops syncing, so it may stop being live: its billing is reported again.
       const [stopped] = await executeWithinCapacity(this.env, this.db, this.organizationId, [{
-        query: "UPDATE product_channel_mappings SET import_stage = 'draft', enabled = 0, updated_at = ? WHERE product_id = ? AND provider = 'channex' AND import_stage = 'complete'",
-        params: [now(), productId],
-      }, { query: "DELETE FROM channel_night_pushes WHERE product_id = ? AND provider = 'channex'", params: [productId] }], { operation: 'Stop syncing an Airbnb listing', action: 'stop syncing it' })
+        query: "UPDATE product_channel_mappings SET import_stage = 'draft', enabled = ?, updated_at = ? WHERE product_id = ? AND provider = 'channex' AND import_stage = 'complete'",
+        params: [Number(alsoVrbo), now(), productId],
+      }, ...(alsoVrbo ? [] : [{ query: "DELETE FROM channel_night_pushes WHERE product_id = ? AND provider = 'channex'", params: [productId] }])], { operation: 'Stop syncing an Airbnb listing', action: 'stop syncing it' })
       if (!stopped?.meta.changes) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.')
       return { product_id: productId, stage: 'draft', waiting: false }
     })
@@ -1145,8 +1104,144 @@ export class AirbnbConnection {
     })
   }
 
+  private async saveMapping(mapping: InventoryMapping, values: MappingProgress): Promise<void> {
+    const entries = Object.entries(values)
+    const result = await execute(this.db, `UPDATE product_channel_mappings SET ${entries.map(([column]) => `${column} = ?`).join(', ')}, updated_at = ?
+      WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND import_stage = ?`,
+    [...entries.map(([, value]) => value ?? null), now(), this.organizationId, mapping.product_id, mapping.import_stage])
+    if (!result.meta.changes) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.')
+    Object.assign(mapping, values)
+  }
+
+  /** Build the provider property, room and rate, then verify the inventory shared by its channels. */
+  private async advanceInventory(row: ConnectionRow, mapping: InventoryMapping, ready: 'content' | 'complete'): Promise<boolean> {
+    const productId = mapping.product_id
+    const stage = mapping.import_stage
+    const required = stage === 'property' ? [] : stage === 'room' ? [mapping.property_id] : stage === 'rate' ? [mapping.property_id, mapping.room_type_id] : [mapping.property_id, mapping.room_type_id, mapping.rate_plan_id]
+    if (required.some(id => !id)) throw new Error(`Home ${productId} at ${stage} is missing a Channex id`)
+    const property = mapping.import_property ? JSON.parse(mapping.import_property) as ImportProperty : null
+    const groupId = string(row.group_id, 'group_id')
+    switch (stage) {
+      case 'property': {
+        if (!property) throw new Error(`Import of ${productId} has no approved listing details`)
+        await this.save(row, { pending_step: 'import_property' })
+        const created = await channexCreate(this.env, '/properties', { property: {
+          title: property.title, currency: property.currency, timezone: property.timezone, group_id: groupId, property_type: property.property_type,
+          email: property.email, phone: property.phone, country: property.country, state: property.state, city: property.city,
+          address: property.address, zip_code: property.zip_code, settings: { state_length: STAY_CALENDAR_DAYS, min_stay_type: 'arrival' },
+        } }, 'property')
+        await this.saveMapping(mapping, { property_id: created.id, import_stage: 'room' })
+        break
+      }
+      case 'room': {
+        if (!property) throw new Error(`Import of ${productId} has no approved listing details`)
+        await this.save(row, { pending_step: 'import_room' })
+        const created = await channexCreate(this.env, '/room_types', { room_type: {
+          property_id: mapping.property_id, title: 'Entire home', count_of_rooms: 1, occ_adults: property.max_guests,
+          // Channex's child-only beds and infant cots; Airbnb counts neither, and Channex says to send 0 when there are none.
+          occ_children: 0, occ_infants: 0, default_occupancy: property.default_occupancy, room_kind: 'room',
+        } }, 'room_type')
+        await this.saveMapping(mapping, { room_type_id: created.id, import_stage: 'rate' })
+        break
+      }
+      case 'rate': {
+        if (!property) throw new Error(`Import of ${productId} has no approved listing details`)
+        await this.save(row, { pending_step: 'import_rate' })
+        const home = await readStayHome(this.db, this.manager(), productId)
+        const created = await channexCreate(this.env, '/rate_plans', { rate_plan: {
+          property_id: mapping.property_id, room_type_id: mapping.room_type_id, title: 'Standard rate', currency: property.currency,
+          rate_mode: 'manual', sell_mode: 'per_room', min_stay_arrival: calendarMinimumDefaults(home),
+          options: [{ occupancy: property.default_occupancy, is_primary: true, rate: property.nightly_rate }],
+        } }, 'rate_plan')
+        await this.saveMapping(mapping, { rate_plan_id: created.id, import_stage: 'inventory' })
+        break
+      }
+      case 'inventory': {
+        // The full sync: the home's calendar ahead through the delivery outbox, as every
+        // night change goes, to a rate plan Channex has nothing confirmed for yet (a new
+        // property has no outbox rows; a reconnect emptied them). One restrictions and
+        // one availability call, each logged with its task; a stage asked again sends
+        // what is due, honouring the outbox's retry times.
+        const waiting = (await this.deliverCalendar(row, mapping)).state === 'pending'
+        if (waiting) return true
+        await this.saveMapping(mapping, { import_stage: 'verify_inventory' })
+        break
+      }
+      case 'verify_inventory': {
+        const matches = await this.inventoryMatches(mapping as InventoryMapping & ChannexMapping)
+        if (!matches) return true
+        await this.saveMapping(mapping, { import_stage: ready })
+        break
+      }
+      default: throw new Error(`Home ${productId} cannot provision inventory at ${stage}`)
+    }
+    await this.save(row, { pending_step: null })
+    return false
+  }
+
+  /** A hosted channel uses the home's own property and inventory, including homes created in Blawby. */
+  async prepareHostedProperty(productId: string): Promise<string | null> {
+    await requireStays(this.db, this.organizationId)
+    return await this.locked(async (row) => {
+      const home = await readStayHome(this.db, this.manager(), productId)
+      let mapping = await queryFirst<InventoryMapping & { listing_id: string | null; enabled: number }>(this.db, `SELECT * FROM product_channel_mappings
+        WHERE organization_id = ? AND product_id = ? AND provider = 'channex'`, [this.organizationId, productId])
+      if (mapping?.enabled && (mapping.import_stage === 'complete' || mapping.import_stage === 'draft')) return string(mapping.property_id, 'property_id')
+      if (mapping?.listing_id) fail(409, 'CHANNEL_MAPPING_IN_PROGRESS', 'Finish activating this home in Airbnb before adding Vrbo.')
+      await requireHomeCapacity(this.env, this.db, this.organizationId, productId)
+      if (!mapping) {
+        if (home.base_price_minor === null) fail(422, 'PRICE_REQUIRED', 'Set the home’s base nightly price before connecting it to Channex.', { field: 'base_price_minor' })
+        const contact = await this.organizationContact()
+        const address = home.address
+        const digits = currencyFractionDigits(home.currency)
+        const property: ImportProperty = {
+          title: home.name, currency: home.currency, timezone: home.timezone,
+          ...(contact.email ? { email: contact.email } : {}), ...(contact.phone ? { phone: contact.phone } : {}),
+          ...(address ? { address: address.address, country: address.country, city: address.city ?? undefined, state: address.state ?? undefined, zip_code: address.zip_code ?? undefined } : {}),
+          max_guests: home.max_guests, default_occupancy: home.max_guests,
+          nightly_rate: (home.base_price_minor / 10 ** digits).toFixed(digits),
+        }
+        const importProperty = JSON.stringify(property)
+        await execute(this.db, `INSERT INTO product_channel_mappings (organization_id, product_id, provider, import_stage, import_property)
+          VALUES (?, ?, 'channex', 'property', ?)`, [this.organizationId, productId, importProperty])
+        mapping = { product_id: productId, property_id: null, room_type_id: null, rate_plan_id: null, import_stage: 'property', import_property: importProperty, listing_id: null, enabled: 0 }
+      }
+      await this.ensureGroup(row)
+      if (mapping.import_stage === 'complete') await this.saveMapping(mapping, { import_stage: 'inventory' })
+      while (mapping.import_stage !== 'complete') {
+        if (await this.advanceInventory(row, mapping, 'complete')) return null
+      }
+      const [enabled] = await executeWithinCapacity(this.env, this.db, this.organizationId, [{
+        query: `UPDATE product_channel_mappings SET enabled = 1, import_property = NULL, updated_at = ?
+          WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND import_stage = 'complete' AND enabled = 0`,
+        params: [now(), this.organizationId, productId],
+      }], { operation: 'Enable Channex inventory for a hosted channel', action: 'sync it with Channex' })
+      if (!enabled?.meta.changes) fail(409, 'IMPORT_CHANGED', 'The home changed. Refresh and try again.')
+      return string(mapping.property_id, 'property_id')
+    })
+  }
+
+  /** Re-read Channex after hosted setup or removal and release inventory with no active channel. */
+  async finishHostedProperty(productId: string): Promise<void> {
+    await requireStays(this.db, this.organizationId)
+    await this.locked(async () => {
+      await readStayHome(this.db, this.manager(), productId)
+      const mapping = await queryFirst<{ property_id: string; rate_plan_id: string }>(this.db, `SELECT property_id, rate_plan_id
+        FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = 1`,
+      [this.organizationId, productId])
+      if (!mapping) return
+      const channels = await propertyChannels(this.env, mapping.property_id)
+      if (channels.some(channel => mapsActiveRate(channel, mapping.rate_plan_id))) return
+      await executeWithinCapacity(this.env, this.db, this.organizationId, [{
+        query: `UPDATE product_channel_mappings SET enabled = 0, updated_at = ?
+          WHERE organization_id = ? AND product_id = ? AND provider = 'channex'`,
+        params: [now(), this.organizationId, productId],
+      }], { operation: 'Stop Channex sync for a home without an active channel', action: 'stop syncing it' })
+    })
+  }
+
   /** Send the configured home's calendar through the outbox: one restrictions call and one availability call. */
-  private async deliverCalendar(row: ConnectionRow, mapping: MappingRow, fullSync = false): Promise<SuccessfulChannelPush> {
+  private async deliverCalendar(row: ConnectionRow, mapping: InventoryMapping, fullSync = false): Promise<SuccessfulChannelPush> {
     const target = { property_id: string(mapping.property_id, 'property_id'), room_type_id: string(mapping.room_type_id, 'room_type_id'), rate_plan_id: string(mapping.rate_plan_id, 'rate_plan_id') }
     await configureStayCalendar(this.db, this.env, this.organizationId, await readStayHome(this.db, this.manager(), mapping.product_id), target, async (action) => {
       await this.save(row, {})
@@ -1160,7 +1255,7 @@ export class AirbnbConnection {
   }
 
   /** Whether Channex now reads every night the full sync sent it; a new rate plan reads zero until its update is applied, which is "not yet", not an error. */
-  private async inventoryMatches(mapping: MappingRow & ChannexMapping): Promise<boolean> {
+  private async inventoryMatches(mapping: InventoryMapping & ChannexMapping): Promise<boolean> {
     const sent = await queryAll<{ date: string; sent_json: string }>(this.db, "SELECT date, sent_json FROM channel_night_pushes WHERE product_id = ? AND provider = 'channex' AND state = 'pushed' AND sent_json IS NOT NULL ORDER BY date", [mapping.product_id])
     if (!sent.length) throw new Error(`Import of ${mapping.product_id} has no delivered calendar to verify`)
     const query = new URLSearchParams({ 'filter[property_id]': mapping.property_id, 'filter[date][gte]': sent[0]!.date, 'filter[date][lte]': sent.at(-1)!.date })
@@ -1183,6 +1278,13 @@ export class AirbnbConnection {
     })
   }
 
+  private async hasVrbo(mapping: InventoryMapping): Promise<boolean> {
+    const { property_id: propertyId, rate_plan_id: ratePlanId } = mapping
+    if (propertyId === null || ratePlanId === null) return false
+    const channels = await propertyChannels(this.env, propertyId, VRBO_CHANNEL)
+    return channels.some(channel => mapsActiveRate(channel, ratePlanId))
+  }
+
   /**
    * Removes the connection one mapping per call (each removal is verified
    * before the next), then deactivates and deletes the channel and the setup
@@ -1193,11 +1295,13 @@ export class AirbnbConnection {
       if (!row.channel_id) fail(409, 'NOT_CONNECTED', 'There is no completed Airbnb connection to disconnect.')
       let channel = await this.channel(row, row.channel_id)
       const path = `/channels/${encodeURIComponent(channel.id)}`
+      const mapped = (await this.mappings()).filter(mapping => mapping.channel_id === channel.id && mapping.enabled === 1)
+      const keeping = await Promise.all(mapped.map(async mapping => await this.hasVrbo(mapping) ? mapping.product_id : null))
       await this.save(row, { status: 'disconnecting' })
       // Homes that stop syncing may stop being live: the counts are reported again.
       await executeWithinCapacity(this.env, this.db, this.organizationId, [{
-        query: "UPDATE product_channel_mappings SET enabled = 0, updated_at = ? WHERE organization_id = ? AND provider = 'channex' AND channel_id = ?",
-        params: [now(), this.organizationId, channel.id],
+        query: "UPDATE product_channel_mappings SET enabled = 0, updated_at = ? WHERE organization_id = ? AND provider = 'channex' AND channel_id = ? AND product_id NOT IN (SELECT value FROM json_each(?))",
+        params: [now(), this.organizationId, channel.id, d1JsonStringSet(keeping.filter(id => id !== null))],
       }], { operation: 'Disconnect Airbnb listings', action: 'disconnect them' })
       const first = channel.ratePlans[0]
       if (first !== undefined) {

@@ -36,7 +36,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { currencyFractionDigits, isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { completeChannelPush, configureStayCalendar, deliverStayNights, pendingChannelNightsQuery, pushAirbnbBookingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type ChannelPushCompletion, type ChannexMapping } from '~/server/integrations/channex/ari'
+import { activeAirbnbMapping, completeChannelPush, configureStayCalendar, deliverStayNights, pendingChannelNightsQuery, pushAirbnbBookingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type ChannelPushCompletion, type ChannexMapping } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { bookingContactQuery, bookingConversationQueries, bookingDay, isBookingDay, nightsBoundary, noStayRequestPaymentInFlightSql, requestInsertQueries, stayRequestPayBySql, stayRequestProgress, stayRequestRespondBySql, threadPayloadForGuest, validateGuestRequest } from '~/server/domain/requests'
 import { bookingPolicy, parseBookingPolicy, type BookingPolicy } from '~/server/utils/booking-policy-summary'
@@ -1642,7 +1642,7 @@ export async function requireAirbnbAcceptable(db: DbClient, organizationId: stri
   if (!product.stay || !sections) return
   const settings = airbnbListingSettings(product.stay, product.details, sections)
   if (!('refusal' in settings)) return
-  const syncing = await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = 1", [organizationId, productId])
+  const syncing = await activeAirbnbMapping(db, organizationId, productId)
   if (syncing) fail(422, 'AIRBNB_UNSUPPORTED_VALUE', settings.refusal, settings.field)
 }
 /** House rules Airbnb takes as guest controls, by product detail. */
@@ -1738,9 +1738,11 @@ export async function pushStayHomeChannel(db: DbClient, env: ChannexEnv & GuestI
   try {
     const home = await readStayHome(db, access, product.id)
     if (home.channel?.status !== 'connected') return null
-    if (changes.settings?.booking || changes.settings?.cancellation) {
+    const airbnb = changes.settings?.booking || changes.settings?.cancellation
+      ? await activeAirbnbMapping(db, access.organizationId, product.id) : null
+    if (airbnb && changes.settings) {
       const settings = airbnbListingSettings(home, (await getProduct(db, access.organizationId, product.id)).details, changes.settings)
-      const pushed: ChannelPush | null = 'refusal' in settings ? { state: 'needs_review', detail: settings.refusal } : await pushAirbnbBookingSettings(db, env, access.organizationId, product.id, settings.booking)
+      const pushed: ChannelPush | null = 'refusal' in settings ? { state: 'needs_review', detail: settings.refusal } : await pushAirbnbBookingSettings(env, airbnb, settings.booking)
       if (pushed?.state === 'needs_review' || !changes.nights) return pushed
     }
     if (!changes.nights) return null

@@ -49,8 +49,8 @@ export async function cleanupOrganizationBeforeDelete(
   await retainPaymentsForTenantDeletion(db, organizationId)
   // Its Airbnb channel, Channex properties and group go first: a failure there
   // keeps the organization, so nothing in Channex outlives it unowned.
-  const { AirbnbConnection } = await import('~/server/integrations/channex/airbnb-connection')
-  await new AirbnbConnection(db, env, organizationId, userId).deleteForOrganization()
+  const { ChannexConnection } = await import('~/server/integrations/channex/channel-connection')
+  await new ChannexConnection(db, env, organizationId, userId).deleteForOrganization()
   await stageCalendarOrganizationCleanup(db, organizationId)
   await deleteOrganizationCustomDomains(env, db, organizationId)
 

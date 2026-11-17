@@ -8,6 +8,7 @@ import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { applyChannelBooking, createStay } from '../../server/domain/stays.ts'
 import { applyBookingRevision, landBookingRevision, pendingBookingRevisions } from '../../server/integrations/channex/booking-revisions.ts'
+import { ChannexConnection } from '../../server/integrations/channex/channel-connection.ts'
 import { startVrboSetup, vrboHomes } from '../../server/integrations/channex/hosted-channel.ts'
 import { captureEvents } from './support/events.ts'
 
@@ -73,7 +74,7 @@ class FakeChannex {
   }
 }
 
-async function boot() {
+async function boot(mapped = true) {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'channex-revisions-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
@@ -97,7 +98,7 @@ async function boot() {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
       stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'm-owner' },
     } })
-    await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
+    if (mapped) await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
       VALUES (?, ?, 'channex', 'listing-1', 'chan-1', 'prop-1', 'room-1', 'rate-1', 'complete', 1)`).bind(ORG, home.id).run()
     return { runtime, db, env, queue, productId: home.id }
   } catch (error) {
@@ -271,9 +272,11 @@ test('Vrbo hosts open only the selected mapped property and bookings use the sha
     return await channex.fetch(input, init)
   }) as typeof fetch
   try {
-    await assert.rejects(startVrboSetup(db, env, ORG, 'unmapped-home', 'Owner'), { data: { code: 'CHANNEL_MAPPING_REQUIRED', field: 'product_id' } })
+    await assert.rejects(startVrboSetup(db, env, ORG, 'unmapped-home', OWNER, 'Owner'), { data: { code: 'HOME_NOT_FOUND' } })
     assert.equal(tokenRequests, 0)
-    const setup = new URL((await startVrboSetup(db, env, ORG, productId, 'Owner')).url)
+    const started = await startVrboSetup(db, env, ORG, productId, OWNER, 'Owner')
+    assert.ok('url' in started)
+    const setup = new URL(started.url)
     assert.equal(setup.origin + setup.pathname, 'https://channex.test/auth/exchange')
     assert.equal(setup.searchParams.get('oauth_session_key'), 'channex-test-token')
     assert.equal(setup.searchParams.get('channels'), 'VRB')
@@ -297,6 +300,103 @@ test('Vrbo hosts open only the selected mapped property and bookings use the sha
     })
     await queue.drain(env, 'stay.changed')
     assert.deepEqual(channex.availability.map(value => [value.date_from, value.date_to, value.availability]), [['2027-02-01', '2027-02-02', 0]])
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('a standalone home provisions one Channex inventory and opens Vrbo only after calendar readback', { timeout: 120_000 }, async () => {
+  const { runtime, db, env, productId } = await boot(false)
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  const created: string[] = []
+  const inventory = { availability: {} as Record<string, unknown>, restrictions: {} as Record<string, unknown> }
+  let confirmInventory = false
+  let channelActive = true
+  function land(values: Record<string, unknown>[], dates: Record<string, unknown>, read: (row: Record<string, unknown>) => unknown) {
+    for (const row of values) {
+      const from = new Date(String(row.date_from))
+      const through = new Date(String(row.date_to))
+      for (const day = from; day <= through; day.setUTCDate(day.getUTCDate() + 1)) {
+        dates[day.toISOString().slice(0, 10)] = read(row)
+      }
+    }
+  }
+  globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+    const path = url.pathname.replace('/api/v1', '')
+    const method = init.method ?? 'GET'
+    const body = init.body ? JSON.parse(String(init.body)) : undefined
+    if (method === 'POST') {
+      const resource = {
+        '/groups': ['group', 'group-1'],
+        '/properties': ['property', 'standalone-property'],
+        '/room_types': ['room_type', 'standalone-room'],
+        '/rate_plans': ['rate_plan', 'standalone-rate'],
+      }[path]
+      if (resource) {
+        const [type, id] = resource
+        assert.ok(type && id)
+        created.push(path)
+        if (type === 'property') assert.equal(body.property.group_id, 'group-1')
+        return Response.json({ data: { id, type, attributes: body[type] } })
+      }
+      if (path === '/availability') land(body.values, inventory.availability, row => row.availability)
+      if (path === '/restrictions') land(body.values, inventory.restrictions, row => row)
+      if (path === '/auth/one_time_token') {
+        assert.ok(confirmInventory)
+        assert.equal(body.one_time_token.property_id, 'standalone-property')
+        return Response.json({ data: { token: 'test-token' } })
+      }
+    }
+    if (method === 'GET' && path === '/channels') {
+      return Response.json({ data: channelActive ? [{ id: 'vrbo-standalone', type: 'channel', attributes: {
+        channel: 'VRB', is_active: true, properties: ['standalone-property'],
+        rate_plans: [{ id: 'vrbo-rate-mapping', rate_plan_id: 'standalone-rate' }],
+      } }] : [], meta: { total: Number(channelActive) } })
+    }
+    if (path === '/properties/standalone-property') {
+      return Response.json({ data: { id: 'standalone-property', type: 'property', attributes: { settings: { min_stay_type: 'arrival' } } } })
+    }
+    if (path === '/rate_plans/standalone-rate') {
+      return Response.json({ data: { id: 'standalone-rate', type: 'rate_plan', attributes: { min_stay_arrival: 1, options: [{ is_primary: true, occupancy: 4, rate: '150.00' }] } } })
+    }
+    if (method === 'GET' && path === '/availability') {
+      const values = confirmInventory ? inventory.availability : Object.fromEntries(Object.keys(inventory.availability).map(day => [day, 0]))
+      return Response.json({ data: { 'standalone-room': values } })
+    }
+    if (method === 'GET' && path === '/restrictions') return Response.json({ data: { 'standalone-rate': inventory.restrictions } })
+    return await channex.fetch(input, init)
+  }) as typeof fetch
+  try {
+    assert.deepEqual(await vrboHomes(db, env, ORG), [{ product_id: productId, name: 'Cabin', status: 'not_connected' }])
+    assert.deepEqual(await startVrboSetup(db, env, ORG, productId, OWNER, 'Owner'), { preparing: true })
+    confirmInventory = true
+    const ready = await startVrboSetup(db, env, ORG, productId, OWNER, 'Owner')
+    assert.ok('url' in ready)
+    assert.equal(new URL(ready.url).searchParams.get('property_id'), 'standalone-property')
+    assert.deepEqual(created, ['/groups', '/properties', '/room_types', '/rate_plans'])
+    assert.deepEqual(await db.prepare('SELECT listing_id, channel_id, property_id, import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), {
+      listing_id: null, channel_id: null, property_id: 'standalone-property', import_stage: 'complete', enabled: 1,
+    })
+    assert.ok(Object.keys(inventory.availability).length > 300)
+    channex.revise('standalone-revision', {
+      id: 'standalone-stay', property_id: 'standalone-property', ota_name: 'VRBO', status: 'new',
+      arrival: '2027-01-10', departure: '2027-01-13', amount: '450.50', revision: 'standalone-revision',
+    }, '2026-10-15T01:00:00Z')
+    const revision = await applyBookingRevision(db, env, 'standalone-revision')
+    assert.equal(revision.status, 'acknowledged')
+    assert.deepEqual(await nights(db, revision.booking_id), ['2027-01-10', '2027-01-11', '2027-01-12'])
+    const connection = new ChannexConnection(db, env, ORG, OWNER)
+    await connection.finishHostedProperty(productId)
+    assert.equal(await db.prepare('SELECT enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first('enabled'), 1)
+    channelActive = false
+    await connection.finishHostedProperty(productId)
+    assert.equal(await db.prepare('SELECT enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first('enabled'), 0)
+    const reopened = await startVrboSetup(db, env, ORG, productId, OWNER, 'Owner')
+    assert.ok('url' in reopened)
+    assert.deepEqual(created, ['/groups', '/properties', '/room_types', '/rate_plans'])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
