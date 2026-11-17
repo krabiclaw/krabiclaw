@@ -664,7 +664,7 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
   return { body: { success: true, status: 'checkout', replayed: Boolean(retrying), ...checkout }, status: retrying ? 200 : 201 }
 }
 
-/** One booked record as `bookedRecordsInRange` reads it, with what was paid and whether the viewer has a seat in its guest conversation. */
+/** One booked record as `bookedRecordsInRange` reads it, including whether the viewer can open its conversation. */
 export interface BookedRecordInRange {
   id: string
   organization_id: string
@@ -695,16 +695,19 @@ export interface BookedRecordInRange {
   channel: 'airbnb' | 'vrbo' | 'booking_com' | 'direct'
   /** A channel stay that landed on held nights. */
   overbooked: number
-  total_minor: number | null
-  currency: string | null
-  /** Recorded payments and captured online payments, net of refunds, in the booking's currency. */
-  paid_minor: number
   /** The offering's responsible member, and how the team names them. */
   assigned_member_id: string | null
   assigned_member_name: string | null
   conversation_id: string | null
   /** 1 when the viewer sits in the booking's guest conversation and so can open it. */
   viewer_seated: number
+}
+
+export interface BookedRecordWithAmounts extends BookedRecordInRange {
+  total_minor: number | null
+  currency: string | null
+  /** Recorded payments and captured online payments, net of refunds, in the booking's currency. */
+  paid_minor: number
 }
 
 /**
@@ -728,7 +731,10 @@ export function businessWideViewer(membership: BatchQuery): BatchQuery {
   return { query: `SELECT organization_id, user_id, member_id, 1 AS organization_wide FROM (${membership.query})`, params: membership.params }
 }
 
-export function bookedRecordsInRange(viewer: ViewerTerms, range: { from: string; to: string; pending?: boolean; cancelled?: boolean; guest?: boolean }): BatchQuery {
+export function bookedRecordsInRange(viewer: ViewerTerms, range: {
+  from: string; to: string; pending?: boolean; cancelled?: boolean; guest?: boolean; amounts?: boolean;
+  organizationId?: string; slotLocationId?: string; assignedMemberId?: string;
+}): BatchQuery {
   const wideFrom = `${addLocalDays(range.from, -1)}T00:00:00.000Z`, wideTo = `${addLocalDays(range.to, 1)}T23:59:59.999Z`
   const whose = range.guest
     ? `r.user_id = ${viewer.user} AND ${CURRENT_GUEST_SQL('r')} AND (b.product_session_id IS NOT NULL OR (b.owner = 'app' AND b.user_id = r.user_id))`
@@ -737,9 +743,10 @@ export function bookedRecordsInRange(viewer: ViewerTerms, range: { from: string;
     query: `SELECT b.id, b.organization_id, org.name AS organization_name, org.vertical, b.status, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit, b.product_id, p.kind AS product_kind,
         ${range.guest ? 'p.name' : 'COALESCE(sc.internal_name, p.name)'} AS product_name, b.product_session_id, COALESCE(b.location_id, sc.location_id) AS location_id, l.title AS location_title,
         b.starts_at, b.ends_at, b.timezone, b.party_size, b.adults, b.children, b.party_size_is_minimum, json_extract(r.payload_json, '$.guest.name') AS guest_name,
-        (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, b.owner, b.channel, b.overbooked, b.total_minor, b.currency,
+        (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, b.owner, b.channel, b.overbooked,
+        ${range.amounts ? `b.total_minor, org.default_currency AS currency,
         (SELECT COALESCE(SUM(o.amount_minor), 0) FROM offline_payments o WHERE o.organization_id = b.organization_id AND o.booking_id = b.id)
-          + (SELECT COALESCE(SUM(pay.captured_amount - pay.refunded_amount), 0) FROM payments pay WHERE pay.organization_id = b.organization_id AND pay.subject_type = 'booking' AND pay.subject_id = b.id) AS paid_minor,
+          + (SELECT COALESCE(SUM(pay.captured_amount - pay.refunded_amount), 0) FROM payments pay WHERE pay.organization_id = b.organization_id AND pay.subject_type = 'booking' AND pay.subject_id = b.id) AS paid_minor,` : ''}
         c.assigned_member_id, (SELECT ${MEMBER_NAME_SQL} FROM member m JOIN user u ON u.id = m.userId LEFT JOIN member_scheduling ms ON ms.member_id = m.id AND ms.organization_id = m.organizationId
           WHERE m.id = c.assigned_member_id AND m.organizationId = b.organization_id) AS assigned_member_name, r.id AS conversation_id,
         ${conversationMemberSql('r', viewer.user)} AS viewer_seated
@@ -752,7 +759,11 @@ export function bookedRecordsInRange(viewer: ViewerTerms, range: { from: string;
       LEFT JOIN conversations r ON r.organization_id = b.organization_id AND r.booking_id = b.id AND r.kind = 'booking'
      WHERE ${whose} ${range.cancelled ? '' : "AND b.status <> 'cancelled'"}
        AND ((b.starts_at <= ? AND b.ends_at >= ?)${range.pending ? " OR (b.status = 'pending' AND b.ends_at >= ?)" : ''})
+       ${range.organizationId ? 'AND b.organization_id = ?' : ''}
+       ${range.slotLocationId ? 'AND (b.product_session_id IS NULL OR b.location_id = ?)' : ''}
+       ${range.assignedMemberId ? 'AND c.assigned_member_id = ?' : ''}
      ORDER BY b.starts_at, b.id`,
-    params: [wideTo, wideFrom, ...(range.pending ? [wideFrom] : [])],
+    params: [wideTo, wideFrom, ...(range.pending ? [wideFrom] : []),
+      ...[range.organizationId, range.slotLocationId, range.assignedMemberId].filter(Boolean)],
   }
 }

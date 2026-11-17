@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { executeBatch, type DbClient } from '~/server/db'
 import { assertRoleAllows, BATCH_VIEWER, membershipBySlugQuery, withViewer } from '~/server/utils/member-access'
-import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
+import { bookedRecordsInRange, type BookedRecordInRange, type BookedRecordWithAmounts } from '~/server/domain/product-bookings'
 import { openWorkQuery, taskAssignees, taskAssigneesQuery, type OpenWorkRow } from '~/server/domain/tasks'
 import { bookingWelcomesQuery, bookingWelcomeViews, setupQueries, setupViews } from '~/server/domain/opportunities'
 import { bookingDay } from '~/server/domain/requests'
@@ -56,7 +56,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   const managed = { sql: `CASE WHEN ${BATCH_VIEWER.organizationWide} = 1 THEN ${org} END` }
   const [viewerResult, recordResult, workResult, productResult, locationResult, welcomeResult, factResult, unpricedResult, assigneeResult] = await executeBatch(db, [
     membership,
-    withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, { from, to, pending: range === 'today' })),
+    withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, { from, to, pending: range === 'today', amounts: true })),
     withViewer(membership, openWorkQuery(BATCH_VIEWER, to)),
     withViewer(membership, mediaPlacementsQuery({ organizationId: { sql: org }, ownerType: 'product', owners: {
       sql: `SELECT product_id FROM bookings WHERE organization_id = ${org} AND status <> 'cancelled' AND ${window}
@@ -103,7 +103,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     return card
   }
 
-  for (const record of (recordResult!.results as BookedRecordInRange[])) {
+  for (const record of (recordResult!.results as BookedRecordWithAmounts[])) {
     const zone = record.timezone
     const start = bookingDay(record.starts_at, zone), end = bookingDay(record.ends_at, zone)
     const guest = first(record.guest_name)
@@ -162,7 +162,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
       action })
   }
   for (const [, held] of byClass) {
-    const record = (recordResult!.results as BookedRecordInRange[]).find(row => row.id === held.card.bookings[0])!
+    const record = (recordResult!.results as BookedRecordWithAmounts[]).find(row => row.id === held.card.bookings[0])!
     // A class is named by itself; its line is where and how many people are booked.
     held.card.headline = record.product_name
     held.card.line = [record.location_id === null ? 'Online' : record.location_title, `${held.party} ${held.party === 1 ? 'guest' : 'guests'}`].filter(Boolean).join(' · ')
@@ -264,7 +264,7 @@ function heading(cards: Card[], range: Range): string {
 }
 
 /** What an owner or admin reads of a booking's money, only when there is some: "$1,240 paid", "$200 of $380 paid", "free", a request's price. */
-function money(record: Pick<BookedRecordInRange, 'status' | 'unit' | 'owner' | 'channel' | 'total_minor' | 'currency' | 'paid_minor' | 'id'>): string | null {
+function money(record: Pick<BookedRecordWithAmounts, 'status' | 'unit' | 'owner' | 'channel' | 'total_minor' | 'currency' | 'paid_minor' | 'id'>): string | null {
   if (record.unit === 'nights' && isChannelManagedStay(record)) return record.channel === 'direct' ? null : `Paid through ${STAY_CHANNEL_LABELS[record.channel]}`
   if (record.total_minor === 0) return 'free'
   const format = (amount: number) => {
