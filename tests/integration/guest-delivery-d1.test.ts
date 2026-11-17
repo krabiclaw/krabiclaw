@@ -636,7 +636,8 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
     const checkIn = addLocalDays(localDateAt(new Date(), 'Asia/Bangkok'), 14)
     const checkOut = addLocalDays(checkIn, 2)
     const stay = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'turnover-alert', check_in_date: checkIn, check_out_date: checkOut, arrival_time: '15:30',
-      adults: 2, children: 1, guest_name: 'Ana Silva', guest_email: 'guest@provider-proof.com', notes: 'Door code 4411', total_minor: 30000 })
+      adults: 2, children: 1, guest_name: 'Ana Silva', guest_email: 'guest@provider-proof.com', private_notes: 'Door code 4411', total_minor: 30000 })
+    assert(stay.conversation_id)
     await notifyStayCancelled(env, db, access.organizationId, stay.id, 'guest', 12345)
 
     const to = (address: string) => emails.filter(email => email.to.includes(address))
@@ -653,17 +654,17 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
     assert.equal(ownerEmail!.subject, `Reservation canceled - Ana Silva, ${subjectDay}`)
     for (const fact of ['guest@provider-proof.com', '$123.45', '3:30 PM']) assert(ownerEmail!.text.includes(fact), `the owner's alert states ${fact}`)
     assert.equal(memberEmail!.subject, memberSubject)
-    for (const fact of ['Place to stay\nTurnover Cabin', 'Guest\nAna\n', `Check-in\n${checkInLabel}`, `Check-out\n${checkOutLabel}`, 'Arriving\n3:30 PM', 'Guests\n3\n', `https://proof.example/dashboard/turnover/bookings/${stay.id}`]) assert(memberEmail!.text.includes(fact), `the member's alert states ${fact}`)
-    for (const secret of ['Silva', 'guest@provider-proof.com', '$123.45', 'Door code', stay.conversation_id!]) {
+    for (const fact of ['Place to stay\nTurnover Cabin', 'Guest\nAna\n', `Check-in\n${checkInLabel}`, `Check-out\n${checkOutLabel}`, 'Arriving\n3:30 PM', 'Guests\n3\n', `https://proof.example/dashboard/turnover/messages/${stay.conversation_id}`]) assert(memberEmail!.text.includes(fact), `the member's alert states ${fact}`)
+    for (const secret of ['Silva', 'guest@provider-proof.com', '$123.45', 'Door code']) {
       assert(!memberEmail!.text.includes(secret) && !memberEmail!.html.includes(secret), `the member's alert leaves out ${secret}`)
     }
-    // The member's phone opens the stay, not the guest's conversation.
+    // The assigned member's phone opens the guest conversation.
     assert.equal(pushes.length, 1)
     assert.equal(pushes[0]!.url, `https://api.sandbox.push.apple.com/3/device/${deviceToken}`)
-    // The icon is the member's unread conversations, the count Messages shows: a stay's guest conversation is not theirs.
+    // A system cancellation alone does not put a stay in the unread inbox.
     assert.deepEqual(pushes[0]!.body, {
-      aps: { alert: { title: memberSubject, body: `Turnover Cabin · ${checkInLabel} – ${checkOutLabel}` }, sound: 'default', badge: 0 },
-      organization_id: access.organizationId, user_id: 'cleaner-turnover', kind: 'stay', booking_id: stay.id,
+      aps: { alert: { title: memberSubject, body: `Turnover Cabin · ${checkInLabel} – ${checkOutLabel}` }, sound: 'default', badge: 0, 'thread-id': stay.conversation_id },
+      organization_id: access.organizationId, user_id: 'cleaner-turnover', kind: 'guest', conversation_id: stay.conversation_id,
     })
   } finally {
     await runtime.dispose()
