@@ -15,6 +15,7 @@
 
 <script setup lang="ts">
 import { useSuggestedReplies } from './guest-messaging-client'
+import { getVerticalCopy } from '~/utils/vertical-copy'
 
 const props = defineProps<{ manage: boolean }>()
 const emit = defineEmits<{ navigate: [] }>()
@@ -26,7 +27,7 @@ const links = computed(() => [
   // Managers see every automatic message there; each person sees their own Send later replies.
   { label: 'Sent and upcoming', icon: 'i-lucide-clock', to: `${listPath.value}/scheduled` },
   // Guests a member blocked are out of every list until unblocked, from their conversation's sheet; anyone who reads guest conversations reaches them.
-  { label: 'Blocked guests', icon: 'i-lucide-ban', to: `${listPath.value}?blocked=` },
+  { label: `Blocked ${getVerticalCopy(dashboard.organization.value?.vertical).guestsLabelPlural}`, icon: 'i-lucide-ban', to: `${listPath.value}?blocked=` },
 ])
 const dashboard = useDashboardOrganization()
 const suggestionsOn = useSuggestedReplies(() => dashboard.organizationId.value)
