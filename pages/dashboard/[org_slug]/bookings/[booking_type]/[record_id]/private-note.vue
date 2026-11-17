@@ -31,10 +31,7 @@ definePageMeta({ layout: 'dashboard' })
 
 const editor = inject(bookingEditorKey, null)
 const level = useRouteLevel()
-const record = editor?.booking.value
-const snapshot = record?.type === 'booking' && record.unit === 'slot' && record.booking_id && record.version !== null
-  ? { id: record.booking_id, version: record.version, text: record.private_notes ?? '' }
-  : null
+const snapshot = editor?.note.value ?? null
 if (!snapshot) showNotFound('This reservation has no private note editor')
 
 const noteLimit = 2000
@@ -49,7 +46,7 @@ async function save() {
   failure.value = ''
   try {
     const backTo = level.to.value
-    if (!backTo || editor.booking.value?.booking_id !== snapshot.id) throw new Error('The reservation is no longer available')
+    if (!backTo || editor.note.value?.id !== snapshot.id) throw new Error('The reservation is no longer available')
     await editor.savePrivateNote({ id: snapshot.id, version: snapshot.version, text: draft.value })
     await navigateTo(backTo, { replace: true })
   } catch (cause) {
