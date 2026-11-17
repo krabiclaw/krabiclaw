@@ -3,8 +3,6 @@ import { OPEN_TERMS_JSON } from './support/booking-terms.ts'
 import test from 'node:test'
 import { symmetricEncrypt } from 'better-auth/crypto'
 import { Miniflare } from 'miniflare'
-import { generateSQLiteDrizzleJson,generateSQLiteMigration } from 'drizzle-kit/api'
-import * as schema from '../../server/db/schema.ts'
 import { writeMemberScheduling, readMemberScheduling, memberSchedulingList, requireSchedulingAccess, workingWindows, selectBusyCalendars } from '../../server/domain/member-scheduling.ts'
 import { claimSessionCapacity, listBookableSessions } from '../../server/utils/availability.ts'
 import { handleBookingsTools } from '../../server/utils/mcp-tools/bookings.ts'
@@ -15,12 +13,13 @@ import { MEMBER_BUSY_SCOPES } from '../../shared/member-scheduling.ts'
 import { roleSatisfies } from '../../server/utils/mcp-auth.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { localDateTimeToInstant } from '../../utils/timezone.ts'
+import { applySchema } from './support/schema.ts'
 
 test('member self-service uses Better Auth permissions, public approval is admin-only, and selected disconnected busy data fails closed for only that member', {timeout:120000},async(t)=>{
  const runtime=new Miniflare({workers:[{config:{name:'member-scheduling-proof',compatibilityDate:'2024-11-01',manifest:{mainModule:'index.mjs',modules:{'index.mjs':{type:'esm',contents:'export class Hub {fetch(){return new Response(null,{status:204})}} export default {fetch(){return new Response("ok")}}'}}},exports:{Hub:{type:'durable-object',storage:'sqlite'}},env:{DB:{type:'d1'},GUEST_INBOX_HUBS:{type:'durable-object',worker:'member-scheduling-proof',exportName:'Hub'}}}}]})
  const db=await runtime.getD1Database('DB')
  try {
-  await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}),await generateSQLiteDrizzleJson(schema))).map(sql=>db.prepare(sql)))
+  await applySchema(db)
   await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at, timezone) VALUES('org','Org','org','org','{}','theme','USD','active','complete','flat','experience','2026-10-01T00:00:00.000Z', 'UTC')`).run()
   // Google Calendar sync is Business; the plan is the organization's subscription.
   await db.prepare("INSERT INTO subscription(id,plan,referenceId,status,periodEnd) VALUES('sub-org','business','org','active',4070908800)").run()

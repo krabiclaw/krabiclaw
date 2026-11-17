@@ -146,15 +146,11 @@
               <p class="mt-1 whitespace-pre-wrap text-sm text-muted">{{ detail.cancellation_reason }}</p>
             </template>
             <template v-if="!personalScope && !purchase">
-              <NuxtLink v-if="booking" :to="{ path: `${editorPath}/private-note`, query: route.query }" :class="rowClass" class="mt-3">
+              <NuxtLink v-if="note" :to="{ path: `${editorPath}/private-note`, query: route.query }" :class="rowClass" class="mt-3">
                 <UIcon name="i-lucide-sticky-note" class="size-4 shrink-0" />
-                <span class="min-w-0 flex-1"><span class="block font-medium">Private note</span><span v-if="booking.private_notes" class="block truncate text-xs text-muted">{{ booking.private_notes }}</span></span>
+                <span class="min-w-0 flex-1"><span class="block font-medium">Private note</span><span v-if="note.text" class="block truncate text-xs text-muted">{{ note.text }}</span></span>
                 <UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
               </NuxtLink>
-              <template v-else-if="detail?.private_notes">
-                <h3 class="mt-5 text-sm font-semibold text-highlighted">Private note</h3>
-                <p class="mt-1 whitespace-pre-wrap text-sm text-muted">{{ detail.private_notes }}</p>
-              </template>
             </template>
             <template v-if="booking?.notes">
               <h3 class="mt-5 text-sm font-semibold text-highlighted">{{ personalScope ? 'Your requests' : 'Requests' }}</h3>
@@ -400,6 +396,8 @@ export interface BookingEditor {
   callTo: ComputedRef<string | null>
   firstName: (name: string) => string
   formatCreatedAt: (value: string) => string
+  /** The team's private note on this booking or stay, when the viewer can edit it. */
+  note: ComputedRef<{ id: string; version: number; text: string } | null>
   savePrivateNote: (input: { id: string; version: number; text: string }) => Promise<void>
   /** A stay's offline payment step: its currency, today at the home, and the write. */
   stayPayment: { currency: ComputedRef<string | null>; today: () => string; record: (input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; idempotency_key: string }) => Promise<void> }
@@ -650,8 +648,17 @@ function selectAction(action: string) {
   } else void runAction(action)
 }
 
+// A timed booking's note, or a managed stay's once it is no longer a request waiting on the guest's payment.
+const note = computed(() => {
+  if (props.personalScope || purchase) return null
+  const timed = booking.value
+  if (timed) return timed.type === 'booking' && timed.unit === 'slot' && timed.booking_id && timed.version !== null ? { id: timed.booking_id, version: timed.version, text: timed.private_notes ?? '' } : null
+  const night = managedStay.value?.booking
+  return night && !(night.status === 'pending' && night.respond_by) ? { id: night.booking_id, version: night.version, text: night.private_notes ?? '' } : null
+})
+
 async function savePrivateNote(input: { id: string; version: number; text: string }) {
-  if (props.personalScope || booking.value?.booking_id !== input.id) throw new Error('The reservation is no longer available to edit.')
+  if (note.value?.id !== input.id) throw new Error('The reservation is no longer available to edit.')
   const revision = accessChangeRevision
   const updated = await dashboardApi(dashboardBookingPath(input.id), {
     method: 'PATCH', body: { private_notes: input.text, version: input.version }, validate: isDashboardBooking,
@@ -1101,6 +1108,7 @@ provide(bookingEditorKey, {
   callTo,
   firstName,
   formatCreatedAt,
+  note,
   savePrivateNote,
   stayPayment: { currency: computed(() => detail.value?.currency ?? null), today: homeToday, record: recordStayPayment },
   stayChange: { stay: computed(() => detail.value ? { check_in_date: detail.value.check_in_date, check_out_date: detail.value.check_out_date, adults: detail.value.adults, children: detail.value.children } : null), save: changeStay },

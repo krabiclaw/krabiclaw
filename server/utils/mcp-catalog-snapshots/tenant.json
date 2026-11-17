@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:e8daf750b0ab4062fd33202843a1293d4910b4f97cd06b37b74cae56d10fca7c",
-  "documentationFingerprint": "sha256:9599136c41fc744c4cd0e9e09d1b3111916f311265266fa51c58bc267da87fd0",
+  "fingerprint": "sha256:fbff4bcc8585a84281b14ce2b94275ec770e51b92fddc186bbdf969e4e6232e8",
+  "documentationFingerprint": "sha256:08d286978f4efa1eb8f996790a853bd1ebb430a1aa19f5cd22672cd88ae0bdd8",
   "tools": [
     {
       "name": "add_organization_language",
@@ -13,9 +13,16 @@
           "locale": {
             "enum": [
               "en",
+              "de",
+              "es",
+              "fr",
+              "it",
               "ja",
+              "ko",
               "th",
-              "vi"
+              "vi",
+              "zh-Hans",
+              "zh-Hant"
             ],
             "type": "string"
           },
@@ -1261,9 +1268,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -4746,9 +4760,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -16345,9 +16366,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -19370,7 +19398,7 @@
     {
       "name": "create_google_ads_search_campaign",
       "title": "Create Google Ads search campaign",
-      "description": "Create a paused Google Ads Search campaign with one ad group and responsive search ad from the supplied keywords, copy, destination and daily budget. The campaign cannot serve ads until separately enabled. Each call creates a new campaign; inspect the account before retrying an uncertain result.",
+      "description": "Create a paused Google Ads Search campaign with one ad group and responsive search ad from the supplied keywords, copy, destination and daily budget. The campaign cannot serve ads until separately enabled. Each call creates a new campaign.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -22126,9 +22154,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -29013,7 +29048,7 @@
         }
       ],
       "domain": "bookings",
-      "minimumRole": "admin",
+      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -30449,9 +30484,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -34299,9 +34341,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -37044,6 +37093,10 @@
               "null"
             ]
           },
+          "claim_role": {
+            "description": "Offer custom work to this role on the selected product_id.",
+            "type": "string"
+          },
           "due_at": {
             "description": "An instant with Z or a numeric offset.",
             "format": "date-time",
@@ -37389,7 +37442,7 @@
         }
       ],
       "domain": "tasks",
-      "minimumRole": "admin",
+      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -38852,9 +38905,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -42376,9 +42436,16 @@
           "locale": {
             "enum": [
               "en",
+              "de",
+              "es",
+              "fr",
+              "it",
               "ja",
+              "ko",
               "th",
-              "vi"
+              "vi",
+              "zh-Hans",
+              "zh-Hant"
             ],
             "type": "string"
           },
@@ -43643,9 +43710,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -56485,9 +56559,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -60975,9 +61056,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -64712,7 +64800,15 @@
             "enum": [
               "member",
               "owner",
-              "admin"
+              "admin",
+              "property_manager",
+              "cleaner",
+              "maintenance",
+              "restaurant_manager",
+              "kitchen",
+              "host",
+              "attorney",
+              "paralegal"
             ],
             "type": "string"
           }
@@ -71445,9 +71541,16 @@
           "locale": {
             "enum": [
               "en",
+              "de",
+              "es",
+              "fr",
+              "it",
               "ja",
+              "ko",
               "th",
-              "vi"
+              "vi",
+              "zh-Hans",
+              "zh-Hant"
             ],
             "type": "string"
           },
@@ -73005,9 +73108,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -77970,9 +78080,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -89711,9 +89828,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -91702,9 +91826,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -96769,9 +96900,16 @@
             "description": "Required when creating; a saved draft cannot be relabelled into another language.",
             "enum": [
               "en",
+              "de",
+              "es",
+              "fr",
+              "it",
               "ja",
+              "ko",
               "th",
-              "vi"
+              "vi",
+              "zh-Hans",
+              "zh-Hant"
             ],
             "type": "string"
           },
@@ -103340,9 +103478,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -110086,7 +110231,15 @@
             "enum": [
               "member",
               "owner",
-              "admin"
+              "admin",
+              "property_manager",
+              "cleaner",
+              "maintenance",
+              "restaurant_manager",
+              "kitchen",
+              "host",
+              "attorney",
+              "paralegal"
             ],
             "type": "string"
           }
@@ -118005,9 +118158,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -121859,9 +122019,16 @@
                     "locale": {
                       "enum": [
                         "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "it",
                         "ja",
+                        "ko",
                         "th",
-                        "vi"
+                        "vi",
+                        "zh-Hans",
+                        "zh-Hant"
                       ],
                       "type": "string"
                     },
@@ -124924,6 +125091,10 @@
               "null"
             ]
           },
+          "claim": {
+            "description": "Claim available work as yourself. Send only task_id and version with this action.",
+            "type": "boolean"
+          },
           "due_at": {
             "format": "date-time",
             "type": [
@@ -125271,7 +125442,7 @@
         }
       ],
       "domain": "tasks",
-      "minimumRole": "admin",
+      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -125293,7 +125464,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:73e37dfcdfb348be542001a9888b00bdada68a739d54c60360fe102f4c40e387",
+        "create_product": "sha256:8193c55ebac41ea1c0bd72472ac43585af9a384aaa0c704339c94172fd80364f",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
@@ -125348,7 +125519,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:170c6665556f77a7be9607052052581cfc9632f45d01b88cbbb5ff5683ff8f32",
-        "create_product": "sha256:73e37dfcdfb348be542001a9888b00bdada68a739d54c60360fe102f4c40e387",
+        "create_product": "sha256:8193c55ebac41ea1c0bd72472ac43585af9a384aaa0c704339c94172fd80364f",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -125394,14 +125565,14 @@
       },
       "toolContracts": {
         "attach_media": "sha256:170c6665556f77a7be9607052052581cfc9632f45d01b88cbbb5ff5683ff8f32",
-        "get_site_page": "sha256:9618228ff74cee9b28c76564d329d9842cf4a2d0feae81656d8ff4abcbbf451f",
+        "get_site_page": "sha256:9df20fb9cef3e8da6b2581f6ac0690ae093e0310a19e22e3dff805c095eef089",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "remove_media": "sha256:2d9f580ca9664c93e76640ab4144fea1fa9187ec88f70a42c4ced0a409a42f21",
         "reorder_media": "sha256:124ff79867ad14cb56b197e28383d915b24f88f2e74a076d305c4bac1fe55a63",
         "set_media": "sha256:832f5f23b3136722fcba0f7e7769b9bdf5b1ed11275a38c1e0692ca297266a26",
-        "update_site_page": "sha256:ddc337bdcab4df17d99b7913ea2dbf4ed1f0ba91a60a1f39f97b8e08a6e451ad"
+        "update_site_page": "sha256:0eff4bad0233a5e62beeb0dfe544eebfe48f3f9355b618be84e31637f221b0d5"
       }
     },
     {
@@ -125417,7 +125588,7 @@
         "get_location": "sha256:eeb473e44df629a24ceb82a2db6873a6b1f108dd852c2fa923f605a637439f34",
         "get_post": "sha256:fd95e9d97a5f0624dda58886752832eee80a1fef08c9c7a64d8c2af4ff3481d1",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
-        "get_site_page": "sha256:9618228ff74cee9b28c76564d329d9842cf4a2d0feae81656d8ff4abcbbf451f",
+        "get_site_page": "sha256:9df20fb9cef3e8da6b2581f6ac0690ae093e0310a19e22e3dff805c095eef089",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
         "set_media": "sha256:832f5f23b3136722fcba0f7e7769b9bdf5b1ed11275a38c1e0692ca297266a26"
@@ -125432,9 +125603,9 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft_id and updated_at. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:73e37dfcdfb348be542001a9888b00bdada68a739d54c60360fe102f4c40e387",
+        "create_product": "sha256:8193c55ebac41ea1c0bd72472ac43585af9a384aaa0c704339c94172fd80364f",
         "get_organization": "sha256:be4891efa8ad393a88869138bf2dacb5a66a3af6005298cfbd261f378cb6c1aa",
-        "get_site_page": "sha256:9618228ff74cee9b28c76564d329d9842cf4a2d0feae81656d8ff4abcbbf451f",
+        "get_site_page": "sha256:9df20fb9cef3e8da6b2581f6ac0690ae093e0310a19e22e3dff805c095eef089",
         "get_website_draft": "sha256:c1444d21ed13337ab56e9d48764d8befe1e0016ba625bc70c8b7d6f29d179d24",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -125442,10 +125613,10 @@
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "publish_website": "sha256:e6856cc57434225006a35c794253cbd35a838569f2dd13bdf7698da06dc73507",
-        "save_website_draft": "sha256:175fdfcf6b66beeecf25d2db60354d5273ea34c59ad8140487e3e714001cfc35",
+        "save_website_draft": "sha256:cc23867aade1082cec3c33941dfe9bef31d4cfc6b7e1077bce1ec94f471f6439",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
         "update_organization_settings": "sha256:4f1a62735af2470e974d07b775594aa2a76f8526128c444ee7ad240783d50f13",
-        "update_site_page": "sha256:ddc337bdcab4df17d99b7913ea2dbf4ed1f0ba91a60a1f39f97b8e08a6e451ad"
+        "update_site_page": "sha256:0eff4bad0233a5e62beeb0dfe544eebfe48f3f9355b618be84e31637f221b0d5"
       }
     },
     {
@@ -125478,14 +125649,14 @@
       },
       "toolContracts": {
         "attach_media": "sha256:170c6665556f77a7be9607052052581cfc9632f45d01b88cbbb5ff5683ff8f32",
-        "get_site_page": "sha256:9618228ff74cee9b28c76564d329d9842cf4a2d0feae81656d8ff4abcbbf451f",
+        "get_site_page": "sha256:9df20fb9cef3e8da6b2581f6ac0690ae093e0310a19e22e3dff805c095eef089",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:832f5f23b3136722fcba0f7e7769b9bdf5b1ed11275a38c1e0692ca297266a26",
         "update_product": "sha256:afed95fa490fdae7aed3b9d4e6f5db435e1ab4c8d3909b260fbe380a82f9d461",
-        "update_site_page": "sha256:ddc337bdcab4df17d99b7913ea2dbf4ed1f0ba91a60a1f39f97b8e08a6e451ad"
+        "update_site_page": "sha256:0eff4bad0233a5e62beeb0dfe544eebfe48f3f9355b618be84e31637f221b0d5"
       }
     },
     {

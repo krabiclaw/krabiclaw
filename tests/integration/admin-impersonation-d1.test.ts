@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { hashPassword } from 'better-auth/crypto'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
+import { applySchema } from './support/schema.ts'
 
 const BASE = 'https://impersonation-proof.example'
 const PASSWORD = 'ImpersonationProof123!'
@@ -17,8 +16,7 @@ test('a bearer administrator stops impersonating with the admin_session cookie B
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-    await db.batch(statements.map(statement => db.prepare(statement)))
+    await applySchema(db)
     for (const [id, role] of [['platform-admin', 'admin'], ['host-user', 'user']]) {
       await db.prepare('INSERT INTO user (id, name, email, emailVerified, role, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, 0, 0)').bind(id, id, `${id}@impersonation-proof.example`, role).run()
       await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES (?, ?, 'credential', ?, ?, 0, 0)")

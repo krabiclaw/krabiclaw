@@ -38,24 +38,24 @@ export interface ChannexMessagesInstallation {
   applicationCode: 'channex_messages'
 }
 
-/** A malformed successful write remains uncertain; it must never be sent again blindly. */
+/** A Messages resource Channex returned in a shape Blawby cannot read. */
 export class ChannexMessageDataError extends ChannexError {
-  constructor(resource: string, field: string, message: string, uncertain = false) {
-    super(`Channex returned invalid ${resource}.${field}: ${message}`, 502, uncertain, { code: 'INVALID_PROVIDER_RESPONSE', resource, field })
+  constructor(resource: string, field: string, message: string) {
+    super(`Channex returned invalid ${resource}.${field}: ${message}`, 502, { code: 'INVALID_PROVIDER_RESPONSE', resource, field })
   }
 }
 
-function read<T>(label: string, field: string, parse: () => T, uncertain = false): T {
+function read<T>(label: string, field: string, parse: () => T): T {
   try {
     return parse()
   } catch (error) {
-    if (error instanceof ChannexDataError) throw new ChannexMessageDataError(label, field, error.message, uncertain)
+    if (error instanceof ChannexDataError) throw new ChannexMessageDataError(label, field, error.message)
     throw error
   }
 }
 
-function fail(label: string, field: string, message: string, uncertain = false): never {
-  throw new ChannexMessageDataError(label, field, message, uncertain)
+function fail(label: string, field: string, message: string): never {
+  throw new ChannexMessageDataError(label, field, message)
 }
 
 /**
@@ -63,23 +63,23 @@ function fail(label: string, field: string, message: string, uncertain = false):
  * Validate their actual calendar/time and retain the provider's precision and
  * timezone representation. A missing offset does not establish a UTC instant.
  */
-export function providerTimestamp(value: unknown, label: string, field: string, uncertain = false): string {
-  const timestamp = read(label, field, () => string(value, field), uncertain)
+export function providerTimestamp(value: unknown, label: string, field: string): string {
+  const timestamp = read(label, field, () => string(value, field))
   const parts = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-]\d{2}:\d{2})?$/.exec(timestamp)
-  if (!parts) fail(label, field, 'Expected an ISO date and time', uncertain)
+  if (!parts) fail(label, field, 'Expected an ISO date and time')
   const year = Number(parts[1]), month = Number(parts[2]), day = Number(parts[3])
   const hours = Number(parts[4]), minutes = Number(parts[5]), seconds = Number(parts[6])
   const date = new Date(`${parts[1]}-${parts[2]}-${parts[3]}T00:00:00.000Z`)
   if (!Number.isFinite(date.getTime()) || date.getUTCFullYear() !== year || date.getUTCMonth() + 1 !== month || date.getUTCDate() !== day
-    || hours > 23 || minutes > 59 || seconds > 59) fail(label, field, 'Invalid calendar date or time', uncertain)
+    || hours > 23 || minutes > 59 || seconds > 59) fail(label, field, 'Invalid calendar date or time')
   const offset = parts[7]
   if (offset && offset !== 'Z' && (Number(offset.slice(1, 3)) > 23 || Number(offset.slice(4, 6)) > 59)) {
-    fail(label, field, 'Invalid timezone offset', uncertain)
+    fail(label, field, 'Invalid timezone offset')
   }
   return timestamp
 }
 
-function relation(row: Resource, key: string, optional = false, uncertain = false): string | null {
+function relation(row: Resource, key: string, optional = false): string | null {
   const label = `${row.type}:${row.id}`
   return read(label, `relationships.${key}`, () => {
     const relationships = object(row.relationships, 'relationships')
@@ -89,7 +89,7 @@ function relation(row: Resource, key: string, optional = false, uncertain = fals
     const data = object(link.data, `${key}.data`)
     if (data.type !== key) throw new ChannexDataError(`Expected a ${key} relationship`)
     return string(data.id, `${key}.id`)
-  }, uncertain)
+  })
 }
 
 export function parseChannexThread(value: unknown): ChannexMessageThread {
@@ -115,42 +115,42 @@ export function parseChannexThread(value: unknown): ChannexMessageThread {
   }
 }
 
-function attachmentUrl(value: unknown, env: ChannexEnv, label: string, field: string, uncertain: boolean): string {
-  const link = read(label, field, () => string(value, field), uncertain)
-  if (link !== link.trim()) fail(label, field, 'Attachment link contains surrounding whitespace', uncertain)
+function attachmentUrl(value: unknown, env: ChannexEnv, label: string, field: string): string {
+  const link = read(label, field, () => string(value, field))
+  if (link !== link.trim()) fail(label, field, 'Attachment link contains surrounding whitespace')
   const base = env.CHANNEX_BASE_URL?.trim().replace(/\/$/, '')
-  if (!base || !URL.canParse(base) || new URL(base).protocol !== 'https:') throw new ChannexError('CHANNEX_BASE_URL must be an absolute HTTPS API URL', 500, false)
-  if (!URL.canParse(link, `${base}/`)) fail(label, field, 'Attachment link is not a valid URL', uncertain)
+  if (!base || !URL.canParse(base) || new URL(base).protocol !== 'https:') throw new ChannexError('CHANNEX_BASE_URL must be an absolute HTTPS API URL', 500)
+  if (!URL.canParse(link, `${base}/`)) fail(label, field, 'Attachment link is not a valid URL')
   const url = new URL(link, `${base}/`)
-  if (url.protocol !== 'https:' || url.username || url.password) fail(label, field, 'Attachment link must use HTTPS without embedded credentials', uncertain)
+  if (url.protocol !== 'https:' || url.username || url.password) fail(label, field, 'Attachment link must use HTTPS without embedded credentials')
   return url.href
 }
 
-export function parseChannexMessage(value: unknown, env: ChannexEnv, uncertain = false): ChannexMessage {
-  const row = read('message', 'data', () => resource(value, 'message'), uncertain)
-  if (!row.id.trim()) fail('message', 'id', 'Expected a nonblank message ID', uncertain)
+export function parseChannexMessage(value: unknown, env: ChannexEnv): ChannexMessage {
+  const row = read('message', 'data', () => resource(value, 'message'))
+  if (!row.id.trim()) fail('message', 'id', 'Expected a nonblank message ID')
   const label = `message:${row.id}`
   const attributes = row.attributes
-  if (!Array.isArray(attributes.attachments)) fail(label, 'attachments', 'Expected an attachment-link array', uncertain)
-  const attachments = attributes.attachments.map((link, index) => attachmentUrl(link, env, label, `attachments[${index}]`, uncertain))
+  if (!Array.isArray(attributes.attachments)) fail(label, 'attachments', 'Expected an attachment-link array')
+  const attachments = attributes.attachments.map((link, index) => attachmentUrl(link, env, label, `attachments[${index}]`))
   const text = attributes.message
-  if (text !== null && typeof text !== 'string') fail(label, 'message', 'Expected text or null for an attachment-only message', uncertain)
+  if (text !== null && typeof text !== 'string') fail(label, 'message', 'Expected text or null for an attachment-only message')
   // A message with neither words nor a file is real: Airbnb records some host
   // actions that way (message c2f68d4e, a host message of 2026-09-14 with
   // message null and no attachments). It is recorded, and the inbox shows nothing for it.
   const sender = attributes.sender
-  if (sender !== 'guest' && sender !== 'property' && sender !== 'system' && sender !== 'agent') fail(label, 'sender', 'Expected guest, property, system or agent', uncertain)
+  if (sender !== 'guest' && sender !== 'property' && sender !== 'system' && sender !== 'agent') fail(label, 'sender', 'Expected guest, property, system or agent')
   const meta = attributes.meta === undefined || attributes.meta === null
     ? attributes.meta
-    : read(label, 'meta', () => object(attributes.meta, 'meta'), uncertain)
+    : read(label, 'meta', () => object(attributes.meta, 'meta'))
   return {
     id: row.id,
-    threadId: relation(row, 'message_thread', false, uncertain)!,
+    threadId: relation(row, 'message_thread')!,
     sender,
     text,
     attachments,
-    insertedAt: providerTimestamp(attributes.inserted_at, label, 'inserted_at', uncertain),
-    updatedAt: providerTimestamp(attributes.updated_at, label, 'updated_at', uncertain),
+    insertedAt: providerTimestamp(attributes.inserted_at, label, 'inserted_at'),
+    updatedAt: providerTimestamp(attributes.updated_at, label, 'updated_at'),
     ...(meta === undefined ? {} : { meta }),
   }
 }
@@ -191,74 +191,57 @@ export async function listChannexMessages(env: ChannexEnv, threadId: string): Pr
 
 /** Channex accepts one attachment instead of text: sending both silently discards the attachment. */
 export async function sendChannexMessage(env: ChannexEnv, threadId: string, text: string, photo?: { bytes: Uint8Array<ArrayBuffer>; filename: string; contentType: string }): Promise<ChannexMessage> {
-  if (photo ? Boolean(text.trim()) : !text.trim()) throw new ChannexError('A channel reply needs text or one photo sent separately', 400, false)
+  if (photo ? Boolean(text.trim()) : !text.trim()) throw new ChannexError('A channel reply needs text or one photo sent separately', 400)
   let attachmentId: string | undefined
   if (photo) {
-    try {
-      const uploaded = await channexRequest(env, '/attachments', 'POST', { attachment: { file: Buffer.from(photo.bytes).toString('base64'), file_name: photo.filename, file_type: photo.contentType } })
-      const attachment = read('attachment', 'data', () => object(uploaded.data, 'data'), true)
-      if (attachment.type !== 'attachment') fail('attachment', 'type', 'Expected an attachment resource', true)
-      attachmentId = read('attachment', 'id', () => string(attachment.id, 'id'), true)
-    } catch (error) {
-      // An uploaded file is not a guest message. Whatever happened to its upload,
-      // this function has not sent the only call that could deliver the reply.
-      if (error instanceof ChannexError) throw new ChannexError(`The photo could not be prepared; no guest message was sent. ${error.message}`, error.providerStatus, false, { code: error.data.code, field: 'photos', resource: 'attachment' }, true)
-      throw error
-    }
+    const uploaded = await channexRequest(env, '/attachments', 'POST', { attachment: { file: Buffer.from(photo.bytes).toString('base64'), file_name: photo.filename, file_type: photo.contentType } })
+    const attachment = read('attachment', 'data', () => object(uploaded.data, 'data'))
+    if (attachment.type !== 'attachment') fail('attachment', 'type', 'Expected an attachment resource')
+    attachmentId = read('attachment', 'id', () => string(attachment.id, 'id'))
   }
   const row = await channexCreate(env, `/message_threads/${encodeURIComponent(threadId)}/messages`, { message: attachmentId ? { attachment_id: attachmentId } : { message: text } }, 'message')
-  const message = parseChannexMessage(row, env, true)
-  if (message.threadId !== threadId) fail(`message:${message.id}`, 'relationships.message_thread', 'Reply belongs to a different thread', true)
-  if (message.sender !== 'property') fail(`message:${message.id}`, 'sender', 'Reply was not returned as a property message', true)
+  const message = parseChannexMessage(row, env)
+  if (message.threadId !== threadId) fail(`message:${message.id}`, 'relationships.message_thread', 'Reply belongs to a different thread')
+  if (message.sender !== 'property') fail(`message:${message.id}`, 'sender', 'Reply was not returned as a property message')
   if (photo) {
-    if (message.text?.trim() || message.attachments.length !== 1) fail(`message:${message.id}`, 'attachments', 'Reply does not contain the submitted photo without text', true)
-  } else if (message.text !== text) fail(`message:${message.id}`, 'message', 'Reply content does not match the submitted text', true)
+    if (message.text?.trim() || message.attachments.length !== 1) fail(`message:${message.id}`, 'attachments', 'Reply does not contain the submitted photo without text')
+  } else if (message.text !== text) fail(`message:${message.id}`, 'message', 'Reply content does not match the submitted text')
   return message
 }
 
-function installation(row: Resource, uncertain = false): { id: string; propertyId: string; applicationCode: string } {
+function installation(row: Resource): { id: string; propertyId: string; applicationCode: string } {
   const label = `application_installation:${row.id}`
-  const id = read(label, 'id', () => string(row.attributes.id, 'id'), uncertain)
-  if (id !== row.id) fail(label, 'id', 'Installation attribute ID differs from its resource ID', uncertain)
+  const id = read(label, 'id', () => string(row.attributes.id, 'id'))
+  if (id !== row.id) fail(label, 'id', 'Installation attribute ID differs from its resource ID')
   return {
     id,
-    propertyId: read(label, 'property_id', () => string(row.attributes.property_id, 'property_id'), uncertain),
-    applicationCode: read(label, 'application_code', () => string(row.attributes.application_code, 'application_code'), uncertain),
+    propertyId: read(label, 'property_id', () => string(row.attributes.property_id, 'property_id')),
+    applicationCode: read(label, 'application_code', () => string(row.attributes.application_code, 'application_code')),
   }
 }
 
-async function installedMessages(env: ChannexEnv, propertyId: string, uncertain = false): Promise<ChannexMessagesInstallation | null> {
+async function installedMessages(env: ChannexEnv, propertyId: string): Promise<ChannexMessagesInstallation | null> {
   const rows = await channexList(env, '/applications/installed', 'application_installation')
-  const matches = rows.map(row => installation(row, uncertain)).filter(row => row.propertyId === propertyId && row.applicationCode === 'channex_messages')
-  if (matches.length > 1) fail('application_installation', 'property_id', 'Property has more than one Messages installation', uncertain)
+  const matches = rows.map(row => installation(row)).filter(row => row.propertyId === propertyId && row.applicationCode === 'channex_messages')
+  if (matches.length > 1) fail('application_installation', 'property_id', 'Property has more than one Messages installation')
   const found = matches[0]
   return found ? { id: found.id, propertyId: found.propertyId, applicationCode: 'channex_messages' } : null
 }
 
-/** Remove the property's Messages installation, if any, and confirm through the list endpoint that it is gone. */
+/** Remove the property's Messages installation, if any. */
 export async function uninstallChannexMessages(env: ChannexEnv, propertyId: string): Promise<void> {
   const existing = await installedMessages(env, propertyId)
   if (!existing) return
   await channexRequest(env, `/applications/${encodeURIComponent(existing.id)}/uninstall`, 'DELETE')
-  if (await installedMessages(env, propertyId, true)) fail(`application_installation:${existing.id}`, 'id', 'The Messages installation is still listed after uninstalling it', true)
 }
 
-/** Read first, install once if absent, and confirm the installation through the list endpoint. */
+/** Read first and install once if absent. */
 export async function installChannexMessages(env: ChannexEnv, propertyId: string): Promise<ChannexMessagesInstallation> {
   const existing = await installedMessages(env, propertyId)
   if (existing) return existing
   const row = await channexCreate(env, '/applications/install', { application_installation: { property_id: propertyId, application_code: 'channex_messages' } }, 'application_installation')
-  const created = installation(row, true)
-  if (created.propertyId !== propertyId) fail(`application_installation:${created.id}`, 'property_id', 'Installation belongs to a different property', true)
-  if (created.applicationCode !== 'channex_messages') fail(`application_installation:${created.id}`, 'application_code', 'Installed application is not Messages', true)
-  let verified: ChannexMessagesInstallation | null
-  try {
-    verified = await installedMessages(env, propertyId, true)
-  } catch (error) {
-    if (error instanceof ChannexMessageDataError) throw error
-    if (error instanceof ChannexError) throw new ChannexError(`Channex accepted the Messages installation but its read-back failed: ${error.message}`, 502, true)
-    throw error
-  }
-  if (!verified || verified.id !== created.id) fail(`application_installation:${created.id}`, 'id', 'The installed-list read did not confirm this Messages installation', true)
-  return verified
+  const created = installation(row)
+  if (created.propertyId !== propertyId) fail(`application_installation:${created.id}`, 'property_id', 'Installation belongs to a different property')
+  if (created.applicationCode !== 'channex_messages') fail(`application_installation:${created.id}`, 'application_code', 'Installed application is not Messages')
+  return { id: created.id, propertyId: created.propertyId, applicationCode: 'channex_messages' }
 }

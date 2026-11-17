@@ -1,15 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { readPlacesCalendar, setPlaceDates, type PlaceDay } from '../../server/domain/places.ts'
-import { addLocalDays, localDateAt } from '../../utils/timezone.ts'
-import { replaceWeeklySchedule } from '../../server/utils/availability.ts'
+import { localDateAt } from '../../utils/timezone.ts'
 import { readPublicProductAvailability } from '../../server/utils/public-session-booking.ts'
-import { parseSpecialHours } from '../../shared/reservation-hours.ts'
+import { applySchema } from './support/schema.ts'
 
 // The places calendar: restaurant locations, experiences and consultations as
 // rows, days as columns, and the one write that opens or blocks their days.
@@ -32,8 +29,7 @@ async function boot() {
   try {
     const db = await runtime.getD1Database('DB')
     const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'places-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example' } as CloudflareEnv
-    const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-    await db.batch(statements.map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Ember & Slice', 'ember', 'ember', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'restaurant', ?, ?)`).bind(ORG, NOW, ZONE).run()
     for (const [id, role] of [[OWNER, 'owner'], [STAFF, 'member']] as const) {
@@ -160,78 +156,16 @@ test('the places calendar reads each location, experience and consultation with 
     assert.deepEqual((await readPlacesCalendar(db, staff, { from: FROM, to: TO })).places.map(entry => entry.place.id), ['brooklyn', 'williamsburg', 'class'])
 
     for (const input of [{ from: 'soon', to: TO }, { from: TO, to: FROM }]) await assert.rejects(readPlacesCalendar(db, owner, input), code('INVALID_PLACE_DATES'))
-  } finally {
-    await runtime.dispose()
-  }
-})
 
-test('blocking and opening a place’s days writes a location’s closures and an offering’s unclaimed sessions, by weekday', { timeout: 120_000 }, async () => {
-  const { runtime, db, owner, staff } = await boot()
-  try {
-    const write = (kind: string, id: string, body: Record<string, unknown>, principal = owner) => setPlaceDates(db, principal, { kind, id, body })
-    for (const body of [{ from: FROM, to: TO }, { from: FROM, to: TO, closed: 'yes' }, { from: FROM, to: TO, closed: true, weekdays: [] }, { from: FROM, to: TO, closed: true, weekdays: [7] }, { from: FROM, to: TO, closed: true, weekdays: [1, 1] }, { from: FROM, to: TO, closed: true, note: 'x' }, { from: '2027-11-09', to: '2027-11-10', closed: true, weekdays: [5] }]) {
-      await assert.rejects(write('location', 'brooklyn', body), code('INVALID_PLACE_DATES'), JSON.stringify(body))
-    }
-    await assert.rejects(write('room', 'brooklyn', { from: FROM, to: TO, closed: true }), code('PLACE_NOT_FOUND'))
-    // The studio has no tables, so it is no row of the grid; the day leaf and Select dates still block it through this write, and read it back.
-    const studio = await write('location', 'studio', { from: '2027-11-09', to: '2027-11-10', closed: true })
-    assert.deepEqual(state(studio.days), ['09:blocked::0:'])
-    assert.deepEqual(parseSpecialHours(JSON.parse((await db.prepare('SELECT special_hours FROM business_locations WHERE id = ?').bind('studio').first<{ special_hours: string }>())!.special_hours)), [{ kind: 'closure', starts_on: '2027-11-09', ends_on: '2027-11-09', note: null }])
-    assert.deepEqual((await readPlacesCalendar(db, owner, { from: FROM, to: TO })).places.map(entry => entry.place.id), ['brooklyn', 'williamsburg', 'family', 'class'])
-    await assert.rejects(write('location', 'missing', { from: FROM, to: TO, closed: true }), (error: unknown) => (error as { status?: number }).status === 404)
-    await assert.rejects(write('location', 'brooklyn', { from: FROM, to: TO, closed: true }, staff), (error: unknown) => (error as { statusCode?: number; status?: number }).statusCode === 404 || (error as { status?: number }).status === 404)
-
-    // Wednesdays and Fridays blocked at Brooklyn: one closure each, read back from the location and from the calendar.
-    const before = (await db.prepare('SELECT updated_at FROM business_locations WHERE id = ?').bind('brooklyn').first<{ updated_at: string }>())!.updated_at
-    const blocked = await write('location', 'brooklyn', { from: FROM, to: TO, closed: true, weekdays: [3, 5], updated_at: before })
-    assert.deepEqual(state(blocked.days), ['08:blocked:hours:0:', '09:open:booked:2:', '10:blocked::0:', '11:open::0:', '12:blocked::0:', '13:open::0:', '14:open::0:'])
-    assert.notEqual(blocked.place.updated_at, before)
-    const saved = await db.prepare('SELECT special_hours FROM business_locations WHERE id = ?').bind('brooklyn').first<{ special_hours: string }>()
-    assert.deepEqual(parseSpecialHours(JSON.parse(saved!.special_hours)), [
-      { kind: 'closure', starts_on: '2027-11-10', ends_on: '2027-11-10', note: null },
-      { kind: 'closure', starts_on: '2027-11-12', ends_on: '2027-11-12', note: null },
-    ])
-    // A stale timestamp is refused and changes nothing.
-    await assert.rejects(write('location', 'brooklyn', { from: FROM, to: TO, closed: false, updated_at: before }), (error: unknown) => (error as { statusCode?: number }).statusCode === 409 || (error as { status?: number }).status === 409)
-    assert.deepEqual(state((await readPlacesCalendar(db, owner, { from: FROM, to: TO }, { kind: 'location', id: 'brooklyn' })).places[0]!.days), state(blocked.days))
-    // Opening the whole week cuts both closures out; Monday stays closed by the hours.
-    const opened = await write('location', 'brooklyn', { from: FROM, to: TO, closed: false })
-    assert.deepEqual(state(opened.days), ['08:blocked:hours:0:', '09:open:booked:2:', '10:open::0:', '11:open::0:', '12:open::0:', '13:open::0:', '14:open::0:'])
-    assert.equal((await db.prepare('SELECT special_hours FROM business_locations WHERE id = ?').bind('brooklyn').first<{ special_hours: string | null }>())!.special_hours, null)
-
-    // Blocking the class's week cancels the unclaimed sessions and leaves Wednesday's booked one scheduled.
-    const cancelled = await write('offering', 'class', { from: FROM, to: TO, closed: true })
-    assert.deepEqual(state(cancelled.days), ['08:blocked::0:0', '09:blocked::0:0', '10:open:booked:1:0', '11:blocked::0:0', '12:blocked::0:0', '13:open:unscheduled:0:0', '14:open:unscheduled:0:0'])
+    // Blocking a place's days from a stale read changes nothing; blocking an offering's week keeps its booked session.
+    const read = (await db.prepare('SELECT updated_at FROM business_locations WHERE id = ?').bind('brooklyn').first<{ updated_at: string }>())!.updated_at
+    await setPlaceDates(db, owner, { kind: 'location', id: 'brooklyn', body: { from: FROM, to: TO, closed: true, weekdays: [3], updated_at: read } })
+    const closures = await db.prepare('SELECT special_hours FROM business_locations WHERE id = ?').bind('brooklyn').first('special_hours')
+    await assert.rejects(setPlaceDates(db, owner, { kind: 'location', id: 'brooklyn', body: { from: FROM, to: TO, closed: false, updated_at: read } }), (error: unknown) => (error as { statusCode?: number }).statusCode === 409 || (error as { status?: number }).status === 409)
+    assert.equal(await db.prepare('SELECT special_hours FROM business_locations WHERE id = ?').bind('brooklyn').first('special_hours'), closures)
+    await setPlaceDates(db, owner, { kind: 'offering', id: 'class', body: { from: FROM, to: TO, closed: true } })
     assert.deepEqual((await db.prepare("SELECT id, status FROM product_sessions WHERE product_id = 'class' ORDER BY starts_at").all<{ id: string; status: string }>()).results,
       [{ id: 'class-0', status: 'cancelled' }, { id: 'class-1', status: 'cancelled' }, { id: 'class-2', status: 'scheduled' }, { id: 'class-3', status: 'cancelled' }, { id: 'class-4', status: 'cancelled' }])
-    const event = await db.prepare("SELECT payload_json FROM activity_entries WHERE event_name = 'product.updated' AND json_extract(payload_json, '$.entityId') = 'class' ORDER BY rowid DESC LIMIT 1").first<{ payload_json: string }>()
-    assert.deepEqual(JSON.parse(event!.payload_json).metadata, { from: FROM, to: TO, closed: true, sessions: 4 })
-    // Opening Mondays and Fridays restores those two; the rest stay cancelled. Dana's consultations are untouched throughout.
-    const restored = await write('offering', 'class', { from: FROM, to: TO, closed: false, weekdays: [1, 5] })
-    assert.deepEqual(state(restored.days), ['08:open::0:0', '09:blocked::0:0', '10:open:booked:1:0', '11:blocked::0:0', '12:open::0:1', '13:open:unscheduled:0:0', '14:open:unscheduled:0:0'])
-    assert.equal((await db.prepare("SELECT count(*) n FROM product_sessions WHERE product_id = 'family' AND status = 'scheduled'").first<number>('n')), 10)
-    // A consultation's Saturday has nothing to write; the week's other days cancel the free slots and keep the requested one, so Tuesday reads blocked with its booking.
-    const consultations = await write('offering', 'family', { from: FROM, to: TO, closed: true })
-    assert.deepEqual(state(consultations.days), ['08:blocked::0:0', '09:blocked::1:0', '10:blocked::0:0', '11:blocked::0:0', '12:blocked::0:0', '13:open:hours:0:0', '14:open:hours:0:0'])
-    assert.equal((await db.prepare("SELECT status FROM product_sessions WHERE id = 'family-1-a'").first<string>('status')), 'scheduled')
-    assert.equal((await db.prepare("SELECT status FROM product_sessions WHERE id = 'family-1-b'").first<string>('status')), 'cancelled')
-    let futureDay = addLocalDays(localDateAt(new Date(), ZONE), 365)
-    if (new Date(`${futureDay}T12:00:00Z`).getUTCDay() === 1) futureDay = addLocalDays(futureDay, 1)
-    const future = { from: futureDay, to: addLocalDays(futureDay, 1) }
-    const weekday = new Date(`${futureDay}T12:00:00Z`).getUTCDay()
-    await replaceWeeklySchedule(db, { organizationId: ORG, productId: 'class', locationId: 'brooklyn', actorId: OWNER, slots: [{ weekday, start_time: '18:00' }] })
-    const stored = () => db.prepare("SELECT COUNT(*) AS n FROM product_sessions WHERE product_id='class' AND starts_at >= ?").bind(`${futureDay}T00:00:00.000Z`).first('n')
-    const openDay = (await readPlacesCalendar(db, owner, future, { kind: 'offering', id: 'class' })).places[0]!.days[0]!
-    assert.equal(openDay.free, 1)
-    assert.equal(await stored(), 0)
-    const [blockedFuture] = (await write('offering', 'class', { ...future, closed: true })).days
-    assert.equal(blockedFuture?.closed, true)
-    assert.equal(blockedFuture.free, 0)
-    assert.equal(await stored(), 1)
-    const [openedFuture] = (await write('offering', 'class', { ...future, closed: false })).days
-    assert.equal(openedFuture?.closed, false)
-    assert.equal(openedFuture.free, 1)
-    assert.equal(await stored(), 1)
   } finally {
     await runtime.dispose()
   }

@@ -1,0 +1,1 @@
+ALTER TABLE `channex_connections` ADD `disconnect_error` text;

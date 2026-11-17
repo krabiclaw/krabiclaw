@@ -7,7 +7,8 @@ import type { GuestThreadDeliveryChannel, GuestThreadDeliveryProvider, GuestThre
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { ConversationParticipant } from '~/shared/messages-contract'
 import { PUBLISHED_PROFILE_SQL } from '~/shared/member-scheduling'
-import { workspaceGuestMessagingRoles } from '~/utils/organization-access'
+import { listingGrantSql } from '~/server/domain/listing-access'
+import { assignedOperationsRoles, roleMatchesSql, workspaceGuestMessagingRoles } from '~/utils/organization-access'
 
 /**
  * Conversations, as Slack and Discord have them: a
@@ -484,8 +485,6 @@ export function archiveQuery(input: { organizationId: string; conversationId: st
 export const guestConversationSql = (alias: string) => `${alias}.kind IN ('contact', 'booking')`
 export type ParticipantRole = 'guest' | 'member'
 
-const guestReplyRoles = JSON.stringify(workspaceGuestMessagingRoles)
-
 /** The current booking product or the channel's home for a guest who has not booked. */
 export function conversationProductSql(conversation: string): string {
   return `COALESCE(
@@ -502,12 +501,11 @@ export function guestConversationMemberSql(conversation: string, member: string)
     AND NOT EXISTS (SELECT 1 FROM conversation_participants guest
       WHERE guest.conversation_id = ${conversation}.id AND guest.organization_id = ${conversation}.organization_id
         AND guest.user_id = ${member}.userId AND guest.role = 'guest')
-    AND (EXISTS (SELECT 1 FROM json_each('${guestReplyRoles}') allowed
-          WHERE instr(',' || replace(${member}.role, ' ', '') || ',', ',' || allowed.value || ',') > 0)
-      OR EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.organization_id = ${conversation}.organization_id
-          AND cfg.product_id = ${product} AND cfg.assigned_member_id = ${member}.id)
-      OR EXISTS (SELECT 1 FROM listing_message_members grant WHERE grant.organization_id = ${conversation}.organization_id
-          AND grant.listing_id = ${product} AND grant.member_id = ${member}.id)))`
+    AND (${roleMatchesSql(`${member}.role`, workspaceGuestMessagingRoles)}
+      OR (${roleMatchesSql(`${member}.role`, assignedOperationsRoles)}
+        AND EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.organization_id = ${conversation}.organization_id
+          AND cfg.product_id = ${product} AND cfg.assigned_member_id = ${member}.id))
+      OR ${listingGrantSql(`${conversation}.organization_id`, product, `${member}.id`, 'reply', `${member}.role`)}))`
 }
 
 /** Workspace access for a trusted SQL expression naming the authenticated user. */

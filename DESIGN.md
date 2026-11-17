@@ -107,8 +107,9 @@ hosts the offerings they are named on), their jobs (for owners and admins,
 also unassigned jobs), requests awaiting a decision, failed messages, changes
 waiting on the business, added tasks, and for owners and admins the unfinished
 setup after the day's cards. A job is the action on its booking's card that day
-("Casey is cleaning"), otherwise its own card. There are three roles and no
-cleaner or attorney role; assignment decides what a member sees.
+("Casey is cleaning"), otherwise its own card. A staff member's role limits
+what they can do. Assigned work appears on Today, and staff can claim custom
+work offered to their role on a listing where they have task access.
 
 Every card is `TodayItemCard`, centred, with a shadow and no border or badges,
 in Airbnb's order: when ("3:00 PM", "Oct 26 – 29"); the home's or offering's

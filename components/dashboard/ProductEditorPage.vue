@@ -1252,7 +1252,11 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   if (!product.value || loadError.value) return []
   if (product.value.kind !== 'stay') {
     const screen = offeringScreen.value
-    return screen ? [{ id: product.value.kind, items: screen.rows.filter(item => !item.optional_detail) }] : []
+    return screen ? [{ id: product.value.kind, items: [
+      ...screen.rows.filter(item => !item.optional_detail),
+      ...(['table', 'service', 'experience'].includes(product.value.kind) && dashboard.organization.value?.role.split(',').includes('owner')
+        ? [{ id: 'team', label: 'Listing access', to: sectionPath('team') }] : []),
+    ] }] : []
   }
   if (arrivalTab.value) {
     const home = arrivalHome.value

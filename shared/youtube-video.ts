@@ -42,10 +42,13 @@ export function videoUploadDate(value: unknown): string | null {
 }
 
 export interface VideoSchemaInput {
+  /** A YouTube address, or the file of a video the site uploaded. */
   url: unknown
   name: unknown
   description?: unknown
   uploadDate: unknown
+  /** An uploaded video's poster; a YouTube video's thumbnail comes from its id. */
+  thumbnailUrl?: unknown
 }
 
 /**
@@ -57,17 +60,19 @@ export function videoObjectSchema(input: VideoSchemaInput, id: string): Record<s
   const videoId = youTubeVideoId(input.url)
   const name = typeof input.name === 'string' ? input.name.trim() : ''
   const uploadDate = videoUploadDate(input.uploadDate)
-  if (!videoId || !name || !uploadDate) return null
+  const file = !videoId && typeof input.url === 'string' && /^https:\/\//.test(input.url) ? input.url : null
+  const poster = typeof input.thumbnailUrl === 'string' && /^https:\/\//.test(input.thumbnailUrl) ? input.thumbnailUrl : null
+  if (!name || !uploadDate || !(videoId || (file && poster))) return null
   const description = typeof input.description === 'string' ? input.description.trim() : ''
   return {
     '@type': 'VideoObject',
     '@id': id,
     name,
     ...(description ? { description } : {}),
-    thumbnailUrl: youTubeThumbnailUrl(videoId),
     uploadDate,
-    embedUrl: youTubeEmbedUrl(videoId),
-    url: youTubeWatchUrl(videoId),
+    ...(videoId
+      ? { thumbnailUrl: youTubeThumbnailUrl(videoId), embedUrl: youTubeEmbedUrl(videoId), url: youTubeWatchUrl(videoId) }
+      : { thumbnailUrl: poster, contentUrl: file }),
   }
 }
 
