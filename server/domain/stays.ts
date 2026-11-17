@@ -34,7 +34,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { currencyFractionDigits, isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { completeChannelPush, configureStayCalendar, deliverStayNights, pendingChannelNightsQuery, pushAirbnbListingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion, type ChannexMapping } from '~/server/integrations/channex/ari'
+import { completeChannelPush, configureStayCalendar, deliverStayNights, pendingChannelNightsQuery, pushAirbnbBookingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type ChannelPushCompletion, type ChannexMapping } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { bookingContactQuery, bookingConversationQueries, bookingDay, isBookingDay, nightsBoundary, noStayRequestPaymentInFlightSql, requestInsertQueries, stayRequestPayBySql, stayRequestProgress, stayRequestRespondBySql, threadPayloadForGuest, validateGuestRequest } from '~/server/domain/requests'
 import { bookingPolicy, parseBookingPolicy, type BookingPolicy } from '~/server/utils/booking-policy-summary'
@@ -1623,10 +1623,9 @@ export async function requireAirbnbAcceptable(db: DbClient, organizationId: stri
 /** House rules Airbnb takes as guest controls, by product detail. */
 const AIRBNB_GUEST_CONTROLS = { pets_allowed: 'allows_pets_as_host', smoking_allowed: 'allows_smoking_as_host', events_allowed: 'allows_events_as_host' } as const
 /**
- * Which of a connected home's Airbnb listing settings a product write changes:
- * the check-in and checkout hours and house rules, the cancellation policies,
- * and the minimum stay. The policies are their own section so an edit that
- * leaves them alone never restates Airbnb's cancellation settings.
+ * Which parts of a connected home a product write changes: hours and house
+ * rules, cancellation policies, or the calendar. The separate cancellation
+ * flag keeps other edits from restating Airbnb's cancellation settings.
  */
 export type AirbnbSettingSections = { booking: boolean; cancellation: boolean; availability: boolean }
 
@@ -1643,23 +1642,22 @@ export function touchesAirbnbSettings(patch: UpdateProductInput, previous: Updat
   return sections.booking || sections.cancellation || sections.availability ? sections : null
 }
 
-type AirbnbHomeSettings = Pick<StayHome, 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'cancellation_policy' | 'long_term_cancellation_policy' | 'min_nights'>
+type AirbnbHomeSettings = Pick<StayHome, 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'cancellation_policy' | 'long_term_cancellation_policy'>
 
 /**
  * A home's Airbnb listing settings, or why one of its values cannot be one.
  * Airbnb takes whole hours: a check-in start from 08:00 to 02:00 the next day
  * ("8"–"26"), an end up to 03:00 ("27") or flexible, and a checkout hour.
  * Only the sections a write changed are sent, and only what the home has: an
- * unset house rule is left as Airbnb has it. Prices are not listing settings
- * here: every night's price, the base price's included, already reaches
+ * unset house rule is left as Airbnb has it. Prices and minimum stays reach
  * Airbnb with the nightly calendar.
  */
-function airbnbListingSettings(home: AirbnbHomeSettings, details: Product['details'], sections: AirbnbSettingSections): AirbnbListingSettings | { refusal: string; field: string } {
+function airbnbListingSettings(home: AirbnbHomeSettings, details: Product['details'], sections: AirbnbSettingSections): { booking: Record<string, unknown> } | { refusal: string; field: string } {
   const hours = sections.booking ? airbnbBookingSettings(home, details) : {}
   if ('refusal' in hours) return hours as { refusal: string; field: string }
   const cancellation = sections.cancellation ? airbnbCancellationSettings(home) : {}
   if ('refusal' in cancellation) return cancellation as { refusal: string; field: string }
-  return { booking: { ...hours, ...cancellation }, availability: sections.availability ? { default_min_nights: home.min_nights } : {} }
+  return { booking: { ...hours, ...cancellation } }
 }
 
 function airbnbBookingSettings(home: AirbnbHomeSettings, details: Product['details']): Record<string, unknown> | { refusal: string; field: string } {
@@ -1715,9 +1713,9 @@ export async function pushStayHomeChannel(db: DbClient, env: ChannexEnv & GuestI
   try {
     const home = await readStayHome(db, access, product.id)
     if (home.channel?.status !== 'connected') return null
-    if (changes.settings) {
+    if (changes.settings?.booking || changes.settings?.cancellation) {
       const settings = airbnbListingSettings(home, (await getProduct(db, access.organizationId, product.id)).details, changes.settings)
-      const pushed: ChannelPush | null = 'refusal' in settings ? { state: 'needs_review', detail: settings.refusal } : await pushAirbnbListingSettings(db, env, access.organizationId, product.id, settings)
+      const pushed: ChannelPush | null = 'refusal' in settings ? { state: 'needs_review', detail: settings.refusal } : await pushAirbnbBookingSettings(db, env, access.organizationId, product.id, settings.booking)
       if (pushed?.state === 'needs_review' || !changes.nights) return pushed
     }
     if (!changes.nights) return null

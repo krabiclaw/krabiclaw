@@ -130,7 +130,7 @@ async function readListingRecord(env: ChannexEnv, channelId: string, listingId: 
   return record
 }
 
-export async function listingRecord(env: ChannexEnv, channelId: string, listingId: string): Promise<JsonRecord> {
+async function listingRecord(env: ChannexEnv, channelId: string, listingId: string): Promise<JsonRecord> {
   try {
     return await readListingRecord(env, channelId, listingId)
   } catch (error) {
@@ -182,12 +182,6 @@ function calendar_rules(listing: JsonRecord, currency: string): StayCalendarRule
   try { return parseStayCalendarRules(Object.keys(rules).length ? rules : null) } catch (error) {
     throw new ChannexDataError(`Airbnb calendar rules are invalid: ${error instanceof Error ? error.message : String(error)}`)
   }
-}
-
-/** Read Airbnb itself, rather than Channex's cached mapping settings, after a default update. */
-export async function listingMinimumNights(env: ChannexEnv, channelId: string, listingId: string): Promise<number> {
-  const listing = await listingRecord(env, channelId, listingId)
-  return provided(() => minimum_nights(listing))
 }
 
 export async function listingDetails(env: ChannexEnv, channelId: string, listingId: string, contact: OrganizationContact): Promise<ListingDetails> {

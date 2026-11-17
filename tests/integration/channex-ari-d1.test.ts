@@ -52,11 +52,12 @@ class FakeChannex {
   channelSettings: Record<string, unknown> = { min_stay_type: 'Arrival' }
   properties = new Map(['1', '2', '3'].map(id => [`prop-${id}`, { settings: { min_stay_type: 'arrival' } }]))
   ratePlans = new Map<string, Record<string, unknown>>(['1', '2', '3'].map(id => [`rate-${id}`, { min_stay_arrival: 2, options: [{ occupancy: 4, is_primary: true, rate: id === '1' ? '150.00' : id === '2' ? '0.00' : '90.00' }] }]))
+  ratePlanAnswer?: () => Response
   answer: Partial<Record<'/restrictions' | '/availability', () => Response>> = {}
   /** Runs while a call is in flight, before Channex answers it. */
   during?: () => Promise<unknown>
 
-  /** The listing settings a minimum-stay change sends, by mapping: Airbnb's default minimum before each night's own. */
+  /** Booking settings Channex sends to the mapped Airbnb listing. */
   settings: Array<{ path: string; body: unknown }> = []
   settingsAnswer?: () => Response
 
@@ -81,20 +82,19 @@ class FakeChannex {
     if (/^\/rate_plans\/rate-\d$/.test(path)) {
       const id = path.split('/').at(-1)!
       const plan = this.ratePlans.get(id)!
-      if (init.method === 'PUT') Object.assign(plan, (JSON.parse(init.body as string) as { rate_plan: { min_stay_arrival: number } }).rate_plan)
+      if (init.method === 'PUT') {
+        if (this.ratePlanAnswer) return this.ratePlanAnswer()
+        Object.assign(plan, (JSON.parse(init.body as string) as { rate_plan: { min_stay_arrival: number } }).rate_plan)
+      }
       return Response.json({ data: { id, type: 'rate_plan', attributes: plan } })
     }
     // Airbnb's own instant-booking setting, guest controls and guest expectations, which every booking-settings update restates.
     if ((init.method ?? 'GET') === 'GET' && (path as string) === '/channels/chan-1/action/listing_details') {
       return Response.json({ data: { listing: { id: url.searchParams.get('listing_id'), images: null, rooms: [], descriptions: null, pricing_settings: { default_daily_price: 150, listing_currency: 'USD', standard_fees: [], weekly_price_factor: 0, monthly_price_factor: 0 }, availability_rules: { ...AIRBNB_AVAILABILITY, default_min_nights: this.minimums.get(url.searchParams.get('listing_id')!) }, booking_settings: { instant_booking_allowed_category: 'everyone', instant_book_welcome_message: null, check_in_time_start: '16', check_in_time_end: '21', check_out_time: 10, cancellation_policy_settings: { cancellation_policy_category: 'flexible', lts_cancellation_policy_id: 'CANCEL_LONG_TERM_FAIR', non_refundable_price_factor: null }, listing_expectations_for_guests: [{ type: 'requires_stairs', added_details: null }], guest_controls: { allows_children_as_host: true, allows_infants_as_host: true, allows_pets_as_host: false, allows_events_as_host: false, allows_smoking_as_host: false, children_not_allowed_details: null, pet_capacity: null } } } } })
     }
-    if ((init.method ?? 'GET') === 'GET' && /^\/channels\/chan-1\/mappings\/map-\d\/availability_settings$/.test(path)) return Response.json({ data: { id: path.split('/')[4], type: 'airbnb_listing_availability_settings', attributes: AIRBNB_AVAILABILITY } })
-    if (init.method === 'PUT' && (/^\/channels\/chan-1\/mappings\/map-\d\/availability_settings$/.test(path) || (path as string) === '/channels/chan-1/execute/update_booking_setting')) {
-      const settings = JSON.parse(init.body as string) as { availability_settings?: { default_min_nights: number } }
-      this.settings.push({ path, body: settings })
-      const response = this.settingsAnswer ? this.settingsAnswer() : Response.json({ data: {} })
-      if (response.ok && settings.availability_settings) this.minimums.set(`listing-${path.split('/')[4]!.split('-')[1]}`, settings.availability_settings.default_min_nights)
-      return response
+    if (init.method === 'PUT' && (path as string) === '/channels/chan-1/execute/update_booking_setting') {
+      this.settings.push({ path, body: JSON.parse(init.body as string) })
+      return this.settingsAnswer ? this.settingsAnswer() : Response.json({ data: {} })
     }
     assert.equal(init.method, 'POST')
     assert.ok(path === '/restrictions' || path === '/availability', `unexpected ${path}`)
@@ -541,6 +541,7 @@ test('Airbnb settings preflight the whole catalog and unchanged settings do not 
 
     const inheritedDate = day(10)
     const overrideDate = day(11)
+    channex.minimums.set('listing-1', 300)
     const previousDefault = await updateProduct(db, {
       env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { stay: { min_nights: 300 } },
     })
@@ -565,24 +566,26 @@ test('Airbnb settings preflight the whole catalog and unchanged settings do not 
     }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     const calendar = () => readHomeCalendar(db, manager, { productId: connected, from: inheritedDate, to: day(12) })
 
-    channex.settingsAnswer = () => Response.json({ errors: { detail: 'Settings refused' } }, { status: 422 })
+    channex.ratePlanAnswer = () => Response.json({ errors: { detail: 'Rate plan refused' } }, { status: 422 })
     const failed = await patchDefault()
     assert.equal(failed.status, 503)
     assert.partialDeepStrictEqual(await failed.json(), { data: { code: 'CHANNEL_PUSH_FAILED', committed: true } })
     const committed = await getProduct(db, ORG, connected)
     assert.equal(committed.stay!.min_nights, 21)
-    assert.equal(channex.minimums.get('listing-1'), 300)
-    assert.deepEqual(channex.take(), [], 'the dates were never sent after the settings refusal')
+    assert.equal(channex.ratePlans.get('rate-1')!.min_stay_arrival, 300)
+    assert.deepEqual(channex.take(), [], 'the dates were never sent after the rate plan refusal')
     assert.deepEqual((await calendar()).nights.map(night => [night.date, night.price_minor, night.min_stay_arrival, night.channel]), [
       [inheritedDate, 150_00, 21, { state: 'needs_review', detail: 'Blawby has a 21-night minimum. Channex last confirmed a 300-night minimum.' }],
       [overrideDate, 75_00, 3, { state: 'pushed', detail: null }],
     ])
 
-    channex.settingsAnswer = undefined
+    channex.ratePlanAnswer = undefined
     const retried = await patchDefault()
     assert.equal(retried.status, 200, await retried.clone().text())
     assert.partialDeepStrictEqual(await retried.json(), { product: { updated_at: committed.updated_at, channel_push: { state: 'pushed', detail: null } } })
-    assert.equal(channex.minimums.get('listing-1'), 21)
+    assert.equal(channex.minimums.get('listing-1'), 300)
+    assert.equal(channex.ratePlans.get('rate-1')!.min_stay_arrival, 21)
+    assert.deepEqual(channex.settings, [])
     const repaired = byNight(channex.take().find(call => call.path === '/restrictions')!.values)
     assert.deepEqual(repaired.get(inheritedDate), { min_stay_arrival: 21 })
     assert.equal(repaired.has(overrideDate), false)
