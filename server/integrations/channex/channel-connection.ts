@@ -1118,22 +1118,23 @@ export class ChannexConnection {
   }
 
   /** Re-read Channex after hosted setup or removal and release inventory with no active channel. */
-  async finishHostedProperty(productId: string): Promise<void> {
+  async finishHostedProperty(productId: string, channelCode?: typeof VRBO_CHANNEL): Promise<boolean> {
     await requireStays(this.db, this.organizationId)
     await readStayHome(this.db, this.manager(), productId)
     const mapping = await queryFirst<{ property_id: string; rate_plan_id: string; enabled: number }>(this.db, `SELECT property_id, rate_plan_id, enabled
       FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex'
         AND import_stage IN ('draft', 'complete')`, [this.organizationId, productId])
     if (!mapping) fail(404, 'CHANNEL_MAPPING_NOT_FOUND', 'Prepare this home in Channex before completing setup.')
-    const channels = await propertyChannels(this.env, mapping.property_id)
+    const channels = await propertyChannels(this.env, mapping.property_id, channelCode)
     const active = Number(channels.some(channel => mapsActiveRate(channel, mapping.rate_plan_id)))
-    if (mapping.enabled === active) return
+    if ((channelCode && !active) || mapping.enabled === active) return Boolean(active)
     const [changed] = await executeWithinCapacity(this.env, this.db, this.organizationId, [{
       query: `UPDATE product_channel_mappings SET enabled = ?, import_property = NULL, updated_at = ?
         WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = ?`,
       params: [active, now(), this.organizationId, productId, mapping.enabled],
     }], { operation: 'Update sync for a hosted Channex channel', action: 'update its Channex connection' })
     if (!changed?.meta.changes) fail(409, 'IMPORT_CHANGED', 'The home changed. Refresh and try again.')
+    return Boolean(active)
   }
 
   /** Send the configured home's calendar through the outbox: one restrictions call and one availability call. */

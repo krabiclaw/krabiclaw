@@ -234,6 +234,7 @@ test('Vrbo hosts open only the selected mapped property and bookings use the sha
 
 test('a standalone home provisions one Channex inventory and opens Vrbo only after calendar readback', { timeout: 120_000 }, async () => {
   const { runtime, db, env, productId } = await boot(false)
+  env.CHANNEX_VRBO_ENABLED = 'true'
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
   const created: string[] = []
@@ -314,14 +315,13 @@ test('a standalone home provisions one Channex inventory and opens Vrbo only aft
     await connection.finishHostedProperty(productId)
     assert.equal(await db.prepare('SELECT enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first('enabled'), 0)
     channelActive = true
-    await connection.finishHostedProperty(productId)
-    assert.equal(await db.prepare('SELECT enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first('enabled'), 1)
     channex.revise('standalone-revision', {
       id: 'standalone-stay', property_id: 'standalone-property', ota_name: 'VRBO', status: 'new',
       arrival: '2027-01-10', departure: '2027-01-13', amount: '450.50', revision: 'standalone-revision',
     }, '2026-10-15T01:00:00Z')
     const revision = await applyBookingRevision(db, env, 'standalone-revision')
     assert.equal(revision.status, 'acknowledged')
+    assert.equal(await db.prepare('SELECT enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first('enabled'), 1)
     assert.deepEqual(await nights(db, revision.booking_id), ['2027-01-10', '2027-01-11', '2027-01-12'])
     channelActive = false
     await connection.finishHostedProperty(productId)
