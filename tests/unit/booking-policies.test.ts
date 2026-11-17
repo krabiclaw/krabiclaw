@@ -83,5 +83,5 @@ test('a table\'s terms read in Vietnamese', () => {
 })
 
 test('formatBookingPolicySummary refuses a locale without a platform catalog', () => {
-  assert.throws(() => formatBookingPolicySummary(tablePolicy(), 'fr', 'table'), /No platform locale catalog/)
+  assert.throws(() => formatBookingPolicySummary(tablePolicy(), 'zz', 'table'), /No platform locale catalog/)
 })

@@ -64,10 +64,10 @@ export function payoutDate(seconds:number,options:Intl.DateTimeFormatOptions={mo
 }
 
 /** One line of the business's transactions list. */
-export interface TransactionRow { id:string; created_at:string; currency:string; amount:number; captured_amount:number; refunded_amount:number; state:string; title:string; image_url:string|null; buyer_name:string|null; starts_at:string|null; ends_at:string|null; timezone:string|null; to:string }
+export interface TransactionRow { id:string; created_at:string; currency:string; amount:number; captured_amount:number; refunded_amount:number; title:string; image_url:string|null; buyer_name:string|null; starts_at:string|null; ends_at:string|null; timezone:string|null; to:string }
 export function isTransactionsView(value:unknown):value is {payments:TransactionRow[];next_cursor:string|null} {
  return record(value)&&(value.next_cursor===null||typeof value.next_cursor==='string')&&Array.isArray(value.payments)&&value.payments.every(row=>record(row)&&typeof row.id==='string'&&typeof row.created_at==='string'&&isCurrencyCode(row.currency)
-  &&['amount','captured_amount','refunded_amount'].every(field=>Number.isSafeInteger(row[field]))&&typeof row.state==='string'&&typeof row.title==='string'&&typeof row.to==='string'
+  &&['amount','captured_amount','refunded_amount'].every(field=>Number.isSafeInteger(row[field]))&&typeof row.title==='string'&&typeof row.to==='string'
   &&[row.image_url,row.buyer_name,row.starts_at,row.ends_at,row.timezone].every(field=>field===null||typeof field==='string'))
 }
 /** Rows to a CSV file the browser saves, as Airbnb's "Export CSV". */

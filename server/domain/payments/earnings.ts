@@ -142,7 +142,7 @@ export async function paymentTransactions(db: DbClient, principal: FinancialPrin
     ? await Promise.all([
         paymentPictures(db, principal.organizationId, page.payments),
         queryAll<{ id: string; name: string | null }>(db, `SELECT p.id, COALESCE(json_extract(r.payload_json, '$.guest.name'), u.name) AS name FROM payments p LEFT JOIN user u ON u.id = p.buyer_user_id LEFT JOIN payment_checkout_holds h ON h.payment_id = p.id LEFT JOIN conversations r ON r.id = h.conversation_id WHERE p.id IN (SELECT value FROM json_each(?))`, [json]),
-        queryAll<{ payment_id: string; booking_id: string; conversation_id: string | null; nights: number }>(db, `SELECT p.id AS payment_id, b.id AS booking_id, (SELECT c.id FROM conversations c WHERE c.booking_id = b.id AND c.kind = 'booking') AS conversation_id, b.product_session_id IS NULL AS nights FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
+        queryAll<{ payment_id: string; booking_id: string }>(db, `SELECT p.id AS payment_id, b.id AS booking_id FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
       ])
     : [new Map<string, PaymentPicture>(), [], []]
   const base = `/dashboard/${encodeURIComponent(organizationSlug)}/bookings`
@@ -151,10 +151,8 @@ export async function paymentTransactions(db: DbClient, principal: FinancialPrin
     payments: page.payments.map((payment) => {
       const picture = pictures.get(payment.id)!
       const booking = bookings.find(row => row.payment_id === payment.id)
-      // A stay opens by its id, any other booking by its conversation, as the bookings pages address them.
-      const to = booking?.nights === 1 ? `${base}/stay/${encodeURIComponent(booking.booking_id)}`
-        : booking?.conversation_id ? `${base}/booking/${encodeURIComponent(booking.conversation_id)}`
-        : `${base}/payment/${encodeURIComponent(payment.id)}`
+      // A booking opens at /bookings/<id>, a payment with no booking at /bookings/payment/<id>, as the bookings page routes them.
+      const to = booking ? `${base}/${encodeURIComponent(booking.booking_id)}` : `${base}/payment/${encodeURIComponent(payment.id)}`
       return {
         id: payment.id, created_at: payment.created_at, currency: payment.currency, amount: payment.amount, captured_amount: payment.captured_amount, refunded_amount: payment.refunded_amount,
         title: picture.title, image_url: picture.image_url, buyer_name: buyers.find(row => row.id === payment.id)?.name ?? null,

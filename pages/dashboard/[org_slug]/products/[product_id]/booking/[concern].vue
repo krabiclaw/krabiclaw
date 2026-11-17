@@ -107,7 +107,7 @@ const settings = computed(() => ({
   assignment: { title: p.bookingCopy.value.assigneeLabel, lead: legal.value ? 'Choose an attorney for new consultations. Clients book the attorney’s working hours and see their published profile. Existing consultations keep their booked attorney.' : `Who runs it. ${peopleLabel.value} see the ${p.bookingCopy.value.assigneeNoun}’s published profile on the page. A published host profile is required before publishing this offering. Existing bookings keep their assigned host.` },
   payment: { title: 'Payment', lead: `${peopleLabel.value} pay before their booking is made. Free ${occurrence.value}s remain bookable.` },
   party: { title: 'Party size', lead: `The smallest and largest party one booking takes. Larger parties are asked to contact you. Existing bookings keep their party.` },
-  'guest-terms': { title: 'Guest requirements', lead: `Shown to ${p.bookingCopy.value.guestsLabelPlural} before they book, and kept with each booking as they read them.` },
+  'guest-terms': { title: legal.value ? 'Client requirements' : 'Guest requirements', lead: `Shown to ${p.bookingCopy.value.guestsLabelPlural} before they book, and kept with each booking as they read them.` },
   location: { title: 'Meeting format', lead: `Enable online ${legal.value ? 'consultations' : 'booking'} in the ${p.bookingCopy.value.assigneeNoun}’s working hours. Edit physical availability and repeating times at each saved ${legal.value ? 'office' : 'location'}.` },
 }))
 const dashboard = useDashboardOrganization()
