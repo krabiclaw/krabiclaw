@@ -261,17 +261,34 @@ function bookingsQuery(context: PageContext, window: 'starts' | 'received', wher
   }
 }
 
-/** The money a page's bookings brought in on the site (Stripe, less refunds) and recorded by hand, by booking. */
-function paymentQueries(context: PageContext): BatchQuery[] {
+/** Read the report's bookings once and total each ledger before joining it. */
+async function bookingsWithIncome(context: PageContext) {
   const bookings = bookingsQuery(context, 'starts')
-  return [
-    { query: `SELECT p.subject_id AS booking_id, p.captured_amount, p.refunded_amount FROM payments p
-        WHERE p.organization_id = ? AND p.subject_type = 'booking' AND p.subject_id IN (SELECT id FROM (${bookings.query}))`,
-    params: [context.reader.organizationId, ...bookings.params!] },
-    { query: `SELECT o.booking_id, o.amount_minor FROM offline_payments o
-        WHERE o.organization_id = ? AND o.booking_id IN (SELECT id FROM (${bookings.query}))`,
-    params: [context.reader.organizationId, ...bookings.params!] },
-  ]
+  const organizationId = context.reader.organizationId
+  const [rows] = await batch(context, [{
+    query: `WITH scoped AS (${bookings.query}),
+      online AS (
+        SELECT p.subject_id AS booking_id, SUM(p.captured_amount - p.refunded_amount) AS amount, SUM(p.refunded_amount) AS refunded
+          FROM payments p JOIN scoped b ON b.id = p.subject_id
+         WHERE p.organization_id = ? AND p.subject_type = 'booking' GROUP BY p.subject_id
+      ),
+      offline AS (
+        SELECT p.booking_id, SUM(p.amount_minor) AS amount, SUM(-MIN(p.amount_minor, 0)) AS refunded
+          FROM offline_payments p JOIN scoped b ON b.id = p.booking_id
+         WHERE p.organization_id = ? GROUP BY p.booking_id
+      )
+      SELECT b.*, online.amount AS online_amount, online.refunded AS online_refunded,
+             offline.amount AS offline_amount, offline.refunded AS offline_refunded
+        FROM scoped b LEFT JOIN online ON online.booking_id = b.id LEFT JOIN offline ON offline.booking_id = b.id`,
+    params: [...bookings.params!, organizationId, organizationId],
+  }])
+  return rows!.map(row => ({
+    ...bookingRow(row),
+    online_amount: row.online_amount === null ? null : num(row.online_amount),
+    online_refunded: num(row.online_refunded),
+    offline_amount: row.offline_amount === null ? null : num(row.offline_amount),
+    offline_refunded: num(row.offline_refunded),
+  })).filter(inRange(context))
 }
 
 const startDay = (row: BookingRow) => bookingDay(row.starts_at, row.timezone)
@@ -455,17 +472,10 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
   },
 
   'rates/average-value': async (context) => {
-    const [rows, allPayments, allOffline] = await batch(context, [bookingsQuery(context, 'starts'), ...paymentQueries(context)])
-    const bookings = rows!.map(bookingRow).filter(inRange(context))
-    // The padded read reaches past the range; only the range's bookings' money counts.
-    const ids = new Set(bookings.map(row => row.id))
-    const payments = allPayments!.filter(row => ids.has(String(row.booking_id))), offline = allOffline!.filter(row => ids.has(String(row.booking_id)))
-    // Received for a booking: captured on the site less its refunds, plus what was recorded by hand (a refund recorded negative).
-    const received = new Map<string, number>()
-    for (const row of payments!) received.set(String(row.booking_id), (received.get(String(row.booking_id)) ?? 0) + num(row.captured_amount) - num(row.refunded_amount))
-    for (const row of offline!) received.set(String(row.booking_id), (received.get(String(row.booking_id)) ?? 0) + num(row.amount_minor))
-    const income = (group: BookingRow[]) => group.reduce((sum, row) => sum + (received.get(row.id) ?? 0), 0)
-    const value = (group: BookingRow[]) => average(income(group), group.filter(row => (received.get(row.id) ?? 0) > 0).length, 0)
+    const bookings = await bookingsWithIncome(context)
+    const received = (row: typeof bookings[number]) => (row.online_amount ?? 0) + (row.offline_amount ?? 0)
+    const income = (group: typeof bookings) => group.reduce((sum, row) => sum + received(row), 0)
+    const value = (group: typeof bookings) => average(income(group), group.filter(row => received(row) > 0).length, 0)
     const day = days(context.dates)
     return {
       currency: context.reader.defaultCurrency,
@@ -479,19 +489,16 @@ const PAGE_READS: Record<InsightsStoredPageId, (context: PageContext) => Promise
   },
 
   'rates/income-by-channel': async (context) => {
-    const [rows, allPayments, allOffline] = await batch(context, [bookingsQuery(context, 'starts'), ...paymentQueries(context)])
-    const bookings = rows!.map(bookingRow).filter(inRange(context))
-    // The padded read reaches past the range; only the range's bookings' money counts.
-    const ids = new Set(bookings.map(row => row.id))
-    const payments = allPayments!.filter(row => ids.has(String(row.booking_id))), offline = allOffline!.filter(row => ids.has(String(row.booking_id)))
-    const channelStays = bookings.filter(row => row.owner === 'channel' && row.status === 'confirmed' && row.total_minor !== null)
-    const startOf = new Map(bookings.map(row => [row.id, startDay(row)]))
-    // Each amount is dated by the start of the booking it was for.
-    const amounts = [
-      ...payments!.flatMap(row => startOf.has(String(row.booking_id)) ? [{ channel: 'Direct', day: startOf.get(String(row.booking_id))!, amount: num(row.captured_amount) - num(row.refunded_amount), refunded: num(row.refunded_amount) }] : []),
-      ...offline!.flatMap(row => startOf.has(String(row.booking_id)) ? [{ channel: 'Recorded by you', day: startOf.get(String(row.booking_id))!, amount: num(row.amount_minor), refunded: Math.max(0, -num(row.amount_minor)) }] : []),
-      ...channelStays.map(row => ({ channel: CHANNEL_LABELS[row.channel] ?? row.channel, day: startDay(row), amount: row.total_minor!, refunded: 0 })),
-    ]
+    const bookings = await bookingsWithIncome(context)
+    const amounts = bookings.flatMap(row => {
+      const day = startDay(row)
+      return [
+        ...(row.online_amount === null ? [] : [{ channel: 'Direct', day, amount: row.online_amount, refunded: row.online_refunded }]),
+        ...(row.offline_amount === null ? [] : [{ channel: 'Recorded by you', day, amount: row.offline_amount, refunded: row.offline_refunded }]),
+        ...(row.owner === 'channel' && row.status === 'confirmed' && row.total_minor !== null
+          ? [{ channel: CHANNEL_LABELS[row.channel] ?? row.channel, day, amount: row.total_minor, refunded: 0 }] : []),
+      ]
+    })
     const day = days(context.dates)
     const total = (group: typeof amounts) => group.reduce((sum, row) => sum + row.amount, 0)
     const direct = amounts.filter(row => row.channel === 'Direct')

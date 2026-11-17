@@ -15,35 +15,46 @@ import { channelReservationAmounts } from '~/server/domain/stays'
  * from Stripe; nothing is stored.
  */
 
-export interface PaymentPicture { title: string; image_url: string | null; name: string | null; starts_at: string | null; ends_at: string | null; timezone: string | null }
+interface PaymentPicture {
+  title: string; image_url: string | null; name: string | null; starts_at: string | null; ends_at: string | null; timezone: string | null
+  booking_id: string | null; buyer_name: string | null
+}
 
-/** What each payment was for — its immutable title, the thing's picture, and the visit's dates when it paid for one. */
-export async function paymentPictures(db: DbClient, organizationId: string, payments: readonly Pick<Payment, 'id' | 'subject_type' | 'subject_id' | 'location_id' | 'price_snapshot_json'>[]): Promise<Map<string, PaymentPicture>> {
-  const ids = payments.map(payment => payment.id)
-  if (!ids.length) return new Map()
-  const json = JSON.stringify(ids)
-  const bookings = await queryAll<{ payment_id: string; product_id: string; name: string; starts_at: string; ends_at: string; timezone: string }>(db, `SELECT p.id AS payment_id, b.product_id, pr.name, b.starts_at, b.ends_at, b.timezone FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id JOIN products pr ON pr.id = b.product_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json])
-  const productIds = bookings.map(row => row.product_id)
-  const locationIds = payments.map(payment => payment.location_id).filter((id): id is string => !!id)
+type PaymentSubject = Omit<PaymentPicture, 'title' | 'image_url'> & { id: string; product_id: string | null }
+
+/** The payment's immutable title, its subject's picture and dates, and the buyer when the list presents them. */
+async function paymentPictures(db: DbClient, organizationId: string, payments: readonly Pick<Payment, 'id' | 'location_id' | 'price_snapshot_json'>[], includeBuyer = false): Promise<Map<string, PaymentPicture>> {
+  if (!payments.length) return new Map()
+  const subjects = await queryAll<PaymentSubject>(db, `
+    SELECT p.id, b.id AS booking_id, b.product_id, pr.name, b.starts_at, b.ends_at, b.timezone,
+      ${includeBuyer ? "COALESCE(json_extract(r.payload_json, '$.guest.name'), u.name)" : 'NULL'} AS buyer_name
+      FROM payments p
+      LEFT JOIN bookings b ON p.subject_type = 'booking' AND b.id = p.subject_id AND b.organization_id = p.organization_id
+      LEFT JOIN products pr ON pr.id = b.product_id AND pr.organization_id = b.organization_id
+      ${includeBuyer ? `LEFT JOIN user u ON u.id = p.buyer_user_id
+      LEFT JOIN payment_checkout_holds h ON h.payment_id = p.id
+      LEFT JOIN conversations r ON r.id = h.conversation_id AND r.organization_id = p.organization_id` : ''}
+     WHERE p.organization_id = ? AND p.id IN (SELECT value FROM json_each(?))`,
+  [organizationId, JSON.stringify(payments.map(payment => payment.id))])
+  const byId = new Map(subjects.map(row => [row.id, row]))
+  const entries = payments.map(payment => {
+    const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
+    if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error(`Payment ${payment.id} has no immutable title`)
+    const subject = byId.get(payment.id)
+    if (!subject) throw new Error(`Payment ${payment.id} is missing from its business`)
+    return { id: payment.id, title: snapshot.title, subject, locationId: !subject.booking_id && 'stay' in snapshot ? payment.location_id : null }
+  })
+  const productIds = entries.flatMap(({ subject }) => subject.product_id ? [subject.product_id] : [])
+  const locationIds = entries.flatMap(({ locationId }) => locationId ? [locationId] : [])
   const [products, locations] = await Promise.all([
     loadOwnerPictures(db, organizationId, 'product', productIds),
     loadOwnerPictures(db, organizationId, 'business_location', locationIds),
   ])
-  const result = new Map<string, PaymentPicture>()
-  for (const payment of payments) {
-    const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
-    if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error(`Payment ${payment.id} has no immutable title`)
-    const booking = bookings.find(row => row.payment_id === payment.id)
-    // Use only the image of the payment's actual subject; an absent image is optional.
-    const image_url = booking ? products.get(booking.product_id)?.imageUrl
-      // A stay not yet booked shows its home's place.
-      : 'stay' in snapshot && payment.location_id ? locations.get(payment.location_id)?.imageUrl
-      : null
-
-    const visit = booking ?? null
-    result.set(payment.id, { title: snapshot.title, image_url: image_url ?? null, name: visit?.name ?? null, starts_at: visit?.starts_at ?? null, ends_at: visit?.ends_at ?? null, timezone: visit?.timezone ?? null })
-  }
-  return result
+  return new Map(entries.map(({ id, title, subject, locationId }) => {
+    const { product_id, booking_id, buyer_name, name, starts_at, ends_at, timezone } = subject
+    const image = product_id ? products.get(product_id) : locationId ? locations.get(locationId) : null
+    return [id, { title, image_url: image?.imageUrl ?? null, booking_id, buyer_name, name, starts_at, ends_at, timezone }]
+  }))
 }
 
 /** Airbnb's Performance: the year by month, and one month by what was sold. */
@@ -77,7 +88,21 @@ export async function paymentPerformance(db: DbClient, principal: FinancialPrinc
   return { currency, months, items: [...byTitle.values()].sort((a, b) => b.paid - a.paid), channel_reservations }
 }
 
-export async function connectedStripe(db: DbClient, env: CloudflareEnv, organizationId: string) {
+export async function paymentPayouts(db: DbClient, env: CloudflareEnv, principal: FinancialPrincipal, after?: string, withItems = false) {
+  await authorizePayments(principal, 'payouts')
+  const account = await getStripeConnectedAccount(db, principal.organizationId)
+  if (!account?.stripe_account_id) return { organization_id: principal.organizationId, configured: false, balance: null, payouts: [], next_cursor: null, source: 'Stripe account not connected', refreshed_at: null }
+  const stripe = paymentsStripe(env, account.livemode), options = { stripeAccount: account.stripe_account_id }
+  const [balance, payouts] = await Promise.all([stripe.balance.retrieve({}, options), stripe.payouts.list({ limit: 50, ...(after ? { starting_after: after } : {}) }, options)])
+  if (balance.livemode !== account.livemode || payouts.data.some(row => row.livemode !== account.livemode)) throw new Error('Stripe payout mode does not match connected account')
+  const nextCursor = payouts.has_more ? payouts.data.at(-1)?.id : null
+  if (payouts.has_more && !nextCursor) throw new Error('Stripe payout list is missing its next cursor')
+  const paid = withItems ? payouts.data.filter(row => row.status === 'paid').slice(0, 3) : []
+  const items = await Promise.all(paid.map(row => payoutItems(db, stripe, options, principal.organizationId, row)))
+  return { ...(withItems ? { items: Object.fromEntries(paid.map((row, index) => [row.id, items[index]!])) } : {}),
+    organization_id: principal.organizationId, configured: true, balance, payouts: payouts.data, next_cursor: nextCursor, source: 'Stripe', refreshed_at: new Date().toISOString() }
+}
+async function connectedStripe(db: DbClient, env: CloudflareEnv, organizationId: string) {
   const account = await getStripeConnectedAccount(db, organizationId)
   if (!account?.stripe_account_id) throw new HTTPError({ statusCode: 404, statusMessage: 'Stripe account not connected' })
   return { stripe: paymentsStripe(env, account.livemode), options: { stripeAccount: account.stripe_account_id } }
@@ -88,10 +113,9 @@ export async function connectedStripe(db: DbClient, env: CloudflareEnv, organiza
  * to the charges this business recorded. Stripe attributes transactions only to
  * the payouts it schedules itself; a payout someone created by hand carries none.
  */
-export async function payoutItems(db: DbClient, stripe: Stripe, options: { stripeAccount: string }, organizationId: string, payoutId: string): Promise<PayoutItem[]> {
-  const payout = await stripe.payouts.retrieve(payoutId, {}, options)
+async function payoutItems(db: DbClient, stripe: Stripe, options: { stripeAccount: string }, organizationId: string, payout: Stripe.Payout): Promise<PayoutItem[]> {
   if (!payout.automatic) return []
-  const transactions = await stripe.balanceTransactions.list({ payout: payoutId, type: 'charge', limit: 100 }, options).autoPagingToArray({ limit: 10000 })
+  const transactions = await stripe.balanceTransactions.list({ payout: payout.id, type: 'charge', limit: 100 }, options).autoPagingToArray({ limit: 10000 })
   const chargeIds = transactions.map(row => {
     const id = typeof row.source === 'string' ? row.source : row.source?.id
     if (!id) throw new HTTPError({ statusCode: 502, statusMessage: 'Stripe payout transaction has no charge source', data: { code: 'PAYOUT_TRANSACTION_SOURCE_MISSING', field: `transactions.${row.id}.source` } })
@@ -125,7 +149,7 @@ export async function paymentPayoutDetail(db: DbClient, env: CloudflareEnv, prin
     status: payout.status,
     arrival_date: payout.arrival_date,
     bank,
-    items: await payoutItems(db, stripe, options, principal.organizationId, payout.id),
+    items: await payoutItems(db, stripe, options, principal.organizationId, payout),
   }
 }
 
@@ -136,26 +160,17 @@ export function payoutStatusLabel(status: string): string {
 
 /** The month's transactions as Airbnb's list reads them: the picture, the buyer, and the record each opens. */
 export async function paymentTransactions(db: DbClient, principal: FinancialPrincipal, organizationSlug: string, page: { payments: VisiblePayment[]; next_cursor: string | null }) {
-  const ids = page.payments.map(payment => payment.id)
-  const json = JSON.stringify(ids)
-  const [pictures, buyers, bookings] = ids.length
-    ? await Promise.all([
-        paymentPictures(db, principal.organizationId, page.payments),
-        queryAll<{ id: string; name: string | null }>(db, `SELECT p.id, COALESCE(json_extract(r.payload_json, '$.guest.name'), u.name) AS name FROM payments p LEFT JOIN user u ON u.id = p.buyer_user_id LEFT JOIN payment_checkout_holds h ON h.payment_id = p.id LEFT JOIN conversations r ON r.id = h.conversation_id WHERE p.id IN (SELECT value FROM json_each(?))`, [json]),
-        queryAll<{ payment_id: string; booking_id: string }>(db, `SELECT p.id AS payment_id, b.id AS booking_id FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
-      ])
-    : [new Map<string, PaymentPicture>(), [], []]
+  const pictures = await paymentPictures(db, principal.organizationId, page.payments, true)
   const base = `/dashboard/${encodeURIComponent(organizationSlug)}/bookings`
   return {
     next_cursor: page.next_cursor,
     payments: page.payments.map((payment) => {
       const picture = pictures.get(payment.id)!
-      const booking = bookings.find(row => row.payment_id === payment.id)
       // A booking opens at /bookings/<id>, a payment with no booking at /bookings/payment/<id>, as the bookings page routes them.
-      const to = booking ? `${base}/${encodeURIComponent(booking.booking_id)}` : `${base}/payment/${encodeURIComponent(payment.id)}`
+      const to = picture.booking_id ? `${base}/${encodeURIComponent(picture.booking_id)}` : `${base}/payment/${encodeURIComponent(payment.id)}`
       return {
         id: payment.id, created_at: payment.created_at, currency: payment.currency, amount: payment.amount, captured_amount: payment.captured_amount, refunded_amount: payment.refunded_amount,
-        title: picture.title, image_url: picture.image_url, buyer_name: buyers.find(row => row.id === payment.id)?.name ?? null,
+        title: picture.title, image_url: picture.image_url, buyer_name: picture.buyer_name,
         starts_at: picture.starts_at, ends_at: picture.ends_at, timezone: picture.timezone, to,
       }
     }),
