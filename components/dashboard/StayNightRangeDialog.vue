@@ -25,7 +25,7 @@ const props = defineProps<{
   firstNight: string
   selection: { from: string; to: string } | null
   pastMessage: string
-  select: (start: CalendarDate, end: CalendarDate) => Promise<string | void>
+  select: (start: CalendarDate, end: CalendarDate) => Promise<string | undefined>
 }>()
 const formId = useId()
 const startNight = ref('')

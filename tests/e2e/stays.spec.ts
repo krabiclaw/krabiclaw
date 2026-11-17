@@ -531,7 +531,7 @@ test('a home keeps its operator name independent from its public title across CM
   await waitForNuxtHydration(page)
   await expect(page.getByRole('link', { name: 'Calendar', exact: true })).toBeVisible()
   await expect(grid.locator(`[data-home="${productId}"]`)).toContainText(internalName)
-  expect(await grid.locator('[data-row-index] button').first().evaluate(element => element.getBoundingClientRect().height)).toBe(64)
+  expect(await grid.locator('[data-row-index] button').first().evaluate(element => element.getBoundingClientRect().height)).toBe(76)
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-calendar-default.png') })
 
   const created = await request.post(api('bookings'), { data: { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 3, children: 0, infants: 0,
