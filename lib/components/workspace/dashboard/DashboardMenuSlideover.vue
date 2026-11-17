@@ -38,7 +38,7 @@ import { dashboardSearchOpenKey } from './dashboardPanelContext'
 
 const open = defineModel<boolean>('open', { default: false })
 
-const route = useRoute()
+const { currentRoute } = useRouter()
 const openDashboardSearch = inject(dashboardSearchOpenKey)!
 const { personal } = useDashboardMenu()
 
@@ -50,9 +50,16 @@ function openSearch() {
 // DashboardMenuContent renders plain NuxtLinks, so a selection navigates the
 // page underneath the slideover rather than closing it. Close on the resulting
 // path change instead of wrapping every item in a click handler.
-watch(() => route.path, (path, previous) => {
-  // The desktop inbox selects its first thread in the background.
-  if (previous.endsWith('/messages') && route.params.conversation_id && path.startsWith(`${previous}/`)) return
+watch(currentRoute, (route, previous) => {
+  if (route.path === previous.path) return
+  // Desktop Messages can select the first thread and open its reservation
+  // while the menu is open. Both keep the user in the same inbox.
+  if (route.params.conversation_id) {
+    if (previous.path.endsWith('/messages') && route.path.startsWith(`${previous.path}/`)) return
+    const reservation = `${previous.path}/reservation`
+    if (route.params.conversation_id === previous.params.conversation_id
+      && (route.path === reservation || route.path.startsWith(`${reservation}/`))) return
+  }
   open.value = false
 })
 </script>

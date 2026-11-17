@@ -85,7 +85,7 @@ export const business_locations = sqliteTable("business_locations", {
 //   organization: a direct conversation, a group, or a job's about a booking).
 // booking_id: the booking it is about, where it has one. A booking has at most
 //   one guest conversation; any number of team conversations may name it.
-// user_id: the guest's Better Auth user (every guest has one); NULL on team.
+// user_id: the guest's Better Auth user when linked; NULL if unclaimed or on team.
 // payload_json: what the guest gave when they wrote or booked (contact,
 //   provenance, the emailed cancellation token); '{}' on team.
 // name/is_group/participants_key/created_by_user_id: team only. A group keeps
@@ -1332,17 +1332,8 @@ export const product_nights = sqliteTable("product_nights", {
 	check("product_nights_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
 
-// Row meaning: the home's calendar on another site (Vrbo), linked by its iCal
-//   address. KrabiClaw reads `import_url` every five minutes and claims the
-//   nights it shows taken (stay_nights.calendar_link_id), and serves the home's
-//   own taken nights at /api/public/stay-calendars/<export_token>.ics for that
-//   site to read. iCal carries dates only: no guest, price or rules.
-// `blocked_json`: the [start, end) date ranges the last successful read found,
-//   as a JSON array of pairs. A night in it that another stay already holds is
-//   a double booking for the host to resolve; it is not claimed.
-// `synced_at`/`sync_error`: the last read. A failed read records its reason
-//   and leaves the earlier claims, the last calendar the site served, in place.
-// Deletion: cascades from the home; its claims cascade with it.
+// Storage retained while the previous Worker can still read linked calendars.
+// The current runtime no longer creates calendar links or checkout night claims.
 export const stay_calendar_links = sqliteTable("stay_calendar_links", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
@@ -1368,20 +1359,10 @@ export const stay_calendar_links = sqliteTable("stay_calendar_links", {
 	check("stay_calendar_links_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (synced_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', synced_at, '+0 days') IS synced_at)`),
 ]);
 
-// The night claim: this nights booking, this guest's checkout hold, or this
-//   linked calendar holds this night at this home. Exactly one of booking_id,
-//   hold_id and calendar_link_id is set. It is the nights unit's inventory
-//   claim, as a session's seats are a slot booking's.
-// The primary key is the overlap guard: a night is held by at most one booking
-//   or hold, so two concurrent writes for the same night cannot both commit.
-//   Claims are written in the same batch as the booking or hold and deleted
-//   when it is cancelled or converted. An overbooked or cancelled booking
-//   holds none.
-// A hold's claim counts only while its hold is active and unexpired. Every
-//   batch that claims nights first deletes, in its range, the claims of holds
-//   that no longer count; the stay-checkout-holds task deletes the rest and
-//   reopens those nights on the home's channel.
-// Deletion: cascades from the booking or the hold.
+// A booking's claim to one night. The primary key allows only one booking
+// to claim each home and date. Claims change in the same batch as the booking.
+// Cancelled and overbooked bookings have no claims.
+// Legacy claimant columns remain readable during the Worker rollout.
 export const stay_nights = sqliteTable("stay_nights", {
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text().notNull(),
@@ -1453,6 +1434,8 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 	booking_id: text(),
 	// A send-later reply's conversation; an automatic message's is its booking's (conversations.booking_id).
 	conversation_id: text(),
+	// A job's reminder or a task's start alert: sent for this task while it is open, into conversation_id when it has one.
+	task_id: text(),
 	author_user_id: text().references(() => user.id, { onDelete: "cascade" }),
 	template_id: text(),
 	template_title: text(),
@@ -1481,11 +1464,11 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 	index("scheduled_guest_messages_author_idx").on(table.author_user_id),
 	index("scheduled_guest_messages_due_idx").on(table.status, table.due_at),
 	index("scheduled_guest_messages_org_created_idx").on(table.organization_id, table.created_at, table.id),
-	check("scheduled_guest_messages_kind_check", sql`(author_user_id IS NULL AND conversation_id IS NULL AND product_id IS NOT NULL AND booking_id IS NOT NULL AND template_title IS NOT NULL AND template_version IS NOT NULL AND timezone IS NOT NULL) OR (author_user_id IS NOT NULL AND conversation_id IS NOT NULL AND due_at IS NOT NULL AND status <> 'skipped' AND product_id IS NULL AND booking_id IS NULL AND template_id IS NULL AND template_title IS NULL AND template_version IS NULL AND timezone IS NULL)`),
+	check("scheduled_guest_messages_kind_check", sql`(task_id IS NULL AND author_user_id IS NULL AND conversation_id IS NULL AND product_id IS NOT NULL AND booking_id IS NOT NULL AND template_title IS NOT NULL AND template_version IS NOT NULL AND timezone IS NOT NULL) OR (task_id IS NULL AND author_user_id IS NOT NULL AND conversation_id IS NOT NULL AND due_at IS NOT NULL AND status <> 'skipped' AND product_id IS NULL AND booking_id IS NULL AND template_id IS NULL AND template_title IS NULL AND template_version IS NULL AND timezone IS NULL) OR (task_id IS NOT NULL AND author_user_id IS NULL AND due_at IS NOT NULL AND status <> 'skipped' AND product_id IS NULL AND booking_id IS NULL AND template_id IS NULL AND template_title IS NULL AND template_version IS NULL AND timezone IS NOT NULL)`),
 	check("scheduled_guest_messages_status_check", sql`status IN ('pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled', 'skipped')`),
 	check("scheduled_guest_messages_due_check", sql`due_at IS NOT NULL OR status IN ('failed', 'skipped')`),
 	check("scheduled_guest_messages_error_check", sql`(status NOT IN ('failed', 'needs_review') OR (length(trim(reason)) > 0 AND length(trim(error_code)) > 0 AND length(trim(error_field)) > 0)) IS TRUE`),
-	check("scheduled_guest_messages_sent_check", sql`status <> 'sent' OR (message_id IS NOT NULL AND sent_at IS NOT NULL)`),
+	check("scheduled_guest_messages_sent_check", sql`status <> 'sent' OR (sent_at IS NOT NULL AND (message_id IS NOT NULL OR (task_id IS NOT NULL AND conversation_id IS NULL)))`),
 	check("scheduled_guest_messages_sending_check", sql`status <> 'sending' OR started_at IS NOT NULL`),
 	check("scheduled_guest_messages_text_check", sql`length(trim(body)) BETWEEN 1 AND 5000 AND (template_title IS NULL OR length(trim(template_title)) BETWEEN 1 AND 100) AND (template_version IS NULL OR template_version >= 1)`),
 	check("scheduled_guest_messages_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (due_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', due_at, '+0 days') IS due_at) AND (started_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+0 days') IS started_at) AND (sent_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', sent_at, '+0 days') IS sent_at)`),
@@ -2361,6 +2344,7 @@ export const mcp_tool_call_events = sqliteTable("mcp_tool_call_events", {
 	check("mcp_tool_call_events_result_summary_json_check", sql`result_summary_json IS NULL OR (json_valid(result_summary_json))`),
 	check("mcp_tool_call_events_duration_check", sql`duration_ms >= 0`),
 	index("idx_mcp_tool_call_events_created_at").on(table.created_at),
+	index("idx_mcp_tool_call_events_diagnostic_retention").on(table.created_at).where(sql`json_extract(arguments_summary_json, '$._diagnostic') = 1`),
 	index("idx_mcp_tool_call_events_tool_status").on(table.tool_name, table.status),
 	index("idx_mcp_tool_call_events_org").on(table.organization_id, table.created_at),
 	index("idx_mcp_tool_call_events_method_created").on(table.method, table.created_at),
@@ -2414,6 +2398,7 @@ export const stripe_ga4_subscription_intents = sqliteTable("stripe_ga4_subscript
 	index("stripe_ga4_subscription_intents_subscription_idx").on(table.stripe_subscription_id, table.status, table.created_at),
 	index("stripe_ga4_subscription_intents_organization_idx").on(table.organization_id, table.status, table.created_at),
 	index("stripe_ga4_subscription_intents_expiry_idx").on(table.status, table.expires_at),
+	index("stripe_ga4_subscription_intents_retention_idx").on(table.consumed_at).where(sql`status = 'consumed'`),
 ]);
 
 export const usage_events = sqliteTable("usage_events", {
@@ -2957,6 +2942,7 @@ export const payments = sqliteTable("payments", {
  check("payments_currency_check", sql`length(currency) = 3 AND currency = upper(currency)`),
 ]);
 
+// Checkout details, conversion status and the approved stay's payment lock.
 export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  id: text().primaryKey(),
  organization_id: text().notNull(),
@@ -2981,9 +2967,8 @@ export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
 }, t => [
  index("payment_holds_capacity_idx").on(t.session_id, t.status, t.expires_at),
  check("payment_holds_quantity_check", sql`quantity > 0 AND amount > 0`),
- // A session booking; or a nights booking, whose starts_at and ends_at are its
- // check-in and check-out dates at the home (product_id) and whose nights are
- // claimed in stay_nights. converted_booking_id is the booking either became.
+ // A session or a stay. For a stay, starts_at and ends_at are the check-in
+ // and check-out dates at the home.
  check("payment_holds_subject_check", sql`(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL) OR (product_id IS NOT NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND date(starts_at, '+0 days') IS starts_at AND date(ends_at, '+0 days') IS ends_at AND ends_at > starts_at)`),
 ]);
 

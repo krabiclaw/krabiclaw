@@ -12,6 +12,21 @@ export function guestInboxTarget(organizationId: string | null, userId: string) 
   return organizationId ?? `account:${userId}`
 }
 
+/** Local deadlines share the business hub's one Durable Object alarm. */
+export const BUSINESS_WAKE_KINDS = ['outbox', 'checkout', 'reviews', 'retention', 'ad_spend', 'channex_ari', 'calendar'] as const
+export type BusinessWakeKind = (typeof BUSINESS_WAKE_KINDS)[number]
+
+export async function scheduleBusinessWake(env: GuestInboxPublicationEnv, organizationId: string, kind: BusinessWakeKind, dueAt: number): Promise<void> {
+  const namespace = env.GUEST_INBOX_HUBS
+  if (!namespace) throw new Error('GUEST_INBOX_HUBS is not bound for the business deadline')
+  const hub = namespace.get(namespace.idFromName(organizationId))
+  const response = await hub.fetch('https://guest-inbox.internal/wake', {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-krabiclaw-organization-id': organizationId },
+    body: JSON.stringify({ kind, due_at: dueAt }),
+  })
+  if (!response.ok) throw new Error(`Could not schedule ${kind} for ${organizationId}: HTTP ${response.status} ${await response.text()}`)
+}
+
 /** A message was written in a conversation, or it or the conversation changed: the gateway tells who may see it. */
 export async function publishConversationEvent(
   env: GuestInboxPublicationEnv,

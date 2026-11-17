@@ -27,8 +27,8 @@ import { cloudflareEnv } from "~/server/utils/api-response";
 import { purgePublicResourceCacheNow } from "~/server/utils/public-resource-cache";
 import { resolveMissingMcpCredential, type McpToolMeta } from "~/server/utils/mcp-runtime";
 import {
-  buildMcpAuthChallengeForError, describeMcpAuthTelemetryError, getCloudflareWaitUntil, isMcpMutatingTool, mcpAuthChallengeFromError, mcpAuthRequiredResult, mcpToolErrorResult, setMcpAuthChallenge, } from "~/server/utils/mcp-route-helpers";
-import { logMcpToolCallEvent, mcpTelemetryMethod } from "~/server/utils/mcp-telemetry";
+  buildMcpAuthChallengeForError, describeMcpAuthTelemetryError, isMcpMutatingTool, mcpAuthChallengeFromError, mcpAuthRequiredResult, mcpToolErrorResult, setMcpAuthChallenge, } from "~/server/utils/mcp-route-helpers";
+import { enqueueMcpToolCallEvent, mcpTelemetryMethod, type LogMcpToolCallEventInput } from "~/server/utils/mcp-telemetry";
 import { describeErrorForTelemetry } from "~/shared/error-telemetry";
 import { getRequestDataMetrics, recordRequestPhase } from "~/server/utils/request-metrics";
 import { mcpFinancialApprovalErrorResult } from "~/server/utils/mcp-financial-handoff";
@@ -36,21 +36,23 @@ import { KRABICLAW_BUG_REPORT_URL, KRABICLAW_FEATURE_REQUEST_URL } from "~/share
 
 const TENANT_CATALOG_FINGERPRINT = catalogFingerprint(MCP_PUBLIC_TOOLS);
 
-// Worker execution context reports telemetry rejection without replaying a committed tool.
-function logMcpEventDetached(
-  event: Parameters<typeof getCloudflareWaitUntil>[0], db: D1Database | undefined, input: Parameters<typeof logMcpToolCallEvent>[1], ) {
-  if (!db) return;
-  const env = cloudflareEnv(event);
+async function logMcpEvent(event: H3Event, env: ReturnType<typeof cloudflareEnv>, input: LogMcpToolCallEventInput) {
+  if (!env.DB) return;
   const executionContext = event.context.mcpExecutionContext as { organizationId: string; locationId: string | null } | undefined;
   const attribution = input.method === "tools/call"
     ? { organizationId: executionContext?.organizationId ?? null, locationId: executionContext?.locationId ?? null }
     : {};
   const toolName = MCP_TOOLS.find(tool => tool.name === input.toolName)?.name ?? null;
-  const logInput = {
-    env, ...input, ...attribution, toolName, unknownToolName: input.unknownToolName ?? (input.toolName && !toolName ? input.toolName : null), cfRayId: input.cfRayId ?? (event.req.headers.get("cf-ray")) ?? null, sessionId: input.sessionId ?? (event.req.headers.get("mcp-session-id")) ?? null, protocolVersion: input.protocolVersion ?? event.req.headers.get('mcp-protocol-version'), catalogFingerprint: input.catalogFingerprint ?? TENANT_CATALOG_FINGERPRINT, };
-  const logged = logMcpToolCallEvent(db, logInput);
-  const waitUntil = getCloudflareWaitUntil(event);
-  waitUntil!(logged);
+  await enqueueMcpToolCallEvent(env, {
+    ...input,
+    ...attribution,
+    toolName,
+    unknownToolName: input.unknownToolName ?? (input.toolName && !toolName ? input.toolName : null),
+    cfRayId: input.cfRayId ?? event.req.headers.get("cf-ray"),
+    sessionId: input.sessionId ?? event.req.headers.get("mcp-session-id"),
+    protocolVersion: input.protocolVersion ?? event.req.headers.get('mcp-protocol-version'),
+    catalogFingerprint: input.catalogFingerprint ?? TENANT_CATALOG_FINGERPRINT,
+  });
 }
 
 const TENANT_AUTH_DESCRIPTION = "Connect Blawby to continue.";
@@ -272,7 +274,7 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
     });
 
     const domains = [...new Set(tools.map((tool) => tool._meta["krabiclaw/toolInfo"].domain))];
-    logMcpEventDetached(event, cfEnv.DB, {
+    await logMcpEvent(event, cfEnv, {
       organizationId: organizationCtx?.organizationId ?? null, userId: mcpUser.userId, requestId, method: "tools/list", arguments: { organization_id: organizationIdHeader },
       result: { count: tools.length, domains, instructions, tools: tools.map(tool => ({
         name: tool.name, title: tool.title, description: tool.description,
@@ -316,11 +318,11 @@ function peekMcpId(body: unknown): JsonRpcId | undefined {
 }
 
 export default defineHandler(async (event) => {
-  if (!getCloudflareWaitUntil(event)) {
-    throw new HTTPError({ statusCode: 503, statusMessage: "MCP requires the Worker execution context" });
-  }
   const requestStartedAt = Date.now();
   const cfEnv = cloudflareEnv(event);
+  if (!cfEnv.EVENTS) {
+    throw new HTTPError({ statusCode: 503, statusMessage: "MCP telemetry queue is unavailable" });
+  }
   const baseUrl = cfEnv.BETTER_AUTH_URL?.replace(/\/$/, "");
   if (!baseUrl) throw new HTTPError({ status: 500, statusText: "BETTER_AUTH_URL is required" });
 
@@ -338,8 +340,12 @@ export default defineHandler(async (event) => {
 
   const tenantAuthOptions = { audiences: [`${baseUrl}/api/mcp`], requiredScopes: ["tenant"] };
   const runtimeDeps = {
-    authOptions: tenantAuthOptions, resourceUrl, authDescription: TENANT_AUTH_DESCRIPTION, authRequiredText: TENANT_AUTH_REQUIRED_TEXT, logEvent: (evt: typeof event, fields: Record<string, unknown>) =>
-      logMcpEventDetached(evt, cfEnv.DB, fields as unknown as Parameters<typeof logMcpToolCallEvent>[1]), resolveToolMeta: resolveTenantToolMeta, };
+    resourceUrl,
+    authDescription: TENANT_AUTH_DESCRIPTION,
+    authRequiredText: TENANT_AUTH_REQUIRED_TEXT,
+    logEvent: (evt: H3Event, fields: LogMcpToolCallEventInput) => logMcpEvent(evt, cfEnv, fields),
+    resolveToolMeta: resolveTenantToolMeta,
+  };
 
   let requestId: JsonRpcId | undefined;
   let requestMethod: string | undefined;
@@ -387,7 +393,7 @@ export default defineHandler(async (event) => {
           const authStatus = mcpError.kind === "forbidden" ? 403 : 401;
           const authChallenge = buildMcpAuthChallengeForError(error, {
             resourceUrl: resourceUrl(baseUrl), defaultDescription: TENANT_AUTH_DESCRIPTION, });
-          logMcpEventDetached(event, cfEnv.DB, {
+          await logMcpEvent(event, cfEnv, {
             requestId: null, method: requestMethod ?? "unknown", status: "auth_required", errorCode: mcpError.code, errorMessage: describeMcpAuthTelemetryError(error), httpStatus: isToolCall ? 200 : authStatus, });
           if (isToolCall) return await respondWithToolResult(mcpAuthRequiredResult({ challenge: authChallenge, message: TENANT_AUTH_REQUIRED_TEXT }));
           event.res.status = authStatus;
@@ -421,7 +427,7 @@ export default defineHandler(async (event) => {
       const toolName = params?.name ?? '';
       const tool = MCP_TOOLS.find(entry => entry.name === toolName);
       const failed = Boolean(wire.error || wire.result?.isError);
-      logMcpEventDetached(event, cfEnv.DB, {
+      await logMcpEvent(event, cfEnv, {
         userId: mcpUser?.userId, requestId, method: 'tools/call', toolName,
         toolDomain: tool?.domain ?? null, isMutating: isMcpMutatingTool(tool),
         arguments: params?.arguments ?? {},

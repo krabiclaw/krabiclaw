@@ -5,6 +5,7 @@
 // see server/api/mcp.ts for what's left in our hands.
 import type { H3Event } from 'nitro';
 import type { CallToolResult } from '@modelcontextprotocol/server';
+import type { LogMcpToolCallEventInput } from '~/server/utils/mcp-telemetry';
 
 export interface McpToolMeta {
   domain?: string | null
@@ -12,11 +13,10 @@ export interface McpToolMeta {
 }
 
 export interface McpSurfaceRuntimeConfig {
-  authOptions: RequireMcpUserOptions
   resourceUrl: (_baseUrl: string) => string
   authDescription: string
   authRequiredText: string
-  logEvent: (_event: H3Event, _fields: Record<string, unknown>) => void
+  logEvent: (_event: H3Event, _fields: LogMcpToolCallEventInput) => Promise<void>
   resolveToolMeta: (_toolName: string | null) => McpToolMeta
 }
 
@@ -52,7 +52,7 @@ export async function resolveMissingMcpCredential(
 
   if (requestMethod === 'tools/call') {
     const toolMeta = config.resolveToolMeta(requestToolName ?? null)
-    config.logEvent(event, {
+    await config.logEvent(event, {
       requestId: requestId ?? null, method: requestMethod, toolName: requestToolName ?? null, toolDomain: requestToolName ? toolMeta.domain ?? null : null, status: 'auth_required', errorMessage: 'credential_missing: missing bearer token or cookie', })
     return {
       handled: true, requestId, requestMethod, requestToolName, toolResult: mcpAuthRequiredResult({ challenge: authChallenge, message: config.authRequiredText }), }

@@ -3,6 +3,7 @@ import type { SQL, SQLChunk } from 'drizzle-orm'
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1'
 import * as schema from './schema'
 import { MAX_D1_BATCH_STATEMENTS } from './d1-limits'
+import { publishEvent, type DomainEvent, type EventsEnv } from '~/server/events'
 
 export * from './d1-limits'
 
@@ -12,6 +13,12 @@ export type DbClient = AppDb | D1Database
 export type QueryResultRow = Record<string, unknown>
 
 const dbCache = new WeakMap<D1Database, AppDb>()
+const databaseEvents = new WeakMap<D1Database, EventsEnv>()
+
+/** A request or Worker event owns this database binding's post-commit publications. */
+export function bindDatabaseEvents(db: D1Database | undefined, env: EventsEnv): void {
+  if (db) databaseEvents.set(db, { EVENTS: env.EVENTS })
+}
 
 export function createDb(client: D1Database): AppDb {
   const cached = dbCache.get(client)
@@ -108,7 +115,7 @@ export function prepareStatement(db: DbClient, query: string) {
   }
 }
 
-export type BatchQuery = { query: string; params?: unknown[] }
+export type BatchQuery = { query: string; params?: unknown[]; event?: DomainEvent }
 
 /**
  * Runs multiple writes as a single atomic D1 batch (all-or-nothing), unlike
@@ -126,7 +133,17 @@ export async function executeBatch(
   }
   const client = rawClient(db)
   const statements = queries.map(({ query, params = [] }) => client.prepare(query).bind(...params))
-  return await client.batch(statements)
+  const results = await client.batch(statements)
+  const env = databaseEvents.get(client)
+  if (env && queries.some(query => query.event)) {
+    const events = queries.flatMap((query, index) => query.event && (results[index]?.meta.changes ?? 0) > 0 ? [query.event] : [])
+    try {
+      await Promise.all(events.map(event => publishEvent(env, event)))
+    } catch (cause) {
+      throw new Error(`${opts.operation ?? 'Database batch'} committed, but its events could not be published`, { cause })
+    }
+  }
+  return results
 }
 
 export { rawClient, schema }

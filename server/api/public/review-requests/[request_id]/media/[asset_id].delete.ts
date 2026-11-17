@@ -16,7 +16,6 @@ export default defineHandler(async (event) => {
   if (!token) return jsonResponse({ error: 'Token required' }, { status: 400 })
   const result = await getReviewRequestByToken(db, token)
   if (!result || result.request.id !== requestId) return jsonResponse({ error: 'Review request not found or expired' }, { status: 404 })
-  // The token was minted for the booking's user; the deletion is theirs.
   const userId = result.request.user_id
   const placement = await queryFirst<{ id: string; asset_status: string }>(db, `
     SELECT mp.id, ma.status AS asset_status

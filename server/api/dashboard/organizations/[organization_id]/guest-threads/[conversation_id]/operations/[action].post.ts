@@ -1,6 +1,7 @@
 import { defineHandler } from 'nitro'
 import { getRouterParam, readBody } from 'nitro/h3'
 import { queryFirst } from '~/server/db'
+import { conversationIdParam } from '~/server/utils/conversation-request'
 
 // Conversation operations here; booking status changes use the versioned booking API.
 import { jsonResponse } from '~/server/utils/api-response'
@@ -12,7 +13,7 @@ import { MEMBER_REPLY_EVENT } from '~/server/domain/conversations'
 
 export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organization_id')
-  const threadId = getRouterParam(event, 'conversation_id')
+  const threadId = conversationIdParam(event)
   const action = getRouterParam(event, 'action')
   if (!organizationId || !threadId || !action) return jsonResponse({ error: 'Missing params', code: 'VALIDATION_ERROR', field: 'params' }, { status: 400 })
   if (action !== 'retry' && action !== 'report' && action !== 'block' && action !== 'unblock') {

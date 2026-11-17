@@ -4,7 +4,7 @@ import { execute, executeBatch, queryAll, queryFirst, type DbClient } from '~/se
 import { assertRoleAllows } from '~/server/utils/member-access'
 import { getStripeConnectedAccount, paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { notifyPaymentFinancialEvent } from './notifications'
+import { publishPaymentNotification } from './notifications'
 import { readPaymentOrder } from './orders'
 import { recordPaymentRefunded } from '~/server/domain/booking-analytics'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
@@ -69,6 +69,11 @@ export interface Payment {
 export type VisiblePayment = Omit<Payment, 'idempotency_key' | 'review_json' | 'return_token' | 'return_token_hash'>
 function visiblePayment(payment: Payment): VisiblePayment {
   const visible: Partial<Payment> = { ...payment }
+  const snapshot = JSON.parse(payment.price_snapshot_json) as Record<string, unknown>
+  if ('checkout_origin' in snapshot) {
+    delete snapshot.checkout_origin
+    visible.price_snapshot_json = JSON.stringify(snapshot)
+  }
   delete visible.idempotency_key
   delete visible.review_json
   delete visible.return_token
@@ -231,7 +236,7 @@ export async function reconcileRefundState(db:DbClient,stripe:Stripe,payment:Pay
   {query:"UPDATE payments SET refunded_amount=(SELECT COALESCE(SUM(amount),0) FROM payment_refunds WHERE payment_id=? AND status='succeeded'),updated_at=? WHERE id=?",params:[payment.id,now,payment.id]},
   {query:`UPDATE payment_authorizations SET consumed_at=COALESCE(consumed_at,?) WHERE payment_id=? AND approved_at IS NOT NULL AND action='refund' AND EXISTS(SELECT 1 FROM payment_refunds r WHERE r.id=? AND r.payment_id=payment_authorizations.payment_id AND r.idempotency_key='approved:'||payment_authorizations.id AND (payment_authorizations.amount IS NULL OR r.amount=payment_authorizations.amount) AND r.created_by=payment_authorizations.user_id)`,params:[now,payment.id,id]},
  ])
- await notifyPaymentFinancialEvent(db,stripe,env,payment,{kind,nativeId:refund.id,status:refund.status!,amount:refund.amount})
+ await publishPaymentNotification(env,payment,{kind,nativeId:refund.id,status:refund.status!,amount:refund.amount})
  if(refund.status==='succeeded')await recordPaymentRefunded(db,payment,refund,id)
  return {id,stripe_refund_id:refund.id,status:refund.status}
 }

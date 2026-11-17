@@ -11,6 +11,7 @@ import { ChannexError } from '~/server/integrations/channex/client'
 import { BOOKING_RECORDS_SQL, bookedRecordGuard, bookedRecordWindow, getGuestRequest, readBookedRecord, stayRequestConfirmationKey, type BookedRecord } from './requests'
 import { memberAccessPrincipal, resolveMembership, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { CloudflareEnv } from '~/server/utils/auth'
+import { sendTaskSend } from './cleaner-jobs'
 
 type Plan = Pick<ScheduledGuestMessageRow, 'due_at' | 'status' | 'reason' | 'error_code' | 'error_field'>
 
@@ -210,31 +211,11 @@ export async function planHomeMessages(db: DbClient, organizationId: string, loc
   for (const row of rows) await planSourceMessages(db, organizationId, row.id, now)
 }
 
-/**
- * Cron recovery reads the same persisted source versions as foreground writes.
- * One template's failure does not stop the others; every failure is returned
- * for the run to report.
- */
-async function reconcileScheduledGuestMessagePlans(db: DbClient, now: string): Promise<Error[]> {
-  const templates = await queryAllPages<MessageTemplateRow>(db, 'SELECT * FROM message_templates WHERE schedule_json IS NOT NULL ORDER BY id', [])
-  const failures: Error[] = []
-  // Check-in messages for stays not yet arrived; an edited home's instructions reach them here.
-  const arriving = await queryAllPages<CheckInStay>(db, `${CHECK_IN_STAYS_SQL} AND br.status = 'confirmed' AND br.starts_at >= date(?, '-2 day') ORDER BY br.id`, [now])
-  for (const stay of arriving) {
-    try {
-      await planCheckInMessage(db, stay, now)
-    } catch (error) {
-      failures.push(new Error(`Planning the check-in message for stay ${stay.id} failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error }))
-    }
-  }
-  for (const template of templates) {
-    try {
-      await planTemplateMessages(db, template, now)
-    } catch (error) {
-      failures.push(new Error(`Planning template ${template.id} failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error }))
-    }
-  }
-  return failures
+/** A guide edit updates the home’s check-in message for upcoming visits. */
+export async function planStayCheckInMessages(db: DbClient, organizationId: string, productId: string, now = new Date().toISOString()): Promise<void> {
+  const stays = await queryAllPages<CheckInStay>(db, `${CHECK_IN_STAYS_SQL} AND br.organization_id = ? AND br.product_id = ?
+    AND br.status = 'confirmed' AND br.ends_at >= date(?, '-1 day') ORDER BY br.id`, [organizationId, productId, now])
+  for (const stay of stays) await planCheckInMessage(db, stay, now)
 }
 
 /** A send time is a future instant, at most a year ahead. */
@@ -372,20 +353,28 @@ async function sendScheduledGuestMessage(db: DbClient, env: SendEnv, row: Pick<S
   return failure.status
 }
 
-/** The production cron: recover automatic plans from persisted sources, then send everything due, each on its own. */
-export async function sendDueScheduledGuestMessages(db: DbClient, env: SendEnv, now = new Date().toISOString()): Promise<{ sent: number; failed: number; needs_review: number }> {
-  const failures = await reconcileScheduledGuestMessagePlans(db, now)
-  const due = await queryAllPages<Pick<ScheduledGuestMessageRow, 'id' | 'organization_id' | 'booking_id' | 'author_user_id'>>(db,
-    "SELECT id, organization_id, booking_id, author_user_id FROM scheduled_guest_messages WHERE status = 'pending' AND due_at <= ? ORDER BY due_at, id", [now])
+/**
+ * One business's outbox, sent when its hub wakes: every row that is due, each
+ * on its own, then the exact time of the next one still waiting. A row that
+ * could not be sent is recorded on the row; an error that is not the row's own
+ * fails the wake, which Cloudflare runs again.
+ */
+export async function sendDueOutbox(db: DbClient, env: SendEnv, organizationId: string, now = new Date().toISOString()): Promise<{ sent: number; failed: number; needs_review: number; next: string | null }> {
+  const due = await queryAllPages<Pick<ScheduledGuestMessageRow, 'id' | 'organization_id' | 'booking_id' | 'author_user_id'> & { task_id: string | null }>(db,
+    "SELECT id, organization_id, booking_id, author_user_id, task_id FROM scheduled_guest_messages WHERE organization_id = ? AND status = 'pending' AND due_at <= ? ORDER BY due_at, id", [organizationId, now])
   const counts = { sent: 0, failed: 0, needs_review: 0 }
+  const failures: Error[] = []
   for (const row of due) {
     try {
+      // A job's reminder or a task's start alert goes to the team, not to a guest, and is not one of the guest counts.
+      if (row.task_id !== null) { await sendTaskSend(env, db, { ...row, task_id: row.task_id }, now); continue }
       const result = await sendScheduledGuestMessage(db, env, row, now)
       if (result !== 'not_due') counts[result] += 1
     } catch (error) {
       failures.push(new Error(`Scheduled message ${row.id} failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error }))
     }
   }
-  if (failures.length) throw new AggregateError(failures, `${failures.length} scheduled guest message operations failed (sent ${counts.sent}, failed ${counts.failed}, needs review ${counts.needs_review}): ${failures.map(error => error.message).join('; ')}`)
-  return counts
+  if (failures.length) throw new AggregateError(failures, `${failures.length} scheduled message operations of ${organizationId} failed (sent ${counts.sent}, failed ${counts.failed}, needs review ${counts.needs_review}): ${failures.map(error => error.message).join('; ')}`)
+  const next = await queryFirst<{ next: string | null }>(db, "SELECT MIN(due_at) AS next FROM scheduled_guest_messages WHERE organization_id = ? AND status = 'pending'", [organizationId])
+  return { ...counts, next: next?.next ?? null }
 }

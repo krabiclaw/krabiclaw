@@ -7,7 +7,7 @@ import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain
 import { openingSentence } from '../../server/domain/guest-threads/opening.ts'
 import { appendMessage, markConversationRead } from '../../server/domain/conversations.ts'
 import { loadConversationPage } from '../../server/domain/conversation-history.ts'
-import { acceptConversationGuestInvite, createConversationGuestInvite } from '../../server/domain/conversation-participants.ts'
+import { acceptConversationGuestInvite, createConversationGuestInvite, removeConversationGuest } from '../../server/domain/conversation-participants.ts'
 import { conversationPageFor } from './support/conversation-page.ts'
 import { listConversations, readGuestInbox } from '../../server/domain/guest-threads/repository.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
@@ -93,7 +93,8 @@ test('a table booking opens with its own message and the guest note, written onc
     await db.batch([booker, traveler].map(user => db.prepare(`INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt)
       VALUES (?, ?, ?, 1, 0, 0)`).bind(user.id, user.name, user.email)))
     await reservation('shared', 'Private booking note', sentence, booker.id)
-    const invite = await createConversationGuestInvite(db, principal, { conversationId: 'shared', email: traveler.email })
+    const companionInvite = { conversationId: 'shared', email: traveler.email }
+    const invite = await createConversationGuestInvite(db, { organizationId: ORG, userId: booker.id }, companionInvite)
     const publication = { GUEST_INBOX_HUBS: { idFromName: () => 'hub', get: () => ({ fetch: () => Promise.resolve(new Response(null, { status: 204 })) }) } } as unknown as Parameters<typeof acceptConversationGuestInvite>[1]
     await acceptConversationGuestInvite(db, publication, { token: invite.token, user: traveler })
     const page = (userId: string, limit = 40) => loadConversationPage(db, { conversationId: 'shared', userId }, { before: null, limit })
@@ -102,6 +103,9 @@ test('a table booking opens with its own message and the guest note, written onc
     const payment = await appendMessage(db, { conversationId: 'shared', authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: privateWords })
     const privatePage = await page(traveler.id)
     assert.deepEqual(privatePage.entries, [])
+    assert.equal(privatePage.capabilities.can_invite_guest, false)
+    assert(privatePage.conversation.participants.every(person => !person.can_remove && !('invitation_id' in person)))
+    await assert.rejects(createConversationGuestInvite(db, { organizationId: ORG, userId: traveler.id }, companionInvite), { statusCode: 404 })
     if (privatePage.conversation.kind === 'team') throw new Error('Expected the traveler’s booking conversation')
     assert.deepEqual([privatePage.conversation.booking_id, privatePage.conversation.activity_path], [null, null])
     const [travelerRow] = await list()
@@ -133,6 +137,16 @@ test('a table booking opens with its own message and the guest note, written onc
     assert(original.entries.some(entry => entry.type === 'message' && entry.body === sentence))
     assert(original.entries.some(entry => entry.type === 'event' && entry.id === payment.id))
     assert(original.entries.some(entry => entry.type === 'message' && entry.id === travelerMessage.id && entry.author === traveler.name))
+    assert.equal(original.capabilities.can_invite_guest, true)
+    const companion = original.conversation.participants.find(person => person.name === traveler.name)
+    assert(companion?.invitation_id)
+    assert.deepEqual([companion.id, companion.image, companion.can_remove], [null, null, true])
+    const removal = { organizationId: ORG, conversationId: 'shared', invitationId: companion.invitation_id }
+    await assert.rejects(removeConversationGuest(db, publication, { ...removal, userId: traveler.id }), { statusCode: 404 })
+    assert.deepEqual(await removeConversationGuest(db, publication, { ...removal, userId: booker.id }), { removed: true })
+    assert(!(await page(booker.id)).conversation.participants.some(person => person.name === traveler.name))
+    await assert.rejects(page(traveler.id), { statusCode: 404 })
+    await assert.rejects(acceptConversationGuestInvite(db, publication, { token: invite.token, user: traveler }), { statusCode: 404 })
   } finally {
     await runtime.dispose()
   }

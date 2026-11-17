@@ -13,7 +13,6 @@
 
       <div v-else-if="optedOut" class="rounded-lg border border-default p-8">
         <h1 class="text-2xl font-semibold">You are opted out</h1>
-        <p class="mt-3 text-sm text-muted">You will not receive more review request emails.</p>
       </div>
 
       <template v-else-if="requestData">
@@ -148,8 +147,6 @@ const content = ref('')
 const privateFeedback = ref('')
 const submitting = ref(false)
 const submitted = computed(() => step.value === 'done')
-// Whether this browser holds the anonymous identity the review belongs to, so
-// signing in here links it through Better Auth. Another browser cannot.
 const optedOut = ref(false)
 const submitError = ref('')
 const copyButtonLabel = ref('Copy my review & post on Google Maps')
@@ -195,12 +192,6 @@ async function next() {
   }
   stepper.value?.next()
 }
-
-onMounted(async () => {
-  if (route.query.optOut === '1' || route.query.optOut === 'true') {
-    await optOut()
-  }
-})
 
 onBeforeUnmount(() => {
   for (const controller of activeVideoUploads) controller.abort()

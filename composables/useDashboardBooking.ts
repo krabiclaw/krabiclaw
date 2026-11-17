@@ -1,16 +1,18 @@
 import type { DashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
 import type { GuestStay, StayDetail, StayTurnover } from '~/server/domain/stays'
-import type { BookingHome } from '~/server/utils/dashboard-bookings'
+import type { BookingHome, TurnoverBookingHome } from '~/server/utils/dashboard-bookings'
 import type { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
 import { isGuestStay, isStayCheckInMethod } from '~/shared/stay-arrival'
+import { isPublicProvider } from '~/shared/member-scheduling'
 import { isRecord } from '~/utils/api-clients'
+import { coordinatesFailure } from '~/utils/location-map'
 
 type NightBooking<T> = Omit<T, 'id'> & { booking_id: string; unit: 'nights' }
 type StayChange = Awaited<ReturnType<typeof pendingStayChanges>>[number]
 type ManagedNightBooking = NightBooking<StayDetail> & { available_actions: string[]; pending_changes: StayChange[] }
 export type DashboardNightBooking =
   | { booking: ManagedNightBooking; manage: true; can_message_guest: boolean; home: BookingHome }
-  | { booking: NightBooking<StayTurnover>; manage: false; home: BookingHome }
+  | { booking: NightBooking<StayTurnover>; manage: false; home: TurnoverBookingHome }
 export type DashboardBooking = DashboardNightBooking | { booking: DashboardBookingDetails & { unit: 'slot' }; manage: boolean }
 export type AccountNightBooking = Omit<GuestStay, 'stay'> & { booking: NightBooking<StayDetail> }
 
@@ -32,6 +34,12 @@ export function isBookingDetailsResponse(value: unknown): value is { booking: Da
     && typeof value.booking.organization_id === 'string'
     && (value.booking.guest_name === null || typeof value.booking.guest_name === 'string')
     && (value.booking.notes === null || typeof value.booking.notes === 'string')
+    && Array.isArray(value.booking.resource_photo_urls) && value.booking.resource_photo_urls.every(url => typeof url === 'string')
+    && (value.booking.host === null || isPublicProvider(value.booking.host))
+    && (value.booking.location_pin === null || (isRecord(value.booking.location_pin)
+      && typeof value.booking.location_pin.latitude === 'number' && typeof value.booking.location_pin.longitude === 'number'
+      && !coordinatesFailure({ latitude: value.booking.location_pin.latitude, longitude: value.booking.location_pin.longitude })))
+    && (value.booking.location_maps_url === null || typeof value.booking.location_maps_url === 'string')
     && Array.isArray(value.booking.answers)
     && (value.booking.policy === null || isRecord(value.booking.policy))
 }
@@ -41,9 +49,15 @@ export function isDashboardBooking(value: unknown): value is DashboardBooking {
   if (value.booking.unit === 'nights') {
     const home = value.home
     if (!isRecord(home) || typeof home.name !== 'string' || typeof home.internal_name !== 'string' || !home.internal_name.trim()
-      || ![home.check_in_time, home.check_in_end_time, home.check_out_time, home.check_in_instructions, home.image_url].every(field => field === null || typeof field === 'string')
-      || (home.check_in_method !== null && !isStayCheckInMethod(home.check_in_method))) return false
-    if (!value.manage) return true
+      || ![home.check_in_time, home.check_in_end_time, home.check_out_time].every(field => field === null || typeof field === 'string')) return false
+    if (!value.manage) {
+      return (home.check_in_method === null || isStayCheckInMethod(home.check_in_method))
+        && (home.check_in_instructions === null || typeof home.check_in_instructions === 'string')
+        && (home.image_url === null || typeof home.image_url === 'string')
+    }
+    if (!Array.isArray(home.photo_urls) || !home.photo_urls.every(url => typeof url === 'string')
+      || !Array.isArray(home.house_rules) || !Array.isArray(home.safety)
+      || (home.host !== null && !isPublicProvider(home.host)) || !Array.isArray(home.co_hosts) || !home.co_hosts.every(isPublicProvider)) return false
     const isTerms = (terms: unknown) => isRecord(terms) && typeof terms.dates === 'string' && Number.isInteger(terms.guests) && typeof terms.total === 'string'
     return typeof value.can_message_guest === 'boolean'
       && Array.isArray(value.booking.available_actions) && value.booking.available_actions.every(action => typeof action === 'string')

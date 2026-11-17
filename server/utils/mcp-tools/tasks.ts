@@ -25,7 +25,7 @@ const opportunity = { type: 'object', properties: { id: text, status_line: text,
   message: { type: ['string', 'null'], description: 'The message it pre-writes from the business’s own records. Review it, then send it with send_message in conversation_id’s conversation; nothing is sent until then.' } },
   required: ['id', 'status_line', 'title', 'detail', 'icon', 'path', 'product_id', 'location_id', 'conversation_id', 'message'] }
 const assignee = {
-  assigned_member_id: { type: ['string', 'null'], description: 'A Better Auth member id from list_tasks assignees; null to unassign.' },
+  assigned_member_id: { type: ['string', 'null'], description: 'A Better Auth member id from list_tasks assignees. null unassigns only a task someone added; a job (a clean, a home to get ready, a follow-up, a prep) always has a member.' },
 }
 
 export const TASK_TOOLS: McpToolDefinition[] = [

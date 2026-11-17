@@ -1,6 +1,7 @@
 import type { GuestStay, StayHome } from '~/server/domain/stays'
 import { isRecord } from '~/utils/api-clients'
 import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayCheckInMethod, type StayCheckoutTask } from './stay-listing'
+import { isPublicProvider } from './member-scheduling'
 
 /** The private fields the listing editor reads from the canonical home response. */
 export type StayArrivalGuide = Pick<StayHome, 'product_id' | 'check_in_method' | 'check_in_instructions' | 'wifi_network' | 'wifi_password' | 'directions' | 'house_manual' | 'checkout_instructions'>
@@ -45,7 +46,9 @@ export function isGuestStay(value: unknown): value is GuestStay {
   if (value.stay.guest_image_url !== null && typeof value.stay.guest_image_url !== 'string') return false
   const home = value.home
   return typeof home.name === 'string' && (home.location === null || isRecord(home.location))
+    && Array.isArray(home.photo_urls) && home.photo_urls.every(url => typeof url === 'string')
     && (home.arrival_guide === null || isStayArrivalGuide(home.arrival_guide))
     && [home.house_rules, home.safety].every(lines => Array.isArray(lines) && lines.every(line => typeof line === 'string'))
+    && (home.host === null || isPublicProvider(home.host)) && Array.isArray(home.co_hosts) && home.co_hosts.every(isPublicProvider)
     && 'cancellation' in value && typeof value.payment_processing === 'boolean'
 }

@@ -10,7 +10,7 @@
       :cancelled="guestStay.stay.status === 'cancelled'"
       :item-title="guestStay.home.name"
       :item-subtitle="guestStay.home.organization_name"
-      :image-url="guestStay.home.image_url"
+      :image-url="guestStay.home.photo_urls[0] ?? null"
       :receipt-rows="receiptRows"
       :next-steps-kicker="t('stay.cancellation_policy')"
       :next-steps="policy ? [...policy.terms] : []"

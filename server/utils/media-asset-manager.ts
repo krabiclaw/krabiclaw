@@ -416,10 +416,11 @@ type MediaPlacementRow = MediaAsset & {
 export function mediaPlacementsQuery(input: {
   /** The organization, or a SQL term for it a batch statement reads (BATCH_VIEWER.organization). */
   organizationId: string | { sql: string }
-  ownerType: MediaPlacementOwnerType
+  ownerType: MediaPlacementOwnerType | { sql: string }
   owners: string[] | { sql: string; params?: unknown[] }
   slot?: string
   includePendingSocialCard?: boolean
+  includeOrganizationFallback?: boolean
 }): BatchQuery {
   const owners = Array.isArray(input.owners) ? { sql: 'SELECT value FROM json_each(?)', params: [d1JsonStringSet([...new Set(input.owners)].filter(Boolean))] } : input.owners
   return {
@@ -428,13 +429,14 @@ export function mediaPlacementsQuery(input: {
            ma.*
       FROM media_placements mp
       JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id
-     WHERE mp.organization_id = ${typeof input.organizationId === 'string' ? '?' : input.organizationId.sql} AND mp.owner_type = ?
-       AND mp.owner_id IN (${owners.sql})
+     WHERE mp.organization_id = ${typeof input.organizationId === 'string' ? '?' : input.organizationId.sql}
+       AND ((mp.owner_type = ${typeof input.ownerType === 'string' ? '?' : input.ownerType.sql} AND mp.owner_id IN (${owners.sql}))
+         ${input.includeOrganizationFallback ? "OR (mp.owner_type = 'organization' AND mp.owner_id = mp.organization_id AND mp.slot = 'social_share')" : ''})
        ${input.slot ? 'AND mp.slot = ?' : ''}
        AND (mp.status = 'active' ${input.includePendingSocialCard ? "OR (mp.slot = 'social_card' AND mp.status = 'pending')" : ''}) AND ma.status = 'active'
      ORDER BY mp.owner_id, mp.slot, mp.sort_order
   `,
-    params: [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.ownerType, ...(owners.params ?? []), ...(input.slot ? [input.slot] : [])],
+    params: [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), ...(typeof input.ownerType === 'string' ? [input.ownerType] : []), ...(owners.params ?? []), ...(input.slot ? [input.slot] : [])],
   }
 }
 

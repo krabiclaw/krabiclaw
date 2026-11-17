@@ -1,5 +1,5 @@
 
-export const LODGING_PAGE_SUMMARY = "Manage furnished rentals, direct bookings and turnovers. Eligible Airbnb homes connect through Channex, and linked Vrbo calendars exchange occupied dates."
+export const LODGING_PAGE_SUMMARY = "Manage furnished rentals, direct bookings and turnovers. Eligible connected homes sync reservations and availability through Channex."
 
 export type PlatformKnowledgeResultType =
   | 'doc'

@@ -119,7 +119,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'get_calendar',
-      description: "Read the business’s bookings (table reservations, classes and consultations), guest arrivals and departures, published posts and unavailable dates when the user wants to review its calendar. Dates are inclusive local calendar days, with at most 62 days per call. Use kinds to filter the agenda.",
+      description: "Read the business’s bookings (table reservations, classes and consultations), guest arrivals and departures, published posts and unavailable dates when the user wants to review its calendar. Dates are inclusive local calendar days. Use kinds to filter the agenda.",
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
@@ -268,7 +268,6 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
       const days: string[] = [];
       for (let day = from; day <= to; day = addLocalDays(day, 1)) {
         days.push(day);
-        if (days.length > 62) throw new Error("get_calendar covers at most 62 days per call");
       }
       const requested = Array.isArray(args.kinds)
         ? args.kinds.filter((kind): kind is AgendaKind => AGENDA_KINDS.includes(kind as AgendaKind))

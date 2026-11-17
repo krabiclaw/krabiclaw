@@ -31,7 +31,7 @@ All calls are in `server/utils/google-ads.ts`, against `v25`.
 | `googleAds:search` on `ad_group`, `ad_group_criterion`, `ad_group_ad` | `get_google_ads_campaign` detail |
 | `googleAds:search` on `search_term_view`, `keyword_view`, `landing_page_view`, `geographic_view`, then `geo_target_constant` for country names | `query_google_ads_report` (`search_terms`, `keywords`, `landing_pages`, `geography`) for chosen days |
 | `googleAds:mutate` | `create_google_ads_search_campaign`, `update_google_ads_campaign` (status, budget) — Business plan only (`google_ads_management`); every read above is free with the connection |
-| `googleAds:search` on `customer` metrics for one day | `marketing:ad-spend-daily`: a managed account's finished day, billed at 10% |
+| `googleAds:search` on `customer` metrics for one day | The business hub's managed ad-spend wake reads an eligible account-local reporting day for the Business plan's 10% fee |
 
 Reads are live and never stored. The only persisted Google Ads figures are the
 daily `ad_spend` usage events for businesses with managed ads on.

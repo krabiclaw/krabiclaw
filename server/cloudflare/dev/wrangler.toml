@@ -6,9 +6,22 @@ main = "guest-inbox-hub.worker.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat_v2", "web_socket_auto_reply_to_close"]
 
+[define]
+"import.meta.dev" = "true"
+
 [[durable_objects.bindings]]
 name = "GUEST_INBOX_HUBS"
 class_name = "GuestInboxHubObject"
+
+[[queues.producers]]
+binding = "EVENTS"
+queue = "krabiclaw-events-local"
+
+[[queues.consumers]]
+queue = "krabiclaw-events-local"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
 
 [[migrations]]
 tag = "v1_guest_inbox_hub"

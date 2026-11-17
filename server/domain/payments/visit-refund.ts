@@ -9,10 +9,14 @@ export const visitRefundKey=(action:VisitRefundAction,bookingId:string)=>`${acti
 export const guestVisitRefundKey=(bookingId:string)=>`guest-cancelled-booking:${bookingId}`
 const authorizationActionFor=(action:VisitRefundAction)=>action==='reject'?'reject_booking':'cancel_booking'
 
+export function visitRefundPaymentQuery(organizationId: string, bookingId: string): BatchQuery {
+ return {query:"SELECT * FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND captured_amount>refunded_amount",params:[organizationId,bookingId]}
+}
+
 /** Extends the canonical visit operation's batch, never a second booking writer. */
 /** `committed` is the caller's own write in the same batch: the refund is queued only where it took effect. */
-export async function visitRefundQueries(db:DbClient,input:{action:VisitRefundAction;organizationId:string;actorUserId:string;bookingId:string;authorizationId?:string;financialWritesAllowed?:boolean;note?:string;committed:BatchQuery;now:string}):Promise<{queries:BatchQuery[];guard:BatchQuery|null}> {
- const payment=await queryFirst<Payment>(db,"SELECT * FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND captured_amount>refunded_amount",[input.organizationId,input.bookingId])
+export async function visitRefundQueries(db:DbClient,input:{action:VisitRefundAction;organizationId:string;actorUserId:string;bookingId:string;authorizationId?:string;financialWritesAllowed?:boolean;note?:string;committed:BatchQuery;now:string;payment:Payment|null;actorRole:()=>Promise<string|null>}):Promise<{queries:BatchQuery[];guard:BatchQuery|null}> {
+ const {payment}=input
  if(!payment)return {queries:[],guard:null}
  if(input.financialWritesAllowed===false){
   const destination=await queryFirst<{slug:string}>(db,'SELECT o.slug FROM organization o JOIN bookings b ON b.organization_id=o.id WHERE o.id=? AND b.id=?',[input.organizationId,input.bookingId])
@@ -20,9 +24,9 @@ export async function visitRefundQueries(db:DbClient,input:{action:VisitRefundAc
   const url=`/dashboard/${encodeURIComponent(destination.slug)}/bookings/${encodeURIComponent(input.bookingId)}`
   throw new HTTPError({statusCode:409,statusMessage:`This paid booking requires a refund before ${input.action==='reject'?'rejection':'cancellation'} can complete. Open its dashboard details to review and approve the financial action. The booking has not changed.`,data:{code:'financial_action_required',dashboard_url:url}})
  }
- const member=await queryFirst<{role:string}>(db,'SELECT role FROM member WHERE organizationId=? AND userId=?',[input.organizationId,input.actorUserId])
- if(!member)throw new HTTPError({statusCode:403,statusMessage:'Financial organization membership required'})
- const principal={organizationId:input.organizationId,userId:input.actorUserId,role:member.role}
+ const role=await input.actorRole()
+ if(!role)throw new HTTPError({statusCode:403,statusMessage:'Financial organization membership required'})
+ const principal={organizationId:input.organizationId,userId:input.actorUserId,role}
  await authorizePayments(principal,'refund')
  const authorizationAction=authorizationActionFor(input.action)
  const approval=input.authorizationId?await queryFirst(db,"SELECT id FROM payment_authorizations WHERE id=? AND organization_id=? AND user_id=? AND payment_id=? AND action=? AND amount IS NULL AND approved_at IS NOT NULL AND consumed_at IS NULL AND expires_at>?",[input.authorizationId,input.organizationId,input.actorUserId,payment.id,authorizationAction,input.now]):null

@@ -31,7 +31,7 @@ interface UploadResolvedMediaInputBase {
 
 type UploadResolvedMediaActor =
   | { source: 'generated'; userId: string | null }
-  | { source: 'uploaded'; userId: string }
+  | { source: 'uploaded'; userId: string | null }
   // Media a provider sync imports has no person behind the request.
   | { source: 'external'; userId: string | null }
 

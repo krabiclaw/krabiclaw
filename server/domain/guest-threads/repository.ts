@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { sessionPrepTaskQueries } from '~/server/domain/tasks'
+import { jobAssigneeSql, sessionPrepTaskQueries } from '~/server/domain/tasks'
 import { BOOKING_ENDS_SQL, BOOKING_RECORDS_SQL, bookingDay, parseGuestRequest, stayRequestPayBySql, stayRequestRespondBySql } from '~/server/domain/requests'
 import {
   MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SUPPORT_CONVERSATION_SQL,
@@ -362,25 +362,25 @@ export async function unreadBadge(db: DbClient, userId: string): Promise<number>
 /** Which of these conversations the viewer has unread, by the one statement. */
 export { listUnreadIds }
 
-// The follow-up belongs to the guest's booking and moves with it.
+// The follow-up belongs to the guest's booking and moves with it; it is its host's, else the owner's.
 function bookingFollowUpQueries(conversationId: string, now: string): BatchQuery[] {
   const dueAt = "strftime('%Y-%m-%dT%H:%M:%fZ', br.ends_at, '+1 day')"
   return [{
     query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = ?
-      FROM ${BOOKING_RECORDS_SQL} br WHERE br.conversation_id = ? AND br.unit = 'slot' AND (br.status <> 'confirmed' OR br.assigned_member_id IS NULL) AND tasks.status = 'open'
-        AND tasks.subject_type = 'booking' AND tasks.subject_id = br.id AND tasks.kind = 'consultation_follow_up'`,
+      FROM ${BOOKING_RECORDS_SQL} br WHERE br.conversation_id = ? AND br.unit = 'slot' AND br.status <> 'confirmed' AND tasks.status = 'open'
+        AND tasks.subject_type = 'booking' AND tasks.subject_id = br.id AND tasks.kind = 'consultation_follow_up' RETURNING id AS changed_task_id`,
     params: [now, now, conversationId],
   }, {
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, starts_at, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT ?, br.organization_id, 'consultation_follow_up', 'booking', br.id, br.product_id, br.location_id, br.assigned_member_id, ${dueAt}, ${dueAt}, br.timezone, 'open', 'consultation_follow_up:' || br.id, 1, ?, ?
+      SELECT ?, br.organization_id, 'consultation_follow_up', 'booking', br.id, br.product_id, br.location_id, ${jobAssigneeSql('br.organization_id', 'br.assigned_member_id')}, ${dueAt}, ${dueAt}, br.timezone, 'open', 'consultation_follow_up:' || br.id, 1, ?, ?
         FROM ${BOOKING_RECORDS_SQL} br
-       WHERE br.conversation_id = ? AND br.unit = 'slot' AND br.status = 'confirmed' AND br.assigned_member_id IS NOT NULL AND ${dueAt} > ?
+       WHERE br.conversation_id = ? AND br.unit = 'slot' AND br.status = 'confirmed' AND ${dueAt} > ?
       ON CONFLICT (dedupe_key) DO UPDATE SET status = CASE WHEN tasks.status = 'cancelled' THEN 'open' ELSE tasks.status END, closed_at = CASE WHEN tasks.status = 'cancelled' THEN NULL ELSE tasks.closed_at END,
         product_id = excluded.product_id, location_id = excluded.location_id, timezone = excluded.timezone,
         starts_at = excluded.starts_at, due_at = excluded.due_at, assigned_member_id = excluded.assigned_member_id, version = tasks.version + 1, updated_at = excluded.updated_at
         WHERE tasks.status = 'cancelled' OR (tasks.status = 'open' AND (tasks.starts_at IS NOT excluded.starts_at
           OR tasks.assigned_member_id IS NOT excluded.assigned_member_id OR tasks.product_id IS NOT excluded.product_id
-          OR tasks.location_id IS NOT excluded.location_id OR tasks.timezone IS NOT excluded.timezone))`,
+          OR tasks.location_id IS NOT excluded.location_id OR tasks.timezone IS NOT excluded.timezone)) RETURNING id AS changed_task_id`,
     params: [crypto.randomUUID(), now, now, conversationId, now],
   }]
 }
@@ -453,8 +453,12 @@ export function conversationTaskQueries(conversationId: string, now: string, pre
   }]
 }
 
-/** KrabiClaw's event `message` was caused by the conversation `conversation`'s guest: their account, or their channel (a channel guest's event names the guest's account too). */
-const GUEST_CAUSED_SQL = (message: string, conversation: string) => `${message}.author_user_id IS ${conversation}.user_id AND ${conversation}.user_id IS NOT NULL`
+/** Airbnb records who initiated its proposal even when the guest has no account. */
+const GUEST_CAUSED_SQL = (message: string, conversation: string) => `(CASE
+  WHEN ${message}.channel = 'airbnb' AND ${message}.payload_json ->> '$.source' = 'airbnb'
+    THEN ${message}.payload_json ->> '$.initiated_by' IS 'guest'
+  ELSE ${message}.author_user_id IS ${conversation}.user_id AND ${conversation}.user_id IS NOT NULL
+END)`
 
 /** A change proposal (message `p`) has its answer, or a newer proposal or a move replaced it. */
 const CHANGE_ANSWERED_SQL = `(EXISTS (SELECT 1 FROM messages answer WHERE answer.conversation_id = p.conversation_id AND answer.dedupe_key = 'booking-change-decision:' || p.id)

@@ -6,6 +6,7 @@ import { respondToBookingChange } from '~/server/domain/guest-threads/booking-ch
 import { readBearerToken } from '~/server/utils/reservation-cancel-token'
 import { getAuthSession } from '~/server/utils/auth'
 import { requireFinancialBrowserOrigin } from '~/server/utils/financial-browser'
+import { conversationIdParam } from '~/server/utils/conversation-request'
 
 /**
  * The guest reads and answers a change the business proposed: from the email
@@ -15,7 +16,7 @@ import { requireFinancialBrowserOrigin } from '~/server/utils/financial-browser'
 export default defineHandler(async (event) => {
   const method = event.req.method
   if (method !== 'GET' && method !== 'POST') throw new HTTPError({ statusCode: 405, message: 'Method not allowed' })
-  const threadId = getRouterParam(event, 'conversation_id')
+  const threadId = conversationIdParam(event)
   const requestId = getRouterParam(event, 'message_id')
   if (!threadId || !requestId) throw new HTTPError({ statusCode: 400, message: 'Change request link is required' })
   const env = cloudflareEnv(event)

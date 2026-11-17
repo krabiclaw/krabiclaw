@@ -11,10 +11,9 @@
     :homes="homes?.homes ?? []"
     :manage="homes?.manage ?? false"
     :home-error="homesError ? getErrorMessage(homesError, 'The places to stay could not be loaded') : ''"
-    :offering-items="offeringItems"
     :offerings-error="offeringsError"
   />
-  <CalendarPage v-else :key="productId ?? 'agenda'" :session-product="scoped?.product" :session-locations="scoped?.locations ?? []" :offering-items="offeringItems" :offerings-error="offeringsError" :can-create-stay="Boolean(homes?.manage && homes.homes.length)" :has-homes="Boolean(homes?.homes.length)" :has-places="Boolean(places?.places.length)" />
+  <CalendarPage v-else :key="productId ?? 'agenda'" :session-product="scoped?.product" :session-locations="scoped?.locations ?? []" :offerings-error="offeringsError" :can-create-stay="Boolean(homes?.manage && homes.homes.length)" :has-homes="Boolean(homes?.homes.length)" :has-places="Boolean(places?.places.length)" />
 </template>
 
 <script setup lang="ts">
@@ -55,17 +54,11 @@ const { data: places, error: placesError } = await useAsyncData(
   () => `calendar-places:${String(route.params.org_slug)}`,
   () => api('/api/dashboard/bookings/calendar', { query: { unit: 'slot', from: todayKey, to: parseDate(todayKey).add({ days: 1 }).toString() }, validate: (value): value is { places: unknown[] } => isRecord(value) && Array.isArray(value.places) }),
 )
-const { data: products, error: productsError } = await useAsyncData(
-  () => `calendar-offerings:${organizationId}:${dashboard.organization.value?.role ?? ''}`,
-  () => canReadSessions.value ? api(`/api/editor/organizations/${organizationId}/products`, { validate: (value): value is { products: Product[] } => isRecord(value) && Array.isArray(value.products) && value.products.every(isProduct) }) : Promise.resolve({ products: [] }),
-)
 const knownHome = computed(() => homes.value?.homes.find(home => home.product_id === productId.value))
 const { data: scoped, error: productError, pending } = await useAsyncData(
   () => `calendar-offering:${organizationId}:${productId.value ?? ''}:${Boolean(knownHome.value)}`,
   async () => {
     if (!productId.value || knownHome.value || !canReadSessions.value) return null
-    if (productsError.value) throw productsError.value
-    if (!products.value?.products.some(product => product.id === productId.value)) throw new Error('That offering is not available in this organization.')
     const response = await api(`/api/editor/organizations/${organizationId}/products/${productId.value}`, { validate: (value): value is { product: Product } => isRecord(value) && isProduct(value.product) })
     const product = response.product
     if (product.kind === 'stay') return { product, locations: [] as DashboardLocation[] }
@@ -82,10 +75,5 @@ const scopeError = computed(() => {
   return productError.value ? getErrorMessage(productError.value, 'The offering could not be loaded') : ''
 })
 const stayScope = computed(() => Boolean(knownHome.value || scoped.value?.product.kind === 'stay'))
-const offeringItems = computed(() => [
-  { label: 'All activity', value: AGENDA_FILTER_ALL },
-  ...(homes.value?.homes ?? []).map(home => ({ label: `Availability: ${home.internal_name}`, value: home.product_id })),
-  ...(products.value?.products ?? []).filter(product => ['experience', 'service'].includes(product.kind) && product.booking).map(product => ({ label: `Availability: ${product.name}${product.active ? '' : ' · Paused'}`, value: product.id })),
-])
-const offeringsError = computed(() => homesError.value ? getErrorMessage(homesError.value, 'The places to stay could not be loaded') : productsError.value ? getErrorMessage(productsError.value, 'The offerings could not be loaded') : placesError.value ? getErrorMessage(placesError.value, 'The places could not be loaded') : '')
+const offeringsError = computed(() => homesError.value ? getErrorMessage(homesError.value, 'The places to stay could not be loaded') : placesError.value ? getErrorMessage(placesError.value, 'The places could not be loaded') : '')
 </script>

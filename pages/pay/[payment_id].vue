@@ -37,18 +37,18 @@
             </p>
             <details v-if="stayPolicy" class="mt-2">
               <summary class="cursor-pointer font-semibold underline">{{ t('payment.full_policy') }}</summary>
-              <ul class="mt-2 list-disc space-y-1 pl-5"><li v-for="term in stayPolicy.terms" :key="term">{{ term }}</li></ul>
+              <ul class="mt-2 list-disc space-y-1 pl-5"><li v-for="term in stayPolicy.terms.slice(1)" :key="term">{{ term }}</li></ul>
               <p v-if="'detail' in stayPolicy" class="mt-2">{{ stayPolicy.detail }}</p>
             </details>
           </section>
 
-          <!-- Changing a stay first releases this purchase's hold, then restores its dates and party on the home's page. -->
+          <!-- Changing a stay cancels the old checkout, then restores its dates and party on the home's page. -->
           <div v-if="handoff.stay" class="flex items-start justify-between gap-4 border-t border-default pt-5" data-payment-stay>
             <div>
               <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.dates') }}</h3>
               <p class="mt-1 text-sm text-default">{{ stayRange }}</p>
             </div>
-            <UButton v-if="offeringPath && !handoff.approved_stay_path && handoff.state !== 'paid' && !paid && !outcome" color="neutral" variant="soft" size="sm" :label="t('payment.change')" :loading="working" :disabled="working || completing" @click="changeStay('dates')" />
+            <UButton v-if="offeringPath && !handoff.approved_stay_path && handoff.state === 'open' && !paid && !outcome" color="neutral" variant="soft" size="sm" :label="t('payment.change')" :loading="working" :disabled="working || completing" @click="changeStay('dates')" />
           </div>
           <div v-else-if="handoff.starts_at && handoff.ends_at && handoff.timezone" class="flex items-start justify-between gap-4 border-t border-default pt-5" data-payment-time>
             <div>
@@ -63,7 +63,7 @@
               <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.guests') }}</h3>
               <p class="mt-1 text-sm text-default">{{ guests }}</p>
             </div>
-            <UButton v-if="offeringPath && handoff.stay && !handoff.approved_stay_path && handoff.state !== 'paid' && !paid && !outcome" color="neutral" variant="soft" size="sm" :label="t('payment.change')" :loading="working" :disabled="working || completing" @click="changeStay('guests')" />
+            <UButton v-if="offeringPath && handoff.stay && !handoff.approved_stay_path && handoff.state === 'open' && !paid && !outcome" color="neutral" variant="soft" size="sm" :label="t('payment.change')" :loading="working" :disabled="working || completing" @click="changeStay('guests')" />
             <UButton v-else-if="offeringPath && !handoff.stay" :to="offeringPath" color="neutral" variant="soft" size="sm" :label="t('payment.change')" />
           </div>
 
@@ -97,25 +97,24 @@
         <div class="lg:order-1 min-w-0 space-y-6">
           <p v-if="completing" class="text-sm text-muted">{{ t('payment.verifying') }}</p>
           <UAlert v-if="verificationUrl" color="info" :title="t('payment.bank_verification')" :description="t('payment.bank_verification_help')" :actions="[{ label: t('payment.bank_verification_action'), to: verificationUrl, target: '_blank', color: 'neutral', variant: 'outline' }]" data-bank-verification />
-          <UAlert v-else-if="outcome === 'processing' || handoff.state === 'processing'" color="info" :title="t('payment.processing')" :description="t('payment.processing_help')" />
-          <UAlert v-else-if="outcome === 'refunded'" color="warning" :title="t('payment.refunded')" :description="t('payment.refunded_help')" />
-          <UAlert v-else-if="outcome === 'expired'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
-          <UAlert v-else-if="!completing && (paid || handoff.state === 'paid')" color="success" :title="t('payment.already_paid')" />
-          <UAlert v-else-if="handoff.state !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
+          <UAlert
+            v-else-if="checkoutState === 'taken'"
+            color="warning"
+            :title="t('payment.taken')"
+            :description="t('payment.taken_help')"
+            :actions="[{ label: t('payment.choose_again'), color: 'neutral', variant: 'outline', onClick: chooseAgain }]"
+          />
+          <UAlert
+            v-else-if="checkoutState === 'processing'"
+            color="info"
+            :title="t('payment.processing')"
+            :description="t('payment.processing_help')"
+            :actions="[{ label: t('payment.check_status'), color: 'neutral', variant: 'outline', loading: completing, onClick: complete }]"
+          />
+          <UAlert v-else-if="checkoutState === 'expired'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
+          <UAlert v-else-if="!completing && (paid || checkoutState === 'paid')" color="success" :title="t('payment.already_paid')" />
+          <UAlert v-else-if="checkoutState !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
           <template v-else>
-            <!-- Airbnb's own choice of when to pay, above the methods: paying later is Klarna's (or Affirm's, Afterpay's) method, and its terms are theirs. -->
-            <section v-if="laterTypes.length && nowTypes.length" class="space-y-4" data-payment-when>
-              <h2 class="text-lg font-semibold text-highlighted">{{ t('payment.when') }}</h2>
-              <div class="divide-y divide-default rounded-xl border border-default" role="radiogroup" :aria-label="t('payment.when')">
-                <label v-for="option in (['now', 'later'] as const)" :key="option" class="flex cursor-pointer items-start justify-between gap-4 p-4">
-                  <span class="min-w-0">
-                    <span class="block text-sm font-semibold text-highlighted">{{ option === 'now' ? t('payment.pay_now', { amount: paymentMoney(handoff.subtotal, handoff.currency) }) : t('payment.pay_later') }}</span>
-                    <span v-if="option === 'later'" :ref="element => { laterMessage = element as HTMLElement | null }" class="mt-1 block" />
-                  </span>
-                  <input v-model="when" type="radio" name="payment-when" :value="option" class="mt-1 size-5 shrink-0 accent-(--ui-text-highlighted)" :disabled="working">
-                </label>
-              </div>
-            </section>
             <!-- No frame around Stripe's form: its fields are the only boxes, as on Airbnb's page. -->
             <section class="space-y-4">
               <h2 class="text-lg font-semibold text-highlighted">{{ t('payment.pay_with') }}</h2>
@@ -155,7 +154,7 @@
 
 <script setup lang="ts">
 import { useMounted } from '@vueuse/core'
-import { loadStripe, type Stripe, type StripeElements, type StripePaymentElement, type StripePaymentMethodMessagingElementOptions } from '@stripe/stripe-js'
+import { loadStripe, type Stripe, type StripeElements, type StripePaymentElement } from '@stripe/stripe-js'
 import { presentationForProduct } from '~/utils/product-presentation'
 import type { ProductKind } from '~/shared/product-details'
 import { paymentMoney } from '~/shared/payment-display'
@@ -180,11 +179,11 @@ const claim = computed(() => typeof route.query.claim === 'string' ? route.query
 type Handoff = Awaited<ReturnType<typeof paymentHandoff>>
 type Review = Awaited<ReturnType<typeof reviewPayment>>
 type Confirmation = Awaited<ReturnType<typeof confirmPayment>>
-const isHandoff = (value: unknown): value is Handoff => isRecord(value) && value.payment_id === paymentId && typeof value.title === 'string' && Number.isSafeInteger(value.subtotal) && typeof value.currency === 'string' && typeof value.stripe_account_id === 'string' && typeof value.publishable_key === 'string' && Array.isArray(value.payment_method_types) && value.payment_method_types.every(type => typeof type === 'string') && ['open', 'paid', 'failed', 'expired', 'processing', 'verifying'].includes(String(value.state))
+const isHandoff = (value: unknown): value is Handoff => isRecord(value) && value.payment_id === paymentId && typeof value.title === 'string' && Number.isSafeInteger(value.subtotal) && typeof value.currency === 'string' && typeof value.stripe_account_id === 'string' && typeof value.publishable_key === 'string' && Array.isArray(value.payment_method_types) && value.payment_method_types.every(type => typeof type === 'string') && ['open', 'paid', 'failed', 'expired', 'processing', 'verifying', 'taken'].includes(String(value.state))
   && (value.billing_details === null || (isRecord(value.billing_details) && typeof value.billing_details.name === 'string' && typeof value.billing_details.email === 'string' && (value.billing_details.phone === undefined || typeof value.billing_details.phone === 'string')))
 const isReview = (value: unknown): value is Review => isRecord(value) && typeof value.payment_method_id === 'string' && [value.subtotal, value.tax, value.tax_included, value.surcharge].every(Number.isSafeInteger) && value.total === (value.subtotal as number) + (value.tax as number) + (value.surcharge as number) && isRecord(value.method)
-const isConfirmation = (value: unknown): value is Confirmation => isRecord(value) && typeof value.status === 'string' && typeof value.requires_action === 'boolean'
-const isReturn = (value: unknown): value is PaymentReturn => isRecord(value) && (value.state === 'processing' || value.state === 'refunded' || value.state === 'expired' || (value.state === 'paid' && (
+const isConfirmation = (value: unknown): value is Confirmation => isRecord(value) && typeof value.status === 'string' && typeof value.requires_action === 'boolean' && typeof value.taken === 'boolean'
+const isReturn = (value: unknown): value is PaymentReturn => isRecord(value) && (value.state === 'processing' || value.state === 'taken' || value.state === 'expired' || (value.state === 'paid' && (
   (value.kind === 'stay' && typeof value.activity_id === 'string' && typeof value.receipt_token === 'string')
   || (value.kind === 'booking' && typeof value.conversation_id === 'string' && typeof value.cancellation_token === 'string'))))
 
@@ -201,9 +200,11 @@ const actionError = ref('')
 const review = ref<Review | null>(null)
 const completing = ref(false)
 const paid = ref(false)
-const outcome = ref<'processing' | 'refunded' | 'expired' | null>(null)
+const outcome = ref<'processing' | 'taken' | 'expired' | null>(null)
+const checkoutState = computed(() => outcome.value ?? handoff.value?.state)
 const confirmedVerificationUrl = ref<string | null>(null)
-const verificationUrl = computed(() => confirmedVerificationUrl.value ?? handoff.value?.bank_verification_url ?? null)
+const verificationUrl = computed(() => checkoutState.value === 'expired' || checkoutState.value === 'taken'
+  ? null : confirmedVerificationUrl.value ?? handoff.value?.bank_verification_url ?? null)
 let stripe: Stripe | null = null
 let mounting = false
 let elements: StripeElements | null = null
@@ -238,7 +239,7 @@ const stayPolicy = computed(() => {
 })
 const policySummary = computed(() => {
   const value = handoff.value
-  if (stayPolicy.value) return stayPolicy.value.summary
+  if (stayPolicy.value) return stayPolicy.value.terms[0]
   if (!value?.starts_at || !value.timezone) return ''
   return value.free_cancellation_until
     ? t('payment.free_cancellation_until', { time: formatTimestamp(value.free_cancellation_until, locale.value, value.timezone, { dateStyle: 'medium', timeStyle: 'short' }) })
@@ -248,20 +249,14 @@ const policySummary = computed(() => {
 const offeringPath = computed(() => {
   const value = handoff.value
   // A table is reserved from the reservations page, not a page of its own.
-  if (!value?.product_slug || !value.kind || value.kind === 'table') return ''
+  if (!value?.product_slug || !value.kind) return ''
+  if (value.kind === 'table') return localePath('/reservations')
   // Only an experience's and a stay's page is the site's; any other offering's is its location's.
   if (value.kind !== 'experience' && value.kind !== 'stay' && !value.location_slug) return ''
   return localePath(presentationForProduct({ kind: value.kind as ProductKind }).productPath(value.location_slug ?? '', value.product_slug))
 })
 const termsPath = computed(() => policySummary.value ? '#booking-policy' : '')
 
-// Airbnb's "Choose when to pay": now with any method, or later with the method that pays in installments.
-const LATER_TYPES = ['klarna', 'affirm', 'afterpay_clearpay']
-const laterTypes = computed(() => handoff.value?.payment_method_types.filter(type => LATER_TYPES.includes(type)) ?? [])
-const nowTypes = computed(() => handoff.value?.payment_method_types.filter(type => !LATER_TYPES.includes(type)) ?? [])
-const when = ref<'now' | 'later'>('now')
-const shownTypes = () => !laterTypes.value.length || !nowTypes.value.length ? handoff.value!.payment_method_types : when.value === 'now' ? nowTypes.value : laterTypes.value
-const laterMessage = ref<HTMLElement | null>(null)
 /** How the total adds up, the way Airbnb's receipt reads: "$120.00 × 2 nights", "$95.00 × 1 guest". */
 const priceLines = computed(() => {
   const value = handoff.value
@@ -288,7 +283,7 @@ watch([handoff, mount], async ([value, container]) => {
     if (!stripe) throw new Error('Stripe could not be loaded')
     elements = stripe.elements({
       mode: 'payment', amount: value.subtotal, currency: value.currency.toLowerCase(),
-      paymentMethodTypes: shownTypes(),
+      paymentMethodTypes: value.payment_method_types,
       // The method is created here and attached by the server, which prices it before anything is confirmed.
       paymentMethodCreation: 'manual',
       ...(value.customer_session_client_secret ? { customerSessionClientSecret: value.customer_session_client_secret } : {}),
@@ -305,10 +300,6 @@ watch([handoff, mount], async ([value, container]) => {
     paymentElement.on('ready', () => { ready.value = true })
     paymentElement.on('change', () => { if (review.value) review.value = null })
     paymentElement.mount(container)
-    // Klarna's own words for what paying later costs, priced on this total.
-    if (laterMessage.value && laterTypes.value.length) {
-      elements.create('paymentMethodMessaging', { amount: value.subtotal, currency: value.currency as StripePaymentMethodMessagingElementOptions['currency'], paymentMethodTypes: laterTypes.value as StripePaymentMethodMessagingElementOptions['paymentMethodTypes'] }).mount(laterMessage.value)
-    }
   } catch (cause) {
     actionError.value = getErrorMessage(cause, t('payment.unavailable'))
   }
@@ -348,22 +339,6 @@ async function reviewMethod() {
 }
 
 // The button waits for Stripe to show the chosen list, so nothing is submitted from the one before.
-watch(when, async () => {
-  review.value = null
-  if (!elements) return
-  // The radios are disabled while working, so one switch finishes before the next.
-  working.value = true
-  ready.value = false
-  try {
-    await elements.update({ paymentMethodTypes: shownTypes(), amount: handoff.value!.subtotal })
-    ready.value = true
-  } catch (cause) {
-    actionError.value = getErrorMessage(cause, t('payment.unavailable'))
-  } finally {
-    working.value = false
-  }
-})
-
 function changeMethod() {
   review.value = null
   if (elements && handoff.value) elements.update({ amount: handoff.value.subtotal })
@@ -385,8 +360,7 @@ async function pay() {
       if (next.error) throw new Error(next.error.message ?? t('payment.declined'))
       if (next.paymentIntent?.status !== 'succeeded' && next.paymentIntent?.status !== 'processing' && next.paymentIntent?.status !== 'requires_capture') throw new Error(t('payment.declined'))
     } else if (confirmed.status === 'canceled') {
-      // What it paid for was taken while the buyer authorized; the authorization was cancelled and nothing was charged.
-      outcome.value = 'expired'
+      outcome.value = confirmed.taken ? 'taken' : 'expired'
       review.value = null
       return
     } else if (confirmed.status !== 'succeeded' && confirmed.status !== 'processing') {
@@ -406,8 +380,7 @@ async function pay() {
 
 /**
  * The business's site confirms what was paid for, as it does an unpaid
- * booking: its own receipt page. A payment still clearing, or one refunded
- * because what it paid for was taken first, is said so here.
+ * booking: its own receipt page.
  */
 async function complete() {
   if (completing.value) return
@@ -434,13 +407,17 @@ async function leave() {
   }
 }
 
+function chooseAgain() {
+  return handoff.value?.stay && !handoff.value.approved_stay_path && offeringPath.value ? changeStay('dates') : leave()
+}
+
 async function changeStay(edit: 'dates' | 'guests') {
   const value = handoff.value
   if (working.value || completing.value || !value?.stay || !offeringPath.value) return
   working.value = true
   actionError.value = ''
   try {
-    if (value.state === 'open') {
+    if (value.state === 'open' && outcome.value !== 'taken') {
       await publicApiMutation<{ status: 'canceled' }>(`/api/public/payments/${encodeURIComponent(paymentId)}/cancel`, {
         method: 'POST', body: { claim: claim.value },
         validate: (result): result is { status: 'canceled' } => isRecord(result) && result.status === 'canceled',

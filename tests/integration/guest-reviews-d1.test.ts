@@ -7,15 +7,15 @@ import * as schema from '../../server/db/schema.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { getGuestRequest, requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { nameConversationBooking } from './support/booking-state.ts'
-import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
-import { getReviewBookingContext, getReviewRequestByToken } from '../../server/utils/review-requests.ts'
-import { sendReviewRequestForBooking } from '../../server/utils/review-request-delivery.ts'
+import { getReviewBookingContext, getReviewRequestByToken, REVIEW_PUBLICATION_PENDING } from '../../server/utils/review-requests.ts'
+import { appendMessage } from '../../server/domain/conversations.ts'
+import { sendDueReviewInvitations, sendReviewRequestForBooking } from '../../server/utils/review-request-delivery.ts'
 import { readInsightsPage } from '../../server/domain/insights.ts'
 import { listOrganizationReviews, setReviewStatus } from '../../server/utils/organization-reviews.ts'
-import reviewTask from '../../server/tasks/review-request-automation.ts'
 import validateRoute from '../../server/api/public/review-requests/validate.get.ts'
 import submitRoute from '../../server/api/public/review-requests/submit.post.ts'
 import { localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
+import { captureEvents } from './support/events.ts'
 
 const HOUR = 3_600_000
 const at = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString()
@@ -51,7 +51,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: captureEvents().binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof',
       EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
@@ -142,18 +142,12 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     const stayContext = await getReviewBookingContext(db, 'cottage-record')
     assert.equal(stayContext?.completed_at, new Date(`${checkout}T04:00:00.000Z`).toISOString(), 'a stay ends at its home\'s checkout time in the home\'s zone')
 
-    // No-show on a visit whose invitation has not gone out yet: it is never sent.
-    const absent = await executeGuestThreadOperation(db, { threadId: T.absent!, organizationId: 'org', action: 'no_show', actorUserId: 'owner', idempotencyKey: 'absent-no-show', env: env as never })
-    assert.equal(absent.ok, true)
-    assert.ok(await db.prepare("SELECT no_show_at FROM bookings WHERE id = 'absent-record'").first('no_show_at'))
-    assert.equal((await db.prepare("SELECT status FROM bookings WHERE id = 'absent-record'").first('status')), 'confirmed', 'a no-show leaves the visit as it was')
-    // The visit that has not begun cannot be a no-show yet... and a cancelled one is not confirmed.
-    for (const id of ['cancelled']) {
-      const refused = await executeGuestThreadOperation(db, { threadId: T[id]!, organizationId: 'org', action: 'no_show', actorUserId: 'owner', idempotencyKey: `${id}-no-show`, env: env as never })
-      assert.equal(refused.ok, false)
-    }
-
-    const run = await reviewTask.run!({ context: { cloudflare: { env } }, payload: {}, name: 'review-request-automation' } as never) as { result: { sent: number } }
+    // A table no-show from before restaurant reservations joined bookings.
+    await appendMessage(db, { conversationId: T.absent!, authorKind: 'member', authorUserId: 'owner',
+      eventName: 'reservation.no_show', body: 'Marked as a no-show', occurredAt: at(-HOUR) })
+    const sendDue = (bindings = env) => sendDueReviewInvitations(bindings, 'org', Date.now())
+    const run = await sendDue()
+    assert.equal(run.next, Date.parse((await db.prepare("SELECT ends_at FROM bookings WHERE id = 'early-record'").first<string>('ends_at'))!) + 24 * HOUR, 'the early visit sets the next deadline')
     // Read back through the bookings each invitation names.
     const invited = (await db.prepare(`SELECT CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END AS booking_type, (SELECT c.id FROM conversations c WHERE c.booking_id = b.id AND c.kind = 'booking') AS booking_id, rr.first_sent_at IS NOT NULL AS sent
       FROM review_requests rr JOIN bookings b ON b.id = rr.booking_id`).all<{ booking_type: string; booking_id: string; sent: number }>()).results
@@ -164,7 +158,6 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       { booking_type: 'booking', booking_id: 'dinner', sent: 1 },
       { booking_type: 'booking', booking_id: 'lesson', sent: 1 },
     ], 'every ended, confirmed visit inside the window is invited; the early, cancelled, old and no-show ones are not')
-    assert.equal(run.result.sent, 4)
     const reviewHub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName('org'))
     const successPublications = await (await reviewHub.fetch('https://hub/success-publications')).json() as Array<{ threadId: string; firstSentAt: string | null }>
     assert.deepEqual(successPublications.map(publication => name(publication.threadId)).sort(), ['consultation', 'cottage', 'dinner', 'lesson'])
@@ -183,7 +176,8 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     const dinnerToken = tokenOf(email.message.html)
 
     // A second run sends nothing more.
-    assert.equal((await reviewTask.run!({ context: { cloudflare: { env } }, payload: {}, name: 'review-request-automation' } as never) as { result: { sent: number } }).result.sent, 0)
+    await sendDue()
+    assert.equal(await db.prepare('SELECT SUM(send_count) AS sent FROM review_requests').first('sent'), 4)
 
     const tokenFor = async (key: string) => {
       const row = await db.prepare(`SELECT d.email_json FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id WHERE e.conversation_id = ? AND e.event_name = 'review.requested'`).bind(T[key]).first<{ email_json: string }>()
@@ -254,8 +248,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
           if (boundary === 'persistence') await db.prepare('DROP TRIGGER fail_review_completion').run()
           rejectSend = false
           const publicationsBefore = await publicationCount()
-          const resumed = await reviewTask.run!({ context: { cloudflare: { env: providerEnv } }, payload: {}, name: 'review-request-automation' } as never) as { result: { sent: number; failed: number } }
-          assert.deepEqual(resumed.result, { sent: 1, failed: 0 }, 'automation resumes the incomplete invitation')
+          await sendDue(providerEnv)
           assert.deepEqual(await db.prepare('SELECT token, token_hash, expires_at FROM review_requests WHERE id = ?').bind(incomplete.requestId).first(), retainedRequest, 'retry preserves the original link and expiry')
           assert.equal(await publicationCount(), publicationsBefore + 1, 'retry completes required visibility work')
         }
@@ -280,19 +273,27 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
           return true
         })
       assert.equal(accepted.length, acceptedBefore + 1)
-      assert.deepEqual(await db.prepare('SELECT send_count, last_error, first_sent_at IS NOT NULL AS sent FROM review_requests WHERE booking_id = ?').bind('retry-success-publication-record').first(), { send_count: 1, last_error: null, sent: 1 })
+      assert.deepEqual(await db.prepare('SELECT send_count, last_error, first_sent_at IS NOT NULL AS sent FROM review_requests WHERE booking_id = ?').bind('retry-success-publication-record').first(), { send_count: 1, last_error: REVIEW_PUBLICATION_PENDING, sent: 1 })
       assert.ok(await getReviewRequestByToken(db, tokenOf(accepted.at(-1)!.body.html)), 'the one delivered invitation retains its usable link')
-      const afterFailure = await reviewTask.run!({ context: { cloudflare: { env: providerEnv } }, payload: {}, name: 'review-request-automation' } as never) as { result: { sent: number; failed: number } }
-      assert.deepEqual(afterFailure.result, { sent: 0, failed: 0 })
+      await sendDue(providerEnv)
+      assert.deepEqual(await db.prepare('SELECT send_count, last_error FROM review_requests WHERE booking_id = ?').bind('retry-success-publication-record').first(), { send_count: 1, last_error: null })
+      const recoveredPublications = await (await hub.fetch('https://hub/success-publications')).json() as Array<{ threadId: string }>
+      assert.equal(recoveredPublications.filter(publication => publication.threadId === T['retry-success-publication']).length, 1)
       assert.equal(accepted.length, acceptedBefore + 1, 'the next automation run does not resend a committed invitation')
 
     } finally { transport.mock.restore() }
 
-    // A no-show after the invitation went out: the unused link stops working.
+    // A historic no-show still disqualifies an invitation already on record.
     const lessonToken = await tokenFor('lesson')
     assert.ok(await getReviewRequestByToken(db, lessonToken))
-    assert.equal((await executeGuestThreadOperation(db, { threadId: T.lesson!, organizationId: 'org', action: 'no_show', actorUserId: 'host', idempotencyKey: 'lesson-no-show', env: env as never })).ok, true)
+    await appendMessage(db, { conversationId: T.lesson!, authorKind: 'krabiclaw', authorUserId: 'owner',
+      eventName: 'booking.no_show', body: 'Marked as a no-show', occurredAt: at(-HOUR) })
     assert.equal(await getReviewRequestByToken(db, lessonToken), null)
+    const stayToken = await tokenFor('cottage')
+    assert.ok(await getReviewRequestByToken(db, stayToken))
+    await appendMessage(db, { conversationId: T.cottage!, authorKind: 'krabiclaw', authorUserId: 'owner',
+      eventName: 'stay.no_show', body: 'Marked as a no-show', occurredAt: at(-HOUR) })
+    assert.equal(await getReviewRequestByToken(db, stayToken), null)
 
     const app = new H3()
     app.get('/api/public/review-requests/validate', validateRoute)

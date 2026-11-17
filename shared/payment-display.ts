@@ -39,10 +39,10 @@ export function paymentOrderDisplay(value:unknown):PaymentOrderDisplay|null {
  })}
 }
 /** One catalog currency formatter for payment principal and fee projections. */
-export function paymentMoney(amount:unknown,currency:unknown):string {
+export function paymentMoney(amount:unknown,currency:unknown,locale?:string):string {
  if(typeof amount!=='number'||!Number.isSafeInteger(amount)||!isCurrencyCode(currency))throw new Error('Invalid currency-safe payment amount')
  const value=amount
- return `${value<0?'-':''}${formatMinorAmount(Math.abs(value),currency)}`
+ return `${value<0?'-':''}${formatMinorAmount(Math.abs(value),currency,locale)}`
 }
 /** What a reader is told about a payment, in the words the booking screen uses; one place for both the business and the buyer. */
 export function paymentStateLabel(payment:Pick<PaymentDisplay,'captured_amount'|'refunded_amount'>):string {

@@ -99,6 +99,51 @@ test('the migration chain applies from zero and builds every table the schema de
   }
 })
 
+test('the historical no-show migration requires the original mark in the booking conversation', () => {
+  const database = new Database(':memory:')
+  database.pragma('foreign_keys = ON')
+  try {
+    const migration = '0012_deadline_indexes'
+    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+    for (const entry of journal.entries.slice(0, journal.entries.findIndex(entry => entry.tag === migration))) {
+      database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
+    }
+    const stamped = '2026-11-01T00:00:00.000Z'
+    database.exec(`
+      INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('studio', 'Clayhouse', 'clayhouse', 'THB', 'Asia/Bangkok');
+      INSERT INTO user (id, name, email) VALUES ('host', 'Class host', 'host@example.test');
+      INSERT INTO products (id, organization_id, kind, slug, name, created_by, updated_by)
+        VALUES ('class', 'studio', 'experience', 'class', 'Wheel throwing', 'host', 'host');
+      INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by)
+        VALUES ('seat', 'studio', 'class', 'Seat', 'host', 'host');
+      INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, scheduling_mode, created_by, updated_by)
+        VALUES ('class', 'studio', 'slot', 60, 'business', 'host', 'host');
+      INSERT INTO product_sessions (id, organization_id, product_id, timezone, starts_at, ends_at, capacity, created_by, updated_by)
+        VALUES ('session', 'studio', 'class', 'Asia/Bangkok', '2026-10-31T13:00:00.000Z', '2026-10-31T14:00:00.000Z', 8, 'host', 'host');
+      INSERT INTO bookings (id, organization_id, product_id, product_variant_id, product_session_id, starts_at, ends_at, timezone, party_size, policy_json, status, no_show_at)
+        SELECT 'reservation', organization_id, product_id, 'seat', id, starts_at, ends_at, timezone, 1, '{}', 'confirmed', '${stamped}' FROM product_sessions;
+      INSERT INTO conversations (id, kind, organization_id, booking_id, payload_json, last_message_at)
+        VALUES ('visit', 'booking', 'studio', 'reservation', '{"guest":{"name":"Guest","email":null,"phone":null}}', '${stamped}');
+    `)
+    const verify = database.transaction(() => database.exec(readFileSync(`migrations/${migration}.sql`, 'utf8')))
+    assert.throws(verify, /historical_no_show_transcript_check/)
+    database.prepare(`INSERT INTO messages (id, organization_id, conversation_id, author_kind, author_user_id, sequence, event_name, dedupe_key, occurred_at)
+      VALUES ('mark', 'studio', 'visit', 'krabiclaw', 'host', 1, 'booking.no_show', 'no-show', ?)`).run('2026-11-01T00:00:01.000Z')
+    assert.throws(verify, /historical_no_show_transcript_check/)
+    database.prepare('UPDATE messages SET occurred_at = ? WHERE id = ?').run(stamped, 'mark')
+    database.prepare('UPDATE bookings SET no_show_at = NULL WHERE id = ?').run('reservation')
+    assert.throws(verify, /historical_no_show_transcript_check/)
+    database.prepare('UPDATE bookings SET no_show_at = ? WHERE id = ?').run(stamped, 'reservation')
+    verify()
+    assert.equal(database.prepare('SELECT occurred_at FROM messages WHERE id = ?').pluck().get('mark'), stamped)
+    assert.equal(database.prepare('SELECT no_show_at FROM bookings WHERE id = ?').pluck().get('reservation'), stamped)
+    assert.equal(database.prepare("SELECT count(*) FROM sqlite_schema WHERE name = '__historical_no_show_check'").pluck().get(), 0)
+    assert.deepEqual(database.pragma('foreign_key_check'), [])
+  } finally {
+    database.close()
+  }
+})
+
 test('session prep migration keeps the completed task and delivery history for both bookings', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')

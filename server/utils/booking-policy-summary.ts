@@ -31,14 +31,19 @@ export interface BookingPolicy {
 }
 
 /** The offering's terms as they stand now, at the price this booking is made at. */
-export function bookingPolicy(config: Pick<ProductBookingConfigRecord, 'advance_notice_minutes' | 'party_size_min' | 'party_size_max' | 'minimum_guest_age' | 'accessibility_contact_required' | 'online_payment_required' | 'payment_basis' | 'payment_min_party_size'>, price: Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'> | null): BookingPolicy {
+type BookingGuestTerms = Pick<ProductBookingConfigRecord, 'advance_notice_minutes' | 'party_size_min' | 'party_size_max' | 'minimum_guest_age' | 'accessibility_contact_required'>
+type BookingPaymentTerms = Pick<ProductBookingConfigRecord, 'online_payment_required' | 'payment_basis' | 'payment_min_party_size'>
+
+export function bookingPolicy(config: BookingGuestTerms, price: null): BookingPolicy
+export function bookingPolicy(config: BookingGuestTerms & BookingPaymentTerms, price: Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'> | null): BookingPolicy
+export function bookingPolicy(config: BookingGuestTerms | (BookingGuestTerms & BookingPaymentTerms), price: Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'> | null): BookingPolicy {
   return {
     advance_notice_minutes: config.advance_notice_minutes,
     party_size_min: config.party_size_min,
     party_size_max: config.party_size_max,
     minimum_guest_age: config.minimum_guest_age,
     accessibility_contact_required: config.accessibility_contact_required,
-    payment: config.online_payment_required && price && price.unit_amount > 0
+    payment: price && price.unit_amount > 0 && 'online_payment_required' in config && config.online_payment_required
       ? { basis: config.payment_basis, unit_amount: price.unit_amount, currency: price.currency, tax_behavior: price.tax_behavior, min_party_size: config.payment_min_party_size }
       : null,
     cancellation: null,

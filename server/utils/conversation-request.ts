@@ -19,7 +19,8 @@ export async function conversationRequest(event: H3Event) {
 }
 
 export function conversationIdParam(event: H3Event): string {
-  const id = getRouterParam(event, 'conversation_id')
+  // h3 hands route params over still percent-encoded; an id such as "v27-stay-conversation:<uuid>" arrives as "%3A".
+  const id = getRouterParam(event, 'conversation_id', { decode: true })
   if (!id) throw new HTTPError({ statusCode: 400, message: 'A conversation is required', data: { code: 'VALIDATION_ERROR', field: 'conversation_id' } })
   return id
 }

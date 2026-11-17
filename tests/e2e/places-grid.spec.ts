@@ -75,16 +75,11 @@ test('a restaurant blocks the same weekdays at two locations from the places gri
     // The grid scrolls inside itself; the page does not scroll sideways.
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 
-    // Search narrows by name or street; No upcoming bookings keeps the places with none in the window.
+    // Search narrows by name or street.
     await page.getByRole('textbox', { name: 'Search places' }).fill('Bedford')
     await expect(grid.locator('[data-place]')).toHaveCount(1)
     await expect(grid.locator(`[data-place="location:${williamsburg.id}"]`)).toBeVisible()
     await page.getByRole('textbox', { name: 'Search places' }).fill('')
-    await expect(grid.locator('[data-place]')).toHaveCount(calendar.places.length)
-    await page.getByRole('button', { name: 'No upcoming bookings' }).click()
-    await expect(grid.locator(`[data-place="location:${brooklyn.id}"]`)).toHaveCount(0)
-    await expect(grid.locator(`[data-place="location:${williamsburg.id}"]`)).toBeVisible()
-    await page.getByRole('button', { name: 'No upcoming bookings' }).click()
     await expect(grid.locator('[data-place]')).toHaveCount(calendar.places.length)
 
     // A first day at Brooklyn and a last at Williamsburg select both rows; the panel offers open or block and the weekdays, and no price.

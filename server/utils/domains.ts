@@ -98,7 +98,6 @@ interface CloudflareCustomHostname {
 }
 
 const CF_API_BASE = 'https://api.cloudflare.com/client/v4'
-const STUCK_AFTER_MS = 48 * 60 * 60 * 1000
 
 const reservedDomains = [
   'app', 'api', 'admin', 'dashboard', 'login', 'signup',
@@ -414,7 +413,17 @@ export async function inspectDomainResolution(env: DomainEnv, hostname: string, 
     ...aRecords.map((value) => ({ type: 'A' as const, value })),
     ...aaaaRecords.map((value) => ({ type: 'AAAA' as const, value })),
   ]
-  const pointsToSaas = domainRecordsPointToSaas(cnameRecords, aRecords, aaaaRecords, cnameTarget)
+  let pointsToSaas = domainRecordsPointToSaas(cnameRecords, aRecords, aaaaRecords, cnameTarget)
+  if (pointsToSaas === null && cnameTarget) {
+    // Apex CNAME flattening publishes the target's addresses in place of the CNAME.
+    const [targetA, targetAAAA]: [string[], string[]] = await Promise.all([
+      aRecords.length ? queryDnsJson(cnameTarget, 'A', signal) : [],
+      aaaaRecords.length ? queryDnsJson(cnameTarget, 'AAAA', signal) : [],
+    ])
+    if (aRecords.every(address => targetA.includes(address)) && aaaaRecords.every(address => targetAAAA.includes(address))) {
+      pointsToSaas = true
+    }
+  }
   return {
     hostname: normalizedHostname,
     checked_at: new Date().toISOString(),
@@ -424,11 +433,7 @@ export async function inspectDomainResolution(env: DomainEnv, hostname: string, 
   }
 }
 
-function isPendingTooLong(domain: DomainRecord, status: DomainStatus, nowMs: number): boolean {
-  if (status !== 'pending' && status !== 'verifying') return false
-  const createdAtMs = Date.parse(domain.created_at)
-  return Number.isFinite(createdAtMs) && nowMs - createdAtMs >= STUCK_AFTER_MS
-}
+const ZARAZ_SYNC_STATUS = 'Website analytics sync'
 
 async function persistCloudflareState(
   env: DomainEnv,
@@ -439,26 +444,22 @@ async function persistCloudflareState(
     actorType?: DomainActorType
     actorId?: string | null
     skipPromotion?: boolean
-    dnsInspection?: DomainResolutionInspection
-    triggeredRevalidation?: boolean
-  } = {}
+    dnsInspection: DomainResolutionInspection
+    previous?: DomainRecord
+  },
 ): Promise<DomainRecord> {
-  const before = await queryFirst<DomainRecord>(db, `SELECT * FROM organization_domains WHERE id = ?`, [domainId])
+  const before = options.previous ?? await queryFirst<DomainRecord>(db, `SELECT * FROM organization_domains WHERE id = ?`, [domainId])
   if (!before) throw new Error('Domain not found')
+  if (!hostname.id || hostname.hostname !== before.domain || (before.cloudflare_hostname_id && hostname.id !== before.cloudflare_hostname_id)) {
+    throw new Error('The Cloudflare hostname does not match this domain')
+  }
 
   const sslValidation = firstSslValidation(hostname)
   const sslValidation2 = secondSslValidation(hostname)
   const dnsTarget = env.CF_SAAS_CNAME_TARGET || null
-  const dnsStatus = options.dnsInspection?.points_to_saas
-    ? 'valid'
-    : options.dnsInspection?.resolves_elsewhere
-      ? 'invalid'
-      : hostname.status === 'active'
-        ? 'valid'
-        : (before.dns_status || 'pending')
-  const mappedStatus = mapCloudflareStatus(hostname.status, hostname.ssl?.status, dnsStatus)
+  const dnsStatus = options.dnsInspection.points_to_saas === true ? 'valid' : options.dnsInspection.resolves_elsewhere ? 'invalid' : 'pending'
+  const status = mapCloudflareStatus(hostname.status, hostname.ssl?.status, dnsStatus)
   const now = new Date().toISOString()
-  const status = isPendingTooLong(before, mappedStatus, Date.parse(now)) ? 'failed' : mappedStatus
   const activatedAt = status === 'active' ? (before.activated_at || now) : before.activated_at
   const certificateLastActiveAt = hostname.ssl?.status === 'active'
     ? now
@@ -469,6 +470,8 @@ async function persistCloudflareState(
       ? null
       : before.renewal_issue_started_at ?? null
   const errors = hostname.verification_errors?.join('; ') || null
+  const currentZarazError = before.error_message?.startsWith(ZARAZ_SYNC_STATUS) ? before.error_message : null
+  const reconcileAnalytics = currentZarazError !== null || (before.status === 'active') !== (status === 'active')
 
   const updates: BatchQuery[] = []
   if (status === 'active' && before.role === 'canonical') {
@@ -483,10 +486,10 @@ async function persistCloudflareState(
           SELECT 1
           FROM organization_domains expected
           WHERE expected.id = ? AND expected.role = 'canonical'
-            AND expected.desired_state = 'active' AND expected.status NOT IN ('disabled', 'deleted')
+            AND expected.desired_state = 'active' AND expected.status NOT IN ('disabled', 'deleted') AND expected.updated_at = ?
         )
     `,
-      params: [now, before.organization_id, domainId, domainId],
+      params: [now, before.organization_id, domainId, domainId, before.updated_at],
     })
   }
 
@@ -511,30 +514,31 @@ async function persistCloudflareState(
     dcv_delegation_value: before.validation_strategy === 'delegated_dcv' ? before.dcv_delegation_value ?? null : null,
     dns_target: dnsTarget,
     dns_status: dnsStatus,
-    dns_last_resolved_at: options.dnsInspection?.checked_at ?? before.dns_last_resolved_at ?? null,
-    dns_resolved_target: options.dnsInspection?.records.map((record) => `${record.type}:${record.value}`).join(', ') || before.dns_resolved_target || null,
+    dns_last_resolved_at: options.dnsInspection.checked_at,
+    dns_resolved_target: options.dnsInspection.records.map((record) => `${record.type}:${record.value}`).join(', ') || null,
     status,
     last_synced_at: now,
+    next_check_at: null,
     activated_at: activatedAt,
     certificate_last_active_at: certificateLastActiveAt,
     renewal_issue_started_at: renewalIssueStartedAt,
     certificate_expires_at: hostname.ssl?.expires_on == null ? null : instantDate(hostname.ssl.expires_on).toISOString(),
-    error_message: errors,
+    error_message: reconcileAnalytics ? currentZarazError ?? `${ZARAZ_SYNC_STATUS} pending` : errors,
     metadata: JSON.stringify({
       cloudflare_created_at: hostname.created_at ?? null,
       ssl_validation_value2: null,
     }),
     updated_at: now,
-  } satisfies Partial<DomainRecord>
+  } satisfies Partial<DomainRecord> & { next_check_at: null }
   const columns = Object.keys(next) as Array<keyof typeof next>
   const updateIndex = updates.length
   updates.push({
     query: `
     UPDATE organization_domains
     SET ${columns.map(column => `${column} = ?`).join(', ')}
-    WHERE id = ? AND desired_state = 'active' AND status NOT IN ('disabled', 'deleted')
+    WHERE id = ? AND desired_state = 'active' AND status NOT IN ('disabled', 'deleted') AND updated_at = ?
   `,
-    params: [...columns.map(column => next[column]), domainId],
+    params: [...columns.map(column => next[column]), domainId, before.updated_at],
   })
 
   // Both events are guarded on the update just before them: a reconciliation
@@ -572,23 +576,27 @@ async function persistCloudflareState(
 
   const after = await queryFirst<DomainRecord>(db, `SELECT * FROM organization_domains WHERE id = ?`, [domainId]) as DomainRecord
 
-  const zarazNeedsReconcile = before.status !== after.status && (before.status === 'active' || after.status === 'active')
-
   // promoteCanonicalIfReady can call setCanonicalDomain, which reads/writes
   // organization_domains rows for this site — callers still inserting other domain
   // rows for the same batch (createCustomDomainPair) must defer this until
   // after those inserts are done, so the candidate rows already exist.
   if (!options.skipPromotion && after.status === 'active') await promoteCanonicalIfReady(db, after.organization_id)
 
-  // Last, and deliberately so. Reconciliation rewrites the analytics configuration
-  // this domain change invalidates, and a failure is raised rather than swallowed —
-  // but the status transition committed in the batch above, and every step between
-  // there and here is derived from it and runs exactly once. Raising before them
-  // stranded the domain: the next reconcile reads before.status === after.status
-  // and reruns none of it, and inside createCustomDomainPair the throw reached a
-  // cleanup that deleted the hostnames just provisioned.
-  if (zarazNeedsReconcile) {
-    await (await import('~/server/utils/zaraz-analytics')).reconcileZarazAnalytics(env, db)
+  // Keep incomplete analytics work visible on the domain that caused it.
+  // Connecting a pair leaves this status for the open domain check to finish.
+  if (reconcileAnalytics && !options.skipPromotion) {
+    let error = errors
+    try {
+      await (await import('~/server/utils/zaraz-analytics')).reconcileZarazAnalytics(env, db)
+    } catch (cause) {
+      error = `${ZARAZ_SYNC_STATUS} failed: ${cause instanceof Error ? cause.message : String(cause)}`
+      throw cause
+    } finally {
+      await execute(db, `UPDATE organization_domains SET error_message = ?
+        WHERE id = ? AND desired_state = 'active' AND status = ? AND last_synced_at = ? AND error_message IS ?`,
+      [error, domainId, status, next.last_synced_at, next.error_message])
+    }
+    return { ...after, error_message: errors }
   }
 
   return after
@@ -605,6 +613,7 @@ export async function createCustomDomainPair(
     includeWww?: boolean
     actorId?: string | null
     actorType?: DomainActorType
+    resolutions: ReadonlyArray<DomainResolutionInspection>
   }
 ): Promise<DomainRecord[]> {
   const domains = domainPair(opts.domain, opts.includeWww !== false)
@@ -662,7 +671,9 @@ export async function createCustomDomainPair(
     for (const entry of entries) {
       const hostname = cloudflareByDomainId.get(entry.id)
       if (!hostname) throw new Error(`Missing Cloudflare hostname for ${entry.domain}`)
-      records.push(await persistCloudflareState(env, db, entry.id, hostname, { actorType: 'cloudflare', skipPromotion: true }))
+      const dnsInspection = opts.resolutions.find(resolution => resolution.hostname === entry.domain)
+      if (!dnsInspection) throw new Error(`Missing DNS inspection for ${entry.domain}`)
+      records.push(await persistCloudflareState(env, db, entry.id, hostname, { actorType: 'cloudflare', skipPromotion: true, dnsInspection }))
     }
 
     // Deferred from persistCloudflareState (skipPromotion: true) — must run
@@ -715,59 +726,35 @@ export async function createCustomDomainPair(
 export async function syncDomainWithCloudflare(
   env: DomainEnv,
   db: D1Database,
-  domainId: string,
-  actorType: DomainActorType = 'system',
-  actorId?: string | null,
-  signal?: AbortSignal,
-  options: { forceRevalidation?: boolean } = {}
+  domain: DomainRecord,
+  actorType: DomainActorType = 'cloudflare',
+  actorId?: string,
 ): Promise<DomainRecord> {
+  let hostname: CloudflareCustomHostname
+  let dnsInspection: DomainResolutionInspection
   try {
-    signal?.throwIfAborted()
-
-    const domain = await queryFirst<DomainRecord>(db, `
-      SELECT * FROM organization_domains
-      WHERE id = ? AND type = 'custom' AND desired_state = 'active' AND status NOT IN ('deleted', 'disabled')
-    `, [domainId])
-    if (!domain) throw new Error('Domain is unavailable')
-
-    if (!domain.cloudflare_hostname_id) {
-      const hostname = await createCloudflareHostname(env, domain.domain, signal)
-      signal?.throwIfAborted()
-      return await persistCloudflareState(env, db, domainId, hostname, { actorType, actorId })
+    dnsInspection = await inspectDomainResolution(env, domain.domain)
+    const providerId = domain.cloudflare_hostname_id
+    hostname = providerId
+      ? await getCloudflareHostname(env, providerId)
+      : await createCloudflareHostname(env, domain.domain)
+    if (!hostname.id || (providerId && hostname.id !== providerId) || hostname.hostname !== domain.domain) {
+      throw new Error('The Cloudflare hostname does not match this domain')
     }
-
-    const dnsInspection = await inspectDomainResolution(env, domain.domain, signal)
-    signal?.throwIfAborted()
-    let hostname = await getCloudflareHostname(env, domain.cloudflare_hostname_id, signal)
-    signal?.throwIfAborted()
-    const shouldPatch = (options.forceRevalidation && (hostname.status !== 'active' || hostname.ssl?.status !== 'active'))
-      || hostname.status === 'moved'
-      || domain.status === 'failed'
-      || (dnsInspection.points_to_saas === true && hostname.status !== 'active')
-    let triggeredRevalidation = false
-    if (shouldPatch) {
-      hostname = await patchCloudflareHostname(env, domain.cloudflare_hostname_id, domain.validation_strategy, signal)
-      triggeredRevalidation = true
-      signal?.throwIfAborted()
+    if (providerId && actorId && (hostname.status !== 'active' || hostname.ssl?.status !== 'active')) {
+      hostname = await patchCloudflareHostname(env, providerId, domain.validation_strategy)
     }
-    return await persistCloudflareState(env, db, domainId, hostname, {
-      actorType,
-      actorId,
-      dnsInspection,
-      triggeredRevalidation,
-    })
   } catch (error) {
-    const normalizedError = error instanceof Error ? error : new Error('Unknown error')
-    // The domain carries the reason its last check failed, where the dashboard reads it.
-    await execute(db, `UPDATE organization_domains SET error_message = ?, updated_at = ? WHERE id = ? AND desired_state = 'active' AND status NOT IN ('deleted', 'disabled')`,
-      [normalizedError.message, new Date().toISOString(), domainId])
-    if (normalizedError.name === 'AbortError') {
-      const abortError = new Error('Domain sync aborted')
-      abortError.name = 'AbortError'
-      throw abortError
-    }
-    throw normalizedError
+    const detail = error instanceof Error ? error.message : String(error)
+    const message = domain.error_message?.startsWith(ZARAZ_SYNC_STATUS)
+      ? `${ZARAZ_SYNC_STATUS} pending; domain check failed: ${detail}`
+      : detail
+    await execute(db, `UPDATE organization_domains SET error_message = ?, updated_at = ?
+      WHERE id = ? AND desired_state = 'active' AND updated_at = ?`,
+    [message, new Date().toISOString(), domain.id, domain.updated_at])
+    throw error
   }
+  return persistCloudflareState(env, db, domain.id, hostname, { actorType, actorId, dnsInspection, previous: domain })
 }
 
 export async function deleteCustomDomain(
@@ -778,7 +765,7 @@ export async function deleteCustomDomain(
   actorId?: string | null,
 ): Promise<void> {
   const domain = await queryFirst<DomainRecord>(db, `
-    UPDATE organization_domains SET desired_state = 'deleted'
+    UPDATE organization_domains SET desired_state = 'deleted', next_check_at = NULL
     WHERE id = ? AND type = 'custom' AND status <> 'deleted'
     RETURNING *
   `, [domainId])
@@ -970,32 +957,6 @@ async function promoteCanonicalIfReady(db: D1Database, organizationId: string): 
   if (!activeSubdomain) return
 
   await setCanonicalDomain(db, organizationId, activeSubdomain.id, 'system')
-}
-
-/**
- * Read Cloudflare for every custom domain still being set up (docs: a custom
- * hostname's ownership and certificate validation complete asynchronously
- * after the owner's DNS change) and record what it reports. A check that
- * fails records its reason on the domain and is reported by the task.
- */
-export async function reconcileDueDomains(env: DomainEnv, db: D1Database, limit = 25): Promise<{ checked: number; failed: number }> {
-  const rows = await queryAll<{ id: string }>(db, `
-    SELECT id FROM organization_domains WHERE type = 'custom' AND desired_state = 'active'
-      AND status IN ('pending', 'verifying', 'failed', 'blocked')
-    ORDER BY updated_at, id LIMIT ?
-  `, [limit])
-  let failed = 0
-  const failures: string[] = []
-  for (const row of rows) {
-    try {
-      await syncDomainWithCloudflare(env, db, row.id, 'system', null)
-    } catch (error) {
-      failed += 1
-      failures.push(`${row.id}: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-  if (failures.length) throw new Error(`${failures.length} of ${rows.length} custom domain checks failed: ${failures.join('; ')}`)
-  return { checked: rows.length, failed }
 }
 
 /**

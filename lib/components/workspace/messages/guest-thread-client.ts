@@ -1,4 +1,4 @@
-import type { InjectionKey } from 'vue'
+import type { ComputedRef, InjectionKey } from 'vue'
 import { isRecord } from '~/utils/api-clients'
 import { isMessageIdentity, type MessageIdentity } from '~/shared/dashboard-invalidations'
 import type { ConversationDetails, ConversationEntriesPage, ConversationEntry, ConversationPage } from '~/shared/messages-contract'
@@ -23,6 +23,8 @@ export type SubmissionType = GuestThreadSubmissionType
 export type ThreadListItem = InboxRow
 export type ThreadListPage = InboxListPage
 export type ThreadDetails = ConversationDetails
+
+export const manageReservationGuestsKey: InjectionKey<{ available: ComputedRef<boolean>; open: (party: 'clients' | 'guests') => void }> = Symbol('manage-reservation-guests')
 
 export const removeInboxConversationKey: InjectionKey<(id: string) => void> = Symbol('remove-inbox-conversation')
 
@@ -97,13 +99,20 @@ export function isConversationPage(value: unknown): value is ConversationPage {
     || !isText(value.conversation.id) || !isText(value.conversation.organization_id)
     || !Array.isArray(value.entries) || !value.entries.every(isConversationEntry) || !isRecord(value.page)
     || !isRecord(value.capabilities)) return false
+  if (value.job_actions !== undefined && (!isRecord(value.job_actions) || !Object.values(value.job_actions).every(isText))) return false
   const { can_manage_participants, can_invite_guest, can_leave } = value.capabilities
   if (typeof can_manage_participants !== 'boolean' || typeof can_invite_guest !== 'boolean'
     || typeof can_leave !== 'boolean') return false
   const { conversation, page } = value
   if (!isText(conversation.title) || !Array.isArray(conversation.participants) || !conversation.participants.every(person =>
     isRecord(person) && (isText(person.id) || (value.viewer_role === 'guest' && person.id === null)) && isText(person.name) && isNullableText(person.image)
-    && (person.role === 'guest' || person.role === 'member') && typeof person.can_remove === 'boolean')) return false
+    && (person.invitation_id === undefined || isText(person.invitation_id))
+    && (person.role === 'guest' || person.role === 'member') && isText(person.title) && typeof person.can_remove === 'boolean')) return false
+  const { reservation } = conversation
+  if (reservation !== undefined && (!isRecord(reservation) || !isText(reservation.at) || !isRecord(reservation.day)
+    || reservation.day.type !== 'day' || !isConversationEntry(reservation.day)
+    || (reservation.confirmation !== null && (!isRecord(reservation.confirmation)
+      || !isNullableText(reservation.confirmation.message_id) || !isText(reservation.confirmation.text))))) return false
   if ((conversation.kind !== 'team' && conversation.kind !== 'guest' && conversation.kind !== 'support')
     || typeof conversation.is_group !== 'boolean' || !isNullableText(conversation.name) || !isNullableText(conversation.booking_id)
     || !isNullableText(conversation.created_by_user_id) || !isNullableText(conversation.activity_path)

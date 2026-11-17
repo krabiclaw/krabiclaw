@@ -1,7 +1,7 @@
 <template>
   <DashboardIndexPanel :id="stay ? 'stay-details' : personalScope ? 'account-booking-details' : 'booking-details'" :title="pageTitle" column="record">
     <template #right>
-      <UButton v-if="recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" :aria-label="stay ? 'Close stay details' : 'Close booking details'" />
+      <UButton v-if="recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="soft" :aria-label="stay ? 'Close stay details' : 'Close booking details'" />
     </template>
     <UAlert v-if="error" color="error" variant="soft" title="Booking details could not be loaded" :description="getErrorMessage(error, 'Booking request failed')" />
     <div v-else class="min-w-0 [overflow-wrap:anywhere]">
@@ -34,335 +34,322 @@
           color="error"
           icon="i-lucide-triangle-alert"
           title="Overbooked"
-          :description="`${channelName} confirmed this stay on nights another stay holds. Move this guest to another home, cancel this stay on ${channelName}, or cancel the other stay where it was booked.`"
+          :description="`${channelName} confirmed this stay on nights another stay holds. Cancel this stay on ${channelName}, or cancel the other stay where it was booked.`"
         />
+        <UAlert v-if="!personalScope && guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This reservation requires a guest name." />
+        <p v-if="changeResult" class="mb-4 text-sm text-highlighted" role="status">{{ changeResult }}</p>
         <UAlert
-          v-if="manage && detail?.booked_home_name"
+          v-if="booking?.pending_change"
           class="mb-5"
+          data-testid="booking-change-request"
           color="info"
           variant="soft"
-          icon="i-lucide-move-right"
-          title="Moved"
-          :description="`Booked as ${detail.booked_home_name} on ${channelName}. These nights are held on the home the guest moved to.`"
-          :actions="[{ label: 'Undo move', color: 'neutral', variant: 'outline', loading: busy === 'undo_move', onClick: undoMove }]"
-        />
-        <UAlert v-if="!personalScope && guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in Blawby, which requires a guest name, but it has none." />
-        <div class="flex flex-col items-center pb-12 text-center" :class="recordImage ? 'pt-2' : 'pt-10'">
-          <img v-if="recordImage" :src="recordImage" alt="" class="aspect-square w-full max-w-80 rounded-2xl bg-elevated object-cover" :class="!personalScope && !purchase && recordGuestName ? '' : 'mb-6'">
-          <div v-if="!personalScope && !purchase && recordGuestName" class="relative mx-auto mb-6 shrink-0 md:mb-8" :class="[recordImage ? '-mt-12 md:-mt-14' : '', partySize && partySize > 1 ? 'h-30 w-35 md:h-40 md:w-46' : 'size-27 md:size-36']">
-            <UAvatar :src="recordGuestImage || undefined" :alt="recordGuestName" :text="recordGuestName.slice(0, 1).toUpperCase()" size="3xl" class="absolute bottom-0 left-0" :class="partySize && partySize > 1 ? 'size-21 md:size-28' : 'size-27 md:size-36'" :ui="{ fallback: 'text-[30px] font-semibold text-highlighted md:text-4xl' }" />
-            <span v-if="partySize > 1" class="absolute right-0 top-0 flex size-16 items-center justify-center rounded-full bg-elevated text-[9px] font-bold text-highlighted md:size-21 md:text-xs" :aria-label="otherGuestLabel">+{{ partySize - 1 }}</span>
+          icon="i-lucide-clock"
+          :title="personalScope ? `${booking.organization_name} requested a change` : 'Change requested'"
+          :actions="personalScope ? [
+            { label: 'Accept', color: 'neutral' as const, loading: answering === 'accept', disabled: answering !== null, onClick: () => answerChange('accept') },
+            { label: 'Decline', color: 'neutral' as const, variant: 'soft' as const, loading: answering === 'decline', disabled: answering !== null, onClick: () => answerChange('decline') },
+          ] : undefined"
+        >
+          <template #description>
+            <div class="mt-2 grid grid-cols-2 gap-4">
+              <div v-for="{ label, terms } in [{ label: 'booking.change_before', terms: booking.pending_change.before }, { label: 'booking.change_proposed', terms: booking.pending_change.after }]" :key="label">
+                <p class="font-medium text-highlighted">{{ t(label) }}</p>
+                <p>{{ terms.when_label }}</p>
+                <p>{{ terms.location_title }}</p>
+                <p>{{ terms.party_size }} {{ terms.party_size === 1 ? recordCopy?.guestLabel : recordCopy?.guestsLabelPlural }}</p>
+                <p>{{ terms.assigned_member_name ?? t('booking.change_unassigned') }}</p>
+              </div>
+            </div>
+            <p class="mt-2">{{ personalScope ? 'Your booking stays unchanged until you accept.' : `Waiting for ${firstName(booking.guest_name ?? '')} to respond` }}</p>
+          </template>
+        </UAlert>
+
+        <section v-if="panel" data-testid="reservation-panel">
+          <UCarousel
+            v-if="panel.photos.length"
+            v-slot="{ item }"
+            :items="panel.photos"
+            :arrows="panel.photos.length > 1"
+            :dots="panel.photos.length > 1"
+            :prev="photoArrow"
+            :next="photoArrow"
+            :ui="{ viewport: 'rounded-2xl', container: 'ms-0', item: 'ps-0', prev: 'start-4 sm:start-4', next: 'end-4 sm:end-4', dots: 'bottom-3 gap-1.5', dot: 'size-1.5 bg-white/55 data-[state=active]:bg-white' }"
+            aria-label="Listing photos"
+            class="mb-6"
+          >
+            <img :src="item" :alt="panel.title ?? ''" class="aspect-[4/3] w-full bg-elevated object-cover">
+          </UCarousel>
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h2 class="text-[22px] font-semibold leading-7 tracking-tight text-highlighted">{{ panel.title }}</h2>
+            <UBadge v-if="statusLabel" :color="(stay?.status ?? booking?.status) === 'pending' ? 'warning' : 'neutral'" variant="soft" :label="statusLabel" />
           </div>
-          <h2 class="max-w-full break-words text-[32px] font-semibold leading-9 tracking-tight text-highlighted">{{ heroTitle }}</h2>
-          <p v-if="heroDate" class="mt-4 break-words text-base text-muted">{{ heroDate }}</p>
-          <p v-if="heroSubtitle" class="mt-1 break-words text-base text-muted">{{ heroSubtitle }}</p>
-          <UBadge v-if="stay && (personalScope || (manage && requestStatus))" class="mt-3" :color="stay.status === 'confirmed' ? 'success' : 'neutral'" variant="soft" :label="statusLabel" />
-          <div v-if="manage && hostActions.includes('confirm')" class="mt-5 flex flex-wrap justify-center gap-3">
+          <p v-if="panel.host" class="text-xs text-muted">Hosted by {{ panel.host.name }}</p>
+          <p v-if="panel.purchaseDate" class="text-xs text-muted">{{ panel.purchaseDate }}</p>
+          <div v-if="recordGuestName" class="mt-4 flex items-center">
+            <span class="relative">
+              <UAvatar :src="recordGuestImage || undefined" :alt="recordGuestName" :text="recordGuestName.slice(0, 1).toUpperCase()" size="lg" class="bg-accented ring-2 ring-default" :ui="{ fallback: 'font-semibold text-highlighted' }" />
+              <ChannelMark v-if="detail" :channel="detail.channel" class="absolute -bottom-1 -right-1" />
+            </span>
+            <span v-if="partySize > 1" class="-ms-2 flex size-8 items-center justify-center rounded-full bg-accented text-xs font-bold text-highlighted ring-2 ring-default" :aria-label="otherGuestLabel">+{{ partySize - 1 }}</span>
+            <UButton v-if="guestManagement?.available.value" type="button" :aria-label="manageGuestsLabel" icon="i-lucide-pencil" color="neutral" variant="outline" size="sm" class="ms-1 size-8 justify-center rounded-full" @click="manageBookingParty" />
+          </div>
+          <div v-if="manage && hostActions.includes('confirm')" class="mt-5 flex flex-wrap gap-3">
             <UButton color="neutral" size="lg" :label="t('stay.approve_request')" :loading="busy === 'confirm'" :disabled="busy !== null" @click="decide('confirm')" />
             <UButton color="neutral" variant="outline" size="lg" :label="t('stay.decline_request')" :loading="busy === 'reject'" :disabled="busy !== null" @click="decide('reject')" />
           </div>
           <UButton v-if="personalScope && detail?.request_status === 'awaiting_payment' && (paymentProcessing || (detail.pay_by && Date.parse(detail.pay_by) > Date.now()))"
             class="mt-5" color="neutral" size="lg" :label="t(paymentProcessing ? 'payment.view_payment' : 'payment.continue_to_pay')" :loading="busy === 'pay'" @click="payForStay" />
-        </div>
 
-        <div class="space-y-4">
-          <p v-if="changeResult" class="text-sm text-highlighted" role="status">{{ changeResult }}</p>
-          <UAlert
-            v-if="booking?.pending_change"
-            data-testid="booking-change-request"
-            color="info"
-            variant="soft"
-            icon="i-lucide-clock"
-            :title="personalScope ? `${booking.organization_name} requested a change` : 'Change requested'"
-            :actions="personalScope ? [
-              { label: 'Accept', color: 'neutral' as const, loading: answering === 'accept', disabled: answering !== null, onClick: () => answerChange('accept') },
-              { label: 'Decline', color: 'neutral' as const, variant: 'soft' as const, loading: answering === 'decline', disabled: answering !== null, onClick: () => answerChange('decline') },
-            ] : undefined"
-          >
-            <template #description>
-              <div class="mt-2 grid grid-cols-2 gap-4">
-                <div v-for="{ label, terms } in [{ label: 'booking.change_before', terms: booking.pending_change.before }, { label: 'booking.change_proposed', terms: booking.pending_change.after }]" :key="label">
-                  <p class="font-medium text-highlighted">{{ t(label) }}</p>
-                  <p>{{ terms.when_label }}</p>
-                  <p>{{ terms.location_title }}</p>
-                  <p>{{ terms.party_size }} {{ terms.party_size === 1 ? recordCopy?.guestLabel : recordCopy?.guestsLabelPlural }}</p>
-                  <p>{{ terms.assigned_member_name ?? t('booking.change_unassigned') }}</p>
-                </div>
-              </div>
-              <p class="mt-2">{{ personalScope ? 'Your booking stays unchanged until you accept.' : `Waiting for ${firstName(booking.guest_name ?? '')} to respond` }}</p>
-            </template>
-          </UAlert>
-
-          <UCard v-if="!purchase" variant="record">
-            <div class="grid grid-cols-2 divide-x divide-default">
-              <div class="min-w-0 pe-6">
-                <h3 class="text-base font-semibold text-highlighted">{{ stay ? 'Check-in' : 'Date' }}</h3>
-                <p class="mt-1 text-sm text-muted">{{ formattedDate }}</p>
-                <p v-if="checkInTime" class="mt-1 text-sm text-muted">{{ checkInTime }}</p>
-              </div>
-              <div class="min-w-0 ps-6 text-right">
-                <h3 class="text-base font-semibold text-highlighted">{{ stay ? 'Checkout' : 'Time' }}</h3>
-                <p class="mt-1 text-sm text-muted">{{ stay ? formatCalendarDate(stay.check_out_date, 'en') : formattedTime }}</p>
-                <p v-if="stay && recordHome?.check_out_time" class="mt-1 text-sm text-muted">By {{ formatTime(recordHome.check_out_time, 'en') }}</p>
-              </div>
+          <dl v-if="panel.when.length" class="mt-5 grid grid-cols-2 divide-x divide-default rounded-xl bg-accented/40 p-4">
+            <div v-for="entry in panel.when" :key="entry.label" class="min-w-0 first:pe-4 last:ps-4 last:text-right">
+              <dt class="text-sm font-semibold text-highlighted">{{ entry.label }}</dt>
+              <dd class="mt-0.5 text-xs text-highlighted">{{ entry.value }}</dd>
+              <dd v-if="entry.detail" class="mt-0.5 text-xs text-muted">{{ entry.detail }}</dd>
             </div>
-            <div v-if="arrivalTime" class="mt-6 border-t border-default pt-4">
-              <p class="text-base font-medium text-highlighted">Arriving</p>
-              <p class="mt-1 text-base text-muted">{{ arrivalTime }}</p>
-            </div>
-            <p v-if="stay?.no_show_at && !detail" class="mt-6 border-t border-default pt-4 text-base text-muted" data-testid="stay-no-show">No-show recorded {{ formatCalendarDate(stay.no_show_at.slice(0, 10), 'en') }}.</p>
-          </UCard>
-          <UCard v-if="!personalScope && hostHome && (hostHome.check_in_method || hostHome.check_in_instructions)" variant="record">
-            <h3 class="text-base font-semibold text-highlighted">{{ t('stay.check_in_method') }}</h3>
-            <p v-if="hostHome.check_in_method" class="mt-3 text-base text-muted">{{ STAY_CHECK_IN_METHODS[hostHome.check_in_method].label }}</p>
-            <p v-if="hostHome.check_in_instructions" class="mt-3 whitespace-pre-wrap text-base text-muted">{{ hostHome.check_in_instructions }}</p>
-          </UCard>
+          </dl>
+          <p v-if="arrivalTime" class="mt-3 text-xs text-muted">Arriving {{ arrivalTime }}</p>
 
-          <UCard v-if="personalScope && home?.location && (guestAddress || home.location.maps_url)" variant="record">
-            <h2 class="text-base font-semibold text-highlighted">{{ t('stay.where_youll_be') }}</h2>
-            <p v-if="guestAddress" class="mt-3 whitespace-pre-line break-words text-base text-muted">{{ guestAddress }}</p>
-            <UButton v-if="home.location.maps_url" :to="home.location.maps_url" target="_blank" rel="noopener noreferrer" class="mt-4" color="neutral" variant="outline" :label="t('site.experience_detail.open_in_maps')" />
-          </UCard>
-
-          <UCard v-if="personalScope && home?.arrival_guide" variant="record">
-            <h2 class="mb-6 text-base font-semibold text-highlighted">{{ t('stay.arrival_guide') }}</h2>
-            <StayArrivalGuideView :guide="home.arrival_guide" :rules="home.house_rules" :safety="home.safety" />
-          </UCard>
-
-          <UCard v-if="booking && !purchase" variant="record">
-            <h3 class="text-base font-semibold text-highlighted">Where</h3>
-            <p class="mt-1 text-sm text-muted">{{ booking.location_title }}</p>
-            <p v-if="booking.location_address" class="mt-1 text-sm text-muted">{{ booking.location_address }}</p>
-          </UCard>
-
-          <UCard v-if="booking?.type === 'booking' && !personalScope" variant="record">
-            <h3 class="text-base font-semibold text-highlighted">What’s booked</h3>
-            <p class="mt-1 text-sm text-muted">{{ offeringName }}<template v-if="booking.party_size"> · {{ guestCountLabel }}</template></p>
-          </UCard>
-
-          <template v-if="booking?.type === 'booking' && !personalScope">
-            <UCard variant="record">
-              <div class="flex items-center gap-4">
-                <span class="min-w-0 flex-1"><span class="block text-base font-semibold text-highlighted">{{ recordCopy?.assigneeLabel }}</span><span class="mt-1 block text-sm text-muted">{{ booking.assigned_member_name || (booking.assigned_member_id ? 'Previously assigned member' : booking.organization_name) }}</span></span>
-              </div>
-            </UCard>
-            <UAlert v-if="booking.provider_conflict" color="warning" :description="`This ${noun} overlaps a busy time. Contact your ${recordCopy?.guestLabel} to change it.`" />
-          </template>
-
-          <UCard v-if="booking && !personalScope && !purchase" variant="record">
-            <h3 class="text-base font-semibold text-highlighted">Private note</h3>
-            <p class="mt-1 text-sm text-muted">Only your team sees this.</p>
-            <div class="group mt-4">
-              <UTextarea v-model="noteDraft" aria-label="Private note" placeholder="Add a note for your team" :rows="2" autoresize maxlength="2000" :disabled="noteSaving" class="w-full" @blur="saveNote" />
-              <p class="mt-2 hidden text-right text-xs text-muted group-focus-within:block">{{ 2000 - noteDraft.length }} characters available</p>
-              <UAlert v-if="noteError" class="mt-3" color="error" variant="soft" :description="noteError" :actions="[{ label: 'Retry', color: 'neutral' as const, loading: noteSaving, onClick: saveNote }]" />
-            </div>
-          </UCard>
-
-          <UCard v-if="stay || (personalScope && !purchase) || (!personalScope && recordGuestName)" variant="record">
-            <component :is="guestDetailLink ? NuxtLink : 'div'" :to="guestDetailLink" :aria-label="guestDetailLink ? `${guestHeading} ${recordGuestName} · ${guestCountLabel}` : undefined" class="block">
-              <h3 class="text-base font-semibold text-highlighted">{{ personalScope ? 'Who’s coming' : purchase ? 'Buyer' : guestHeading }}</h3>
-              <div v-if="recordGuestName && (stay || !personalScope)" class="mt-4 flex items-center gap-4">
-                <UAvatar :src="recordGuestImage || undefined" :alt="recordGuestName" :text="recordGuestName.slice(0, 1).toUpperCase()" size="xl" class="size-12 bg-muted" aria-hidden="true" />
-                <span class="min-w-0 flex-1 text-base text-highlighted">{{ recordGuestName }}</span>
-                <UIcon v-if="guestDetailLink" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-              </div>
-              <div v-if="partySize > 1 && (stay || !personalScope)" class="mt-4 flex items-center gap-4">
-                <span class="flex size-12 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold" aria-hidden="true">+{{ partySize - 1 }}</span>
-                <span class="text-base text-highlighted">{{ otherGuestLabel }}</span>
-              </div>
-              <p v-if="stay || personalScope" class="mt-3 text-base text-muted">{{ stay ? partyLabel : guestCountLabel }}</p>
+          <div v-if="panel.rows.length" class="mt-3">
+            <component :is="row.to ? NuxtLink : row.href ? 'a' : 'button'" v-for="row in panel.rows" :key="row.label" :to="row.to" :href="row.href" :type="row.run ? 'button' : undefined" class="flex w-full items-start gap-4 py-3 text-left" @click="row.run?.()">
+              <UIcon :name="row.icon" class="mt-0.5 size-5 shrink-0 text-highlighted" />
+              <span class="min-w-0 flex-1"><span class="block text-sm font-medium text-highlighted">{{ row.label }}</span><span v-if="row.detail" class="block truncate text-xs text-muted">{{ row.detail }}</span></span>
             </component>
-            <a v-if="detail?.guest_phone" :href="`tel:${detail.guest_phone}`" class="mt-3 block w-fit text-base text-highlighted underline underline-offset-4">{{ formatPhone(detail.guest_phone) }}</a>
-            <a v-if="detail?.guest_email" :href="`mailto:${detail.guest_email}`" class="mt-2 block w-fit break-all text-base text-highlighted underline underline-offset-4">{{ detail.guest_email }}</a>
-          </UCard>
+          </div>
 
-          <!-- The guest did not come, or where the visit's review invitation stands: the team's own record of it. -->
-          <UCard v-if="!personalScope && (booking?.no_show_at || booking?.review_invitation)" variant="record" data-testid="booking-review-state">
-            <h3 class="text-base font-semibold text-highlighted">{{ booking.no_show_at ? 'No-show' : 'Review invitation' }}</h3>
-            <p class="mt-1 text-sm text-muted">{{ reviewStateLabel }}</p>
-          </UCard>
-
-          <FormAnswersCard v-if="booking || detail" :answers="booking?.answers ?? detail?.answers ?? []" :title="personalScope ? 'Your answers' : undefined" />
-          <UCard v-if="booking?.notes" variant="record">
-            <h3 class="text-base font-semibold text-highlighted">{{ personalScope ? 'Your requests' : `${recordCopy?.guestLabel.charAt(0).toUpperCase()}${recordCopy?.guestLabel.slice(1)} requests` }}</h3>
-            <p class="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted">{{ booking.notes }}</p>
-          </UCard>
-
-          <UCard v-if="booking && !purchase" as="button" type="button" variant="record" class="w-full text-left" @click="policyOpen = true">
-            <span class="flex items-center gap-4">
-              <span class="min-w-0 flex-1"><span class="block text-base font-semibold text-highlighted">Cancellation policy</span><span class="mt-1 block text-sm text-muted">{{ cancellationSummary }}</span></span>
-              <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-            </span>
-          </UCard>
-
-          <PaymentDetails v-for="detail in booking?.payments" :key="detail.payment.id" :payment="detail.payment" :refunds="detail.refunds" :order="detail.order">
-            <template v-if="!personalScope && detail.payment.captured_amount > detail.payment.refunded_amount" #actions>
-              <NuxtLink :to="{ path: `${editorPath}/refund`, query: { ...route.query, payment: detail.payment.id } }" class="flex items-center gap-4 border-t border-default py-4">
-                <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Send a refund</span>
-                <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-              </NuxtLink>
+          <div v-if="!purchase || recordGuestName" :class="sectionClass">
+            <h2 class="text-lg font-semibold text-highlighted">{{ purchase ? 'Buyer' : 'Reservation details' }}</h2>
+            <template v-if="panel.guests">
+              <h3 class="mt-5 text-sm font-semibold text-highlighted">Who’s coming</h3>
+              <component :is="guestDetailLink ? NuxtLink : 'p'" :to="guestDetailLink" class="mt-1 flex justify-between gap-3 text-sm text-muted">
+                <span>{{ panel.guests }}</span>
+                <UIcon v-if="guestDetailLink" name="i-lucide-chevron-right" class="size-4 shrink-0" />
+              </component>
             </template>
-          </PaymentDetails>
-
-          <template v-if="detail">
-          <UCard v-if="!personalScope && detail.private_notes" variant="record">
-            <h3 class="text-base font-semibold text-highlighted">Private note</h3>
-            <p class="mt-3 whitespace-pre-wrap text-base text-muted">{{ detail.private_notes }}</p>
-          </UCard>
-
-          <!-- The policy the guest booked under, in Airbnb's words: what their own cancellation returns. -->
-          <UCard v-if="policy || detail.cancellation_reason" variant="record">
-          <template v-if="policy">
-            <h2 class="text-base font-semibold text-highlighted">Cancellation policy</h2>
-            <p class="mt-1 text-base text-highlighted">{{ policy.label }}</p>
-            <ul class="mt-2 space-y-1 text-base text-muted">
-              <li v-for="term in policy.terms" :key="term">{{ term }}</li>
-            </ul>
-          </template>
-          <section v-if="detail.cancellation_reason" class="mt-6">
-            <h3 class="text-base font-semibold text-highlighted">Cancellation reason</h3>
-            <p class="mt-2 whitespace-pre-wrap text-base text-muted">{{ detail.cancellation_reason }}</p>
-          </section>
-          </UCard>
-
-          <UCard variant="record">
-          <dl class="space-y-4">
-            <div class="flex items-start justify-between gap-4">
-              <dt class="text-base font-semibold text-highlighted">Total</dt>
-              <dd class="text-right text-base font-semibold text-highlighted">{{ money(detail.total_minor) }}</dd>
-            </div>
-            <div v-if="!channelManaged" class="flex items-start justify-between gap-4 border-t border-default pt-4">
-              <dt class="text-base text-muted">Paid</dt>
-              <dd class="text-right text-base text-highlighted">{{ money(detail.paid_minor) }}</dd>
-            </div>
-          </dl>
-          </UCard>
-
-          <!-- The Stripe payment the guest made on the site: its record and refunds are the payment's own screens. -->
-          <UCard v-if="!personalScope && (detail.online_payment || (!channelManaged && !requestStatus))" variant="record">
-          <h2 class="text-base font-semibold text-highlighted">Payments</h2>
-          <template v-if="detail.online_payment">
-            <h3 class="mt-6 text-base font-semibold text-highlighted">Paid on your site</h3>
-            <p class="mt-1 text-base text-muted">{{ money(detail.online_payment.captured_minor) }}{{ detail.online_payment.refunded_minor ? ` · ${money(detail.online_payment.refunded_minor)} refunded` : '' }}</p>
-            <div class="mt-4 divide-y divide-default border-y border-default">
-              <NuxtLink :to="`${paymentPath}`" class="flex items-center gap-4 py-4">
-                <span class="min-w-0 flex-1 text-base font-medium text-highlighted">View payment</span>
-                <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
-              </NuxtLink>
-              <NuxtLink v-if="manage && detail.online_payment.captured_minor > detail.online_payment.refunded_minor" :to="{ path: `${paymentPath}/refund`, query: { payment: detail.online_payment.payment_id } }" class="flex items-center gap-4 py-4">
-                <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Send a refund</span>
-                <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+            <p v-else-if="purchase && recordGuestName" class="mt-1 text-sm text-muted">{{ recordGuestName }}</p>
+            <div v-if="!personalScope && panel.contact.length" class="mt-2">
+              <NuxtLink v-for="action in panel.contact" :key="action.label" :to="action.to" :class="rowClass" :data-testid="action.testid">
+                <UIcon :name="action.icon" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">{{ action.label }}</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
               </NuxtLink>
             </div>
-          </template>
+            <template v-if="panel.code">
+              <h3 class="mt-5 text-sm font-semibold text-highlighted">Confirmation code</h3>
+              <p class="mt-1 text-sm text-muted" :data-testid="stay ? 'stay-confirmation-code' : 'booking-confirmation-code'">{{ panel.code }}</p>
+            </template>
+            <template v-if="panel.policy">
+              <h3 class="mt-5 text-sm font-semibold text-highlighted">Cancellation policy</h3>
+              <p class="mt-1 text-sm text-muted">{{ panel.policy }}</p>
+              <button v-if="policy?.terms.length || booking?.policy" type="button" class="mt-1 cursor-pointer text-sm font-medium text-highlighted underline" @click="policyOpen = true">Read more</button>
+            </template>
+            <template v-if="detail?.cancellation_reason">
+              <h3 class="mt-5 text-sm font-semibold text-highlighted">Cancellation reason</h3>
+              <p class="mt-1 whitespace-pre-wrap text-sm text-muted">{{ detail.cancellation_reason }}</p>
+            </template>
+            <template v-if="!personalScope && !purchase">
+              <NuxtLink v-if="booking" :to="{ path: `${editorPath}/private-note`, query: route.query }" :class="rowClass" class="mt-3">
+                <UIcon name="i-lucide-sticky-note" class="size-4 shrink-0" />
+                <span class="min-w-0 flex-1"><span class="block font-medium">Private note</span><span v-if="booking.private_notes" class="block truncate text-xs text-muted">{{ booking.private_notes }}</span></span>
+                <UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+              </NuxtLink>
+              <template v-else-if="detail?.private_notes">
+                <h3 class="mt-5 text-sm font-semibold text-highlighted">Private note</h3>
+                <p class="mt-1 whitespace-pre-wrap text-sm text-muted">{{ detail.private_notes }}</p>
+              </template>
+            </template>
+            <template v-if="booking?.notes">
+              <h3 class="mt-5 text-sm font-semibold text-highlighted">{{ personalScope ? 'Your requests' : 'Requests' }}</h3>
+              <p class="mt-1 whitespace-pre-wrap text-sm text-muted">{{ booking.notes }}</p>
+            </template>
+            <FormAnswersCard :answers="booking?.answers ?? detail?.answers ?? []" :title="personalScope ? 'Your answers' : undefined" />
+            <div v-if="!personalScope && reviewStateLabel" class="mt-5" data-testid="booking-review-state">
+              <h3 class="text-sm font-semibold text-highlighted">Review invitation</h3>
+              <p class="mt-1 text-sm text-muted">{{ reviewStateLabel }}</p>
+            </div>
+            <div v-if="panel.actions.length" class="mt-3">
+              <component :is="action.to ? NuxtLink : 'button'" v-for="action in panel.actions" :key="action.label" :to="action.to" :type="action.to ? undefined : 'button'" :class="rowClass" :disabled="action.to ? undefined : busy !== null" :data-testid="action.testid" @click="('run' in action) && action.run()">
+                <UIcon :name="action.icon" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">{{ action.label }}</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+              </component>
+            </div>
+            <p v-if="channelManaged && detail" class="mt-4 text-sm text-muted">
+              Payments, changes and cancellations for this stay are managed on
+              <ULink v-if="detail.channel_booking_url" :to="detail.channel_booking_url" target="_blank" rel="noopener noreferrer" class="text-highlighted underline">{{ channelName }}</ULink><template v-else>{{ channelName }}</template>.
+            </p>
+          </div>
 
-          <template v-if="!channelManaged && !requestStatus">
-            <p class="text-sm text-muted" :class="detail.online_payment ? 'mt-6' : 'mt-1'">Money you received or refunded outside KrabiClaw. Recording it moves no money.</p>
-            <ul v-if="detail.payments.length" class="mt-4 divide-y divide-default border-y border-default">
-              <li v-for="payment in detail.payments" :key="payment.id" class="flex items-center gap-4 py-3">
-                <span class="min-w-0 flex-1">
-                  <span class="block text-base text-highlighted">{{ money(payment.amount_minor) }} · {{ methodLabel(payment.method) }}</span>
-                  <span class="block text-sm text-muted">{{ formatCalendarDate(payment.paid_on, 'en') }}{{ payment.reference ? ` · ${payment.reference}` : '' }}</span>
-                </span>
-                <UButton v-if="manage" icon="i-lucide-trash-2" color="neutral" variant="ghost" :aria-label="`Delete payment of ${money(payment.amount_minor)}`" :loading="busy === payment.id" @click="deletePayment(payment.id)" />
-              </li>
-            </ul>
-            <p v-else class="mt-4 text-base text-muted">No payments recorded.</p>
+          <div v-if="panel.location || panel.address || panel.pin || panel.guide?.directions" id="getting-there" :class="sectionClass">
+            <h2 class="text-lg font-semibold text-highlighted">Getting there</h2>
+            <StaySetupMap v-if="panel.pin" :key="`${panel.pin.latitude},${panel.pin.longitude}`" :pin="panel.pin" :marker-icon="stay ? 'i-lucide-house' : 'i-lucide-map-pin'" :interactive="false" compact class="mt-4" />
+            <p v-if="panel.location" class="mt-4 text-sm font-medium text-highlighted">{{ panel.location }}</p>
+            <p v-if="panel.address" :class="panel.location ? 'mt-1' : 'mt-4'" class="text-sm text-muted">{{ panel.address }}</p>
+            <template v-if="panel.guide?.directions">
+              <h3 class="mt-5 text-sm font-semibold text-highlighted">Directions from your host</h3>
+              <p ref="directionsPreview" class="mt-1 line-clamp-6 whitespace-pre-wrap text-sm text-muted">{{ panel.guide.directions }}</p>
+              <button v-if="directionsClipped" type="button" class="mt-1 text-sm font-medium text-highlighted underline" @click="guideSection = 'directions'">Read more</button>
+            </template>
+            <div v-if="panel.address || panel.mapsUrl" class="mt-3">
+              <button v-if="panel.address" type="button" :class="rowClass" @click="copyAddress(panel.address)">
+                <UIcon name="i-lucide-copy" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Copy address</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+              </button>
+              <a v-if="panel.mapsUrl" :href="panel.mapsUrl" target="_blank" rel="noopener noreferrer" :class="rowClass">
+                <UIcon name="i-lucide-map-pin" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Get directions</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+              </a>
+            </div>
+          </div>
 
-            <UForm v-if="manage" :state="draft" class="mt-6 space-y-4" @submit="recordPayment">
-              <div class="grid gap-4 sm:grid-cols-2">
-                <UFormField :label="`Amount (${detail.currency})`" name="amount" description="Negative for a refund." required>
-                  <UInput v-model="draft.amount" inputmode="decimal" class="w-full" />
-                </UFormField>
-                <UFormField label="Method" name="method" required>
-                  <USelect v-model="draft.method" :items="methods" class="w-full" />
-                </UFormField>
-                <UFormField label="Date" name="paid_on" required>
-                  <UInput v-model="draft.paid_on" type="date" class="w-full" />
-                </UFormField>
-                <UFormField label="Reference" name="reference">
-                  <UInput v-model="draft.reference" class="w-full" />
-                </UFormField>
+          <div v-if="panel.guide && (panel.guide.method || panel.guide.instructions || panel.guide.wifi)" id="checking-in" :class="sectionClass">
+            <h2 class="text-lg font-semibold text-highlighted">Checking in</h2>
+            <template v-if="panel.guide.method">
+              <h3 class="mt-5 text-sm font-semibold text-highlighted">Check-in method</h3>
+              <p class="mt-1 text-sm text-muted">{{ panel.guide.method }}</p>
+            </template>
+            <button v-if="panel.guide.instructions || panel.guide.wifi" type="button" :class="rowClass" class="mt-3" @click="guideSection = 'check-in'">
+              <UIcon name="i-lucide-key-round" class="size-4 shrink-0" /><span class="min-w-0 flex-1">How to get inside</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+            </button>
+          </div>
+
+          <div v-if="panel.guide && (panel.guide.manual || panel.guide.rules.length || panel.guide.safety.length || panel.listingUrl)" id="rules-and-instructions" :class="sectionClass">
+            <h2 class="text-lg font-semibold text-highlighted">Rules and instructions</h2>
+            <template v-if="panel.guide.manual">
+              <h3 class="mt-5 text-sm font-semibold text-highlighted">House manual</h3>
+              <p ref="manualPreview" class="mt-1 line-clamp-3 whitespace-pre-wrap text-sm text-muted">{{ panel.guide.manual }}</p>
+              <button v-if="manualClipped" type="button" class="mt-1 text-sm font-medium text-highlighted underline" @click="guideSection = 'manual'">Show more</button>
+            </template>
+            <template v-if="panel.guide.rules.length">
+              <h3 class="mt-5 text-sm font-semibold text-highlighted">House rules</h3>
+              <p ref="rulesPreview" class="mt-1 line-clamp-3 whitespace-pre-line text-sm text-muted">{{ panel.guide.rules.join('\n') }}</p>
+              <button v-if="rulesClipped" type="button" class="mt-1 text-sm font-medium text-highlighted underline" @click="guideSection = 'rules'">Show more</button>
+            </template>
+            <template v-if="panel.guide.safety.length">
+              <h3 class="mt-5 text-sm font-semibold text-highlighted">Safety and property</h3>
+              <ul class="mt-1 space-y-1 text-sm text-muted"><li v-for="line in panel.guide.safety" :key="line">{{ line }}</li></ul>
+            </template>
+            <a v-if="panel.listingUrl" :href="panel.listingUrl" target="_blank" rel="noopener noreferrer" :class="rowClass" class="mt-3">
+              <UIcon name="i-lucide-store" class="size-4 shrink-0" /><span class="min-w-0 flex-1">Show listing</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+            </a>
+          </div>
+
+          <div v-if="panel.host || panel.coHosts.length || (personalScope && panel.contact.length)" :class="sectionClass">
+            <div v-if="panel.host" class="flex items-center gap-4">
+              <h2 class="min-w-0 flex-1 text-lg font-semibold text-highlighted">Hosted by {{ panel.host.name }}</h2>
+              <UAvatar :src="panel.host.photo_url ?? undefined" :alt="panel.host.name" size="xl" class="bg-accented" />
+            </div>
+            <div v-if="panel.host?.bio" class="mt-4">
+              <h3 class="text-sm font-semibold text-highlighted">About your host</h3>
+              <p ref="hostPreview" class="mt-1 line-clamp-3 whitespace-pre-wrap break-words text-sm text-muted">{{ panel.host.bio }}</p>
+              <button v-if="hostClipped" type="button" class="mt-1 text-sm font-medium text-highlighted underline" @click="showProfile('About your host', panel.host?.bio)">Show more</button>
+            </div>
+            <div v-for="(coHost, index) in panel.coHosts" :key="index" class="mt-5 flex items-center gap-4">
+              <div class="min-w-0 flex-1">
+                <h3 class="text-sm font-semibold text-highlighted">Co-host</h3>
+                <button v-if="coHost.bio" type="button" class="mt-1 text-sm text-highlighted underline" @click="showProfile(coHost.name, coHost.bio)">{{ coHost.name }}</button>
+                <p v-else class="mt-1 text-sm text-muted">{{ coHost.name }}</p>
               </div>
-              <UButton type="submit" label="Record payment" :loading="busy === 'record'" :disabled="!draft.amount.trim() || !draft.paid_on" />
-            </UForm>
-            <p v-if="!personalScope && detail.no_show_at" class="mt-6 text-sm text-muted" data-testid="stay-no-show">No-show recorded {{ formatCalendarDate(detail.no_show_at.slice(0, 10), 'en') }}. No review invitation is sent.</p>
-            <UButton v-else-if="canMarkNoShow" class="mt-4 ms-2" color="neutral" variant="soft" label="Mark as a no-show" :loading="busy === 'no_show'" @click="markNoShow" />
-          </template>
-          </UCard>
-          <UButton v-if="manage && !personalScope && !channelManaged && hostActions.includes('cancel')" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" :disabled="busy !== null" @click="cancelStay" />
-          <UCard variant="record">
-          <dl class="space-y-4">
-            <div v-if="detail.channel_booking_id" class="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-4">
-              <dt class="text-base text-muted">{{ STAY_CHANNEL_LABELS[detail.channel] }} confirmation</dt>
-              <dd class="break-words text-right text-base text-highlighted">{{ detail.channel_booking_id }}</dd>
+              <UAvatar :src="coHost.photo_url ?? undefined" :alt="coHost.name" size="xl" class="bg-accented" />
             </div>
-            <div class="flex items-start justify-between gap-4">
-              <dt class="text-base text-muted">Booked through</dt>
-              <dd class="text-right text-base text-highlighted">{{ STAY_CHANNEL_LABELS[detail.channel] }}</dd>
+            <div v-if="personalScope && panel.contact.length" class="mt-3">
+              <NuxtLink v-for="action in panel.contact" :key="action.label" :to="action.to" :class="rowClass" :data-testid="action.testid">
+                <UIcon :name="action.icon" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">{{ action.label }}</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+              </NuxtLink>
             </div>
-          </dl>
-          <UButton v-if="manage && hostActions.includes('move')" class="mt-4" color="neutral" variant="outline" label="Move guest" :to="`/dashboard/${encodeURIComponent(String(route.params.org_slug))}/bookings/${encodeURIComponent(detail.booking_id)}/move`" data-testid="stay-move" />
-          <p v-if="!personalScope && channelManaged" class="mt-4 text-base text-muted">
-            Payments, changes and cancellations for this stay are managed on
-            <ULink v-if="detail.channel_booking_url" :to="detail.channel_booking_url" target="_blank" rel="noopener noreferrer" class="text-highlighted underline">{{ channelName }}</ULink><template v-else>{{ channelName }}</template>.
-          </p>
-          </UCard>
-          </template>
-          <UCard v-if="(booking && (!purchase || availableActions.length)) || (stay && personalScope)" as="button" type="button" variant="record" class="w-full text-left" @click="manageOpen = true">
-            <span class="flex items-center gap-4"><span class="min-w-0 flex-1 text-base font-semibold text-highlighted">{{ stay ? t('booking.manage') : `Manage ${noun}` }}</span><UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" /></span>
-          </UCard>
-          <UCard v-if="booking" variant="record">
-            <p class="text-base font-semibold text-highlighted">{{ purchase ? 'Purchase date' : 'Booking date' }}</p>
-            <p class="mt-1 text-sm text-muted">{{ formatCreatedAt(booking.created_at) }}</p>
-          </UCard>
-        </div>
+          </div>
+
+          <div v-if="detail || (booking?.type === 'booking' && booking.payments !== null) || booking?.payments?.length" :class="sectionClass">
+            <h2 class="text-lg font-semibold text-highlighted">Payment info</h2>
+            <template v-if="detail">
+              <h3 class="mt-5 text-sm font-semibold text-highlighted">Amount paid</h3>
+              <p class="mt-1 text-sm text-muted" data-testid="stay-amount-paid">{{ money(detail.online_payment ? detail.online_payment.captured_minor - detail.online_payment.refunded_minor : detail.paid_minor) }}</p>
+              <template v-if="!personalScope">
+                <ul v-if="!channelManaged && detail.payments.length" class="mt-4 space-y-3">
+                  <li v-for="payment in detail.payments" :key="payment.id" class="flex items-center gap-4">
+                    <span class="min-w-0 flex-1">
+                      <span class="block text-sm text-highlighted">{{ money(payment.amount_minor) }} · {{ methodLabel(payment.method) }}</span>
+                      <span class="block text-xs text-muted">{{ formatCalendarDate(payment.paid_on, 'en') }}{{ payment.reference ? ` · ${payment.reference}` : '' }}</span>
+                    </span>
+                    <UButton v-if="manage" icon="i-lucide-trash-2" color="neutral" variant="ghost" :aria-label="`Delete payment of ${money(payment.amount_minor)}`" :loading="busy === payment.id" @click="deletePayment(payment.id)" />
+                  </li>
+                </ul>
+                <NuxtLink v-if="manage && !channelManaged && !requestStatus && !detail.online_payment" :to="{ path: `${editorPath}/payment`, query: route.query }" :class="rowClass" class="mt-2" data-testid="stay-record-payment">
+                  <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Record a payment</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+                </NuxtLink>
+                <template v-if="detail.online_payment">
+                  <NuxtLink :to="paymentPath" :class="rowClass" class="mt-2">
+                    <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Get receipt</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+                  </NuxtLink>
+                  <NuxtLink v-if="manage && detail.online_payment.captured_minor > detail.online_payment.refunded_minor" :to="{ path: `${paymentPath}/refund`, query: { payment: detail.online_payment.payment_id } }" :class="rowClass">
+                    <UIcon name="i-lucide-undo-2" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Send a refund</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+                  </NuxtLink>
+                </template>
+              </template>
+              <a v-else-if="detail.online_payment?.receipt_url" :href="detail.online_payment.receipt_url" target="_blank" rel="noopener noreferrer" :class="rowClass" class="mt-2">
+                <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Get receipt</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+              </a>
+            </template>
+            <p v-else-if="booking?.payments?.length === 0" class="mt-4 text-sm text-muted">No payments recorded.</p>
+            <PaymentDetails v-for="entry in booking?.payments" :key="entry.payment.id" :payment="entry.payment" :refunds="entry.refunds" :order="entry.order">
+              <template v-if="!personalScope && entry.payment.captured_amount > entry.payment.refunded_amount" #actions>
+                <NuxtLink :to="{ path: `${editorPath}/refund`, query: { ...route.query, payment: entry.payment.id } }" :class="rowClass">
+                  <UIcon name="i-lucide-undo-2" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Send a refund</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+                </NuxtLink>
+              </template>
+            </PaymentDetails>
+          </div>
+          <div v-if="!purchase" id="reservation-support" :class="sectionClass">
+            <h2 class="text-lg font-semibold text-highlighted">Get support anytime</h2>
+            <NuxtLink to="/help" :class="rowClass" class="mt-3">
+              <UIcon name="i-lucide-circle-help" class="size-4 shrink-0" /><span class="min-w-0 flex-1">Visit the Help Center</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+            </NuxtLink>
+          </div>
+        </section>
       </template>
     </div>
-    <template v-if="(booking || stay) && !error && (messageTo || contactCallTo)" #footer>
-      <div class="flex flex-wrap justify-center gap-3">
-        <UButton v-if="messageTo" :to="messageTo" :label="stay && personalScope ? t('stay.message_host') : 'Message'" :aria-label="messageLabel" color="neutral" class="pointer-events-auto h-14 rounded-full px-8 shadow-lg" />
-        <UButton v-if="contactCallTo" :to="contactCallTo" label="Call" color="neutral" class="pointer-events-auto h-14 rounded-full px-8 shadow-lg" />
-      </div>
-    </template>
   </DashboardIndexPanel>
 
-  <DashboardListItemDialog v-model:open="manageOpen" :title="stay ? t('booking.manage') : `Manage ${noun}`" :show-actions="false" :error="actionError">
-    <div v-if="booking" class="divide-y divide-default">
-      <NuxtLink v-if="canChangeBooking && !personalScope" :to="{ path: `${editorPath}/change`, query: route.query }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>Change {{ noun }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
-      <NuxtLink v-if="personalScope && canChangeBooking && messageTo" :to="{ path: messageTo, query: { intent: 'booking-change' } }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('booking.request_change') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
-      <NuxtLink v-if="!purchase" :to="{ path: personalScope ? `/dashboard/account/calendar/${booking.booking_date}` : `/dashboard/${orgSlug}/calendar/${booking.booking_date}`, query: !personalScope && booking.location_id ? { locationId: booking.location_id } : undefined }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>View on calendar</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
-      <UButton v-for="action in availableActions" :key="action.value" :label="action.label" :icon="action.icon" :color="action.color" variant="ghost" block class="justify-start py-4" :loading="busy === action.value" @click="selectAction(action.value)" />
+  <ReservationItinerary
+    v-if="itinerary && panel?.code"
+    v-model:open="itineraryOpen"
+    :itinerary="itinerary"
+    :confirmation-code="panel.code"
+  />
+
+  <DashboardListItemDialog v-if="panel?.guide" v-model:open="guideOpen" :title="guideSection ? guideLabels[guideSection] : ''" :show-actions="false">
+    <p v-if="guideSection === 'directions'" class="whitespace-pre-wrap text-sm text-muted">{{ panel.guide.directions }}</p>
+    <p v-else-if="guideSection === 'manual'" class="whitespace-pre-wrap text-sm text-muted">{{ panel.guide.manual }}</p>
+    <ul v-else-if="guideSection === 'rules'" class="space-y-2 text-sm text-muted">
+      <li v-for="rule in panel.guide.rules" :key="rule">{{ rule }}</li>
+    </ul>
+    <div v-else-if="guideSection === 'check-in'" class="space-y-4 text-sm">
+      <p v-if="panel.guide.instructions" class="whitespace-pre-wrap text-muted">{{ panel.guide.instructions }}</p>
+      <div v-if="panel.guide.wifi">
+        <h3 class="mb-1 font-semibold">Wi-Fi</h3>
+        <p v-if="panel.guide.wifi.network" class="text-muted">{{ panel.guide.wifi.network }}</p>
+        <p v-if="panel.guide.wifi.password" class="text-muted">{{ panel.guide.wifi.password }}</p>
+      </div>
     </div>
-    <div v-else-if="detail" class="divide-y divide-default">
-      <p v-if="channelManaged" class="py-4 text-base text-muted">{{ t('booking.channel_manage', { channel: channelName }) }}</p>
-      <NuxtLink v-if="canRequestChange && messageTo" :to="{ path: messageTo, query: { intent: 'booking-change' } }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('booking.request_change') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
-      <NuxtLink v-if="messageTo" :to="messageTo" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('stay.message_host') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
-      <p v-if="personalScope && !channelManaged && recordHome?.check_in_time === null && detail.online_payment && detail.status !== 'cancelled'" class="py-4 text-base text-muted">Contact your host to cancel this stay.</p>
-      <UButton v-if="personalScope && !channelManaged && !paymentProcessing && (cancellation || detail.request_status)" color="error" variant="ghost" block
-        class="justify-start py-4" :label="detail.request_status ? t('stay.withdraw_request') : 'Cancel stay'" :loading="busy === 'cancel'"
-        @click="manageOpen = false; cancelAsGuest()" />
-    </div>
+    <template v-else-if="guideSection === 'checkout'">
+      <ul class="space-y-3">
+        <li v-for="instruction in panel.guide.checkout" :key="instruction.task" class="flex gap-4">
+          <UIcon :name="STAY_CHECKOUT_TASKS[instruction.task].icon" class="mt-0.5 size-4 shrink-0 text-highlighted" />
+          <span><span class="block text-sm text-highlighted">{{ STAY_CHECKOUT_TASKS[instruction.task].label }}</span><span v-if="instruction.details" class="block whitespace-pre-wrap text-xs text-muted">{{ instruction.details }}</span></span>
+        </li>
+      </ul>
+      <UButton v-if="panel.guide.checkoutEditor" :to="panel.guide.checkoutEditor" label="Edit" color="neutral" variant="outline" class="mt-5" />
+    </template>
   </DashboardListItemDialog>
+
+  <DashboardListItemDialog v-model:open="profileOpen" :title="profile?.title ?? ''" :show-actions="false">
+    <p class="whitespace-pre-wrap break-words text-sm text-muted">{{ profile?.bio }}</p>
+  </DashboardListItemDialog>
+
   <DashboardListItemDialog v-model:open="policyOpen" :title="booking?.policy?.heading || 'Cancellation policy'" :show-actions="false">
-    <div v-if="booking" class="space-y-4">
-      <div class="space-y-3">
-        <div v-for="item in booking.policy!.items" :key="item.id" class="flex gap-3">
-          <UIcon name="i-lucide-check" class="mt-0.5 size-4 shrink-0 text-success" />
-          <p class="text-sm leading-relaxed text-muted">{{ item.text }}</p>
-        </div>
-      </div>
-    </div>
-  </DashboardListItemDialog>
-  <DashboardListItemDialog v-model:open="noShowOpen" title="Mark as a no-show" :show-actions="false" :error="actionError">
-    <div v-if="booking" class="space-y-5">
-      <p class="text-sm leading-relaxed text-muted">{{ firstName(booking.guest_name ?? '') }} won’t be asked to review this {{ noun }}, and a review link already sent stops working. The {{ noun }} itself stays as it is. This cannot be undone.</p>
-      <div class="flex items-center justify-between gap-4 pt-1">
-        <UButton label="Keep as is" color="neutral" variant="ghost" @click="noShowOpen = false" />
-        <UButton label="Mark as a no-show" color="error" :loading="busy === 'no_show'" @click="runAction('no_show')" />
-      </div>
-    </div>
+    <ul v-if="policy" class="space-y-3 text-sm text-muted">
+      <li v-for="term in policy.terms" :key="term">{{ term }}</li>
+    </ul>
+    <ul v-else-if="booking?.policy" class="space-y-3">
+      <li v-for="item in booking.policy.items" :key="item.id" class="flex gap-3">
+        <UIcon name="i-lucide-check" class="mt-0.5 size-4 shrink-0 text-success" />
+        <p class="text-sm text-muted">{{ item.text }}</p>
+      </li>
+    </ul>
   </DashboardListItemDialog>
   <!--
     Cancelling gets a screen that states the consequence and lets the tenant say
@@ -413,33 +400,42 @@ export interface BookingEditor {
   callTo: ComputedRef<string | null>
   firstName: (name: string) => string
   formatCreatedAt: (value: string) => string
+  savePrivateNote: (input: { id: string; version: number; text: string }) => Promise<void>
+  /** A stay's offline payment step: its currency, today at the home, and the write. */
+  stayPayment: { currency: ComputedRef<string | null>; today: () => string; record: (input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; idempotency_key: string }) => Promise<void> }
+  /** A stay's Change reservation step: what it is now, and the write. */
+  stayChange: { stay: ComputedRef<{ check_in_date: string; check_out_date: string; adults: number; children: number } | null>; save: (input: { check_in_date: string; check_out_date: string; adults: number; children: number }) => Promise<void> }
 }
 
 export const bookingEditorKey = Symbol('booking-editor') as InjectionKey<BookingEditor>
 </script>
 
 <script setup lang="ts">
+import type { RouteLocationRaw } from 'vue-router'
+import { useResizeObserver } from '@vueuse/core'
+import { manageReservationGuestsKey } from '~/lib/components/workspace/messages/guest-thread-client'
+import { STAY_PRESENTATION } from '~/utils/product-presentation'
+import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 import FormAnswersCard from '~/components/forms/FormAnswersCard.vue'
 import PaymentDetails from '~/components/dashboard/PaymentDetails.vue'
+import ReservationItinerary, { type ReservationItineraryDetails } from '~/components/dashboard/ReservationItinerary.vue'
+import ChannelMark from '~/lib/components/workspace/messages/ChannelMark.vue'
 import { paymentMoney } from '~/shared/payment-display'
 import { authClient } from '~/lib/auth-client'
 import { NuxtLink } from '#components'
-import { formatCalendarDate, formatTime, formatTimestamp, localDateAt  } from '~/utils/timezone'
+import { formatCalendarDate, formatTime, formatTimestamp, localDateAt } from '~/utils/timezone'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import { getErrorMessage } from '~/utils/errors'
 import { getVerticalCopy } from '~/utils/vertical-copy'
-import { formatPhone } from '~/utils/phone'
-import StayArrivalGuideView from '~/components/booking/StayArrivalGuide.vue'
-import { stayCheckInWindow } from '~/shared/stay-arrival'
-import { STAY_CHECK_IN_METHODS } from '~/shared/stay-listing'
+import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS } from '~/shared/stay-listing'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import { isChannelManagedStay, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
-import { STAY_MOVE_MESSAGE_QUEUED, isMovedStayResponse } from '~/shared/stay-move'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
 import { formatPostalAddress } from '~/utils/postal-address'
+import StaySetupMap from './StaySetupMap.client.vue'
 import { ApiClientError } from '~/utils/api-clients'
 
 const props = defineProps<{
@@ -452,8 +448,70 @@ const props = defineProps<{
 }>()
 const recordLevel = useRouteLevel()
 const route = useRoute()
+const runtimeConfig = useRuntimeConfig()
+const guestManagement = inject(manageReservationGuestsKey)
+const photoArrow = { color: 'neutral', variant: 'solid', size: 'sm', class: 'bg-white text-black hover:bg-white/90 disabled:opacity-0' } as const
+const guideLabels = {
+  directions: 'Directions from your host',
+  'check-in': 'How to get inside',
+  manual: 'House manual',
+  rules: 'House rules',
+  checkout: 'Checkout details',
+}
+const guideSection = ref<keyof typeof guideLabels | null>(null)
+const guideOpen = computed({
+  get: () => guideSection.value !== null,
+  set: open => { if (!open) guideSection.value = null },
+})
 
-type ActionColor = 'success' | 'error' | 'neutral'
+function textPreview() {
+  const element = ref<HTMLElement | null>(null)
+  const clipped = ref(false)
+  useResizeObserver(element, () => {
+    const preview = element.value
+    clipped.value = preview !== null && preview.scrollHeight > preview.clientHeight
+  })
+  return { element, clipped }
+}
+const { element: directionsPreview, clipped: directionsClipped } = textPreview()
+const { element: manualPreview, clipped: manualClipped } = textPreview()
+const { element: rulesPreview, clipped: rulesClipped } = textPreview()
+const { element: hostPreview, clipped: hostClipped } = textPreview()
+const profile = ref<{ title: string; bio: string } | null>(null)
+const profileOpen = computed({
+  get: () => profile.value !== null,
+  set: open => { if (!open) profile.value = null },
+})
+function showProfile(title: string, bio: string | null | undefined) {
+  if (bio) profile.value = { title, bio }
+}
+
+interface PanelLink {
+  label: string
+  icon: string
+  to: RouteLocationRaw
+  testid?: string
+}
+
+type PanelShortcut = {
+  label: string
+  icon: string
+  detail: string | null | undefined
+  href?: string
+  to?: string
+  run?: () => void
+}
+
+type PanelAction = PanelLink | {
+  label: string
+  icon: string
+  to?: undefined
+  run: () => void
+  testid?: string
+}
+
+const sectionClass = 'mt-8 border-t border-default pt-7'
+const rowClass = 'flex w-full items-center gap-3 py-2.5 text-left text-sm text-highlighted disabled:opacity-50'
 
 const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const actionError = ref<string | null>(null)
@@ -464,7 +522,6 @@ watchEffect(() => {
   if (error.value && !data.value) showError(error.value)
 })
 
-const formattedDate = computed(() => stay.value ? formatCalendarDate(stay.value.check_in_date, 'en') : booking.value ? formatCalendarDate(booking.value.booking_date, 'en') : '')
 const formattedTime = computed(() => {
   if (!booking.value?.booking_time) return ''
   const start = formatTime(booking.value.booking_time, 'en')
@@ -479,30 +536,10 @@ const formattedTime = computed(() => {
 const recordGuestName = computed(() => booking.value?.guest_name ?? stay.value?.guest_name ?? null)
 const recordGuestImage = computed(() => booking.value?.guest_image_url ?? detail.value?.guest_image_url ?? null)
 const partySize = computed(() => booking.value?.party_size ?? guestCount.value)
-const partyTitle = computed(() => {
-  const name = firstName(recordGuestName.value ?? '')
-  return partySize.value > 1 ? `${name}’s group of ${partySize.value}` : name
-})
-const recordImage = computed(() => booking.value?.resource_image_url ?? recordHome.value?.image_url ?? null)
-const heroTitle = computed(() => {
-  if (!stay.value) return props.personalScope || purchase ? offeringName.value : partyTitle.value
-  if (props.personalScope && home.value) return home.value.name
-  if (guest.value.state === 'named') return partyTitle.value
-  if (guest.value.state === 'not-provided') return `Name not provided by ${channelName.value}`
-  return guest.value.state === 'missing' ? 'Guest name missing' : 'Guest'
-})
-const heroDate = computed(() => stay.value ? stayDates.value : purchase
-  ? `${booking.value?.type === 'order' ? 'Ordered' : 'Paid'} ${formattedDate.value}`
-  : props.personalScope ? formattedDate.value : '')
-const heroSubtitle = computed(() => stay.value ? home.value?.organization_name ?? hostHome.value?.internal_name
-  : props.personalScope ? booking.value?.organization_name : purchase ? recordGuestName.value : offeringName.value)
 const recordCopy = computed(() => booking.value ? getVerticalCopy(booking.value.vertical) : null)
-const guestHeading = computed(() => {
-  const label = recordCopy.value?.guestsLabelPlural ?? 'Guests'
-  return label.charAt(0).toUpperCase() + label.slice(1)
-})
-const offeringName = computed(() => booking.value?.product_kind === 'table' ? booking.value.location_title : booking.value?.name ?? '')
-const guestCountLabel = computed(() => `${booking.value?.party_size ?? 0} ${booking.value?.party_size === 1 ? recordCopy.value?.guestLabel : recordCopy.value?.guestsLabelPlural}`)
+const bookingParty = computed(() => recordCopy.value?.guestsLabelPlural === 'clients' ? 'clients' : 'guests')
+const manageGuestsLabel = computed(() => `Manage ${bookingParty.value}`)
+function manageBookingParty() { guestManagement?.open(bookingParty.value) }
 const otherGuestLabel = computed(() => `${partySize.value - 1} other ${partySize.value === 2 ? recordCopy.value?.guestLabel ?? 'guest' : recordCopy.value?.guestsLabelPlural ?? 'guests'}`)
 const cancellationSummary = computed(() => booking.value?.policy?.items.find(item => item.id === 'cancellation')?.text)
 const conversationId = computed(() => booking.value?.conversation_id ?? detail.value?.conversation_id ?? null)
@@ -515,13 +552,25 @@ const callTo = computed(() => {
   const phone = booking.value?.guest_phone ?? (!props.personalScope ? detail.value?.guest_phone : null)
   return phone ? `tel:${phone}` : null
 })
-const contactCallTo = computed(() => props.personalScope ? booking.value?.contact_phone ? `tel:${booking.value.contact_phone}` : null : callTo.value)
+const contactCallTo = computed(() => {
+  if (!props.personalScope) return callTo.value
+  const phone = recordHome.value?.contact_phone ?? booking.value?.contact_phone
+  return phone ? `tel:${phone}` : null
+})
 const guestDetailLink = computed(() => booking.value?.type === 'booking' && !props.personalScope ? { path: `${editorPath.value}/guest`, query: route.query } : undefined)
-const messageLabel = computed(() => props.personalScope ? stay.value ? t('stay.message_host') : 'Message' : `Message ${recordCopy.value?.guestLabel ?? 'guest'}`)
 
 const policyOpen = ref(false)
+const toast = useToast()
+
+async function copyAddress(address: string) {
+  try {
+    await navigator.clipboard.writeText(address)
+    toast.add({ title: 'Address copied', color: 'success' })
+  } catch (cause) {
+    toast.add({ title: 'Address could not be copied', description: getErrorMessage(cause, 'Clipboard unavailable'), color: 'error' })
+  }
+}
 const { t } = useI18n()
-const manageOpen = ref(false)
 const session = authClient.useSession()
 // The buyer's answer to a change, on the record itself; the email link records the same decision.
 const answering = ref<'accept' | 'decline' | null>(null)
@@ -549,46 +598,15 @@ async function answerChange(decision: 'accept' | 'decline') {
   }
 }
 const cancelOpen = ref(false)
-const noShowOpen = ref(false)
 const cancelNote = ref('')
 // What a cancellation gives back: everything still captured, as Airbnb's host cancellation does.
 const refundable = computed(() => (booking.value?.payments ?? []).reduce((sum, entry) => sum + entry.payment.captured_amount - entry.payment.refunded_amount, 0))
 const busy = ref<string | null>(null)
 const actionAttempt = ref<{ draft: string; key: string } | null>(null)
-// The team's one private note on the booking, saved as a whole when the field is left.
-const noteDraft = ref('')
-const noteSaving = ref(false)
-const noteError = ref<string | null>(null)
-watch(() => booking.value?.private_notes, (saved) => { if (!noteSaving.value) noteDraft.value = saved ?? '' }, { immediate: true })
-
-// Nothing to approve and nothing to mark done: a booking arrives confirmed and
-// is complete once its end passes. Cancelling is the one thing left to decide,
-// and changing it is the link above.
-const availableActions = computed<Array<{ value: string; label: string; icon: string; color: ActionColor }>>(() => {
-  if (!booking.value || !presentation.value || !booking.value.conversation_id) return []
-  if (props.personalScope && booking.value.guest_can_retry_cancellation) return [
-    { value: 'cancel', label: 'Retry deposit refund', icon: 'i-lucide-refresh-cw', color: 'neutral' as const },
-  ]
-  // The account's one decision is its own cancellation, on the public cancel rule the server already answered.
-  if (props.personalScope) return booking.value.guest_can_cancel
-    ? [{ value: 'cancel', label: `Cancel ${presentation.value.noun}`, icon: 'i-lucide-calendar-x', color: 'error' as const }]
-    : []
-  const noShow = booking.value.can_mark_no_show ? [{ value: 'no_show', label: 'Mark as a no-show', icon: 'i-lucide-user-x', color: 'neutral' as const }] : []
-  if (booking.value.complete) return noShow
-  if (booking.value.type === 'booking' && booking.value.status === 'pending') return [
-    { value: 'confirm', label: `Confirm ${presentation.value.noun}`, icon: 'i-lucide-calendar-check', color: 'success' as const },
-    { value: 'reject', label: `Decline ${presentation.value.noun}`, icon: 'i-lucide-calendar-x', color: 'error' as const },
-  ]
-  if (booking.value.status !== 'confirmed') return []
-  return [{ value: 'cancel', label: `Cancel ${presentation.value.noun}`, icon: 'i-lucide-calendar-x', color: 'error' as const }, ...noShow]
-})
 
 const REVIEW_INVITATION_LABELS = { sent: 'Sent', submitted: 'Answered', revoked: 'Withdrawn', expired: 'Expired' } as const
 const reviewStateLabel = computed(() => {
-  const record = booking.value
-  if (!record) return ''
-  if (record.no_show_at) return `Recorded ${formatCreatedAt(record.no_show_at)}. No review invitation is sent.`
-  const invitation = record.review_invitation
+  const invitation = booking.value?.review_invitation
   return invitation ? `${REVIEW_INVITATION_LABELS[invitation.state]} ${formatCreatedAt(invitation.at)}` : ''
 })
 
@@ -626,53 +644,20 @@ watch(realtime.connectionEpoch, epoch => {
   if (epoch > 0 && !purchase) void refreshDetails()
 })
 
-// A blur save and the navigation it caused share one write. Failed text stays
-// visible on the record.
-let pendingNote: Promise<boolean> | null = null
-function saveNote(): Promise<boolean> {
-  if (pendingNote) return pendingNote
-  const current = booking.value
-  if (!current || noteDraft.value.trim() === (current.private_notes ?? '')) return Promise.resolve(true)
-  pendingNote = writeNote(current).finally(() => { pendingNote = null })
-  return pendingNote
-}
-onBeforeRouteUpdate(saveNote)
-onBeforeRouteLeave(saveNote)
-
 function selectAction(action: string) {
   if (action === 'cancel' && !booking.value?.guest_can_retry_cancellation) {
-    manageOpen.value = false
     openCancel()
-  } else if (action === 'no_show') {
-    manageOpen.value = false
-    actionError.value = null
-    noShowOpen.value = true
   } else void runAction(action)
 }
 
-async function writeNote(current: DashboardBookingDetails) {
+async function savePrivateNote(input: { id: string; version: number; text: string }) {
+  if (props.personalScope || booking.value?.booking_id !== input.id) throw new Error('The reservation is no longer available to edit.')
   const revision = accessChangeRevision
-  const note = noteDraft.value
-  noteSaving.value = true
-  noteError.value = null
-  try {
-    const updated = await dashboardApi(
-      dashboardBookingPath(props.bookingId),
-      {
-        method: 'PATCH',
-        // Guarded by the booking as it was read: an edit since then is not overwritten.
-        body: { private_notes: note, version: current.version },
-        validate: isDashboardBooking,
-      },
-    )
-    if (accessChangeRevision === revision) data.value = updated
-    return true
-  } catch (cause) {
-    noteError.value = getErrorMessage(cause, 'Note could not be saved')
-    return false
-  } finally {
-    noteSaving.value = false
-  }
+  const updated = await dashboardApi(dashboardBookingPath(input.id), {
+    method: 'PATCH', body: { private_notes: input.text, version: input.version }, validate: isDashboardBooking,
+  })
+  if (accessChangeRevision !== revision) throw new Error('Reservation access changed while saving the note.')
+  data.value = updated
 }
 
 const isCancelled = (value: unknown): value is { success: true } => isRecord(value) && value.success === true
@@ -710,40 +695,226 @@ async function runAction(action: string) {
   await run(action, async () => {
     await updateStatus(action, record, action === 'cancel' ? cancelNote.value.trim() : '')
     cancelOpen.value = false
-    noShowOpen.value = false
-    manageOpen.value = false
   }, 'Booking could not be updated', false)
 }
-const toast = useToast()
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 const accountStay = computed(() => isAccountNightBooking(data.value) ? data.value : null)
+const itineraryOpen = ref(false)
 const dashboardStay = computed(() => isDashboardBooking(data.value) && 'home' in data.value ? data.value : null)
 const managedStay = computed(() => dashboardStay.value?.manage ? dashboardStay.value : null)
+const turnoverHome = computed(() => dashboardStay.value?.manage === false ? dashboardStay.value.home : null)
 const stay = computed(() => accountStay.value?.booking ?? dashboardStay.value?.booking ?? null)
 const detail = computed(() => accountStay.value?.booking ?? managedStay.value?.booking ?? null)
 const pendingChanges = computed(() => managedStay.value?.booking.pending_changes ?? [])
 const channelManaged = computed(() => detail.value !== null && isChannelManagedStay(detail.value))
 const manage = computed(() => managedStay.value !== null)
-const home = computed(() => accountStay.value?.home ?? null)
-const hostHome = computed(() => dashboardStay.value?.home ?? null)
-const recordHome = computed(() => home.value ?? hostHome.value)
-const checkInTime = computed(() => recordHome.value?.check_in_time
-  ? stayCheckInWindow(formatTime(recordHome.value.check_in_time, 'en'), hostHome.value?.check_in_end_time ? formatTime(hostHome.value.check_in_end_time, 'en') : null)
-  : null)
-/** When the guest said they arrive, where that is not the home's check-in time: the stay's stored start in the home's clock. */
+const recordHome = computed(() => accountStay.value?.home ?? managedStay.value?.home ?? null)
+const itinerary = computed<ReservationItineraryDetails | null>(() => {
+  const value = detail.value
+  const home = recordHome.value
+  if (value?.status === 'confirmed' && home && !channelManaged.value) {
+    const online = value.online_payment
+    return {
+      title: home.name, organizationName: home.organization_name, address: home.location?.address ? formatPostalAddress(home.location.address) : null,
+      photoUrl: home.photo_urls[0] ?? null, hostName: home.host?.name ?? null, partySize: value.adults + value.children + value.infants,
+      paid: [{ amount: online ? online.captured_minor - online.refunded_minor : value.paid_minor, currency: value.currency }],
+      schedule: { unit: 'nights', checkInDate: value.check_in_date, checkOutDate: value.check_out_date, checkInTime: home.check_in_time, checkOutTime: home.check_out_time },
+      houseManual: home.arrival_guide?.house_manual, houseRules: home.house_rules,
+    }
+  }
+  const record = booking.value
+  if (record?.type !== 'booking' || record.status !== 'confirmed' || !record.starts_at || !record.ends_at || record.party_size === null) return null
+  const paid = new Map<string, number>()
+  for (const { payment } of record.payments ?? []) {
+    if (payment.captured_amount > 0) paid.set(payment.currency, (paid.get(payment.currency) ?? 0) + payment.captured_amount - payment.refunded_amount)
+  }
+  return {
+    title: record.product_kind === 'table' ? record.location_title : record.name, organizationName: record.organization_name, address: record.location_address,
+    photoUrl: record.resource_photo_urls[0] ?? null, hostName: record.host?.name ?? null, partySize: record.party_size,
+    paid: Array.from(paid, ([currency, amount]) => ({ amount, currency })),
+    schedule: { unit: 'slot', startsAt: record.starts_at, endsAt: record.ends_at, timezone: record.timezone },
+  }
+})
+const itineraryAction: PanelAction = { label: 'Get a PDF for visa purposes', icon: 'i-lucide-file-text', run: () => { itineraryOpen.value = true }, testid: 'stay-itinerary' }
+
+/** When the guest said they arrive, where that differs from the home's check-in clock. */
 const arrivalTime = computed(() => {
   const value = stay.value
   if (!value || value.starts_at.length === 10) return null
   const local = new Intl.DateTimeFormat('en-GB', { timeZone: value.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value.starts_at))
-  return local === recordHome.value?.check_in_time ? null : formatTime(local, 'en')
+  return local === (recordHome.value ?? turnoverHome.value)?.check_in_time ? null : formatTime(local, 'en')
 })
-const guestAddress = computed(() => home.value?.location?.address ? formatPostalAddress(home.value.location.address) : '')
+
+const reservationActions = computed<PanelAction[]>(() => {
+  const actions: PanelAction[] = []
+  if (guestManagement?.available.value) {
+    actions.push({ label: manageGuestsLabel.value, icon: 'i-lucide-users-round', run: manageBookingParty })
+  }
+  if (stay.value) {
+    if (props.personalScope) {
+      if (canRequestChange.value && messageTo.value) {
+        actions.push({ label: 'Change reservation', icon: 'i-lucide-pencil', to: { path: messageTo.value, query: { intent: 'booking-change' } }, testid: 'stay-change' })
+      }
+      if (!channelManaged.value && !paymentProcessing.value && (canRequestChange.value || requestStatus.value)) {
+        actions.push({ label: requestStatus.value ? t('stay.withdraw_request') : 'Cancel reservation', icon: 'i-lucide-ban', run: () => void cancelAsGuest(), testid: 'stay-cancel' })
+      }
+    } else if (manage.value && !channelManaged.value) {
+      if (hostActions.value.includes('edit')) {
+        actions.push({ label: 'Change reservation', icon: 'i-lucide-pencil', to: { path: `${editorPath.value}/dates`, query: route.query }, testid: 'stay-change' })
+      }
+      if (hostActions.value.includes('cancel')) {
+        actions.push({ label: 'Cancel reservation', icon: 'i-lucide-ban', run: () => void cancelStay(), testid: 'stay-cancel' })
+      }
+    }
+    if (itinerary.value) actions.push(itineraryAction)
+    return actions
+  }
+
+  const record = booking.value
+  if (!record?.conversation_id || !presentation.value) return actions
+  if (canChangeBooking.value) {
+    const to = props.personalScope
+      ? { path: messageTo.value!, query: { intent: 'booking-change' } }
+      : { path: `${editorPath.value}/change`, query: route.query }
+    actions.push({ label: `Change ${noun.value}`, icon: 'i-lucide-pencil', to })
+  }
+
+  if (props.personalScope) {
+    if (record.guest_can_retry_cancellation) {
+      actions.push({ label: 'Retry deposit refund', icon: 'i-lucide-refresh-cw', run: () => selectAction('cancel') })
+    } else if (record.guest_can_cancel) {
+      actions.push({ label: `Cancel ${noun.value}`, icon: 'i-lucide-ban', run: () => selectAction('cancel') })
+    }
+  } else if (!record.complete) {
+    if (record.status === 'pending') {
+      actions.push(
+        { label: `Confirm ${noun.value}`, icon: 'i-lucide-calendar-check', run: () => selectAction('confirm') },
+        { label: `Decline ${noun.value}`, icon: 'i-lucide-calendar-x', run: () => selectAction('reject') },
+      )
+    } else if (record.status === 'confirmed') {
+      actions.push({ label: `Cancel ${noun.value}`, icon: 'i-lucide-ban', run: () => selectAction('cancel') })
+    }
+  }
+  if (itinerary.value) actions.push(itineraryAction)
+  return actions
+})
+
+const contact = computed(() => {
+  const links: PanelLink[] = []
+  const contactName = props.personalScope ? 'host' : recordCopy.value?.guestLabel ?? 'guest'
+  if (messageTo.value && !route.meta.dashboardThirdPane) {
+    links.push({
+      label: props.personalScope ? t('stay.message_host') : `Message ${contactName}`,
+      icon: 'i-lucide-message-circle',
+      to: messageTo.value,
+      testid: stay.value ? 'stay-message' : undefined,
+    })
+  }
+  if (contactCallTo.value) {
+    links.push({ label: `Call ${contactName}`, icon: 'i-lucide-phone', to: contactCallTo.value, testid: stay.value ? 'stay-call' : undefined })
+  }
+  return links
+})
+
+function reservationDay(date: string) {
+  return formatCalendarDate(date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })
+}
+
+const panel = computed(() => {
+  const value = stay.value
+  const place = recordHome.value
+  const turnover = turnoverHome.value
+  const home = place ?? turnover
+  const record = booking.value
+  const guide = place?.arrival_guide
+  const checkInMethod = guide?.check_in_method ?? turnover?.check_in_method
+  const method = checkInMethod ? STAY_CHECK_IN_METHODS[checkInMethod].label : null
+  const location = purchase ? null : record?.location_title
+  const address = place?.location?.address ? formatPostalAddress(place.location.address) : record?.location_address
+  const editor = value && `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/products/${encodeURIComponent(value.product_id)}`
+  if (!value && !record) return null
+
+  const rows: PanelShortcut[] = []
+  if (value && !turnover) {
+    if (address || guide?.directions || !props.personalScope) {
+      rows.push({ label: 'Getting there', icon: 'i-lucide-map-pin', detail: address,
+        ...(props.personalScope ? { href: '#getting-there' } : { to: `${editor}/directions` }) })
+    }
+    if (guide?.check_in_instructions || guide?.wifi_network || guide?.wifi_password || !props.personalScope) {
+      rows.push({ label: 'How to get inside', icon: 'i-lucide-key-round', detail: 'Details for an easy check-in',
+        ...(props.personalScope ? { run: () => { guideSection.value = 'check-in' } } : { to: `${editor}/check-in-method` }) })
+    }
+    if (guide?.house_manual || place?.house_rules.length || place?.safety.length || !props.personalScope) {
+      rows.push({ label: 'House rules', icon: 'i-lucide-book-open', detail: 'Review these details for a smooth stay',
+        ...(props.personalScope ? { href: '#rules-and-instructions' } : { to: `${editor}/house-rules` }) })
+    }
+    if (guide?.checkout_instructions.length) {
+      rows.push({ label: 'Checkout details', icon: 'i-lucide-door-open', detail: 'How to check out',
+        run: () => { guideSection.value = 'checkout' } })
+    } else if (!props.personalScope) {
+      rows.push({ label: 'Checkout details', icon: 'i-lucide-door-open', detail: 'How to check out', to: `${editor}/checkout-instructions` })
+    }
+  } else if (!value && (location || address)) {
+    rows.push({ label: 'Getting there', icon: 'i-lucide-map-pin', detail: address ?? location, href: '#getting-there' })
+  }
+  if (!purchase) rows.push({ label: 'Get help', icon: 'i-lucide-life-buoy', detail: 'Contact support', href: '#reservation-support' })
+  const when = value ? [
+    {
+      label: 'Check-in',
+      value: reservationDay(value.check_in_date),
+      detail: home?.check_in_time ? formatTime(home.check_in_time, 'en') : null,
+    },
+    { label: 'Checkout', value: reservationDay(value.check_out_date), detail: home?.check_out_time ? formatTime(home.check_out_time, 'en') : null },
+  ] : record && !purchase ? [
+    { label: 'Date', value: reservationDay(record.booking_date), detail: null },
+    { label: 'Time', value: formattedTime.value, detail: null },
+  ] : []
+  const bookingId = value?.booking_id ?? record?.booking_id
+
+  return {
+    photos: place?.photo_urls ?? (turnover?.image_url ? [turnover.image_url] : record?.resource_photo_urls ?? []),
+    title: home?.name ?? (record?.product_kind === 'table' ? record.location_title : record?.name),
+    purchaseDate: purchase && record ? `${record.type === 'order' ? 'Ordered' : 'Paid'} ${formatCreatedAt(record.created_at)}` : null,
+    host: value ? place?.host : record?.host,
+    coHosts: place?.co_hosts ?? [],
+    when,
+    rows,
+    guests: value
+      ? `${guestCount.value} ${guestCount.value === 1 ? 'guest' : 'guests'}`
+      : record?.party_size != null ? presentation.value?.formatCount(record.party_size) : null,
+    code: detail.value?.channel_booking_id ?? bookingId?.slice(0, 8).toUpperCase(),
+    actions: reservationActions.value,
+    contact: contact.value,
+    location,
+    address,
+    pin: place?.location && place.location.latitude !== null && place.location.longitude !== null
+      ? { latitude: place.location.latitude, longitude: place.location.longitude } : record?.location_pin,
+    mapsUrl: place?.location?.maps_url ?? record?.location_maps_url,
+    listingUrl: place?.listing ? new URL(STAY_PRESENTATION.productPath('', place.listing.slug), tenantOrganizationOrigin({
+      platformDomain: String(runtimeConfig.public.platformDomain),
+      freeOrganizationDomain: String(runtimeConfig.public.freeOrganizationDomain),
+      subdomain: place.listing.subdomain,
+      canonicalDomain: place.listing.canonical_domain,
+    })).href : null,
+    policy: policy.value ? (props.personalScope ? policy.value.terms[0] : `${policy.value.label} · ${policy.value.summary}`) : cancellationSummary.value,
+    guide: home ? {
+      directions: guide?.directions,
+      method,
+      instructions: guide?.check_in_instructions ?? turnover?.check_in_instructions,
+      manual: guide?.house_manual,
+      rules: place?.house_rules ?? [],
+      wifi: guide && (guide.wifi_network || guide.wifi_password) ? { network: guide.wifi_network, password: guide.wifi_password } : null,
+      safety: place?.safety ?? [],
+      checkout: guide?.checkout_instructions ?? [],
+      checkoutEditor: !props.personalScope && manage.value && editor ? `${editor}/checkout-instructions` : null,
+    } : null,
+  }
+})
 const cancellation = computed(() => accountStay.value?.cancellation ?? null)
 const canRequestChange = computed(() => props.personalScope && detail.value !== null && !isChannelManagedStay(detail.value) && Boolean(messageTo.value) && detail.value.status === 'confirmed'
   && (detail.value.ends_at.length === 10 ? detail.value.check_out_date >= localDateAt(new Date(), detail.value.timezone) : Date.parse(detail.value.ends_at) > Date.now()))
 const policy = computed(() => detail.value?.cancellation_policy ? bookedPolicyTerms(detail.value.cancellation_policy) : null)
 const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.org_slug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
-const methods = Object.entries(STAY_PAYMENT_METHOD_LABELS).map(([value, label]) => ({ value, label }))
 const channelName = computed(() => detail.value ? detail.value.channel === 'direct' ? 'You' : STAY_CHANNEL_LABELS[detail.value.channel] : '')
 /**
  * Who the stay is for. A stay made here always names its guest, so one without
@@ -758,29 +929,20 @@ const guest = computed<GuestIdentity>(() => {
   if (value.owner === 'app' && !value.guest_name) return { state: 'missing' }
   return value.guest_name ? { state: 'named', name: value.guest_name } : { state: 'not-provided' }
 })
-const nights = computed(() => stay.value ? Math.round((Date.parse(`${stay.value.check_out_date}T00:00:00Z`) - Date.parse(`${stay.value.check_in_date}T00:00:00Z`)) / 86_400_000) : 0)
-const stayDates = computed(() => stay.value
-  ? `${formatCalendarDate(stay.value.check_in_date, 'en')} – ${formatCalendarDate(stay.value.check_out_date, 'en')} · ${nights.value === 1 ? '1 night' : `${nights.value} nights`}`
-  : '')
-const partyLabel = computed(() => {
-  const value = stay.value
-  if (!value) return ''
-  const parts = [`${value.adults} ${value.adults === 1 ? 'adult' : 'adults'}`]
-  if (value.children) parts.push(`${value.children} ${value.children === 1 ? 'child' : 'children'}`)
-  if (value.infants) parts.push(`${value.infants} ${value.infants === 1 ? 'infant' : 'infants'}`)
-  return parts.join(', ')
-})
-const guestCount = computed(() => stay.value ? stay.value.adults + stay.value.children + stay.value.infants : 0)
+const guestCount = computed(() => detail.value?.party_size ?? (stay.value ? stay.value.adults + stay.value.children : 0))
 const paymentProcessing = computed(() => accountStay.value?.payment_processing === true)
 const requestStatus = computed(() => detail.value?.request_status)
 const hostActions = computed(() => managedStay.value?.booking.available_actions ?? [])
-const pageTitle = computed(() => stay.value ? props.personalScope ? 'Your stay' : statusLabel.value : timedTitle.value)
+const pageTitle = computed(() => purchase ? timedTitle.value : 'Reservation')
 const statusLabel = computed(() => {
-  if (!stay.value) return 'Stay'
+  if (purchase) return null
   if (paymentProcessing.value) return t('payment.processing')
   if (requestStatus.value === 'awaiting_payment') return t('stay.awaiting_payment')
   if (requestStatus.value === 'awaiting_approval') return t('stay.awaiting_approval')
-  return { pending: 'Pending', cancelled: 'Cancelled', confirmed: 'Confirmed' }[stay.value.status]
+  const status = stay.value?.status ?? booking.value?.status
+  if (status === 'cancelled') return 'Cancelled'
+  if (status === 'pending') return 'Awaiting review'
+  return null
 })
 
 function money(minor: number): string {
@@ -793,8 +955,6 @@ function methodLabel(method: StayPaymentMethod) { return STAY_PAYMENT_METHOD_LAB
 const changeRetry = ref<{ messageId: string; decision: 'accept' | 'decline' } | null>(null)
 // The payment day defaults to today where the home is; one key per payment being entered, kept across retries.
 const homeToday = () => stay.value ? localDateAt(new Date(), stay.value.timezone) : ''
-const draft = reactive({ amount: '', method: 'cash' as StayPaymentMethod, paid_on: homeToday(), reference: '', key: crypto.randomUUID() })
-watch(stay, () => { if (!draft.paid_on) draft.paid_on = homeToday() })
 
 async function run(key: string, action: () => Promise<unknown>, failure: string, reload = true) {
   if (busy.value) return
@@ -848,21 +1008,18 @@ async function answerStayChange(messageId: string, decision: 'accept' | 'decline
   }, t('booking.change_failed'))
 }
 
-async function recordPayment() {
+/** The payment step's write: money the host received or refunded offline, recorded on the stay. */
+async function recordStayPayment(input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; idempotency_key: string }) {
   const value = detail.value
-  if (!value || isChannelManagedStay(value) || !isCurrencyCode(value.currency)) return
-  const typed = draft.amount.trim()
+  if (!value || isChannelManagedStay(value) || !isCurrencyCode(value.currency)) throw new Error('This stay records no payments here')
+  const typed = input.amount.trim()
   const negative = typed.startsWith('-')
-  await run('record', async () => {
-    const minor = majorAmountToMinor(negative ? typed.slice(1) : typed, value.currency as Parameters<typeof majorAmountToMinor>[1])
-    await dashboardApi(`${dashboardBookingPath(value.booking_id)}/payments`, {
-      method: 'POST', validate: isNightBooking,
-      body: { amount_minor: negative ? -minor : minor, method: draft.method, paid_on: draft.paid_on, reference: draft.reference || undefined, idempotency_key: draft.key },
-    })
-    draft.amount = ''
-    draft.reference = ''
-    draft.key = crypto.randomUUID()
-  }, 'The payment could not be recorded')
+  const minor = majorAmountToMinor(negative ? typed.slice(1) : typed, value.currency as Parameters<typeof majorAmountToMinor>[1])
+  await dashboardApi(`${dashboardBookingPath(value.booking_id)}/payments`, {
+    method: 'POST', validate: isNightBooking,
+    body: { amount_minor: negative ? -minor : minor, method: input.method, paid_on: input.paid_on, reference: input.reference || undefined, idempotency_key: input.idempotency_key },
+  })
+  await refreshDetails()
 }
 
 async function deletePayment(paymentId: string) {
@@ -871,31 +1028,12 @@ async function deletePayment(paymentId: string) {
   await run(paymentId, () => dashboardApi(`${dashboardBookingPath(value.booking_id)}/payments/${encodeURIComponent(paymentId)}`, { method: 'DELETE', validate: isNightBooking }), 'The payment could not be deleted')
 }
 
-// A stay paid on the site returns the guest's whole payment, as Airbnb's host cancellation does; the host approves that refund next.
-// A stay booked here that has begun, before its guest reviewed it. The thread
-// operation is the writer; it refuses a stay that no longer qualifies.
-const canMarkNoShow = computed(() => !props.personalScope && manage.value && detail.value?.channel === 'direct' && detail.value.status === 'confirmed'
-  && !detail.value.no_show_at && Boolean(detail.value.conversation_id) && detail.value.check_in_date <= localDateAt(new Date(), detail.value.timezone))
-
-async function undoMove() {
+/** The Change reservation step's write: new dates and guests for a stay the business made, under its version. */
+async function changeStay(input: { check_in_date: string; check_out_date: string; adults: number; children: number }) {
   const value = detail.value
-  if (!value?.booked_product_id) return
-  if (!await confirmDialog.open({ title: 'Undo this move', description: `The guest goes back to ${value.booked_home_name} and a message with its address and entry details is queued.`, confirmLabel: 'Undo move', cancelLabel: 'Keep the move' })) return
-  await run('undo_move', async () => {
-    await dashboardApi(`${dashboardBookingPath(value.booking_id)}/move`, { method: 'POST', validate: isMovedStayResponse, body: { version: value.version, product_id: value.booked_product_id } })
-    toast.add(STAY_MOVE_MESSAGE_QUEUED)
-  }, 'The move could not be undone.')
-}
-
-async function markNoShow() {
-  const value = detail.value
-  if (!value?.conversation_id) return
-  if (!await confirmDialog.open({
-    title: 'Mark as a no-show',
-    description: `${guest.value.state === 'named' ? guest.value.name : 'The guest'} won’t be asked to review this stay, and a review link already sent stops working. The stay itself stays as it is. This cannot be undone.`,
-    confirmLabel: 'Mark as a no-show', cancelLabel: 'Keep as is',
-  })) return
-  await run('no_show', () => updateStatus('no_show', value), 'The stay could not be marked as a no-show', false)
+  if (!value) throw new Error('The stay is not loaded')
+  await dashboardApi(`${dashboardBookingPath(value.booking_id)}/move`, { method: 'POST', validate: isNightBooking, body: { ...input, version: value.version } })
+  await refreshDetails()
 }
 
 async function cancelStay() {
@@ -940,7 +1078,11 @@ async function cancelAsGuest() {
   const quote = cancellation.value
   if (!value || isChannelManagedStay(value) || !value.conversation_id) return
   const pending = value.request_status !== null
-  if (!pending && (!quote || !policy.value)) return
+  if (!pending && !quote) {
+    if (messageTo.value && await confirmDialog.open({ title: 'Cancel reservation', description: 'Contact your host to cancel this reservation.',
+      confirmLabel: t('stay.message_host'), cancelLabel: 'Keep reservation' })) await navigateTo(messageTo.value)
+    return
+  }
   const description = pending || !quote ? '' : quote.refund_minor === quote.paid_minor ? `You get back the full ${money(quote.paid_minor)}.`
     : quote.refund_minor > 0 ? `Under the ${policy.value?.label} policy you get back ${money(quote.refund_minor)} of the ${money(quote.paid_minor)} you paid.`
       : `Under the ${policy.value?.label} policy none of the ${money(quote.paid_minor)} you paid comes back.`
@@ -958,5 +1100,8 @@ provide(bookingEditorKey, {
   callTo,
   firstName,
   formatCreatedAt,
+  savePrivateNote,
+  stayPayment: { currency: computed(() => detail.value?.currency ?? null), today: homeToday, record: recordStayPayment },
+  stayChange: { stay: computed(() => detail.value ? { check_in_date: detail.value.check_in_date, check_out_date: detail.value.check_out_date, adults: detail.value.adults, children: detail.value.children } : null), save: changeStay },
 })
 </script>

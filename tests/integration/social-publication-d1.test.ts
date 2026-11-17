@@ -3,6 +3,7 @@ import { createHmac } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import test from 'node:test'
+import { captureEvents } from './support/events.ts'
 import Ajv from 'ajv'
 import { Miniflare } from 'miniflare'
 import sharp from 'sharp'
@@ -39,6 +40,7 @@ import { resolveMembership } from '../../server/utils/member-access.ts'
 import { loadSettingsPayload, updateOrganizationSettingsFields } from '../../server/utils/organization-settings.ts'
 import regenerateSocialCards from '../../server/api/editor/organizations/[organization_id]/social-cards/regenerate.post.ts'
 import { drainPublicResourceCacheInvalidations } from '../../server/utils/public-resource-cache.ts'
+import { bindDatabaseEvents } from '../../server/db/index.ts'
 
 /**
  * Publication, channel management and erasure against real local D1, with Meta and
@@ -225,8 +227,9 @@ async function setUp() {
   for (const { tag } of journal.entries) {
     for (const statement of readFileSync(`migrations/${tag}.sql`, 'utf8').split('--> statement-breakpoint').map(sql => sql.trim()).filter(Boolean)) await db.prepare(statement).run()
   }
+  const queue = captureEvents()
   const env = {
-    ...await runtime.getBindings<CloudflareEnv>(),
+    ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding,
     BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests',
     NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', PREVIEW_SECRET: 'preview-proof-secret',
     FACEBOOK_APP_ID: 'fb-app', FACEBOOK_APP_SECRET: 'facebook-secret', INSTAGRAM_APP_ID: 'ig-app', INSTAGRAM_APP_SECRET: 'instagram-secret',
@@ -258,7 +261,7 @@ async function setUp() {
   // Ordinary publication cases run without production Images credentials, as
   // local development does. The card contract below uses the native binding.
   const { CLOUDFLARE_IMAGES_API_TOKEN: _token, ...cardless } = env as unknown as Record<string, unknown>
-  return { runtime, db, env, cardless: cardless as unknown as CloudflareEnv, meta, run, asset, restore: () => { globalThis.fetch = realFetch } }
+  return { runtime, db, env, queue, cardless: cardless as unknown as CloudflareEnv, meta, run, asset, restore: () => { globalThis.fetch = realFetch } }
 }
 
 const targets = {
@@ -268,7 +271,8 @@ const targets = {
 }
 
 test('AVIF pictures render through native Images and a rename redraws 47 social cards in separate requests', { timeout: 180_000 }, async () => {
-  const { runtime, db, env, meta, asset, restore } = await setUp()
+  const { runtime, db, env, queue, meta, asset, restore } = await setUp()
+  bindDatabaseEvents(db, env)
   try {
     const source = readFileSync(new URL('../../docs/marketing/publishing-assets/lodging-2026-10-23/new-home.avif', import.meta.url))
     const sourceUrl = 'https://imagedelivery.example.test/hash/avif-source/public'
@@ -417,6 +421,8 @@ test('AVIF pictures render through native Images and a rename redraws 47 social 
     assert.equal(savedSettings.status, 'inactive')
     assert.ok(refresh)
     assert.equal(refresh.status, 'pending')
+    const queuedFor = (id: string) => queue.pending.filter(({ body }) => body.type === 'site.cache_changed' && body.organization_id === 'org-a' && body.invalidation_id === id).length
+    assert.equal(queuedFor(refresh.id), 1)
 
     const app = new H3()
     app.post('/api/editor/organizations/:organization_id/social-cards/regenerate', regenerateSocialCards)
@@ -430,7 +436,9 @@ test('AVIF pictures render through native Images and a rename redraws 47 social 
       return await response.json() as { refresh: typeof refresh; summary: { total: number } }
     }
     unavailable = true
-    await assert.rejects(drainPublicResourceCacheInvalidations(db, cardEnv.ORGANIZATION_CACHE!, cardEnv), /OG page media could not be loaded/)
+    await assert.rejects(drainPublicResourceCacheInvalidations(db, cardEnv.ORGANIZATION_CACHE!, cardEnv, {
+      organizationId: 'org-a', invalidationId: refresh.id,
+    }), /OG page media could not be loaded/)
     const failed = (await loadSettingsPayload(db, cardEnv, 'org-a')).social_card_refresh
     assert.equal(failed?.status, 'failed')
     assert.equal(failed.cursor, null)
@@ -470,10 +478,15 @@ test('AVIF pictures render through native Images and a rename redraws 47 social 
     assert.notEqual(await rootCard(), previousCardId, 'retrying deletion does not discard the replacement')
 
     for (let request = 1; request <= 47; request++) {
+      const queuedBefore = queuedFor(replacement.id)
       const batch = await advance(replacement.id)
       assert.ok(batch.summary.total <= 1)
-      if (batch.refresh.status === 'complete') break
+      if (batch.refresh.status === 'complete') {
+        assert.equal(queuedFor(replacement.id), queuedBefore)
+        break
+      }
       assert.equal(batch.refresh.status, 'pending')
+      assert.equal(queuedFor(replacement.id), queuedBefore + 1)
     }
     const final = (await loadSettingsPayload(db, cardEnv, 'org-a')).social_card_refresh
     assert.equal(final?.id, replacement.id)

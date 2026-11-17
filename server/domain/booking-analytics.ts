@@ -1,8 +1,9 @@
 import { queryFirst, type DbClient } from '~/server/db'
-import { recordOrganizationConversionEvent, websiteSourceOf } from '~/server/utils/organization-conversions'
+import { conversionSnapshotAttribution, recordOrganizationConversionEvent, websiteSourceOf, type ConversionOriginSnapshot } from '~/server/utils/organization-conversions'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
 import { AUTHORIZATION_WINDOW_SECONDS, type Payment } from '~/server/domain/payments'
 import type { AttributionChannel, AttributionTouch } from '~/utils/analytics-attribution'
+import type { DomainEvent } from '~/server/events'
 
 /**
  * What a business's paid bookings and decisions look like in its analytics: each event is recorded
@@ -24,21 +25,23 @@ async function paymentSubject(db: DbClient, payment: Payment): Promise<PaymentSu
 }
 
 /**
- * A checkout the guest started, read in the guest's own request: how they
- * arrived is its attribution, as for any other website event. The event is
- * once per payment, so a retry, even from another campaign, keeps the first.
- * `savedCardsOffered` is null on a retry that reuses the Checkout already
- * created, where the count was not observed.
+ * A checkout records the guest's visit at reservation, even when its event reaches Insights after capture.
  */
-export async function recordCheckoutStarted(db: DbClient, payment: Payment, savedCardsOffered: number | null, origin: { request: { headers: Headers }; pageEventId: string | null } | null) {
+export async function recordCheckoutStarted(db: DbClient, event: Extract<DomainEvent, { type: 'payment.checkout_started' }>) {
+  const payment = await queryFirst<Payment>(db, 'SELECT * FROM payments WHERE id=? AND organization_id=?', [event.payment_id, event.organization_id])
+  if (!payment?.stripe_payment_intent_id) throw new Error('Checkout analytics requires a linked payment')
   const subject = await paymentSubject(db, payment)
-  await recordOrganizationConversionEvent(db, origin?.request ?? null, {
+  await recordOrganizationConversionEvent(db, null, {
     organizationId: payment.organization_id, eventName: 'payment_checkout_started', stage: 'started', surface: 'website',
     locationId: payment.location_id, productId: subject.productId, variantId: subject.variantId,
-    entityType: 'payment', entityId: payment.id, originEventId: origin?.pageEventId ?? null,
+    entityType: 'payment', entityId: payment.id, occurredAt: payment.created_at,
     value: { basis: 'quoted', amount_minor: payment.amount, currency: payment.currency },
-    properties: { member_id: subject.memberId, saved_cards_offered: savedCardsOffered },
-  })
+    properties: { member_id: subject.memberId, saved_cards_offered: event.saved_cards_offered },
+  }, checkoutOrigin(payment) ?? null)
+}
+
+function checkoutOrigin(payment: Payment) {
+  return (JSON.parse(payment.price_snapshot_json) as { checkout_origin?: ConversionOriginSnapshot | null }).checkout_origin
 }
 
 /**
@@ -48,6 +51,14 @@ export async function recordCheckoutStarted(db: DbClient, payment: Payment, save
  * none, or that predates recording one, stays unattributed.
  */
 async function checkoutAttribution(db: DbClient, payment: Payment): Promise<{ touch: AttributionTouch; attributedAt: string } | null> {
+  const origin = checkoutOrigin(payment)
+  if (origin === null) return null
+  if (origin) {
+    const { touch, attributedAt } = conversionSnapshotAttribution(origin, payment.created_at)
+    if (!touch) return null
+    if (!attributedAt) throw new Error(`Checkout of payment ${payment.id} recorded an attribution without its time`)
+    return { touch, attributedAt }
+  }
   const started = await queryFirst<{ touch: string | null; attributed_at: string | null }>(db, `SELECT json_extract(payload_json, '$.attribution') AS touch,
     json_extract(payload_json, '$.attributed_at') AS attributed_at FROM analytics_events
     WHERE organization_id = ? AND kind = 'interaction' AND json_extract(payload_json, '$.event_name') = 'payment_checkout_started'
@@ -63,6 +74,8 @@ async function checkoutAttribution(db: DbClient, payment: Payment): Promise<{ to
  * whose guest had no analytics session, or that recorded no start, has none recorded.
  */
 export async function checkoutWebsiteSource(db: DbClient, payment: Payment, conversationId: string | null): Promise<AttributionChannel | null> {
+  const origin = checkoutOrigin(payment)
+  if (origin !== undefined) return origin ? websiteSourceOf(conversionSnapshotAttribution(origin, payment.created_at).touch) : null
   if (conversationId) {
     // The checkout wrote its hold and this conversation in one batch.
     const conversation = await queryFirst<{ source: string | null }>(db, `SELECT json_extract(payload_json, '$.provenance.source') AS source FROM conversations WHERE id = ? AND organization_id = ?`, [conversationId, payment.organization_id])
@@ -71,7 +84,7 @@ export async function checkoutWebsiteSource(db: DbClient, payment: Payment, conv
   const started = await queryFirst<{ touch: string | null; session_id: string | null }>(db, `SELECT json_extract(payload_json, '$.attribution') AS touch, session_id FROM analytics_events
     WHERE organization_id = ? AND kind = 'interaction' AND json_extract(payload_json, '$.event_name') = 'payment_checkout_started'
       AND json_extract(payload_json, '$.entity_type') = 'payment' AND json_extract(payload_json, '$.entity_id') = ?`, [payment.organization_id, payment.id])
-  if (!started?.session_id) return 'Not recorded'
+  if (!started?.session_id) return null
   return websiteSourceOf(started.touch ? JSON.parse(started.touch) as AttributionTouch : null)
 }
 

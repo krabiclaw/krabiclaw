@@ -10,7 +10,7 @@ import { runAlterationRequestFeed } from '~/server/domain/guest-threads/stay-cha
 /**
  * Channex's account webhook. A booking event's revision is landed and
  * acknowledged before this answers 200; anything short of that answers an
- * error, so Channex retries and the revision feed covers it. Messaging events
+ * error so Channex can retry. Messaging events
  * pull the current provider conversation and await its canonical ledger write;
  * an Airbnb change request pulls its property's live feed the same way.
  */
@@ -18,14 +18,14 @@ export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
   const validation = await validateInternalRequest(event, env, CHANNEX_WEBHOOK_CALLER)
   if (!validation.ok) return jsonResponse({ error: validation.error }, { status: validation.status })
-  const body = await readBody<{ event?: unknown; property_id?: unknown; payload?: { revision_id?: unknown } }>(event)
+  const body = await readBody<{ event?: unknown; property_id?: unknown; payload?: { revision_id?: unknown; booking_revision_id?: unknown } }>(event)
   // The event and the identities it names, so a delivery can be traced to what
   // it triggered. Guest names, messages and contact details are never logged.
   const ids = body?.payload && typeof body.payload === 'object' ? body.payload as Record<string, unknown> : {}
   console.info('channex_webhook', {
     ...(typeof body?.event === 'string' ? { event: body.event } : {}),
     ...(typeof body?.property_id === 'string' ? { property_id: body.property_id } : {}),
-    ...Object.fromEntries(['id', 'revision_id', 'booking_id', 'message_thread_id', 'live_feed_event_id'].filter(key => typeof ids[key] === 'string').map(key => [key, ids[key]])),
+    ...Object.fromEntries(['id', 'revision_id', 'booking_revision_id', 'booking_id', 'message_thread_id', 'live_feed_event_id'].filter(key => typeof ids[key] === 'string').map(key => [key, ids[key]])),
   })
   // The events registered for this webhook (CHANNEX_WEBHOOK_EVENTS); anything else is ignored.
   if (!CHANNEX_WEBHOOK_EVENTS.some(name => name === body?.event)) return jsonResponse({ status: 'ignored', reason: 'unsupported_event' })
@@ -33,8 +33,9 @@ export default defineHandler(async (event) => {
     if (typeof body.property_id !== 'string' || !body.property_id) return jsonResponse({ error: 'An alteration request event needs property_id', code: 'VALIDATION_ERROR', field: 'property_id' }, { status: 400 })
     return jsonResponse(await runAlterationRequestFeed(env.DB, env, body.property_id))
   }
-  if (body?.event !== 'booking') return jsonResponse(await mirrorChannexMessageEvent(env.DB, env, body))
-  const revisionId = body.payload?.revision_id
-  if (typeof revisionId !== 'string' || !revisionId) return jsonResponse({ error: 'A booking event needs payload.revision_id', code: 'VALIDATION_ERROR', field: 'payload.revision_id' }, { status: 400 })
+  if (body?.event !== 'booking' && body?.event !== 'non_acked_booking') return jsonResponse(await mirrorChannexMessageEvent(env.DB, env, body))
+  const key = body.event === 'booking' ? 'revision_id' : 'booking_revision_id'
+  const revisionId = body.payload?.[key]
+  if (typeof revisionId !== 'string' || !revisionId) return jsonResponse({ error: `A ${body.event} event needs payload.${key}`, code: 'VALIDATION_ERROR', field: `payload.${key}` }, { status: 400 })
   return jsonResponse(await applyBookingRevision(env.DB, env, revisionId))
 })

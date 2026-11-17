@@ -148,6 +148,9 @@
 
             <!-- Expanded DNS Verification Details -->
             <div v-if="expandedGroups[group.id]" class="mt-5 pt-5 border-t border-default space-y-4">
+              <p v-if="group.status !== 'active'" class="text-sm text-muted">
+                After updating the records at your DNS provider, select Check DNS.
+              </p>
               <UAlert
                 v-if="group.warning || group.error"
                 :color="group.error ? 'error' : 'warning'"
@@ -182,7 +185,12 @@
               </div>
 
               <div class="flex flex-col gap-2 text-xs text-muted sm:flex-row sm:items-center sm:justify-between pt-2">
-                <span>{{ group.last_synced_at ? `Last checked ${formatDateTime(group.last_synced_at)}` : 'Not checked yet' }}</span>
+                <div class="flex items-center gap-2">
+                  <span role="status">{{ checkRequested === group.id ? 'Domain check requested' : group.last_synced_at ? `Last checked ${formatDateTime(group.last_synced_at)}` : 'Not checked yet' }}</span>
+                  <UButton v-if="checkRequested === group.id" size="xs" color="neutral" variant="ghost" @click="refreshDomainStatus">
+                    Refresh status
+                  </UButton>
+                </div>
                 <UButton
                   size="xs"
                   color="neutral"
@@ -191,7 +199,7 @@
                   :loading="syncingGroupId === group.id"
                   @click="syncGroup(group)"
                 >
-                  Check now
+                  Check DNS
                 </UButton>
               </div>
             </div>
@@ -395,6 +403,7 @@ const copiedValue = ref<string | null>(null)
 const actionError = ref<string | null>(null)
 const adding = ref(false)
 const syncingGroupId = ref<string | null>(null)
+const checkRequested = ref<string | null>(null)
 const promotingGroupId = ref<string | null>(null)
 const deletingGroupId = ref<string | null>(null)
 const expandedGroups = ref<Record<string, boolean>>({})
@@ -498,7 +507,7 @@ function primaryAction(group: DomainGroup) {
   if (group.status === 'active' && group.role === 'canonical') return null
   if (group.status === 'active') return { label: 'Make primary', icon: 'i-lucide-star', color: 'neutral' as const, variant: 'soft' as const }
   if (group.status === 'pending') return { label: 'Configure', icon: 'i-lucide-list-checks', color: 'neutral' as const, variant: 'soft' as const }
-  if (group.status === 'verifying') return { label: 'Check now', icon: 'i-lucide-refresh-cw', color: 'neutral' as const, variant: 'soft' as const }
+  if (group.status === 'verifying') return { label: 'Check DNS', icon: 'i-lucide-refresh-cw', color: 'neutral' as const, variant: 'soft' as const }
   if (group.status === 'failed') return { label: 'Retry', icon: 'i-lucide-rotate-cw', color: 'error' as const, variant: 'soft' as const }
   return { label: 'Resolve', icon: 'i-lucide-circle-alert', color: 'error' as const, variant: 'soft' as const }
 }
@@ -522,15 +531,20 @@ async function syncGroup(group: DomainGroup) {
   try {
     await dashboardApi(`/api/organizations/${organizationId.value}/domains/${group.primary_domain_id}/sync`, {
       method: 'POST',
-      validate: (value): value is { success: true; domain: ApiRecord } =>
-        isRecord(value) && value.success === true && isRecord(value.domain),
+      validate: (value): value is { success: true } => isRecord(value) && value.success === true,
     })
-    await loadDomains()
+    expandedGroups.value[group.id] = true
+    checkRequested.value = group.id
   } catch {
     actionError.value = 'Domain check failed'
   } finally {
     syncingGroupId.value = null
   }
+}
+
+async function refreshDomainStatus() {
+  await loadDomains()
+  checkRequested.value = null
 }
 
 async function makePrimary(group: DomainGroup) {

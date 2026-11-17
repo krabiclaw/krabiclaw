@@ -2,6 +2,7 @@ import { OPEN_TERMS, OPEN_TERMS_JSON } from './support/booking-terms.ts'
 import { publishedCatalogResponse } from './support/stripe-published-catalog.ts'
 import assert from 'node:assert/strict'
 import { nameConversationBooking } from './support/booking-state.ts'
+import { captureEvents } from './support/events.ts'
 import test, { type TestContext } from 'node:test'
 import Stripe from 'stripe'
 import { SERVICES } from '../../shared/billing-model.ts'
@@ -9,11 +10,12 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { HTTPError } from 'nitro'
 import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
+import { bindDatabaseEvents } from '../../server/db/index.ts'
 import * as schema from '../../server/db/schema.ts'
 import { claimSessionCapacity, listBookableSessions, setProductBookingConfig } from '../../server/utils/availability.ts'
 import { createProductBooking, quoteTimedBooking } from '../../server/domain/product-bookings.ts'
 import publicBookingRoute from '../../server/api/public/products/[slug]/book.post.ts'
-import { projectStripeConnectedAccount, reserveStripeConnectedAccount } from '../../server/utils/stripe-connect.ts'
+import { paymentsStripe, projectStripeConnectedAccount, reserveStripeConnectedAccount } from '../../server/utils/stripe-connect.ts'
 import { H3Event } from 'h3'
 import { ingestStripeFeeReport, stripeFeeMinor, stripeFeeScaled } from '../../server/domain/payments/costs.ts'
 import { buyerActivities, buyerPaymentActivityPath, buyerRequestActivityPath, claimCheckoutReturn, tokenHash } from '../../server/domain/payments/buyer.ts'
@@ -44,8 +46,8 @@ import paymentHandoffRoute from '../../server/api/public/payments/[payment_id].g
 import { readHomeCalendar } from '../../server/domain/stays.ts'
 import bookingReceiptRoute from '../../server/api/public/booking-requests/[conversation_id].get.ts'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '../../server/utils/reservation-cancel-token.ts'
-import adSpendDailyTask from '../../server/tasks/marketing-ad-spend-daily.ts'
-import { recordAdSpend, unrecordedAdSpendDays } from '../../server/domain/payments/ad-spend.ts'
+import { unrecordedAdSpendDays } from '../../server/domain/payments/ad-spend.ts'
+import { runDueBusinessWork } from '../../server/domain/due-business-work.ts'
 import { selectGoogleAdsCustomer } from '../../server/utils/google-ads.ts'
 import { getStripe } from '../../server/utils/billing.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
@@ -79,12 +81,14 @@ async function boot(){
  await db.prepare(`INSERT INTO member_scheduling(member_id, organization_id, public_name, public_approved, timezone, weekly_json, time_off_json, updated_at, updated_by) VALUES('host-member',?,'Attorney Host',1,'America/New_York','[{"weekday":0,"start":"00:00","end":"23:59"},{"weekday":1,"start":"00:00","end":"23:59"},{"weekday":2,"start":"00:00","end":"23:59"},{"weekday":3,"start":"00:00","end":"23:59"},{"weekday":4,"start":"00:00","end":"23:59"},{"weekday":5,"start":"00:00","end":"23:59"},{"weekday":6,"start":"00:00","end":"23:59"}]','[]',?,'host')`).bind(ORG,NOW).run()
  await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,default_capacity,confirmation_mode,held_online,scheduling_mode,assigned_member_id,online_payment_required,created_by,updated_by) VALUES('product',?,'slot',60,1,'review',1,'provider','host-member',1,'guest','guest')").bind(ORG).run()
  await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by) VALUES('session',?,'product','America/New_York','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z',1,'scheduled','guest','guest')").bind(ORG).run()
- const env={...await runtime.getBindings<CloudflareEnv>(),BETTER_AUTH_URL:'https://proof.example',BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth',NUXT_PUBLIC_PLATFORM_DOMAIN:'https://proof.example'} as CloudflareEnv
- return {db,runtime,env}
+ const events = captureEvents()
+ const env={...await runtime.getBindings<CloudflareEnv>(),DB:db,EVENTS:events.binding,EMAIL_REPLY_DOMAIN:'reply.proof.example',BETTER_AUTH_URL:'https://proof.example',BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth',NUXT_PUBLIC_PLATFORM_DOMAIN:'https://proof.example'} as CloudflareEnv
+ bindDatabaseEvents(db, env)
+ return {db,runtime,env,events}
  }catch(error){await runtime.dispose();throw error}
 }
 async function payable(db:D1Database,id:string,expires='2099-09-30T00:00:00.000Z'){
- await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,currency,amount,price_snapshot_json,created_at,updated_at) VALUES(?,?,'guest','acct_seller',0,'booking','USD',10000,?,?,?)").bind(id,ORG,JSON.stringify({title:'Consultation',tax_code:null,price:{unit_amount:10000,currency:'USD',tax_behavior:'exclusive'},quantity:1,automatic_tax:false,method_configuration_id:'pmc_seller',policy:{...OPEN_TERMS,payment:{basis:'per_guest',unit_amount:10000,currency:'USD',tax_behavior:'exclusive',min_party_size:null}},answers:[]}),NOW,NOW).run()
+ await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,currency,amount,price_snapshot_json,created_at,updated_at) VALUES(?,?,'guest','acct_seller',0,'booking','USD',10000,?,?,?)").bind(id,ORG,JSON.stringify({title:'Consultation',tax_code:null,price:{unit_amount:10000,currency:'USD',tax_behavior:'exclusive'},quantity:1,automatic_tax:false,method_configuration_id:'pmc_seller',product_id:'product',variant_id:'variant',session_id:'session',policy:{...OPEN_TERMS,payment:{basis:'per_guest',unit_amount:10000,currency:'USD',tax_behavior:'exclusive',min_party_size:null}},answers:[]}),NOW,NOW).run()
  await db.prepare("UPDATE payments SET stripe_payment_intent_id=?,idempotency_key=?,return_token='test-return-proof',checkout_expires_at=? WHERE id=?").bind(`pi_${id}`,`checkout:${id}`,expires,id).run()
  await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at) VALUES(?,?,'product','variant','price','session','guest',?,1,10000,'USD','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z','active',?,?)").bind(`h:${id}`,ORG,id,expires,NOW).run()
 }
@@ -123,9 +127,9 @@ async function paidTable(db: D1Database, env: CloudflareEnv) {
 test('guest table cancellation refunds until 24 hours before the start, through Stripe full remaining refund for both buyer and token credentials', { timeout: 120_000 }, async t => {
  for (const credentials of [{ buyerUserId: 'verified' }, { tokenHash: 'deposit-token-hash' }]) {
   for (const policy of [{ now: '2099-09-30T13:00:00.000Z', refundable: true }, { now: '2099-09-30T13:00:00.001Z', refundable: false }]) {
-   const { db, runtime } = await boot()
+   const { db, runtime, env: bootEnv } = await boot()
    try {
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    const env = { ...bootEnv, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
     const paid = await paidTable(db, env)
     const input = { ...paid, ...credentials, now: policy.now }
     const originalFetch = globalThis.fetch
@@ -163,9 +167,9 @@ test('guest table cancellation refunds until 24 hours before the start, through 
 
 test('a table deposit is the table price once, only for parties at its threshold, and a booking keeps the terms it was made with', { timeout: 120_000 }, async t => {
  t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
- const { db, runtime } = await boot()
+ const { db, runtime, env: bootEnv } = await boot()
  try {
-  const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://payments.proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
+  const env = { ...bootEnv, BETTER_AUTH_URL: 'https://payments.proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
     STRIPE_SECRET_KEY: 'sk_live_mock', STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary', STRIPE_TEST_PUBLISHABLE_KEY: 'pk_test_mock', STRIPE_TEST_PAYMENTS_METHOD_CONFIGURATION: 'pmc_parent' } as CloudflareEnv
   await diningTables(db)
   // Tables for twenty, a $100 deposit from parties of six, and a seating tomorrow.
@@ -292,9 +296,9 @@ test('a checkout thread stays out of Messages until payment creates its booking'
 
 test('guest class cancellation refunds through Stripe until 24 hours before the start, and later only releases the seat', { timeout: 120_000 }, async t => {
  for (const refundable of [true, false]) {
-  const { db, runtime } = await boot()
+  const { db, runtime, env: bootEnv } = await boot()
   try {
-   const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+   const env = { ...bootEnv, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
    const opening = { id: 'class-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'verified', booking_id: null, payload: threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com' }), created_at: NOW }
    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
    const booking = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified' })
@@ -336,9 +340,9 @@ test('an advance notice closes a guest\'s own class cancellation at the notice, 
  // [notice minutes, now relative to the start, cancelled, refunded]
  const cases: Array<[number | null, number, boolean, boolean]> = [[2880, -48 * HOUR - 1, true, true], [2880, -48 * HOUR + 1, false, false], [120, -12 * HOUR, true, false], [120, -2 * HOUR + 1, false, false], [null, 30 * 60_000, true, false]]
  for (const [notice, offset, open, refunded] of cases) {
-  const { db, runtime } = await boot()
+  const { db, runtime, env: bootEnv } = await boot()
   try {
-   const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+   const env = { ...bootEnv, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
    const opening = { id: 'notice-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'verified', booking_id: null, payload: threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com' }), created_at: NOW }
    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
    // The notice is part of the terms the guest booked under, frozen on the booking.
@@ -377,9 +381,9 @@ test('an advance notice closes a guest\'s own class cancellation at the notice, 
 
 test('authorized guest cancellation replay recovers an interrupted Stripe refund without another cancellation or refund intent', { timeout: 120_000 }, async t => {
  for (const credentials of [{ buyerUserId: 'verified' }, { tokenHash: 'deposit-token-hash' }]) {
-  const { db, runtime } = await boot()
+  const { db, runtime, env: bootEnv, events } = await boot()
   try {
-   const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+   const env = { ...bootEnv, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
    const { bookingId, ...paid } = await paidTable(db, env)
    const scope = { ...paid, now: '2099-09-30T13:00:00.000Z' }
    const input = { ...scope, ...credentials }
@@ -448,28 +452,33 @@ test('authorized guest cancellation replay recovers an interrupted Stripe refund
     assert.equal(await canRetryGuestVisitRefund(db, tokenScope), false)
     assert.deepEqual(refundedDetails.payments?.flatMap(payment => payment.refunds.map(refund => ({ amount: refund.amount, status: refund.status }))), [{ amount: 10500, status: 'succeeded' }])
     assert.deepEqual((await db.prepare("SELECT * FROM messages WHERE conversation_id='deposit-request' AND event_name='booking.cancel'").all()).results, [cancellation])
+    await events.drain(env, 'payment.financial')
     assert.equal(await db.prepare("SELECT COUNT(*) n FROM messages WHERE conversation_id='deposit-request' AND event_name='payment.refund_succeeded'").first('n'), 1)
     assert.equal(await seatingRemaining(db), 1)
    } finally { fetchMock.mock.restore() }
   } finally { await runtime.dispose() }
  }
 })
-test('an active payment hold consumes the canonical session capacity until release', { timeout: 120_000 }, async () => {
+test('active and expired checkout records leave session capacity available until a booking claims it', { timeout: 120_000 }, async () => {
  const { db, runtime, env } = await boot()
  try {
-  await payable(db, 'held')
-  await assert.rejects(() => claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
-  assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings').first('n'), 0)
-  await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='held'").run()
-  const booking = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
+  await payable(db, 'open')
+  await payable(db, 'expired', '2000-01-01T00:00:00.000Z')
+  const claim = () => claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
+  const booking = await claim()
   assert.equal(await db.prepare('SELECT party_size FROM bookings WHERE id=?').bind(booking.bookingId).first('party_size'), 1)
+  await assert.rejects(claim, /no longer has room/u)
+  assert.deepEqual((await db.prepare('SELECT payment_id, status FROM payment_checkout_holds ORDER BY payment_id').all()).results, [
+   { payment_id: 'expired', status: 'active' }, { payment_id: 'open', status: 'active' },
+  ])
  } finally { await runtime.dispose() }
 })
+
 test('MCP paid booking cancellation and rejection hand off without preparing money, while dashboard approval and interrupted refund recovery complete once', { timeout: 120_000 }, async t => {
  for (const action of ['cancel', 'reject'] as const) {
-  const { db, runtime } = await boot()
+  const { db, runtime, env: bootEnv } = await boot()
   try {
-   const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+   const env = { ...bootEnv, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
    await db.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('owner',?,'verified','owner')").bind(ORG).run()
    const opening = { id: 'paid-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com' }), created_at: NOW }
    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
@@ -641,8 +650,8 @@ test('Stripe cost report replay and correction bill attributable deltas while co
 })
 
 test('Checkout proof attaches ownership without exposing merchant financial data or transferring an authenticated purchase', {timeout:120000},async t=>{
- const {db,runtime}=await boot();try{
-  const env={...await runtime.getBindings<CloudflareEnv>(),STRIPE_SECRET_KEY:'sk_test_local_d1_no_stripe_requests'}
+ const {db,runtime, env: bootEnv}=await boot();try{
+  const env={...bootEnv,STRIPE_SECRET_KEY:'sk_test_local_d1_no_stripe_requests'}
   await payable(db,'claim')
   const originalFetch=globalThis.fetch
   t.mock.method(globalThis,'fetch',async(request:RequestInfo|URL,init?:RequestInit)=>{
@@ -731,10 +740,10 @@ test('Checkout proof attaches ownership without exposing merchant financial data
 })
 
 test('a payment back on the business’s site claims for that site’s buyer and names the business’s own receipt; a clearing or unauthenticated one claims nothing', { timeout: 120_000 }, async t => {
- const { db, runtime } = await boot()
+ const { db, runtime, env: bootEnv, events } = await boot()
  try {
   // A demo business on the live platform takes test-mode payments; its capture is not billable volume.
-  const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://payments.proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary', STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary' }
+  const env = { ...bootEnv, BETTER_AUTH_URL: 'https://payments.proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary', STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary' }
   await payable(db, 'clearing')
   await payable(db, 'declined')
   // The browser that booked on the site holds the Better Auth anonymous user its checkout was made for.
@@ -761,23 +770,30 @@ test('a payment back on the business’s site claims for that site’s buyer and
   }
   await db.prepare("UPDATE payments SET stripe_payment_intent_id='pi_deposit',idempotency_key='checkout:deposit',return_token=?,checkout_expires_at='2099-09-30T00:00:00.000Z' WHERE id='deposit'").bind(claims.deposit).run()
 
-  const statuses: Record<string, string> = { pi_deposit: 'succeeded', pi_clearing: 'processing', pi_declined: 'requires_payment_method' }
+  const statuses: Record<string, string> = { pi_deposit: 'requires_capture', pi_clearing: 'processing', pi_declined: 'requires_payment_method' }
   const originalFetch = globalThis.fetch
   t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
    const url = new URL(request instanceof Request ? request.url : String(request))
    if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
-   assert.equal(init?.method, 'GET')
    assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer sk_test_local_boundary')
    const charge = { id: 'ch_deposit', object: 'charge', livemode: false, amount: 10800, currency: 'usd', created: 1_790_000_000, payment_intent: 'pi_deposit', payment_method: 'pm_card', receipt_url: 'https://pay.stripe.com/receipts/deposit', billing_details: { email: 'card@example.com' } }
    if (url.pathname === '/v1/charges/ch_deposit') return Response.json(charge)
    // The deposit's tax is the Stripe Tax calculation its intent carried.
    if (url.pathname === '/v1/tax/calculations/taxcalc_deposit') return Response.json({ id: 'taxcalc_deposit', object: 'tax.calculation', amount_total: 10800, tax_amount_exclusive: 800, tax_amount_inclusive: 0 })
-   const id = url.pathname.split('/').at(-1)!
+   const capture = url.pathname === '/v1/payment_intents/pi_deposit/capture'
+   if (capture) {
+    assert.equal(init?.method, 'POST')
+    assert.equal(await db.prepare("SELECT b.status FROM payments p JOIN bookings b ON b.id=p.subject_id WHERE p.id='deposit'").first('status'), 'confirmed')
+    statuses.pi_deposit = 'succeeded'
+   } else {
+    assert.equal(init?.method, 'GET')
+   }
+   const id = capture ? 'pi_deposit' : url.pathname.split('/').at(-1)!
    assert.ok(id in statuses, `Unexpected Stripe request: ${url.pathname}`)
-   if (id === 'pi_deposit') assert.equal(url.searchParams.get('expand[0]'), 'latest_charge')
+   if (id === 'pi_deposit' && !capture) assert.equal(url.searchParams.get('expand[0]'), 'latest_charge')
    const paid = statuses[id] === 'succeeded'
-   return Response.json({ id, object: 'payment_intent', livemode: false, currency: 'usd', amount: paid ? 10800 : 10000, amount_received: paid ? 10800 : 0, status: statuses[id], customer: null, application_fee_amount: null, latest_charge: paid ? charge : null, last_payment_error: null, metadata: { krabiclaw_payment_id: id.slice(3) }, ...(paid ? { hooks: { inputs: { tax: { calculation: 'taxcalc_deposit' } } } } : {}) })
+   return Response.json({ id, object: 'payment_intent', livemode: false, currency: 'usd', amount: id === 'pi_deposit' ? 10800 : 10000, amount_received: paid ? 10800 : 0, status: statuses[id], customer: null, application_fee_amount: null, latest_charge: id === 'pi_deposit' ? charge : null, last_payment_error: null, metadata: { krabiclaw_payment_id: id.slice(3) }, ...(paid ? { hooks: { inputs: { tax: { calculation: 'taxcalc_deposit' } } } } : {}) })
   })
 
   const app = new H3()
@@ -789,7 +805,7 @@ test('a payment back on the business’s site claims for that site’s buyer and
   }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
   const back = (id: string, headers: Record<string, string> = {}) => call(`/api/public/payments/${id}/return`, { method: 'POST', headers, body: { claim: claims[id] } })
 
-  // Still clearing: nothing is booked, so nothing is claimed and no identity is minted for it.
+  // The browser cannot claim a purchase while settlement is processing.
   const clearing = await back('clearing')
   assert.equal(clearing.status, 200)
   assert.deepEqual(await clearing.json(), { state: 'processing' })
@@ -811,8 +827,14 @@ test('a payment back on the business’s site claims for that site’s buyer and
   assert.equal(foreign.status, 404)
   assert.equal(await db.prepare("SELECT claimed_at FROM payments WHERE id='deposit'").first('claimed_at'), null)
 
-  // Paid: Stripe's capture makes the booking, the purchase is claimed for the browser's own buyer,
-  // and the receipt is the business's confirmation, not the platform's.
+  const ready = await back('deposit', { cookie })
+  assert.equal(ready.status, 200)
+  assert.deepEqual(await ready.json(), { state: 'processing' })
+  assert.equal(await db.prepare("SELECT subject_id FROM payments WHERE id='deposit'").first('subject_id'), null)
+  const stripe = paymentsStripe(env, false)
+  const authorized = await stripe.paymentIntents.retrieve('pi_deposit', { expand: ['latest_charge'] }, { stripeAccount: 'acct_seller' })
+  await reconcilePaymentIntent(db, stripe, await requirePayment(db, ORG, 'deposit'), authorized, env)
+  // Return attaches the settled booking to this browser's buyer and opens the business's receipt.
   const paid = await back('deposit', { cookie })
   assert.equal(paid.status, 200, await paid.clone().text())
   assert.deepEqual(await paid.json(), { state: 'paid', kind: 'booking', conversation_id: 'deposit-request', cancellation_token: receipt.token })
@@ -822,6 +844,8 @@ test('a payment back on the business’s site claims for that site’s buyer and
   assert.equal(typeof bookingId, 'string')
   assert.deepEqual(await db.prepare("SELECT buyer_user_id,amount,tax_amount,captured_amount,receipt_url,subject_id FROM payments WHERE id='deposit'").first(), { buyer_user_id: buyer, amount: 10000, tax_amount: 800, captured_amount: 10800, receipt_url: 'https://pay.stripe.com/receipts/deposit', subject_id: bookingId })
   assert.deepEqual(await db.prepare("SELECT (SELECT c.id FROM conversations c WHERE c.booking_id=bookings.id AND c.kind='booking') AS request_id,user_id,status,product_id,product_session_id,party_size FROM bookings WHERE id=?").bind(bookingId).first(), { request_id: 'deposit-request', user_id: buyer, status: 'confirmed', product_id: 'tables', product_session_id: 'seating', party_size: 1 })
+  await events.drain(env, 'payment.captured')
+  await events.drain(env, 'payment.financial')
   // The capture alert went to the buyer who proved the purchase, once.
   assert.equal(await db.prepare("SELECT count(*) n FROM messages WHERE conversation_id='deposit-request' AND event_name='payment.payment_captured'").first('n'), 1)
 
@@ -829,13 +853,15 @@ test('a payment back on the business’s site claims for that site’s buyer and
   const read = await call('/api/public/booking-requests/deposit-request', { headers: { authorization: `Bearer ${receipt.token}` } })
   assert.equal(read.status, 200)
   const booking = (await read.json() as { booking: Record<string, unknown> }).booking
-  assert.equal(booking.manage_url, 'https://proof.example/dashboard/account/activity/booking/deposit-request')
+  assert.equal(booking.manage_url, 'https://proof.example/dashboard/account/messages/deposit-request/reservation')
   assert.deepEqual({ kind: booking.kind, status: booking.status, name: booking.name, email: booking.email, starts_at: booking.starts_at, timezone: booking.timezone, guests: booking.guests, location_id: booking.location_id },
    { kind: 'booking', status: 'confirmed', name: 'Verified', email: 'verified@example.com', starts_at: '2099-10-01T13:00:00.000Z', timezone: 'UTC', guests: '1', location_id: 'dining' })
 
   // Returning again, as a reload of the pay page does, names the same receipt and changes nothing.
   const before = await db.prepare("SELECT return_token_hash,claimed_at,claimed_user_id FROM payments WHERE id='deposit'").first()
   const again = await back('deposit', { cookie })
+  await events.drain(env, 'payment.captured')
+  await events.drain(env, 'payment.financial')
   assert.deepEqual(await again.json(), { state: 'paid', kind: 'booking', conversation_id: 'deposit-request', cancellation_token: receipt.token })
   assert.deepEqual(await db.prepare("SELECT return_token_hash,claimed_at,claimed_user_id FROM payments WHERE id='deposit'").first(), before)
   assert.equal(await db.prepare("SELECT count(*) n FROM messages WHERE conversation_id='deposit-request' AND event_name='payment.payment_captured'").first('n'), 1)
@@ -898,8 +924,8 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
 })
 
 test('buyer conversations hide merchant facts and preserve public unread receipts and immutable reply retries', {timeout:120000},async()=>{
- const {db,runtime}=await boot();try{
-  const env={...await runtime.getBindings<CloudflareEnv>(),BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth',BETTER_AUTH_URL:'https://proof.example',STRIPE_SECRET_KEY:'sk_test_local_d1_no_stripe_requests',NUXT_PUBLIC_PLATFORM_DOMAIN:'https://proof.example',EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET:'local-reply-proof',EMAIL_DELIVERY_MODE:'log_only',WHATSAPP_DELIVERY_MODE:'log_only'}
+ const {db,runtime, env: bootEnv}=await boot();try{
+  const env={...bootEnv,BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth',BETTER_AUTH_URL:'https://proof.example',STRIPE_SECRET_KEY:'sk_test_local_d1_no_stripe_requests',NUXT_PUBLIC_PLATFORM_DOMAIN:'https://proof.example',EMAIL_REPLY_SECRET:'local-reply-proof',EMAIL_DELIVERY_MODE:'log_only',WHATSAPP_DELIVERY_MODE:'log_only'}
   // The member who answers is the business's owner, so the guest's messages alert them.
   await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES('other-member',?,'other','owner',1)").bind(ORG).run()
   const opening=requestInsertQueries({id:'buyer-conversation',kind:'contact',organization_id:ORG,location_id:null,user_id:'verified',booking_id:null,payload:{guest:{name:'Verified',email:'verified@example.com',phone:null},subject:'Sandbox conversation',consent_at:null,ip_hash:'private-ip-hash',answers:[]},created_at:NOW },undefined,{words:'My question'})
@@ -1010,15 +1036,6 @@ test('tenant deletion refuses a connected account retained for another tenant wi
  }finally{await runtime.dispose()}
 })
 
-test('an expired payment hold no longer consumes session capacity', {timeout:120000},async()=>{
- const {db,runtime,env}=await boot();try{
-  await payable(db,'expired','2000-01-01T00:00:00.000Z')
-  const booking=await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env,organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1})
-  assert.equal(await db.prepare('SELECT party_size FROM bookings WHERE id=?').bind(booking.bookingId).first('party_size'),1)
-  assert.equal(await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='expired'").first('status'),'active')
- }finally{await runtime.dispose()}
-})
-
 test('Payments usage reaches its Stripe meters once, a correction as a negative value, and a rejected event keeps Stripe’s reason without holding back the others', {timeout:120000},async(t)=>{
  const {db,runtime}=await boot();try{
   await payable(db,'billable')
@@ -1087,11 +1104,11 @@ test('Payments usage reaches its Stripe meters once, a correction as a negative 
  }finally{await runtime.dispose()}
 })
 
-test('a stay purchase claim cancels Stripe before releasing only its held nights, and a replay completes without a second cancellation', { timeout: 120_000 }, async t => {
+test('a stay purchase claim cancels Stripe before releasing only its checkout record, and a replay does not cancel twice', { timeout: 120_000 }, async t => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse(NOW) })
-  const { db, runtime } = await boot()
+  const { db, runtime, env: bootEnv } = await boot()
   try {
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_boundary', NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_local_boundary' }
+    const env = { ...bootEnv, BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_boundary', NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_local_boundary' }
     await db.prepare("INSERT INTO business_locations(id,organization_id,slug,title,timezone) VALUES('cabin-site',?,'cabin-site','Cabin','UTC')").bind(ORG).run()
     await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('stay','cabin',?,'Cabin','cabin','host','host')").bind(ORG).run()
     await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,created_by,updated_by) VALUES(?,'cabin','cabin-site','host','host')").bind(ORG).run()
@@ -1108,10 +1125,9 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
       claims.set(id!, claim)
       await db.prepare("UPDATE payments SET return_token_hash=?,return_expires_at='2099-01-01T00:00:00.000Z' WHERE id=?").bind(await tokenHash(claim), id).run()
     }
-    for (const [date, hold] of [['2099-10-01', 'h:changing'], ['2099-10-02', 'h:changing'], ['2099-10-03', 'h:other-stay']]) {
+    for (const date of ['2099-10-01', '2099-10-02', '2099-10-03']) {
       await db.prepare("INSERT INTO product_nights(organization_id,product_id,date,min_stay_arrival,source,updated_by) VALUES(?,'cabin',?,1,'host','host')").bind(ORG, date).run()
       await db.prepare("INSERT INTO prices(id,organization_id,product_variant_id,stay_date,currency,unit_amount,created_by,updated_by) VALUES(?,?,'cabin-night',?,'USD',10000,'host','host')").bind(`price:${date}`, ORG, date).run()
-      await db.prepare("INSERT INTO stay_nights(organization_id,product_id,date,hold_id) VALUES(?,'cabin',?,?)").bind(ORG, date, hold).run()
     }
     const stayPurchase = {
       product_id: 'cabin', location_id: 'cabin-site', timezone: 'UTC', check_in_date: '2099-10-01', check_out_date: '2099-10-03',
@@ -1123,6 +1139,7 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
       title: 'Cabin', tax_code: null, quantity: 1, automatic_tax: false, method_configuration_id: 'pmc_cabin', price: { unit_amount: 20000, currency: 'USD', tax_behavior: 'exclusive' }, stay: stayPurchase,
     })).run()
     await db.prepare("UPDATE payment_checkout_holds SET amount=20000 WHERE payment_id='changing'").run()
+    assert.equal(await db.prepare('SELECT count(*) FROM stay_nights').first('count(*)'), 0)
     let nativeStatus = 'processing'
     let cancellations = 0
     const originalFetch = globalThis.fetch
@@ -1134,6 +1151,8 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
         assert.equal(url.pathname, '/v1/payment_intents/pi_changing/cancel')
         assert.equal(new URLSearchParams(String(init.body)).get('cancellation_reason'), 'requested_by_customer')
         assert.equal(new Headers(init.headers).get('idempotency-key'), 'krabiclaw-cancel:changing')
+        assert.equal(await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='changing'").first('status'), 'active')
+        assert.equal(await db.prepare('SELECT count(*) FROM stay_nights').first('count(*)'), 0)
         cancellations++
         nativeStatus = 'canceled'
       } else assert.equal(url.pathname, '/v1/payment_intents/pi_changing')
@@ -1167,7 +1186,6 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
       subtotal: 20000, currency: 'USD', expires_at: '2099-09-30T00:00:00.000Z', stripe_account_id: 'acct_seller', publishable_key: 'pk_test_local_boundary',
       payment_method_types: ['card'], customer_session_client_secret: null, bank_verification_url: null, surcharge_basis_points: null,
     })
-    const originalNights = (await db.prepare('SELECT * FROM stay_nights ORDER BY date').all()).results
     for (const column of ['checkout_expires_at', 'return_expires_at']) {
       const expiry = await db.prepare(`SELECT ${column} AS expires_at FROM payments WHERE id='changing'`).first<string>('expires_at')
       assert(expiry)
@@ -1181,7 +1199,7 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
       assert.deepEqual(await expiredHandoff.json(), { ...open, state: 'expired', billing_details: null, ...(column === 'checkout_expires_at' ? { expires_at: NOW } : {}) })
       assert.equal(cancellations, 0)
       assert.deepEqual(await requirePayment(db, ORG, 'changing'), lapsedPayment)
-      assert.deepEqual((await db.prepare('SELECT * FROM stay_nights ORDER BY date').all()).results, originalNights)
+      assert.equal(await db.prepare('SELECT count(*) FROM stay_nights').first('count(*)'), 0)
       assert.deepEqual((await db.prepare('SELECT payment_id,status FROM payment_checkout_holds ORDER BY payment_id').all()).results, [{ payment_id: 'changing', status: 'active' }, { payment_id: 'other-stay', status: 'active' }])
       await db.prepare(`UPDATE payments SET ${column}=? WHERE id='changing'`).bind(expiry).run()
     }
@@ -1193,11 +1211,11 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     assert.equal(failedHandoff.status, 200, await failedHandoff.clone().text())
     assert.deepEqual(await failedHandoff.json(), { ...open, state: 'failed', billing_details: null })
     const calendar = await readHomeCalendar(db, { organizationId: ORG, actorId: 'host', manage: true }, { productId: 'cabin', from: '2099-10-01', to: '2099-10-04' })
-    assert.deepEqual(calendar.nights.map(night => [night.date, night.available, night.held_until === null]), [
-      ['2099-10-01', true, true], ['2099-10-02', true, true], ['2099-10-03', false, false],
+    assert.deepEqual(calendar.nights.map(night => [night.date, night.available]), [
+      ['2099-10-01', true], ['2099-10-02', true], ['2099-10-03', true],
     ])
     assert.deepEqual((await db.prepare('SELECT payment_id,status FROM payment_checkout_holds ORDER BY payment_id').all()).results, [{ payment_id: 'changing', status: 'released' }, { payment_id: 'other-stay', status: 'active' }])
-    assert.equal(await db.prepare("SELECT COUNT(*) FROM stay_nights WHERE hold_id='h:changing'").first('COUNT(*)'), 0)
+    assert.equal(await db.prepare('SELECT count(*) FROM stay_nights').first('count(*)'), 0)
     await db.prepare("UPDATE payments SET return_expires_at=?,checkout_expires_at=? WHERE id='changing'").bind(NOW,NOW).run()
     const replay = await cancel(claims.get('changing')!)
     assert.equal(replay.status, 200)
@@ -1208,10 +1226,10 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
   }
 })
 
-test('ACH Direct Debit payment review and confirmation handles bank account details, zero surcharge, and processing hold extension', { timeout: 120_000 }, async (t) => {
-  const { db, runtime } = await boot()
+test('ACH review shows bank details and no surcharge, and payment failure frees the booking it made', { timeout: 120_000 }, async (t) => {
+  const { db, runtime, env: bootEnv, events } = await boot()
   try {
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    const env = { ...bootEnv, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
     await payable(db, 'ach-payment')
     const opening = { id: 'ach-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com', phone: '+12025550114' }), created_at: NOW }
     await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
@@ -1266,17 +1284,24 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
           payment_method: 'pm_achproof123',
         })
       }
+      if (url.pathname === '/v1/payment_intents/pi_ach-payment/cancel' && init?.method === 'POST') {
+        assert.equal(new Headers(init?.headers).get('idempotency-key'), 'krabiclaw-failed:ach-payment')
+        achIntentStatus = 'canceled'
+        return Response.json({ id: 'pi_ach-payment', object: 'payment_intent', status: achIntentStatus, amount: 10000, currency: 'usd', livemode: false,
+          cancellation_reason: 'abandoned', metadata: { krabiclaw_payment_id: 'ach-payment' } })
+      }
       if (url.pathname === '/v1/payment_intents/pi_ach-payment/confirm' && init?.method === 'POST') {
         // A method that leaves the site comes back to the business's own pay page, never the platform.
         assert.equal(new URLSearchParams(String(init.body)).get('return_url'), `https://payments.proof.example/pay/ach-payment?claim=${claim}`)
+        achIntentStatus = 'processing'
         return Response.json({
           id: 'pi_ach-payment',
           object: 'payment_intent',
-          status: 'processing',
+          status: achIntentStatus,
           amount: 10000,
           currency: 'usd',
           client_secret: 'pi_ach-payment_secret',
-          payment_method: 'pm_achproof123',
+          payment_method: { id: 'pm_achproof123', type: 'us_bank_account' },
           livemode: false,
           metadata: { krabiclaw_payment_id: 'ach-payment' },
         })
@@ -1299,12 +1324,13 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
     const originalHold = await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first()
     await reconcilePaymentIntent(db, stripe, await requirePayment(db, ORG, 'ach-payment'), declinedIntent, env)
     assert.equal((await requirePayment(db, ORG, 'ach-payment')).captured_amount, 0)
-    const handoff = await paymentHandoff(db, stripe, 'pk_test_local_boundary', ORG, 'ach-payment', claim)
+    const handoff = await paymentHandoff(db, { ...env, NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_local_boundary' }, ORG, 'ach-payment', claim)
     assert.equal(handoff.state, 'open')
     assert.deepEqual(handoff.billing_details, { name: 'Guest', email: 'guest@example.com', phone: '+12025550114' })
     assert.deepEqual(await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first(), originalHold)
+    assert.ok(events.take('payment.financial'))
 
-    const review = await reviewPayment(db, stripe, ORG, 'ach-payment', claim, 'pm_achproof123', null)
+    const review = await reviewPayment(db, env, ORG, 'ach-payment', claim, 'pm_achproof123', null)
     assert.equal(review.surcharge, 0)
     assert.equal(review.tax, 0)
     assert.equal(review.total, 10000)
@@ -1312,52 +1338,36 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
     assert.equal(review.method.bank_name, 'STRIPE TEST BANK')
     assert.equal(review.method.last4, '6789')
 
-    const confirm = await confirmPayment(db, stripe, env, ORG, 'ach-payment', claim, { payment_method_id: 'pm_achproof123', total: 10000 }, 'https://payments.proof.example')
-    assert.deepEqual(confirm, { status: 'processing', client_secret: null, requires_action: false, bank_verification_url: null })
+    const confirm = await confirmPayment(db, env, ORG, 'ach-payment', claim, { payment_method_id: 'pm_achproof123', total: 10000 }, 'https://payments.proof.example')
+    assert.deepEqual(confirm, { status: 'processing', taken: false, client_secret: null, requires_action: false, bank_verification_url: null })
 
-    // Capacity hold should be extended by 14 days rather than expiring immediately
-    const hold = await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first<{ status: string; expires_at: string }>()
-    assert.equal(hold?.status, 'active')
-    const holdExpires = Date.parse(hold!.expires_at)
-    const expectedMinExpires = Date.now() + 13 * 86400 * 1000
-    assert.ok(holdExpires > expectedMinExpires, `Hold expires_at ${hold!.expires_at} should be at least 13 days in the future`)
+    const payment = await requirePayment(db, ORG, 'ach-payment')
+    assert.ok(payment.subject_id)
+    assert.equal(payment.captured_amount, 0)
+    assert.equal(await db.prepare('SELECT status FROM bookings WHERE id=?').bind(payment.subject_id).first('status'), 'confirmed')
+    assert.deepEqual(await holdOf(db, 'ach-payment'), { status: 'converted', expires_at: '2099-09-30T00:00:00.000Z' })
 
-    // A clearing failure is reported, but Stripe still permits a new method.
+    // The bank can fail long after the checkout expires. The financial event cancels the booking.
     const failedIntent = {
-      id: 'pi_ach-payment',
-      livemode: false,
-      currency: 'USD',
-      metadata: { krabiclaw_payment_id: 'ach-payment' },
-      status: 'requires_payment_method',
-      amount: 10000,
+      id: 'pi_ach-payment', livemode: false, currency: 'usd', metadata: { krabiclaw_payment_id: 'ach-payment' },
+      status: 'requires_payment_method', amount: 10000,
       last_payment_error: { code: 'bank_account_unusable', message: 'The bank payment failed' },
     } as unknown as Stripe.PaymentIntent
-    // A bank debit fails days later, long after the time to pay: the 14 days it was holding go back.
-    await db.prepare("UPDATE payments SET checkout_expires_at='2026-01-01T00:00:00.000Z' WHERE id='ach-payment'").run()
+    await db.prepare("UPDATE payments SET checkout_expires_at='2000-01-01T00:00:00.000Z' WHERE id='ach-payment'").run()
     await reconcilePaymentIntent(db, stripe, await requirePayment(db, ORG, 'ach-payment'), failedIntent, env)
-
-    assert.equal((await requirePayment(db, ORG, 'ach-payment')).captured_amount, 0)
-    const failedHold = await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first<{ status: string; expires_at: string }>()
-    assert.equal(failedHold?.status, 'active')
-    assert.ok(Date.parse(failedHold!.expires_at) <= Date.now() + 61 * 60_000, `Hold expires_at ${failedHold!.expires_at} should have given the 14 days back`)
+    assert.equal((await requireClaimedPayment(db, env, ORG, 'ach-payment', claim)).state, 'failed')
+    await events.runNext(env, 'payment.financial')
+    assert.equal(await db.prepare('SELECT status FROM bookings WHERE id=?').bind(payment.subject_id).first('status'), 'cancelled')
     assert.equal(await db.prepare("SELECT count(*) FROM messages WHERE conversation_id=? AND event_name='payment.payment_failed'").bind(opening.id).first('count(*)'), 1)
-
-    // Cancellation is terminal and releases the active capacity hold.
-    achIntentStatus = 'canceled'
-    await reconcilePaymentIntent(db, stripe, await requirePayment(db, ORG, 'ach-payment'), { ...failedIntent, status: 'canceled', last_payment_error: null }, env)
-    assert.equal((await requirePayment(db, ORG, 'ach-payment')).captured_amount, 0)
-    assert.equal((await requireClaimedPayment(db, stripe, ORG, 'ach-payment', claim)).state, 'failed')
-    const releasedHold = await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='ach-payment'").first<{ status: string }>()
-    assert.equal(releasedHold?.status, 'released')
   } finally {
     await runtime.dispose()
   }
 })
 
 test('a business registered for Stripe Tax has tax calculated by Stripe from the billing address, attached to the intent and confirmed as reviewed', { timeout: 120_000 }, async (t) => {
-  const { db, runtime } = await boot()
+  const { db, runtime, env: bootEnv } = await boot()
   try {
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    const env = { ...bootEnv, STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
     await payable(db, 'taxed')
     await db.prepare("UPDATE payments SET price_snapshot_json=? WHERE id='taxed'").bind(JSON.stringify({ title: 'Consultation', tax_code: 'txcd_20030000', price: { unit_amount: 10000, currency: 'USD', tax_behavior: 'exclusive' }, quantity: 1, automatic_tax: true, method_configuration_id: 'pmc_seller' })).run()
     await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,surcharge_basis_points,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',300,?,?)").bind(ORG, NOW, NOW).run()
@@ -1392,9 +1402,7 @@ test('a business registered for Stripe Tax has tax calculated by Stripe from the
       }
       throw new Error(`Unexpected Stripe request: ${init?.method} ${url.pathname}`)
     })
-    const stripe = getStripe(env)
-
-    const review = await reviewPayment(db, stripe, ORG, 'taxed', claim, 'pm_cardUS', '203.0.113.9')
+    const review = await reviewPayment(db, env, ORG, 'taxed', claim, 'pm_cardUS', '203.0.113.9')
     // Stripe Tax located the buyer by the card's billing address, for the purchase's own amount, tax code and behavior.
     assert.equal(calculations, 1)
     assert.equal(sent.calculation!.get('currency'), 'usd')
@@ -1416,9 +1424,9 @@ test('a business registered for Stripe Tax has tax calculated by Stripe from the
     assert.deepEqual({ tax: stored.tax, total: stored.total }, { tax: 1025, total: 11355 })
 
     // A total other than the one reviewed is not confirmed.
-    await assert.rejects(confirmPayment(db, stripe, env, ORG, 'taxed', claim, { payment_method_id: 'pm_cardUS', total: 10330 }, 'https://payments.proof.example'), /Review the payment again/u)
+    await assert.rejects(confirmPayment(db, env, ORG, 'taxed', claim, { payment_method_id: 'pm_cardUS', total: 10330 }, 'https://payments.proof.example'), /Review the payment again/u)
     assert.equal(sent.confirm, undefined)
-    const confirmed = await confirmPayment(db, stripe, env, ORG, 'taxed', claim, { payment_method_id: 'pm_cardUS', total: 11355 }, 'https://payments.proof.example')
+    const confirmed = await confirmPayment(db, env, ORG, 'taxed', claim, { payment_method_id: 'pm_cardUS', total: 11355 }, 'https://payments.proof.example')
     assert.equal(confirmed.status, 'processing')
     assert.equal(sent.confirm!.get('amount_to_confirm'), '11355')
     assert.equal(sent.confirm!.get('amount_details[surcharge][amount]'), '330')
@@ -1427,46 +1435,37 @@ test('a business registered for Stripe Tax has tax calculated by Stripe from the
   }
 })
 
-test('processing webhooks extend only active checkout holds and preserve capacity without a confirmation response', { timeout: 120_000 }, async (t) => {
-  const { db, runtime } = await boot()
-  try {
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
-    await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
-    const expires = new Date(Date.now() + 5 * 60_000).toISOString()
-    const originalFetch = globalThis.fetch
-    t.mock.method(globalThis, 'fetch', async (request, init) => {
-      const url = new URL(request instanceof Request ? request.url : String(request))
-      if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
-      assert.equal(init?.method, 'GET')
-      assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
-      const id = url.pathname.split('/').at(-1)!
-      return Response.json({ id, object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000, status: 'processing', metadata: { krabiclaw_payment_id: id.slice(3) } })
-    })
-    for (const status of ['active', 'released', 'converted']) {
-      const id = `processing-${status}`
-      await payable(db, id, expires)
-      if (status !== 'active') await db.prepare('UPDATE payment_checkout_holds SET status=? WHERE payment_id=?').bind(status, id).run()
-      const event = { id: `evt_${id}`, type: 'payment_intent.processing', account: 'acct_seller', livemode: false, data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as Stripe.Event
-      await processPaymentEvent(db, getStripe(env), event, env)
-      const hold = await db.prepare('SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id=?').bind(id).first<{ status: string; expires_at: string }>()
-      assert.equal(hold?.status, status)
-      assert.equal((await requirePayment(db, ORG, id)).captured_amount, 0)
-      if (status === 'active') {
-        assert.ok(Date.parse(hold!.expires_at) >= Date.now() + 13 * 86400_000)
-        await assert.rejects(claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
-      } else {
-        assert.equal(hold?.expires_at, expires)
-      }
-    }
-  } finally {
-    await runtime.dispose()
-  }
+test('a processing bank webhook books once even if the confirm response is lost', { timeout: 120_000 }, async t => {
+ const { db, runtime, env } = await boot()
+ try {
+  const stripeEnv = { ...env, STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+  await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
+  const expires = inMinutes(5)
+  await confirmable(db, 'processing', expires, expires)
+  fakeStripe(t, (url, init) => {
+   if (url.pathname !== '/v1/payment_intents/pi_processing' || init?.method !== 'GET') return null
+   return Response.json({ id: 'pi_processing', object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000, status: 'processing',
+    payment_method: { id: 'pm_proof', type: 'us_bank_account' }, metadata: { krabiclaw_payment_id: 'processing' } })
+  }, {})
+  const deliver = (id: string) => processPaymentEvent(db, getStripe(stripeEnv), { id, type: 'payment_intent.processing', account: 'acct_seller', livemode: false,
+   data: { object: { id: 'pi_processing', metadata: { krabiclaw_payment_id: 'processing' } } } } as Stripe.Event, stripeEnv)
+  await deliver('evt_processing')
+  const payment = await requirePayment(db, ORG, 'processing')
+  assert.ok(payment.subject_id)
+  assert.equal(payment.captured_amount, 0)
+  assert.equal(await db.prepare('SELECT status FROM bookings WHERE id=?').bind(payment.subject_id).first('status'), 'confirmed')
+  assert.deepEqual(await holdOf(db, 'processing'), { status: 'converted', expires_at: expires })
+  await deliver('evt_processing_redelivered')
+  assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
+  assert.equal((await requirePayment(db, ORG, 'processing')).subject_id, payment.subject_id)
+  await assert.rejects(claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env: stripeEnv, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
+ } finally { await runtime.dispose() }
 })
 
 async function confirmable(db: D1Database, id: string, holdExpires: string, checkoutExpires = '2099-09-30T00:00:00.000Z') {
  await payable(db, id, checkoutExpires)
  const claim = crypto.randomUUID() + crypto.randomUUID()
- // A site checkout's conversation, as createProductBooking writes it; capture records the status its booking is created in.
+ // A site checkout's conversation, as createProductBooking writes it. Its booking is attached at settlement.
  const provenance = { source: 'website', external_reference: null, actor_user_id: null, idempotency_key: `checkout-${id}`, fingerprint: `fingerprint-${id}`, guest_acknowledgement: true, creation_kind: 'checkout' as const, creation_status: 'pending' as const, followups_completed: false }
  const opening = { id: `request-${id}`, kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: { ...threadPayloadForGuest({ name: 'Guest', email: 'buyer@krabiclaw-proof.com' }), provenance }, created_at: NOW }
  await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
@@ -1478,6 +1477,7 @@ async function confirmable(db: D1Database, id: string, holdExpires: string, chec
 function fakeStripe(t: TestContext, handle: (url: URL, init: RequestInit | undefined) => Promise<Response | null> | Response | null, statuses: Record<string, string>) {
  const originalFetch = globalThis.fetch
  const calls = { confirm: [] as string[], capture: [] as string[], cancel: [] as string[], refund: [] as string[], read: [] as string[], billed: [] as string[] }
+ const cancellations = new Map<string, string | null>()
  t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(request instanceof Request ? request.url : String(request))
   if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
@@ -1493,12 +1493,22 @@ function fakeStripe(t: TestContext, handle: (url: URL, init: RequestInit | undef
   if (handled) return handled
   const [, , resource, id, action] = url.pathname.split('/')
   const paymentId = id?.replace(/^(pi|ch)_/u, '')
-  const intent = () => ({ id: `pi_${paymentId}`, object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000, amount_received: statuses[paymentId!] === 'succeeded' ? 10000 : 0, status: statuses[paymentId!], client_secret: `pi_${paymentId}_secret`, payment_method: 'pm_proof', latest_charge: statuses[paymentId!] === 'succeeded' || statuses[paymentId!] === 'requires_capture' ? `ch_${paymentId}` : null, last_payment_error: null, metadata: { krabiclaw_payment_id: paymentId } })
+  const charge = { id: `ch_${paymentId}`, object: 'charge', livemode: false, amount: 10000, currency: 'usd', created: 1_790_000_000,
+   payment_intent: `pi_${paymentId}`, receipt_url: 'https://pay.stripe.com/receipts/proof', billing_details: { email: 'buyer@krabiclaw-proof.com' } }
+  const intent = () => ({ id: `pi_${paymentId}`, object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000,
+   amount_received: statuses[paymentId!] === 'succeeded' ? 10000 : 0, status: statuses[paymentId!], client_secret: `pi_${paymentId}_secret`,
+   payment_method: 'pm_proof', latest_charge: ['succeeded', 'requires_capture'].includes(statuses[paymentId!]!) ? charge : null,
+   cancellation_reason: cancellations.get(paymentId!) ?? null, last_payment_error: null, metadata: { krabiclaw_payment_id: paymentId } })
   if (resource === 'payment_intents' && action === 'confirm') { calls.confirm.push(paymentId!); return Response.json(intent()) }
   if (resource === 'payment_intents' && action === 'capture') { calls.capture.push(paymentId!); statuses[paymentId!] = 'succeeded'; return Response.json(intent()) }
-  if (resource === 'payment_intents' && action === 'cancel') { calls.cancel.push(paymentId!); statuses[paymentId!] = 'canceled'; return Response.json(intent()) }
+  if (resource === 'payment_intents' && action === 'cancel') {
+   calls.cancel.push(paymentId!)
+   statuses[paymentId!] = 'canceled'
+   cancellations.set(paymentId!, new URLSearchParams(String(init?.body)).get('cancellation_reason'))
+   return Response.json(intent())
+  }
   if (resource === 'payment_intents' && init?.method === 'GET') { calls.read.push(paymentId!); return Response.json(intent()) }
-  if (resource === 'charges') return Response.json({ id: `ch_${paymentId}`, object: 'charge', livemode: false, amount: 10000, currency: 'usd', created: 1_790_000_000, payment_intent: `pi_${paymentId}`, receipt_url: 'https://pay.stripe.com/receipts/proof', billing_details: { email: 'buyer@krabiclaw-proof.com' } })
+  if (resource === 'charges') return Response.json(charge)
   if (resource === 'refunds' && init?.method === 'POST') { const paid = new URLSearchParams(String(init.body)).get('payment_intent')!; calls.refund.push(paid); return Response.json({ id: `re_${paid}`, object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: paid, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: new URLSearchParams(String(init.body)).get('metadata[krabiclaw_refund_id]') } }) }
   throw new Error(`Unexpected Stripe request ${init?.method} ${url.pathname}`)
  })
@@ -1506,7 +1516,7 @@ function fakeStripe(t: TestContext, handle: (url: URL, init: RequestInit | undef
 }
 const inMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
 const holdOf = (db: D1Database, id: string) => db.prepare('SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id=?').bind(id).first<{ status: string; expires_at: string }>()
-const stripeEnv = async (runtime: Miniflare, env: CloudflareEnv) => ({ ...env, ...await runtime.getBindings<CloudflareEnv>(), STRIPE_SECRET_KEY: 'sk_test_local_boundary', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply' } as CloudflareEnv)
+const stripeEnv = (env: CloudflareEnv) => ({ ...env, STRIPE_SECRET_KEY: 'sk_test_local_boundary', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', EMAIL_REPLY_SECRET: 'local-proof-reply' } as CloudflareEnv)
 /** Email goes to Resend, as in production. */
 const resendEnv = (env: CloudflareEnv) => ({ ...env, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 're_test_local', EMAIL_FROM: 'KrabiClaw <proof@example.com>' } as CloudflareEnv)
 /** Resend's API: every email it is asked to send, as the request body sent it, and each one read back as sent. */
@@ -1534,65 +1544,69 @@ async function ownersAndAdmins(db: D1Database) {
 }
 const sentMail = (emails: string[]) => emails.map(body => JSON.parse(body) as { to: string[]; subject: string; html: string })
 
-test('a card is authorized, booked, then captured, and a hold that has lapsed stops the confirmation before Stripe is asked', { timeout: 120_000 }, async t => {
- const { db, runtime, env: bootEnv } = await boot()
+test('a card is authorized, booked, then captured, and an expired payment window stops confirmation before Stripe is asked', { timeout: 120_000 }, async t => {
+ const { db, runtime, env: bootEnv, events } = await boot()
  try {
-  const env = await stripeEnv(runtime, bootEnv)
+  const env = stripeEnv(bootEnv)
   await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
   const statuses: Record<string, string> = { lapsed: 'requires_confirmation', direct: 'requires_confirmation', authenticating: 'requires_confirmation' }
-  const heldWhenAsked: Record<string, string> = {}
+  const expiryWhenAsked: Record<string, string> = {}
   const bookedWhenCaptured: Record<string, number> = {}
   const calls = fakeStripe(t, async (url, init) => {
    const [, , resource, id, action] = url.pathname.split('/')
    if (resource !== 'payment_intents' || init?.method !== 'POST') return null
    const paymentId = id!.slice(3)
    if (action === 'confirm') {
-    heldWhenAsked[paymentId] = (await holdOf(db, paymentId))!.expires_at
+    expiryWhenAsked[paymentId] = (await holdOf(db, paymentId))!.expires_at
     statuses[paymentId] = paymentId === 'direct' ? 'requires_capture' : 'requires_action'
    }
    if (action === 'capture') bookedWhenCaptured[paymentId] = await db.prepare('SELECT count(*) n FROM payment_checkout_holds h JOIN bookings b ON b.id=h.converted_booking_id WHERE h.payment_id=?').bind(paymentId).first<number>('n') ?? 0
    return null
   }, statuses)
   const stripe = getStripe(env)
-  const confirm = (id: string, claim: string) => confirmPayment(db, stripe, env, ORG, id, claim, { payment_method_id: 'pm_proof', total: 10000 }, 'https://payments.proof.example')
+  const confirm = (id: string, claim: string) => confirmPayment(db, env, ORG, id, claim, { payment_method_id: 'pm_proof', total: 10000 }, 'https://payments.proof.example')
 
-  // The buyer's window is open; only the hold has gone. Stripe is never asked.
-  const lapsed = await confirmable(db, 'lapsed', inMinutes(-1))
+  // An expired purchase never reaches Stripe confirmation.
+  const lapsed = await confirmable(db, 'lapsed', inMinutes(-1), inMinutes(-1))
   await assert.rejects(() => confirm('lapsed', lapsed), error => error instanceof HTTPError && error.statusCode === 409 && (error.data as { code: string }).code === 'payment_expired')
   assert.deepEqual(calls.confirm, [])
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 0)
-  await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='lapsed'").run()
 
-  // A card with no authentication: the hold is extended before Stripe is asked, and the money moves only after the booking exists.
-  const direct = await confirmable(db, 'direct', inMinutes(1), inMinutes(1))
-  assert.deepEqual(await confirm('direct', direct), { status: 'succeeded', client_secret: null, requires_action: false, bank_verification_url: null })
-  assert.ok(Date.parse(heldWhenAsked.direct!) >= Date.now() + 55 * 60_000, `hold was ${heldWhenAsked.direct} when Stripe was asked`)
+  // Authorization leaves the checkout expiry alone. The money moves only after the booking exists.
+  const directExpiry = inMinutes(15)
+  const direct = await confirmable(db, 'direct', directExpiry, directExpiry)
+  assert.deepEqual(await confirm('direct', direct), { status: 'succeeded', taken: false, client_secret: null, requires_action: false, bank_verification_url: null })
+  assert.equal(expiryWhenAsked.direct, directExpiry)
   assert.deepEqual(bookedWhenCaptured, { direct: 1 })
   assert.equal((await holdOf(db, 'direct'))?.status, 'converted')
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
   assert.equal((await requirePayment(db, ORG, 'direct')).captured_amount, 10000)
 
-  // 3DS: the seat is held across the authentication, the browser gets the secret, and the webhook books and captures once it passes.
+  // For 3DS, the browser gets the secret and the booking waits for the authorization webhook.
   await db.prepare("UPDATE product_sessions SET capacity=2 WHERE id='session'").run()
-  const authenticating = await confirmable(db, 'authenticating', inMinutes(1), inMinutes(1))
-  assert.deepEqual(await confirm('authenticating', authenticating), { status: 'requires_action', client_secret: 'pi_authenticating_secret', requires_action: true, bank_verification_url: null })
-  assert.ok(Date.parse((await holdOf(db, 'authenticating'))!.expires_at) >= Date.now() + 55 * 60_000)
-  await assert.rejects(claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
+  const authExpiry = inMinutes(15)
+  const authenticating = await confirmable(db, 'authenticating', authExpiry, authExpiry)
+  assert.deepEqual(await confirm('authenticating', authenticating), { status: 'requires_action', taken: false, client_secret: 'pi_authenticating_secret', requires_action: true, bank_verification_url: null })
+  assert.deepEqual(await holdOf(db, 'authenticating'), { status: 'active', expires_at: authExpiry })
+  assert.equal((await requirePayment(db, ORG, 'authenticating')).subject_id, null)
+  assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
   assert.deepEqual(calls.capture, ['direct'])
   statuses.authenticating = 'requires_capture'
   const event = { id: 'evt_authorized', type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_authenticating', metadata: { krabiclaw_payment_id: 'authenticating' } } } } as unknown as Stripe.Event
   await processPaymentEvent(db, stripe, event, env)
   assert.deepEqual(bookedWhenCaptured, { direct: 1, authenticating: 1 })
   assert.equal((await requirePayment(db, ORG, 'authenticating')).captured_amount, 10000)
+  assert.deepEqual(calls.billed, [], 'checkout and webhook finish before meter delivery')
+  await events.drain(env, 'payment.captured')
   assert.deepEqual(calls.billed, ['krabiclaw_captured_volume:10000', 'krabiclaw_captured_volume:10000'], 'each capture is billed on the business’s meter')
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 2)
  } finally { await runtime.dispose() }
 })
 
 test('an authorization that lost its capacity is cancelled and never charged; capture failures are settled against the booking that exists', { timeout: 120_000 }, async t => {
- const { db, runtime, env: bootEnv } = await boot()
+ const { db, runtime, env: bootEnv, events } = await boot()
  try {
-  const env = await stripeEnv(runtime, bootEnv)
+  const env = stripeEnv(bootEnv)
   await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
   const statuses: Record<string, string> = { taken: 'requires_capture', lost: 'requires_capture', refused: 'requires_capture', raced: 'requires_capture' }
   let captures = 0
@@ -1610,9 +1624,8 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
   const deliver = (id: string, event = `evt_${id}`) => processPaymentEvent(db, stripe, { id: event, type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false, data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as unknown as Stripe.Event, env)
   const bookingsOf = (id: string) => db.prepare('SELECT count(*) n FROM bookings b JOIN payment_checkout_holds h ON h.converted_booking_id=b.id WHERE h.payment_id=?').bind(id).first('n')
 
-  // The hold lapsed and someone else took the only seat. Stripe holds an authorization; nothing has been charged.
-  await confirmable(db, 'taken', inMinutes(-1))
-  await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='taken'").run()
+  // Someone booked the last seat while this purchase was authorizing.
+  const claim = await confirmable(db, 'taken', inMinutes(30))
   const seat = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
   await deliver('taken')
   assert.deepEqual([calls.cancel, calls.capture, calls.refund], [['taken'], [], []])
@@ -1620,6 +1633,7 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
   assert.equal(await db.prepare("SELECT count(*) n FROM payment_refunds WHERE payment_id='taken'").first('n'), 0)
   const uncharged = await requirePayment(db, ORG, 'taken')
   assert.deepEqual([uncharged.captured_amount, uncharged.subject_id], [0, null])
+  assert.equal((await requireClaimedPayment(db, env, ORG, 'taken', claim)).state, 'taken')
   await deliver('taken', 'evt_taken_again')
   assert.deepEqual([calls.cancel, calls.capture, calls.refund], [['taken'], [], []])
 
@@ -1646,8 +1660,11 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
   assert.equal(await bookingsOf('refused'), 1)
   assert.equal((await requirePayment(db, ORG, 'refused')).captured_amount, 10000)
 
-  // Another delivery captured first: Stripe's own status finishes this one.
+  // A concurrent Stripe capture is discovered on webhook redelivery.
   captures = 0
+  await assert.rejects(() => deliver('raced'), /already been captured/u)
+  assert.equal(await bookingsOf('raced'), 1)
+  assert.equal((await requirePayment(db, ORG, 'raced')).captured_amount, 0)
   await deliver('raced')
   assert.equal(await bookingsOf('raced'), 1)
   assert.equal((await requirePayment(db, ORG, 'raced')).captured_amount, 10000)
@@ -1659,97 +1676,146 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
   assert.equal(await bookingsOf('voided'), 1)
   statuses.voided = 'canceled'
   await processPaymentEvent(db, stripe, { id: 'evt_voided_canceled', type: 'payment_intent.canceled', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_voided', metadata: { krabiclaw_payment_id: 'voided' } } } } as unknown as Stripe.Event, env)
+  await events.runNext(env, 'payment.financial')
   assert.equal(await db.prepare("SELECT count(*) n FROM messages WHERE conversation_id='request-voided' AND event_name='payment.payment_failed'").first('n'), 1)
   assert.equal(await bookingsOf('voided'), 1)
+  assert.equal(await db.prepare("SELECT b.status FROM payments p JOIN bookings b ON b.id=p.subject_id WHERE p.id='voided'").first('status'), 'cancelled')
  } finally { await runtime.dispose() }
 })
 
-test('a bank debit waiting on microdeposits keeps its capacity, sends the buyer to Stripe, and gives the capacity back if verification fails', { timeout: 120_000 }, async t => {
- const { db, runtime, env: bootEnv } = await boot()
+test('a captured payment without a booking remains serviceable and cannot return a booking receipt', { timeout: 120_000 }, async t => {
+ const { db, runtime, env: bootEnv, events } = await boot()
  try {
-  const env = await stripeEnv(runtime, bootEnv)
+  const env = { ...stripeEnv(bootEnv), NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_local_boundary' }
+  await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
+  const claim = await confirmable(db, 'settled', inMinutes(30))
+  const calls = fakeStripe(t, () => null, { settled: 'succeeded' })
+  const stripe = getStripe(env)
+  const event = { id: 'evt_settled', type: 'payment_intent.succeeded', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_settled', metadata: { krabiclaw_payment_id: 'settled' } } } } as unknown as Stripe.Event
+
+  await assert.rejects(() => processPaymentEvent(db, stripe, event, env), /Captured payment has no saved booking/u)
+  const recorded = await requirePayment(db, ORG, 'settled')
+  assert.deepEqual([recorded.captured_amount, recorded.stripe_charge_id, recorded.subject_id], [10000, 'ch_settled', null])
+  await assert.rejects(() => processPaymentEvent(db, stripe, event, env), /Captured payment has no saved booking/u)
+  assert.deepEqual(await requirePayment(db, ORG, 'settled'), recorded)
+  assert.deepEqual([calls.capture, calls.cancel, calls.refund, events.pending], [[], [], [], []])
+
+  const app = new H3()
+  app.use((event) => { event.context.organizationId = ORG })
+  app.get('/api/public/payments/:payment_id', paymentHandoffRoute)
+  app.post('/api/public/payments/:payment_id/return', paymentReturnRoute)
+  const base = 'https://payments.proof.example/api/public/payments/settled'
+  for (const request of [
+   new Request(`${base}?claim=${encodeURIComponent(claim)}`),
+   new Request(`${base}/return`, { method: 'POST', headers: { origin: 'https://payments.proof.example', 'content-type': 'application/json' }, body: JSON.stringify({ claim }) }),
+  ]) {
+   const response = await app.request(Object.assign(request, { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+   assert.equal(response.status, 409)
+   assert.equal((await response.json() as { data?: { code?: string } }).data?.code, 'payment_booking_unconfirmed')
+   assert.deepEqual(response.headers.getSetCookie(), [])
+  }
+ } finally { await runtime.dispose() }
+})
+
+test('bank verification begins with a booking, sends the buyer to Stripe, and cancels the booking if verification fails', { timeout: 120_000 }, async t => {
+ const { db, runtime, env: bootEnv, events } = await boot()
+ try {
+  const env = stripeEnv(bootEnv)
   await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
   const page = 'https://payments.stripe.com/microdeposit/proof'
   let stage = 'requires_confirmation'
-  const reply = () => Response.json({ id: 'pi_bank', object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000, amount_received: 0, status: stage, payment_method: 'pm_proof', latest_charge: null, client_secret: 'pi_bank_secret', metadata: { krabiclaw_payment_id: 'bank' },
+  const reply = () => Response.json({ id: 'pi_bank', object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000, amount_received: 0, status: stage, payment_method: { id: 'pm_proof', type: 'us_bank_account' }, latest_charge: null, client_secret: 'pi_bank_secret', metadata: { krabiclaw_payment_id: 'bank' },
    next_action: stage === 'requires_action' ? { type: 'verify_with_microdeposits', verify_with_microdeposits: { hosted_verification_url: page } } : null,
    last_payment_error: stage === 'requires_payment_method' ? { code: 'payment_method_microdeposit_verification_timeout', message: 'Verification expired' } : null })
   fakeStripe(t, (url, init) => {
    if (url.pathname === '/v1/payment_intents/pi_bank/confirm' && init?.method === 'POST') stage = 'requires_action'
+   if (url.pathname === '/v1/payment_intents/pi_bank/cancel' && init?.method === 'POST') stage = 'canceled'
    return url.pathname.startsWith('/v1/payment_intents/pi_bank') ? reply() : null
   }, {})
   const stripe = getStripe(env)
-  const claim = await confirmable(db, 'bank', inMinutes(30), inMinutes(1))
-  assert.deepEqual(await confirmPayment(db, stripe, env, ORG, 'bank', claim, { payment_method_id: 'pm_proof', total: 10000 }, 'https://payments.proof.example'), { status: 'requires_action', client_secret: null, requires_action: false, bank_verification_url: page })
-  assert.ok(Date.parse((await holdOf(db, 'bank'))!.expires_at) >= Date.now() + 13 * 86_400_000)
-  assert.equal((await requireClaimedPayment(db, stripe, ORG, 'bank', claim)).state, 'verifying')
+  const expires = inMinutes(30)
+  const claim = await confirmable(db, 'bank', expires, expires)
+  assert.deepEqual(await confirmPayment(db, env, ORG, 'bank', claim, { payment_method_id: 'pm_proof', total: 10000 }, 'https://payments.proof.example'), { status: 'requires_action', taken: false, client_secret: null, requires_action: false, bank_verification_url: page })
+  assert.deepEqual(await holdOf(db, 'bank'), { status: 'converted', expires_at: expires })
+  assert.equal((await requireClaimedPayment(db, env, ORG, 'bank', claim)).state, 'verifying')
   assert.equal((await requirePayment(db, ORG, 'bank')).captured_amount, 0)
 
   // Verification moves it to processing: still not paid, and the capacity is still held.
   stage = 'processing'
   const event = (id: string, type: string) => ({ id, type, account: 'acct_seller', livemode: false, data: { object: { id: 'pi_bank', metadata: { krabiclaw_payment_id: 'bank' } } } }) as unknown as Stripe.Event
   await processPaymentEvent(db, stripe, event('evt_bank_processing', 'payment_intent.processing'), env)
-  assert.equal((await requireClaimedPayment(db, stripe, ORG, 'bank', claim)).state, 'processing')
+  assert.equal((await requireClaimedPayment(db, env, ORG, 'bank', claim)).state, 'processing')
   assert.equal((await requirePayment(db, ORG, 'bank')).captured_amount, 0)
-  assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 0)
+  assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
 
   // Verification that fails or expires gives the capacity back.
   stage = 'requires_payment_method'
   await processPaymentEvent(db, stripe, event('evt_bank_failed', 'payment_intent.payment_failed'), env)
-  assert.ok(Date.parse((await holdOf(db, 'bank'))!.expires_at) <= Date.now() + 61 * 60_000)
+  assert.equal((await requireClaimedPayment(db, env, ORG, 'bank', claim)).state, 'failed')
+  await events.runNext(env, 'payment.financial')
   assert.equal(await db.prepare("SELECT count(*) n FROM messages WHERE conversation_id='request-bank' AND event_name='payment.payment_failed'").first('n'), 1)
+  assert.equal(await db.prepare("SELECT b.status FROM payments p JOIN bookings b ON b.id=p.subject_id WHERE p.id='bank'").first('status'), 'cancelled')
  } finally { await runtime.dispose() }
 })
 
-test('a bank debit that cleared after its capacity went is refunded once and never booked; a failed delivery books once when Stripe redelivers', { timeout: 120_000 }, async t => {
+test('a bank debit that loses its seat is cancelled, and a clearing retry records payment against one booking', { timeout: 120_000 }, async t => {
  const { db, runtime, env: bootEnv } = await boot()
  try {
-  const env = resendEnv(await stripeEnv(runtime, bootEnv))
+  const env = stripeEnv(bootEnv)
   await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
-  const emails = resendOutbox(t)
-  const statuses: Record<string, string> = { taken: 'succeeded', retried: 'succeeded' }
-  let chargeFailures = 0
-  const calls = fakeStripe(t, (url) => {
-   if (url.pathname === '/v1/refunds/re_pi_taken') return Response.json({ id: 're_pi_taken', object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: 'pi_taken', reason: 'requested_by_customer', metadata: {} })
-   if (url.pathname === '/v1/charges/ch_retried' && chargeFailures-- > 0) return Response.json({ error: { type: 'api_error', message: 'Stripe could not answer' } }, { status: 500, headers: { 'stripe-should-retry': 'false' } })
-   return null
+  const statuses: Record<string, string> = { taken: 'processing', retried: 'processing' }
+  let failNextRead = false
+  const calls = fakeStripe(t, (url, init) => {
+   const id = url.pathname.match(/^\/v1\/payment_intents\/pi_(taken|retried)$/u)?.[1]
+   if (!id || init?.method !== 'GET') return null
+   if (id === 'retried' && failNextRead) {
+    failNextRead = false
+    return Response.json({ error: { type: 'api_error', message: 'Stripe could not answer' } }, { status: 500, headers: { 'stripe-should-retry': 'false' } })
+   }
+   if (statuses[id] !== 'processing') return null
+   return Response.json({ id: `pi_${id}`, object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000,
+    status: 'processing', payment_method: { id: 'pm_proof', type: 'us_bank_account' }, metadata: { krabiclaw_payment_id: id } })
   }, statuses)
   const stripe = getStripe(env)
-  const deliver = (id: string, event = `evt_${id}`) => processPaymentEvent(db, stripe, { id: event, type: 'payment_intent.succeeded', account: 'acct_seller', livemode: false, data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as unknown as Stripe.Event, env)
+  const deliver = (id: string, event: string, type: string) => processPaymentEvent(db, stripe, { id: event, type, account: 'acct_seller', livemode: false,
+   data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as unknown as Stripe.Event, env)
 
-  // A debit has no authorization to cancel: the hold lapsed, someone else took the only seat, and the money goes back through the ordinary refund.
-  await confirmable(db, 'taken', inMinutes(-1))
-  await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='taken'").run()
+  await confirmable(db, 'taken', inMinutes(30))
   const seat = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
-  await deliver('taken')
-  assert.deepEqual(calls.refund, ['pi_taken'])
+  await deliver('taken', 'evt_taken', 'payment_intent.processing')
+  assert.deepEqual([calls.cancel, calls.capture, calls.refund], [['taken'], [], []])
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings WHERE id<>?').bind(seat.bookingId).first('n'), 0)
-  assert.equal((await db.prepare("SELECT idempotency_key FROM payment_refunds WHERE payment_id='taken'").first('idempotency_key')), 'unfulfillable:pi_taken')
-  assert.match(emails.join(' '), /taken before your payment completed/u)
-
-  // A redelivery that finds the seat free again still does not book a purchase already sent back.
+  assert.equal((await holdOf(db, 'taken'))?.status, 'released')
+  assert.equal((await requirePayment(db, ORG, 'taken')).captured_amount, 0)
   await db.prepare('DELETE FROM bookings WHERE id=?').bind(seat.bookingId).run()
-  await deliver('taken', 'evt_taken_again')
-  assert.deepEqual(calls.refund, ['pi_taken'])
+  await deliver('taken', 'evt_taken_again', 'payment_intent.processing')
+  assert.deepEqual(calls.cancel, ['taken'])
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 0)
 
-  // A failure Stripe will redeliver leaves nothing half done, and the booking lands once.
   await confirmable(db, 'retried', inMinutes(30))
-  chargeFailures = 1
-  await assert.rejects(() => deliver('retried'))
-  assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 0)
-  assert.equal((await holdOf(db, 'retried'))?.status, 'active')
-  await deliver('retried')
-  await deliver('retried', 'evt_retried_duplicate')
+  await deliver('retried', 'evt_retried_processing', 'payment_intent.processing')
+  const started = await requirePayment(db, ORG, 'retried')
+  assert.ok(started.subject_id)
+  assert.equal(started.captured_amount, 0)
+  statuses.retried = 'succeeded'
+  failNextRead = true
+  const cleared = () => deliver('retried', 'evt_retried_cleared', 'payment_intent.succeeded')
+  await assert.rejects(cleared, /Stripe could not answer/u)
+  assert.equal((await requirePayment(db, ORG, 'retried')).captured_amount, 0)
+  await cleared()
+  await cleared()
+  const settled = await requirePayment(db, ORG, 'retried')
+  assert.equal(settled.subject_id, started.subject_id)
+  assert.equal(settled.captured_amount, 10000)
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
-  assert.equal((await holdOf(db, 'retried'))?.status, 'converted')
+  assert.deepEqual(calls.refund, [])
  } finally { await runtime.dispose() }
 })
 
 test('a payment reads its refunds and disputes from Stripe, carries no checkout secret, and keeps one attempt and one claim', { timeout: 120_000 }, async t => {
  const { db, runtime, env: bootEnv } = await boot()
  try {
-  const env = await stripeEnv(runtime, bootEnv)
+  const env = stripeEnv(bootEnv)
   await payable(db, 'shown')
   await db.prepare("UPDATE payments SET captured_amount=10000,stripe_charge_id='ch_shown',return_token_hash='hash-shown' WHERE id='shown'").run()
   await db.prepare("INSERT INTO payment_refunds(id,payment_id,idempotency_key,stripe_refund_id,amount,reason,status,note,created_by,created_at,updated_at) VALUES('local-refund','shown','refund:shown','re_shown',500,'requested_by_customer','pending','Goodwill','other',?,?)").bind(NOW, NOW).run()
@@ -1778,9 +1844,9 @@ test('a payment reads its refunds and disputes from Stripe, carries no checkout 
 
 test('managed ads keeps MCP creation paused, preserves updates and billing consent, and ends on its recorded day', { timeout: 120_000 }, async t => {
  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-01T12:00:00.000Z') })
- const { db, runtime } = await boot()
+ const { db, runtime, env: bootEnv, events } = await boot()
  try {
-  const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-managed-ads-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_managed_ads_boundary' }
+  const env = { ...bootEnv, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-managed-ads-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_managed_ads_boundary' }
   await db.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('billing-owner',?,'verified','owner')").bind(ORG).run()
   await db.prepare("INSERT INTO account(id,accountId,providerId,userId,password) VALUES('billing-credential','verified','credential','verified',?)").bind(await hashPassword('ManagedAdsProof123!')).run()
   const login = await createAuth(env).api.signInEmail({ body: { email: 'verified@example.com', password: 'ManagedAdsProof123!' }, asResponse: true })
@@ -1792,9 +1858,8 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   app.get('/api/organizations/:organization_id/integrations/google-ads/accounts', googleAdsAccountsRoute)
   app.post('/api/organizations/:organization_id/integrations/google-ads/select', googleAdsSelectRoute)
   app.post('/api/mcp', mcpRoute)
-  const background: Promise<unknown>[] = []
   // Nitro initializes the Request context before H3; the bare in-process app shares it here too.
-  const workerRuntime = { name: 'cloudflare', cloudflare: { env, context: { waitUntil: (promise: Promise<unknown>) => background.push(promise) } } }
+  const workerRuntime = { name: 'cloudflare', cloudflare: { env } }
   const call = (path: string, method = 'GET', body?: Record<string, unknown>) => app.request(Object.assign(new Request(`https://proof.example${path}`, {
    method, headers: { cookie, host: 'proof.example', origin: 'https://proof.example', 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18' }, ...(body ? { body: JSON.stringify(body) } : {}),
   }), { context: {}, runtime: workerRuntime }))
@@ -1923,7 +1988,7 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
    assert.deepEqual(campaignMutations, [{ status: 'PAUSED', budget: '1000000' }, { status: 'ENABLED', budget: null }])
   } finally {
    await client.close()
-   await Promise.all(background)
+   await events.drain(env, 'mcp.telemetry')
   }
   currency = 'THB'
   await assert.rejects(agree, /requires a Google Ads account billed in USD/u)
@@ -1945,6 +2010,12 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   const agreement = acceptedBody.services.managed_ads!
   assert.deepEqual(await db.prepare('SELECT id,service,terms_version,agreed_by_user_id,agreed_at,ended_by_user_id,ended_at FROM organization_services WHERE organization_id=?').bind(ORG).first(), { id: agreement.id, service: 'managed_ads', terms_version: SERVICE_TERMS_VERSION.managed_ads, agreed_by_user_id: 'verified', agreed_at: '2026-10-01T12:00:00.000Z', ended_by_user_id: null, ended_at: null })
   assert.equal((await listServices(db, ORG)).managed_ads?.id, agreement.id)
+  const wake = events.pending.find(({ body }) => body.type === 'business.wake' && body.kind === 'ad_spend'
+    && body.organization_id === ORG && body.due_at === Date.now())
+  assert.ok(wake, 'the agreement sends a wake for this business')
+  const runDue = () => runDueBusinessWork(env, ORG, 'ad_spend', Date.now())
+  assert.deepEqual(await runDue(), { next: Date.parse('2026-10-03T04:00:00.000Z') })
+  assert.deepEqual(ingests, [])
   await assert.rejects(agree, /This service is already on/u)
   await assert.rejects(() => releaseIntegration(env, ORG, 'google-ads'), /Turn off managed ads in Plan/u)
   await assert.rejects(() => selectGoogleAdsCustomer(env, ORG, 'ads-linked', '2222222222', 'Replacement'), /Turn off managed ads in Plan/u)
@@ -1960,19 +2031,20 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   assert.equal(statusRead.status, 200)
   assert.deepEqual(await statusRead.json(), { success: true, services: { managed_ads: null, strategy: null }, offers: SERVICES })
   assert.deepEqual(await db.prepare('SELECT ended_at,ended_by_user_id FROM organization_services WHERE id=?').bind(agreement.id).first(), { ended_at: '2026-10-03T10:00:00.000Z', ended_by_user_id: 'verified' })
-  await assert.rejects(() => endService(db, ORG, 'managed_ads', 'other'), /This service is not on/u)
+  assert.ok(events.pending.some(({ body }) => body.type === 'business.wake' && body.kind === 'ad_spend'
+    && body.organization_id === ORG && body.due_at === Date.now()), 'ending the agreement recalculates the wake')
+  await assert.rejects(() => endService(db, env, ORG, 'managed_ads', 'other'), /This service is not on/u)
   await assert.rejects(() => releaseIntegration(env, ORG, 'google-ads'), /Google Ads API error \(503\)/u)
   await assert.rejects(() => selectGoogleAdsCustomer(env, ORG, 'ads-linked', '2222222222', 'Replacement'), /Google Ads API error \(503\)/u)
   assert.equal((await readIntegration(db, ORG, 'google_ads'))?.account_id, 'ads-linked')
   assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM account WHERE id='ads-linked'").first('n'), 1)
-  const runDaily = () => adSpendDailyTask.run({ name: 'marketing:ad-spend-daily', payload: {}, context: { cloudflare: { env } } })
-  await assert.rejects(runDaily, /Google Ads API error \(503\)/u)
+  await assert.rejects(runDue, /Google Ads API error \(503\)/u)
   assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM usage_events WHERE resource='ad_spend' AND provider_occurred_at IS NOT NULL").first('n'), 0)
   providerUnavailable = false
   assert.deepEqual(await unrecordedAdSpendDays(db, env, ORG), ['2026-10-01', '2026-10-02'])
   await assert.rejects(() => releaseIntegration(env, ORG, 'google-ads'), /Keep Google Ads connected until your prior managed spend has been counted/u)
   deliveryUnavailable = true
-  await assert.rejects(runDaily, /Native ingestion unavailable at test boundary/u)
+  await assert.rejects(runDue, /Native ingestion unavailable at test boundary/u)
   assert.deepEqual(await unrecordedAdSpendDays(db, env, ORG, new Date('2026-10-02T12:00:00.000Z')), [])
   assert.deepEqual(await unrecordedAdSpendDays(db, env, ORG), ['2026-10-02'])
   // All mature amounts are captured, but yesterday is still promised and not
@@ -1983,7 +2055,7 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   t.mock.timers.setTime(new Date('2026-10-04T10:00:00.000Z').getTime())
   providerUnavailable = false
   deliveryUnavailable = true
-  await Promise.all([assert.rejects(runDaily, /Native ingestion unavailable at test boundary/u), assert.rejects(runDaily, /Native ingestion unavailable at test boundary/u)])
+  await Promise.all([assert.rejects(runDue, /Native ingestion unavailable at test boundary/u), assert.rejects(runDue, /Native ingestion unavailable at test boundary/u)])
   const captured = (await db.prepare("SELECT id,idempotency_key AS source_id,quantity AS amount,provider_occurred_at,delivery_at FROM usage_events WHERE resource='ad_spend' AND provider_occurred_at IS NOT NULL ORDER BY idempotency_key").all()).results
   assert.deepEqual(captured.map(({ source_id, amount, provider_occurred_at, delivery_at }) => ({ source_id, amount, provider_occurred_at, delivery_at })), [
    { source_id: 'google_ads:1234567890:2026-10-01', amount: 0, provider_occurred_at: '2026-10-02T03:59:59.999Z', delivery_at: null },
@@ -2021,7 +2093,7 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   const readsBeforeDelivery = googleReads
   providerUnavailable = true
   deliveryUnavailable = false
-  assert.deepEqual((await runDaily()).result, { billed: 1, skipped: 0 })
+  assert.deepEqual(await runDue(), { next: null })
   assert.equal(googleReads, readsBeforeDelivery, 'queued spend no longer needs the old Google identity')
   // Every delivery sends every pending day: the first failure, both concurrent failures, then the one Stripe took.
   const zeroSpend = ingests.filter(row => row.value === '0'), spend = ingests.filter(row => row.value === '1250')
@@ -2033,23 +2105,33 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   const delivered = (await db.prepare("SELECT id,delivery_at FROM usage_events WHERE resource='ad_spend' AND provider_occurred_at IS NOT NULL ORDER BY idempotency_key").all()).results
   assert.deepEqual(delivered.map(row => row.id), captured.map(row => row.id))
   assert.ok(delivered.every(row => row.delivery_at === '2026-10-04T10:00:00.000Z'))
-  assert.deepEqual((await runDaily()).result, { billed: 0, skipped: 1 })
+  assert.deepEqual(await runDue(), { next: null })
   assert.equal(ingests.length, 7)
  } finally { await runtime.dispose() }
 })
 
 test('managed spend follows actual account-local closed days and reporting delay across DST', { timeout: 120_000 }, async t => {
  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-02T10:00:00.000Z') })
- const { db, runtime } = await boot()
+ const { db, runtime, env: bootEnv } = await boot()
  try {
-  const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-managed-calendar-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_managed_calendar_boundary' }
+  const env = { ...bootEnv, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-managed-calendar-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_managed_calendar_boundary' }
   const token = await symmetricEncrypt({ key: env.BETTER_AUTH_SECRET, data: 'managed-calendar-token' })
   await db.prepare("INSERT INTO account(id,accountId,providerId,userId,accessToken) VALUES('historical-account','google-calendar-fixture','google','verified',?)").bind(token).run()
   await storeIntegration(db, ORG, 'google_ads', { account_id: 'historical-account', target_id: '1234567890', target_name: 'Historical connection' }, { revision: null })
   await db.prepare("INSERT INTO organization_services(id,organization_id,service,terms_version,agreed_by_user_id,agreed_at,ended_at) VALUES('historical',?,'managed_ads','historical','verified','2026-10-01T12:00:00.000Z','2026-10-04T10:00:00.000Z')").bind(ORG).run()
   let timeZone: string | undefined = 'America/New_York'
+  const meterValues: string[] = []
   t.mock.method(globalThis, 'fetch', async (input, init) => {
    const url = new URL(input instanceof Request ? input.url : String(input))
+   if (url.origin === 'https://api.stripe.com') {
+    assert.equal(url.pathname, '/v1/billing/meter_events')
+    assert.equal(init?.method, 'POST')
+    const form = new URLSearchParams(String(init.body))
+    assert.equal(form.get('event_name'), 'krabiclaw_ad_spend')
+    assert.equal(form.get('payload[stripe_customer_id]'), 'cus_operating')
+    meterValues.push(form.get('payload[value]')!)
+    return Response.json({ object: 'billing.meter_event', identifier: form.get('identifier') })
+   }
    assert.equal(url.origin, 'https://googleads.googleapis.com')
    assert.equal(url.pathname, '/v25/customers/1234567890/googleAds:search')
    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer managed-calendar-token')
@@ -2061,7 +2143,7 @@ test('managed spend follows actual account-local closed days and reporting delay
   assert.deepEqual(await unrecordedAdSpendDays(db, env, ORG, new Date('2026-10-06T12:00:00.000Z')), ['2026-10-02', '2026-10-03'])
   assert.deepEqual(await unrecordedAdSpendDays(db, env, ORG, new Date('2026-10-02T12:00:00.000Z')), [])
   await assert.rejects(() => unrecordedAdSpendDays(db, env, ORG, new Date(NaN)), /Invalid timestamp instant/u)
-  await assert.rejects(() => recordAdSpend(db, env, ORG, '2026-02-30'), /valid Gregorian/u)
+  await assert.rejects(() => runDueBusinessWork(env, ORG, 'ad_spend', NaN), /Invalid timestamp instant/u)
 
   // UTC midnight is still the previous reporting day in New York. Consent and
   // connection instants between it and local midnight belong to that same day.
@@ -2084,14 +2166,20 @@ test('managed spend follows actual account-local closed days and reporting delay
    await db.prepare("UPDATE organization_services SET ended_at=? WHERE id='historical'").bind(day.occurred).run()
    assert.deepEqual(await unrecordedAdSpendDays(db, env, ORG, new Date(day.mature), 2), [], 'ending at the final millisecond excludes that day')
    await db.prepare("UPDATE organization_services SET ended_at=? WHERE id='historical'").bind(day.end).run()
-   assert.deepEqual(await recordAdSpend(db, env, ORG, day.date), { amount: 100 })
-   assert.deepEqual(await db.prepare('SELECT quantity AS amount,provider_occurred_at,delivery_at FROM usage_events WHERE idempotency_key=? AND provider_occurred_at IS NOT NULL').bind(`google_ads:1234567890:${day.date}`).first(), { amount: 100, provider_occurred_at: day.occurred, delivery_at: null })
+   const before = meterValues.length
+   t.mock.timers.setTime(Date.parse(day.beforeMature))
+   assert.deepEqual(await runDueBusinessWork(env, ORG, 'ad_spend', Date.now()), { next: Date.parse(day.mature) })
+   assert.equal(meterValues.length, before)
+   t.mock.timers.setTime(Date.parse(day.mature))
+   assert.deepEqual(await runDueBusinessWork(env, ORG, 'ad_spend', Date.now()), { next: null })
+   assert.deepEqual(meterValues.slice(before), ['100'])
+   assert.deepEqual(await db.prepare('SELECT quantity AS amount,provider_occurred_at,delivery_at FROM usage_events WHERE idempotency_key=? AND provider_occurred_at IS NOT NULL').bind(`google_ads:1234567890:${day.date}`).first(), { amount: 100, provider_occurred_at: day.occurred, delivery_at: day.mature })
    assert.deepEqual(await unrecordedAdSpendDays(db, env, ORG, new Date(day.mature), 2), [])
   }
   for (const invalid of [undefined, 'Not/A-Timezone']) {
    timeZone = invalid
    await assert.rejects(() => unrecordedAdSpendDays(db, env, ORG, new Date('2026-11-03T12:00:00.000Z')), /valid reporting timezone/u)
-   await assert.rejects(() => recordAdSpend(db, env, ORG, '2026-11-01'), /valid reporting timezone/u)
+   await assert.rejects(() => runDueBusinessWork(env, ORG, 'ad_spend', Date.parse('2026-11-03T12:00:00.000Z')), /valid reporting timezone/u)
    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM usage_events WHERE resource='ad_spend' AND provider_occurred_at IS NOT NULL").first('n'), 2)
   }
  } finally { await runtime.dispose() }
@@ -2099,9 +2187,9 @@ test('managed spend follows actual account-local closed days and reporting delay
 
 test('native Google unlink and full-user deletion require canonical Ads disconnect before credentials are removed', { timeout: 120_000 }, async t => {
  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-01T12:00:00.000Z') })
- const { db, runtime } = await boot()
+ const { db, runtime, env: bootEnv } = await boot()
  try {
-  const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-native-unlink-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_native_unlink_boundary' }
+  const env = { ...bootEnv, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-native-unlink-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_native_unlink_boundary' }
   await db.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('unlink-owner',?,'verified','owner'),('remaining-owner',?,'other','owner')").bind(ORG, ORG).run()
   await db.prepare("INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at,timezone) VALUES('second-ads-org','Second Ads','second-ads','second-ads','{}','theme','USD','active','complete','flat','experience',?,'America/New_York')").bind(NOW).run()
   await db.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('second-admin','second-ads-org','verified','admin'),('second-owner','second-ads-org','other','owner')").run()
@@ -2163,7 +2251,7 @@ test('native Google unlink and full-user deletion require canonical Ads disconne
 test('a payout sent and a payout failed are emailed to the business owner and administrator once each', { timeout: 120_000 }, async t => {
  const { db, runtime, env: bootEnv } = await boot()
  try {
-  const env = resendEnv(await stripeEnv(runtime, bootEnv))
+  const env = resendEnv(stripeEnv(bootEnv))
   await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
   await ownersAndAdmins(db)
   const emails = resendOutbox(t)
@@ -2204,7 +2292,7 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
  const { db, runtime, env: bootEnv } = await boot()
  try {
   const secret = 'whsec_plan_proof'
-  const env = { ...resendEnv(await stripeEnv(runtime, bootEnv)), STRIPE_WEBHOOK_SECRET: secret } as CloudflareEnv
+  const env = { ...resendEnv(stripeEnv(bootEnv)), STRIPE_WEBHOOK_SECRET: secret } as CloudflareEnv
   await ownersAndAdmins(db)
   // Better Auth's upgrade wrote the subscription before Checkout opened.
   await db.prepare("INSERT INTO subscription(id,plan,referenceId,stripeCustomerId,status,seats) VALUES('sub-row','growth',?,'cus_operating','incomplete',1)").bind(ORG).run()

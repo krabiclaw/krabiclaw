@@ -2,7 +2,7 @@ import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 import { executeBatch, queryFirst } from '~/server/db'
-import { dashboardOrgQueryParam, getDashboardMemberContext } from '~/server/utils/dashboard-context'
+import { dashboardMemberQuery, dashboardOrgQueryParam, getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { assignedMemberSql, BATCH_VIEWER, joinedMemberPrincipal, memberAccessPrincipal, membershipBySlugQuery, withViewer } from '~/server/utils/member-access'
@@ -10,18 +10,25 @@ import { bookedRecordsInRange, businessWideViewer, type BookedRecordInRange } fr
 import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
-import { calendarStays, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, type StayHome } from '~/server/domain/stays'
+import { calendarStays, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, readStayReservationHome, type StayHome, type StayNight, type StayReservationHome } from '~/server/domain/stays'
 import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
 import { loadDashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
-import { addLocalDays, isValidCalendarDate, localDateAt } from '~/utils/timezone'
-import { readProductPhotos } from '~/server/utils/media-placement'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
+import { readProductPhotos } from '~/server/utils/media-placement'
+import { isValidCalendarDate, localDateAt } from '~/utils/timezone'
 
-export type BookingHome = Pick<StayHome, 'name' | 'internal_name' | 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'check_in_method' | 'check_in_instructions'> & { image_url: string | null }
+export type BookingHome = StayReservationHome
+export type TurnoverBookingHome = Pick<StayHome, 'name' | 'internal_name' | 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'check_in_method' | 'check_in_instructions'>
+  & { image_url: string | null }
 
 export function nightBooking<T extends { id: string }>({ id, ...record }: T) {
   return { ...record, booking_id: id, unit: 'nights' as const }
+}
+
+/** Released native decoders require both keys. No checkout or linked calendar owns nights now. */
+export function dashboardCalendarNight(night: StayNight) {
+  return { ...night, held_until: null, calendar: null }
 }
 
 async function dashboardBookingsContext(event: H3Event) {
@@ -32,17 +39,22 @@ async function dashboardBookingsContext(event: H3Event) {
 }
 
 export async function dashboardBookingContext(event: H3Event) {
-  const context = await dashboardBookingsContext(event)
+  const { env, db, session, userId, membership, organizationFrom } = await dashboardMemberQuery(event)
   const bookingId = getRouterParam(event, 'booking_id')
   if (!bookingId) throw new HTTPError({ statusCode: 400, message: 'Booking ID is required' })
-  const booking = await queryFirst<Pick<BookedRecord, 'unit' | 'status' | 'respond_by' | 'product_id'> & { conversation_id: string }>(context.db, `
-    SELECT b.unit, c.id AS conversation_id, b.status, b.respond_by, b.product_id FROM ${BOOKING_RECORDS_SQL} b
+  const [memberResult, bookingResult] = await executeBatch(db, [membership, withViewer(membership, {
+    query: `SELECT b.unit, c.id AS conversation_id, b.status, b.respond_by, b.product_id, ${assignedMemberSql('b', BATCH_VIEWER.user)} AS assigned
+      FROM ${BOOKING_RECORDS_SQL} b
       JOIN conversations c ON c.booking_id=b.id AND c.organization_id=b.organization_id AND c.kind='booking'
-      WHERE b.organization_id = ? AND b.id = ?
-        ${context.access.manage ? '' : `AND ${assignedMemberSql('b')}`}
-  `, [context.organization.id, bookingId, ...(context.access.manage ? [] : [context.userId])])
-  if (!booking) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
-  return { ...context, bookingId, booking }
+      WHERE b.organization_id = ${BATCH_VIEWER.organization} AND b.id = ?`,
+    params: [bookingId],
+  })], { operation: 'Read dashboard booking access' })
+  const organization = organizationFrom(memberResult?.results[0])
+  const principal = memberAccessPrincipal(organization, { env, event })
+  const access = await stayAccessFor(principal)
+  const booking = bookingResult?.results[0] as Pick<BookedRecord, 'unit' | 'status' | 'respond_by' | 'product_id'> & { conversation_id: string; assigned: number } | undefined
+  if (!booking || (!access.manage && !booking.assigned)) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
+  return { db, env, session, userId, organization, principal, access, bookingId, booking }
 }
 
 export async function dashboardBookingDetails(event: H3Event) {
@@ -50,18 +62,25 @@ export async function dashboardBookingDetails(event: H3Event) {
   if (booking.unit === 'slot') {
     return { booking: await loadDashboardBookingDetails(event, { type: 'booking', bookingId, lookup: 'booking' }), manage: access.manage }
   }
-  const [stay, house, pictures] = await Promise.all([
+  if (!access.manage) {
+    const [stay, house, photos] = await Promise.all([
+      getStay(db, access, bookingId),
+      queryFirst<Omit<TurnoverBookingHome, 'image_url'>>(db, `SELECT p.name, c.internal_name, b.check_in_time, b.check_in_end_time, b.check_out_time,
+        c.check_in_method, c.check_in_instructions
+        FROM product_stay_configs c
+        JOIN products p ON p.organization_id=c.organization_id AND p.id=c.product_id
+        JOIN product_booking_configs b ON b.organization_id=c.organization_id AND b.product_id=c.product_id
+        WHERE c.organization_id=? AND c.product_id=?`, [organization.id, booking.product_id]),
+      readProductPhotos(db, { organizationId: organization.id, productIds: [booking.product_id] }),
+    ])
+    if (!house) throw new Error('The booking has no home')
+    const home = { ...house, image_url: mediaStillUrl(photos.get(booking.product_id)?.[0]) }
+    return { booking: nightBooking(stay), manage: false as const, home }
+  }
+  const [stay, home] = await Promise.all([
     getStay(db, access, bookingId),
-    queryFirst<Omit<BookingHome, 'image_url'>>(db, `SELECT p.name, s.internal_name, b.check_in_time, b.check_in_end_time, b.check_out_time,
-      s.check_in_method, s.check_in_instructions FROM product_stay_configs s
-      JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
-      JOIN product_booking_configs b ON b.organization_id = s.organization_id AND b.product_id = s.product_id
-      WHERE s.organization_id = ? AND s.product_id = ?`, [organization.id, booking.product_id]),
-    readProductPhotos(db, { organizationId: organization.id, productIds: [booking.product_id] }),
+    readStayReservationHome(db, { organizationId: organization.id, productId: booking.product_id, showLocation: true, showArrival: true }),
   ])
-  if (!house) throw new Error('The booking has no home')
-  const home: BookingHome = { ...house, image_url: mediaStillUrl(pictures.get(booking.product_id)?.[0]) }
-  if (!('payments' in stay)) return { booking: nightBooking(stay), manage: false, home }
   const conversation = await getGuestRequest(db, booking.conversation_id, organization.id, 'booking')
   if (!conversation) throw new Error('The booking has no guest conversation')
   const [destination, record, pending_changes] = await Promise.all([
@@ -74,11 +93,8 @@ export async function dashboardBookingDetails(event: H3Event) {
   if (!record) throw new Error('The conversation has no booking')
   const channelOwned = isChannelManagedStay(stay)
   const actions = requestActions(record, new Date().toISOString())
-  const available_actions = stay.request_status ? actions : [
-    ...actions.filter(action => action === 'no_show' && !channelOwned),
-    ...(stay.status === 'cancelled' ? [] : ['move', ...(!channelOwned ? ['edit', 'cancel'] : [])]),
-  ]
-  return { booking: { ...nightBooking(stay), available_actions, pending_changes }, manage: true, home, can_message_guest: destination.channel !== null && !conversation.blocked_at }
+  const available_actions = stay.request_status ? actions : stay.status === 'cancelled' || channelOwned ? [] : ['edit', 'cancel']
+  return { booking: { ...nightBooking(stay), available_actions, pending_changes }, manage: true, home: { ...home, image_url: home.photo_urls[0] ?? null }, can_message_guest: destination.channel !== null && !conversation.blocked_at }
 }
 
 interface BookingListQuery { unit?: unknown; from?: unknown; to?: unknown; product_id?: unknown; include_cancelled?: unknown }
@@ -86,8 +102,8 @@ interface BookingListQuery { unit?: unknown; from?: unknown; to?: unknown; produ
 function bookingListWindow(query: BookingListQuery) {
   const { unit, from, to, product_id: productId } = query
   if (unit !== undefined && unit !== 'slot' && unit !== 'nights') throw new HTTPError({ statusCode: 422, message: 'Invalid booking unit' })
-  if (!isValidCalendarDate(from) || !isValidCalendarDate(to) || to <= from || to > addLocalDays(from, 62)) {
-    throw new HTTPError({ statusCode: 422, message: 'Choose a booking date range of at most 62 days' })
+  if (!isValidCalendarDate(from) || !isValidCalendarDate(to) || to <= from) {
+    throw new HTTPError({ statusCode: 422, message: 'Choose calendar dates with to after from' })
   }
   if (productId !== undefined && (typeof productId !== 'string' || !productId)) throw new HTTPError({ statusCode: 422, message: 'Invalid product ID' })
   return { unit, from, to, productId, includeCancelled: query.include_cancelled === 'true' }
@@ -168,7 +184,8 @@ async function dashboardHomesCalendar(event: H3Event, window: BookingWindow) {
   const access = await stayAccessFor(joinedMemberPrincipal({ organizationId: member.organization_id, memberId: member.member_id, role: member.role, userId }, { env, event }))
   const calendar = stayCalendarOf(rest, access.manage, window)
   if (window.productId && !calendar.homes.length) throw new HTTPError({ statusCode: 404, message: 'That place to stay is not in this organization', data: { code: 'HOME_NOT_FOUND' } })
-  return { from: window.from, to: window.to, bookings: calendar.stays, homes: calendar.homes, places: [], manage: access.manage }
+  const homes = calendar.homes.map(entry => ({ ...entry, nights: entry.nights.map(dashboardCalendarNight) }))
+  return { from: window.from, to: window.to, bookings: calendar.stays, homes, places: [], manage: access.manage }
 }
 
 export async function dashboardBookingCalendar(event: H3Event, query: BookingListQuery) {

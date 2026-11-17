@@ -161,6 +161,13 @@ export default defineHandler(async (event) => {
     return redirect('/docs/mcp-setup', 302)
   }
 
+  // A site page can be localized, renamed, or retired. API handlers own their
+  // paths and use the tenant already resolved from the request's host.
+  if (normalizedPathname === '/api' || normalizedPathname.startsWith('/api/')) {
+    markTranscriptMiddlewareComplete(event)
+    return
+  }
+
   // Review invitations sent before every kind of visit shared one review
   // address named their location; the token alone identifies the visit, and
   // each such link stops working 30 days after it was sent.

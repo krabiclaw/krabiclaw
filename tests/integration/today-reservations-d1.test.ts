@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { captureEvents } from './support/events.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { hashPassword } from 'better-auth/crypto'
@@ -13,7 +14,6 @@ import { createTables } from './support/table-product.ts'
 import { createStay, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
 import { resolveOrganizationMembership } from '../../server/utils/member-access.ts'
-import { stayReadyTaskQueries } from '../../server/domain/tasks.ts'
 import { handleTaskTools } from '../../server/utils/mcp-tools/tasks.ts'
 import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
@@ -42,7 +42,8 @@ async function boot() {
     env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, MEDIA_BUCKET: { type: 'r2' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'today-reservations-proof', exportName: 'Hub' } },
   } }] })
   const db = await runtime.getD1Database('DB')
-  const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'today-reservations-proof-secret-long-enough', BETTER_AUTH_URL: 'https://proof.example',
+  const events = captureEvents()
+  const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: events.binding, BETTER_AUTH_SECRET: 'today-reservations-proof-secret-long-enough', BETTER_AUTH_URL: 'https://proof.example',
     STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'today-reservations-reply-secret',
     PREVIEW_SECRET: 'today-reservations-preview-proof-secret', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
   await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
@@ -72,7 +73,7 @@ async function boot() {
     assert.equal(response.status, 200, await response.clone().text())
     return await response.json() as Today
   }
-  return { runtime, db, env, event: () => new H3Event(request()), today }
+  return { runtime, db, env, events, event: () => new H3Event(request()), today }
 }
 
 /** A scheduled offering at the organization's site, with a session on `day` at 10:00. */
@@ -97,7 +98,7 @@ async function offering(db: D1Database, env: CloudflareEnv, org: Org, input: { k
 const operator = (key: string) => ({ userId: OWNER, idempotencyKey: key, source: 'operator', externalReference: null, guestAcknowledgement: false })
 
 test('Today shows every booking type as one card for its own business, with the welcome as its action only where it applies', { timeout: 180_000 }, async () => {
-  const { runtime, db, env, event, today } = await boot()
+  const { runtime, db, env, events, event, today } = await boot()
   try {
     const localToday = localDateAt(new Date(), ZONE)
     const inTwoDays = addLocalDays(localToday, 2), inThreeDays = addLocalDays(localToday, 3)
@@ -131,6 +132,7 @@ test('Today shows every booking type as one card for its own business, with the 
     const stay = await createStay(db, env, manager, { product_id: home.id, idempotency_key: 'diana-stay', check_in_date: inTwoDays, check_out_date: addLocalDays(inTwoDays, 3),
       adults: 2, children: 0, guest_name: 'Diana Lee', guest_email: 'diana@proof.example', total_minor: 45_000 })
     assert.ok(stay.conversation_id, 'a stay with a guest email has a conversation')
+    await events.runNext(env, 'stay.changed')
 
     // A table reservation: a booking of the bistro's tables at 18:00.
     const tables = await createTables(db, env, { organizationId: 'bistro', locationId: 'bistro-site', actorId: OWNER, memberId: 'bistro-owner', name: 'Bistro table',
@@ -163,13 +165,11 @@ test('Today shows every booking type as one card for its own business, with the 
     const turnover = String(await db.prepare("SELECT id FROM tasks WHERE kind = 'turnover' AND subject_id = ?").bind(stay.id).first('id'))
     assert.deepEqual(inn.cards.map(shape), [
       { id: `booking:${stay.id}`, headline: 'Diana’s group of 2', line: 'Seaview Cottage', action: { title: 'Share info about your place', detail: 'Help Diana get ready' }, to: `/dashboard/inn/messages/${stay.conversation_id}` },
-      { id: `task:${turnover}`, headline: 'Clean up after Diana’s group of 2', line: 'Seaview Cottage', action: { title: 'Tap Done when it’s finished', detail: 'In Diana’s conversation' }, to: `/dashboard/inn/messages/${stay.conversation_id}` },
+      // The owner's own clean opens the job's conversation, where its Done is.
+      { id: `task:${turnover}`, headline: 'Clean up after Diana’s group of 2', line: 'Seaview Cottage', action: { title: 'Open the job', detail: 'Tap Done when it’s finished' },
+        to: `/dashboard/inn/messages/${await db.prepare("SELECT id FROM conversations WHERE kind = 'team' AND booking_id = ?").bind(stay.id).first('id')}` },
     ])
     assert.equal(inn.title, 'You have 1 upcoming reservation and 1 upcoming home to clean')
-    // A make-ready job at a home with no check-in time is the arrival's work: it is the action of Diana's card, not a card on her checkout day.
-    await db.batch(stayReadyTaskQueries({ organizationId: 'inn', stayId: stay.id, now: new Date().toISOString(), previousProductId: home.id, guard: { query: '1', params: [] }, guestName: 'Diana Lee', checkInDate: inTwoDays,
-      home: { product_id: home.id, location_id: 'inn-site', timezone: ZONE, check_in_time: null, internal_name: 'Seaview Cottage', assigned_member_id: 'inn-owner' } }).map(query => db.prepare(query.query).bind(...query.params ?? [])))
-    assert.deepEqual((await today('inn', 'upcoming')).cards.map(card => [card.id, card.action.title]), [[`booking:${stay.id}`, 'You’re cleaning'], [`task:${turnover}`, 'Tap Done when it’s finished']])
     assert.equal(inn.cards[0]!.when, `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).formatRange(new Date(`${inTwoDays}T00:00:00Z`), new Date(`${addLocalDays(inTwoDays, 3)}T00:00:00Z`)).replace(/[\u2009\u202f]/g, ' ')}`)
     // A restaurant has no host-written preparation, so its reservation has no welcome.
     assert.deepEqual(bistro.cards.map(shape), [

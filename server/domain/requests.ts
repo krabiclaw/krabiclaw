@@ -116,7 +116,6 @@ export interface ThreadOperationalRecord {
   organization_id: string
   user_id: string | null
   /** Staff recorded the guest did not come. */
-  no_show_at: string | null
   /** The review the thread's guest submitted, if any. */
   review_id: string | null
   /** The advance notice the booking was made under (its frozen policy), which closes the guest's own cancellation; null for no notice. */
@@ -203,7 +202,7 @@ export async function validateGuestRequest(db: DbClient, row: Record<string, unk
       WHERE r.id = ? AND r.organization_id = ? AND (
         (ct.conversation_id IS NULL AND b.owner = 'channel')
         OR (c.product_id IS NOT NULL AND (CASE WHEN b.id IS NULL THEN c.location_id = r.location_id
-          ELSE ct.product_id = coalesce(b.booked_product_id, b.product_id) END))
+          ELSE ct.product_id = b.product_id END))
       )`, [request.id, request.organization_id])
     if (!mapped) throw new HTTPError({ statusCode: 500, message: 'Channel conversation has no matching home mapping', data: { code: 'CHANNEL_THREAD_MAPPING_INVALID', field: 'conversation_id' } })
   }
@@ -220,7 +219,7 @@ export const BOOKING_RECORDS_SQL = `(
     SELECT b.id, (SELECT conv.id FROM conversations conv WHERE conv.booking_id = b.id AND conv.kind = 'booking') AS conversation_id, b.organization_id, b.status, b.party_size, b.party_size_is_minimum, b.starts_at, b.ends_at, b.timezone,
            b.location_id, b.product_id, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit,
            p.kind AS product_kind, b.product_id AS offering_id, p.name AS product_name, sc.internal_name AS product_internal_name, c.assigned_member_id, b.user_id,
-           b.no_show_at, b.created_at, b.received_at, b.updated_at, b.version, ${stayRequestRespondBySql('b')} AS respond_by,
+           b.created_at, b.received_at, b.updated_at, b.version, ${stayRequestRespondBySql('b')} AS respond_by,
            json_extract(b.policy_json, '$.advance_notice_minutes') AS advance_notice_minutes,
            json_array(b.version, b.status, b.product_id, b.product_session_id, b.starts_at, b.ends_at, b.timezone, b.updated_at) AS fingerprint
       FROM bookings b
@@ -271,7 +270,7 @@ export async function getThreadOperationalRecord(db: DbClient, requestId: string
   const now = new Date().toISOString()
   const record = authorized?.booking_id === null ? null : await queryFirst<Omit<ThreadOperationalRecord, 'party_size_is_minimum' | 'payment_processing'> & { party_size_is_minimum: number; payment_processing: number }>(db, `
     SELECT br.unit, br.id, br.status, br.party_size, br.party_size_is_minimum, br.starts_at, br.ends_at, br.timezone, br.location_id, br.product_id, br.product_kind, br.product_name, br.product_internal_name,
-           br.assigned_member_id, br.organization_id, br.user_id, br.no_show_at, br.version, br.respond_by, ${stayRequestPayBySql(conversationRef)} AS pay_by,
+           br.assigned_member_id, br.organization_id, br.user_id, br.version, br.respond_by, ${stayRequestPayBySql(conversationRef)} AS pay_by,
            CASE WHEN br.status='pending' AND br.respond_by IS NOT NULL THEN NOT (${noStayRequestPaymentInFlightSql(conversationRef)}) ELSE 0 END AS payment_processing,
            (SELECT rv.id FROM reviews rv WHERE rv.organization_id = br.organization_id AND rv.booking_id = br.id ORDER BY rv.created_at LIMIT 1) AS review_id, br.advance_notice_minutes
       FROM ${authorized ? `${BOOKING_RECORDS_SQL} br` : `conversations owner JOIN ${BOOKING_RECORDS_SQL} br ON br.id = owner.booking_id AND br.organization_id = owner.organization_id`}
@@ -335,11 +334,11 @@ export function requestInsertQueries(request: Omit<GuestRequest, 'blocked_at' | 
 /**
  * A booking's conversation, written in the booking's own batch and only where
  * the booking landed and has none yet: every booking has one. Its guest
- * contact is what the booking was made with; the conversation belongs to the
- * booking's guest account.
+ * contact is what the booking was made with. Use the booking's guest account
+ * when it has one.
  */
 export function bookingConversationQueries(input: {
-  organizationId: string; bookingId: string; requestId: string; locationId: string | null; userId: string; now: string
+  organizationId: string; bookingId: string; requestId: string; locationId: string | null; userId: string | null; now: string
   guest: { name: string | null; email: string | null; phone: string | null }
   participant?: { kind: 'channel'; title: string }
 }): BatchQuery[] {
@@ -351,7 +350,7 @@ export function bookingConversationQueries(input: {
         AND NOT EXISTS (SELECT 1 FROM conversations WHERE kind = 'booking' AND booking_id = ?)`,
     params: [input.requestId, input.organizationId, input.locationId, input.bookingId, input.userId, JSON.stringify(payload), input.now, input.now, input.organizationId, input.bookingId, input.bookingId],
   }, initialConversationParticipants(input.requestId, input.organizationId),
-  initialListingParticipants(input.organizationId, input.requestId), publicResourceCacheInvalidationQuery(input.organizationId, 'guest-thread-create')]
+  initialListingParticipants(input.organizationId, input.requestId)]
 }
 
 /**
@@ -387,24 +386,13 @@ export function threadPayloadForGuest(input: GuestThreadInput): GuestThreadPaylo
  * because the clock says so.
  */
 export function requestActions(record: ThreadOperationalRecord | null, now: string): string[] {
-  const noShow = canMarkNoShow(record, now) ? ['no_show'] : []
-  if (!canCancelBookingRequest(record, now)) return noShow
+  if (!canCancelBookingRequest(record, now)) return []
   if (record.unit === 'nights') {
-    if (record.status !== 'pending' || !record.respond_by) return noShow
-    if (record.pay_by) return !record.payment_processing && record.pay_by > now ? ['cancel'] : noShow
-    return record.respond_by > now ? ['confirm', 'reject'] : noShow
+    if (record.status !== 'pending' || !record.respond_by) return []
+    if (record.pay_by) return !record.payment_processing && record.pay_by > now ? ['cancel'] : []
+    return record.respond_by > now ? ['confirm', 'reject'] : []
   }
-  return [...(record.status === 'pending' ? ['confirm', 'reject', 'change', 'cancel'] : ['change', 'cancel']), ...noShow]
-}
-
-/**
- * A confirmed visit that has begun can be recorded as a no-show, until the
- * guest has reviewed it. It is the one thing that stops a visit's review
- * invitation without cancelling the visit.
- */
-export function canMarkNoShow(record: ThreadOperationalRecord | null, now: string): record is ThreadOperationalRecord {
-  return Boolean(record && record.status === 'confirmed' && record.no_show_at === null && record.review_id === null
-    && record.starts_at <= (isBookingDay(record.starts_at) ? localDateAt(new Date(now), record.timezone) : now))
+  return record.status === 'pending' ? ['confirm', 'reject', 'change', 'cancel'] : ['change', 'cancel']
 }
 
 export function canCancelBookingRequest(record: ThreadOperationalRecord | null, now: string): record is ThreadOperationalRecord {
@@ -530,7 +518,7 @@ export async function cancelBookingRequest(db: DbClient, input: GuestCancellatio
           AND EXISTS (SELECT 1 FROM bookings WHERE id = ? AND organization_id = ? AND id = conversations.booking_id AND version = ? AND status = ?${input.buyerUserId ? ' AND user_id = ?' : ''}) RETURNING *`,
       params: [input.now, input.id, input.organizationId, input.kind, ...(input.buyerUserId ? [input.buyerUserId] : [input.tokenHash, input.now]), ...(refund.guard?.params ?? []), record.id, input.organizationId, record.version, record.status, ...(input.buyerUserId ? [input.buyerUserId] : [])],
     },
-    bookingStatusQuery({ organizationId: input.organizationId, bookingId: record.id, status: 'cancelled', reason: 'guest_cancelled', now: input.now,
+    bookingStatusQuery({ organizationId: input.organizationId, bookingId: record.id, status: 'cancelled', reason: 'guest_cancelled', now: input.now, calendar: true,
       guard: { query: `changes() = 1 AND version = ? AND status = ?${input.buyerUserId ? ' AND user_id = ?' : ''}
         AND EXISTS (SELECT 1 FROM conversations WHERE id = ? AND organization_id = ? AND booking_id = bookings.id
           AND json_extract(payload_json, '$.cancellation.used_at') = ?)`,

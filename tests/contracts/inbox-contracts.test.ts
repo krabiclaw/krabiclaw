@@ -12,6 +12,7 @@ import { runAlterationRequestFeed } from '../../server/domain/guest-threads/stay
 import { sendGuestThreadReply } from '../../server/domain/guest-threads/operations.ts'
 import { getConversationDetails } from '../../server/domain/guest-threads/inbox.ts'
 import { conversationPageFor } from '../integration/support/conversation-page.ts'
+import { captureEvents } from '../integration/support/events.ts'
 import { scheduleGuestReply } from '../../server/domain/scheduled-guest-messages.ts'
 import { suggestGuestReplies } from '../../server/domain/suggested-reply.ts'
 import { memberInbox } from '../../server/utils/dashboard-guest-threads.ts'
@@ -20,7 +21,9 @@ import { executeBatch } from '../../server/db/index.ts'
 import { requestInsertQueries } from '../../server/domain/requests.ts'
 import { appendMessage, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { archiveConversation } from '../../server/domain/guest-threads/repository.ts'
-import { stayCheckoutPolicy, stayFromCheckoutQueries } from '../../server/domain/stays.ts'
+import { stayCheckoutPolicy, stayFromCheckoutQueries, stayHoldPredicate } from '../../server/domain/stays.ts'
+import { bookingPolicy } from '../../server/utils/booking-policy-summary.ts'
+import { requireBookingConfig } from '../../server/utils/availability.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 /*
@@ -95,10 +98,9 @@ const generatedId = (sequence: number) => `00000000-0000-4000-8000-${String(sequ
 /** Generated ids, numbered in the order the contract files first show them: an id the server draws elsewhere leaves the files as they are. */
 const shown = new Map<string, string>()
 
-async function check(name: string, value: unknown, providerGuestId?: string) {
+async function check(name: string, value: unknown) {
   const path = new URL(`../../contracts/inbox/${name}.json`, import.meta.url)
-  const serialized = `${JSON.stringify(stable(value), null, 2)}\n`.replace(/00000000-0000-4000-8000-\d{12}/g, id => shown.get(id) ?? shown.set(id, generatedId(shown.size + 1)).get(id)!)
-  const text = providerGuestId ? serialized.replaceAll(JSON.stringify(providerGuestId), '"airbnb-guest-account"') : serialized
+  const text = `${JSON.stringify(stable(value), null, 2)}\n`.replace(/00000000-0000-4000-8000-\d{12}/g, id => shown.get(id) ?? shown.set(id, generatedId(shown.size + 1)).get(id)!)
   if (WRITE) { await writeFile(path, text); return }
   const committed = await readFile(path, 'utf8').catch((error: unknown) => { throw new Error(`contracts/inbox/${name}.json is missing; run yarn contracts:write`, { cause: error }) })
   assert.equal(text, committed, `contracts/inbox/${name}.json differs from what the inbox view model returns; run yarn contracts:write and commit the diff`)
@@ -126,13 +128,13 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('owner-member', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
       VALUES ('location', ?, 'sky', '74 D · Sky', 'active', 'America/Denver', ?, ?)`).bind(ORG, NOW, NOW).run()
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), MEDIA_BASE_URL: 'https://media.example.test', CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k',
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: captureEvents().binding, MEDIA_BASE_URL: 'https://media.example.test', CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k',
       BETTER_AUTH_SECRET: 'inbox-contract-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
       EMAIL_REPLY_DOMAIN: 'reply.proof.example',
       STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', EMAIL_REPLY_SECRET: 'contract-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
       AI: { run: async () => ({ response: ['Yes, check-in is from 4 PM.', 'Check-in starts at 4 PM; the code arrives that morning.'], usage: { prompt_tokens: 120, completion_tokens: 24 } }) },
     } as unknown as CloudflareEnv
-    const home = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
+    const home = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, publication: { published: true }, product: {
       kind: 'stay', name: '74 D · Sky', variants: [{ name: '74 D · Sky', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
       stay: { location_id: 'location', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'owner-member' },
     } })
@@ -167,7 +169,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     // The outbox has a pending reply that does not appear in delivered chat history.
     await scheduleGuestReply(db, principal, threadId, { body: 'Enjoy your stay!', due_at: '2026-11-08T23:00:00.000Z' })
 
-    // A stay booked and paid on the site, as its captured payment converts it: the stay's own message, then the guest's note.
+    // A stay booked and paid on the site: the stay's own message, then the guest's note.
     const purchase = { product_id: home.id, location_id: 'location', timezone: 'America/Denver', check_in_date: '2026-11-20', check_out_date: '2026-11-23', adults: 2, children: 0, infants: 0,
       total_minor: 45_000, currency: 'USD', cancellation_policy: 'moderate', nightly: ['2026-11-20', '2026-11-21', '2026-11-22'].map(date => ({ date, price_minor: 15_000 })),
       guest: { name: 'Ana Ruiz', email: 'ana@example.test', phone: '+13035550123', notes: 'We arrive late, around 9 PM.', answers: [] } }
@@ -176,8 +178,9 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     await db.prepare(`INSERT INTO payments (id, organization_id, buyer_user_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, captured_amount, stripe_payment_intent_id, price_snapshot_json, created_at, updated_at)
       VALUES ('site-pay', ?, 'site-guest', 'acct_contract', 0, 'booking', NULL, 'location', 'USD', 45000, 45000, 'pi_site', ?, ?, ?)`).bind(ORG, JSON.stringify({ stay: purchase }), NOW, NOW).run()
     const variant = (await db.prepare('SELECT id FROM product_variants WHERE product_id = ?').bind(home.id).first<{ id: string }>())!
-    await executeBatch(db, stayFromCheckoutQueries({ organizationId: ORG, stayId: 'site-stay', holdId: 'site-hold', paymentId: 'site-pay', buyerUserId: 'site-guest', now: NOW, websiteSource: 'Direct',
-      stay: { quote: purchase, guest: purchase.guest }, policy: await stayCheckoutPolicy(db, ORG, { ...purchase, tax_behavior: 'unspecified' }),
+    await executeBatch(db, stayFromCheckoutQueries({ organizationId: ORG, stayId: 'site-stay', paymentId: 'site-pay', buyerUserId: 'site-guest', now: NOW, websiteSource: 'Direct',
+      availability: await stayHoldPredicate(db, { organizationId: ORG, productId: home.id, checkIn: purchase.check_in_date, checkOut: purchase.check_out_date }),
+      stay: { quote: purchase, guest: purchase.guest }, policy: JSON.stringify(stayCheckoutPolicy(bookingPolicy(await requireBookingConfig(db, ORG, purchase.product_id), null), { ...purchase, tax_behavior: 'unspecified' })),
       home: { name: home.name, location_id: 'location', timezone: 'America/Denver', check_in_time: '16:00', check_out_time: '10:00', variant_id: variant.id } }))
     const siteThreadId = (await db.prepare("SELECT id FROM conversations WHERE booking_id = 'site-stay' AND kind = 'booking'").first<{ id: string }>())!.id
     // A question through the contact form that nobody has written in for 30 days: past by the rule, not archived.
@@ -206,10 +209,11 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
 
     await check('list', current)
     await check('past', past)
-    // Better Auth owns the anonymous account ID. Assert the exact stored identity before stabilizing its value in the fixture.
-    assert.ok(stay.user_id)
-    assert.deepEqual(thread.conversation.participants.filter(person => person.role === 'guest').map(person => person.id), [stay.user_id])
-    await check('thread', thread, stay.user_id)
+    // The channel guest keeps their conversation identity without a local account.
+    assert.equal(stay.user_id, null)
+    assert.equal(thread.conversation.title, 'Mililani')
+    assert.deepEqual(thread.conversation.participants.filter(person => person.role === 'guest'), [])
+    await check('thread', thread)
     await check('opening', opened)
     await check('details', await getConversationDetails(db, (await resolveConversationAccess(db, OWNER, threadId)).conversation, OWNER, 'member', new Date(NOW)))
     await check('suggestions', suggestions)

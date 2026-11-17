@@ -1,6 +1,6 @@
 <template>
   <!-- One row of a day: the Today card's shape, smaller — who, with the place as a badge, what, and when. -->
-  <NuxtLink :to="to ?? item.to" :data-session-id="item.kind === 'session' ? item.id : undefined" class="group flex items-center gap-4 py-3" :class="cancelled ? 'text-muted' : 'text-highlighted'">
+  <NuxtLink :to="item.to" :data-session-id="item.kind === 'session' ? item.id : undefined" class="group flex items-center gap-4 py-3" :class="cancelled ? 'text-muted' : 'text-highlighted'">
     <div class="relative size-12 shrink-0" aria-hidden="true">
       <UAvatar
         :src="item.guest_image_url || undefined"
@@ -36,9 +36,7 @@ export type CalendarRowItem = Pick<AgendaItem, 'id' | 'starts_at' | 'timezone' |
 <script setup lang="ts">
 import { formatTimestamp } from '~/utils/timezone'
 
-// The surface drawing the row says where it opens: under Today the record's
-// own screen, under a calendar day the same record as a leaf of that day.
-const props = defineProps<{ item: CalendarRowItem; to?: string }>()
+const props = defineProps<{ item: CalendarRowItem }>()
 const cancelled = computed(() => props.item.status === 'cancelled')
 const formattedTime = computed(() => formatTimestamp(props.item.starts_at, 'en', props.item.timezone, { hour: 'numeric', minute: '2-digit' }))
 const details = computed(() => [cancelled.value ? 'Cancelled' : null, !cancelled.value || props.item.kind === 'session' ? props.item.subtitle : null, props.item.location_title].filter(Boolean).join(' · '))

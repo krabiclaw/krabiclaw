@@ -41,6 +41,7 @@ import { isNewSalePlan, normalizeBillingPlanId } from '~/shared/billing-model'
 import { integrationsThroughAccount } from '~/server/utils/organization-integrations'
 import { publishAccessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { reconcileResponsibilities } from '~/server/utils/member-access'
+import { publishEvent } from '~/server/events'
 
 type IntegrationCallbackContext = GenericEndpointContext['context'] & { integrationAccountId?: string }
 
@@ -138,6 +139,7 @@ function organizationDeletionCleanupPlugin(env: CloudflareEnv): BetterAuthPlugin
         },
         afterDeleteOrganization: async (data, hookCtx) => {
           await afterDeleteOrganization?.(data, hookCtx)
+          await publishEvent(env, { type: 'calendar.cleanup', organization_id: data.organization.id })
           await publishAccessInvalidation(env, { organizationId: data.organization.id })
           await reconcileZarazAnalytics(env, env.DB)
         },
@@ -189,6 +191,7 @@ export interface CloudflareEnv {
   CF_PLATFORM_ZARAZ_ZONE_ID?: string
   OPENAI_APPS_CHALLENGE_BLAWBY_B64?: string
   CF_CUSTOM_HOSTNAMES_API_TOKEN?: string
+  CF_CUSTOM_HOSTNAMES_WEBHOOK_SECRET?: string
   CF_SAAS_CNAME_TARGET?: string
   NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN?: string
   NUXT_PUBLIC_PLATFORM_DOMAIN?: string
@@ -216,6 +219,8 @@ export interface CloudflareEnv {
   MEDIA_BUCKET?: R2Bucket
   ORGANIZATION_CACHE?: KVNamespace
   GUEST_INBOX_HUBS?: DurableObjectNamespace
+  /** Cloudflare's queue of what writes announce (server/events.ts). */
+  EVENTS?: import('~/server/events').EventsEnv['EVENTS']
   db?: ReturnType<typeof createDb>
   [key: string]: ApiValue
 }
@@ -381,6 +386,7 @@ function buildAuth(env: CloudflareEnv) {
     await reconcileResponsibilities(env, db, { organizationId })
     // A person who left keeps no seat or read position in the organization's conversations.
     await executeBatch(db, [publicResourceCacheInvalidationQuery(organizationId, 'member-change'), departedParticipantsQuery(organizationId), ...audit])
+    await publishEvent(env, { type: 'calendar.changed', organization_id: organizationId, booking_id: null })
     await publishAccessInvalidation(env, { organizationId })
   }
   // Removed by an owner, leaving, or deleting the account: one departure, one
@@ -393,9 +399,9 @@ function buildAuth(env: CloudflareEnv) {
     entityId: member.id,
     metadata: { userId: member.userId, operation },
   })])
-  // Better Auth's user delete.after receives only the user; the memberships
-  // its delete cascades away are read in delete.before of the same request.
-  const departingMemberships = new Map<string, Array<{ id: string; organizationId: string; userId: string }>>()
+  // Deletion removes memberships and clears guest ownership before the after hook runs.
+  type AccountDeparture = { kind: 'member' | 'calendar'; id: string; organizationId: string; userId: string }
+  const accountDepartures = new Map<string, AccountDeparture[]>()
   const configuredOrganizationOptions = {
     ...organizationOptions,
     organizationHooks: {
@@ -594,7 +600,9 @@ function buildAuth(env: CloudflareEnv) {
     databaseHooks: {
       session: {
         create: {
-          after: async (session) => {
+          after: async (session, context) => {
+            // The anonymous endpoint creates an unverified identity, so there is no verified email to link.
+            if (context?.path === '/sign-in/anonymous') return
             const user = await (await createAuth(env).$context).adapter.findOne<Pick<UserWithAnonymous, 'id' | 'email' | 'emailVerified' | 'isAnonymous'>>({
               model: 'user', where: [{ field: 'id', value: session.userId }], select: ['id', 'email', 'emailVerified', 'isAnonymous'],
             })
@@ -613,18 +621,27 @@ function buildAuth(env: CloudflareEnv) {
           before: async (user) => {
             // A deleted account's Customer at every business it paid goes with it, and the cards saved there.
             await deleteBuyerCustomers(db, env, user.id)
-            departingMemberships.set(user.id, await queryAll<{ id: string; organizationId: string; userId: string }>(db, 'SELECT id, "organizationId", "userId" FROM member WHERE "userId" = ?', [user.id]))
+            accountDepartures.set(user.id, await queryAll<AccountDeparture>(db, `
+              SELECT 'member' AS kind, id, "organizationId", "userId" FROM member WHERE "userId"=?
+              UNION ALL
+              SELECT 'calendar', b.id, b.organization_id, b.user_id FROM bookings b
+              WHERE b.user_id=? AND b.status IN ('pending', 'confirmed') AND EXISTS (
+                SELECT 1 FROM google_calendar_event_links l WHERE l.organization_id=b.organization_id AND l.booking_id=b.id AND l.state<>'deleted'
+              )`, [user.id, user.id]))
           },
           // Current business responsibility ends with membership, once the
           // deletion has removed it. The actual individual recorded on
           // historical bookings remains unchanged.
           after: async (user) => {
-            const memberships = departingMemberships.get(user.id)
-            if (!memberships) throw new Error('A deleted account\'s memberships were not read before its deletion')
-            departingMemberships.delete(user.id)
+            const departures = accountDepartures.get(user.id)
+            if (!departures) throw new Error('The deleted account\'s references were not read before deletion')
+            accountDepartures.delete(user.id)
             // The user no longer exists, so the audit cannot reference them
             // through its user foreign key. Preserve the provider operation.
-            for (const member of memberships) await recordMemberDeparture(member, null, 'account_deleted')
+            for (const departure of departures) {
+              if (departure.kind === 'member') await recordMemberDeparture(departure, null, 'account_deleted')
+              else await publishEvent(env, { type: 'calendar.changed', organization_id: departure.organizationId, booking_id: departure.id })
+            }
           },
         },
         update: {
@@ -792,12 +809,20 @@ function buildAuth(env: CloudflareEnv) {
         onEvent: async (event) => {
           await handleStripeGa4Event(env, db, stripeClient, event)
           const { reportBillingUsageForSubscriptionEvent } = await import('~/server/utils/billing')
-          await reportBillingUsageForSubscriptionEvent(env, db, event)
+          const organizationId = await reportBillingUsageForSubscriptionEvent(env, db, event)
+          if (organizationId) await publishEvent(env, { type: 'calendar.changed', organization_id: organizationId, booking_id: null })
           const { returnExtrasToDraftsForPlanEnd } = await import('~/server/utils/billing-plan-end')
           await returnExtrasToDraftsForPlanEnd(env, d1, event)
           await ingestStripeFeeReportEvent(db, stripeClient, env, event)
           const { notifySubscriptionPlanForEvent } = await import('~/server/domain/payments/notifications')
           await notifySubscriptionPlanForEvent(env, db, event, loadStripePlans)
+          if (!event.account && event.type === 'checkout.session.completed') {
+            const checkout = event.data.object
+            const referenceId = checkout.client_reference_id ?? checkout.metadata?.referenceId
+            if (checkout.mode === 'subscription' && checkout.metadata?.subscriptionId && referenceId) {
+              await publishEvent(env, { type: 'calendar.changed', organization_id: referenceId, booking_id: null })
+            }
+          }
         },
       }),
       organizationDeletionCleanupPlugin(env),
@@ -1118,9 +1143,9 @@ export async function getAuthSession(event: H3Event, env: CloudflareEnv): Promis
  * same browser reuses it. Call it only once the write is about to happen: a page
  * view or a rejected submission must not mint an identity.
  */
-export async function ensureInteractionUser(event: H3Event, env: CloudflareEnv): Promise<string> {
+export async function ensureInteractionUser(event: H3Event, env: CloudflareEnv): Promise<{ id: string; email: string; name: string; isAnonymous?: boolean | null }> {
   const session = await getAuthSession(event, env)
-  if (session?.user) return session.user.id
+  if (session?.user) return session.user
   const auth = createAuth(env)
   const { headers, response } = await auth.api.signInAnonymous({
     headers: event.req.headers,
@@ -1130,22 +1155,5 @@ export async function ensureInteractionUser(event: H3Event, env: CloudflareEnv):
   for (const cookie of headers.getSetCookie()) {
     event.res.headers.append('set-cookie', cookie)
   }
-  return response.user.id
-}
-
-/**
- * The Better Auth user of a guest the business knows only by what a host or a
- * channel gave it: Better Auth's anonymous user, carrying that name. Nobody is
- * signed in as it, so the session the sign-in opens is closed at once. The
- * guest's own verified sign-in later joins it to their account
- * (server/utils/guest-accounts.ts).
- */
-export async function createGuestUser(env: CloudflareEnv, name: string): Promise<string> {
-  const auth = createAuth(env)
-  const { response } = await auth.api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
-  if (!response?.user?.id || !response.token) throw new Error('Better Auth did not return an anonymous user')
-  const context = await auth.$context
-  await context.internalAdapter.updateUser(response.user.id, { name })
-  await context.internalAdapter.deleteSession(response.token)
-  return response.user.id
+  return { ...response.user, isAnonymous: true }
 }

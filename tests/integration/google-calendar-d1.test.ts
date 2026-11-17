@@ -12,7 +12,8 @@ import { cleanupOrganizationBeforeDelete } from '../../server/utils/tenant-delet
 import { organizationAdapter } from '../../server/utils/member-access.ts'
 import { INTEGRATION_SCOPES } from '../../shared/organization-settings.ts'
 import { symmetricEncrypt } from 'better-auth/crypto'
-import calendarSyncTask from '../../server/tasks/google-calendar-sync.ts'
+import { consumeEvent, type DomainEvent } from '../../server/events.ts'
+import { describeFailure } from '../../server/scheduled-tasks.ts'
 
 test('committed consultation projection is tenant scoped, private, idempotent and fenced during cancellation and cleanup', { timeout: 120_000 }, async (t) => {
   const mf = new Miniflare({ workers: [{ config: { name: 'calendar-proof', compatibilityDate: '2024-11-01', manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } }, env: { DB: { type: 'd1' } } } }] })
@@ -229,21 +230,37 @@ test('bounded Calendar backfill resumes and cancelled historical Sessions are cl
   } finally { await mf.dispose() }
 })
 
-test('scheduled Calendar sync reports thrown and event failures while projecting healthy organizations', { timeout: 120_000 }, async t => {
+test('Calendar backfill publishes separate tenant jobs and a pending projection arms its booking deadline', { timeout: 120_000 }, async t => {
   const mf = new Miniflare({ workers: [{ config: { name: 'calendar-task-proof', compatibilityDate: '2024-11-01', manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } }, env: { DB: { type: 'd1' } } } }] })
   try {
     const db = await mf.getD1Database('DB')
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(sql => db.prepare(sql)))
-    const env = { DB: db, STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', GOOGLE_CLIENT_ID: 'test-google-client', GOOGLE_CLIENT_SECRET: 'test-google-secret' } as CloudflareEnv
+    const queued: DomainEvent[] = []
+    const wakes: Array<{ organizationId: string; kind: string; due_at: number }> = []
+    const env = {
+      DB: db, STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', BETTER_AUTH_URL: 'https://proof.example',
+      BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test',
+      GOOGLE_CLIENT_ID: 'test-google-client', GOOGLE_CLIENT_SECRET: 'test-google-secret',
+      EVENTS: { send: async (event: DomainEvent) => { queued.push(event) } },
+      GUEST_INBOX_HUBS: {
+        idFromName: (organizationId: string) => organizationId,
+        get: (organizationId: string) => ({
+          fetch: async (_url: string, init: RequestInit) => {
+            wakes.push({ organizationId, ...JSON.parse(String(init.body)) })
+            return new Response(null, { status: 204 })
+          },
+        }),
+      } as unknown as DurableObjectNamespace,
+    } satisfies CloudflareEnv
     await db.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('actor','Actor','actor@example.test',1)").run()
     const accessToken = await symmetricEncrypt({ key: env.BETTER_AUTH_SECRET!, data: 'calendar-task-token' })
     await db.prepare("INSERT INTO account(id,accountId,providerId,userId,scope,accessToken) VALUES('linked','google-subject','google','actor',?,?)").bind(INTEGRATION_SCOPES['google-calendar'].join(','), accessToken).run()
     for (const org of ['a-broken', 'b-failed', 'c-healthy']) {
       await db.prepare(`INSERT INTO organization(id,name,slug, default_currency, timezone) VALUES(?,?,?, 'USD', 'UTC')`).bind(org, org, org).run()
-      // Google Calendar sync is Business; the task reads only entitled organizations.
+      // The Calendar consumer checks the business entitlement before projecting.
       await db.prepare("INSERT INTO subscription(id,plan,referenceId,status,periodEnd) VALUES(?,'business',?,'active',4070908800)").bind(`sub-${org}`, org).run()
       await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('service',?,?,?,'consultation','actor','actor')").bind(org, org, org).run()
-    // Held online by a provider whose hours cover the sessions.
+      // Held online by a provider whose hours cover the sessions.
       await db.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified) VALUES('host','Host','host@example.test',1)").run()
       await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES(?,?,'host','member',1)").bind(`host-${org}`, org).run()
       await db.prepare(`INSERT INTO member_scheduling(member_id, organization_id, public_name, public_approved, timezone, weekly_json, time_off_json, updated_at, updated_by) VALUES(?,?,'Host',1,'UTC','[{"weekday":0,"start":"00:00","end":"23:59"},{"weekday":1,"start":"00:00","end":"23:59"},{"weekday":2,"start":"00:00","end":"23:59"},{"weekday":3,"start":"00:00","end":"23:59"},{"weekday":4,"start":"00:00","end":"23:59"},{"weekday":5,"start":"00:00","end":"23:59"},{"weekday":6,"start":"00:00","end":"23:59"}]','[]','2099-01-01T00:00:00.000Z','host')`).bind(`host-${org}`, org).run()
@@ -265,15 +282,23 @@ test('scheduled Calendar sync reports thrown and event failures while projecting
       events.set(url.pathname, payload)
       return Response.json(payload)
     })
-    await assert.rejects(calendarSyncTask.run({ name: 'google-calendar-sync', payload: {}, context: { cloudflare: { env } } }), error => {
-      assert.match(String(error), /a-broken:.*projection write rejected/s)
-      assert.match(String(error), /b-failed: 1 Google Calendar event\(s\) failed/)
+    await consumeEvent(env, { type: 'deployment.adopt_pending_work' })
+    assert.deepEqual(queued.filter(event => event.type === 'calendar.changed').toSorted((a, b) => a.organization_id.localeCompare(b.organization_id)),
+      ['a-broken', 'b-failed', 'c-healthy'].map(organization_id => ({ type: 'calendar.changed', organization_id, booking_id: null })))
+    const eventFor = (organization_id: string): DomainEvent => ({ type: 'calendar.changed', organization_id, booking_id: null })
+    await assert.rejects(consumeEvent(env, eventFor('a-broken')), error => {
+      assert.match(describeFailure(error), /projection write rejected/)
       return true
     })
+    await assert.rejects(consumeEvent(env, eventFor('b-failed')), /1 Google Calendar events could not sync/)
+    await consumeEvent(env, eventFor('c-healthy'))
     assert.equal((await readCalendarIntegration(db, 'b-failed'))?.status, 'error')
     assert.equal((await readCalendarIntegration(db, 'b-failed'))!.last_error, 'Google Calendar returned 403. Check the account grant and calendar writer access.')
     assert.equal(await db.prepare("SELECT state FROM google_calendar_event_links WHERE organization_id='c-healthy'").first('state'), 'synced')
     assert.equal(events.size, 1, 'the healthy organization creates one event with one invitation operation despite other failures')
+    assert.deepEqual(wakes.filter(({ organizationId }) => organizationId === 'c-healthy'), [
+      { organizationId: 'c-healthy', kind: 'calendar', due_at: Date.parse('2099-11-01T10:30:00.000Z') },
+    ])
     assert([...events.keys()].every(path => path.includes('/calendars/c-healthy/events')))
     for (const event of events.values()) {
       assert.equal((event as { summary: string }).summary, 'Pending consultation')
@@ -381,7 +406,7 @@ test('experience and dining Calendar management links follow canonical buyer own
       // A table is still a reservation to its guest, a home a stay; every visit is managed at its booking.
       const word=link.request_id==='dining-thread'?'reservation':link.request_id==='stay-thread'?'stay':'booking'
       const event=events.get(String(link.event_id))!
-      assert.ok(String(event.description).endsWith(`Manage ${word}: http://localhost:3113/dashboard/account/activity/${word==='stay'?'stay':'booking'}/${link.request_id}`))
+      assert.ok(String(event.description).endsWith(`Manage ${word}: http://localhost:3113/dashboard/account/messages/${link.request_id}/reservation`))
       assert.equal(event.attendees,undefined,'this link does not introduce consultation attendee semantics to other verticals')
       assert.ok(!JSON.stringify(event).includes('PRIVATE_'))
       assert.ok(!JSON.stringify(event).includes('PRIVATE NOTES'))
@@ -398,6 +423,6 @@ test('experience and dining Calendar management links follow canonical buyer own
     assert.equal((await syncCalendarOrganization(env,'org',25,provider)).failed,0)
     assert.deepEqual([...events.keys()],identities,'ownership eligibility reconciles existing event identities')
     assert.equal(inserts,3,'eligible management links update existing events instead of duplicating them')
-    for(const event of events.values()) assert.ok(String(event.description).includes('/dashboard/account/activity/'))
+    for(const event of events.values()) assert.ok(String(event.description).includes('/dashboard/account/messages/'))
   } finally {await runtime.dispose()}
 })

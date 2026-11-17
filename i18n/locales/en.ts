@@ -67,9 +67,6 @@ export default {
     "full_policy": "Full policy",
     "free_cancellation_until": "Free cancellation until {time}. After that, this payment isn't refunded automatically.",
     "non_refundable": "This booking is non-refundable.",
-    "when": "Choose when to pay",
-    "pay_now": "Pay {amount} now",
-    "pay_later": "Pay later",
     "confirm": "Confirm and pay",
     "continue_to_pay": "Continue to payment",
     "view_payment": "View payment",
@@ -80,9 +77,11 @@ export default {
     "declined": "The payment was not completed.",
     "verifying": "Confirming your payment…",
     "processing": "Your payment is processing",
-    "processing_help": "Your bank is still confirming this payment. You will get an email when it completes.",
-    "refunded": "This booking could not be completed",
-    "refunded_help": "What you paid for was taken before your payment completed, so your payment is being refunded in full."
+    "processing_help": "You'll get an email when your payment is complete.",
+    "check_status": "Check payment status",
+    "taken": "Someone else just booked this",
+    "taken_help": "You haven’t been charged. Choose another date or time to continue.",
+    "choose_again": "Choose another date or time"
   },
   "site_pages": {
     "home": "Home",

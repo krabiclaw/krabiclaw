@@ -31,7 +31,7 @@ const key = { type: 'string', minLength: 1, maxLength: 200, description: 'Caller
 const payment = { type: 'object', properties: { id: text, booking_id: text, amount_minor: { type: 'integer' }, currency: text, method: { type: 'string', enum: [...STAY_PAYMENT_METHODS] }, paid_on: day, reference: nullableText, note: nullableText, created_at: text, created_by: text },
   required: ['id', 'booking_id', 'amount_minor', 'currency', 'method', 'paid_on', 'reference', 'note', 'created_at', 'created_by'] }
 const stayProperties = {
-  id: text, product_id: text, booked_product_id: { ...nullableText, description: 'The listing a channel reservation is booked on when the host moved the guest to another home; null when they sleep where they booked.' }, booked_home_name: nullableText, location_id: text, timezone: text, channel: { type: 'string', enum: [...STAY_CHANNELS] }, owner: { type: 'string', enum: ['app', 'channel'] },
+  id: text, product_id: text, location_id: text, timezone: text, channel: { type: 'string', enum: [...STAY_CHANNELS] }, owner: { type: 'string', enum: ['app', 'channel'] },
   status: { type: 'string', enum: [...STAY_STATUSES] }, overbooked: { type: 'boolean' },
   starts_at: { ...text, description: 'Check-in: an ISO instant at the home\'s check-in time (or the arrival the host recorded), or the day alone when the home has no check-in time.' },
   ends_at: { ...text, description: 'Checkout: an ISO instant at the home\'s checkout time, or the day alone when the home has no checkout time.' },
@@ -40,7 +40,6 @@ const stayProperties = {
   guest_email: nullableText, guest_phone: nullableText, user_id: nullableText, total_minor: { type: 'integer' }, currency: text, private_notes: { ...nullableText, description: 'The host\'s own note, never shown to the guest.' },
   provider: nullableText, external_booking_id: nullableText, channel_booking_id: nullableText, channel_booking_url: { ...nullableText, description: 'The reservation on its channel (Airbnb\'s host reservation page), where a channel stay is changed or cancelled. Null for other stays.' }, conversation_id: { ...text, description: 'The guest conversation about this stay, for get_conversation and send_message. Every stay has one.' }, cancelled_at: nullableText, cancellation_reason: nullableText,
   cancellation_policy: { type: ['string', 'null'], enum: [...STAY_BOOKED_POLICIES, null], description: 'The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.' },
-  no_show_at: { ...nullableText, description: 'When the host recorded that the guest never arrived; null otherwise.' },
   answers: { ...formAnswerSnapshotsJsonSchema(), description: 'The guest\'s answers to the home\'s questions, worded as they answered them. The stay keeps them even when its conversation is deleted.' },
   version: { type: 'integer' }, created_at: text, updated_at: text,
 }
@@ -51,7 +50,7 @@ const onlinePayment = { type: ['object', 'null'], description: 'The Stripe payme
 const stayTurnoverProperties = Object.fromEntries(STAY_TURNOVER_FIELDS.map(field => [field, stayProperties[field]]))
 /** What a member responsible for the home reads of a stay: dates, arrival, the guest's first name and party. */
 export const stayTurnover = { type: 'object', description: 'A member’s view of a stay at a home they look after: dates, arrival time, the guest’s first name and party. Owners and admins read the whole stay.', properties: stayTurnoverProperties, required: [...STAY_TURNOVER_FIELDS], additionalProperties: false }
-export const stayDetail = { type: 'object', properties: { ...stayProperties, guest_image_url: { ...nullableText, description: 'The linked Better Auth account’s current portrait. Null for guests without an account portrait.' }, payments: { type: 'array', items: payment }, online_payment: onlinePayment, paid_minor: { type: 'integer' }, payment_status: { type: ['string', 'null'], enum: ['unpaid', 'partial', 'paid', 'overpaid', null] }, channel_push: channelPush },
+export const stayDetail = { type: 'object', properties: { ...stayProperties, guest_image_url: { ...nullableText, description: 'The linked Better Auth account’s current portrait. Null for guests without an account portrait.' }, payments: { type: 'array', items: payment }, online_payment: onlinePayment, paid_minor: { type: 'integer' }, payment_status: { type: ['string', 'null'], enum: ['unpaid', 'partial', 'paid', 'overpaid', null] } },
   required: [...Object.keys(stayProperties), 'guest_image_url', 'payments', 'online_payment', 'paid_minor', 'payment_status'] }
 const nullableCode = (vocabulary: Record<string, unknown>, description: string) => ({ type: ['string', 'null'], enum: [...Object.keys(vocabulary), null], description })
 /** What a home is and offers: public product stay settings. */
@@ -138,21 +137,20 @@ export const stayHomeObject = {
   photo_rooms: { type: 'array', description: 'Authored photo-tour rooms and spaces. photo_ids follow the Product photo order; unassigned photos are Additional photos. Counts and amenities never create rooms.', items: STAY_PHOTO_ROOM_SCHEMA }, accessibility: STAY_HOME_ACCESSIBILITY_SCHEMA },
   required: ['product_id', 'updated_at', 'name', 'internal_name', 'location_id', 'timezone', 'currency', 'airbnb_listing_id', 'airbnb_editor_url', 'base_price_minor', 'base_price_tax_behavior', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules',
     'description', 'published', 'address', 'latitude', 'longitude', 'stay_map_sharing', ...Object.keys(STAY_LISTING_SCHEMA), ...Object.keys(STAY_ARRIVAL_SCHEMA), 'smoke_detector_details', 'carbon_monoxide_detector_details', 'assigned_member_id', 'channel', 'photos', 'photo_rooms', 'accessibility'] }
-const night = { type: 'object', properties: { date: day, available: { type: 'boolean' }, booking_id: nullableText, held_until: { ...nullableText, description: 'When a guest checkout hold on this night lapses; null when no guest is paying for it. A held night is not available.' }, closed: { type: 'boolean' }, price_minor: { type: ['integer', 'null'] }, min_stay_arrival: { type: 'integer' }, max_stay: { type: ['integer', 'null'] }, closed_to_arrival: { type: 'boolean' }, closed_to_departure: { type: 'boolean' }, source: { type: ['string', 'null'], enum: ['host', 'import', null] },
-  calendar: { type: ['string', 'null'], enum: ['vrbo', null], description: 'The linked calendar (Vrbo) that shows this night taken; null when none does. Such a night is not available.' },
+const night = { type: 'object', properties: { date: day, available: { type: 'boolean' }, booking_id: nullableText, closed: { type: 'boolean' }, price_minor: { type: ['integer', 'null'] }, min_stay_arrival: { type: 'integer' }, max_stay: { type: ['integer', 'null'] }, closed_to_arrival: { type: 'boolean' }, closed_to_departure: { type: 'boolean' }, source: { type: ['string', 'null'], enum: ['host', 'import', null] },
   channel: { type: ['object', 'null'], properties: { state: { type: 'string', enum: ['pending', 'pushed', 'needs_review'] }, detail: nullableText }, required: ['state', 'detail'] } },
-  required: ['date', 'available', 'booking_id', 'closed', 'price_minor', 'min_stay_arrival', 'max_stay', 'closed_to_arrival', 'closed_to_departure', 'source', 'held_until', 'calendar', 'channel'] }
+  required: ['date', 'available', 'booking_id', 'closed', 'price_minor', 'min_stay_arrival', 'max_stay', 'closed_to_arrival', 'closed_to_departure', 'source', 'channel'] }
 // The home's calendar as the host Calendar reads it: the home's name, clock, price, minimum nights, rules, address and cancellation terms, and its stays.
 const calendarHomeProperties = { product_id: text, name: text, internal_name: text, timezone: text, currency: text, base_price_minor: stayHomeObject.properties.base_price_minor,
   min_nights: { type: 'integer' }, calendar_rules: STAY_CALENDAR_RULES_SCHEMA, address: stayHomeObject.properties.address,
   cancellation_policy: STAY_LISTING_SCHEMA.cancellation_policy, long_term_cancellation_policy: STAY_LISTING_SCHEMA.long_term_cancellation_policy }
 const calendarHome = { type: 'object', properties: calendarHomeProperties, required: Object.keys(calendarHomeProperties), additionalProperties: false }
-const calendarStayProperties = { unit: { const: 'nights' }, booking_id: text, product_id: text, status: stayProperties.status,
+const calendarStayProperties = { unit: { const: 'nights' }, booking_id: text, conversation_id: { ...nullableText, description: 'The reservation conversation if the caller has access to it.' }, product_id: text, status: stayProperties.status,
   guest_name: { ...nullableText, description: 'The guest as their conversation names them; a member reads the first name.' }, adults: { type: 'integer' }, children: { type: 'integer' },
   check_in_date: day, check_out_date: day, channel: { ...stayProperties.channel, description: 'Where the stay was booked; owners and admins only.' } }
-const calendarStay = { type: 'object', properties: calendarStayProperties, required: ['unit', 'booking_id', 'product_id', 'status', 'guest_name', 'adults', 'children', 'check_in_date', 'check_out_date'], additionalProperties: false }
+const calendarStay = { type: 'object', properties: calendarStayProperties, required: ['unit', 'booking_id', 'conversation_id', 'product_id', 'status', 'guest_name', 'adults', 'children', 'check_in_date', 'check_out_date'], additionalProperties: false }
 const calendar = { type: 'object', properties: { home: calendarHome, nights: { type: 'array', items: night }, stays: { type: 'array', items: calendarStay }, channel_push: channelPush }, required: ['home', 'nights', 'stays'] }
-const nightReceiptProperties = { booking_id: text, unit: { const: 'nights' }, product_id: text, conversation_id: text, status: stayProperties.status, version: stayProperties.version, updated_at: text, check_in_date: day, check_out_date: day, channel_push: channelPush }
+const nightReceiptProperties = { booking_id: text, unit: { const: 'nights' }, product_id: text, conversation_id: text, status: stayProperties.status, version: stayProperties.version, updated_at: text, check_in_date: day, check_out_date: day }
 export const nightBookingReceipt = { type: 'object', properties: nightReceiptProperties, required: Object.keys(nightReceiptProperties) }
 const paymentBalanceProperties = { booking_id: text, currency: text, paid_minor: { type: 'integer' }, payment_status: stayDetail.properties.payment_status }
 const paymentReceiptProperties = { id: text, booking_id: text, amount_minor: { type: 'integer' }, currency: text, method: payment.properties.method, paid_on: day, reference: nullableText, note: nullableText, created_at: text }
@@ -173,14 +171,14 @@ function roomIdentityResult(room: StayHome['photo_rooms'][number]) {
   return { id: room.id, type: room.type, photo_ids: room.photo_ids, details_version: room.details_version }
 }
 
-export function nightBookingMutation(stay: StayDetail & { channel_push: unknown }) {
+export function nightBookingMutation(stay: StayDetail) {
   return { booking_id: stay.id, unit: 'nights', product_id: stay.product_id, conversation_id: stay.conversation_id, status: stay.status, version: stay.version,
-    updated_at: stay.updated_at, check_in_date: stay.check_in_date, check_out_date: stay.check_out_date, channel_push: stay.channel_push }
+    updated_at: stay.updated_at, check_in_date: stay.check_in_date, check_out_date: stay.check_out_date }
 }
 
 export const STAYS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'get_stay_calendar', domain: 'stays', minimumRole: 'member', description: 'Read every night of a date range at one home: availability, nightly price, booking restrictions and the stays holding those nights. Returns scheduling details; each stay is its dates, status, guest and party; members read the guest’s first name and no channel. Owners and admins use get_product_booking for one booking’s contact and payment details, or get_product for the home’s photos and room groups.',
-    inputSchema: { product_id: productId, from: day, to: { ...day, description: 'Exclusive; at most 500 days after from.' } }, required: ['product_id', 'from', 'to'], outputSchema: calendar }),
+    inputSchema: { product_id: productId, from: day, to: { ...day, description: 'Exclusive.' } }, required: ['product_id', 'from', 'to'], outputSchema: calendar }),
   organizationTool({ name: 'create_home_room', domain: 'stays', minimumRole: 'admin', description: 'Create an empty room or space, such as Bedroom or Patio, for grouping an existing home’s photos. This creates a room group, not a photo or business location, and requires no amenity answers. Use assign_home_photos_to_room to group existing home photos afterward; save_media_attachment saves new attachments and attach_media adds library images to the home’s gallery. Returns the new room ID. Each call creates a new room; if the outcome is uncertain, read get_product before retrying. Changes only Blawby; it does not update Airbnb. Edit Airbnb’s photo tour separately in Airbnb.',
     inputSchema: { product_id: productId, type: { ...roomType, description: 'Type of the empty room or space to create.' } }, required: ['product_id', 'type'], outputSchema: roomResult }),
   organizationTool({ name: 'update_home_accessibility', domain: 'stays', minimumRole: 'admin', description: 'Change one home accessibility answer. First call get_product for product.updated_at and product.stay.accessibility. True requires evidence images in this organization; saving appends selected library images to this home’s Product photos without changing the cover, existing order or room assignments. False/null requires []; null clears the answer. Evidence photos remain protected until the answer is cleared or the evidence replaced. A stale Product revision or photo order refuses the entire change. Changes only Blawby; it does not update Airbnb. Edit Airbnb accessibility separately in Airbnb.',

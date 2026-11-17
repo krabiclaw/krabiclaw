@@ -18,8 +18,8 @@ export default defineHandler(async (event) => {
     const from = typeof query.from === 'string' ? query.from : new Date().toISOString()
     const to = typeof query.to === 'string' ? query.to : new Date(Date.now() + 90 * 86_400_000).toISOString()
     const fromTime = Date.parse(from), toTime = Date.parse(to)
-    if (!Number.isFinite(fromTime) || !Number.isFinite(toTime) || toTime <= fromTime || toTime - fromTime > 93 * 86_400_000) {
-      throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a valid availability range of at most 93 days' })
+    if (!Number.isFinite(fromTime) || !Number.isFinite(toTime) || toTime <= fromTime) {
+      throw new HTTPError({ statusCode: 400, statusMessage: 'Choose valid instants with to after from' })
     }
     const statuses = typeof query.status === 'string'
       ? String(query.status).split(',').filter((value): value is ProductSessionStatus => (PRODUCT_SESSION_STATUSES as readonly string[]).includes(value))

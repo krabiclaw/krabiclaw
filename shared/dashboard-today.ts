@@ -20,7 +20,7 @@ export function agendaToTodayCard(item: AgendaItem, input: { resolved_at: string
   const when = distance <= 0 ? 'today' : distance === 1 ? 'tomorrow' : `in ${distance} days`
   const guests = item.party_size && item.party_size > 0 ? `${item.party_size} ${item.party_size === 1 ? 'guest' : 'guests'}` : ''
   return {
-    id: item.id, to: item.to.replace(/^\/dashboard\/account\/activity\//, '/dashboard/account/bookings/'),
+    id: item.id, to: item.to,
     eyebrow: item.stay_moment === 'current' ? 'Currently hosting' : !item.starts_at.includes('T') ? 'Time not set' : formatTimestamp(item.starts_at, 'en', item.timezone, { hour: 'numeric', minute: '2-digit' }),
     headline: `${item.title} ${when}${guests ? ` for ${guests}` : ''}`,
     description: [...new Set([item.subtitle, item.location_title].filter((part): part is string => !!part && part !== item.title))].join(' · ') || null,

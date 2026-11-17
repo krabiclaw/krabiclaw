@@ -64,8 +64,8 @@ The write path Channex will ask to see:
 | 429 and 5xx | logged as failed with Channex's answer; the nights stay pending with that reason and the next delivery sends them |
 | Mapping | `product_channel_mappings` (property, room type, rate plan per home) |
 | Task IDs | `channel_sync_log.task_id` on every ARI call |
-| Bookings | webhook `POST /api/integrations/channex/webhook` → `applyBookingRevision` (`booking-revisions.ts`) → `GET /booking_revisions/:id` is the booking, landed as a stay, then `POST /booking_revisions/:id/ack`; `channex-revision-feed` reads unacknowledged revisions every 10 minutes. Nothing reads `GET /bookings/:id`: Channex counts that as `booking_received_via_booking_find` and refuses it |
-| Airbnb change requests | webhook event `alteration_request` (or the same `channex-revision-feed` run) → `runAlterationRequestFeed` (`server/domain/guest-threads/stay-change-requests.ts`) reads `GET /live_feed?filter[event]=alteration_request` and records each waiting request in the stay's conversation, alerting the owners; the host's Accept or Decline there sends `POST /live_feed/:id/resolve` with `{"resolution":{"accept":"accept"|"decline"}}` and reads the event back. The stay changes only when Airbnb's confirmed `modified` revision lands as above. A request resolved on Airbnb (declined, or withdrawn by the guest, which sends no webhook) is reconciled from the feed |
+| Bookings | webhook `POST /api/integrations/channex/webhook` → `applyBookingRevision` (`booking-revisions.ts`) → `GET /booking_revisions/:id` is the booking, landed as a stay, then `POST /booking_revisions/:id/ack`. Enable `non_acked_booking` with the existing webhook setup command to recover the specific revision Channex still sees as unacknowledged after 30 minutes. Nothing reads `GET /bookings/:id`: Channex counts that as `booking_received_via_booking_find` and refuses it |
+| Airbnb change requests | webhook event `alteration_request` → `runAlterationRequestFeed` (`server/domain/guest-threads/stay-change-requests.ts`) reads `GET /live_feed?filter[event]=alteration_request` and records each waiting request in the stay's conversation, alerting the owners; the host's Accept or Decline there sends `POST /live_feed/:id/resolve` with `{"resolution":{"accept":"accept"|"decline"}}` and reads the event back. The stay changes only when Airbnb's confirmed `modified` revision lands as above. A request resolved on Airbnb is reconciled when Channex delivers an alteration request for that property |
 | Full sync again | In the iOS app's Airbnb listing chooser, **Full sync** beside the selected syncing home → `POST /api/organizations/:organizationId/integrations/airbnb/imports/:productId/calendar` (empty request). The existing outbox resends the home's actual 500 future nights in two Channex ARI requests: one `POST /restrictions` and one `POST /availability`, preserving its channel mapping and Messages installation |
 
 ## Before the run
@@ -104,7 +104,7 @@ The write path Channex will ask to see:
    host rows remain canonical; other night values and confirmations are preserved.
    Source read failures remain visible on the job and prevent the
    calendar push. Job status reads do not process jobs; an environment without
-   the normal cron must invoke the existing `airbnb-sync` task processor.
+   the EVENTS queue must advance the saved listing sync job.
 
 2. Register the webhook for the staging account, then check it again without
    `--apply`; it must report `unchanged`:
@@ -190,6 +190,21 @@ consecutive nights may be compressed into date ranges; expand the ranges when
 checking 500-night coverage. A full sync preserves the same property and
 channel mapping. After recording, cancel the test stay through the PMS and
 verify its occupied night reopens in Channex.
+
+## Cutover from the revision feed
+
+Before merging the Worker change to staging, verify or register the
+`non_acked_booking` event on its effective Channex webhooks using
+`yarn channex:webhook --env staging`. Repeat against the production account
+before promoting. A property-level registration takes precedence over the
+account registration. Verify a booking revision and its acknowledgement
+through the staging webhook.
+
+After assets converge, **Adopt outstanding work** drains revisions still
+unacknowledged at cutover through the same booking and acknowledgement path
+as the webhook. Verify the drain completed. The next release step
+**Remove one-time Channex revision adoption** deletes this drain from
+deployment adoption.
 
 ## Submitting
 

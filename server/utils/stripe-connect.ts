@@ -1,10 +1,11 @@
 import { HTTPError } from 'nitro'
-import { paymentsUsage } from '~/server/domain/payments/usage'
 import type Stripe from 'stripe'
 import { execute, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { hasOrganizationEntitlement } from '~/server/utils/billing'
+import { readCheckoutSeller } from '~/server/utils/billing-access'
+import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 import { createStripeClient } from '~/server/utils/stripe-client'
+import { planMeters } from '~/shared/billing-model'
 import { isDemoOrganization } from '~/shared/demo'
 
 export type StripeConnectStatus =
@@ -43,12 +44,17 @@ export interface StripeConnectedAccount {
   updated_at: string
 }
 
+export function validatedSurchargeBasisPoints(points: number | null): number | null {
+  if (points !== null && (!Number.isSafeInteger(points) || points <= 0 || points > 10_000)) throw new Error('Surcharge rate is invalid')
+  return points
+}
+
 interface StripeConnectedAccountRow {
   id: string
   organization_id: string
   stripe_account_id: string | null
   country: string | null
-  livemode: number
+  livemode: number | boolean
   status: StripeConnectStatus
   card_payments_status: StripeCapabilityStatus | null
   surcharge_basis_points: number | null
@@ -198,14 +204,16 @@ export function deriveStripeConnectStatus(input: {
   return 'pending_review'
 }
 
+const CONNECTED_ACCOUNT_COLUMNS = `id, organization_id, stripe_account_id, country, livemode, status,
+  card_payments_status, surcharge_basis_points, requirements_json, stripe_refreshed_at,
+  last_error, created_at, updated_at`
+
 export async function getStripeConnectedAccount(
   db: DbClient,
   organizationId: string,
 ): Promise<StripeConnectedAccount | null> {
   const row = await queryFirst<StripeConnectedAccountRow>(db, `
-    SELECT id, organization_id, stripe_account_id, country, livemode, status,
-           card_payments_status, surcharge_basis_points, requirements_json, stripe_refreshed_at,
-           last_error, created_at, updated_at
+    SELECT ${CONNECTED_ACCOUNT_COLUMNS}
     FROM stripe_connected_accounts
     WHERE organization_id = ?
     LIMIT 1
@@ -213,27 +221,22 @@ export async function getStripeConnectedAccount(
   return row ? mapConnectedAccount(row) : null
 }
 
-/** Known checkout setup, read once for a catalogue; final checkout still verifies native providers. */
+/** The same account projection for the catalogue and checkout, maintained by Stripe Connect events. */
 export async function readStripeCheckoutSetup(db: DbClient, organizationId: string, env: CloudflareEnv) {
-  const [connected, organization, entitled] = await Promise.all([
-    getStripeConnectedAccount(db, organizationId),
-    queryFirst<{ slug: string; subdomain: string | null; servicing: number }>(db, `
-      SELECT o.slug, o.subdomain, EXISTS(SELECT 1 FROM payment_servicing_tenants WHERE organization_id=o.id) AS servicing
-        FROM organization o WHERE o.id=?
-    `, [organizationId]),
-    hasOrganizationEntitlement(env, organizationId, 'payments'),
-  ])
-  if (!organization) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
+  const seller = await readCheckoutSeller(db, organizationId)
+  if (!seller) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
+  const { slug, subdomain, servicing, stripeCustomerId, account, plan, subscription } = seller
+  const connected = account ? mapConnectedAccount(account as StripeConnectedAccountRow) : null
   const missing: string[] = []
-  if (!entitled) missing.push('payments.entitlement')
-  const livemode = env.STRIPE_SECRET_KEY ? organizationPaymentsLivemode(env, organization) : null
+  if (getPlanEntitlements(plan).payments !== true) missing.push('payments.entitlement')
+  const livemode = env.STRIPE_SECRET_KEY ? organizationPaymentsLivemode(env, { subdomain }) : null
   const keys = livemode === null ? null : paymentsStripeKeys(env, livemode)
   if (!keys?.methodConfiguration || !keys.publishableKey || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) missing.push('payments.configuration')
-  if (organization.servicing) missing.push('payments.servicing')
+  if (servicing) missing.push('payments.servicing')
   if (!connected?.stripe_account_id) missing.push('payments.account')
   else if (connected.status !== 'ready' || connected.card_payments_status !== 'active' || !connected.stripe_refreshed_at) missing.push('payments.account_ready')
   if (connected && livemode !== null && connected.livemode !== livemode) missing.push('payments.account_mode')
-  return { connected, slug: organization.slug, missing, livemode }
+  return { connected, slug, missing, livemode, subscription, plan, stripeCustomerId }
 }
 
 export async function getStripeConnectedAccountByStripeId(
@@ -319,13 +322,14 @@ export async function projectStripeConnectedAccount(
   input: StripeConnectProjection,
 ): Promise<StripeConnectedAccount> {
   const status = input.financialContractSupported === false ? 'restricted' : deriveStripeConnectStatus(input)
-  const updated = await execute(db, `
+  const updated = await queryFirst<StripeConnectedAccountRow>(db, `
     UPDATE stripe_connected_accounts
     SET stripe_account_id = ?, country = ?, status = ?, card_payments_status = ?,
         requirements_json = ?, stripe_refreshed_at = ?, last_error = NULL,
         updated_at = ?
     WHERE id = ? AND organization_id = ? AND livemode = ?
       AND (stripe_account_id IS NULL OR stripe_account_id = ?)
+    RETURNING ${CONNECTED_ACCOUNT_COLUMNS}
   `, [
     input.stripeAccountId,
     input.country,
@@ -339,10 +343,8 @@ export async function projectStripeConnectedAccount(
     input.livemode ? 1 : 0,
     input.stripeAccountId,
   ])
-  if (Number(updated.meta.changes) !== 1) throw new Error('Stripe Connect account projection did not match its reservation')
-  const row = await getStripeConnectedAccount(db, input.organizationId)
-  if (!row) throw new Error('Projected Stripe Connect account is missing')
-  return row
+  if (!updated) throw new Error('Stripe Connect account projection did not match its reservation')
+  return mapConnectedAccount(updated)
 }
 
 function normalizeAccountRequirements(account: Stripe.V2.Core.Account): StripeConnectRequirement[] {
@@ -373,7 +375,7 @@ function accountProjection(
     livemode: account.livemode,
     cardPaymentsStatus: cardPaymentsStatus === undefined ? null : cardPaymentsStatus,
     cardPaymentsResolutions: (cardPayments?.status_details ?? []).map(detail => detail.resolution),
-    financialContractSupported: account.dashboard==='express' && account.defaults?.responsibilities?.fees_collector==='application' && account.defaults.responsibilities.losses_collector==='stripe',
+    financialContractSupported: !account.closed && account.dashboard==='express' && account.defaults?.responsibilities?.fees_collector==='application' && account.defaults.responsibilities.losses_collector==='stripe',
     requirements: normalizeAccountRequirements(account),
     stripeRefreshedAt: refreshedAt,
   }
@@ -404,41 +406,28 @@ async function connectedMethodConfiguration(stripe: Stripe, stripeAccountId: str
 
 /**
  * Whether a business takes payment online now, and if not, why, for whoever
- * asks: checkout refuses with the reason, the footer shows no methods. Stripe
- * is read for the account itself, so a capability event not yet projected
- * still counts.
+ * asks: checkout refuses with the reason, the footer shows no methods.
  */
 async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationId: string) {
   const setup = await readStripeCheckoutSetup(db, organizationId, env)
   const handoff = { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(setup.slug)}/payments`, missing: setup.missing }
-  // Native retrieval below can resolve a capability event not yet projected.
-  if (setup.missing.some(field => field !== 'payments.account_ready')) {
+  if (setup.missing.length) {
     return { ready: false as const, statusCode: setup.missing.includes('payments.configuration') ? 503 : setup.missing.includes('payments.entitlement') ? 403 : 409, statusMessage: 'Complete the business’s Payments setup before accepting online payments', handoff }
   }
   // Payments fees are billed only in the platform's mode, on the business's
   // subscription; a demo's test-mode payments carry none.
-  if (setup.livemode === platformLivemode(env) && !(await paymentsUsage(db, env, organizationId)).configured) {
-    return { ready: false as const, statusCode: 409, statusMessage: 'Your plan subscription does not bill Payments fees yet.', handoff: { ...handoff, missing: [...handoff.missing, 'payments.billing'] } }
+  if (setup.livemode === platformLivemode(env)) {
+    const { subscription, plan, stripeCustomerId } = setup
+    if (subscription?.stripeCustomerId && subscription.stripeCustomerId !== stripeCustomerId) throw new Error('Subscription customer does not match its organization')
+    const meters = planMeters(plan)
+    if (!subscription?.stripeSubscriptionId || !meters.includes('captured_volume') || !meters.includes('stripe_cost')) {
+      return { ready: false as const, statusCode: 409, statusMessage: 'Your plan subscription does not bill Payments fees yet.', handoff: { ...handoff, missing: [...handoff.missing, 'payments.billing'] } }
+    }
   }
-  const saved = setup.connected!
-  const keys = paymentsStripeKeys(env, setup.livemode!)!
-  const stripe = createStripeClient(keys.secretKey, 'payments')
-  const account = await stripe.v2.core.accounts.retrieve(saved.stripe_account_id!, { include: STRIPE_CONNECT_ACCOUNT_INCLUDE })
-  const connected = await projectStripeConnectedAccount(db, accountProjection(saved, account))
-  if (connected.status !== 'ready' || account.livemode !== saved.livemode) return { ready: false as const, statusCode: 409, statusMessage: 'Complete the business’s Stripe account setup before requiring online collection', handoff }
-  // Stripe Tax answers a seller outside its business locations with a 400 that
-  // carries no error code, so the seller country is read against Stripe's own
-  // published list. Elsewhere an active registration means checkout calculates
-  // tax through Stripe; a failed read propagates rather than reading as no tax.
-  let automaticTax = false
-  if (connected.country && STRIPE_TAX_BUSINESS_COUNTRIES.has(connected.country)) {
-    const [taxSettings, registrations] = await Promise.all([
-      stripe.tax.settings.retrieve({}, { stripeAccount: account.id }),
-      stripe.tax.registrations.list({ status: 'active', limit: 1 }, { stripeAccount: account.id }),
-    ])
-    automaticTax = taxSettings.status === 'active' && registrations.data.length > 0
-  }
-  return { ready: true as const, stripe, account, connected, parent: keys.methodConfiguration!, handoff, automaticTax }
+  const { connected, livemode } = setup
+  const keys = livemode === null ? null : paymentsStripeKeys(env, livemode)
+  if (!connected?.stripe_account_id || !keys?.methodConfiguration) throw new Error('Ready checkout is missing its Stripe account or payment method configuration')
+  return { ready: true as const, stripe: createStripeClient(keys.secretKey, 'payments'), connected: { ...connected, stripe_account_id: connected.stripe_account_id }, parent: keys.methodConfiguration, handoff }
 }
 
 /**
@@ -449,7 +438,7 @@ async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationI
 export async function acceptedPaymentMethods(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<{ types: string[]; country: string | null }> {
   const readiness = await checkoutReadiness(db, env, organizationId)
   if (!readiness.ready) return { types: [], country: null }
-  const methods = await connectedMethodConfiguration(readiness.stripe, readiness.account.id, readiness.parent)
+  const methods = await connectedMethodConfiguration(readiness.stripe, readiness.connected.stripe_account_id, readiness.parent)
   // A configuration the business must still fix takes no payment, as checkout refuses it.
   if ('problem' in methods) return { types: [], country: null }
   const types = Object.entries(methods.configuration as unknown as Record<string, unknown>)
@@ -463,11 +452,22 @@ export async function acceptedPaymentMethods(db: DbClient, env: CloudflareEnv, o
 export async function requireStripeCheckoutAcceptance(db: DbClient, env: CloudflareEnv, organizationId: string) {
   const readiness = await checkoutReadiness(db, env, organizationId)
   if (!readiness.ready) throw new HTTPError({ statusCode: readiness.statusCode, statusMessage: readiness.statusMessage, data: readiness.handoff })
-  const { stripe, account, connected, handoff } = readiness
+  const { stripe, connected, handoff } = readiness
+  const stripeAccount = connected.stripe_account_id
   // Which methods the business offers is its Stripe payment method configuration's to decide.
-  const methods = await connectedMethodConfiguration(stripe, account.id, readiness.parent)
+  const methods = await connectedMethodConfiguration(stripe, stripeAccount, readiness.parent)
   if ('problem' in methods) throw new HTTPError({ statusCode: 409, statusMessage: methods.problem, data: handoff })
-  return { connected: { ...connected, stripe_account_id: account.id }, methodConfigurationId: methods.configuration.id, automaticTax: readiness.automaticTax }
+  // Stripe Tax rejects sellers outside its business locations. For supported
+  // sellers, only an active registration enables it; provider failures surface.
+  let automaticTax = false
+  if (connected.country && STRIPE_TAX_BUSINESS_COUNTRIES.has(connected.country)) {
+    const [taxSettings, registrations] = await Promise.all([
+      stripe.tax.settings.retrieve({}, { stripeAccount }),
+      stripe.tax.registrations.list({ status: 'active', limit: 1 }, { stripeAccount }),
+    ])
+    automaticTax = taxSettings.status === 'active' && registrations.data.length > 0
+  }
+  return { connected, stripe, methodConfigurationId: methods.configuration.id, automaticTax, surchargeBasisPoints: validatedSurchargeBasisPoints(connected.surcharge_basis_points) }
 }
 
 export async function refreshStripeConnectedAccount(

@@ -7,7 +7,7 @@
   -->
   <DashboardIndexPanel
     :id="personalScope ? 'account-calendar' : 'org-calendar'"
-    title="Calendar"
+    :title="sessionProduct?.name ?? 'Calendar'"
     :fill="gridView"
   >
     <template #right>
@@ -46,7 +46,8 @@
       <UAlert v-if="offeringsError" class="mb-6" color="error" variant="soft" title="Offerings could not be loaded" :description="offeringsError" />
       <!-- Calendar chooses bookings or one offering's availability; Location narrows that scope. -->
       <div v-if="!personalScope" class="flex flex-wrap items-center gap-3" :class="gridView ? 'mb-4 sm:mb-8' : 'mb-8'">
-        <CalendarOfferingFilter :items="offeringItems ?? []" :disabled="Boolean(level.child.value)" />
+        <!-- One offering's availability goes back to the whole calendar. -->
+        <UButton v-if="sessionProduct" label="Calendar" icon="i-lucide-arrow-left" color="neutral" variant="outline" class="h-10 rounded-full" :to="`/dashboard/${route.params.org_slug}/calendar`" />
         <!-- Every home is its own location, so the Homes view narrows by city instead. -->
         <DashboardLocationFilter v-if="!gridView" v-model="filters.locationId" :items="locationItems" :disabled="Boolean(level.child.value)" />
         <!-- One search for every calendar: homes by name or address, places by name and where, bookings by who, what and where. -->
@@ -120,7 +121,7 @@
                 >{{ day.number }}</component>
                 <ol v-if="itemsOn(day.key).length" class="mt-2 space-y-0.5">
                   <li v-for="item in itemsOn(day.key).slice(0, 2)" :key="item.id">
-                    <NuxtLink :to="rowTo(item, day.key) ?? item.to" :data-session-id="item.kind === 'session' ? item.session.id : undefined" class="group/item flex" :class="item.status === 'cancelled' ? 'text-muted line-through' : ''">
+                    <NuxtLink :to="item.to" :data-session-id="item.kind === 'session' ? item.session.id : undefined" class="group/item flex" :class="item.status === 'cancelled' ? 'text-muted line-through' : ''">
                       <p class="flex-auto truncate font-medium" :class="item.status === 'cancelled' ? '' : 'text-highlighted group-hover/item:text-primary'">{{ item.kind === 'session' ? timeOf(item) : item.title }}</p>
                       <time v-if="item.kind !== 'session'" :datetime="item.starts_at" class="ml-3 hidden flex-none text-muted xl:block">{{ timeOf(item) }}</time>
                     </NuxtLink>
@@ -168,7 +169,7 @@
               <span class="block text-xs text-muted">{{ formatCalendarDate(dayKey, 'en', { weekday: 'short' }) }}</span>
             </NuxtLink>
             <div class="min-w-0">
-              <AgendaRow v-for="item in itemsOn(dayKey)" :key="item.id" :item="item" :to="rowTo(item, dayKey)" />
+              <AgendaRow v-for="item in itemsOn(dayKey)" :key="item.id" :item="item" />
             </div>
           </div>
         </div>
@@ -243,12 +244,6 @@ import type { AgendaItem, AgendaKind, AgendaLocation, AgendaPayload } from '~/se
 export type CalendarSessionItem = CalendarRowItem & { kind: 'session'; day_key: string; session: BookableSession }
 export type CalendarItem = AgendaItem | CalendarSessionItem
 
-/** A booking opens beneath its calendar day, so the calendar stays beside it. */
-export function calendarRecordPath(dayPath: string, item: CalendarItem): string | undefined {
-  if (item.kind === 'session' || item.kind === 'post' || !item.booking_id) return undefined
-  return `${dayPath}/booking/${encodeURIComponent(item.booking_id)}`
-}
-
 /** The location the calendar is showing, owned by this level and read by the day leaf below it. */
 export interface CalendarLocation {
   id: string
@@ -289,7 +284,6 @@ import AgendaRow from '~/lib/components/workspace/dashboard/AgendaRow.vue'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import AgendaFilters from './AgendaFilters.vue'
 import CalendarGrid from './CalendarGrid.vue'
-import CalendarOfferingFilter from './CalendarOfferingFilter.vue'
 import { closureOnDate, getDateIntervals, parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 import { addLocalDays, formatCalendarDate, formatTimestamp, isValidCalendarDate, localNow } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
@@ -304,7 +298,6 @@ const props = defineProps<{
   personalScope?: boolean
   sessionProduct?: Product
   sessionLocations?: DashboardLocation[]
-  offeringItems?: { label: string; value: string }[]
   offeringsError?: string
   canCreateStay?: boolean
   hasHomes?: boolean
@@ -591,10 +584,6 @@ const level = useRouteLevel()
 const openDay = computed(() => typeof route.params.day === 'string' ? route.params.day : null)
 function dayTo(dayKey: string) {
   return { path: `${level.path.value}/${dayKey}`, query: route.query }
-}
-function rowTo(item: CalendarItem, dayKey: string): string | undefined {
-  const path = props.personalScope ? undefined : calendarRecordPath(`${level.path.value}/${dayKey}`, item)
-  return path && router.resolve({ path, query: route.query }).fullPath
 }
 function openDayAt(dayKey: string): void {
   void navigateTo(dayTo(dayKey))

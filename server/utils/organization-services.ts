@@ -3,6 +3,7 @@ import { AD_SPEND_RATE } from '~/shared/billing-model'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { linkedAccountAccessToken, type CloudflareEnv } from '~/server/utils/auth'
 import { getOrganizationBillingStatus, getStripe } from '~/server/utils/billing'
+import { publishManagedAdSpendWake } from '~/server/domain/payments/ad-spend'
 import { paymentsUsage } from '~/server/domain/payments/usage'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { getGoogleAdsCustomer } from '~/server/utils/google-ads'
@@ -70,11 +71,13 @@ export async function agreeToService(db: DbClient, env: CloudflareEnv, organizat
   if (result.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'Google Ads changed. Reload before turning on managed ads.', data: { code: 'SERVICE_OPERATION_REFUSED', field: 'service' } })
   const written = (await listServices(db, organizationId))[service]
   if (!written || written.id !== id) throw new Error('Service agreement was not recorded')
+  await publishManagedAdSpendWake(env, organizationId)
   return written
 }
 
-export async function endService(db: DbClient, organizationId: string, service: Service, userId: string): Promise<void> {
+export async function endService(db: DbClient, env: CloudflareEnv, organizationId: string, service: Service, userId: string): Promise<void> {
   const now = new Date().toISOString()
   const result = await execute(db, 'UPDATE organization_services SET ended_at=?,ended_by_user_id=? WHERE organization_id=? AND service=? AND ended_at IS NULL', [now, userId, organizationId, service])
   if (!result.meta.changes) throw new HTTPError({ statusCode: 409, statusMessage: 'This service is not on', data: { code: 'SERVICE_NOT_ACTIVE', field: 'service' } })
+  await publishManagedAdSpendWake(env, organizationId)
 }

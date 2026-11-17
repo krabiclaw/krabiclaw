@@ -1,3 +1,5 @@
+import { RETENTION_HUB, retentionWakeAt } from '~/server/domain/due-business-work'
+import { publishEvent } from '~/server/events'
 import { HTTPError, defineHandler  } from 'nitro';
 
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
@@ -143,6 +145,7 @@ export default defineHandler(async (event) => {
   await updateStripeAttribution(env, organization.id, session.user.id, gaBody, action)
   const intent = await recordStripeGa4Intent(env.DB, {
     organizationId: organization.id, userId: session.user.id, stripeSubscriptionId: subscriptionId, action, clientId, sessionId, sessionCapturedAt, attribution, previousPriceId: optionalString(body.previousPriceId), newPriceId: optionalString(body.newPriceId), effectiveTiming: body.effectiveTiming, source: body.source ?? 'browser', })
+  await publishEvent(env, { type: 'business.wake', organization_id: RETENTION_HUB, kind: 'retention', due_at: retentionWakeAt(Date.parse(intent.expiresAt)) })
   return jsonResponse({ success: true, intent_id: intent.id })
 })
 import { readBody } from 'nitro/h3';

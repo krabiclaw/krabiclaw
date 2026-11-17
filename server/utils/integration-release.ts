@@ -6,7 +6,7 @@ import type { VerifiedMetaRequest } from './meta-graph'
 import { deleteIntegration, integrationsThroughAccount } from './organization-integrations'
 import { publicResourceCacheInvalidationQuery } from './public-resource-cache'
 import { reconcileZarazAnalytics } from './zaraz-analytics'
-import { requireRecordedManagedSpend } from '~/server/domain/payments/ad-spend'
+import { publishManagedAdSpendWake, requireRecordedManagedSpend } from '~/server/domain/payments/ad-spend'
 
 /**
  * Removing an organization's integration, and what Meta's callbacks ask for.
@@ -52,7 +52,8 @@ export async function releaseIntegration(
   product: IntegrationProduct,
   expected?: { revision: string },
 ): Promise<ReleaseIntegrationResult> {
-  if (product === 'google-ads' || product === 'meta-ads') await requireRecordedManagedSpend(env.DB, env, organizationId, product)
+  const ads = product === 'google-ads' || product === 'meta-ads'
+  if (ads) await requireRecordedManagedSpend(env.DB, env, organizationId, product)
   const released = await deleteIntegration(env.DB, organizationId, PROVIDER[product], expected)
   if (expected && !released) throw new HTTPError({ statusCode: 409, message: 'The connection changed. Reload it before disconnecting.' })
 
@@ -60,6 +61,7 @@ export async function releaseIntegration(
   // has to withdraw the tag rather than keep collecting for a tenant who
   // disconnected. The disconnect has not taken effect until it has.
   if (product === 'google-analytics' && released) await reconcileZarazAnalytics(env, env.DB)
+  if (ads && released) await publishManagedAdSpendWake(env, organizationId)
 
   return { product, released }
 }

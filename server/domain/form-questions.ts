@@ -51,11 +51,19 @@ export async function readFormQuestions(db: DbClient, owner: FormQuestionOwner):
  */
 export async function readLocalizedFormQuestions(db: DbClient, owner: FormQuestionOwner, locale: string | null): Promise<{ questions: FormQuestion[]; questions_revision: string }> {
   const questions = await readFormQuestions(db, owner)
-  const questions_revision = formQuestionsRevision(questions)
-  if (!questions.length || locale === null || locale === await getSourceLocale(db, owner.organizationId)) return { questions, questions_revision }
+  const translatedLocale = questions.length && locale !== null && locale !== await getSourceLocale(db, owner.organizationId) ? locale : null
+  return localizeStoredFormQuestions(db, owner, translatedLocale, { questions, questions_revision: formQuestionsRevision(questions) })
+}
+
+export async function localizeStoredFormQuestions(
+  db: DbClient, owner: FormQuestionOwner, translatedLocale: string | null,
+  current: { questions: FormQuestion[]; questions_revision: string },
+): Promise<{ questions: FormQuestion[]; questions_revision: string }> {
+  const { questions, questions_revision } = current
+  if (!questions.length || translatedLocale === null) return { questions, questions_revision }
   const { resourceType, resourceId, field } = formQuestionLocalizationField(owner)
   const row = await queryFirst<{ wording: string | null }>(db, `SELECT json_extract(values_json, '$.' || ?) AS wording FROM ${RESOURCE_LOCALIZATIONS_SQL}
-    WHERE organization_id = ? AND resource_type = ? AND resource_id = ? AND locale = ?`, [field, owner.organizationId, resourceType, resourceId, locale])
+    WHERE organization_id = ? AND resource_type = ? AND resource_id = ? AND locale = ?`, [field, owner.organizationId, resourceType, resourceId, translatedLocale])
   const localization = row?.wording ? formQuestionLocalizationSchema.parse(JSON.parse(row.wording)) : null
   return { questions: localizeFormQuestions(questions, localization), questions_revision }
 }
@@ -69,16 +77,23 @@ export async function readLocalizedFormQuestions(db: DbClient, owner: FormQuesti
  * against the wording in the submission's language, which is what is stored.
  */
 export async function acceptFormAnswers(db: DbClient, owner: FormQuestionOwner, input: { locale: string | null; answers: unknown; questionsRevision: unknown; revisionRequired: boolean }): Promise<FormAnswerSnapshot[]> {
-  const current = await readLocalizedFormQuestions(db, owner, input.locale)
+  return validateFormAnswers(await readLocalizedFormQuestions(db, owner, input.locale), input)
+}
+
+export function validateFormAnswers(
+  current: { questions: FormQuestion[]; questions_revision: string },
+  input: { answers: unknown; questionsRevision: unknown; revisionRequired: boolean },
+): FormAnswerSnapshot[] {
+  const { questions, questions_revision } = current
   const supplied = typeof input.questionsRevision === 'string' && input.questionsRevision.trim() ? input.questionsRevision.trim() : null
   const answered = Array.isArray(input.answers) && input.answers.length > 0
   if (supplied === null && (input.revisionRequired || answered)) {
-    throw new HTTPError({ statusCode: 422, statusMessage: 'questions_revision is required: read the current questions and send the revision they came with.', data: { code: 'QUESTIONS_REVISION_REQUIRED', field: 'questions_revision', ...current } })
+    throw new HTTPError({ statusCode: 422, statusMessage: 'questions_revision is required: read the current questions and send the revision they came with.', data: { code: 'QUESTIONS_REVISION_REQUIRED', field: 'questions_revision', questions, questions_revision } })
   }
-  if (supplied !== null && supplied !== current.questions_revision) {
-    throw new HTTPError({ statusCode: 409, statusMessage: 'The questions on this form changed. Review your answers and submit again.', data: { code: 'questions_changed', field: 'answers', ...current } })
+  if (supplied !== null && supplied !== questions_revision) {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'The questions on this form changed. Review your answers and submit again.', data: { code: 'questions_changed', field: 'answers', questions, questions_revision } })
   }
-  const resolution = resolveFormAnswers(current.questions, input.answers)
+  const resolution = resolveFormAnswers(questions, input.answers)
   if (!resolution.ok) {
     throw new HTTPError({ statusCode: 422, statusMessage: resolution.errors.map(error => error.message).join(' '), data: { code: 'invalid_answers', field: 'answers', answer_errors: resolution.errors } })
   }

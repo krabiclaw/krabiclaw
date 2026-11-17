@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { nameConversationBooking, setBookingStatus } from './support/booking-state.ts'
 import { OPEN_TERMS_JSON } from './support/booking-terms.ts'
+import { captureEvents } from './support/events.ts'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
@@ -71,7 +72,7 @@ async function boot() {
   await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('class-host', ?, 'class-host-user', 'member')").bind(ORG).run()
   await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, assigned_member_id, created_by, updated_by)
     VALUES (?, ?, 'slot', 120, 10, 'business', 'class-host', ?, ?)`).bind(PRODUCT, ORG, ACTOR, ACTOR).run()
-  const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+  const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: captureEvents().binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
     STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
   return { runtime, db, env }
 }
