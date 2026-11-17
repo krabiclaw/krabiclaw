@@ -366,8 +366,8 @@ function addDays(day: string, count: number): string {
 }
 
 /** Today's date where the home is. */
-function homeToday(timezone: string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+function homeToday(timezone: string, now = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now)
 }
 
 function assertStayCheckoutHorizon(checkOut: string, today: string) {
@@ -1462,11 +1462,6 @@ function homeNightsQueries(organization: BatchQuery, products: BatchQuery, from:
 /** Every night of [from, to) at each of these homes, in their order, with what their channel last took. */
 async function homesNights(db: DbClient, organizationId: string, homes: readonly StayHomeCore[], from: string, to: string): Promise<StayNight[][]> {
   return homeNightsFrom(homes, await executeBatch(db, homeNightsQueries({ query: '?', params: [organizationId] }, { query: 'SELECT value FROM json_each(?)', params: [d1JsonStringSet(homes.map(home => home.product_id))] }, from, to, true), { operation: 'Read home nights' }), from, to) as StayNight[][]
-}
-
-/** Every night of [from, to) at each of these homes, as a guest reads them: no channel state. */
-async function homesOpenNights(db: DbClient, organizationId: string, homes: readonly StayHomeCore[], from: string, to: string): Promise<Array<Array<Omit<StayNight, 'channel'>>>> {
-  return homeNightsFrom(homes, await executeBatch(db, homeNightsQueries({ query: '?', params: [organizationId] }, { query: 'SELECT value FROM json_each(?)', params: [d1JsonStringSet(homes.map(home => home.product_id))] }, from, to, false), { operation: 'Read home nights' }), from, to)
 }
 
 /** The effective nights and claims at each home, with the channel status when requested. */
@@ -3041,13 +3036,29 @@ function publicNight(night: Omit<StayNight, 'channel'>, today: string, lastDepar
 
 /** The bookable nights of [from, to), plus `to` so the guest can select that departure. No claims are shown. */
 export async function readPublicStayCalendar(db: DbClient, organizationId: string, productId: string, input: { from: unknown; to: unknown }): Promise<PublicStayCalendar> {
-  const home = await readPublicStayHome(db, organizationId, productId)
-  const { from, to } = range(input)
-  const today = homeToday(home.timezone)
+  const now = new Date()
+  const utcToday = now.toISOString().slice(0, 10)
+  // Read the requested nights inside every possible home-local horizon. Once the
+  // home supplies its time zone, trim the result to that home's exact horizon.
+  const earliest = addDays(utcToday, -1)
+  const latest = addDays(utcToday, STAY_CALENDAR_DAYS + 1)
+  const from = isStayDate(input.from) ? input.from : null
+  const to = isStayDate(input.to) ? input.to : null
+  const start = from && from > earliest ? from : earliest
+  const departure = to && to < latest ? to : latest
+  const queries = from && to && from < to && start <= departure
+    ? homeNightsQueries({ query: '?', params: [organizationId] }, { query: '?', params: [productId] }, start, addDays(departure, 1), false)
+    : []
+  const [rows, prices, ...nightRows] = await executeBatch(db, [
+    ...publicStayHomeQueries(organizationId, productId), ...queries,
+  ], { operation: 'Read public stay calendar' })
+  const home = publicStayHomeFrom(rows!, prices!)
+  const requested = range(input)
+  const today = homeToday(home.timezone, now)
   const lastDeparture = addDays(today, STAY_CALENDAR_DAYS)
-  const start = from < today ? today : from
-  const departure = to > lastDeparture ? lastDeparture : to
-  const nights = start > departure ? [] : (await homesOpenNights(db, organizationId, [home], start, addDays(departure, 1)))[0]!
+  const firstNight = requested.from < today ? today : requested.from
+  const lastNight = requested.to > lastDeparture ? lastDeparture : requested.to
+  const nights = firstNight > lastNight ? [] : homeNightsFrom([home], nightRows, firstNight, addDays(lastNight, 1))[0]!
   return {
     home: { currency: home.currency, timezone: home.timezone, today, check_in_time: home.check_in_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, base_price_minor: home.base_price_minor },
     nights: nights.map(night => publicNight(night, today, lastDeparture)),

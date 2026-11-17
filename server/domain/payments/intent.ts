@@ -82,13 +82,13 @@ async function readCheckoutPayment(db: DbClient, organizationId: string, payment
   if (!payment) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
   if (hash === null) throw new HTTPError({ statusCode: 400, statusMessage: 'Purchase claim required' })
   if (!payment.stripe_payment_intent_id || !payment.checkout_expires_at || !payment.return_expires_at) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
+  if (payment.subject_type === 'booking' && payment.captured_amount > 0 && !payment.subject_id) {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'Payment was received, but the booking could not be confirmed', data: { code: 'payment_booking_unconfirmed' } })
+  }
   return payment
 }
 
 async function readCheckoutIntent(stripe: Stripe, payment: CheckoutPayment, now: string) {
-  if (payment.subject_type === 'booking' && payment.captured_amount > 0 && !payment.subject_id) {
-    throw new HTTPError({ statusCode: 409, statusMessage: 'Payment was received, but the booking could not be confirmed', data: { code: 'payment_booking_unconfirmed' } })
-  }
   const intent = await stripe.paymentIntents.retrieve(payment.stripe_payment_intent_id, { expand: ['latest_charge'] }, { stripeAccount: payment.stripe_account_id })
   const confirming = payment.confirmation_in_flight === 1 && (intent.status === 'requires_confirmation' || intent.status === 'requires_payment_method')
   const state: PaymentHandoffState = payment.captured_amount > 0 ? 'paid'
@@ -397,15 +397,20 @@ async function paymentReceipt(env: CloudflareEnv, payment: Payment, receipt: Che
 
 /** Read the receipt after confirm or the Stripe webhook has saved and captured the booking. */
 export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, buyer: () => Promise<string>): Promise<PaymentReturn> {
-  const { payment, intent, state } = await requireClaimedPayment(db, env, organizationId, paymentId, claim, 'settlement')
-  if (intent.livemode !== Boolean(payment.livemode) || intent.metadata.krabiclaw_payment_id !== payment.id) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
-  if (state === 'taken') return { state: 'taken' }
-  if (state === 'failed' || state === 'expired') return { state: 'expired' }
-  if (intent.status === 'requires_payment_method' && intent.last_payment_error) {
-    throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe declined this payment', data: { code: 'payment_declined' } })
+  const now = new Date().toISOString()
+  const payment = await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
+  // Reconciliation writes captured_amount only after it verifies Stripe's succeeded intent.
+  if (payment.captured_amount <= 0) {
+    const { intent, state } = await readCheckoutIntent(paymentsStripe(env, Boolean(payment.livemode)), payment, now)
+    if (intent.livemode !== Boolean(payment.livemode) || intent.metadata.krabiclaw_payment_id !== payment.id) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
+    if (state === 'taken') return { state: 'taken' }
+    if (state === 'failed' || state === 'expired') return { state: 'expired' }
+    if (intent.status === 'requires_payment_method' && intent.last_payment_error) {
+      throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe declined this payment', data: { code: 'payment_declined' } })
+    }
+    if (state === 'processing' || state === 'verifying') return { state: 'processing' }
+    throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
   }
-  if (state === 'processing' || state === 'verifying') return { state: 'processing' }
-  if (state !== 'paid' || intent.status !== 'succeeded') throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
   // The approval checkout began in the buyer's account; the business's site may have a different browser session.
   const snapshot = snapshotOf(payment)
   if (!snapshot.approval) await claimCheckoutReturn(db, await buyer(), claim, payment)

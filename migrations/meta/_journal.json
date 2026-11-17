@@ -127,6 +127,13 @@
       "when": 1794921826411,
       "tag": "0017_standalone_channex_homes",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1794922103015,
+      "tag": "0018_drop_payment_orders",
+      "breakpoints": true
     }
   ]
 }
