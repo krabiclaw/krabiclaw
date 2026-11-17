@@ -27,7 +27,7 @@ body:
     attributes:
       label: Website or business
       description: The site address or business name, if it is about one.
-      placeholder: https://example.krabiclaw.com
+      placeholder: https://example.com
   - type: textarea
     id: what_happened
     attributes:

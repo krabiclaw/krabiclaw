@@ -11,6 +11,8 @@ const platformRedirects: Record<string, string> = {
   '/mcp': '/plugin',
   '/solutions/legal': '/legal',
   '/solutions/review-seo': '/blog/how-to-turn-google-reviews-into-website-faqs-social-posts-and-seo-pages',
+  '/platform/apple-touch-icon.png': '/platform/blawby-180.png',
+  '/platform/favicon.ico': '/platform/blawby.ico',
 }
 
 const redirects: Record<string, string> = {
@@ -181,7 +183,7 @@ export default defineHandler(async (event) => {
 
   const target = redirects[normalizedPathname]
     ?? (event.context.tenantType === TENANT_TYPES.PLATFORM
-      ? platformRedirects[normalizedPathname] ?? articlePathWithoutCategory(normalizedPathname)
+      ? platformRedirects[normalizedPathname]
       : null)
   if (target) {
     const targetWithParams = `${target}${url.search}${url.hash}`
@@ -237,20 +239,18 @@ export default defineHandler(async (event) => {
     if (retired) return redirect(`${retired}${url.search}${url.hash}`, 301)
   }
 
-  if (event.req.method === 'GET') {
-    const platformOrganizationId = event.context.tenantType === TENANT_TYPES.PLATFORM ? event.context.organizationId as string | null : null
-    if (platformOrganizationId) {
-      const db = cloudflareEnv(event).db
-      if (db) {
-        // A lookup that failed is not "no redirect configured": swallowing it
-        // served a 404 for a path the tenant had already pointed somewhere.
-        const redirected = await queryFirst<{ to_path: string } | null>(db, `
-          SELECT to_path FROM organization_redirects
-           WHERE organization_id = ? AND locale = (SELECT locale FROM organization_locales WHERE organization_id = ? AND is_source = 1) AND from_path = ? AND behavior = 'redirect' LIMIT 1
-        `, [platformOrganizationId, platformOrganizationId, normalizedPathname])
-        if (redirected) return redirect(`${redirected.to_path}${url.search}${url.hash}`, 301)
-      }
+  if (event.context.tenantType === TENANT_TYPES.PLATFORM && ['GET', 'HEAD'].includes(event.req.method)) {
+    const platformOrganizationId = event.context.organizationId as string | null
+    const articlePath = articlePathWithoutCategory(normalizedPathname)
+    const db = cloudflareEnv(event).db
+    if (db && platformOrganizationId) {
+      const redirected = await queryFirst<{ to_path: string } | null>(db, `
+        SELECT to_path FROM organization_redirects
+         WHERE organization_id = ? AND locale = (SELECT locale FROM organization_locales WHERE organization_id = ? AND is_source = 1) AND from_path = ? AND behavior = 'redirect' LIMIT 1
+      `, [platformOrganizationId, platformOrganizationId, articlePath ?? normalizedPathname])
+      if (redirected) return redirect(`${redirected.to_path}${url.search}${url.hash}`, 301)
     }
+    if (articlePath) return redirect(`${articlePath}${url.search}${url.hash}`, 301)
   }
 
   // Nuxt's remaining middleware and lazy API handler import run after this point.

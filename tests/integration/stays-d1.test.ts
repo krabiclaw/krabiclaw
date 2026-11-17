@@ -1659,7 +1659,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
     assert.equal((await accountRead()).status, 401)
     // Better Auth owns the guest's portrait: the host reads it through the account the stay belongs to.
     assert.equal((await getStay(db, manager, stay.id)).guest_image_url, null)
-    const portraitUrl = 'https://proof.example/platform/apple-touch-icon.png'
+    const portraitUrl = 'https://proof.example/platform/blawby-180.png'
     await createAuth(env).api.updateUser({ headers: new Headers({ cookie: booker.cookie }), body: { image: portraitUrl } })
     assert.equal((await getStay(db, manager, stay.id)).guest_image_url, portraitUrl)
     assert.equal((await read('another-org', link)).status, 404)

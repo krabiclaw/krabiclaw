@@ -82,7 +82,7 @@ const category = computed(() => {
 
 // Editorial emphasis selects existing published tasks; it does not create content.
 const featured = computed(() => (isPlatform && props.collection === 'docs' && category.value.slug === 'getting-started'
-  ? category.value.posts.find(article => article.slug === 'create-your-krabiclaw-account')
+  ? category.value.posts.find(article => article.id === 'doc-013')
   : null) ?? category.value.posts[0] ?? null)
 const guides = computed(() => category.value.posts.filter(article => article.id !== featured.value?.id))
 const intro = computed(() => category.value.description || (props.collection === 'docs' ? category.value.posts[0]?.excerpt : null))
