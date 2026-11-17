@@ -3,6 +3,7 @@ import { useNitroApp } from 'nitro/app'
 import { MEMBER_BUSY_SCOPES } from '~/shared/member-scheduling'
 import { BUSINESS_PLAN_ID, GROWTH_PLAN_ID, STARTER_PLAN_ID } from '~/shared/billing-model'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
+import { vrboEnabled } from '~/server/integrations/channex/hosted-channel'
 import { INTEGRATIONS, type IntegrationKey } from '~/shared/integrations'
 import type { CatalogAnswer, CatalogRow, CatalogScreen } from '~/shared/catalog-screen'
 import { getOrganizationEntitlements } from '~/server/utils/billing-access'
@@ -57,7 +58,8 @@ export async function connectionRows(
   const base = `/dashboard/${encodeURIComponent(organization.slug)}/integrations`
   const maps = summary.google_maps
   const mapped = maps.filter(location => location.google_place_id).length
-  const rows = INTEGRATIONS.filter(item => !item.feature || features.includes(item.feature)).map((item): ConnectionRow => {
+  const rows = INTEGRATIONS.filter(item => (!item.feature || features.includes(item.feature))
+    && (item.key !== 'vrbo' || vrboEnabled(env))).map((item): ConnectionRow => {
     const state = target(summary, item.key)
     const plan = plans.find(plan => !item.entitlement || getPlanEntitlements(plan)[item.entitlement] === true) ?? BUSINESS_PLAN_ID
     const locked = item.entitlement && allowed[item.entitlement] !== true

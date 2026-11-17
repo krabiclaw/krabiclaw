@@ -6,6 +6,10 @@ import { object, string } from './data'
 
 const VRBO = 'VRB'
 
+export function vrboEnabled(env: { CHANNEX_VRBO_ENABLED?: string }): boolean {
+  return env.CHANNEX_VRBO_ENABLED === 'true'
+}
+
 interface HomeMapping {
   product_id: string
   property_id: string
