@@ -124,9 +124,9 @@ export async function takeAlterationRequest(db: DbClient, env: CloudflareEnv, re
   if (!entry) {
     type StayRow = Omit<Terms, 'check_in_date' | 'check_out_date'> & { id: string; conversation_id: string; guest_user_id: string | null; starts_at: string; ends_at: string; timezone: string; mirrored: number }
     const read = async (): Promise<(Terms & { id: string; conversation_id: string; guest_user_id: string | null; mirrored: boolean }) | null> => {
-      const row = await queryFirst<StayRow>(db, `SELECT b.id, c.id AS conversation_id, c.user_id AS guest_user_id, b.starts_at, b.ends_at, b.timezone, b.adults, b.children, b.infants, b.total_minor, org.default_currency AS currency,
+      const row = await queryFirst<StayRow>(db, `SELECT b.id, c.id AS conversation_id, c.user_id AS guest_user_id, b.starts_at, b.ends_at, b.timezone, b.adults, b.children, b.infants, b.total_minor, b.currency,
           EXISTS (SELECT 1 FROM channel_threads t WHERE t.conversation_id = c.id) AS mirrored
-        FROM bookings b JOIN organization org ON org.id = b.organization_id
+        FROM bookings b
         JOIN conversations c ON c.booking_id = b.id AND c.organization_id = b.organization_id AND c.kind = 'booking'
         WHERE b.provider = 'channex' AND b.external_booking_id = ? AND b.organization_id = ? AND b.product_id = ? AND b.product_session_id IS NULL`, [request.bookingId, mapping.organization_id, mapping.product_id])
       if (!row) return null
