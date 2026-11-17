@@ -22,7 +22,7 @@ import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 import { calculateMapUrl, coordinatesFailure } from '~/utils/location-map'
 import { pendingBookingChangeView } from '~/server/domain/guest-threads/booking-changes'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
-import { readPaymentDetails } from '~/server/domain/payments'
+import { readBookingPaymentReceipts, readPaymentDetails } from '~/server/domain/payments'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { canRetryGuestVisitRefund } from '~/server/domain/payments/visit-refund'
 import { historicalNoShowAtSql } from '~/server/utils/review-requests'
@@ -55,6 +55,7 @@ interface BookingRow {
   location_latitude: number | null
   location_longitude: number | null
   location_maps_url: string | null
+  contact_phone: string | null
   guest_name: string
   guest_email: string
   guest_phone: string | null
@@ -76,9 +77,6 @@ interface BookingRow {
   updated_at: string
   policy_json: string
   product_kind: ProductKind
-  /** The offering's advance notice, which also closes the guest's own cancellation; null is no notice. */
-  advance_notice_minutes: number | null
-  review_id: string | null
   private_notes: string | null
   no_show_at: string | null
 }
@@ -198,20 +196,21 @@ async function loadBookingRow(
   // refers to, not on the thread. The thread carries the conversation and the
   // guest.
   return queryFirst<BookingRow>(db, `SELECT record.id AS booking_id, record.version, r.organization_id, s.name AS organization_name, s.vertical,
-    record.assigned_member_id, record.policy_json, record.product_kind, record.advance_notice_minutes, record.location_id,
+    record.assigned_member_id, record.policy_json, record.product_kind, record.location_id,
     l.slug AS location_slug, l.title AS location_title, l.address AS location_address,
     l.latitude AS location_latitude, l.longitude AS location_longitude, l.maps_url AS location_maps_url,
+    CASE WHEN record.location_id IS NULL THEN s.contact_phone WHEN l.status = 'active' THEN l.phone END AS contact_phone,
     ${scope.buyerUserId ? 'NULL' : MEMBER_NAME_SQL} AS assigned_member_name,
     ${RESERVATION_HOST_SQL} AS host_json,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status,
     (SELECT m.body FROM messages m WHERE m.conversation_id = r.id AND m.event_name = '${GUEST_NOTE_EVENT}' ORDER BY m.sequence LIMIT 1) AS notes,
     record.product_id, record.name, record.product_session_id,
-    r.id AS conversation_id, record.answers AS answers_json, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, record.created_at, record.updated_at, ${historicalNoShowAtSql('r')} AS no_show_at, (SELECT rv.id FROM reviews rv WHERE rv.organization_id = record.organization_id AND rv.booking_id = record.id ORDER BY rv.created_at LIMIT 1) AS review_id, record.private_notes
+    r.id AS conversation_id, record.answers AS answers_json, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, record.created_at, record.updated_at, ${historicalNoShowAtSql('r')} AS no_show_at, record.private_notes
     FROM conversations r
     JOIN organization s ON s.id = r.organization_id
     JOIN (
-      SELECT b.id, b.version, b.organization_id, b.status, b.party_size, b.starts_at, b.ends_at, b.timezone, b.location_id, b.product_id, p.name, b.product_session_id, cfg.assigned_member_id, b.created_at, b.updated_at, b.policy_json, p.kind AS product_kind, cfg.advance_notice_minutes, b.answers, b.private_notes
+      SELECT b.id, b.version, b.organization_id, b.status, b.party_size, b.starts_at, b.ends_at, b.timezone, b.location_id, b.product_id, p.name, b.product_session_id, cfg.assigned_member_id, b.created_at, b.updated_at, b.policy_json, p.kind AS product_kind, b.answers, b.private_notes
         FROM bookings b JOIN products p ON p.id = b.product_id
         LEFT JOIN product_booking_configs cfg ON cfg.product_id = b.product_id AND cfg.organization_id = b.organization_id
     ) record ON record.id = r.booking_id AND record.organization_id = r.organization_id
@@ -255,20 +254,21 @@ async function pendingBookingChange(db: DbClient, threadId: string | null): Prom
   }
 }
 
-export async function loadDashboardBookingDetails(
-  event: H3Event,
-  input: { type: DashboardRecordType; bookingId: string; organizationSlug?: string | null; lookup?: 'booking' | 'conversation' },
-): Promise<DashboardBookingDetails> {
-  const context = await bookingContext(event, input.organizationSlug)
-  if (input.type === 'payment') {
-    if (!await roleAllows({ organizationId: context.organization.id, role: context.organization.role, permissions: { payments: ['read'] } })) throw new HTTPError({ statusCode: 403, message: 'Payments access is required' })
-    return composePurchaseDetails(context.db, context.env, { organizationId: context.organization.id }, input.bookingId)
+export async function loadDashboardPurchaseDetails(event: H3Event, paymentId: string): Promise<DashboardBookingDetails> {
+  const { db, env, organization } = await bookingContext(event)
+  if (!await roleAllows({ organizationId: organization.id, role: organization.role, permissions: { payments: ['read'] } })) {
+    throw new HTTPError({ statusCode: 403, message: 'Payments access is required' })
   }
-  const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, input.type, input.bookingId, input.lookup)
+  return composePurchaseDetails(db, env, { organizationId: organization.id }, paymentId)
+}
+
+export async function loadStaffBookingDetails(context: BookingAccessContext, bookingId: string): Promise<DashboardBookingDetails> {
+  const { db, env, organization } = context
+  const row = await loadBookingRow(db, { organizationId: organization.id }, 'booking', bookingId, 'booking')
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   await assertBookingAccess(context, row)
-  const canReadPayments=await roleAllows({organizationId:context.organization.id,role:context.organization.role,permissions:{payments:['read']}})
-  return composeBookingDetails(context.db, row, input.type, { env: context.env, canReadPayments })
+  const canReadPayments = await roleAllows({ organizationId: organization.id, role: organization.role, permissions: { payments: ['read'] } })
+  return composeBookingDetails(db, row, 'booking', { env, canReadPayments })
 }
 
 /**
@@ -312,37 +312,28 @@ async function composeBookingDetails(
 ): Promise<DashboardBookingDetails> {
   if (row.location_id !== null && !row.location_title) throw new HTTPError({ statusCode: 500, message: 'The booking location is missing its title' })
   const { location_latitude: latitude, location_longitude: longitude, location_maps_url, location_address, location_title,
-    policy_json: _policy, answers_json, cancellation_used_at: _cancellation, advance_notice_minutes: _notice,
-    review_id: _review, private_notes, host_json, ...booking } = row
+    policy_json: _policy, answers_json, cancellation_used_at: _cancellation, private_notes, host_json, ...booking } = row
   const address = parsePostalAddress(location_address)
   const pinFailure = coordinatesFailure({ latitude, longitude })
   if (pinFailure) throw new HTTPError({ statusCode: 500, message: pinFailure.error, data: { code: 'INVALID_STORED_LOCATION', field: pinFailure.field } })
 
   // A table may move to the business's tables at any of its locations; anything else stays where it is.
-  const visibleLocations = await queryAll<{ id: string; title: string }>(db, row.product_kind === 'table'
-    ? `SELECT DISTINCT l.id, l.title FROM business_locations l JOIN product_locations pl ON pl.organization_id = l.organization_id AND pl.location_id = l.id
-        JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id AND p.kind = 'table'
-        JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
-       WHERE l.organization_id = ? ORDER BY l.title`
-    : 'SELECT id, title FROM business_locations WHERE organization_id = ? AND id IS ? ORDER BY title', row.product_kind === 'table' ? [row.organization_id] : [row.organization_id, row.location_id])
+  const visibleLocations = row.product_kind === 'table'
+    ? await queryAll<{ id: string; title: string }>(db, `SELECT DISTINCT l.id, l.title
+         FROM business_locations l JOIN product_locations pl ON pl.organization_id = l.organization_id AND pl.location_id = l.id
+         JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id AND p.kind = 'table'
+         JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
+        WHERE l.organization_id = ? ORDER BY l.title`, [row.organization_id])
+    : row.location_id === null ? [] : [{ id: row.location_id, title: location_title! }]
   const locationPictures = await loadOwnerPictures(db, row.organization_id, 'business_location', visibleLocations.map(location => location.id))
   const policy = parseBookingPolicy(row.policy_json)
-  const [policyLocale, contact] = await Promise.all([
-    getSourceLocale(db,row.organization_id),
-    row.location_id
-      ? resolveLocationContact(db, row.organization_id, row.location_id)
-      : queryFirst<{ contactPhone: string | null }>(db, 'SELECT contact_phone AS contactPhone FROM organization WHERE id = ?', [row.organization_id]),
-  ])
+  const policyLocale = await getSourceLocale(db, row.organization_id)
 
   const now = new Date().toISOString()
   const complete = isBookingComplete({ status: row.status as BookingStatus, ends_at: row.ends_at }, now)
-  const paymentIds=reader.buyerUserId
-    ?await queryAll<{id:string}>(db,"SELECT id FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND buyer_user_id=? ORDER BY created_at,id",[row.organization_id,row.booking_id,reader.buyerUserId])
-    :reader.canReadPayments?await queryAll<{id:string}>(db,"SELECT id FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? ORDER BY created_at,id",[row.organization_id,row.booking_id]):[]
-  const payments=await Promise.all(paymentIds.map(async ({id})=>{
-    const detail=await readPaymentDetails(db,reader.env,row.organization_id,id)
-    return {payment:paymentDisplay(detail.payment),refunds:paymentRefundsDisplay(detail.refunds)}
-  }))
+  const payments = reader.buyerUserId || reader.canReadPayments
+    ? await readBookingPaymentReceipts(db, reader.env, row.organization_id, row.booking_id, reader.buyerUserId)
+    : null
   const guestCanRetryCancellation = Boolean(reader.buyerUserId && row.status === 'cancelled' && row.cancellation_used_at
     && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, bookingId: row.booking_id, requestId: row.conversation_id, buyerUserId: reader.buyerUserId }))
   return {
@@ -374,13 +365,12 @@ async function composeBookingDetails(
     answers: formAnswerSnapshotsSchema.parse(JSON.parse(answers_json)),
     pending_change: await pendingBookingChange(db, row.conversation_id),
     locations: visibleLocations.map(location => ({ ...location, image_url: locationPictures.get(location.id)?.imageUrl ?? null })),
-    payments:reader.buyerUserId||reader.canReadPayments?payments:null,
+    payments,
     // The same rule the public cancel route applies, read here so the screen
     // does not offer a cancellation the write would refuse.
     guest_can_cancel: ['pending', 'confirmed'].includes(row.status) && row.ends_at > now && !complete && !row.cancellation_used_at && (policy.advance_notice_minutes === null || outsideNotice(row.starts_at, policy.advance_notice_minutes, Date.parse(now))),
     guest_can_retry_cancellation: guestCanRetryCancellation,
     guest_cancel_refunds: now <= freeCancellationUntil(row.starts_at, policy.advance_notice_minutes),
-    contact_phone: contact?.contactPhone ?? null,
     review_invitation: reader.buyerUserId ? null : await reviewInvitationState(db, row.booking_id, now),
   }
 }
