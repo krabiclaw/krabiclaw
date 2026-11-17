@@ -12,8 +12,6 @@ import { isRecord } from '~/server/utils/type-guards'
   write waits on what reacts to it.
 */
 export type DomainEvent =
-  /** Sent to EVENTS by the Worker before the AIRBNB_SYNC queue existed; forwarded there, never run here. */
-  | { type: 'airbnb.sync'; organization_id: string; job_id: string }
   | { type: 'booking.created'; organization_id: string; conversation_id: string }
   | { type: 'booking.status_changed'; organization_id: string; conversation_id: string; message_id: string; delivery_id: string }
   | { type: 'booking.change'; organization_id: string; conversation_id: string; entry_id: string; proposal_id: string }
@@ -98,10 +96,6 @@ export async function publishChangedJobs(env: EventsEnv, organizationId: string,
 
 /** React to one event. A throw is the delivery's failure: Cloudflare retries it. */
 export async function consumeEvent(env: CloudflareEnv, event: DomainEvent): Promise<void> {
-  if (event.type === 'airbnb.sync') {
-    await publishAirbnbSync(env, { type: 'airbnb.sync_step', organization_id: event.organization_id, job_id: event.job_id })
-    return
-  }
   if (event.type === 'booking.change') {
     const { deliverBookingChange } = await import('~/server/domain/guest-threads/booking-changes')
     await deliverBookingChange(env, event)
