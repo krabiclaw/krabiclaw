@@ -1,14 +1,14 @@
 ---
 name: write-help-docs
-description: Create or update KrabiClaw customer help articles through the canonical CMS, with verified instructions and live screenshots of relevant workflows.
+description: Create or update Blawby customer help articles through the canonical CMS, with verified instructions and live screenshots of relevant workflows.
 ---
 
 # Write customer help docs
 
 Publish a useful, self-contained article on the explicitly selected site's docs
-collection. KrabiClaw's help belongs to organization `platform`; a customer's
+collection. Blawby's help belongs to organization `platform`; a customer's
 site has its own organization, content, domain and SEO. Use the connected
-KrabiClaw MCP tools for CMS reads and writes. Read the current article and retain
+Blawby MCP tools for CMS reads and writes. Read the current article and retain
 its block IDs and concurrency token when editing.
 
 ## Verify the instructions
@@ -53,7 +53,7 @@ or another distinct workflow. Policy-only sections do not need decorative images
 
 Screenshots must show the current UI after loading finishes. Do not use generated
 mockups, reconstructed screens, repository source images, loading skeletons or
-an unrelated provider screenshot as evidence of KrabiClaw's behavior. Capture
+an unrelated provider screenshot as evidence of Blawby's behavior. Capture
 provider-owned controls only from the authorized real provider interface and
 label the provider boundary explicitly.
 

@@ -50,10 +50,8 @@ A key carrying a stored value uses its column name across the domain, REST, MCP,
 Every concept has one canonical implementation and every value has one canonical
 source.
 
-`docs/domain-model.md` names each concept's one table and module, and
-`yarn lint:domain-model` fails when the schema or server grows a second one. A
-change that adds a table or column names its concept there; a concept that
-already has a model is extended, never given a parallel one.
+A concept that already has a table and module is extended, never given a
+parallel one.
 
 Fix the canonical source rather than adding a second path around it.
 
@@ -203,7 +201,14 @@ path than the one that made it. Assert the exact status rather than "not an
 error". Never loosen an assertion to make it pass: decide whether the spec or
 the application is wrong, say which, and fix that.
 
-Follow `docs/testing-strategy.md`.
+Do not add a test by default. Add one only when it proves a named, current
+invariant more directly than the existing build, browser, MCP or database
+verification, and fails only when that invariant breaks. Use the narrowest real
+boundary: typecheck or lint for structure, a unit test for an isolated
+calculation, parser or security decision, local D1 and the Worker for
+persistence, and the E2E suite for customer journeys. Do not write tests that
+match source text, mock internal modules, restate a constant, or only prove that
+removed behavior stays absent.
 
 Do not declare success while the affected path still contains a known failure,
 even when that failure predates the current change.
@@ -303,7 +308,7 @@ Read the current primary [Stripe pricing](https://stripe.com/pricing) before
 changing pricing copy. Preserve the actual amounts, charge basis, currency,
 billing interval and conditions. Every plan charge is on the business's one
 Stripe subscription; additional homes and fees are metered and billed at
-the end of each period (`docs/payments/payments.md`). Public pages and their Markdown, SEO and LLM projections use the
+the end of each period ([Stripe usage-based billing](https://docs.stripe.com/billing/subscriptions/usage-based)). Public pages and their Markdown, SEO and LLM projections use the
 same canonical published pricing content.
 
 ## Vertical focus and domain boundaries
@@ -335,7 +340,7 @@ screenshots captured from the running application and published with the article
 
 ## Local development
 
-Follow `docs/local-development.md`.
+Follow the Local setup section of `README.md`.
 
 Use the repository's documented setup, fixtures, authentication, and local
 runtime paths rather than recreating their individual steps manually.
@@ -348,11 +353,6 @@ trees and any simulators you boot when the check finishes or work pauses, and
 verify that those runners and listeners are gone. Keep benchmark artifacts on
 disk.
 
-For Messages consolidation, finish removing the separate history readers and
-send implementations before running any benchmark. Exercise the shared paths
-through the local runtime and compare the completed change against the
-matched baseline.
-
 ## Marketing execution
 
 For feature launches, blogs and social distribution, read
@@ -360,6 +360,7 @@ For feature launches, blogs and social distribution, read
 content selection, writer handoffs, SEO research plans, and authorized distribution.
 
 For Blawby marketing videos, use `.agents/skills/krabiclaw-marketing/SKILL.md`.
-Product facts and voice remain in `docs/marketing/product-profile.md`.
+Product facts and voice are in `.agents/skills/krabiclaw-marketing/product-profile.md`.
 
-The relevant official HyperFrames skills are tracked in `.agents/skills/hyperframes*/`, `.agents/skills/product-launch-video/` and `.agents/skills/media-use/`; load their `SKILL.md` through the marketing wrapper as needed. Upstream provenance and licenses accompany each.
+The marketing skill uses the official HyperFrames skills. Install them with
+`npx skills add heygen-com/hyperframes --all`; they are not committed.

@@ -9,7 +9,7 @@ import type { ConversationParticipant } from '~/shared/messages-contract'
 import { PUBLISHED_PROFILE_SQL } from '~/shared/member-scheduling'
 
 /**
- * Conversations, as Slack and Discord have them (docs/domain-model.md): a
+ * Conversations, as Slack and Discord have them: a
  * guest's with the business (`contact`, `booking`) or the team's own (`team`),
  * each person's read position and archive (`conversation_participants`), and
  * the messages, written by people or by KrabiClaw (`messages`).

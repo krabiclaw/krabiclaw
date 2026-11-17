@@ -85,7 +85,6 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       # CIMD client metadata must be public HTTPS, which localhost cannot serve.
-      # Staging's test-client documents are the ones docs/testing-strategy.md names.
       MCP_CIMD_CLIENT_URL: https://staging.krabiclaw.com/api/auth/oauth2/test-client-metadata
       MCP_PRIVATE_CIMD_CLIENT_URL: https://staging.krabiclaw.com/api/auth/oauth2/test-private-client-metadata
       PLAYWRIGHT_WORKERS: "1"

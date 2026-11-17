@@ -19,7 +19,6 @@ import type { Product } from '../../server/types/products'
 // Sec-Fetch-Mode, which a native URLSession never sends and which makes Better
 // Auth demand an Origin — and keeps no cookie jar, so a cookie can never stand
 // in for the bearer.
-// docs/shared-auth-contract.md §3–§4.
 
 const fixture = findE2eAuthFixture('user-e2e-lodging-native')
 const invitee = findE2eAuthFixture('user-e2e-lodging-invitee')

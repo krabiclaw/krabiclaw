@@ -1,13 +1,13 @@
 ---
 name: krabiclaw-marketing
-description: Make KrabiClaw marketing and feature videos the owner-approved way, modeled on Airbnb's host feature tours. The script follows Airbnb's narration line for line, the voice is local Kokoro, and the real dashboard UI is rebuilt in HyperFrames from live captures. Use for marketing videos and feature media for blogs and help docs. For screen-recorded proof such as app-review or OAuth demos, use recording/.
+description: Make Blawby marketing and feature videos the owner-approved way, modeled on Airbnb's host feature tours. The script follows Airbnb's narration line for line, the voice is local Kokoro, and the real dashboard UI is rebuilt in HyperFrames from live captures. Use for marketing videos and feature media for blogs and help docs. For screen-recorded proof such as app-review or OAuth demos, use recording/.
 ---
 
-# KrabiClaw marketing video
+# Blawby marketing video
 
 Approved 2026-11-10 with the Cedar Legal consultations film. This file records the method that produced it. Change this file only after the owner approves a new output; the approved output is what this skill encodes.
 
-Read [product-profile.md](../../../docs/marketing/product-profile.md) for product facts, pricing boundaries and brand. Read [PRODUCT.md](../../../PRODUCT.md) and the [MCP contract](../../../docs/mcp.md) before claiming a capability.
+Read [product-profile.md](product-profile.md) for product facts, voice and brand. Check a capability in the product itself before claiming it. Install the HyperFrames skills with `npx skills add heygen-com/hyperframes --all`.
 
 ## The model: Airbnb
 
@@ -32,7 +32,7 @@ Use fictional people and numbers that agree with each other: 14 paid consultatio
 Use Kokoro `af_heart`, run locally. Audio is not an approval step: generate it, transcribe it to check, normalize it and move on.
 
 - **Setup:** `npx hyperframes tts "<line>" -v af_heart -o NN.wav`, with `HYPERFRAMES_PYTHON` pointing at a venv that has `kokoro-onnx soundfile`.
-- **Brand name:** spell it "Crabby Claw" in the TTS text so it is said "crabby claw". Captions and screens still say KrabiClaw.
+- **Brand name:** spell it "Crabby Claw" in the TTS text so it is said "crabby claw". Captions and screens still say Blawby.
 - **One file per line:** split a line where the picture needs a pause. If Kokoro runs two clauses together ("Jordan accepts, and your calendar…"), voice them as separate clips.
 - **Checks:** transcribe each file (Whisper `base.en` with `--word_timestamps True`) to confirm the words and to time taps to them. Normalize each file to −16 LUFS / −1.5 dBTP with ffmpeg `loudnorm`.
 

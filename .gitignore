@@ -35,11 +35,12 @@ pr_body.txt
 /screenshot*.mjs
 /watch-*.mjs
 
-# AI tool local state (like .claude/ — never commit)
+# Installed agent skills (npx skills add …) — only the in-house ones are tracked
 /.agents/skills/*
 !/.agents/skills/krabiclaw-marketing/
 /.agents/skills/krabiclaw-marketing/*
 !/.agents/skills/krabiclaw-marketing/SKILL.md
+!/.agents/skills/krabiclaw-marketing/product-profile.md
 !/.agents/skills/krabiclaw-marketing/recording/
 !/.agents/skills/krabiclaw-marketing/film/
 !/.agents/skills/write-help-docs/
@@ -82,16 +83,6 @@ tsconfig.spot.json
 
 # Generated at build from the resolved route table (see nuxt.config.ts).
 .nuxt-generated/
-
-# Official HyperFrames skills used by the marketing workflow (pinned provenance).
-!/.agents/skills/hyperframes/
-!/.agents/skills/hyperframes-core/
-!/.agents/skills/hyperframes-animation/
-!/.agents/skills/hyperframes-audio/
-!/.agents/skills/hyperframes-creative/
-!/.agents/skills/hyperframes-cli/
-!/.agents/skills/product-launch-video/
-!/.agents/skills/media-use/
 
 # Per-customer onboarding intake files (yarn client:onboard --from) — customer data, never commit
 /client-intake/

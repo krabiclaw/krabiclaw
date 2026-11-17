@@ -106,7 +106,7 @@ MCP_DIAGNOSTICS_ENABLED = "true"
 # PLATFORM_SEARCH_REINDEX_SECRET protects POST /api/internal/search/reindex and is required for
 # yarn ai-search:sync. Production CI syncs it from the PLATFORM_SEARCH_REINDEX_SECRET repo
 # secret and rebuilds the production index. Non-production has no AI Search binding
-# automatically (see .github/workflows/ci.yml and docs/ai-search.md). To set it by hand:
+# automatically (see .github/workflows/ci.yml). To set it by hand:
 #   yarn wrangler secret put PLATFORM_SEARCH_REINDEX_SECRET
 
 [[d1_databases]]

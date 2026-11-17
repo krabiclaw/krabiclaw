@@ -1,12 +1,12 @@
 ---
 name: krabiclaw-publishing
-description: Prepare a focused editorial outline, verified facts, comprehensive SEO research plan, and real screenshot/video assets, then assign a GitHub writing issue to the human writer. Use for KrabiClaw feature launches and blog planning; handle approved human copy, CMS draft assembly, and authorized distribution through canonical MCP tools afterward.
+description: Prepare a focused editorial outline, verified facts, comprehensive SEO research plan, and real screenshot/video assets, then assign a GitHub writing issue to the human writer. Use for Blawby feature launches and blog planning; handle approved human copy, CMS draft assembly, and authorized distribution through canonical MCP tools afterward.
 ---
 
-# Publishing KrabiClaw news
+# Publishing Blawby news
 
-Read [product-profile.md](../../../docs/marketing/product-profile.md) for verified
-facts and Paul's voice and [PRODUCT.md](../../../PRODUCT.md) for current policy.
+Read [product-profile.md](../krabiclaw-marketing/product-profile.md) for verified
+facts and Paul's voice.
 Use [write-help-docs](../write-help-docs/SKILL.md) for customer instructions and
 [krabiclaw-marketing](../krabiclaw-marketing/SKILL.md) for capture, Flow,
 HyperFrames, media QA, authorized publishing and private archive cleanup.
@@ -59,7 +59,7 @@ article or impersonate the writer's personal experience.
 Give the writer a brief they can use without reading the conversation:
 
 1. **Audience, product outcome and editorial objective.** Identify one primary
-   audience and its specific problem. State what KrabiClaw enables that audience
+   audience and its specific problem. State what Blawby enables that audience
    to accomplish for its own customers or guests (the product outcome), what the
    article should make the reader understand, reconsider or want to do (the
    editorial objective), and the one next step the reader should take (the CTA).
@@ -79,7 +79,7 @@ Give the writer a brief they can use without reading the conversation:
    - **Rich Snippets & Structured Schema:** Target JSON-LD types (`Product`, `Offer`,
      `Event`, `LegalService`, `FAQPage`), specifying the exact attributes the
      article will establish (price currency, availability, geo coordinates, author).
-   - **SEO Gap & Competitor Analysis:** Queries where KrabiClaw currently lacks
+   - **SEO Gap & Competitor Analysis:** Queries where Blawby currently lacks
      visibility, zero-click questions to answer upfront (answer-first formatting in
      the first 40–60 words for Google AI Overviews and Perplexity citations), and
      E-E-A-T grounding.
@@ -108,16 +108,16 @@ gh issue create \
 
 ### 1. Audience, Product Outcome & Editorial Objective
 - **Target Reader:** [One primary audience and its specific problem]
-- **Product Outcome:** [What KrabiClaw enables this audience to accomplish for its own customers or guests; one sentence describing the supported action and visible result]
+- **Product Outcome:** [What Blawby enables this audience to accomplish for its own customers or guests; one sentence describing the supported action and visible result]
 - **Editorial Objective:** [What the article should make the reader understand, reconsider, or want to do; describe the content's purpose, not product functionality]
 - **Reader Action (CTA):** [One next step for the reader, pointing to an existing, verified destination]
 - **Angle:** [Why this audience should care now: the friction, unmet need, or opportunity that makes the story worth attention]
 
-Keep these outcomes distinct: the product outcome explains what the customer can achieve with KrabiClaw; the editorial objective explains what the article must achieve with its reader; the CTA specifies the next action we want that reader to take.
+Keep these outcomes distinct: the product outcome explains what the customer can achieve with Blawby; the editorial objective explains what the article must achieve with its reader; the CTA specifies the next action we want that reader to take.
 
 ### 2. Beat Outline
 1. **Beat 1: The Friction / Need** — [What problem the operator or guest faces]
-2. **Beat 2: The New Capability** — [How the action works in KrabiClaw]
+2. **Beat 2: The New Capability** — [How the action works in Blawby]
 3. **Beat 3: The Result in Practice** — [The verified client outcome]
 4. **Beat 4: Next Steps / Horizon** — [CTA and preview of upcoming features]
 
@@ -142,7 +142,7 @@ Keep these outcomes distinct: the product outcome explains what the customer can
 ### 6. Deliverable Checklist
 - [ ] Draft article in Markdown with frontmatter (title, summary, category)
 - [ ] Answer-first summary lead (40–60 words) answering the core query
-- [ ] Factual review against docs/payments
+- [ ] Factual review against the /docs/payments help articles
 - [ ] Owner approval before CMS draft staging
 EOF
 )"
@@ -186,7 +186,7 @@ When an email broadcast to the Product News list is desired:
 ## Publish and distribute through MCP
 
 1. **Verify organization context:** Read `get_workspace_context` and explicitly
-   target the selected organization. KrabiClaw's own content uses `organization_id: "platform"`;
+   target the selected organization. Blawby's own content uses `organization_id: "platform"`;
    the active workspace may be a customer site. Inspect `list_blog_posts` for the intended
    collection, `list_posts`, and the relevant live provider posts. Reuse the
    exact existing document when appropriate; do not duplicate a launch.
@@ -224,9 +224,8 @@ When an email broadcast to the Product News list is desired:
 
 Check existing material first: the live platform blog already contains
 “Make room for your next booking.” Build on it rather than announce Calendar
-as brand new again. Read [Google Calendar](../../../docs/integrations/google-calendar.md)
-and [Payments](../../../docs/payments/payments.md) plus current qualification
-records.
+as brand new again. Check Calendar and Payments behavior in the product and the
+published help articles.
 
 Plan entitlement: New customers need **Business ($149/month)** for online payments
 and direct paid stay bookings, plus a ready Stripe connected account. Basic (free)

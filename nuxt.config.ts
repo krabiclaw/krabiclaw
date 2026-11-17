@@ -471,11 +471,6 @@ export default defineNuxtConfig({
     // R2 bytes at runtime.
     rollupConfig: {
       external: [workerWasmExternal]
-    },
-    serverAssets: [{
-      baseName: 'platform',
-      dir: '..',
-      pattern: 'PRODUCT.md'
-    }]
+    }
   }
 })

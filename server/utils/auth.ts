@@ -312,7 +312,7 @@ async function requireDisconnectedGoogleAds(db: ReturnType<typeof createDb>, acc
 
 /**
  * What has to hold, and what has to be undone elsewhere, before an account is
- * deleted (docs/shared-auth-contract.md D6). Each step fails the deletion: the
+ * deleted. Each step fails the deletion: the
  * account stays until all of them succeed.
  */
 async function prepareAccountDeletion(env: CloudflareEnv, db: ReturnType<typeof createDb>, userId: string, request: Request | undefined) {

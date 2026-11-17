@@ -1,9 +1,8 @@
 import { getPlanEntitlements } from '../server/utils/billing-entitlements'
 import { BASIC_HOMES, homePrice, isKnownRecurringPlan, PAYMENTS_FEE } from './billing-model'
 
-// Reviewed comparison copy, not Stripe's paid marketing_features. Source ownership
-// and unresolved policies are recorded in docs/design/pricing/implementation-plan.md.
-// Keep provider bullets untouched.
+// Reviewed comparison copy, not Stripe's paid marketing_features. Keep provider
+// bullets untouched.
 export interface PricingComparisonRow {
   id: string
   label: string
