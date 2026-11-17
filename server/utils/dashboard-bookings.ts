@@ -12,7 +12,7 @@ import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
 import { calendarStays, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, readStayReservationHome, type StayHome, type StayNight, type StayReservationHome } from '~/server/domain/stays'
 import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
-import { loadDashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
+import { loadStaffBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { readProductPhotos } from '~/server/utils/media-placement'
@@ -58,9 +58,10 @@ export async function dashboardBookingContext(event: H3Event) {
 }
 
 export async function dashboardBookingDetails(event: H3Event) {
-  const { access, db, organization, userId, bookingId, booking } = await dashboardBookingContext(event)
+  const context = await dashboardBookingContext(event)
+  const { access, db, organization, userId, bookingId, booking } = context
   if (booking.unit === 'slot') {
-    return { booking: await loadDashboardBookingDetails(event, { type: 'booking', bookingId, lookup: 'booking' }), manage: access.manage }
+    return { booking: await loadStaffBookingDetails(context, bookingId), manage: access.manage }
   }
   if (!access.manage) {
     const [stay, house, photos] = await Promise.all([
