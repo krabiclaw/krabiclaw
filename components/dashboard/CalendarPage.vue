@@ -121,10 +121,10 @@
                 >{{ day.number }}</component>
                 <ol v-if="itemsOn(day.key).length" class="mt-2 space-y-0.5">
                   <li v-for="item in itemsOn(day.key).slice(0, 2)" :key="item.id">
-                    <NuxtLink :to="item.to" :data-session-id="item.kind === 'session' ? item.session.id : undefined" class="group/item flex" :class="item.status === 'cancelled' ? 'text-muted line-through' : ''">
+                    <component :is="item.to ? NuxtLink : 'div'" :to="item.to ?? undefined" :data-session-id="item.kind === 'session' ? item.session.id : undefined" class="group/item flex" :class="item.status === 'cancelled' ? 'text-muted line-through' : ''">
                       <p class="flex-auto truncate font-medium" :class="item.status === 'cancelled' ? '' : 'text-highlighted group-hover/item:text-primary'">{{ item.kind === 'session' ? timeOf(item) : item.title }}</p>
                       <time v-if="item.kind !== 'session'" :datetime="item.starts_at" class="ml-3 hidden flex-none text-muted xl:block">{{ timeOf(item) }}</time>
-                    </NuxtLink>
+                    </component>
                   </li>
                   <li v-if="itemsOn(day.key).length > 2" class="text-muted">
                     <NuxtLink :to="dayTo(day.key)">+ {{ itemsOn(day.key).length - 2 }} more</NuxtLink>
@@ -471,7 +471,7 @@ const isAgendaItem = (value: unknown): value is AgendaItem =>
   isRecord(value) && typeof value.id === 'string' && typeof value.kind === 'string'
   && typeof value.starts_at === 'string' && typeof value.day_key === 'string'
   && typeof value.timezone === 'string' && typeof value.title === 'string'
-  && typeof value.status === 'string' && typeof value.to === 'string'
+  && typeof value.status === 'string' && (value.to === null || typeof value.to === 'string')
 const isLocation = (value: unknown): value is AgendaLocation => isRecord(value) && typeof value.id === 'string' && typeof value.title === 'string'
 const isAgendaPayload = (value: unknown): value is AgendaPayload =>
   isRecord(value) && Array.isArray(value.items) && value.items.every(isAgendaItem)

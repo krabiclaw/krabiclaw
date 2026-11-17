@@ -54,10 +54,6 @@ export function noticeSummary(minutes: number | null | undefined): string {
   return `At least ${formatMinutes(value)}`
 }
 
-export function seatsSummary(capacity: number | null | undefined): string {
-  return capacity === null || capacity === undefined ? 'No limit' : `${capacity} per time slot`
-}
-
 /** "Mon–Sat · Closed Sun", the way Airbnb's card states a value in one line. */
 export function hoursSummary(hours: OpeningHours): string {
   if (!hours) return 'Not set'

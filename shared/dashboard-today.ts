@@ -15,6 +15,7 @@ export type TodayFeedPayload = z.infer<typeof todayFeedSchema>
 /** A guest account's visit as a Today card. */
 export function agendaToTodayCard(item: AgendaItem, input: { resolved_at: string }): TodayCard {
   if (item.kind !== 'booking' && item.kind !== 'stay') throw new Error('Today cards require a booking or stay')
+  if (!item.to) throw new Error('A guest visit has no conversation link')
   const referenceDay = localDateAt(new Date(input.resolved_at), item.timezone)
   const distance = Math.round((Date.parse(`${item.day_key}T00:00:00Z`) - Date.parse(`${referenceDay}T00:00:00Z`)) / 86_400_000)
   const when = distance <= 0 ? 'today' : distance === 1 ? 'tomorrow' : `in ${distance} days`

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
+import { applySchema } from './support/schema.ts'
 
 const NOW = '2026-09-27T00:00:00.000Z'
 
@@ -107,12 +107,7 @@ test('guest records refuse an ordinary parent delete and cascade away with their
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    // The baseline and every forward migration after it, in the journal's order.
-    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
-    for (const { tag } of journal.entries) {
-      const statements = readFileSync(`migrations/${tag}.sql`, 'utf8').split('--> statement-breakpoint').map(statement => statement.trim()).filter(Boolean)
-      await db.batch(statements.map(statement => db.prepare(statement)))
-    }
+    await applySchema(db)
     await db.batch(['doomed', 'bystander'].flatMap(org => [...tenantGraph(org), ...lodgingGraph(org)]).map(statement => db.prepare(statement)))
     const bystanderBefore = await rowsOwnedBy(db, 'bystander')
 

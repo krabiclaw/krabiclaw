@@ -2,12 +2,13 @@ import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { assertRoleAllows } from '~/server/utils/member-access'
-import { getStripeConnectedAccount, paymentsStripe } from '~/server/utils/stripe-connect'
+import { paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { publishPaymentNotification } from './notifications'
 import { recordPaymentRefunded } from '~/server/domain/booking-analytics'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { isRecord } from '~/server/utils/type-guards'
+import { paymentDisplay, paymentRefundsDisplay } from '~/shared/payment-display'
 
 export interface ApprovedStayBooking {
   bookingId: string
@@ -94,30 +95,65 @@ export async function requirePayment(db: DbClient, organizationId: string, payme
   if (!payment) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
   return payment
 }
-/** What Stripe says was captured, refunded and disputed. A PaymentIntent keeps saying succeeded after a refund: the Charge and Refunds hold that. */
-async function stripePaymentFacts(env:CloudflareEnv,payment:Payment){
- if(!payment.stripe_payment_intent_id||!payment.stripe_charge_id)return null
- const stripe=paymentsStripe(env,Boolean(payment.livemode))
- const account={stripeAccount:payment.stripe_account_id}
- const [charge,refunds,disputes]=await Promise.all([
-  stripe.charges.retrieve(payment.stripe_charge_id,{},account),
-  stripe.refunds.list({payment_intent:payment.stripe_payment_intent_id,limit:100},account).autoPagingToArray({limit:10_000}),
-  stripe.disputes.list({payment_intent:payment.stripe_payment_intent_id,limit:100},account).autoPagingToArray({limit:10_000}),
- ])
- return {captured:charge.amount_captured,refunded:charge.amount_refunded,refunds,disputes}
+type StripeReceiptScope = Pick<Payment, 'stripe_payment_intent_id' | 'stripe_charge_id' | 'livemode' | 'stripe_account_id'>
+type RecordedRefund = { id: string; amount: number | null; status: string; stripe_refund_id: string | null; note: string | null }
+
+/** A succeeded PaymentIntent stays succeeded after a refund. Use its charge and refunds. */
+async function stripePaymentFacts(env: CloudflareEnv, payment: StripeReceiptScope, includeDisputes: boolean) {
+  if (!payment.stripe_payment_intent_id || !payment.stripe_charge_id) return null
+  const stripe = paymentsStripe(env, Boolean(payment.livemode))
+  const account = { stripeAccount: payment.stripe_account_id }
+  const [charge, refunds, disputes] = await Promise.all([
+    stripe.charges.retrieve(payment.stripe_charge_id, {}, account),
+    stripe.refunds.list({ payment_intent: payment.stripe_payment_intent_id, limit: 100 }, account).autoPagingToArray({ limit: 10_000 }),
+    includeDisputes
+      ? stripe.disputes.list({ payment_intent: payment.stripe_payment_intent_id, limit: 100 }, account).autoPagingToArray({ limit: 10_000 })
+      : [],
+  ])
+  return { amounts: { captured_amount: charge.amount_captured, refunded_amount: charge.amount_refunded }, refunds, disputes }
 }
+
+/** Stripe owns sent refunds. The recorded row supplies the note and refunds still awaiting submission. */
+function mergeRefunds(rows: RecordedRefund[], provider: Stripe.Refund[] | undefined) {
+  if (!provider) return rows
+  const byProviderId = new Map(rows.map(row => [row.stripe_refund_id, row]))
+  return [...provider.map(refund => {
+    const local = byProviderId.get(refund.id)
+    return { ...local, id: local?.id ?? refund.id, stripe_refund_id: refund.id, amount: refund.amount, status: refund.status ?? 'pending' }
+  }), ...rows.filter(row => !row.stripe_refund_id)]
+}
+
+/** The receipt fields shown with a booking, after the caller authorizes the booking and payment access. */
+export async function readBookingPaymentReceipts(db: DbClient, env: CloudflareEnv, organizationId: string, bookingId: string, buyerUserId?: string) {
+  const rows = await queryAll<StripeReceiptScope & { refunds_json: string }>(db, `
+    SELECT p.id, p.currency, p.captured_amount, p.refunded_amount, p.surcharge_amount, p.receipt_url,
+           p.stripe_account_id, p.livemode, p.stripe_payment_intent_id, p.stripe_charge_id,
+           (SELECT json_group_array(json_object('id', f.id, 'amount', f.amount, 'status', f.status,
+               'stripe_refund_id', f.stripe_refund_id, 'note', f.note))
+            FROM payment_refunds f WHERE f.payment_id = p.id) AS refunds_json
+    FROM payments p WHERE p.organization_id = ? AND p.subject_type = 'booking' AND p.subject_id = ?
+      ${buyerUserId === undefined ? '' : 'AND p.buyer_user_id = ?'}
+    ORDER BY p.created_at, p.id`, buyerUserId === undefined ? [organizationId, bookingId] : [organizationId, bookingId, buyerUserId])
+  return Promise.all(rows.map(async row => {
+    const facts = await stripePaymentFacts(env, row, false)
+    return {
+      payment: paymentDisplay({ ...row, ...facts?.amounts }),
+      refunds: paymentRefundsDisplay(mergeRefunds(JSON.parse(row.refunds_json) as RecordedRefund[], facts?.refunds)),
+    }
+  }))
+}
+
 /** Full merchant detail; callers must authorize before reading or projecting it. */
 export async function readPaymentDetails(db:DbClient,env:CloudflareEnv,organizationId:string,paymentId:string){
  const recorded=await requirePayment(db,organizationId,paymentId)
  const [refundRows,disputeRows,booking,stripeFacts]=await Promise.all([
-  queryAll<{id:string;amount:number;status:string;stripe_refund_id:string|null}>(db,'SELECT * FROM payment_refunds WHERE payment_id=?',[recorded.id]),
+  queryAll<RecordedRefund>(db,'SELECT * FROM payment_refunds WHERE payment_id=?',[recorded.id]),
   queryAll<{id:string;stripe_dispute_id:string;amount:number;currency:string;reason:string;status:string;evidence_due_at:string|null;updated_at:string}>(db,'SELECT * FROM payment_disputes WHERE payment_id=?',[recorded.id]),
   recorded.subject_type==='booking'?queryFirst<{conversation_id:string|null}>(db,`SELECT (SELECT c.id FROM conversations c WHERE c.booking_id=b.id AND c.kind='booking') AS conversation_id FROM bookings b WHERE b.id=? AND b.organization_id=?`,[recorded.subject_id,organizationId]):Promise.resolve(null),
-  stripePaymentFacts(env,recorded),
+  stripePaymentFacts(env,recorded,true),
  ])
- const payment=visiblePayment(stripeFacts?{...recorded,captured_amount:stripeFacts.captured,refunded_amount:stripeFacts.refunded}:recorded)
- // Stripe's refunds, with the note and author only we hold; a refund not yet sent to Stripe exists only here.
- const refunds=stripeFacts?[...stripeFacts.refunds.map(refund=>({...refundRows.find(row=>row.stripe_refund_id===refund.id),id:refundRows.find(row=>row.stripe_refund_id===refund.id)?.id??refund.id,stripe_refund_id:refund.id,amount:refund.amount,status:refund.status??'pending'})),...refundRows.filter(row=>!row.stripe_refund_id)]:refundRows
+ const payment=visiblePayment({...recorded,...stripeFacts?.amounts})
+ const refunds=mergeRefunds(refundRows,stripeFacts?.refunds)
  return {payment,refunds,disputes:stripeFacts?stripeFacts.disputes.map(dispute=>{const row=disputeRows.find(item=>item.stripe_dispute_id===dispute.id);return {id:row?.id??dispute.id,stripe_dispute_id:dispute.id,amount:dispute.amount,currency:dispute.currency.toUpperCase(),reason:dispute.reason,status:dispute.status,evidence_due_at:dispute.evidence_details?.due_by?new Date(dispute.evidence_details.due_by*1000).toISOString():null,updated_at:row?.updated_at??new Date(dispute.created*1000).toISOString()}}):disputeRows,visit:booking?.conversation_id?{kind:payment.subject_type,conversation_id:booking.conversation_id}:null}
 }
 export type PaymentsEarningsType = 'paid' | 'refunded'
@@ -131,17 +167,6 @@ export async function listPayments(db: DbClient, principal: FinancialPrincipal, 
   const rows = await queryAll<Payment>(db, `SELECT * FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? AND id > ? AND (? IS NULL OR location_id = ?) AND (? IS NULL OR (CASE WHEN ? = 'refunded' THEN refunded_amount > 0 ELSE refunded_amount < captured_amount END)) ORDER BY id LIMIT ?`,
     [principal.organizationId, from.toISOString(), to.toISOString(), input.after ?? '', input.location_id ?? null, input.location_id ?? null, input.earnings_type ?? null, input.earnings_type ?? null, limit + 1])
   return { organization_id: principal.organizationId, timezone: 'UTC', from: from.toISOString(), to: to.toISOString(), payments: rows.slice(0, limit).map(visiblePayment), next_cursor: rows.length > limit ? rows[limit - 1]!.id : null }
-}
-export async function paymentPayouts(db: DbClient, env: CloudflareEnv, principal: FinancialPrincipal, after?: string) {
-  await authorizePayments(principal, 'payouts')
-  const account = await getStripeConnectedAccount(db, principal.organizationId)
-  if (!account?.stripe_account_id) return { organization_id: principal.organizationId, configured: false, balance: null, payouts: [], next_cursor: null, source: 'Stripe account not connected', refreshed_at: null }
-  const stripe = paymentsStripe(env, account.livemode), options = { stripeAccount: account.stripe_account_id }
-  const [balance, payouts] = await Promise.all([stripe.balance.retrieve({}, options), stripe.payouts.list({ limit: 50, ...(after ? { starting_after: after } : {}) }, options)])
-  if (balance.livemode !== account.livemode || payouts.data.some(row => row.livemode !== account.livemode)) throw new Error('Stripe payout mode does not match connected account')
-  const nextCursor = payouts.has_more ? payouts.data.at(-1)?.id : null
-  if (payouts.has_more && !nextCursor) throw new Error('Stripe payout list is missing its next cursor')
-  return { organization_id: principal.organizationId, configured: true, balance, payouts: payouts.data, next_cursor: nextCursor, source: 'Stripe', refreshed_at: new Date().toISOString() }
 }
 export async function paymentSummary(db: DbClient, principal: FinancialPrincipal, from: string, to: string) {
   await authorizePayments(principal, 'read')

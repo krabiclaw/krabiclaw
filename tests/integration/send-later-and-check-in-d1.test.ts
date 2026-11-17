@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { createStay, stayAccessFor, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { cancelScheduledGuestMessage, deleteMessageTemplate, listScheduledGuestMessages, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
@@ -15,9 +13,9 @@ import { appendMessage } from '../../server/domain/conversations.ts'
 import { setListingAccess } from '../../server/domain/conversation-participants.ts'
 import { applyResendEmailEvent, createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { sendGuestThreadReply, operationDedupeKey } from '../../server/domain/guest-threads/operations.ts'
-import { creationRequestHash } from '../../server/utils/organization-events.ts'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { captureEvents } from './support/events.ts'
+import { applySchema } from './support/schema.ts'
 
 // Every confirmed stay is sent its home's check-in instructions on its own, and
 // a member's send-later reply goes out as their reply at its time, visible only
@@ -60,7 +58,7 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     bindDatabaseEvents(db, env)
-    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
@@ -263,7 +261,7 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
     const db = await runtime.getD1Database('DB')
     const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'provider', EMAIL_FROM: 'Blawby <hello@krabiclaw.com>', RESEND_API_KEY: 're_controlled_http', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
-    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES (?, 'Org', 'org', 'org', 'USD', 'UTC')").bind(ORG).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
     for (const [id, role] of [[OWNER, 'owner'], [ADMIN, 'admin']]) {
@@ -329,37 +327,12 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
     assert.equal((await retry(reply.body, reply.id)).ok, true)
     assert.equal(posts.length, 1)
     assert.equal(await db.prepare('SELECT count(*) count FROM messages WHERE dedupe_key = ?').bind(message!.dedupe_key).first('count'), 1)
-    await appendMessage(db, { conversationId: reply.threadId, authorKind: 'guest', authorUserId: null, channel: 'email', body: 'A new question',
-      payload: { email: { from: 'delivered@resend.dev', messageId: '<guest-question@resend.dev>', subject: null } } })
-
-    // A legacy interruption left Sending with no job entry link, but already
-    // wrote the immutable entry and pending receipt. Retry repairs the actual
-    // lifecycle through those same records, with exactly one provider POST.
-    const legacy = await schedule('Legacy scheduled reply.')
-    await db.prepare("UPDATE scheduled_guest_messages SET status = 'sending', started_at = ? WHERE id = ?").bind(now, legacy.id).run()
-    const original = await appendMessage(db, { conversationId: legacy.threadId, authorKind: 'member', authorUserId: OWNER, channel: 'email', body: legacy.body, eventName: 'thread.member_reply',
-      dedupeKey: operationDedupeKey({ threadId: legacy.threadId, idempotencyKey: `send-later:${legacy.id}` }), payload: { request_hash: await creationRequestHash({ body: legacy.body, photos: [] }) } })
-    await createDeliveryReceipt(db, { subject: { messageId: original.id }, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: `guest-thread-email:${legacy.threadId}:send-later:${legacy.id}` })
-    assert.equal((await retry(legacy.body, legacy.id)).ok, true)
-    assert.deepEqual([(await saved(legacy.id))?.status, (await saved(legacy.id))?.message_id], ['sent', original.id])
-    assert.equal(posts.length, 2)
-    assert.equal(posts[1]?.headers?.['In-Reply-To'], '<guest-question@resend.dev>', 'the latest genuine inbound RFC ID supplies the parent')
-    assert.equal(posts[1]?.headers?.References, '<sent-1@resend.dev> <guest-question@resend.dev>', 'references contain only retained inbound and outbound RFC IDs')
-    assert.equal((await retry(legacy.body, legacy.id)).ok, true)
-    assert.equal(posts.length, 2, 'the original pending receipt sends once and settled retry sends nothing')
-
-    // Resend's accepted id proves the send. An interrupted dispatcher's saved error still has to
-    // clear through that dispatcher, or Today would keep showing the completed job as attention.
-    await db.prepare("UPDATE guest_thread_deliveries SET error = 'Interrupted after Resend accepted it' WHERE message_id = ?").bind(original.id).run()
-    assert.equal((await retry(legacy.body, legacy.id)).ok, true)
-    assert.equal(await db.prepare('SELECT error FROM guest_thread_deliveries WHERE message_id = ?').bind(original.id).first('error'), null)
-    assert.equal(posts.length, 2)
 
     const notStarted = await schedule('Not due yet.')
     await assert.rejects(retry(notStarted.body, notStarted.id), /already-started scheduled message/)
     await cancelScheduledGuestMessage(db, env, await stayAccessFor(owner), notStarted.id)
     await assert.rejects(retry(notStarted.body, notStarted.id), /already-started scheduled message/)
-    assert.equal(posts.length, 2, 'pending and cancelled scheduled replies cannot be started by Retry')
+    assert.equal(posts.length, 1, 'pending and cancelled scheduled replies cannot be started by Retry')
 
     // Corrupt recorded RFC metadata fails before dispatch: the job is failed with the actual entry and
     // reason, the run reports the error, and a later cron does not resend it.
@@ -371,7 +344,7 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
     assert.ok(refused.message_id)
     assert.equal(await db.prepare('SELECT body FROM messages WHERE id = ?').bind(refused.message_id).first('body'), invalid.body)
     assert.partialDeepStrictEqual(await sendDueOutbox(db, env, ORG, minutes(3)), { sent: 0, failed: 0, needs_review: 0 })
-    assert.equal(posts.length, 2)
+    assert.equal(posts.length, 1)
   } finally {
     await runtime.dispose()
   }

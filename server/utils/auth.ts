@@ -226,6 +226,8 @@ export interface CloudflareEnv {
   GUEST_INBOX_HUBS?: DurableObjectNamespace
   /** Cloudflare's queue of what writes announce (server/events.ts). */
   EVENTS?: import('~/server/events').EventsEnv['EVENTS']
+  /** The serial queue that runs Airbnb sync and disconnect steps (server/integrations/channex/airbnb-sync.ts). */
+  AIRBNB_SYNC?: import('~/server/events').AirbnbSyncEnv['AIRBNB_SYNC']
   db?: ReturnType<typeof createDb>
   [key: string]: ApiValue
 }

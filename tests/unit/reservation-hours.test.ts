@@ -13,6 +13,9 @@ test('weekly hours retain close weekdays, Sunday rollover and exact 23:59 endpoi
 test('unknown, explicitly closed, and always open remain distinct', () => {
   assert.equal(getDateIntervals(null, null, '2099-01-05'), null)
   assert.deepEqual(getDateIntervals({ periods: [] }, null, '2099-01-05'), [])
+  assert.equal(normalizeGoogleOpeningHours(undefined), null)
+  assert.equal(normalizeGoogleOpeningHours(null), null)
+  assert.deepEqual(normalizeGoogleOpeningHours([]), { periods: [] })
   const always = normalizeGoogleOpeningHours([{ open: { day: 0 } }])
   assert.deepEqual(getDateIntervals(always, null, '2099-01-05'), [{ start: 0, end: 2880 }])
   assert.equal(isOpenNow(null, 'Asia/Bangkok'), undefined)

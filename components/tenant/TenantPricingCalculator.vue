@@ -34,8 +34,9 @@
 
       <div class="flex flex-col justify-center rounded-xl border border-muted bg-[var(--tenant-primary-100,var(--ui-bg-muted))] p-6">
         <h4 class="mb-1 text-lg font-semibold text-[var(--tenant-primary,var(--ui-text-highlighted))]">Estimated Hourly Rate</h4>
-        <p v-if="!income" class="mb-6 text-sm italic text-muted">Enter income to see your specific rate</p>
-        <div class="space-y-4">
+        <p v-if="!result" class="mb-6 text-sm italic text-muted">Enter income to see your specific rate</p>
+        <p v-else-if="'error' in result" role="alert" class="text-sm text-error">{{ result.error }}</p>
+        <div v-else class="space-y-4">
           <div class="flex items-center justify-between text-sm"><span class="text-muted">Standard Rate</span><span class="font-medium">${{ result.standardRate }}/hr</span></div>
           <div class="flex items-center justify-between text-sm"><span class="text-muted">Discount<span v-if="result.percentage"> ({{ result.percentage }}%)</span></span><span class="font-medium" :class="result.percentage ? 'text-success' : ''">{{ result.percentage ? `-$${result.standardRate - result.rate}/hr` : 'None' }}</span></div>
           <div class="border-t border-default pt-4"><div class="flex items-center justify-between"><span class="text-xl font-bold text-[var(--tenant-primary,var(--ui-text-highlighted))]">Your Rate</span><span class="text-3xl font-bold text-[var(--tenant-accent-strong,var(--ui-primary))]">${{ result.rate }}/hr</span></div></div>
@@ -63,12 +64,21 @@ const props = withDefaults(defineProps<{
 const householdSize = ref(1)
 const income = ref('')
 const period = ref<'annual' | 'monthly'>('annual')
-const result = computed(() => calculateSlidingScaleRate({
-  householdSize: householdSize.value,
-  income: parsePricingAmount(income.value),
-  period: period.value,
-  rows: props.rows,
-}))
+// No digit yet is no income entered, not an income of zero. A table the
+// calculator cannot read is shown as its error in place of a rate.
+const result = computed(() => {
+  if (!/\d/.test(income.value)) return null
+  try {
+    return calculateSlidingScaleRate({
+      householdSize: householdSize.value,
+      income: parsePricingAmount(income.value),
+      period: period.value,
+      rows: props.rows,
+    })
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+})
 
 function onIncomeInput(event: Event) {
   const target = event.target as HTMLInputElement

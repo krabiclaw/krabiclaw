@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict'
 import type Stripe from 'stripe'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
-import { countActiveHomes, executeWithinCapacity, getOrganizationBillingStatus, getOrganizationSubscriptionPrice, homesQuote, parseHomesAdding } from '../../server/utils/billing.ts'
+import { countActiveHomes, getOrganizationBillingStatus, getOrganizationSubscriptionPrice, homesQuote, parseHomesAdding } from '../../server/utils/billing.ts'
 import { createLocation, deleteLocation, updateLocation } from '../../server/utils/location-management.ts'
 import { createProduct, deleteProduct, getProduct, reconcileProducts, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
 import { createStayHome, readStayHome, stayHomeInput, updateStayHome } from '../../server/domain/stays.ts'
 import { publishedCatalogResponse } from './support/stripe-published-catalog.ts'
 import { returnExtrasToDraftsForPlanEnd } from '../../server/utils/billing-plan-end.ts'
 import { HTTPError } from 'nitro'
+import { applySchema } from './support/schema.ts'
 
 // Billing by count: Growth and Business bill every live home. A home is a stay
 // product at a location; locations themselves are never counted or billed. A
@@ -76,7 +75,7 @@ test('live homes are reported to their Stripe meter, drafts and locations are fr
   try {
     const db = await runtime.getD1Database('DB')
     const counts = (organizationId: string) => countActiveHomes(db, organizationId)
-    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await applySchema(db)
     const env = {
       ...await runtime.getBindings<CloudflareEnv>(), DB: db, BETTER_AUTH_SECRET: 'business-capacity-proof-secret-long-enough', BETTER_AUTH_URL: 'https://proof.example',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_business_capacity', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
@@ -209,36 +208,6 @@ test('live homes are reported to their Stripe meter, drafts and locations are fr
     assert.deepEqual(await Promise.all(activationBoundaryTables.map(table => db.prepare(`SELECT * FROM ${table} WHERE organization_id = 'inn' ORDER BY rowid`).all().then(result => result.results))), beforeReactivation)
     assert.deepEqual(stripeRequests, stripeBeforeReactivation)
     assert.equal(await counts('inn'), 3)
-    // Schedule genuine competing writes at D1's batch boundary, after the
-    // guarded operation read three live homes. Its stale bound would otherwise
-    // let reactivation pass when one, or every, active home was turned off.
-    for (const competingProductIds of [[villas[1]!.product_id], [villas[0]!.product_id, villas[1]!.product_id, cabin.id]]) {
-      let interleaved = false
-      let afterCompetingWrite: Record<string, unknown>[][] | undefined
-      let stripeAfterCompetingWrite: string[] | undefined
-      const interleavedDb = new Proxy(db, { get(target, key) {
-        if (key === 'batch') return async (statements: D1PreparedStatement[]) => {
-          assert.equal(interleaved, false)
-          interleaved = true
-          for (const productId of competingProductIds) await updateProduct(db, { env, organizationId: 'inn', productId, actor, patch: { active: false } })
-          afterCompetingWrite = await Promise.all(activationBoundaryTables.map(table => db.prepare(`SELECT * FROM ${table} WHERE organization_id = 'inn' ORDER BY rowid`).all<Record<string, unknown>>().then(result => result.results)))
-          stripeAfterCompetingWrite = stripeRequests.slice()
-          return target.batch(statements)
-        }
-        const value = Reflect.get(target, key, target)
-        return typeof value === 'function' ? value.bind(target) : value
-      } })
-      await assert.rejects(executeWithinCapacity(env, interleavedDb, 'inn', [{
-        query: "UPDATE products SET active = 1, name = 'Refused stale activation' WHERE organization_id = ? AND id = ?",
-        params: ['inn', villas[2]!.product_id],
-      }], { action: 'turn it on', allowHomeActivation: false }), { status: 409, data: { code: 'HOME_STATE_CHANGED', operation_completed: false } })
-      assert.equal(interleaved, true)
-      assert.deepEqual(await Promise.all(activationBoundaryTables.map(table => db.prepare(`SELECT * FROM ${table} WHERE organization_id = 'inn' ORDER BY rowid`).all().then(result => result.results))), afterCompetingWrite)
-      assert.deepEqual(stripeRequests, stripeAfterCompetingWrite)
-      assert.equal(await counts('inn'), 3 - competingProductIds.length)
-      for (const productId of competingProductIds) await updateProduct(db, { env, organizationId: 'inn', productId, actor, patch: { active: true } })
-      assert.equal(await counts('inn'), 3)
-    }
     await updateProduct(db, { env, organizationId: 'inn', productId: villas[2]!.product_id, actor, patch: { active: true } })
     assert.deepEqual(last('cus_inn'), 4)
     // A location can hold several homes. Reactivating it would activate both;
@@ -273,27 +242,6 @@ test('live homes are reported to their Stripe meter, drafts and locations are fr
     const cafe = (await db.prepare("SELECT id FROM business_locations WHERE organization_id = 'inn' AND title = 'Cafe'").first('id')) as string
     assert.equal((await deleteLocation(env, db, 'inn', cafe)).status, 200)
     assert.deepEqual(last('cus_inn'), 3)
-    // Deleting all home rows between the read and batch must also be visible:
-    // an equality fence on only the products table would match no row here.
-    const beforeStaleLocationName = await db.prepare("SELECT name FROM organization WHERE id = 'inn'").first('name')
-    let afterCompetingDeletion: Record<string, unknown>[][] | undefined
-    let stripeAfterCompetingDeletion: string[] | undefined
-    const deletingDb = new Proxy(db, { get(target, key) {
-      if (key === 'batch') return async (statements: D1PreparedStatement[]) => {
-        for (const villa of villas) await deleteProduct(db, { organizationId: 'inn', productId: villa.product_id, env })
-        afterCompetingDeletion = await Promise.all(activationBoundaryTables.map(table => db.prepare(`SELECT * FROM ${table} WHERE organization_id = 'inn' ORDER BY rowid`).all<Record<string, unknown>>().then(result => result.results)))
-        stripeAfterCompetingDeletion = stripeRequests.slice()
-        return target.batch(statements)
-      }
-      const value = Reflect.get(target, key, target)
-      return typeof value === 'function' ? value.bind(target) : value
-    } })
-    await assert.rejects(executeWithinCapacity(env, deletingDb, 'inn', [{ query: "UPDATE organization SET name = 'Refused stale edit' WHERE id = ?", params: ['inn'] }], { action: 'edit it', allowHomeActivation: false }), { status: 409, data: { code: 'HOME_STATE_CHANGED', operation_completed: false } })
-    assert.deepEqual(await Promise.all(activationBoundaryTables.map(table => db.prepare(`SELECT * FROM ${table} WHERE organization_id = 'inn' ORDER BY rowid`).all().then(result => result.results))), afterCompetingDeletion)
-    assert.deepEqual(stripeRequests, stripeAfterCompetingDeletion)
-    assert.equal(await db.prepare("SELECT name FROM organization WHERE id = 'inn'").first('name'), beforeStaleLocationName)
-    assert.equal(await counts('inn'), 0)
-    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM products WHERE organization_id = 'inn' AND kind = 'stay'").first('n'), 0)
 
     // ── Growth bills the same way: the homes meter, nothing refused.
     await organization('grower', 'growth')

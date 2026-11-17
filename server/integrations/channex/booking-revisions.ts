@@ -2,7 +2,7 @@ import { execute, queryFirst, type DbClient } from '~/server/db'
 import { applyChannelBooking, type ChannelBooking } from '~/server/domain/stays'
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
-import { channexGet, channexList, channexRequest, type ChannexEnv } from './client'
+import { channexGet, channexList, channexRequest, VRBO_CHANNEL, type ChannexEnv } from './client'
 import { ChannexDataError, integer, nullableString, object, string, type Resource } from './data'
 
 import type { GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
@@ -22,7 +22,7 @@ import { publishEvent } from '~/server/events'
 
 export type RevisionOutcome = { status: 'acknowledged'; booking_id: string; overbooked: boolean } | { status: 'ignored_disconnected' }
 
-interface Mapping { organization_id: string; product_id: string; enabled: number }
+interface Mapping { organization_id: string; product_id: string; enabled: number; import_stage: string }
 
 // Channex's ota_name, lowercased. Its booking documentation shows Booking.com as both
 // "Booking.com" and "BookingCom".
@@ -121,7 +121,14 @@ export async function landBookingRevision(db: DbClient, env: ChannexEnv & GuestI
   let mapping: Mapping | null = null
   try {
     const propertyId = string(revision.attributes.property_id, 'property_id')
-    mapping = await queryFirst<Mapping>(db, "SELECT organization_id, product_id, enabled FROM product_channel_mappings WHERE provider = 'channex' AND property_id = ?", [propertyId])
+    mapping = await queryFirst<Mapping>(db, "SELECT organization_id, product_id, enabled, import_stage FROM product_channel_mappings WHERE provider = 'channex' AND property_id = ?", [propertyId])
+    // Vrbo can deliver a booking as soon as the host activates in Channex, before they close the setup frame.
+    if (mapping && mapping.enabled !== 1 && ['draft', 'complete'].includes(mapping.import_stage)
+      && String(revision.attributes.ota_name).toLowerCase() === 'vrbo' && env.CHANNEX_VRBO_ENABLED === 'true') {
+      const { ChannexConnection } = await import('./channel-connection')
+      const connection = new ChannexConnection(db, env, mapping.organization_id, 'system')
+      if (await connection.finishHostedProperty(mapping.product_id, VRBO_CHANNEL)) mapping.enabled = 1
+    }
     if (!mapping || mapping.enabled !== 1) {
       // D-G: a home nobody connected, or one disconnected, takes nothing; the revision is logged and acknowledged.
       await log(db, { organizationId: mapping?.organization_id ?? null, productId: mapping?.product_id ?? null, revisionId, status: 'ignored_disconnected', detail: `property ${propertyId}` })

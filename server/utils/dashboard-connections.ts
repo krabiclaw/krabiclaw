@@ -12,9 +12,10 @@ import { getSocialConnections } from '~/server/utils/social-publication'
 import { loadOrganizationFeatures } from '~/server/utils/cms-capabilities'
 import { createAuth, requireIntegrationAccount } from '~/server/utils/auth'
 import { readIntegration } from '~/server/utils/organization-integrations'
-import { loadSettingsPayload } from '~/server/utils/organization-settings'
+import { loadConnectionSummary } from '~/server/utils/organization-settings'
 import { assertOrganizationWideAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
-import { requireSchedulingAccess, readMemberScheduling } from '~/server/domain/member-scheduling'
+import { memberCalendarCoverage, requireSchedulingAccess, readMemberScheduling } from '~/server/domain/member-scheduling'
+import { readCalendarConnection } from '~/server/utils/google-calendar'
 import type { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 
 const inventory = {
@@ -31,7 +32,7 @@ const planLabel = (plan: string) => plan === STARTER_PLAN_ID ? 'Free' : plan.cha
 export const connectionGroups = [{ id: 'sync', label: 'Sync' }, { id: 'connection', label: 'Connections' }]
 export const connectionFilters = [{ value: 'all', label: 'All' }, ...plans.map(plan => ({ value: plan, label: planLabel(plan) }))]
 
-type Summary = Awaited<ReturnType<typeof loadSettingsPayload>>['integrations']
+type Summary = Awaited<ReturnType<typeof loadConnectionSummary>>
 type ConnectionRow = CatalogRow & { group: 'sync' | 'connection'; plan: typeof plans[number] | null }
 
 function target(summary: Summary, integration: IntegrationKey) {
@@ -153,7 +154,7 @@ export async function dashboardConnections(
       { enabled: !disconnect, ...(accountId && !disconnect ? { account_id: accountId } : {}) })
     return { ...screen, destination: { view: 'connection-personal-calendar', query: scope } }
   }
-  const { integrations: summary } = await loadSettingsPayload(db, env, organization.id)
+  const summary = await loadConnectionSummary(db, env, organization.id)
   if (view === 'connections') {
     if (answer) return invalid('Choose a connection')
     return { ...index('Connections', await connectionRows(context, summary)), groups: connectionGroups, filters: connectionFilters }
@@ -218,10 +219,10 @@ export async function dashboardConnections(
   const calendar = integration === 'google-calendar'
   const connected = Boolean(connection && connection.state !== 'disabled')
   const path = `${base}/${integration}`
-  const calendarState = calendar ? await api<{ cleanup_pending: boolean; calendar: { calendar_id: string; revision: string } | null }>(path) : null
-  const members = calendar && view === 'connection' && connected
-    ? await api<{ members: Array<{ scheduling: { calendar_ids: string[] } | null }> }>(`/api/organizations/${encodeURIComponent(organization.id)}/members/scheduling`)
-    : null
+  const [calendarState, members] = await Promise.all([
+    calendar && (view === 'connection' || view === 'connection-action') ? readCalendarConnection(db, organization.id) : null,
+    calendar && view === 'connection' && connected ? memberCalendarCoverage(db, organization) : null,
+  ])
   const accountId = typeof query.account_id === 'string' && query.account_id ? query.account_id : null
   const social = integration === 'facebook' || integration === 'instagram' || integration === 'discord'
   const authorize = { id: 'authorize', label: connected ? 'Reconnect account' : 'Link account', authorization: integration, query: scope }
@@ -235,7 +236,7 @@ export async function dashboardConnections(
       ...(health?.problems.map(item => ({ id: `problem:${item.code}`, label: 'Needs attention', summary: item.message })) ?? []),
       ...(connection?.owner ? [{ id: 'account', label: 'Linked by', summary: connection.owner.name ?? connection.owner.email ?? undefined }] : []),
       ...(members ? [{ id: 'conflicts', label: 'Check for conflicts',
-        summary: `${members.members.filter(member => member.scheduling?.calendar_ids.length).length} of ${members.members.length} team members checking their calendar` }] : []),
+        summary: `${members.checking} of ${members.members} team members checking their calendar` }] : []),
       ...(calendarState?.calendar && connected ? [{ id: 'calendar', label: 'Add bookings to', summary: connection?.name ?? undefined,
         external_url: `https://calendar.google.com/calendar/u/0/r?cid=${encodeURIComponent(Buffer.from(calendarState.calendar.calendar_id).toString('base64').replace(/=+$/, ''))}` }] : []),
       ...(entitled && !calendarState?.cleanup_pending && (!connected || social || calendar || managedAds) ? [authorize] : []),

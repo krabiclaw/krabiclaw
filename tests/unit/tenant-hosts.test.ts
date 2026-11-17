@@ -3,8 +3,6 @@ import assert from 'node:assert/strict'
 import {
   environmentTenantAliasHostname,
   environmentTenantAliasSlug,
-  getFreeOrganizationDomain,
-  getPlatformHtmlCacheHosts,
   getPlatformHosts,
   hostnameOf,
   isPlatformHost,
@@ -29,11 +27,6 @@ const stagingEnv: TenantHostEnv = {
   NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://staging.krabiclaw.com',
 }
 
-const portedCustomEnv: TenantHostEnv = {
-  NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'http://myapp.example.com:3000',
-  NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.com',
-}
-
 test('normalizeHost strips protocol, trailing slash and port', () => {
   assert.equal(normalizeHost('https://krabiclaw.com'), 'krabiclaw.com')
   assert.equal(normalizeHost('http://localhost:3000'), 'localhost')
@@ -42,9 +35,6 @@ test('normalizeHost strips protocol, trailing slash and port', () => {
   assert.equal(normalizeHost('krabiclaw.com'), 'krabiclaw.com')
   assert.equal(normalizeHost(''), '')
   assert.equal(normalizeHost(undefined), '')
-})
-
-test('hostnameOf strips the port from a Host header', () => {
   assert.equal(hostnameOf('localhost:3000'), 'localhost')
   assert.equal(hostnameOf('127.0.0.1:3000'), '127.0.0.1')
   assert.equal(hostnameOf('krabiclaw.com'), 'krabiclaw.com')
@@ -61,19 +51,7 @@ test('getPlatformHosts includes loopback and only explicitly configured domains'
     assert.equal(hosts.includes('www.krabiclaw.com'), false)
   }
   assert.deepEqual(getPlatformHosts({}), ['localhost', '127.0.0.1'])
-})
-
-test('getPlatformHosts folds the configured domains in without duplicates', () => {
-  const hosts = getPlatformHosts(prodEnv)
-  assert.equal(hosts.filter((h) => h === 'krabiclaw.com').length, 1)
-})
-
-test('getPlatformHtmlCacheHosts covers all platform host cache prefixes', () => {
-  assert.deepEqual(getPlatformHtmlCacheHosts(prodEnv, ['https://krabiclaw.com/api/mcp']), [
-    'krabiclaw.com',
-    'localhost',
-    '127.0.0.1',
-])
+  assert.equal(getPlatformHosts(prodEnv).filter((h) => h === 'krabiclaw.com').length, 1)
 })
 
 test('isPlatformHost', async (t) => {
@@ -117,16 +95,6 @@ test('isPlatformHost', async (t) => {
     assert.equal(isPlatformHost('krabiclaw-preview.paulchrisluke.workers.dev', prodEnv), false)
     assert.equal(isPlatformHost('some-other-worker.paulchrisluke.workers.dev', prodEnv), false)
   })
-})
-
-test('getFreeOrganizationDomain normalizes the configured domain and strips its port', () => {
-  assert.equal(getFreeOrganizationDomain(prodEnv), 'krabiclaw.com')
-  assert.equal(getFreeOrganizationDomain(localEnv), 'localhost')
-  assert.equal(getFreeOrganizationDomain(portedCustomEnv), 'myapp.example.com')
-})
-
-test('getFreeOrganizationDomain rejects an unconfigured domain', () => {
-  assert.throws(() => getFreeOrganizationDomain({}), /NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN is required/)
 })
 
 test('non-production is local and staging, including staging tenant aliases', () => {

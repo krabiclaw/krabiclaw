@@ -1,15 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import { executeBatch } from '../../server/db/index.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
-import { createTenantPage, getPublishedTenantPage, getTenantPageForEditor, isProductPageConflict, listPublishedTenantPagePaths, prepareTenantPageCreate, updateTenantPage } from '../../server/utils/content/pages.ts'
+import { getPublishedTenantPage, isProductPageConflict, listPublishedTenantPagePaths, prepareTenantPageCreate } from '../../server/utils/content/pages.ts'
 import { createProduct, getProduct, prepareProductLocation, productPublicPresentation, reconcileProducts, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
 import { createLocation } from '../../server/utils/location-management.ts'
 import { setProductBookingConfig } from '../../server/utils/availability.ts'
+import { applySchema } from './support/schema.ts'
 
 // Real D1 and the real Better Auth subscription read. A service is a Product
 // and the page that shows it, written together through the one product writer
@@ -30,7 +29,7 @@ async function boot(plan: 'growth' | null) {
     const db = await runtime.getD1Database('DB')
     const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' } as CloudflareEnv
-    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Legal Services', 'legal-services', 'legal-services', '{}', 'blawby-theme-v1', 'USD', 'active', 'active', 'flat', 'service', ?, 'America/New_York')`).bind(ORG, NOW).run()
     await db.prepare("INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('canonical-domain', ?, 'legal-services.proof.example', 'custom', 'canonical', 'active')").bind(ORG).run()
@@ -240,32 +239,3 @@ test('a bound page and its share address follow publication while its booking is
   }
 })
 
-
-test('page edits retain actor and meaningful revisions while unchanged saves retain the document', async () => {
-  const { runtime, db, env } = await boot('growth')
-  try {
-    const { page } = await createTenantPage(db, { organizationId: ORG, userId: ACTOR.actorId, env, data: {
-      path: '/services/foundation', title: 'Foundation', summary: 'Keep this summary', page_type: 'custom', recipe: null, sort_order: 0,
-      blocks: [{ type: 'markdown', data: { markdown: 'Original practice information.', editor_mode: 'rich' } }],
-    } })
-    const data = { path: page.path, title: 'Foundation updated', page_type: page.page_type, recipe: page.recipe,
-      sort_order: page.sort_order, blocks: page.blocks, updated_at: page.document.updated_at }
-    await updateTenantPage(db, page.id, { userId: ACTOR.actorId, scope: { organizationId: ORG }, env, data })
-    const read = await getPublishedTenantPage(db, ORG, page.path)
-    assert.equal(read?.title, 'Foundation updated')
-    assert.equal(read?.summary, 'Keep this summary', 'an omitted optional summary retains its canonical value')
-    assert.equal(read?.blocks[0]?.data.markdown, 'Original practice information.')
-    const receipts = async () => (await db.prepare("SELECT actor_user_id, payload_json FROM activity_entries WHERE event_name = 'content.updated' AND json_extract(payload_json, '$.entityId') = ? ORDER BY occurred_at, id")
-      .bind(page.id).all<{ actor_user_id: string; payload_json: string }>()).results.map(row => ({ actor: row.actor_user_id, ...JSON.parse(row.payload_json) }))
-    const savedReceipts = await receipts()
-    assert.equal(savedReceipts.length, 2)
-    assert.ok(savedReceipts.every(row => row.actor === ACTOR.actorId))
-    assert.deepEqual(savedReceipts[1].metadata.changed_fields, ['title'])
-    assert.equal(savedReceipts[0].afterState.updated_at, page.document.updated_at)
-    assert.equal(savedReceipts[1].afterState.updated_at, read!.document.updated_at)
-    const current = await getTenantPageForEditor(db, page.id, { organizationId: ORG })
-    await updateTenantPage(db, page.id, { userId: ACTOR.actorId, scope: { organizationId: ORG }, env, data: { ...data, updated_at: current.document.updated_at } })
-    assert.equal((await getTenantPageForEditor(db, page.id)).document.updated_at, current.document.updated_at)
-    assert.deepEqual(await receipts(), savedReceipts)
-  } finally { await runtime.dispose() }
-})

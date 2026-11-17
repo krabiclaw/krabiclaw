@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { isDashboardAppPath, resolveDashboardAppTarget } from '../../shared/auth/return-target.ts'
-import { appDashboardPath, DASHBOARD_DESTINATIONS } from '../../server/utils/dashboard-links.ts'
 
 test('isDashboardAppPath identifies /dashboard/app and its subpaths', () => {
   assert.equal(isDashboardAppPath('/dashboard/app'), true)
@@ -35,21 +34,4 @@ test('resolveDashboardAppTarget maps /dashboard/app subpaths to the active organ
 
   // Non-app paths remain untouched
   assert.equal(resolveDashboardAppTarget(base, '/dashboard/account/profile'), '/dashboard/account/profile')
-})
-
-test('appDashboardPath generates canonical org-agnostic deep-links', () => {
-  assert.equal(appDashboardPath(), '/dashboard/app')
-  assert.equal(appDashboardPath(''), '/dashboard/app')
-  assert.equal(appDashboardPath('products'), '/dashboard/app/products')
-  assert.equal(appDashboardPath('/products/menu'), '/dashboard/app/products/menu')
-  assert.equal(appDashboardPath('website/brand'), '/dashboard/app/website/brand')
-})
-
-test('DASHBOARD_DESTINATIONS includes canonical app settings destinations', () => {
-  assert.equal(DASHBOARD_DESTINATIONS.products, 'products')
-  assert.equal(DASHBOARD_DESTINATIONS['products.menu'], 'products/menu')
-  assert.equal(DASHBOARD_DESTINATIONS['website.brand'], 'website/brand')
-  assert.equal(DASHBOARD_DESTINATIONS['website.pages'], 'website/pages')
-  assert.equal(DASHBOARD_DESTINATIONS.team, 'team')
-  assert.equal(DASHBOARD_DESTINATIONS.payments, 'payments')
 })

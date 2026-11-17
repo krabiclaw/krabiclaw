@@ -1,1 +1,0 @@
-ALTER TABLE `guest_thread_deliveries` ADD `non_delivery_confirmed` integer;

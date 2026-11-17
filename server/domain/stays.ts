@@ -36,7 +36,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { currencyFractionDigits, isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { completeChannelPush, configureStayCalendar, deliverStayNights, pendingChannelNightsQuery, pushAirbnbBookingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type ChannelPushCompletion, type ChannexMapping } from '~/server/integrations/channex/ari'
+import { activeAirbnbMapping, completeChannelPush, configureStayCalendar, deliverStayNights, pendingChannelNightsQuery, pushAirbnbBookingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type ChannelPushCompletion, type ChannexMapping } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { bookingContactQuery, bookingConversationQueries, bookingDay, isBookingDay, nightsBoundary, noStayRequestPaymentInFlightSql, requestInsertQueries, stayRequestPayBySql, stayRequestProgress, stayRequestRespondBySql, threadPayloadForGuest, validateGuestRequest } from '~/server/domain/requests'
 import { bookingPolicy, parseBookingPolicy, type BookingPolicy } from '~/server/utils/booking-policy-summary'
@@ -366,8 +366,8 @@ function addDays(day: string, count: number): string {
 }
 
 /** Today's date where the home is. */
-function homeToday(timezone: string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+function homeToday(timezone: string, now = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now)
 }
 
 function assertStayCheckoutHorizon(checkOut: string, today: string) {
@@ -402,8 +402,7 @@ function amount(value: unknown, field: string, allowNegative = false): number {
 }
 
 /** A nights booking at its home, with its conversation's guest contact: `s` is the booking. */
-const STAY_FROM = `bookings s JOIN organization org ON org.id = s.organization_id
-  JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
+const STAY_FROM = `bookings s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
   JOIN conversations r ON r.organization_id = s.organization_id AND r.booking_id = s.id AND r.kind = 'booking'`
 const STAY_COLUMNS = `s.id, s.product_id, s.booked_product_id,
   (SELECT COALESCE(home.internal_name, p.name) FROM product_stay_configs home
@@ -411,7 +410,7 @@ const STAY_COLUMNS = `s.id, s.product_id, s.booked_product_id,
     WHERE home.organization_id=s.organization_id AND home.product_id=s.booked_product_id) AS booked_home_name,
   s.location_id, s.timezone, s.channel, s.owner, s.status, s.overbooked, s.starts_at, s.ends_at,
   s.adults, s.children, s.infants, s.party_size, json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
-  s.user_id, s.total_minor, org.default_currency AS currency, s.private_notes, s.provider, s.external_booking_id, s.channel_booking_id, r.id AS conversation_id, s.cancelled_at, s.cancellation_reason,
+  s.user_id, s.total_minor, s.currency, s.private_notes, s.provider, s.external_booking_id, s.channel_booking_id, r.id AS conversation_id, s.cancelled_at, s.cancellation_reason,
   json_extract(s.policy_json, '$.cancellation') AS cancellation_policy, ${historicalNoShowAtSql('r')} AS no_show_at, s.answers, s.version, s.created_at, s.updated_at,
   ${stayRequestRespondBySql('s')} AS respond_by, ${stayRequestPayBySql('r.id')} AS pay_by`
 
@@ -1465,11 +1464,6 @@ async function homesNights(db: DbClient, organizationId: string, homes: readonly
   return homeNightsFrom(homes, await executeBatch(db, homeNightsQueries({ query: '?', params: [organizationId] }, { query: 'SELECT value FROM json_each(?)', params: [d1JsonStringSet(homes.map(home => home.product_id))] }, from, to, true), { operation: 'Read home nights' }), from, to) as StayNight[][]
 }
 
-/** Every night of [from, to) at each of these homes, as a guest reads them: no channel state. */
-async function homesOpenNights(db: DbClient, organizationId: string, homes: readonly StayHomeCore[], from: string, to: string): Promise<Array<Array<Omit<StayNight, 'channel'>>>> {
-  return homeNightsFrom(homes, await executeBatch(db, homeNightsQueries({ query: '?', params: [organizationId] }, { query: 'SELECT value FROM json_each(?)', params: [d1JsonStringSet(homes.map(home => home.product_id))] }, from, to, false), { operation: 'Read home nights' }), from, to)
-}
-
 /** The effective nights and claims at each home, with the channel status when requested. */
 function homeNightsFrom(homes: ReadonlyArray<Pick<StayHomeCore, 'product_id' | 'min_nights' | 'base_price_minor' | 'calendar_rules' | 'timezone'>>, results: Array<{ results: unknown[] }>, from: string, to: string): Array<Array<Omit<StayNight, 'channel'> & Partial<Pick<StayNight, 'channel'>>>> {
   const [overrides, claims = [], overbooked = [], pushes] = results.map(result => result.results) as [
@@ -1642,7 +1636,7 @@ export async function requireAirbnbAcceptable(db: DbClient, organizationId: stri
   if (!product.stay || !sections) return
   const settings = airbnbListingSettings(product.stay, product.details, sections)
   if (!('refusal' in settings)) return
-  const syncing = await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = 1", [organizationId, productId])
+  const syncing = await activeAirbnbMapping(db, organizationId, productId)
   if (syncing) fail(422, 'AIRBNB_UNSUPPORTED_VALUE', settings.refusal, settings.field)
 }
 /** House rules Airbnb takes as guest controls, by product detail. */
@@ -1738,9 +1732,11 @@ export async function pushStayHomeChannel(db: DbClient, env: ChannexEnv & GuestI
   try {
     const home = await readStayHome(db, access, product.id)
     if (home.channel?.status !== 'connected') return null
-    if (changes.settings?.booking || changes.settings?.cancellation) {
+    const airbnb = changes.settings?.booking || changes.settings?.cancellation
+      ? await activeAirbnbMapping(db, access.organizationId, product.id) : null
+    if (airbnb && changes.settings) {
       const settings = airbnbListingSettings(home, (await getProduct(db, access.organizationId, product.id)).details, changes.settings)
-      const pushed: ChannelPush | null = 'refusal' in settings ? { state: 'needs_review', detail: settings.refusal } : await pushAirbnbBookingSettings(db, env, access.organizationId, product.id, settings.booking)
+      const pushed: ChannelPush | null = 'refusal' in settings ? { state: 'needs_review', detail: settings.refusal } : await pushAirbnbBookingSettings(env, airbnb, settings.booking)
       if (pushed?.state === 'needs_review' || !changes.nights) return pushed
     }
     if (!changes.nights) return null
@@ -3040,13 +3036,29 @@ function publicNight(night: Omit<StayNight, 'channel'>, today: string, lastDepar
 
 /** The bookable nights of [from, to), plus `to` so the guest can select that departure. No claims are shown. */
 export async function readPublicStayCalendar(db: DbClient, organizationId: string, productId: string, input: { from: unknown; to: unknown }): Promise<PublicStayCalendar> {
-  const home = await readPublicStayHome(db, organizationId, productId)
-  const { from, to } = range(input)
-  const today = homeToday(home.timezone)
+  const now = new Date()
+  const utcToday = now.toISOString().slice(0, 10)
+  // Read the requested nights inside every possible home-local horizon. Once the
+  // home supplies its time zone, trim the result to that home's exact horizon.
+  const earliest = addDays(utcToday, -1)
+  const latest = addDays(utcToday, STAY_CALENDAR_DAYS + 1)
+  const from = isStayDate(input.from) ? input.from : null
+  const to = isStayDate(input.to) ? input.to : null
+  const start = from && from > earliest ? from : earliest
+  const departure = to && to < latest ? to : latest
+  const queries = from && to && from < to && start <= departure
+    ? homeNightsQueries({ query: '?', params: [organizationId] }, { query: '?', params: [productId] }, start, addDays(departure, 1), false)
+    : []
+  const [rows, prices, ...nightRows] = await executeBatch(db, [
+    ...publicStayHomeQueries(organizationId, productId), ...queries,
+  ], { operation: 'Read public stay calendar' })
+  const home = publicStayHomeFrom(rows!, prices!)
+  const requested = range(input)
+  const today = homeToday(home.timezone, now)
   const lastDeparture = addDays(today, STAY_CALENDAR_DAYS)
-  const start = from < today ? today : from
-  const departure = to > lastDeparture ? lastDeparture : to
-  const nights = start > departure ? [] : (await homesOpenNights(db, organizationId, [home], start, addDays(departure, 1)))[0]!
+  const firstNight = requested.from < today ? today : requested.from
+  const lastNight = requested.to > lastDeparture ? lastDeparture : requested.to
+  const nights = firstNight > lastNight ? [] : homeNightsFrom([home], nightRows, firstNight, addDays(lastNight, 1))[0]!
   return {
     home: { currency: home.currency, timezone: home.timezone, today, check_in_time: home.check_in_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, base_price_minor: home.base_price_minor },
     nights: nights.map(night => publicNight(night, today, lastDeparture)),
@@ -3481,8 +3493,8 @@ export async function readCheckoutStay(db: DbClient, organizationId: string, sta
 export async function channelReservationAmounts(db: DbClient, organizationId: string, from: string, until: string) {
   // The arrival day is read in each home's clock; SQL narrows by instants a day wider either side.
   const reservations = await queryAll<{ channel: string; currency: string; total_minor: number; starts_at: string; timezone: string }>(db,
-    `SELECT b.channel, org.default_currency AS currency, b.total_minor, b.starts_at, b.timezone
-       FROM bookings b JOIN organization org ON org.id = b.organization_id
+    `SELECT b.channel, b.currency, b.total_minor, b.starts_at, b.timezone
+       FROM bookings b
       WHERE b.organization_id = ? AND b.owner = 'channel' AND b.status = 'confirmed' AND b.product_session_id IS NULL AND b.starts_at >= ? AND b.starts_at < ?`,
     [organizationId, addDays(from, -1), `${addDays(until, 1)}T14:00:00.000Z`])
   const totals = new Map<string, { channel: string; currency: string; amount: number; count: number }>()

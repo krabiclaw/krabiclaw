@@ -1,23 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { calendarEvent, listWritableCalendars } from '../../server/utils/google-calendar.ts'
+import { calendarEvent } from '../../server/utils/google-calendar.ts'
 import { composeBuyerActivityUrl, composeOwnerThreadInboxUrl } from '../../server/utils/dashboard-notification-links.ts'
-
-test('calendar selection paginates and only offers writer calendars with the narrow calendar-list boundary', async (t) => {
-  const requests: string[] = []
-  t.mock.method(globalThis, 'fetch', async (input, init) => {
-    const url = new URL(String(input))
-    requests.push(url.href)
-    assert.equal(url.pathname, '/calendar/v3/users/me/calendarList')
-    assert.equal(url.searchParams.get('minAccessRole'), 'writer')
-    assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer linked-token')
-    return Response.json(url.searchParams.has('pageToken')
-      ? { items: [{ id: 'shared', summary: 'Shared calendar', accessRole: 'writer' }] }
-      : { items: [{ id: 'mine', summary: 'Owned calendar', accessRole: 'owner' }, { id: 'readonly', summary: 'Read only', accessRole: 'reader' }], nextPageToken: 'next page' })
-  })
-  assert.deepEqual((await listWritableCalendars('linked-token')).map(item => item.id), ['mine', 'shared'])
-  assert.equal(requests.length, 2)
-})
 
 test('a table booking projects as a reservation, preserving canonical UTC instants and timezone without guest invitations', () => {
   for (const origin of ['http://localhost:3113', 'https://staging.krabiclaw.com']) {

@@ -1446,13 +1446,14 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 // activated, and only then is the mapping enabled. import_property holds the listing details the host approved
 // (what the Channex property, room type and rate plan are created from), and
 // import_calendar the Airbnb calendar the inventory stage writes and verifies;
-// both are cleared when the import completes. Deleting the home deletes the mapping.
+// both are cleared when the import completes. Hosted channels have no Airbnb listing or channel ID.
+// Deleting the home deletes the mapping.
 export const product_channel_mappings = sqliteTable("product_channel_mappings", {
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text().notNull(),
 	provider: text().$type<'channex'>().notNull(),
-	listing_id: text().notNull(),
-	channel_id: text().notNull(),
+	listing_id: text(),
+	channel_id: text(),
 	property_id: text(),
 	room_type_id: text(),
 	rate_plan_id: text(),
@@ -1478,11 +1479,12 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 	index("product_channel_mappings_org_idx").on(table.organization_id),
 	check("product_channel_mappings_provider_check", sql`provider = 'channex'`),
 	check("product_channel_mappings_stage_check", sql`import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'content', 'draft', 'mapping', 'activate', 'reservations', 'messages', 'complete')`),
+	check("product_channel_mappings_airbnb_ids_check", sql`(listing_id IS NULL) = (channel_id IS NULL) AND (listing_id IS NOT NULL OR import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'complete'))`),
 	check("product_channel_mappings_ids_check", sql`(import_stage = 'property' OR property_id IS NOT NULL) AND (import_stage IN ('property', 'room') OR room_type_id IS NOT NULL) AND (import_stage IN ('property', 'room', 'rate') OR rate_plan_id IS NOT NULL)`),
 	check("product_channel_mappings_calendar_check", sql`import_calendar IS NULL OR (json_valid(import_calendar) AND json_type(import_calendar) = 'array')`),
 	check("product_channel_mappings_property_json_check", sql`import_property IS NULL OR (json_valid(import_property) AND json_type(import_property) = 'object')`),
 	check("product_channel_mappings_content_json_check", sql`import_content IS NULL OR (json_valid(import_content) AND json_type(import_content) = 'object')`),
-	check("product_channel_mappings_enabled_check", sql`enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'messages', 'complete'))`),
+	check("product_channel_mappings_enabled_check", sql`enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('draft', 'mapping', 'activate', 'reservations', 'messages', 'complete'))`),
 	check("product_channel_mappings_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
 
@@ -1640,12 +1642,11 @@ export const organization_integrations = sqliteTable("organization_integrations"
 // An organization's Airbnb account, connected through Channex. It is one row
 // per organization with its own lifecycle: a Channex group and a temporary
 // setup property, a single-use sign-in bound to the person who started it,
-// then the connected channel. operation_id is the lock one setup step holds;
-// pending_step names a provider write that was sent and may have applied, so
-// a failure there is held for review instead of being repeated.
+// then the connected channel.
 export const channex_connections = sqliteTable("channex_connections", {
 	organization_id: text().primaryKey().references(() => organization.id, { onDelete: "cascade" }),
-	status: text().$type<'not_connected' | 'authorizing' | 'connected' | 'disconnecting' | 'needs_review'>().notNull(),
+	status: text().$type<'not_connected' | 'authorizing' | 'connected' | 'disconnecting'>().notNull(),
+	// Unread since #1916; dropped, with needs_review below, by the release after the Worker that stopped using them is live.
 	operation_id: text(),
 	pending_step: text(),
 	group_id: text(),
@@ -1657,6 +1658,8 @@ export const channex_connections = sqliteTable("channex_connections", {
 	authorization_expires_at: text(),
 	channel_id: text(),
 	connected_at: text(),
+	// Why the last disconnect failed, shown with the connection; cleared when Disconnect is asked again.
+	disconnect_error: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
@@ -2935,28 +2938,6 @@ export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  // and check-out dates at the home.
  check("payment_holds_subject_check", sql`(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL) OR (product_id IS NOT NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND date(starts_at, '+0 days') IS starts_at AND date(ends_at, '+0 days') IS ends_at AND ends_at > starts_at)`),
 ]);
-
-export const payment_orders = sqliteTable("payment_orders", {
- id: text().primaryKey(),
- organization_id: text().notNull(),
- buyer_user_id: text().references(() => user.id, { onDelete: "set null" }),
- payment_id: text().notNull().unique().references(() => payments.id, { onDelete: "restrict" }),
- currency: text().notNull(),
- amount: integer().notNull(),
- created_at: text().notNull(),
-});
-export const payment_order_lines = sqliteTable("payment_order_lines", {
- id: text().primaryKey(),
- order_id: text().notNull().references(() => payment_orders.id, { onDelete: "restrict" }),
- product_id: text().notNull(),
- variant_id: text().notNull(),
- price_id: text().notNull(),
- title: text().notNull(),
- unit_amount: integer().notNull(),
- quantity: integer().notNull(),
- currency: text().notNull(),
- tax_behavior: text().notNull(),
-}, () => [check("payment_order_lines_amount_check", sql`unit_amount >= 0 AND quantity > 0`)]);
 
 export const payment_refunds = sqliteTable("payment_refunds", {
  id: text().primaryKey(),
