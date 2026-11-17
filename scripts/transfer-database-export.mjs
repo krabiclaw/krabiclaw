@@ -37,6 +37,7 @@ const DECLARED_ORGANIZATION_ROLES = new Set(Object.keys(organizationRoles))
 
 const MIGRATIONS_DIRECTORY = 'migrations'
 const V26_DIRECTORY = 'migrations-history/v26'
+const V27_DIRECTORY = 'migrations-history/v27'
 const v26Baseline = () => readFileSync(resolve(V26_DIRECTORY, '0000_baseline.sql'), 'utf8')
 const hash = value => createHash('sha256').update(value).digest('hex')
 const qi = value => `"${value.replaceAll('"', '""')}"`
@@ -123,6 +124,7 @@ const RETIRED_COLUMNS = {
   organization: ['integrations_json', 'feature_overrides'],
   business_locations: ['description_provenance', 'feature_overrides'],
   products: ['tags'],
+  bookings: ['currency'],
   product_booking_configs: ['online_timezone', 'calendar_group'],
   payment_checkout_holds: ['calendar_group'],
   payments: ['state'],
@@ -764,7 +766,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     assert(applied.size === ledger.length, 'Source migration ledger contains duplicate filenames')
     assert(ledger[0] === '0000_baseline.sql', 'Source migration ledger must start with 0000_baseline.sql')
     let recognized = false
-    for (const directory of [MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
+    for (const directory of [MIGRATIONS_DIRECTORY, V27_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
       const candidates = readdirSync(resolve(directory)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
       if (!ledger.every(name => candidates.includes(name))) continue
       const expected = new Database(':memory:')
@@ -798,6 +800,8 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       assert(digest(rows, targetColumns) === digest(stage.prepare(`SELECT * FROM ${qi(table)}`).all(), targetColumns), `${table}: copy differs`)
     }
     for (const name of sourceFiles.filter(name => !applied.has(name))) stage.exec(readFileSync(resolve(sourceDirectory, name), 'utf8'))
+    // A v27 source has already passed the legacy transformations below.
+    if (sourceDirectory === V27_DIRECTORY) sourceDirectory = MIGRATIONS_DIRECTORY
 
     const fromV7 = columns(stage, 'organization').includes('integrations_json')
     const integrations = fromV7 ? integrationRows(stage) : []
@@ -1185,8 +1189,14 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       if (approved) manifest.transforms.push({ name: 'owner_approved_saltleaf_through_minimum_removed', changes: approved })
     }
     if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
-      await consolidateV26(stage, baseSql, manifest)
-      for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
+      await consolidateV26(stage, readFileSync(resolve(V27_DIRECTORY, '0000_baseline.sql'), 'utf8'), manifest)
+      const v27Files = readdirSync(resolve(V27_DIRECTORY)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
+      for (const name of v27Files.slice(1)) stage.exec(readFileSync(resolve(V27_DIRECTORY, name), 'utf8'))
+    }
+    if (columns(stage, 'bookings').includes('currency')) {
+      const mismatches = stage.prepare(`SELECT COUNT(*) AS count FROM bookings b JOIN organization org ON org.id = b.organization_id
+        WHERE b.currency <> org.default_currency`).get().count
+      assert(mismatches === 0, `${mismatches} bookings use a different currency than their business; no rows were copied`)
     }
     const names = tableNames(stage)
     const count = (db, table) => db.prepare(`SELECT count(*) AS n FROM ${qi(table)}`).get().n

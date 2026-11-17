@@ -1950,10 +1950,10 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
     writes = await executeBatch(db, [
       {
         query: `INSERT INTO bookings (id, organization_id, user_id, product_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, adults, children, infants,
-                  status, answers, private_notes, policy_json, total_minor, currency, idempotency_key, version, channel, owner, channel_booking_id, received_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, 1, ?, 'app', ?, ?, ?, ?)`,
+                  status, answers, private_notes, policy_json, total_minor, idempotency_key, version, channel, owner, channel_booking_id, received_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, 1, ?, 'app', ?, ?, ?, ?)`,
         params: [id, access.organizationId, null, home.product_id, variants[0]!, home.location_id, window.starts_at, window.ends_at, home.timezone, partySize, fields.adults, fields.children, fields.infants,
-          JSON.stringify(answers), fields.private_notes, JSON.stringify(policy), fields.total_minor, home.currency, key, channel, channelBookingId, imported ? null : now, now, now],
+          JSON.stringify(answers), fields.private_notes, JSON.stringify(policy), fields.total_minor, key, channel, channelBookingId, imported ? null : now, now, now],
       },
       ...reconcileNightsQueries(access.organizationId, id, { updated_at: now, version: 1, product_id: home.product_id, ...window, check_in_date: fields.check_in_date, check_out_date: fields.check_out_date }),
       ...bookingConversationQueries({ organizationId: access.organizationId, bookingId: id, requestId: conversationId, locationId: home.location_id, userId: null, now,
@@ -2817,14 +2817,14 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     params: [organizationId, id, landing, organizationId, existing?.id ?? null, previous?.product_id ?? null, booking.provider_updated_at],
   }, {
     query: `INSERT INTO bookings (id, organization_id, user_id, product_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, adults, children, infants,
-              channel, owner, status, overbooked, policy_json, total_minor, currency, provider, external_booking_id, channel_booking_id, revision_id,
+              channel, owner, status, overbooked, policy_json, total_minor, provider, external_booking_id, channel_booking_id, revision_id,
               provider_updated_at, cancelled_at, received_at, version, created_at, updated_at, booked_product_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'channel', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'channel', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT (provider, external_booking_id) WHERE external_booking_id IS NOT NULL DO UPDATE SET
               product_id = excluded.product_id, product_variant_id = excluded.product_variant_id, location_id = excluded.location_id, timezone = excluded.timezone,
               starts_at = excluded.starts_at, ends_at = excluded.ends_at, channel = excluded.channel, status = excluded.status, overbooked = excluded.overbooked,
               party_size = excluded.party_size, adults = excluded.adults, children = excluded.children, infants = excluded.infants,
-              total_minor = excluded.total_minor, currency = excluded.currency, channel_booking_id = excluded.channel_booking_id,
+              total_minor = excluded.total_minor, channel_booking_id = excluded.channel_booking_id,
               revision_id = excluded.revision_id, provider_updated_at = excluded.provider_updated_at,
               cancelled_at = CASE WHEN excluded.status = 'cancelled' THEN COALESCE(bookings.cancelled_at, excluded.cancelled_at) ELSE NULL END,
               version = bookings.version + 1, updated_at = excluded.updated_at, booked_product_id = excluded.booked_product_id
@@ -2832,7 +2832,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
               AND (bookings.provider_updated_at IS NULL OR bookings.provider_updated_at < excluded.provider_updated_at)`,
     params: [id, organizationId, guestUserId, landing, home.variant_id, home.location_id, window.starts_at, window.ends_at, home.timezone,
       booking.adults + booking.children, booking.adults, booking.children, booking.infants, booking.channel, booking.cancelled ? 'cancelled' : 'confirmed', overbooked, policy,
-      booking.total_minor, booking.currency, booking.provider, booking.external_booking_id, booking.channel_booking_id, booking.revision_id,
+      booking.total_minor, booking.provider, booking.external_booking_id, booking.channel_booking_id, booking.revision_id,
       // A booking received as it happened starts the new-reservation messages; the import's history never does. An update keeps the first answer.
       booking.provider_updated_at, booking.cancelled ? now : null, booking.imported || booking.cancelled ? null : now, now, now, bookedProductId, existing?.id ?? null, previous?.product_id ?? null, previous?.version ?? null],
   },
@@ -3247,12 +3247,12 @@ export async function createStayRequest(db: DbClient, env: StayMutationEnv, inpu
   try {
     await executeBatch(db, [{
       query: `INSERT INTO bookings (id, organization_id, user_id, product_id, product_variant_id, location_id, starts_at, ends_at, timezone,
-                  party_size, adults, children, infants, status, answers, policy_json, total_minor, currency, idempotency_key, website_source, received_at, created_at, updated_at)
-              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${publicNights.query}
+                  party_size, adults, children, infants, status, answers, policy_json, total_minor, idempotency_key, website_source, received_at, created_at, updated_at)
+              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ? WHERE ${publicNights.query}
               ON CONFLICT(organization_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,
       params: [bookingId, organizationId, buyerUserId, home.product_id, home.variant_id, home.location_id, window.starts_at, window.ends_at, quote.timezone,
         quote.adults + quote.children, quote.adults, quote.children, quote.infants, JSON.stringify(guest.answers ?? []), JSON.stringify({ ...policy, stay_request: stayRequest }),
-        quote.total_minor, quote.currency, key, input.websiteSource, now, now, now, ...publicNights.params!],
+        quote.total_minor, key, input.websiteSource, now, now, now, ...publicNights.params!],
     }, assertBookingBatchWrite({ query: 'EXISTS (SELECT 1 FROM bookings WHERE organization_id=? AND id=?)', params: [organizationId, bookingId] }),
     ...reconcileNightsQueries(organizationId, bookingId, { ...window, updated_at: now, version: 1, product_id: home.product_id,
       check_in_date: quote.check_in_date, check_out_date: quote.check_out_date }),
@@ -3402,11 +3402,11 @@ export function stayFromCheckoutQueries(input: { organizationId: string; stayId:
   return [
     {
       query: `INSERT INTO bookings (id, organization_id, user_id, product_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, adults, children, infants,
-                status, answers, policy_json, total_minor, currency, idempotency_key, version, channel, owner, website_source, received_at, created_at, updated_at)
-              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, 1, 'direct', 'app', ?, ?, ?, ?
+                status, answers, policy_json, total_minor, idempotency_key, version, channel, owner, website_source, received_at, created_at, updated_at)
+              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, 1, 'direct', 'app', ?, ?, ?, ?
                WHERE EXISTS (SELECT 1 FROM payments WHERE id = ? AND organization_id = ? AND refunded_amount = 0) AND (${input.availability.query})`,
       params: [input.stayId, input.organizationId, input.buyerUserId, quote.product_id, input.home.variant_id, input.home.location_id, window.starts_at, window.ends_at, input.home.timezone,
-        quote.adults + quote.children, quote.adults, quote.children, quote.infants, JSON.stringify(guest.answers ?? []), input.policy, quote.total_minor, quote.currency, `checkout:${input.paymentId}`,
+        quote.adults + quote.children, quote.adults, quote.children, quote.infants, JSON.stringify(guest.answers ?? []), input.policy, quote.total_minor, `checkout:${input.paymentId}`,
         input.websiteSource, input.now, input.now, input.now, input.paymentId, input.organizationId, ...(input.availability.params ?? [])],
       event: checkoutStayChangedEvent({ organizationId: input.organizationId, stayId: input.stayId, productId: quote.product_id,
         locationId: input.home.location_id, conversationId: requestId, version: 1, range: [quote.check_in_date, quote.check_out_date], endsAt: window.ends_at }),

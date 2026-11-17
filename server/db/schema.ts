@@ -1058,7 +1058,6 @@ export const bookings = sqliteTable("bookings", {
 	// BookingPolicy), not the product's mutable settings.
 	policy_json: text().notNull(),
 	total_minor: integer(),
-	currency: text(),
 	idempotency_key: text(),
 	version: integer().default(1).notNull(),
 	channel: text().$type<'airbnb' | 'vrbo' | 'booking_com' | 'direct'>().default("direct").notNull(),
@@ -1093,7 +1092,7 @@ export const bookings = sqliteTable("bookings", {
 		AND timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
 	check("bookings_party_size_check", sql`party_size > 0 AND party_size_is_minimum IN (0, 1)
 		AND ((adults IS NULL AND children IS NULL AND infants IS NULL) OR (adults >= 1 AND children >= 0 AND infants >= 0 AND adults + children = party_size))`),
-	check("bookings_money_check", sql`(total_minor IS NULL) = (currency IS NULL) AND (total_minor IS NULL OR (total_minor >= 0 AND length(currency) = 3 AND currency = upper(currency))) AND (product_session_id IS NOT NULL OR total_minor IS NOT NULL)`),
+	check("bookings_money_check", sql`(total_minor IS NULL OR total_minor >= 0) AND (product_session_id IS NOT NULL OR total_minor IS NOT NULL)`),
 	check("bookings_channel_check", sql`channel IN ('airbnb', 'vrbo', 'booking_com', 'direct') AND (provider IS NULL OR provider = 'channex')`),
 	check("bookings_owner_check", sql`owner IN ('app', 'channel') AND (owner = 'channel') = (provider IS NOT NULL AND external_booking_id IS NOT NULL)`),
 	check("bookings_overbooked_check", sql`overbooked IN (0, 1) AND (overbooked = 0 OR owner = 'channel')`),

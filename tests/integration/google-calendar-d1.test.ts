@@ -379,8 +379,8 @@ test('experience and dining Calendar management links follow canonical buyer own
     await db.prepare("INSERT INTO product_stay_configs(product_id,organization_id,location_id,internal_name,created_by,updated_by) VALUES('home','org','dining','Garden house','actor','actor')").run()
     await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,default_capacity,min_nights,check_in_time,held_online,scheduling_mode,confirmation_mode,created_by,updated_by) VALUES('home','org','nights',4,1,'15:00',0,'business','instant','actor','actor')").run()
     await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('home-variant','org','home','Night','actor','actor')").run()
-    await db.prepare(`INSERT INTO bookings(id,organization_id,user_id,product_id,product_variant_id,location_id,starts_at,ends_at,timezone,party_size,adults,children,infants,status,policy_json,total_minor,currency)
-      VALUES('stay','org','buyer','home','home-variant','dining','2099-11-05T15:00:00.000Z','2099-11-08','UTC',2,2,0,0,'confirmed',?,90000,'USD')`).bind(OPEN_TERMS_JSON).run()
+    await db.prepare(`INSERT INTO bookings(id,organization_id,user_id,product_id,product_variant_id,location_id,starts_at,ends_at,timezone,party_size,adults,children,infants,status,policy_json,total_minor)
+      VALUES('stay','org','buyer','home','home-variant','dining','2099-11-05T15:00:00.000Z','2099-11-08','UTC',2,2,0,0,'confirmed',?,90000)`).bind(OPEN_TERMS_JSON).run()
     const env={DB:db,NUXT_PUBLIC_PLATFORM_DOMAIN:'http://localhost:3113'} as CloudflareEnv
     await nameConversationBooking(db, 'stay-thread', 'stay')
     await nameConversationBooking(db, 'experience-thread', (await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env,organizationId:'org',productId:'experience',sessionId:'session',productVariantId:'variant',partySize:1,userId:'buyer'})).bookingId)

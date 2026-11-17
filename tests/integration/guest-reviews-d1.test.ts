@@ -131,8 +131,8 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     await thread('cottage', 'g-stay', 'room', 'Guest cottage')
     // A stay is a booking of the home's nights: its check-in and checkout at the home's times in the home's zone.
     const checkIn = localDateAt(new Date(Date.now() - 5 * 24 * HOUR), 'Asia/Bangkok')
-    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, adults, children, infants, channel, owner, status, user_id, total_minor, currency, policy_json)
-      VALUES ('cottage-record', 'org', 'home', 'home-v', 'room', ?, ?, 'Asia/Bangkok', 2, 2, 0, 0, 'direct', 'app', 'confirmed', 'g-stay', 30000, 'USD', '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}')`)
+    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, adults, children, infants, channel, owner, status, user_id, total_minor, policy_json)
+      VALUES ('cottage-record', 'org', 'home', 'home-v', 'room', ?, ?, 'Asia/Bangkok', 2, 2, 0, 0, 'direct', 'app', 'confirmed', 'g-stay', 30000, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}')`)
       .bind(localDateTimeToInstant(checkIn, '15:00', 'Asia/Bangkok').toISOString(), localDateTimeToInstant(checkout, '11:00', 'Asia/Bangkok').toISOString()).run()
     await nameConversationBooking(db, T.cottage!, 'cottage-record')
 

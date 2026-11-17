@@ -142,8 +142,8 @@ test('unread is a message from someone else after your read position, the same c
         `INSERT INTO product_sessions (id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)
           SELECT '${id}-session',organization_id,'${id}',location_id,timezone,starts_at,ends_at,capacity,created_by,updated_by FROM product_sessions WHERE id = 'session'`,
       ]),
-      `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,location_id,starts_at,ends_at,timezone,user_id,party_size,policy_json,status,total_minor,currency)
-        SELECT '${id}-booking',organization_id,'${id}',${kind === 'stay' ? 'NULL' : `'${id}-session'`},'${id}-variant',location_id,starts_at,ends_at,timezone,user_id,party_size,policy_json,status,0,'USD' FROM bookings WHERE id = 'booking'`,
+      `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,location_id,starts_at,ends_at,timezone,user_id,party_size,policy_json,status,total_minor)
+        SELECT '${id}-booking',organization_id,'${id}',${kind === 'stay' ? 'NULL' : `'${id}-session'`},'${id}-variant',location_id,starts_at,ends_at,timezone,user_id,party_size,policy_json,status,0 FROM bookings WHERE id = 'booking'`,
     ].map(statement => db.prepare(statement))))
     for (const [id] of assignedProducts) {
       await db.batch(requestInsertQueries({ id: `${id}-conversation`, kind: 'booking', organization_id: ORG, location_id: 'loc', booking_id: `${id}-booking`, user_id: GUEST,

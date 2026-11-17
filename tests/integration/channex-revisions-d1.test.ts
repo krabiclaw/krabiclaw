@@ -145,8 +145,8 @@ test('a reservation re-imported under a new Channex booking id updates its stay 
     const other = await applyBookingRevision(db, env, 'rev-other') as { booking_id: string }
     assert.notEqual(other.booking_id, original.booking_id)
     // The database holds one stay per channel reservation, whatever writes it.
-    await assert.rejects(db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_variant_id, starts_at, ends_at, timezone, party_size, adults, children, infants, policy_json, total_minor, currency, channel, owner, status, provider, external_booking_id, channel_booking_id)
-      SELECT 'duplicate', organization_id, product_id, id, '2027-03-01', '2027-03-02', 'America/Denver', 1, 1, 0, 0, '{}', 100, 'USD', 'airbnb', 'channel', 'confirmed', 'channex', 'bk-duplicate', 'HMREIMPORT'
+    await assert.rejects(db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_variant_id, starts_at, ends_at, timezone, party_size, adults, children, infants, policy_json, total_minor, channel, owner, status, provider, external_booking_id, channel_booking_id)
+      SELECT 'duplicate', organization_id, product_id, id, '2027-03-01', '2027-03-02', 'America/Denver', 1, 1, 0, 0, '{}', 100, 'airbnb', 'channel', 'confirmed', 'channex', 'bk-duplicate', 'HMREIMPORT'
         FROM product_variants WHERE organization_id = ? AND product_id = ?`).bind(ORG, productId).run(), /UNIQUE constraint failed: bookings\.organization_id, bookings\.channel, bookings\.channel_booking_id/)
     assert.deepEqual(channex.acked, ['rev-staging', 'rev-production', 'rev-staging-late', 'rev-stale', 'rev-production-cancel', 'rev-other'])
   } finally {
@@ -166,8 +166,8 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
     const landed = await applyBookingRevision(db, env, 'rev-1')
     assert.equal(landed.status, 'acknowledged')
     const stayId = (landed as { booking_id: string }).booking_id
-    const stored = await db.prepare(`SELECT b.channel, b.owner, b.status, b.overbooked, b.total_minor, b.currency, json_extract(r.payload_json, '$.guest.name') AS guest_name, b.adults, b.children, b.version, b.provider_updated_at
-      FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking' WHERE b.id = ?`).bind(stayId).first()
+    const stored = await db.prepare(`SELECT b.channel, b.owner, b.status, b.overbooked, b.total_minor, org.default_currency AS currency, json_extract(r.payload_json, '$.guest.name') AS guest_name, b.adults, b.children, b.version, b.provider_updated_at
+      FROM bookings b JOIN organization org ON org.id = b.organization_id JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking' WHERE b.id = ?`).bind(stayId).first()
     assert.deepEqual(stored, { channel: 'airbnb', owner: 'channel', status: 'confirmed', overbooked: 0, total_minor: 45_050, currency: 'USD', guest_name: 'Lee Park', adults: 2, children: 1, version: 1, provider_updated_at: '2026-10-15T01:00:00Z' })
     assert.deepEqual(await nights(db, stayId), ['2027-01-10', '2027-01-11', '2027-01-12'])
     assert.deepEqual(channex.acked, ['rev-1'])

@@ -11,7 +11,6 @@ test('the media transfer audit retries failed DNS lookups without accepting miss
   const database = new Database(':memory:')
   try {
     database.exec(readFileSync('migrations/0000_baseline.sql', 'utf8'))
-    database.exec(readFileSync('migrations/0001_session_prep_tasks.sql', 'utf8'))
     database.exec("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('tenant', 'Test tenant', 'tenant', 'USD', 'America/New_York')")
     const asset = database.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url) VALUES (?, 'tenant', 'image', 'cloudflare_r2', 'upload', ?)")
     for (const name of ['reachable', 'unresolved', 'missing']) asset.run(name, `https://media.example.test/${name}`)
@@ -104,10 +103,10 @@ test('the migrations require and preserve the original no-show mark in the booki
   database.pragma('foreign_keys = ON')
   try {
     const migration = '0012_deadline_indexes'
-    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+    const journal = JSON.parse(readFileSync('migrations-history/v27/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
     const migrationIndex = journal.entries.findIndex(entry => entry.tag === migration)
     for (const entry of journal.entries.slice(0, migrationIndex)) {
-      database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
+      database.exec(readFileSync(`migrations-history/v27/${entry.tag}.sql`, 'utf8'))
     }
     const stamped = '2026-11-01T00:00:00.000Z'
     database.exec(`
@@ -126,7 +125,7 @@ test('the migrations require and preserve the original no-show mark in the booki
       INSERT INTO conversations (id, kind, organization_id, booking_id, payload_json, last_message_at)
         VALUES ('visit', 'booking', 'studio', 'reservation', '{"guest":{"name":"Guest","email":null,"phone":null}}', '${stamped}');
     `)
-    const verify = database.transaction(() => database.exec(readFileSync(`migrations/${migration}.sql`, 'utf8')))
+    const verify = database.transaction(() => database.exec(readFileSync(`migrations-history/v27/${migration}.sql`, 'utf8')))
     assert.throws(verify, /historical_no_show_transcript_check/)
     database.prepare(`INSERT INTO messages (id, organization_id, conversation_id, author_kind, author_user_id, sequence, event_name, dedupe_key, occurred_at)
       VALUES ('mark', 'studio', 'visit', 'krabiclaw', 'host', 1, 'booking.no_show', 'no-show', ?)`).run('2026-11-01T00:00:01.000Z')
@@ -137,7 +136,7 @@ test('the migrations require and preserve the original no-show mark in the booki
     database.prepare('UPDATE bookings SET no_show_at = ? WHERE id = ?').run(stamped, 'reservation')
     verify()
     for (const entry of journal.entries.slice(migrationIndex + 1)) {
-      database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
+      database.exec(readFileSync(`migrations-history/v27/${entry.tag}.sql`, 'utf8'))
     }
     assert.deepEqual(database.prepare(`SELECT c.booking_id, m.event_name, m.occurred_at
       FROM messages m JOIN conversations c ON c.organization_id = m.organization_id AND c.id = m.conversation_id
@@ -154,7 +153,7 @@ test('session prep migration keeps the completed task and delivery history for b
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
   try {
-    database.exec(readFileSync('migrations/0000_baseline.sql', 'utf8'))
+    database.exec(readFileSync('migrations-history/v27/0000_baseline.sql', 'utf8'))
     database.exec(`
       INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('studio', 'Clayhouse', 'clayhouse', 'THB', 'Asia/Bangkok');
       INSERT INTO user (id, name, email) VALUES ('host', 'Class host', 'host@example.test');
@@ -183,7 +182,7 @@ test('session prep migration keeps the completed task and delivery history for b
       .run(JSON.stringify({ version: 3, source: { details }, preview: { media: [{ slot: 'logo', asset }] } }))
     database.prepare("INSERT INTO stripe_connected_accounts (id, organization_id, livemode, requirements_json) VALUES ('stripe', 'studio', 0, ?)")
       .run(JSON.stringify([{ awaitingActionFrom: 'user', deadlineStatus: 'currently_due', description: 'Verify address', errors: ['Missing address'] }]))
-    database.exec(readFileSync('migrations/0001_session_prep_tasks.sql', 'utf8'))
+    database.exec(readFileSync('migrations-history/v27/0001_session_prep_tasks.sql', 'utf8'))
     const draft = JSON.parse(database.prepare('SELECT payload_json FROM onboarding_drafts').pluck().get() as string)
     assert.deepEqual(draft.source.details, { name: 'Clayhouse', street_address: '88 Moo 2', address_line_2: null, postal_code: '81180', website_url: null, opening_hours: { periods: [] }, special_hours: null, source_locale: 'en' })
     assert.deepEqual(draft.preview.media, [{ slot: 'logo', asset: { asset_id: 'media-1', cloudflare_image_id: 'cf-1', public_url: 'https://example.test/media', thumbnail_url: null, mime_type: 'image/png', file_name: 'logo.png', file_size: 1234 } }])
@@ -206,7 +205,7 @@ test('the conversation migration grants only known guests, owners, and team seat
   database.pragma('foreign_keys = ON')
   try {
     for (const tag of ['0000_baseline', '0001_session_prep_tasks', '0002_use_better_auth_organization_invitations', '0003_stay_home_setup_drafts']) {
-      database.exec(readFileSync(`migrations/${tag}.sql`, 'utf8'))
+      database.exec(readFileSync(`migrations-history/v27/${tag}.sql`, 'utf8'))
     }
     database.exec(`
       INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org', 'Studio', 'studio', 'USD', 'UTC');
@@ -224,7 +223,7 @@ test('the conversation migration grants only known guests, owners, and team seat
         ('team', 'org', 'staff', NULL, NULL), ('team', 'org', 'former', NULL, NULL);
       INSERT INTO stay_home_setup_drafts (organization_id, member_id, payload_json, revision) VALUES ('org', 'om', '{}', 'saved');
     `)
-    database.exec(readFileSync('migrations/0004_conversation_participants.sql', 'utf8'))
+    database.exec(readFileSync('migrations-history/v27/0004_conversation_participants.sql', 'utf8'))
     // The old Worker can still persist a read position during deployment.
     database.exec("INSERT INTO conversation_participants (conversation_id, organization_id, user_id, last_read_message_id) VALUES ('thread', 'org', 'old-write', 'm')")
     assert.deepEqual(database.prepare(`SELECT conversation_id, user_id, role, last_read_message_id, archived_at
@@ -1304,7 +1303,7 @@ test('a v20 export transfers into the current baseline unchanged, which admits B
     try {
       target.pragma('foreign_keys = ON')
       assert.deepEqual(target.pragma('foreign_key_check'), [])
-      assert.deepEqual(target.prepare("SELECT id, channel, external_booking_id, starts_at, ends_at, adults, total_minor, currency FROM bookings").all(),
+      assert.deepEqual(target.prepare("SELECT b.id, b.channel, b.external_booking_id, b.starts_at, b.ends_at, b.adults, b.total_minor, org.default_currency AS currency FROM bookings b JOIN organization org ON org.id = b.organization_id").all(),
         [{ id: 'airbnb-stay', channel: 'airbnb', external_booking_id: 'booking-airbnb-stay', starts_at: '2026-11-01T23:00:00.000Z', ends_at: '2026-11-03T17:00:00.000Z', adults: 2, total_minor: 30000, currency: 'USD' }])
       assert.deepEqual(target.prepare("SELECT booking_id, json_extract(payload_json,'$.participant.title') AS title, json_type(payload_json,'$.guest.name') AS guest_type FROM conversations").all(),
         [{ booking_id: 'airbnb-stay', title: 'Airbnb reservation booking-airbnb-stay', guest_type: 'null' }])
@@ -1661,7 +1660,7 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
         assert.deepEqual(target.prepare(`SELECT ${recordedColumns(table)} FROM ${table}${recordedRows} ORDER BY 1,2`).all(), recorded[table], `${table} keeps every recorded value`)
       }
       assert.deepEqual(target.prepare("SELECT u.name, u.isAnonymous FROM bookings b JOIN user u ON u.id = b.user_id WHERE b.id = 'booked-stay'").get(), { name: 'Recorded guest', isAnonymous: 1 })
-      assert.deepEqual(target.prepare("SELECT id, total_minor, currency, starts_at, ends_at FROM bookings").all(), [
+      assert.deepEqual(target.prepare("SELECT b.id, b.total_minor, org.default_currency AS currency, b.starts_at, b.ends_at FROM bookings b JOIN organization org ON org.id = b.organization_id").all(), [
         { id: 'booked-stay', total_minor: 30000, currency: 'USD', starts_at: '2026-11-10T02:00:00.000Z', ends_at: '2026-11-11T20:00:00.000Z' },
       ])
       assert.deepEqual(target.prepare('SELECT date, booking_id FROM stay_nights ORDER BY date').all(), [
