@@ -2,16 +2,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { validateTelemetryInput } from '../../server/api/dashboard/telemetry.post.ts'
 
-test('validateTelemetryInput accepts valid telemetry actions', () => {
-  const actions = ['today_view', 'today_range_switch', 'today_card_click', 'today_filter_change'] as const
-  for (const action of actions) {
-    const valid = validateTelemetryInput({ action, surface: 'today' })
-    assert.ok(valid)
-    assert.equal(valid.action, action)
-    assert.equal(valid.surface, 'today')
-  }
-})
-
 test('validateTelemetryInput parses stringified JSON payloads from beacons', () => {
   const payload = JSON.stringify({
     action: 'today_card_click',

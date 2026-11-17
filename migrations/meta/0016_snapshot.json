@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b126adff-40d2-4238-9ce3-97767f357822",
+  "id": "18833708-e414-4c6a-9c30-5bf52426619a",
   "prevId": "04486f2a-9f16-4530-899e-437e56d4937e",
   "tables": {
     "account": {
@@ -2504,6 +2504,13 @@
         },
         "connected_at": {
           "name": "connected_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "disconnect_error": {
+          "name": "disconnect_error",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -11292,14 +11299,14 @@
           "name": "listing_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "channel_id": {
           "name": "channel_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "property_id": {
@@ -11476,10 +11483,6 @@
           "name": "product_channel_mappings_stage_check",
           "value": "import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'content', 'draft', 'mapping', 'activate', 'reservations', 'messages', 'complete')"
         },
-        "product_channel_mappings_airbnb_ids_check": {
-          "name": "product_channel_mappings_airbnb_ids_check",
-          "value": "(listing_id IS NULL) = (channel_id IS NULL) AND (listing_id IS NOT NULL OR import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'complete'))"
-        },
         "product_channel_mappings_ids_check": {
           "name": "product_channel_mappings_ids_check",
           "value": "(import_stage = 'property' OR property_id IS NOT NULL) AND (import_stage IN ('property', 'room') OR room_type_id IS NOT NULL) AND (import_stage IN ('property', 'room', 'rate') OR rate_plan_id IS NOT NULL)"
@@ -11498,7 +11501,7 @@
         },
         "product_channel_mappings_enabled_check": {
           "name": "product_channel_mappings_enabled_check",
-          "value": "enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('draft', 'mapping', 'activate', 'reservations', 'messages', 'complete'))"
+          "value": "enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'messages', 'complete'))"
         },
         "product_channel_mappings_instants_check": {
           "name": "product_channel_mappings_instants_check",

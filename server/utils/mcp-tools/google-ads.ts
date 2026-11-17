@@ -18,7 +18,6 @@ import {
   type GoogleAdsReport,
   validateGoogleAdsSearchCampaign,
   validateGoogleAdsCampaignUpdate,
-  GoogleAdsMutationError,
   type CreateSearchCampaignInput,
   type UpdateGoogleAdsCampaignInput,
 } from '~/server/utils/google-ads'
@@ -204,7 +203,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'create_google_ads_search_campaign',
-    description: 'Create a paused Google Ads Search campaign with one ad group and responsive search ad from the supplied keywords, copy, destination and daily budget. The campaign cannot serve ads until separately enabled. Each call creates a new campaign; inspect the account before retrying an uncertain result.',
+    description: 'Create a paused Google Ads Search campaign with one ad group and responsive search ad from the supplied keywords, copy, destination and daily budget. The campaign cannot serve ads until separately enabled. Each call creates a new campaign.',
     domain: 'google_ads',
     minimumRole: 'admin',
     requiredEntitlement: 'google_ads_management',
@@ -367,8 +366,7 @@ export async function handleGoogleAdsTools(ctx: McpExecutorContext): Promise<unk
     const update: UpdateGoogleAdsCampaignInput | null = creating ? null : {
       campaignId: campaignId!, status: status ?? undefined, budgetId: budgetId ?? undefined, dailyBudgetAmountMicros: dailyBudget ?? undefined,
     }
-    // The same validation protects direct provider callers and runs here
-    // before any intent can imply that a mutation was dispatched.
+    // The same validation protects direct provider callers and runs here before any provider read.
     if (creation) validateGoogleAdsSearchCampaign(creation)
     else validateGoogleAdsCampaignUpdate(update!)
     const { accessToken, developerToken, customerId } = await resolveGoogleAdsCredentials(ctx)
@@ -389,55 +387,24 @@ export async function handleGoogleAdsTools(ctx: McpExecutorContext): Promise<unk
     }
     const changedFields = Object.keys(requestedState).filter(key => !beforeState || requestedState[key as keyof typeof requestedState] !== beforeState[key as keyof typeof beforeState])
     if (!creating && !changedFields.length) return { campaign_id: campaignId, status, budget_id: budgetId, daily_budget_micros: dailyBudget }
-    const operationId = crypto.randomUUID()
-    const metadata = { operation_id: operationId, provider: 'google_ads', customer_id: customerId, currency: account.currencyCode, changed_fields: changedFields, requested_state: requestedState }
-    await executeBatch(db, [organizationEventQuery({
-      id: operationId, organizationId, actorId: userId, eventType: 'google_ads.campaign_change_requested',
-      entityType: campaignId ? 'google_ads_campaign' : 'google_ads_customer', entityId: campaignId ?? customerId,
-      beforeState, metadata,
-    })])
     let result: { campaign_id: string; status: string | null; budget_id?: string | null; daily_budget_micros?: number | null }
     let resourceNames: string[], requestId: string | null
-    try {
-      if (creating) {
-        const created = await createGoogleAdsSearchCampaign(accessToken, developerToken, customerId, creation!)
-        result = { campaign_id: created.campaignId, status: created.status }
-        resourceNames = [created.resourceName, created.budgetResourceName, created.adGroupResourceName, created.adResourceName]
-        requestId = created.requestId
-      } else {
-        const updated = await updateGoogleAdsCampaign(accessToken, developerToken, customerId, update!)
-        result = { campaign_id: campaignId!, status, budget_id: budgetId, daily_budget_micros: dailyBudget }
-        resourceNames = updated.resourceNames
-        requestId = updated.requestId
-      }
-    } catch (error) {
-      // Google's definite atomic refusal is not a response lost after a
-      // possible commit. Preserve that distinction in the actual result.
-      const refused = error instanceof GoogleAdsMutationError && error.outcome === 'not_applied'
-      try {
-        await executeBatch(db, [organizationEventQuery({
-          organizationId, actorId: userId, eventType: refused ? 'google_ads.campaign_change_failed' : 'google_ads.campaign_change_unconfirmed',
-          entityType: campaignId ? 'google_ads_campaign' : 'google_ads_customer', entityId: campaignId ?? customerId,
-          beforeState, metadata: { ...metadata, verification_status: refused ? 'failed' : 'unconfirmed', verification_basis: 'provider_acceptance',
-            provider_request_id: error instanceof GoogleAdsMutationError ? error.requestId : null,
-            error: error instanceof Error ? error.message : String(error) },
-        })])
-      } catch (auditError) {
-        throw new AggregateError([error, auditError], refused
-          ? 'Google Ads did not apply the change, but the refusal could not be recorded.'
-          : 'The Google Ads outcome is uncertain and could not be recorded. Inspect the account before retrying.', { cause: auditError })
-      }
-      throw error
+    if (creating) {
+      const created = await createGoogleAdsSearchCampaign(accessToken, developerToken, customerId, creation!)
+      result = { campaign_id: created.campaignId, status: created.status }
+      resourceNames = [created.resourceName, created.budgetResourceName, created.adGroupResourceName, created.adResourceName]
+      requestId = created.requestId
+    } else {
+      const updated = await updateGoogleAdsCampaign(accessToken, developerToken, customerId, update!)
+      result = { campaign_id: campaignId!, status, budget_id: budgetId, daily_budget_micros: dailyBudget }
+      resourceNames = updated.resourceNames
+      requestId = updated.requestId
     }
-    try {
-      await executeBatch(db, [organizationEventQuery({
-        organizationId, actorId: userId, eventType: creating ? 'google_ads.campaign_created' : 'google_ads.campaign_updated',
-        entityType: 'google_ads_campaign', entityId: result.campaign_id, beforeState, afterState: requestedState,
-        metadata: { ...metadata, verification_status: 'verified', verification_basis: 'provider_acceptance', provider_request_id: requestId, provider_resource_names: resourceNames },
-      })])
-    } catch (error) {
-      throw new Error('Google Ads accepted the campaign change, but its result could not be recorded. Inspect the account before retrying.', { cause: error })
-    }
+    await executeBatch(db, [organizationEventQuery({
+      organizationId, actorId: userId, eventType: creating ? 'google_ads.campaign_created' : 'google_ads.campaign_updated',
+      entityType: 'google_ads_campaign', entityId: result.campaign_id, beforeState, afterState: requestedState,
+      metadata: { provider: 'google_ads', customer_id: customerId, currency: account.currencyCode, changed_fields: changedFields, provider_request_id: requestId, provider_resource_names: resourceNames },
+    })])
     return result
   }
 

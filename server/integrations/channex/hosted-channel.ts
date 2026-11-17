@@ -23,7 +23,7 @@ export async function vrboHomes(db: DbClient, env: ChannexEnv, organizationId: s
     FROM product_stay_configs h
     JOIN products p ON p.organization_id = h.organization_id AND p.id = h.product_id
     LEFT JOIN product_channel_mappings m ON m.organization_id = h.organization_id AND m.product_id = h.product_id
-      AND m.provider = 'channex' AND m.enabled = 1
+      AND m.provider = 'channex' AND m.import_stage IN ('draft', 'complete')
     WHERE h.organization_id = ? ORDER BY p.name, p.id`, [organizationId])
   return await Promise.all(homes.map(async (home) => {
     if (home.property_id === null || home.rate_plan_id === null) {

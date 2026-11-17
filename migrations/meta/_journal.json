@@ -117,8 +117,15 @@
     {
       "idx": 16,
       "version": "6",
-      "when": 1794920008800,
-      "tag": "0016_standalone_channex_homes",
+      "when": 1794919886624,
+      "tag": "0016_channex_connections_disconnect_error",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1794921826411,
+      "tag": "0017_standalone_channex_homes",
       "breakpoints": true
     }
   ]

@@ -8,9 +8,6 @@ test('homepage share card states every rotating accent and preserves the descrip
     title: 'Automate your website using ChatGPT, Claude, MCP',
     description,
   })
-})
-
-test('missing hero title keeps the existing organization fallback available', () => {
   assert.equal(platformHomeSocialCardCopy({ subtitle: 'Description only' }), null)
   assert.deepEqual(platformHomeSocialCardCopy({ title: 'Website', rotating_accents: [null, '', ' Claude '] }), { title: 'Website Claude', description: null })
 })

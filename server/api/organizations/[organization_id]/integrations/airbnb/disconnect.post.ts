@@ -4,7 +4,7 @@ import { jsonResponse } from '~/server/utils/api-response'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
 import { ChannexConnection } from '~/server/integrations/channex/channel-connection'
 
-// Disconnects step by step; disconnected: false means call again.
+// Asks for the disconnect, which the AIRBNB_SYNC queue runs; disconnected: false means it is under way.
 export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organization_id')
   if (!organizationId) return jsonResponse({ error: 'Organization ID is required' }, { status: 400 })

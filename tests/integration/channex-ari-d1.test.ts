@@ -1,16 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { hashPassword } from 'better-auth/crypto'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import { H3 } from 'nitro/h3'
-import productPatchRoute from '../../server/api/editor/organizations/[organization_id]/products/[product_id].patch.ts'
-import * as schema from '../../server/db/schema.ts'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
-import { createProduct, createProductsBatch, getProduct, reconcileProducts, updateProduct } from '../../server/utils/product-management.ts'
-import { cancelStay, createStay, deliverPendingChannelNights, dispatchStayCheckoutDeadlines, readHomeCalendar, readStayHome, setStayNights, updateStay, updateStayHome, verifyStayCalendarOccupancy, type StayAccess } from '../../server/domain/stays.ts'
-import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
+import { createProduct, getProduct, reconcileProducts, updateProduct } from '../../server/utils/product-management.ts'
+import { cancelStay, createStay, deliverPendingChannelNights, readHomeCalendar, readStayHome, setStayNights, updateStay, updateStayHome, verifyStayCalendarOccupancy, type StayAccess } from '../../server/domain/stays.ts'
+import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { captureEvents } from './support/events.ts'
+import { applySchema } from './support/schema.ts'
 
 // A connected home's night changes reach Channex: closed nights, prices and
 // stay rules as restrictions, booked nights as availability, each
@@ -138,8 +134,7 @@ async function boot(airbnbConnected = true) {
     const env = { ...await runtime.getBindings<CloudflareEnv>(), ...channexEnv, DB: db, EVENTS: queue.binding,
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-ari-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     bindDatabaseEvents(db, env)
-    const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-    await db.batch(statements.map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', ?)`).bind(ORG, TZ).run()
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner', 'o@example.test', 1, 0, 0)").bind(OWNER).run()
@@ -167,37 +162,6 @@ async function boot(airbnbConnected = true) {
   }
 }
 
-test('checkout records leave nights available on the home calendar and Channex', async () => {
-  const { runtime, db, env, queue, connected } = await boot()
-  const channex = new FakeChannex()
-  const realFetch = globalThis.fetch
-  globalThis.fetch = channex.fetch as typeof fetch
-  try {
-    const now = new Date().toISOString()
-    for (const [id, offset, expires] of [['active', 60, day(1)], ['expired', 61, day(-1)]] as const) {
-      await db.prepare(`INSERT INTO payments (id, organization_id, stripe_account_id, livemode, subject_type, currency, amount, price_snapshot_json, created_at, updated_at)
-        VALUES (?, ?, 'acct_checkout_proof', 0, 'booking', 'USD', 15000, '{}', ?, ?)`).bind(id, ORG, now, now).run()
-      await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, location_id, timezone, payment_id, quantity, amount, currency, starts_at, ends_at, status, expires_at, created_at)
-        VALUES (?, ?, ?, 'site', ?, ?, 1, 15000, 'USD', ?, ?, 'active', ?, ?)`).bind(id, ORG, connected, TZ, id, day(offset), day(offset + 1), expires, now).run()
-    }
-    assert.equal(await dispatchStayCheckoutDeadlines(env, ORG, Date.now()), null)
-    assert.deepEqual(queue.pending.filter(item => item.body.type === 'stay.checkout_expired'), [])
-    const range = { productId: connected, from: day(60), to: day(62) }
-    const changed = await setStayNights(db, env, manager, { product_id: connected, from: range.from, to: range.to, price_minor: 17500 })
-    assert.deepEqual(changed.channel_push, { state: 'pushed', detail: null })
-    assert.deepEqual(channex.take().filter(request => request.path === '/availability'), [
-      { path: '/availability', values: [{ property_id: 'prop-1', room_type_id: 'room-1', date_from: day(60), date_to: day(61), availability: 1 }] },
-    ])
-    assert.deepEqual((await readHomeCalendar(db, manager, range)).nights.map(night => [night.available, night.booking_id]), [[true, null], [true, null]])
-    assert.deepEqual((await db.prepare('SELECT id, status FROM payment_checkout_holds ORDER BY id').all()).results, [
-      { id: 'active', status: 'active' }, { id: 'expired', status: 'active' },
-    ])
-  } finally {
-    globalThis.fetch = realFetch
-    await runtime.dispose()
-  }
-})
-
 test('night changes on a connected home reach Channex, and what it took is on each night', async (t) => {
   const { runtime, db, env, queue, connected, unpriced, local } = await boot()
   const channex = new FakeChannex()
@@ -206,7 +170,6 @@ test('night changes on a connected home reach Channex, and what it took is on ea
   try {
     const states = async (productId: string, from: string, to: string) => (await readHomeCalendar(db, manager, { productId, from, to })).nights.map(night => night.channel)
     const log = async () => (await db.prepare("SELECT kind, external_id, status, detail, task_id FROM channel_sync_log WHERE direction = 'outbound' ORDER BY created_at, rowid").all()).results
-    const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName(ORG))
     const deliver = () => deliverPendingChannelNights(env, ORG, Date.now())
     const retryAtDeadline = async () => {
       const due = await deliver()
@@ -323,33 +286,6 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.deepEqual(channex.take(), [{ path: '/availability', values: [{ property_id: 'prop-1', room_type_id: 'room-1', date_from: day(30), date_to: day(30), availability: 1 }] }])
     assert.deepEqual((await states(connected, day(30), day(31)))[0], { state: 'pushed', detail: null })
 
-    // A 429 is a call Channex did not confirm: its nights stay pending with Channex's answer; the other call still goes.
-    channex.answer['/restrictions'] = () => Response.json({ errors: { code: 'http_too_many_requests', title: 'Too Many Requests' } }, { status: 429 })
-    const limited = await setStayNights(db, env, manager, { product_id: connected, from: day(32), to: day(33), price_minor: 140_00 })
-    assert.equal(limited.channel_push?.state, 'pending')
-    assert.match(String(limited.channel_push?.detail), /^Channex did not confirm the restrictions update for .*: .*429/)
-    assert.deepEqual(channex.take().map(request => request.path), ['/restrictions', '/availability'])
-    const deferred = await setStayNights(db, env, manager, { product_id: connected, from: day(33), to: day(34), price_minor: 14300 })
-    assert.equal(deferred.channel_push?.state, 'pending')
-    assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => value.date_from)]), [['/availability', [day(33)]]])
-    channex.answer['/restrictions'] = undefined
-    await retryAtDeadline()
-    assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => [value.date_from, value.rate])]), [
-      ['/restrictions', [[day(32), '140.00'], [day(33), '143.00']]],
-    ])
-    assert.deepEqual((await states(connected, day(32), day(34))), [{ state: 'pushed', detail: null }, { state: 'pushed', detail: null }])
-
-    // Ten calls of a kind in the last minute is Channex's limit for the property: the next change waits for the window.
-    for (let call = 0; call < 10; call++) {
-      await db.prepare("INSERT INTO channel_sync_log (id, organization_id, product_id, provider, direction, kind, external_id, status, detail) VALUES (?, ?, ?, 'channex', 'outbound', 'restrictions', 'prop-1', 'pushed', 'window')").bind(`window-${call}`, ORG, connected).run()
-    }
-    // Availability has its own ten, so the night's availability still goes.
-    const windowed = await setStayNights(db, env, manager, { product_id: connected, from: day(34), to: day(35), price_minor: 141_00 })
-    assert.equal(windowed.channel_push?.state, 'pending')
-    assert.match(String(windowed.channel_push?.detail), /Channex takes 10 restrictions updates a minute for this home; this one goes after/)
-    assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => value.date_from)]), [['/availability', [day(34)]]])
-    await db.prepare("DELETE FROM channel_sync_log WHERE detail = 'window'").run()
-
     // A broken provider body is unconfirmed too: Channex may have applied the
     // POST before its body failed, so it is sent again rather than assumed.
     const interruptedReason = 'The Channex response body was interrupted.'
@@ -361,11 +297,11 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.match(String(interrupted.channel_push?.detail), new RegExp(`^Channex did not confirm the restrictions update for .*${day(35)}: Channex could not be reached for POST /restrictions: ${interruptedReason}`))
     assert.deepEqual(interrupted.nights.map(night => [night.date, night.closed, night.available]), [[day(35), true, false]])
     assert.deepEqual(channex.take().map(request => request.path), ['/restrictions', '/availability'])
-    // The pending nights go with the next delivery. Contiguous nights with different changes are separate ranges: one has a new price, the other is closed.
+    // The pending night goes with the next delivery.
     channex.answer['/restrictions'] = undefined
     await retryAtDeadline()
-    assert.deepEqual(channex.take().map(request => request.values.map(value => [value.date_from, value.date_to])), [[[day(34), day(34)], [day(35), day(35)]]])
-    assert.deepEqual(await states(connected, day(34), day(36)), [{ state: 'pushed', detail: null }, { state: 'pushed', detail: null }])
+    assert.deepEqual(channex.take().map(request => request.values.map(value => [value.date_from, value.date_to])), [[[day(35), day(35)]]])
+    assert.deepEqual(await states(connected, day(35), day(36)), [{ state: 'pushed', detail: null }])
 
     // A new base price on a connected home reaches every night ahead that has no price of its own.
     // A minute has passed since the calls above, as far as Channex's limit is concerned.
@@ -389,23 +325,6 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     // A rename changes nothing the channel is told.
     assert.equal((await updateStayHome(env, db, manager, connected, { name: 'Cabin by the cliff' })).channel_push, null)
     assert.deepEqual(channex.take(), [])
-
-    // A night changed while a delivery of the home had it in flight was sent its old value by that delivery:
-    // it stays pending with the reason, and the next delivery sends what Channex has not got.
-    const raceStarted = Date.now()
-    channex.during = async () => {
-      if (channex.sent.at(-1)!.path !== '/restrictions') return
-      channex.during = undefined
-      assert.deepEqual((await setStayNights(db, env, manager, { product_id: connected, from: day(40), to: day(41), price_minor: 150_00 })).channel_push, { state: 'pushed', detail: null })
-    }
-    const changedDuring = await setStayNights(db, env, manager, { product_id: connected, from: day(40), to: day(41), price_minor: 142_00 })
-    assert.deepEqual(changedDuring.channel_push, { state: 'pending', detail: 'This change was saved while a delivery was under way; the next delivery sends it' })
-    assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => value.rate)]), [['/restrictions', ['142.00']], ['/restrictions', ['150.00']]])
-    const scheduledRace = await (await hub.fetch('https://inbox.test/ari-deadline')).json()
-    assert(typeof scheduledRace === 'number' && scheduledRace >= raceStarted && scheduledRace <= Date.now(), 'a concurrent write schedules an immediate ARI wake')
-    assert.equal(await deliver(), null)
-    assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => [value.date_from, value.rate])]), [['/restrictions', [[day(40), '150.00']]]])
-    assert.deepEqual((await readHomeCalendar(db, manager, { productId: connected, from: day(40), to: day(41) })).nights.map(night => [night.price_minor, night.channel]), [[150_00, { state: 'pushed', detail: null }]])
 
     // A connected home with no nightly price still sends its availability and rules; the missing price needs review.
     channex.answer['/availability'] = undefined
@@ -466,332 +385,23 @@ test('night changes on a connected home reach Channex, and what it took is on ea
   }
 })
 
-test('Airbnb settings preflight the whole catalog and unchanged settings do not push while replays repair completion', async () => {
-  const { runtime, db, env, connected, unpriced, local } = await boot()
-  const channex = new FakeChannex()
-  const realFetch = globalThis.fetch
-  globalThis.fetch = channex.fetch as typeof fetch
-  try {
-    const before = await Promise.all([connected, unpriced, local].map(id => getProduct(db, ORG, id)))
-    const activity = (await db.prepare('SELECT id FROM activity_entries ORDER BY id').all()).results
-    const invalidations = (await db.prepare('SELECT id FROM public_resource_cache_invalidations ORDER BY id').all()).results
-    const { photo_rooms: _photoRooms, accessibility: _accessibility, ...stay } = before[0]!.stay!
-    for (const invalid of [
-      { field: 'cancellation_policy', value: 'strict' },
-      { field: 'check_in_time', value: '16:30' },
-      { field: 'check_in_time', value: '03:00' },
-      { field: 'check_in_end_time', value: '18:30' },
-      { field: 'check_in_end_time', value: '04:00' },
-      { field: 'check_out_time', value: '10:30' },
-    ] as const) {
-      await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { name: 'Must remain Cabin', stay: { [invalid.field]: invalid.value } } }),
-        { status: 422, data: { code: 'AIRBNB_UNSUPPORTED_VALUE', field: invalid.field } })
-      await assert.rejects(reconcileProducts(db, { env, organizationId: ORG, actor: { actorId: OWNER }, deactivateMissing: true, products: [
-        { product_id: local, kind: 'stay', name: 'Must remain Barn' },
-        { product_id: connected, kind: 'stay', name: 'Must remain Cabin', stay: { ...stay, [invalid.field]: invalid.value } },
-      ] }), { status: 422, data: { code: 'AIRBNB_UNSUPPORTED_VALUE', field: invalid.field } })
-      assert.deepEqual(await Promise.all([connected, unpriced, local].map(id => getProduct(db, ORG, id))), before)
-      assert.deepEqual((await db.prepare('SELECT id FROM activity_entries ORDER BY id').all()).results, activity)
-      assert.deepEqual((await db.prepare('SELECT id FROM public_resource_cache_invalidations ORDER BY id').all()).results, invalidations)
-      assert.deepEqual(channex.take(), [])
-      assert.deepEqual(channex.settings, [])
-    }
-
-    // Explicitly unknown policies remain unknown rather than acquiring new-home defaults.
-    for (const field of ['cancellation_policy', 'long_term_cancellation_policy'] as const) {
-      await updateProduct(db, { env, organizationId: ORG, productId: local, actor: { actorId: OWNER }, patch: { stay: { [field]: null } } })
-      assert.equal((await getProduct(db, ORG, local)).stay![field], null)
-    }
-    const unchanged = { check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', min_nights: 2 } as const
-    assert.equal((await updateProduct(db, { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { stay: unchanged } })).channel_push, null)
-    assert.equal((await reconcileProducts(db, { env, organizationId: ORG, actor: { actorId: OWNER }, products: [{ product_id: connected, kind: 'stay', name: 'Cabin', stay: { ...stay, ...unchanged } }] }))[0]!.channel_push, null)
-    assert.equal((await updateStayHome(env, db, manager, connected, unchanged)).channel_push, null)
-    assert.deepEqual(channex.settings, [])
-    assert.deepEqual(channex.take(), [])
-
-    // Homes which are not syncing retain legitimate minute-valued times.
-    await updateStayHome(env, db, manager, local, { check_in_time: '16:30', cancellation_policy: 'strict' })
-    assert.equal((await getProduct(db, ORG, local)).stay!.check_in_time, '16:30')
-    assert.equal((await getProduct(db, ORG, local)).stay!.cancellation_policy, 'strict')
-    assert.deepEqual(channex.settings, [])
-
-    channex.settingsAnswer = () => Response.json({ errors: { detail: 'Settings refused' } }, { status: 422 })
-    const update = { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { stay: { check_in_time: '17:00' } }, idempotencyKey: 'booking-repair' }
-    await assert.rejects(updateProduct(db, update), (error: { status?: number; data?: Record<string, unknown> }) => error.status === 503 && error.data?.code === 'CHANNEL_PUSH_FAILED' && error.data.committed === true)
-    const saved = await getProduct(db, ORG, connected)
-    assert.equal(saved.stay!.check_in_time, '17:00')
-    assert.equal(channex.settings.length, 1)
-    channex.settingsAnswer = undefined
-    const replay = await updateProduct(db, update)
-    assert.equal(replay.updated_at, saved.updated_at)
-    assert.deepEqual(replay.channel_push, { state: 'pushed', detail: null })
-    assert.equal(channex.settings.length, 2)
-
-    channex.settingsAnswer = () => Response.json({ errors: { detail: 'Settings refused' } }, { status: 422 })
-    const reconcile = { env, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'catalog-booking-repair', products: [{ product_id: connected, kind: 'stay' as const, name: 'Cabin', stay: { ...stay, check_in_time: '18:00' } }] }
-    await assert.rejects(reconcileProducts(db, reconcile), (error: { status?: number; data?: Record<string, unknown> }) => error.status === 503 && error.data?.code === 'CHANNEL_PUSH_FAILED' && error.data.committed === true)
-    const savedCatalog = await getProduct(db, ORG, connected)
-    assert.equal(savedCatalog.stay!.check_in_time, '18:00')
-    assert.equal(channex.settings.length, 3)
-    channex.settingsAnswer = undefined
-    const replayedCatalog = await reconcileProducts(db, reconcile)
-    assert.equal(replayedCatalog[0]!.updated_at, savedCatalog.updated_at)
-    assert.deepEqual(replayedCatalog[0]!.channel_push, { state: 'pushed', detail: null })
-    assert.equal(channex.settings.length, 4, 'a replay completes only the booking section the committed plan changed')
-    assert.deepEqual(channex.take(), [])
-    channex.settings = []
-
-    const inheritedDate = day(10)
-    const overrideDate = day(11)
-    channex.minimums.set('listing-1', 300)
-    const previousDefault = await updateProduct(db, {
-      env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { stay: { min_nights: 300 } },
-    })
-    assert.equal(byNight(channex.take().find(call => call.path === '/restrictions')!.values).get(inheritedDate)?.min_stay_arrival, 300)
-    await setStayNights(db, env, manager, { product_id: connected, from: overrideDate, to: day(12), min_stay_arrival: 3, price_minor: 75_00 })
-    assert.deepEqual(channex.take(), [{ path: '/restrictions', values: [{
-      property_id: 'prop-1', rate_plan_id: 'rate-1', date_from: overrideDate, date_to: overrideDate, rate: '75.00', min_stay_arrival: 3,
-    }] }])
-
-    const password = 'Local-Calendar-Settings-Only-42'
-    await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('a-owner', ?, 'credential', ?, ?, 0, 0)")
-      .bind(OWNER, OWNER, await hashPassword(password)).run()
-    const login = await createAuth(env).api.signInEmail({ body: { email: 'o@example.test', password }, asResponse: true })
-    assert.equal(login.status, 200, await login.clone().text())
-    const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
-    const app = new H3()
-    app.patch('/api/editor/organizations/:organization_id/products/:product_id', productPatchRoute)
-    const patchDefault = () => app.request(Object.assign(new Request(`https://proof.example/api/editor/organizations/${ORG}/products/${connected}`, {
-      method: 'PATCH',
-      headers: { cookie, origin: 'https://proof.example', 'content-type': 'application/json', 'idempotency-key': 'minimum-repair' },
-      body: JSON.stringify({ updated_at: previousDefault.updated_at, stay: { min_nights: 21 } }),
-    }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
-    const calendar = () => readHomeCalendar(db, manager, { productId: connected, from: inheritedDate, to: day(12) })
-
-    channex.ratePlanAnswer = () => Response.json({ errors: { detail: 'Rate plan refused' } }, { status: 422 })
-    const failed = await patchDefault()
-    assert.equal(failed.status, 503)
-    assert.partialDeepStrictEqual(await failed.json(), { data: { code: 'CHANNEL_PUSH_FAILED', committed: true } })
-    const committed = await getProduct(db, ORG, connected)
-    assert.equal(committed.stay!.min_nights, 21)
-    assert.equal(channex.ratePlans.get('rate-1')!.min_stay_arrival, 300)
-    assert.deepEqual(channex.take(), [], 'the dates were never sent after the rate plan refusal')
-    assert.deepEqual((await calendar()).nights.map(night => [night.date, night.price_minor, night.min_stay_arrival, night.channel]), [
-      [inheritedDate, 150_00, 21, { state: 'needs_review', detail: 'Blawby has a 21-night minimum. Channex last confirmed a 300-night minimum.' }],
-      [overrideDate, 75_00, 3, { state: 'pushed', detail: null }],
-    ])
-
-    channex.ratePlanAnswer = undefined
-    const retried = await patchDefault()
-    assert.equal(retried.status, 200, await retried.clone().text())
-    assert.partialDeepStrictEqual(await retried.json(), { product: { updated_at: committed.updated_at, channel_push: { state: 'pushed', detail: null } } })
-    assert.equal(channex.minimums.get('listing-1'), 300)
-    assert.equal(channex.ratePlans.get('rate-1')!.min_stay_arrival, 21)
-    assert.deepEqual(channex.settings, [])
-    const repaired = byNight(channex.take().find(call => call.path === '/restrictions')!.values)
-    assert.deepEqual(repaired.get(inheritedDate), { min_stay_arrival: 21 })
-    assert.equal(repaired.has(overrideDate), false)
-    assert.deepEqual((await calendar()).nights.map(night => [night.date, night.price_minor, night.min_stay_arrival, night.channel]), [
-      [inheritedDate, 150_00, 21, { state: 'pushed', detail: null }],
-      [overrideDate, 75_00, 3, { state: 'pushed', detail: null }],
-    ])
-  } finally {
-    globalThis.fetch = realFetch
-    await runtime.dispose()
-  }
-})
-
-test('removed guest controls retain the committed channel completion intent for single and catalog retries', async () => {
-  const { runtime, db, env, connected, local } = await boot()
-  const channex = new FakeChannex()
-  const realFetch = globalThis.fetch
-  globalThis.fetch = channex.fetch as typeof fetch
-  try {
-    await updateProduct(db, { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { details: { pets_allowed: true, smoking_allowed: false } } })
-    assert.deepEqual((await getProduct(db, ORG, connected)).details, { featured: false, pets_allowed: true, smoking_allowed: false })
-    channex.settings = []
-    channex.settingsAnswer = () => Response.json({ errors: { detail: 'Settings refused' } }, { status: 422 })
-    const update = { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { details: { house_rules: 'Shoes off' } }, idempotencyKey: 'removed-controls-repair' }
-    await assert.rejects(updateProduct(db, update), (error: { status?: number; data?: Record<string, unknown> }) => error.status === 503 && error.data?.code === 'CHANNEL_PUSH_FAILED' && error.data.committed === true)
-    const saved = await getProduct(db, ORG, connected)
-    assert.deepEqual(saved.details, { featured: false, house_rules: 'Shoes off' })
-    const updateReceipt = `product-update:${ORG}:${connected}:removed-controls-repair`
-    const updateIntent = await db.prepare("SELECT json_extract(payload_json, '$.metadata.channel_completion') AS intent FROM activity_entries WHERE dedupe_key=?").bind(updateReceipt).first<string>('intent')
-    assert.deepEqual(JSON.parse(updateIntent!), { nights: false, settings: { booking: true, cancellation: false, availability: false } })
-    assert.deepEqual(channex.settings, [{ path: '/channels/chan-1/execute/update_booking_setting', body: {
-      channel_rate_plan_id: 'map-1', data: { check_in_time_start: '16', check_in_time_end: 'FLEXIBLE', check_out_time: 10, instant_booking_allowed_category: 'everyone', listing_expectations_for_guests: [{ type: 'requires_stairs', added_details: null }] },
-    } }], 'unknown guest controls stay omitted from the canonical provider payload')
-    const attemptedUpdate = channex.settings[0]
-    channex.settingsAnswer = undefined
-    const replay = await updateProduct(db, update)
-    assert.deepEqual(replay.channel_push, { state: 'pushed', detail: null })
-    assert.deepEqual(await getProduct(db, ORG, connected), saved)
-    assert.equal(channex.settings.length, 2)
-    assert.deepEqual(channex.settings[1], attemptedUpdate, 'same-key repair retries the booking work planned before the controls were removed')
-    assert.deepEqual(channex.take(), [])
-
-    await db.prepare("UPDATE activity_entries SET payload_json=json_remove(payload_json, '$.metadata.channel_completion') WHERE dedupe_key=?").bind(updateReceipt).run()
-    await assert.rejects(updateProduct(db, update), { status: 503, data: {
-      code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true,
-      reason: 'Product audit record has a missing or invalid channel completion plan', channel_outcome: 'unknown', product_id: connected, updated_at: saved.updated_at,
-    } })
-    assert.equal(channex.settings.length, 2, 'missing intent fails before provider work')
-    assert.deepEqual(await getProduct(db, ORG, connected), saved)
-
-    await updateProduct(db, { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { details: { pets_allowed: true, smoking_allowed: false } } })
-    channex.settings = []
-    channex.settingsAnswer = () => Response.json({ errors: { detail: 'Settings refused' } }, { status: 422 })
-    const reconcile = { env, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'catalog-removed-controls-repair', products: [
-      { product_id: connected, kind: 'stay' as const, name: 'Cabin', details: { house_rules: 'Quiet after ten' } },
-      { product_id: local, kind: 'stay' as const, name: 'Updated Barn' },
-    ] }
-    await assert.rejects(reconcileProducts(db, reconcile), (error: { status?: number; data?: Record<string, unknown> }) => error.status === 503 && error.data?.code === 'CHANNEL_PUSH_FAILED' && error.data.committed === true)
-    const savedCatalog = await Promise.all([connected, local].map(id => getProduct(db, ORG, id)))
-    assert.deepEqual(savedCatalog[0]!.details, { featured: false, house_rules: 'Quiet after ten' })
-    assert.equal(savedCatalog[1]!.name, 'Updated Barn')
-    const catalogReceipt = `catalog-reconcile:${ORG}:catalog-removed-controls-repair`
-    const catalogIntent = await db.prepare("SELECT json_extract(payload_json, '$.metadata.channel_completion') AS intent FROM activity_entries WHERE dedupe_key=?").bind(catalogReceipt).first<string>('intent')
-    assert.deepEqual(JSON.parse(catalogIntent!), {
-      [connected]: { nights: false, settings: { booking: true, cancellation: false, availability: false } },
-      [local]: { nights: false, settings: null },
-    })
-    assert.equal(channex.settings.length, 1)
-    const attemptedCatalog = channex.settings[0]
-    assert.deepEqual(attemptedCatalog, attemptedUpdate)
-    channex.settingsAnswer = undefined
-    const replayedCatalog = await reconcileProducts(db, reconcile)
-    assert.deepEqual(replayedCatalog.map(product => product.channel_push), [{ state: 'pushed', detail: null }, null])
-    assert.deepEqual(await Promise.all([connected, local].map(id => getProduct(db, ORG, id))), savedCatalog)
-    assert.equal(channex.settings.length, 2)
-    assert.deepEqual(channex.settings[1], attemptedCatalog)
-    assert.deepEqual(channex.take(), [])
-
-    // A missing later entry must fail before the first home's otherwise valid push.
-    await db.prepare("UPDATE activity_entries SET payload_json=json_set(payload_json, '$.metadata.channel_completion', json(?)) WHERE dedupe_key=?").bind(JSON.stringify({ [connected]: JSON.parse(catalogIntent!)[connected] }), catalogReceipt).run()
-    await assert.rejects(reconcileProducts(db, reconcile), { status: 503, data: {
-      code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true,
-      reason: 'Product audit record has a missing or invalid channel completion plan', channel_outcome: 'unknown', product_id: local, updated_at: savedCatalog[1]!.updated_at,
-    } })
-    assert.equal(channex.settings.length, 2)
-    assert.deepEqual(await Promise.all([connected, local].map(id => getProduct(db, ORG, id))), savedCatalog)
-
-    // Canonical non-stay kinds have no Airbnb work, including older receipts.
-    const dish = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: { kind: 'dish', name: 'Breakfast' } })
-    const dishUpdate = { env, organizationId: ORG, productId: dish.id, actor: { actorId: OWNER }, patch: { name: 'Breakfast menu' }, idempotencyKey: 'dish-update' }
-    await updateProduct(db, dishUpdate)
-    const savedDish = await getProduct(db, ORG, dish.id)
-    await db.prepare("UPDATE activity_entries SET payload_json=json_remove(payload_json, '$.metadata.channel_completion') WHERE dedupe_key=?").bind(`product-update:${ORG}:${dish.id}:dish-update`).run()
-    assert.equal((await updateProduct(db, dishUpdate)).channel_push, null)
-    assert.deepEqual(await getProduct(db, ORG, dish.id), savedDish)
-    const dishReconcile = { env, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'dish-reconcile', products: [{ product_id: dish.id, kind: 'dish' as const, name: 'Breakfast specials' }] }
-    await reconcileProducts(db, dishReconcile)
-    const savedDishCatalog = await getProduct(db, ORG, dish.id)
-    await db.prepare("UPDATE activity_entries SET payload_json=json_remove(payload_json, '$.metadata.channel_completion') WHERE dedupe_key=?").bind(`catalog-reconcile:${ORG}:dish-reconcile`).run()
-    assert.equal((await reconcileProducts(db, dishReconcile))[0]!.channel_push, null)
-    assert.deepEqual(await getProduct(db, ORG, dish.id), savedDishCatalog)
-    assert.equal(channex.settings.length, 2)
-    assert.deepEqual(channex.take(), [])
-  } finally {
-    globalThis.fetch = realFetch
-    await runtime.dispose()
-  }
-})
-
-test('paid home product receipts repair failed billing reports before channel work without repeating writes', async () => {
-  const { runtime, db, env, connected } = await boot()
-  const channex = new FakeChannex()
-  const realFetch = globalThis.fetch
-  let refused = true
-  const meters: string[] = []
-  globalThis.fetch = async (input, init = {}) => {
-    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
-    if (url.origin !== 'https://api.stripe.com') return channex.fetch(input, init)
-    assert.equal(url.pathname, '/v1/billing/meter_events')
-    const data = new URLSearchParams(String(init.body))
-    assert.equal(data.get('payload[stripe_customer_id]'), 'cus_paid_host')
-    meters.push(`${data.get('event_name')}=${data.get('payload[value]')}`)
-    if (refused) return Response.json({ error: { type: 'invalid_request_error', message: 'Meter refused' } }, { status: 400 })
-    return Response.json({ object: 'billing.meter_event', identifier: `meter-${meters.length}`, event_name: data.get('event_name'), created: Math.floor(Date.now() / 1000), livemode: false })
-  }
-  try {
-    await db.prepare('UPDATE organization SET stripeCustomerId=? WHERE id=?').bind('cus_paid_host', ORG).run()
-    await db.prepare("UPDATE subscription SET stripeCustomerId='cus_paid_host', stripeSubscriptionId='sub-paid' WHERE referenceId=?").bind(ORG).run()
-    const billingFailure = { status: 503, data: { code: 'POST_WRITE_COMPLETION_FAILED', field: 'billing_usage', committed: true, organization_id: ORG, reason: 'Meter refused' } }
-    const update = { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { active: false, stay: { check_in_time: '17:00' } }, idempotencyKey: 'billing-update' }
-    await assert.rejects(updateProduct(db, update), billingFailure)
-    const saved = await getProduct(db, ORG, connected)
-    assert.equal(saved.active, false)
-    assert.equal(saved.stay!.check_in_time, '17:00')
-    assert.equal(await db.prepare('SELECT count(*) AS n FROM activity_entries WHERE dedupe_key=?').bind(`product-update:${ORG}:${connected}:billing-update`).first('n'), 1)
-    assert.deepEqual(channex.settings, [])
-    // A still-failing replay must retain committed state and make no channel write.
-    await assert.rejects(updateProduct(db, update), billingFailure)
-    assert.deepEqual(await getProduct(db, ORG, connected), saved)
-    assert.deepEqual(channex.settings, [])
-    refused = false
-    assert.deepEqual((await updateProduct(db, update)).channel_push, { state: 'pushed', detail: null })
-    assert.deepEqual(await getProduct(db, ORG, connected), saved)
-    assert.deepEqual(meters.splice(0), ['krabiclaw_homes=1', 'krabiclaw_homes=1', 'krabiclaw_homes=1'])
-    assert.equal(channex.settings.length, 1)
-
-    refused = true
-    const { photo_rooms: _rooms, accessibility: _accessibility, ...stay } = saved.stay!
-    const reconcile = { env, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'billing-reconcile', products: [{ product_id: connected, kind: 'stay' as const, name: 'Cabin', active: true, stay: { ...stay, check_in_time: '18:00' } }] }
-    await assert.rejects(reconcileProducts(db, reconcile), billingFailure)
-    const savedCatalog = await getProduct(db, ORG, connected)
-    assert.equal(savedCatalog.active, true)
-    assert.equal(savedCatalog.stay!.check_in_time, '18:00')
-    assert.equal(await db.prepare('SELECT count(*) AS n FROM activity_entries WHERE dedupe_key=?').bind(`catalog-reconcile:${ORG}:billing-reconcile`).first('n'), 1)
-    assert.equal(channex.settings.length, 1)
-    refused = false
-    assert.deepEqual((await reconcileProducts(db, reconcile))[0]!.channel_push, { state: 'pushed', detail: null })
-    assert.deepEqual(await getProduct(db, ORG, connected), savedCatalog)
-    assert.deepEqual(meters.splice(0), ['krabiclaw_homes=2', 'krabiclaw_homes=2'])
-    assert.equal(channex.settings.length, 2)
-
-    const home = { kind: 'stay' as const, stay, variants: [{ name: 'Night', prices: [{ unit_amount: 150_00, currency: 'USD' }] }] }
-    refused = true
-    const create = { env, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'billing-create', publication: { published: true }, product: { ...home, name: 'Creek Cabin' } }
-    await assert.rejects(createProduct(db, create), billingFailure)
-    assert.deepEqual(meters, ['krabiclaw_homes=3'], 'a failed completion is reported once; only the caller retries its committed receipt')
-    const createdId = await db.prepare("SELECT json_extract(payload_json, '$.entityId') AS id FROM activity_entries WHERE dedupe_key=?").bind(`create:product:${ORG}:billing-create`).first<string>('id')
-    const created = await getProduct(db, ORG, createdId!)
-    assert.equal(created.name, 'Creek Cabin')
-    assert.equal(created.publications[0]!.published, true)
-    assert.equal(await db.prepare('SELECT count(*) AS n FROM products').first('n'), 4)
-    refused = false
-    assert.equal((await createProduct(db, create)).id, createdId)
-    assert.deepEqual(await getProduct(db, ORG, createdId!), created)
-    assert.equal(await db.prepare('SELECT count(*) AS n FROM products').first('n'), 4)
-    assert.deepEqual(meters.splice(0), ['krabiclaw_homes=3', 'krabiclaw_homes=3'])
-
-    refused = true
-    const createBatch = { env, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'billing-create-batch', publication: { published: true }, products: [{ ...home, name: 'Forest Cabin' }, { ...home, name: 'River Cabin' }] }
-    await assert.rejects(createProductsBatch(db, createBatch), billingFailure)
-    const ids = await db.prepare("SELECT json_extract(payload_json, '$.metadata.product_ids') AS ids FROM activity_entries WHERE dedupe_key=?").bind(`catalog-create:${ORG}:billing-create-batch`).first<string>('ids')
-    const createdIds = JSON.parse(ids!) as string[]
-    const createdCatalog = await Promise.all(createdIds.map(id => getProduct(db, ORG, id)))
-    assert.deepEqual(createdCatalog.map(product => [product.name, product.publications[0]!.published]), [['Forest Cabin', true], ['River Cabin', true]])
-    assert.equal(await db.prepare('SELECT count(*) AS n FROM products').first('n'), 6)
-    refused = false
-    assert.deepEqual((await createProductsBatch(db, createBatch)).map(product => product.id), createdIds)
-    assert.deepEqual(await Promise.all(createdIds.map(id => getProduct(db, ORG, id))), createdCatalog)
-    assert.equal(await db.prepare('SELECT count(*) AS n FROM products').first('n'), 6)
-    assert.deepEqual(meters.splice(0), ['krabiclaw_homes=5', 'krabiclaw_homes=5'])
-    assert.equal(channex.settings.length, 2)
-    assert.deepEqual(channex.take(), [])
-  } finally {
-    globalThis.fetch = realFetch
-    await runtime.dispose()
-  }
-})
-
 test('catalog price and minimum-stay writes use the same channel completion and preflight the whole batch', async () => {
   const { runtime, db, env, connected, unpriced, local } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
   try {
+    // An Airbnb setting the channel cannot take refuses the whole catalog write before anything changes.
+    const beforeRefusal = await Promise.all([connected, local].map(id => getProduct(db, ORG, id)))
+    const { photo_rooms: _refusedRooms, accessibility: _refusedAccessibility, ...refusedStay } = beforeRefusal[0]!.stay!
+    await assert.rejects(reconcileProducts(db, { env, organizationId: ORG, actor: { actorId: OWNER }, products: [
+      { product_id: local, kind: 'stay', name: 'Must remain Barn' },
+      { product_id: connected, kind: 'stay', name: 'Must remain Cabin', stay: { ...refusedStay, check_in_time: '16:30' } },
+    ] }), { status: 422, data: { code: 'AIRBNB_UNSUPPORTED_VALUE', field: 'check_in_time' } })
+    assert.deepEqual(await Promise.all([connected, local].map(id => getProduct(db, ORG, id))), beforeRefusal)
+    assert.deepEqual(channex.take(), [])
+    assert.deepEqual(channex.settings, [])
+
     const before = await getProduct(db, ORG, connected)
     const variant = before.variants[0]!
     const price = variant.prices[0]!

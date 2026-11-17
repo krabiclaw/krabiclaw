@@ -1,1 +1,0 @@
-CREATE INDEX `requests_guest_email_idx` ON `requests` (lower(payload_json ->> '$.guest.email'));

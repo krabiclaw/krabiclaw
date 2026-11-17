@@ -23,11 +23,11 @@ export interface GoogleAdsCustomer {
   error?: string
 }
 
-/** Google's structured refusal is stronger evidence than an HTTP/transport failure. */
-function googleAdsError(status: number, body: string): { code?: string; message: string; reason: string; definiteRefusal: boolean } {
+/** Google's own reason for a failed request, from its structured error when it sent one. */
+function googleAdsError(status: number, body: string): { code?: string; message: string; reason: string } {
   type Failure = { error?: { code?: number; status?: string; message?: string; details?: Array<{ errors?: Array<{ message?: string; errorCode?: Record<string, string>; location?: { fieldPathElements?: Array<{ fieldName: string; index?: number }> } }> }> } }
   const parsed = (() => { try { return JSON.parse(body) as Failure } catch { return null } })()
-  if (!parsed) return { message: `${status}: ${body.slice(0, 200)}`, reason: body.slice(0, 500), definiteRefusal: false }
+  if (!parsed) return { message: `${status}: ${body.slice(0, 200)}`, reason: body.slice(0, 500) }
   const details = (parsed.error?.details ?? []).flatMap(detail => detail.errors ?? [])
   const code = details[0]?.errorCode ? Object.values(details[0].errorCode)[0] : undefined
   const reason = details.map(detail => {
@@ -35,25 +35,7 @@ function googleAdsError(status: number, body: string): { code?: string; message:
     const field = detail.location?.fieldPathElements?.map(element => element.index === undefined ? element.fieldName : `${element.fieldName}[${element.index}]`).join('.')
     return `${detailCode ? `${detailCode}: ` : ''}${detail.message ?? parsed.error?.message ?? body.slice(0, 200)}${field ? ` (${field})` : ''}`
   }).join('; ') || parsed.error?.message || body.slice(0, 500)
-  // Our mutate calls keep Google's atomic partialFailure=false default.
-  // Only a structured definite refusal establishes that nothing applied;
-  // deadline/internal errors and unparseable responses remain uncertain.
-  const definiteRefusal = status >= 400 && status < 500 && parsed.error?.code === status && (
-    parsed.error.status
-      ? ['INVALID_ARGUMENT', 'UNAUTHENTICATED', 'PERMISSION_DENIED', 'NOT_FOUND', 'FAILED_PRECONDITION', 'OUT_OF_RANGE', 'ALREADY_EXISTS', 'RESOURCE_EXHAUSTED', 'ABORTED'].includes(parsed.error.status)
-      : details.length > 0 && details.every(detail => detail.errorCode && !('internalError' in detail.errorCode))
-  )
-  return { code, message: code ? reason : `${status}: ${reason}`, reason, definiteRefusal }
-}
-
-export class GoogleAdsMutationError extends Error {
-  readonly outcome: 'not_applied' | 'unknown'
-  readonly requestId: string | null
-  constructor(outcome: 'not_applied' | 'unknown', message: string, options: ErrorOptions & { requestId?: string | null } = {}) {
-    super(message, options)
-    this.outcome = outcome
-    this.requestId = options.requestId ?? null
-  }
+  return { code, message: code ? reason : `${status}: ${reason}`, reason }
 }
 
 /** Formats a 10-digit customer ID as XXX-XXX-XXXX */
@@ -519,8 +501,7 @@ export async function createGoogleAdsSearchCampaign(
   })
 
   if (!response.ok) {
-    const failure = googleAdsError(response.status, await response.text())
-    throw new GoogleAdsMutationError(failure.definiteRefusal ? 'not_applied' : 'unknown', `Google Ads campaign creation failed: ${failure.message}`, { requestId: response.headers.get('request-id') })
+    throw new Error(`Google Ads campaign creation failed: ${googleAdsError(response.status, await response.text()).message}`)
   }
 
   const result = await response.json() as {
@@ -576,17 +557,13 @@ export async function updateGoogleAdsCampaign(
   const mutateOperations: Array<Record<string, unknown>> = []
 
   if (input.budgetId !== undefined) {
-    try {
-      const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:search`, {
-        method: 'POST', headers,
-        body: JSON.stringify({ query: `SELECT campaign_budget.id FROM campaign WHERE campaign.id = ${input.campaignId} LIMIT 1` }),
-      })
-      if (!response.ok) throw await googleAdsFailure('Google Ads campaign budget query failed', response)
-      const data = await response.json() as { results?: GoogleAdsSearchRow[] }
-      if (data.results?.[0]?.campaignBudget?.id !== input.budgetId) throw new Error(`Budget ${input.budgetId} does not belong to campaign ${input.campaignId}`)
-    } catch (error) {
-      throw new GoogleAdsMutationError('not_applied', error instanceof Error ? error.message : String(error), { cause: error })
-    }
+    const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:search`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ query: `SELECT campaign_budget.id FROM campaign WHERE campaign.id = ${input.campaignId} LIMIT 1` }),
+    })
+    if (!response.ok) throw await googleAdsFailure('Google Ads campaign budget query failed', response)
+    const data = await response.json() as { results?: GoogleAdsSearchRow[] }
+    if (data.results?.[0]?.campaignBudget?.id !== input.budgetId) throw new Error(`Budget ${input.budgetId} does not belong to campaign ${input.campaignId}`)
     mutateOperations.push({ campaignBudgetOperation: {
       update: { resourceName: `customers/${cid}/campaignBudgets/${input.budgetId}`, amountMicros: String(input.dailyBudgetAmountMicros) },
       updateMask: 'amountMicros',
@@ -602,7 +579,7 @@ export async function updateGoogleAdsCampaign(
   const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:mutate`, {
     method: 'POST', headers, body: JSON.stringify({ mutateOperations }),
   })
-  if (!response.ok) throw await googleAdsFailure('Google Ads campaign update failed', response, true)
+  if (!response.ok) throw await googleAdsFailure('Google Ads campaign update failed', response)
   const result = await response.json() as { mutateOperationResponses?: Array<{ campaignBudgetResult?: { resourceName: string }; campaignResult?: { resourceName: string } }> }
   const receipts = result.mutateOperationResponses ?? []
   if (receipts.length !== mutateOperations.length || (input.budgetId !== undefined && !receipts.some(receipt => receipt.campaignBudgetResult?.resourceName === `customers/${cid}/campaignBudgets/${input.budgetId}`)) || (input.status !== undefined && !receipts.some(receipt => receipt.campaignResult?.resourceName === `customers/${cid}/campaigns/${input.campaignId}`))) {
@@ -619,13 +596,8 @@ export async function updateGoogleAdsCampaign(
  * Google's own reason for a refused request: each error's code and message from
  * the GoogleAdsFailure details, which a truncated body cuts off.
  */
-async function googleAdsFailure(label: string, response: Response, mutation = false): Promise<Error> {
-  const text = await response.text()
-  const failure = googleAdsError(response.status, text)
-  const message = `${label} (${response.status}): ${failure.reason}`
-  return mutation
-    ? new GoogleAdsMutationError(failure.definiteRefusal ? 'not_applied' : 'unknown', message, { requestId: response.headers.get('request-id') })
-    : new Error(message)
+async function googleAdsFailure(label: string, response: Response): Promise<Error> {
+  return new Error(`${label} (${response.status}): ${googleAdsError(response.status, await response.text()).reason}`)
 }
 
 export async function getGoogleAdsCustomer(accessToken: string, developerToken: string | undefined, customerId: string): Promise<{ descriptiveName: string; currencyCode: string; timeZone: string; is_manager: boolean }> {
