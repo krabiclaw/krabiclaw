@@ -195,7 +195,7 @@ test('listing messaging grants and verified trip invites use the live conversati
     await expectStatus(await setGrant(true), 200)
     const currentGrants = await page.request.get(grants, { params: { organization_id: organizationId } })
     await expectStatus(currentGrants, 200)
-    expect(await currentGrants.json()).toEqual({ grants: [{ member_id: memberId, access: 'messaging' }] })
+    expect(await currentGrants.json()).toEqual({ grants: [{ member_id: memberId, access: 'messaging' }], staff_access_writes: true })
     const cohostTranscript = await cohost.request.get(path)
     await expectStatus(cohostTranscript, 200)
     expect(await cohostTranscript.json()).toMatchObject({ conversation: { booking_id: null }, viewer_role: 'member' })
