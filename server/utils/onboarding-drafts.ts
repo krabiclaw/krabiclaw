@@ -500,23 +500,17 @@ export function buildOnboardingDraftPayload(input: {
   }
 }
 
-/**
- * Reads a stored draft. Version 2 drafts predate `source.placeId`; they carry
- * the same identity on their place snapshot, so they restore as version 3 and
- * an owner part-way through onboarding at deployment keeps their draft.
- */
 export function parseStoredOnboardingDraftPayload(raw: string): StoredOnboardingDraftPayload {
-  const parsed = JSON.parse(raw) as StoredOnboardingDraftPayload | (Omit<OnboardingDraftPayload, 'version'> & { version: 2 })
-  if (!parsed || (parsed.version !== 2 && parsed.version !== 3) || !parsed.source
-    || (!parsed.partial && !parsed.preview)
-    || (parsed.preview && (!Array.isArray(parsed.preview.media) || !Array.isArray(parsed.preview.products)))) {
+  const payload = JSON.parse(raw) as StoredOnboardingDraftPayload
+  if (!payload || payload.version !== 3 || !payload.source
+    || (!payload.partial && !payload.preview)
+    || (payload.preview && (!Array.isArray(payload.preview.media) || !Array.isArray(payload.preview.products)))) {
     throw new Error('Unsupported onboarding draft payload')
   }
-  const placeId = parsed.version === 3 ? parsed.source.placeId : parsed.source.place?.placeId ?? null
-  if (parsed.source.type === 'google_places' ? !placeId : placeId !== null || parsed.source.place !== null) {
-    throw new Error(`Onboarding draft source does not match its ${parsed.source.type} type`)
+  const placeId = payload.source.placeId
+  if (payload.source.type === 'google_places' ? !placeId : placeId !== null || payload.source.place !== null) {
+    throw new Error(`Onboarding draft source does not match its ${payload.source.type} type`)
   }
-  const payload: StoredOnboardingDraftPayload = { ...parsed, version: 3, source: { ...parsed.source, placeId } }
   const confirmationMode = payload.source.details.confirmation_mode
   if (confirmationMode != null && !isLodgingConfirmationMode(confirmationMode)) {
     throw new Error('Onboarding booking settings are invalid')

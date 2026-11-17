@@ -256,28 +256,6 @@ export function catalogSummary(vertical: string | null | undefined, counts: Cata
   }).join(' · ')
 }
 
-/** The shared catalog routes support every product type. */
-export function isCatalogSurface(vertical: string | null | undefined, segment: string): segment is ProductSurface {
-  requireProductPresentation(vertical)
-  return segment === 'experiences' || segment === 'menu' || segment === 'products' || segment === 'stays'
-}
-
-/** Collections appear on each surface represented by their members. Empty collections remain editable. */
-export function collectionsOnSurface<
-  P extends Pick<Product, 'kind'>,
-  T extends { products: readonly P[] },
->(
-  vertical: string | null | undefined,
-  rows: readonly T[],
-  surface: ProductSurface,
-): Array<T & { products: P[] }> {
-  return rows.flatMap((row) => {
-    const products = row.products.filter(product => productSurfaceOf(vertical, product) === surface)
-    if (row.products.length > 0 && products.length === 0) return []
-    return [{ ...row, products }]
-  })
-}
-
 export interface ProductCollectionGroup<T extends Pick<Product, 'id' | 'name' | 'collections'> = Product> {
   id: string
   name: string

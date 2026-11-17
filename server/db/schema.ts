@@ -1640,12 +1640,11 @@ export const organization_integrations = sqliteTable("organization_integrations"
 // An organization's Airbnb account, connected through Channex. It is one row
 // per organization with its own lifecycle: a Channex group and a temporary
 // setup property, a single-use sign-in bound to the person who started it,
-// then the connected channel. operation_id is the lock one setup step holds;
-// pending_step names a provider write that was sent and may have applied, so
-// a failure there is held for review instead of being repeated.
+// then the connected channel.
 export const channex_connections = sqliteTable("channex_connections", {
 	organization_id: text().primaryKey().references(() => organization.id, { onDelete: "cascade" }),
-	status: text().$type<'not_connected' | 'authorizing' | 'connected' | 'disconnecting' | 'needs_review'>().notNull(),
+	status: text().$type<'not_connected' | 'authorizing' | 'connected' | 'disconnecting'>().notNull(),
+	// Unread since #1916; dropped, with needs_review below, by the release after the Worker that stopped using them is live.
 	operation_id: text(),
 	pending_step: text(),
 	group_id: text(),
@@ -1657,6 +1656,8 @@ export const channex_connections = sqliteTable("channex_connections", {
 	authorization_expires_at: text(),
 	channel_id: text(),
 	connected_at: text(),
+	// Why the last disconnect failed, shown with the connection; cleared when Disconnect is asked again.
+	disconnect_error: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [

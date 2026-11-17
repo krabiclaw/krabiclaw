@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:6ed7f3e4196345c496f1f6411ee0b63ac3bbbaeea0a968ed9ce8028d780deb44",
-  "documentationFingerprint": "sha256:534dc3069d96ed6876f9c1982dc34690e2ed31a3c3866e22a683c2e4989bcc96",
+  "fingerprint": "sha256:fbff4bcc8585a84281b14ce2b94275ec770e51b92fddc186bbdf969e4e6232e8",
+  "documentationFingerprint": "sha256:08d286978f4efa1eb8f996790a853bd1ebb430a1aa19f5cd22672cd88ae0bdd8",
   "tools": [
     {
       "name": "add_organization_language",
@@ -19398,7 +19398,7 @@
     {
       "name": "create_google_ads_search_campaign",
       "title": "Create Google Ads search campaign",
-      "description": "Create a paused Google Ads Search campaign with one ad group and responsive search ad from the supplied keywords, copy, destination and daily budget. The campaign cannot serve ads until separately enabled. Each call creates a new campaign; inspect the account before retrying an uncertain result.",
+      "description": "Create a paused Google Ads Search campaign with one ad group and responsive search ad from the supplied keywords, copy, destination and daily budget. The campaign cannot serve ads until separately enabled. Each call creates a new campaign.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

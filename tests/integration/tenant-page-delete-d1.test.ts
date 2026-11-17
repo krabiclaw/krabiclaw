@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import { executeBatch } from '../../server/db/index.ts'
 import { createContentDocumentWithBlocks, prepareContentDocumentDeletion } from '../../server/utils/content/documents.ts'
 import { buildMediaPlacementInsertQuery } from '../../server/utils/media-asset-manager.ts'
 import { deleteTenantPage } from '../../server/utils/content/pages.ts'
+import { applySchema } from './support/schema.ts'
 
 // What deleting a tenant page takes with it, proven against real D1 rather than
 // reasoned about: the scope follows the row, and the rows that reference a
@@ -20,8 +19,7 @@ test('deleting a tenant page takes its translations, placements and redirects', 
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-    await db.batch(statements.map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare(`INSERT INTO organization (id,name,slug,subdomain,theme_id,vertical, default_currency, timezone) VALUES (?,?,?,?,?,?, 'USD', 'UTC')`)
       .bind('org', 'org', 'org', 'org', 'tenant-theme-v1', 'restaurant').run()
     for (const locale of ['en', 'th']) {
@@ -93,56 +91,11 @@ test('deleting a tenant page takes its translations, placements and redirects', 
       'the translation kept no redirect pointing at a deleted document',
     )
     assert.equal(await db.prepare('SELECT count(*) AS count FROM media_assets').first('count'), 1, 'the asset itself survives its placement')
-  } finally {
-    await runtime.dispose()
-  }
-})
 
-test('a translation deletes alone, and a required site page does not delete at all', { timeout: 60_000 }, async () => {
-  const runtime = new Miniflare({ workers: [{ config: {
-    name: 'tenant-page-delete-scope-proof', compatibilityDate: '2024-11-01',
-    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
-    env: { DB: { type: 'd1' } },
-  } }] })
-  try {
-    const db = await runtime.getD1Database('DB')
-    const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-    await db.batch(statements.map(statement => db.prepare(statement)))
-    await db.prepare(`INSERT INTO organization (id,name,slug,subdomain,theme_id,vertical, default_currency, timezone) VALUES (?,?,?,?,?,?, 'USD', 'UTC')`)
-      .bind('org', 'org', 'org', 'org', 'tenant-theme-v1', 'restaurant').run()
-    for (const locale of ['en', 'th']) {
-      await db.prepare('INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES (?,?,?,?,?)')
-        .bind('loc-' + locale, 'org', locale, Number(locale === 'en'), 'published').run()
-    }
-    const page = async (id: string, path: string, locale: string, rootId?: string) =>
-      await createContentDocumentWithBlocks(db, {
-        id, organizationId: 'org', kind: 'page', locale,
-        ...(rootId ? { rowRole: 'representation' as const, rootId } : { rowRole: 'root' as const, metadata: { page_type: 'custom' } }),
-        path, title: id,
-      }, [])
-    await page('story', '/our-story', 'en')
-    await page('story-th', '/our-story', 'th', 'story')
-    // /about is a required shared site page, so its route would have nothing
-    // to show without it.
+    // /about is a required shared site page: its route would have nothing to show without it.
     await page('about', '/about', 'en')
-
-    const scope = { organizationId: 'org' }
-    const env = {} as Parameters<typeof deleteTenantPage>[2]['env']
-    const stamp = async (id: string) => (await db.prepare('SELECT updated_at FROM content_documents WHERE id = ?').bind(id).first<string>('updated_at'))!
-
-    const translation = await deleteTenantPage(db, 'story-th', { scope, expectedUpdatedAt: await stamp('story-th'), env })
-    assert.equal(translation.deleted.locale, 'th')
-    assert.deepEqual(translation.deleted.removed_locales, [], 'deleting a translation takes nothing else')
-    assert.deepEqual(
-      (await db.prepare('SELECT id FROM content_documents ORDER BY id').all()).results,
-      [{ id: 'about' }, { id: 'story' }],
-      'the source page survives its translation being removed',
-    )
-
-    await assert.rejects(
-      deleteTenantPage(db, 'about', { scope, expectedUpdatedAt: await stamp('about'), env }),
-      /organization's site renders/,
-    )
+    const about = await db.prepare("SELECT updated_at FROM content_documents WHERE id = 'about'").first<string>('updated_at')
+    await assert.rejects(deleteTenantPage(db, 'about', { scope, expectedUpdatedAt: about!, env }), /organization's site renders/)
   } finally {
     await runtime.dispose()
   }

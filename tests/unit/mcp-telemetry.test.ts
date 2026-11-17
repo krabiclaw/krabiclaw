@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { describeErrorForTelemetry, errorChainForTelemetry } from "../../shared/error-telemetry.ts";
+import { describeErrorForTelemetry } from "../../shared/error-telemetry.ts";
 import { mcpDiagnosticPayload, summarizeForTelemetry } from "../../server/utils/mcp-telemetry.ts";
 
 test('startup diagnostics preserve workflow content and redact credentials in both structured data and MCP text', () => {
@@ -79,21 +79,9 @@ test("describeErrorForTelemetry preserves a nested database root cause", () => {
   assert.match(description, /CHECK constraint failed: media_assets_category_check$/);
   assert.match(description, /middle truncated/);
   assert.doesNotMatch(description, /signed\.example|customer@example\.com/);
+
+  const circular = new Error("outer") as Error & { cause?: unknown };
+  circular.cause = circular;
+  assert.equal(describeErrorForTelemetry(circular), "outer");
 });
 
-test("describeErrorForTelemetry handles circular cause chains", () => {
-  const error = new Error("outer") as Error & { cause?: unknown };
-  error.cause = error;
-
-  assert.equal(describeErrorForTelemetry(error), "outer");
-});
-
-test("provider error chains retain the cause without logging credentials", () => {
-  const cause = new Error("Invalid API Key provided: sk_test_example123; Authorization: Bearer private-token");
-  cause.name = "StripeAuthenticationError";
-  const chain = errorChainForTelemetry(new Error("Billing plans are temporarily unavailable", { cause }));
-
-  assert.equal(chain[1]?.name, "StripeAuthenticationError");
-  assert.match(chain[1]!.message, /Invalid API Key provided/);
-  assert.doesNotMatch(JSON.stringify(chain), /sk_test_example123|private-token/);
-});

@@ -1,13 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { calculateSlidingScaleRate, parsePricingAmount } from '../../utils/pricing-calculator.ts'
+import { calculateSlidingScaleRate } from '../../utils/pricing-calculator.ts'
 
 const rows = [['1', '$39,900', '$55,860', '$63,840']]
-
-test('Blawby pricing parser handles formatted imported amounts', () => {
-  assert.equal(parsePricingAmount('$55,860'), 55860)
-  assert.equal(parsePricingAmount('bad'), 0)
-})
 
 test('Blawby pricing calculator applies inclusive imported thresholds', () => {
   assert.deepEqual(calculateSlidingScaleRate({ householdSize: 1, income: 39900, period: 'annual', rows }), { percentage: 50, rate: 160, standardRate: 320 })

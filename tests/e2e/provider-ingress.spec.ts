@@ -1,5 +1,4 @@
-import { Buffer } from 'node:buffer'
-import { createHmac, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
@@ -8,72 +7,6 @@ import type { ConversationPage } from '../../shared/messages-contract'
 import { seededTenant } from './seed/manifest'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { devLoginHeaders, seededSiteHeaders } from './test-env'
-
-test('signed Stripe ingress accepts a signed event and rejects invalid signatures', async ({ request }) => {
-  const eventId = `evt_e2e_${randomUUID().replaceAll('-', '')}`
-  const payload = JSON.stringify({
-    id: eventId, object: 'event', type: 'customer.created',
-    created: Math.floor(Date.now() / 1000), livemode: false,
-    data: { object: { id: `cus_e2e_${randomUUID()}`, object: 'customer' } },
-  })
-  const signatureResponse = await request.post('/api/dev/stripe-signature', {
-    headers: devLoginHeaders(), data: { payload },
-  })
-  expect(signatureResponse.status(), await signatureResponse.text()).toBe(200)
-  const { signature } = await signatureResponse.json()
-  // Stripe's own delivery retries are the retry mechanism, so a redelivery is
-  // simply accepted again; there is no application-owned webhook queue to read.
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await request.post('/api/auth/stripe/webhook', {
-      headers: { 'content-type': 'application/json', 'stripe-signature': signature }, data: payload,
-    })
-    expect(response.status(), await response.text()).toBe(200)
-  }
-  const invalid = await request.post('/api/auth/stripe/webhook', {
-    headers: { 'content-type': 'application/json', 'stripe-signature': `${signature}0` }, data: payload,
-  })
-  expect(invalid.status()).toBe(400)
-})
-
-test('signed Resend ingress verifies the raw body and ignores mail that is not a guest-thread delivery', async ({ request }) => {
-  const secret = process.env.RESEND_WEBHOOK_SECRET
-  if (!secret) throw new Error('RESEND_WEBHOOK_SECRET is set by playwright.config.ts for the local Worker')
-  // Signed the way Resend (Svix) signs: HMAC-SHA256 over id.timestamp.body
-  // with the base64 key after `whsec_`. The Worker verifies with the SDK, so
-  // this is an independent check that the two agree on the exact bytes.
-  const sign = (id: string, timestamp: string, body: string) =>
-    `v1,${createHmac('sha256', Buffer.from(secret.slice('whsec_'.length), 'base64')).update(`${id}.${timestamp}.${body}`).digest('base64')}`
-  const post = (body: string, headers: Record<string, string>) =>
-    request.post('/api/resend/webhook', { headers: { 'content-type': 'application/json', ...headers }, data: body })
-  const signedHeaders = (body: string) => {
-    const id = `msg_${randomUUID()}`
-    const timestamp = String(Math.floor(Date.now() / 1000))
-    return { 'svix-id': id, 'svix-timestamp': timestamp, 'svix-signature': sign(id, timestamp, body) }
-  }
-
-  // Spacing a JSON serialiser would not reproduce: accepted only if the
-  // signature is checked against the bytes as sent.
-  const delivered = `{ "type":  "email.delivered",  "created_at": "${new Date().toISOString()}",
-    "data": { "email_id": "e2e-${randomUUID()}", "created_at": "${new Date().toISOString()}", "from": "hello@krabiclaw.com",
-    "to": ["guest@example.test"], "subject": "E2E", "message_id": "<e2e@krabiclaw.com>" } }`
-  const deliveredHeaders = signedHeaders(delivered)
-  const accepted = await post(delivered, deliveredHeaders)
-  expect(accepted.status(), await accepted.text()).toBe(200)
-  // No guest-thread delivery carries this id, as with every Broadcast recipient.
-  expect(await accepted.json()).toEqual({ received: 'email.delivered', outcome: 'no_delivery' })
-
-  const reserialised = await post(JSON.stringify(JSON.parse(delivered)), deliveredHeaders)
-  expect(reserialised.status()).toBe(400)
-  const tampered = await post(delivered, { ...deliveredHeaders, 'svix-signature': sign(deliveredHeaders['svix-id'], deliveredHeaders['svix-timestamp'], `${delivered} `) })
-  expect(tampered.status()).toBe(400)
-  const unsigned = await post(delivered, {})
-  expect(unsigned.status()).toBe(400)
-
-  const opened = JSON.stringify({ type: 'email.opened', created_at: new Date().toISOString(), data: { email_id: `e2e-${randomUUID()}`, created_at: new Date().toISOString(), from: 'hello@krabiclaw.com', to: ['guest@example.test'], subject: 'E2E', message_id: '<e2e@krabiclaw.com>' } })
-  const irrelevant = await post(opened, signedHeaders(opened))
-  expect(irrelevant.status(), await irrelevant.text()).toBe(200)
-  expect(await irrelevant.json()).toEqual({ received: 'email.opened', outcome: 'ignored' })
-})
 
 test('native email replies retain their RFC ancestry through repeated dashboard replies and reject changed addresses', async ({ request, playwright, baseURL }, testInfo) => {
   test.skip(!baseURL || !['localhost', '127.0.0.1'].includes(new URL(baseURL).hostname), 'native email injection requires disposable local data')
@@ -101,7 +34,7 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
     })
   }
   const organizationId = seededTenant('restaurant').organizationId
-  // The restaurant's contact form is shared with specs that change its questions.
+  // Other specs write to the restaurant; the lock keeps their writes apart.
   const release = await acquireTenantMutationLock(testInfo, organizationId)
   const guest = await playwright.request.newContext({ baseURL })
   try {

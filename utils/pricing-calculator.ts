@@ -42,9 +42,12 @@ export function updatePricingCalculator(config: Record<string, unknown>, rows: u
     : { ...config, note, rows }
 }
 
-export function parsePricingAmount(value: unknown) {
-  const amount = Number(String(value ?? '').replace(/[^0-9.]/g, ''))
-  return Number.isFinite(amount) ? amount : 0
+/** An imported amount such as "$39,900". Anything that is not an amount is refused, never read as zero. */
+export function parsePricingAmount(value: unknown): number {
+  const digits = String(value ?? '').replace(/[^0-9.]/g, '')
+  const amount = Number(digits)
+  if (!/\d/.test(digits) || !Number.isFinite(amount)) throw new Error(`Pricing amount ${JSON.stringify(value ?? null)} is not an amount`)
+  return amount
 }
 
 export function calculateSlidingScaleRate(input: {
@@ -56,7 +59,8 @@ export function calculateSlidingScaleRate(input: {
 }): SlidingScaleRateResult {
   const rates = input.rates ?? { standard: 320, at250: 160, at350: 215, at400: 240 }
   const size = Math.min(8, Math.max(1, Math.trunc(input.householdSize)))
-  const row = input.rows.find(candidate => Number(candidate[0]) === size) ?? input.rows[size - 1] ?? []
+  const row = input.rows.find(candidate => Number(candidate[0]) === size) ?? input.rows[size - 1]
+  if (!row) throw new Error(`The pricing table has no row for a household of ${size}`)
   const annualIncome = Math.max(0, Number.isFinite(input.income) ? input.income : 0) * (input.period === 'monthly' ? 12 : 1)
   const limit250 = parsePricingAmount(row[1])
   const limit350 = parsePricingAmount(row[2])

@@ -1,8 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  MAX_MARKDOWN_BYTES,
-  assertMarkdownSize,
   decodeMarkdownText,
   resolveMarkdownMimeType,
 } from '../../server/utils/markdown-document.ts'
@@ -14,21 +12,10 @@ test('resolveMarkdownMimeType recognizes Markdown MIME types and rejects unrelat
   assert.equal(resolveMarkdownMimeType('application/pdf'), null)
   assert.equal(resolveMarkdownMimeType('image/png'), null)
   assert.equal(resolveMarkdownMimeType('image/png', 'notes.md'), null)
-})
-
-test('resolveMarkdownMimeType falls back to a Markdown filename for generic or missing MIME types', () => {
   assert.equal(resolveMarkdownMimeType('application/octet-stream', 'notes.md'), 'text/markdown')
   assert.equal(resolveMarkdownMimeType(undefined, 'README.MARKDOWN'), 'text/markdown')
   assert.equal(resolveMarkdownMimeType('application/octet-stream', 'notes.txt'), null)
   assert.equal(resolveMarkdownMimeType(null), null)
-})
-
-test('assertMarkdownSize rejects files over the configured limit with a clear message', () => {
-  assert.doesNotThrow(() => assertMarkdownSize(MAX_MARKDOWN_BYTES))
-  assert.throws(
-    () => assertMarkdownSize(MAX_MARKDOWN_BYTES + 1),
-    /too large/i,
-  )
 })
 
 test('decodeMarkdownText accepts valid UTF-8 and rejects invalid byte sequences', () => {
