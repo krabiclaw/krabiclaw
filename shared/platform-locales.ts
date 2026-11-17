@@ -7,6 +7,8 @@ import koreanMessages from '../i18n/catalogs/ko.json' with { type: 'json' }
 import japaneseMessages from '../i18n/catalogs/ja.json' with { type: 'json' }
 import thaiMessages from '../i18n/catalogs/th.json' with { type: 'json' }
 import vietnameseMessages from '../i18n/catalogs/vi.json' with { type: 'json' }
+import simplifiedChineseMessages from '../i18n/catalogs/zh-Hans.json' with { type: 'json' }
+import traditionalChineseMessages from '../i18n/catalogs/zh-Hant.json' with { type: 'json' }
 import { flattenLocaleManifest, validateLocaleCatalog } from './platform-locale-catalog'
 
 export interface PlatformLocale {
@@ -28,6 +30,8 @@ const CATALOGS: Record<string, unknown> = {
   ko: koreanMessages,
   th: thaiMessages,
   vi: vietnameseMessages,
+  'zh-Hans': simplifiedChineseMessages,
+  'zh-Hant': traditionalChineseMessages,
 }
 
 const englishMessages = Object.freeze(flattenLocaleManifest(englishManifest))
