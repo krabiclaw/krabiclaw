@@ -542,7 +542,9 @@ test('a listing imports through every stage into a home Channex and Blawby agree
     await syncs.deliver(env, { ...asked, id: crypto.randomUUID() })
     assert.equal(channex.seen.filter(request => request.method !== 'GET').length, writes)
     channex.failMappingRemoval = false
-    assert.deepEqual(await connection.disconnect(), { disconnected: false })
+    await assert.rejects(connection.disconnect(), { status: 409, data: { code: 'DISCONNECT_FAILED' } })
+    assert.equal(syncs.pending.length, 0)
+    assert.deepEqual(await connection.disconnect(true), { disconnected: false })
     await syncs.drain(env)
     assert.deepEqual([await enabled(), channex.channel.ratePlans, await db.prepare('SELECT status, channel_id, disconnect_error FROM channex_connections').first()],
       [0, [], { status: 'not_connected', channel_id: null, disconnect_error: null }])
