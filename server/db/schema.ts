@@ -2869,7 +2869,7 @@ export const payments = sqliteTable("payments", {
  buyer_user_id: text().references(() => user.id, { onDelete: "set null" }),
  stripe_account_id: text().notNull(),
  livemode: integer({ mode: "boolean" }).notNull(),
- subject_type: text().$type<'booking' | 'order' | 'invoice'>().notNull(),
+ subject_type: text().$type<'booking'>().notNull(),
  subject_id: text(),
  location_id: text(),
  currency: text().notNull(),

@@ -39,7 +39,7 @@ export function noticeDuration(minutes: number, locale: string): string {
 
 /** How far ahead a guest must book: Airbnb's choices, with hours where a table needs them. */
 export const NOTICE_OPTIONS = [
-  { value: 0, label: 'No notice', description: 'Guests can book a slot right up to its start.' },
+  { value: 0, label: 'No notice', description: 'Bookings are taken right up to the start.' },
   { value: 2 * HOUR, label: '2 hours', description: 'Slots starting within 2 hours are not offered.' },
   { value: DAY, label: '1 day' },
   { value: 2 * DAY, label: '2 days' },

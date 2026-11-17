@@ -117,6 +117,7 @@ import { dashboardScopeHeaderModelKey } from '~/lib/components/workspace/dashboa
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { authClient } from '~/lib/auth-client'
 import { parsePhoneOrThrow, formatPhone } from '~/utils/phone'
+import { accountRows, describeDevice, THEME_OPTIONS, type AccountRowId } from '~/shared/account-screen'
 
 
 // The level runs while setup is still synchronous: it injects the record the
@@ -124,10 +125,6 @@ import { parsePhoneOrThrow, formatPhone } from '~/utils/phone'
 const level = useRouteLevel()
 // The organizations this account belongs to, read off the layout's one list of them.
 const scopeHeaderModel = inject(dashboardScopeHeaderModelKey, null)
-const organizationsSummary = computed(() => {
-  const count = (scopeHeaderModel?.value.peers ?? []).filter(peer => peer.id).length
-  return count === 0 ? undefined : count === 1 ? '1 organization' : `${count} organizations`
-})
 const profilePath = level.path
 const session = authClient.useSession()
 const sessionData = computed(() => session.value.data)
@@ -200,22 +197,10 @@ async function revokeDevice(token: string) {
   }
 }
 
-function describeDevice(userAgent?: string | null) {
-  const ua = userAgent ?? ''
-  const os = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mac OS/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : null
-  const browser = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : /Firefox\//.test(ua) ? 'Firefox' : null
-  return [os, browser].filter(Boolean).join(' · ') || 'Unknown device'
-}
 
 // Appearance is a preference of the person, kept on this device.
 const { preference: themePreference, setPreference: setThemePreference } = usePlatformTheme()
-type ThemePreference = 'system' | 'light' | 'dark'
-const THEME_OPTIONS: { label: string; description: string; value: ThemePreference }[] = [
-  { label: 'System', description: 'Follow your device appearance.', value: 'system' },
-  { label: 'Light', description: 'Always use the light dashboard.', value: 'light' },
-  { label: 'Dark', description: 'Always use the dark dashboard.', value: 'dark' },
-]
-const themeInput = ref<ThemePreference>(themePreference.value)
+const themeInput = ref<PlatformThemePreference>(themePreference.value)
 watch(themePreference, saved => { themeInput.value = saved })
 const themeDirty = computed(() => themeInput.value !== themePreference.value)
 // Photo
@@ -282,29 +267,30 @@ watch(() => [openKey.value === 'login', sessionData.value?.session?.token] as co
 const { preferences: notificationPreferences, load: loadNotificationPreferences } = useNotificationPreferences(() => sessionData.value?.user?.id)
 await loadNotificationPreferences()
 
-/** How many categories currently reach this person at all. */
-const notificationSummary = computed(() => {
-  const preferences = notificationPreferences.value
-  if (!preferences) return ''
-  const settings = Object.values(preferences)
-  const on = settings.filter(setting => setting.email || setting.whatsapp || setting.push).length
-  return on === settings.length ? 'All on' : `${on} of ${settings.length} on`
-})
+// Where each shared Account settings row opens on the web.
+const ROW_DESTINATIONS: Record<AccountRowId, () => { icon: string; to?: string; action?: object }> = {
+  personal: () => ({ icon: 'i-lucide-contact-round', to: `${profilePath.value}/personal` }),
+  login: () => ({ icon: 'i-lucide-shield-check', to: `${profilePath.value}/login` }),
+  notifications: () => ({ icon: 'i-lucide-bell', to: `${profilePath.value}/notifications` }),
+  // Inside an organization, availability is that organization's; Personal names one first.
+  calendar: () => ({ icon: 'i-lucide-calendar-clock', to: organization.value ? `${profilePath.value}/calendar/${encodeURIComponent(organization.value.id)}` : `${profilePath.value}/calendar` }),
+  appearance: () => ({ icon: 'i-lucide-sun-moon', to: `${profilePath.value}/appearance` }),
+  payments: () => ({ icon: 'i-lucide-credit-card', to: `${profilePath.value}/payments` }),
+  organizations: () => ({ icon: 'i-lucide-building-2', to: `${profilePath.value}/organizations` }),
+  'log-out': () => ({ icon: 'i-lucide-log-out', action: {} }),
+}
 
 const groups = computed<EditorNavigationGroup[]>(() => [
   {
     id: 'account',
-    items: [
-      { id: 'personal', icon: 'i-lucide-contact-round', label: 'Personal information', summary: [sessionData.value?.user?.name, sessionData.value?.user?.phoneNumber].filter(Boolean).join(' · ') || 'Name, photo, WhatsApp number', to: `${profilePath.value}/personal` },
-      { id: 'login', icon: 'i-lucide-shield-check', label: 'Login & security', summary: sessionData.value?.user?.email ?? '', to: `${profilePath.value}/login` },
-      { id: 'notifications', icon: 'i-lucide-bell', label: 'Notifications', summary: notificationSummary.value, to: `${profilePath.value}/notifications` },
-      // Inside an organization, availability is that organization's; Personal names one first.
-      ...((scopeHeaderModel?.value.peers ?? []).some(peer => peer.id) ? [{ id: 'calendar', icon: 'i-lucide-calendar-clock', label: 'Profile & availability', summary: 'Public profile, hours, time off and Google Calendar', to: organization.value ? `${profilePath.value}/calendar/${encodeURIComponent(organization.value.id)}` : `${profilePath.value}/calendar` }] : []),
-      { id: 'appearance', icon: 'i-lucide-sun-moon', label: 'Appearance', summary: `${themePreference.value.charAt(0).toUpperCase()}${themePreference.value.slice(1)} theme`, to: `${profilePath.value}/appearance` },
-      { id: 'payments', icon: 'i-lucide-credit-card', label: 'Payments', summary: 'Your payments and refunds', to: `${profilePath.value}/payments` },
-      { id: 'organizations', icon: 'i-lucide-building-2', label: 'Organizations', summary: organizationsSummary.value, to: `${profilePath.value}/organizations` },
-      { id: 'log-out', icon: 'i-lucide-log-out', label: 'Log out', action: {} },
-    ],
+    items: accountRows({
+      name: sessionData.value?.user?.name ?? null,
+      phoneNumber: sessionData.value?.user?.phoneNumber ?? null,
+      email: sessionData.value?.user?.email ?? '',
+      notifications: notificationPreferences.value ? Object.values(notificationPreferences.value) : null,
+      organizations: (scopeHeaderModel?.value.peers ?? []).filter(peer => peer.id).length,
+      theme: themePreference.value,
+    }).map(row => ({ ...row, ...ROW_DESTINATIONS[row.id]() })),
   },
 ])
 

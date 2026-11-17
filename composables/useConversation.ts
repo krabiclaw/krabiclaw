@@ -36,7 +36,7 @@ export function useConversationPrefetch(personalScope = false) {
     if (event.type === 'access.changed') end()
     else if ('conversation_id' in event && !('scheduled' in event && event.scheduled)) end(event.conversation_id)
   }, { flush: 'sync' })
-  watch([realtime.status, realtime.connectionEpoch, realtime.accessEnded, userId, organizationId], () => end(), { flush: 'sync' })
+  watch([realtime.status, realtime.reconnectEpoch, realtime.accessEnded, userId, organizationId], () => end(), { flush: 'sync' })
   onBeforeUnmount(() => end())
 
   async function read(conversationId: string, signal: AbortSignal): Promise<ConversationPage | undefined> {
@@ -85,7 +85,7 @@ export function useConversation(threadId: Ref<string> | ComputedRef<string>, per
   let holding: HeldRead | undefined
   const request = useAsyncData(key, (_app, { signal }) => {
     if (!personalScope && !organizationId.value) throw createError({ statusCode: 400, statusMessage: 'Conversation requires a workspace' })
-    readConnectionEpoch = realtime.connectionEpoch.value
+    readConnectionEpoch = realtime.reconnectEpoch.value
     holding = beginConversation(realtime.held, threadId.value, userId.value)
     // A head the list is already reading is this conversation's read; a failed or ended one is read here.
     const reading = realtime.conversationReads.get(threadId.value)

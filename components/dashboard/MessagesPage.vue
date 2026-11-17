@@ -5,7 +5,7 @@
       <InboxFilters v-if="!personalScope" />
     </div>
   </DefineControls>
-  <DashboardIndexPanel :id="personalScope ? 'account-messages' : 'organization-messages'" :title="blockedOnly ? 'Blocked guests' : pastOnly ? 'Past conversations' : 'Messages'" :auto-open="firstThread" fill>
+  <DashboardIndexPanel :id="personalScope ? 'account-messages' : 'organization-messages'" :title="blockedOnly ? `Blocked ${getVerticalCopy(dashboard.organization.value?.vertical).guestsLabelPlural}` : pastOnly ? 'Past conversations' : 'Messages'" :auto-open="firstThread" fill>
     <!-- Search and settings beside the title, as on Airbnb. -->
     <template #right>
       <UButton icon="i-lucide-search" color="neutral" variant="soft" class="rounded-full" :aria-label="searching ? 'Close search' : 'Search messages'" :aria-pressed="searching" @click="toggleSearch" />
@@ -18,7 +18,7 @@
     <UAlert v-else-if="!session.isPending" class="m-6" color="error" title="Messages are unavailable" description="Your membership does not allow access to conversations." />
     <UAlert v-if="accessError" class="m-6" color="error" title="Conversation access changed" :description="accessError" />
     <UModal v-model:open="settingsOpen" title="Messaging settings">
-      <template #body><MessagingSettings :manage="canManageMessages && dashboard.hasFeature('stays')" @navigate="settingsOpen = false" /></template>
+      <template #body><MessagingSettings :manage="canManageMessages" @navigate="settingsOpen = false" /></template>
     </UModal>
   </DashboardIndexPanel>
 </template>
@@ -34,6 +34,7 @@ import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
 import { useTeamGroupLeaveRequest } from '~/lib/components/workspace/messages/team-thread-client'
 import { getErrorMessage } from '~/utils/errors'
+import { getVerticalCopy } from '~/utils/vertical-copy'
 const route = useRoute()
 const personalScope = route.params.org_slug === undefined
 const router = useRouter()

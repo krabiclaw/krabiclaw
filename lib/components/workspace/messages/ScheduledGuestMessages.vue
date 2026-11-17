@@ -108,7 +108,7 @@ watch(realtime.event, event => {
       && (status.value === 'pending' || data.value?.messages.some(message => message.conversation_id === event.conversation_id)))) reconcile()
   }
 }, { flush: 'sync' })
-watch(realtime.connectionEpoch, () => {
+watch(realtime.reconnectEpoch, () => {
   revoked.value = false
   reconcile()
 })

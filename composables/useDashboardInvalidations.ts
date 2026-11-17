@@ -7,19 +7,13 @@ export type DashboardInvalidationStatus = 'closed' | 'connecting' | 'open' | 'fa
 export interface DashboardInvalidationConnection {
   status: Ref<DashboardInvalidationStatus>
   event: Ref<DashboardInvalidation | null>
-  /**
-   * Counts successful opens. Consumers reconcile both reconnect gaps and the
-   * first gap between their initial read and the completed socket upgrade.
-   */
-  connectionEpoch: Ref<number>
-  /** Last successful reconnect in the current workspace or account scope. */
+  /** Last successful reconnect in the current workspace or account scope; reads made before it re-read once. The first open does not count. */
   reconnectEpoch: Ref<number>
   accessEnded: Ref<number>
   /** Heads being read before their conversation opens; an opening conversation takes its read from here. */
   conversationReads: Map<string, Promise<ConversationPage | undefined>>
   held: HeldReads
   connect: () => void
-  waitForFirstOpen: (signal: AbortSignal) => Promise<void>
 }
 
 export interface HeldRead {
@@ -74,7 +68,6 @@ export type HeldReads = ReturnType<typeof heldReads>
 
 const dashboardInvalidationKey: InjectionKey<DashboardInvalidationConnection> = Symbol('dashboard-invalidations')
 const CONNECT_TIMEOUT_MS = 8_000
-const INITIAL_READ_WAIT_MS = 350
 const HEARTBEAT_INTERVAL_MS = 20_000
 const HEARTBEAT_TIMEOUT_MS = 8_000
 
@@ -88,11 +81,11 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
   // `yarn dev:worker`, staging and production; here the dashboard stays on its
   // reads instead of retrying a connection that cannot open and reporting it.
   if (import.meta.dev) {
-    return { status, event: shallowRef(null), connectionEpoch: ref(0), reconnectEpoch: ref(0), accessEnded: ref(0), conversationReads, held, connect: () => {}, waitForFirstOpen: async () => {} }
+    return { status, event: shallowRef(null), reconnectEpoch: ref(0), accessEnded: ref(0), conversationReads, held, connect: () => {} }
   }
 
   const event = shallowRef<DashboardInvalidation | null>(null)
-  const connectionEpoch = ref(0)
+  let opens = 0
   const reconnectEpoch = ref(0)
   const accessEnded = ref(0)
   let opened = false
@@ -161,8 +154,8 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     nextSocket.addEventListener('open', () => {
       if (socket !== nextSocket) return
       reconnectAttempt = 0
-      connectionEpoch.value += 1
-      if (opened) reconnectEpoch.value = connectionEpoch.value
+      opens += 1
+      if (opened) reconnectEpoch.value = opens
       opened = true
       status.value = 'open'
       scheduleHeartbeat(nextSocket)
@@ -213,25 +206,6 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
 
     nextSocket.addEventListener('error', () => {
       nextSocket.close()
-    })
-  }
-
-  /** Start a cold read after its subscription, unless the socket is slow or unavailable. */
-  async function waitForFirstOpen(signal: AbortSignal) {
-    if (!import.meta.client || signal.aborted || status.value === 'open' || status.value === 'failed' || !window.navigator.onLine) return
-    connect()
-    await new Promise<void>(resolve => {
-      const stop = watch(status, value => {
-        if (value === 'open' || value === 'failed' || value === 'closed') finish()
-      }, { flush: 'sync' })
-      const timer = setTimeout(finish, INITIAL_READ_WAIT_MS)
-      signal.addEventListener('abort', finish, { once: true })
-      function finish() {
-        clearTimeout(timer)
-        stop()
-        signal.removeEventListener('abort', finish)
-        resolve()
-      }
     })
   }
 
@@ -292,7 +266,7 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     status.value = 'closed'
   })
 
-  return { status, event, connectionEpoch, reconnectEpoch, accessEnded, conversationReads, held, connect, waitForFirstOpen }
+  return { status, event, reconnectEpoch, accessEnded, conversationReads, held, connect }
 }
 
 export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>, personal: Readonly<Ref<boolean>>, reader: Readonly<Ref<string | undefined>>, sessionPending: Readonly<Ref<boolean>>): DashboardInvalidationConnection {

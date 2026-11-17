@@ -112,10 +112,11 @@
     </template>
   </UModal>
   <ReportDialog
-    :open="reporting !== null"
-    :title="reporting?.block ? 'Block this guest' : 'Report this conversation'"
-    :description="reporting?.block ? 'Their conversation moves to Blocked guests and new messages from them stop alerting your team.' : 'Tell Blawby what this guest sent.'"
-    :confirm-label="reporting?.block ? 'Block and report' : 'Report'"
+    v-if="reporting"
+    open
+    :title="reporting.block ? 'Block this guest' : 'Report this conversation'"
+    :description="reporting.block ? `Their conversation moves to Blocked ${getVerticalCopy(dashboard.organization.value?.vertical).guestsLabelPlural} and new messages from them stop alerting your team.` : `Tell Blawby what this ${getVerticalCopy(dashboard.organization.value?.vertical).guestLabel} sent.`"
+    :confirm-label="reporting.block ? 'Block and report' : 'Report'"
     :saving="saving === 'report' || saving === 'block'"
     :error="moveError"
     @submit="reason => reporting && void move(reporting.block ? 'block' : 'report', reason)"
@@ -131,6 +132,7 @@ import { authClient } from '~/lib/auth-client'
 import type { TeamMember } from '~/server/domain/team-messages'
 import { isTeamMembersResponse, useTeamGroupLeaveRequest, type TeamGroupOperation } from './team-thread-client'
 import { getErrorMessage } from '~/utils/errors'
+import { getVerticalCopy } from '~/utils/vertical-copy'
 import { isRecord } from '~/utils/api-clients'
 import { isConversationOperation, isThreadDetails, type ThreadDetails } from './guest-thread-client'
 import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'

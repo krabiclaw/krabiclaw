@@ -741,6 +741,6 @@ if (realtime) {
   watch(realtime.event, event => {
     if (event?.type === 'stay.changed' || event?.type === 'nights.changed') void resetMonths()
   })
-  watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void resetMonths() })
+  watch(realtime.reconnectEpoch, epoch => { if (epoch > 0) void resetMonths() })
 }
 </script>

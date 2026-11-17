@@ -173,6 +173,7 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
   ]
 
   const md = renderPlansMarkdown(dummyPlans, 'https://example.com')
+  assert.match(md, /contact hello@blawby\.com\./)
   assert.ok(md.includes('# Blawby Pricing & Plans'))
   assert.ok(md.includes('\nBeta pricing. Prices will rise for new subscribers as Blawby grows; you keep the price you subscribe at for 12 months.\n'))
   assert.ok(md.includes('## Free'))

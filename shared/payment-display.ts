@@ -12,9 +12,6 @@ export interface PaymentDisplay {
  receipt_url:string|null
 }
 export interface PaymentRefundDisplay {id:string;amount:number|null;status:string;note:string|null}
-export interface PaymentOrderDisplay {
- lines:Array<{id:string;title:string;quantity:number;unit_amount:number;currency:CurrencyCode}>
-}
 export function paymentDisplay(value:unknown):PaymentDisplay {
  if(!value||typeof value!=='object'||!('id' in value)||typeof value.id!=='string'||!('currency' in value)||!isCurrencyCode(value.currency)||!('captured_amount' in value)||typeof value.captured_amount!=='number'||!Number.isSafeInteger(value.captured_amount)||value.captured_amount<0||!('refunded_amount' in value)||typeof value.refunded_amount!=='number'||!Number.isSafeInteger(value.refunded_amount)||value.refunded_amount<0||!('surcharge_amount' in value)||typeof value.surcharge_amount!=='number'||!Number.isSafeInteger(value.surcharge_amount)||value.surcharge_amount<0||!('receipt_url' in value)||(value.receipt_url!==null&&typeof value.receipt_url!=='string'))throw new Error('Invalid payment detail')
  if(value.refunded_amount>value.captured_amount||value.surcharge_amount>value.captured_amount)throw new Error('Invalid payment state')
@@ -27,16 +24,6 @@ export function paymentRefundsDisplay(value:unknown):PaymentRefundDisplay[] {
   if(!['queued','creating','pending','requires_action','succeeded','failed','canceled'].includes(refund.status))throw new Error('Invalid payment refund state')
   return {id:refund.id,amount:refund.amount as number|null,status:refund.status,note:'note' in refund&&typeof refund.note==='string'?refund.note:null}
  })
-}
-export function paymentOrderDisplay(value:unknown):PaymentOrderDisplay|null {
- if(value===null)return null
- if(!value||typeof value!=='object'||!('lines' in value)||!Array.isArray(value.lines))throw new Error('Invalid payment order')
- if(!value.lines.length)throw new Error('Payment order has no items')
- return {lines:value.lines.map((line:unknown)=>{
-  if(!line||typeof line!=='object'||!('id' in line)||typeof line.id!=='string'||!('title' in line)||typeof line.title!=='string'||!('quantity' in line)||typeof line.quantity!=='number'||!Number.isSafeInteger(line.quantity)||line.quantity<1||!('unit_amount' in line)||typeof line.unit_amount!=='number'||!Number.isSafeInteger(line.unit_amount)||line.unit_amount<0||!('currency' in line)||!isCurrencyCode(line.currency))throw new Error('Invalid payment order line')
-  if(!Number.isSafeInteger(line.quantity*line.unit_amount))throw new Error('Invalid order line total')
-  return {id:line.id,title:line.title,quantity:line.quantity,unit_amount:line.unit_amount,currency:line.currency}
- })}
 }
 /** One catalog currency formatter for payment principal and fee projections. */
 export function paymentMoney(amount:unknown,currency:unknown,locale?:string):string {

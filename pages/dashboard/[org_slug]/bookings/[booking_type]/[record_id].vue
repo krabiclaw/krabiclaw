@@ -12,7 +12,7 @@ useSeoMeta({ title: 'Booking details | Blawby', robots: 'noindex, nofollow' })
 const route = useRoute()
 const level = useRouteLevel()
 const rawType = route.params.booking_type
-const purchase = rawType === 'order' || rawType === 'payment' ? rawType : null
+const purchase = rawType === 'payment' ? rawType : null
 const bookingId = String(route.params.record_id || '')
 if (!bookingId || (rawType && !purchase)) showNotFound()
 </script>

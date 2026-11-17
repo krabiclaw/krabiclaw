@@ -39,12 +39,12 @@ import type { ProductKind } from '~/shared/product-details'
  * alone told a professional-services client's guest about their "booking" while
  * every screen their host saw said consultation.
  */
-async function bookingNoun(db: DbClient, thread: Pick<GuestThreadRow, 'id' | 'organization_id'>): Promise<string> {
+async function bookingPresentation(db: DbClient, thread: Pick<GuestThreadRow, 'id' | 'organization_id'>) {
 	const booked = await queryFirst<{ vertical: string; kind: ProductKind }>(db, `SELECT o.vertical, p.kind FROM organization o JOIN conversations c ON c.organization_id = o.id
 	  JOIN bookings b ON b.id = c.booking_id AND b.organization_id = o.id JOIN products p ON p.id = b.product_id AND p.organization_id = b.organization_id
 	  WHERE o.id = ? AND c.id = ? LIMIT 1`, [thread.organization_id, thread.id])
 	if (!booked) throw new HTTPError({ statusCode: 409, message: 'This conversation has no booking to change', data: { code: 'BOOKING_CHANGE_UNSUPPORTED', field: 'kind' } })
-	return resolveBookingPresentation(booked.kind, booked.vertical).noun
+	return resolveBookingPresentation(booked.kind, booked.vertical)
 }
 
 /**
@@ -367,7 +367,7 @@ export async function deliverBookingChange(env: CloudflareEnv, event: Extract<Do
     await recordBookingChangeAnswer(db, { organizationId: thread.organization_id, bookingId: answered.booking_id, changeRequestId: proposalEntry.id, accepted: status === 'accepted' })
   }
   await publishConversationEvent(env, db, { conversationId: thread.id, type: 'MESSAGE_CREATE', message: { id: entry.id, sequence: entry.sequence } })
-  await deliverEmail(db, env, thread, entry.id, proposalEntry.id, status, proposal, await bookingNoun(db, thread))
+  await deliverEmail(db, env, thread, entry.id, proposalEntry.id, status, proposal, (await bookingPresentation(db, thread)).noun)
 }
 
 async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow, entryId: string, proposalEntryId: string, status: 'requested' | 'accepted' | 'declined' | 'moved', proposal: z.infer<typeof proposalSchema>, noun: string) {
@@ -502,7 +502,7 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
     const unchanged = sourceGuard(thread, before)
     entry = await appendMessage(db, { guard: { sql: unchanged.query, params: unchanged.params ?? [] }, conversationId: thread.id, authorKind: 'krabiclaw', authorUserId: actorUserId,
       eventName: 'booking_change.requested', dedupeKey: externalId,
-      body: `Requested ${destination.label} for ${after.party_size} guests${destination.title ? ` at ${destination.title}` : ''}.`,
+      body: `Requested ${destination.label} for ${(await bookingPresentation(db, thread)).formatCount(after.party_size)}${destination.title ? ` at ${destination.title}` : ''}.`,
       payload: { before: sourceSchema.parse(before), after, version: before.version,
         beforeAssignedMemberName: await assignedMemberName(db, thread.organization_id, before.assignedMemberId), afterAssignedMemberId: destination.assignedMemberId ?? null, afterAssignedMemberName: await assignedMemberName(db, thread.organization_id, destination.assignedMemberId),
         locationTitle: destination.title, originalLocationTitle: original?.title ?? '', afterLabel: destination.label,
@@ -569,7 +569,7 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
     // the party changes no row, so the entry is not written either.
     const queries: BatchQuery[] = [...await destination.claim(before.recordId, now),
       ...messageQueries({ id, conversationId: thread.id, authorKind: 'krabiclaw', authorUserId: actor.userId, eventName: 'booking_change.moved',
-        body: `Moved to ${destination.label} for ${after.party_size} guests${destination.title ? ` at ${destination.title}` : ''}.`,
+        body: `Moved to ${destination.label} for ${(await bookingPresentation(db, thread)).formatCount(after.party_size)}${destination.title ? ` at ${destination.title}` : ''}.`,
         payload, dedupeKey, occurredAt: now, guard: { sql: 'c.organization_id = ? AND changes() = 1', params: [thread.organization_id] } }).queries, {
       // A moved booking is the party it moved with, no longer "this many or more".
       query: 'UPDATE bookings SET party_size_is_minimum = 0 WHERE id = ? AND organization_id = ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)',
@@ -606,7 +606,7 @@ export type BookingChangeView = {
 async function proposalView(db: DbClient, thread: GuestThreadRow, proposal: z.infer<typeof proposalSchema>, state: Pick<BookingChangeView, 'status' | 'message'>): Promise<BookingChangeView> {
   const guest = await changePresentation(db, thread, proposal)
   const summary = await sourceSummary(db, thread)
-  return { type: 'booking', noun: await bookingNoun(db, thread), guest_name: summary.guestName, locale: guest.locale, vertical: guest.vertical, requested_by: 'business',
+  return { type: 'booking', noun: (await bookingPresentation(db, thread)).noun, guest_name: summary.guestName, locale: guest.locale, vertical: guest.vertical, requested_by: 'business',
     before: guest.before, after: guest.after, location_title: guest.location_title, original_location_title: guest.original_location_title, ...state }
 }
 

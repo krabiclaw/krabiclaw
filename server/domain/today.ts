@@ -13,6 +13,7 @@ import { isChannelManagedStay, STAY_CHANNEL_LABELS } from '~/shared/bookings'
 import { currencyFractionDigits } from '~/shared/currencies'
 import { formatMinorAmount } from '~/shared/prices'
 import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
+import { resolveBookingPresentation } from '~/utils/booking-presentation'
 
 /*
   Today and Upcoming for the person looking: the bookings they host in the
@@ -85,6 +86,12 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   const visitWhen = (instant: string, timezone: string) => range === 'today' ? time(instant, timezone) : dayTime(instant, timezone)
   const recordPath = (bookingId: string, conversationId: string | null, seated: number) => bookingConversationOrRecordPath(viewer.slug, bookingId, seated ? conversationId : null)
   const first = (name: string | null) => name?.trim().split(/\s+/)[0] || null
+  // Who booked, in the business's word: a home's guests, a law firm's client or clients.
+  const counterparty = (record: BookedRecordInRange) => {
+    if (record.unit === 'nights') return 'guests'
+    const noun = resolveBookingPresentation(record.product_kind, viewer.vertical).counterpartyNoun
+    return record.party_size === 1 ? noun : `${noun}s`
+  }
 
   const cards: Card[] = []
   const byBooking = new Map<string, Card>()
@@ -111,7 +118,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     const opens = record.conversation_id && record.viewer_seated
     const named = !guest
       ? { title: 'Open the reservation', detail: record.owner === 'channel' ? `No guest name came from ${STAY_CHANNEL_LABELS[record.channel]}` : 'No guest name was recorded' }
-      : opens ? { title: 'Say hello to your guests', detail: 'See if they have any questions' } : { title: 'Open the reservation', detail: `See what ${guest} booked` }
+      : opens ? { title: `Say hello to your ${counterparty(record)}`, detail: 'See if they have any questions' } : { title: 'Open the reservation', detail: `See what ${guest} booked` }
     const action = welcome && opens ? { title: welcome.title, detail: welcome.detail } : named
     const base = { image_url: image, icon: iconOf(record.product_kind), line, to, draft: welcome && opens ? welcome.message : null, bookings: [record.id], day: start }
     if (record.status === 'pending') {

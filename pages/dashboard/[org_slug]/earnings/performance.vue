@@ -80,22 +80,22 @@ const now = new Date()
 const thisYear = now.getUTCFullYear()
 const initial = typeof route.query.month === 'string' && /^\d{4}-\d{2}$/.test(route.query.month) ? route.query.month : `${thisYear}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
 const month = ref(initial)
-const year = ref(Number(initial.slice(0, 4)))
-// Choosing a year keeps the same month number; choosing a month follows its year. The month rides in the URL.
-watch(year, (next) => { month.value = `${next}-${month.value.slice(5)}` })
-watch(month, (next) => { year.value = Number(next.slice(0, 4)); void router.replace({ query: { ...route.query, month: next } }) })
+const year = computed({
+  get: () => Number(month.value.slice(0, 4)),
+  set: (next) => { month.value = `${next}-${month.value.slice(5)}` },
+})
+watch(month, (next) => { void router.replace({ query: { ...route.query, month: next } }) })
 
 const { data, error } = await useAsyncData(
-  () => `earnings-performance:${route.params.org_slug}:${year.value}:${month.value}`,
+  () => `earnings-performance:${route.params.org_slug}:${month.value}`,
   async () => {
     const requestedMonth = month.value
-    const performance = await api<EarningsPerformance>('/api/dashboard/payments', { query: { view: 'performance', year: year.value, month: requestedMonth }, validate: isEarningsPerformance })
+    const performance = await api<EarningsPerformance>('/api/dashboard/payments', { query: { view: 'performance', year: Number(requestedMonth.slice(0, 4)), month: requestedMonth }, validate: isEarningsPerformance })
     if (!performance.months.some(row => row.month === requestedMonth)) {
-      throw createError({ statusCode: 502, statusMessage: `Krabiclaw did not return earnings for ${requestedMonth}`, data: { code: 'EARNINGS_MONTH_MISSING', field: `months.${requestedMonth}` } })
+      throw createError({ statusCode: 502, message: `Earnings are missing for ${requestedMonth}`, data: { code: 'EARNINGS_MONTH_MISSING', field: `months.${requestedMonth}` } })
     }
     return performance
   },
-  { watch: [month] },
 )
 const money = (amount: number) => paymentMoney(amount, data.value!.currency)
 const selected = computed(() => data.value?.months.find(row => row.month === month.value))

@@ -152,7 +152,7 @@ test('Today shows every booking type as one card for its own business, with the 
     // Each business sees its own bookings and nothing of another's, in the business's own word.
     assert.deepEqual(law.cards.map(shape), [
       { id: `booking:${await record(evaConsultation)}`, headline: 'Eva’s consultation', line: 'Estate Planning Consultation · law office', action: { title: 'Share how to prepare', detail: 'Help Eva get ready' }, to: `/dashboard/law/messages/${evaConsultation}` },
-      { id: `booking:${await record(ianConsultation)}`, headline: 'Ian’s consultation', line: 'Initial Case Review · law office', action: { title: 'Say hello to your guests', detail: 'See if they have any questions' }, to: `/dashboard/law/messages/${ianConsultation}` },
+      { id: `booking:${await record(ianConsultation)}`, headline: 'Ian’s consultation', line: 'Initial Case Review · law office', action: { title: 'Say hello to your client', detail: 'See if they have any questions' }, to: `/dashboard/law/messages/${ianConsultation}` },
     ])
     assert.deepEqual([law.title, law.cards[0]!.when], ['You have 2 upcoming consultations', visit(estate.startsAt)])
     // A class is one card for everyone booked into it.
@@ -208,8 +208,8 @@ test('Today shows every booking type as one card for its own business, with the 
     assert.equal(replied.ok, true, JSON.stringify(replied))
     const after = await today('law', 'upcoming')
     assert.deepEqual(after.cards.map(card => [card.headline, card.action.title, card.draft]), [
-      ['Eva’s consultation', 'Say hello to your guests', null],
-      ['Ian’s consultation', 'Say hello to your guests', null],
+      ['Eva’s consultation', 'Say hello to your client', null],
+      ['Ian’s consultation', 'Say hello to your client', null],
     ])
     assert.deepEqual(await welcomes(), [])
     // The sent message is the conversation's, read back from the ledger.

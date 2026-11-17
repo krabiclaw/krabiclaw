@@ -387,7 +387,7 @@ const realtime = useDashboardInvalidations()
 watch(realtime.event, event => {
   if ((event?.type === 'stay.changed' || event?.type === 'nights.changed') && event.product_id === props.productId && !busy.value) void refresh()
 })
-watch(realtime.connectionEpoch, epoch => { if (epoch > 0 && !busy.value) void refresh() })
+watch(realtime.reconnectEpoch, epoch => { if (epoch > 0 && !busy.value) void refresh() })
 const calendarUi = {
   header: 'gap-3 pb-6', heading: 'text-left', body: 'pt-0', grid: 'w-full',
   gridWeekDaysRow: 'mb-2 grid-cols-7 gap-1 sm:gap-2', headCell: 'py-3 text-xs font-normal text-muted',

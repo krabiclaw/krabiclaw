@@ -36,7 +36,7 @@ export function useConversationUnread(connection?: DashboardInvalidationConnecti
         started = revision
         const workspace = orgId.value
         if (!reader.value || inboxRoute.value) break
-        readConnectionEpoch = realtime.connectionEpoch.value
+        readConnectionEpoch = realtime.reconnectEpoch.value
         try {
           const response = await applicationFetch('/api/messages', {
             query: { ...(workspace && { organization_id: workspace }), mailbox: 'current', limit: 1 },
@@ -71,7 +71,7 @@ export function useConversationUnread(connection?: DashboardInvalidationConnecti
     if (event.type === 'access.changed') inbox.value = null
     if (['MESSAGE_CREATE', 'MESSAGE_UPDATE', 'MESSAGE_ACK', 'CONVERSATION_LEAVE', 'access.changed'].includes(event.type)) void refresh()
   }, { flush: 'sync' })
-  watch(realtime.connectionEpoch, epoch => { if (epoch > readConnectionEpoch) void refresh() })
+  watch(realtime.reconnectEpoch, epoch => { if (epoch > readConnectionEpoch) void refresh() })
   watch(realtime.accessEnded, () => { revision++; personal.value = null }, { flush: 'sync' })
   watch(useState('dashboard-unread-refresh', () => 0), () => void refresh())
   return { unread, refresh, error, unavailable: computed(() => Boolean(error.value) || realtime.status.value === 'failed') }

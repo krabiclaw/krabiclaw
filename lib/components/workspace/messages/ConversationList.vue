@@ -94,6 +94,7 @@
 import { authClient } from '~/lib/auth-client'
 import type { LocationQueryRaw } from 'vue-router'
 import { getErrorMessage } from '~/utils/errors'
+import { getVerticalCopy } from '~/utils/vertical-copy'
 import { isThreadListResponse, type ThreadListItem, type ThreadListPage } from '~/lib/components/workspace/messages/guest-thread-client'
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
@@ -152,7 +153,7 @@ const emptyDescription = computed(() => {
   if (search.value) return `Nothing matched “${search.value}”.`
   if (blockedOnly.value) return 'Guests you block appear here until you unblock them.'
   if (pastOnly.value) return 'Conversations move here when you archive them, or once they have been quiet for 30 days after the last message and any stay or booking has ended.'
-  return props.personalScope ? 'Your conversations with businesses will appear here.' : 'When a guest writes, the conversation appears here.'
+  return props.personalScope ? 'Your conversations with businesses will appear here.' : `When a ${getVerticalCopy(dashboard.organization.value?.vertical).guestLabel} writes, the conversation appears here.`
 })
 
 const listQuery = computed(() => ({
@@ -232,16 +233,15 @@ const { data, pending, status, error: threadsError, refresh, clear } = await use
     const held = realtime.held.take(`inbox:${scope}`)
     if (held) {
       const window = held.value as ThreadListPage
-      readConnectionEpoch = realtime.connectionEpoch.value
+      readConnectionEpoch = realtime.reconnectEpoch.value
       reuseExpiresAt = held.expiresAt
       loadedPages = 1 + window.pagination.offset / window.pagination.limit
       rowsKey.value = scope
       return window
     }
-    await realtime.waitForFirstOpen(signal)
   }
   if (signal.aborted || scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
-  readConnectionEpoch = realtime.connectionEpoch.value
+  readConnectionEpoch = realtime.reconnectEpoch.value
   if (loadedScope !== scope) { loadedScope = scope; loadedPages = 1 }
   const { page, fetched } = await loadWindow(loadedPages, scope, signal)
   if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
@@ -401,7 +401,7 @@ onScopeDispose(() => {
   const current = page.value
   if (!props.personalScope && current && reader.value && status.value === 'success' && !loadingMore.value && !reconciling
     && !nextPageError.value && !toggling.size && !fullRefresh && !changedIds.size && realtime.status.value === 'open'
-    && readConnectionEpoch === realtime.connectionEpoch.value) {
+    && readConnectionEpoch === realtime.reconnectEpoch.value) {
     // Mailboxes and labels change with time. Reusing a held read does not extend its life.
     realtime.held.hold(realtime.held.begin(`inbox:${listKey.value}`, event => event.type === 'access.changed'
       || ((event.type === 'MESSAGE_ACK' || event.type === 'CONVERSATION_LEAVE') && event.user_id === reader.value)
@@ -517,7 +517,7 @@ watch(realtime.event, event => {
 }, { flush: 'sync' })
 
 watch(realtime.accessEnded, clearInbox, { flush: 'sync' })
-watch(realtime.connectionEpoch, epoch => {
+watch(realtime.reconnectEpoch, epoch => {
   if (readConnectionEpoch !== null && epoch > readConnectionEpoch) reconcile()
 }, { immediate: true })
 </script>

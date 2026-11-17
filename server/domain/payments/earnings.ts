@@ -22,11 +22,8 @@ export async function paymentPictures(db: DbClient, organizationId: string, paym
   const ids = payments.map(payment => payment.id)
   if (!ids.length) return new Map()
   const json = JSON.stringify(ids)
-  const [bookings, lines] = await Promise.all([
-    queryAll<{ payment_id: string; product_id: string; name: string; starts_at: string; ends_at: string; timezone: string }>(db, `SELECT p.id AS payment_id, b.product_id, pr.name, b.starts_at, b.ends_at, b.timezone FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id JOIN products pr ON pr.id = b.product_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
-    queryAll<{ payment_id: string; product_id: string | null }>(db, `SELECT o.payment_id, (SELECT l.product_id FROM payment_order_lines l WHERE l.order_id = o.id ORDER BY l.rowid LIMIT 1) AS product_id FROM payment_orders o WHERE o.payment_id IN (SELECT value FROM json_each(?))`, [json]),
-  ])
-  const productIds = [...bookings.map(row => row.product_id), ...lines.map(row => row.product_id).filter((id): id is string => !!id)]
+  const bookings = await queryAll<{ payment_id: string; product_id: string; name: string; starts_at: string; ends_at: string; timezone: string }>(db, `SELECT p.id AS payment_id, b.product_id, pr.name, b.starts_at, b.ends_at, b.timezone FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id JOIN products pr ON pr.id = b.product_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json])
+  const productIds = bookings.map(row => row.product_id)
   const locationIds = payments.map(payment => payment.location_id).filter((id): id is string => !!id)
   const [products, locations] = await Promise.all([
     loadOwnerPictures(db, organizationId, 'product', productIds),
@@ -37,10 +34,8 @@ export async function paymentPictures(db: DbClient, organizationId: string, paym
     const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
     if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error(`Payment ${payment.id} has no immutable title`)
     const booking = bookings.find(row => row.payment_id === payment.id)
-    const line = lines.find(row => row.payment_id === payment.id)
     // Use only the image of the payment's actual subject; an absent image is optional.
     const image_url = booking ? products.get(booking.product_id)?.imageUrl
-      : line?.product_id ? products.get(line.product_id)?.imageUrl
       // A stay not yet booked shows its home's place.
       : 'stay' in snapshot && payment.location_id ? locations.get(payment.location_id)?.imageUrl
       : null
@@ -143,14 +138,13 @@ export function payoutStatusLabel(status: string): string {
 export async function paymentTransactions(db: DbClient, principal: FinancialPrincipal, organizationSlug: string, page: { payments: VisiblePayment[]; next_cursor: string | null }) {
   const ids = page.payments.map(payment => payment.id)
   const json = JSON.stringify(ids)
-  const [pictures, buyers, bookings, orders] = ids.length
+  const [pictures, buyers, bookings] = ids.length
     ? await Promise.all([
         paymentPictures(db, principal.organizationId, page.payments),
         queryAll<{ id: string; name: string | null }>(db, `SELECT p.id, COALESCE(json_extract(r.payload_json, '$.guest.name'), u.name) AS name FROM payments p LEFT JOIN user u ON u.id = p.buyer_user_id LEFT JOIN payment_checkout_holds h ON h.payment_id = p.id LEFT JOIN conversations r ON r.id = h.conversation_id WHERE p.id IN (SELECT value FROM json_each(?))`, [json]),
         queryAll<{ payment_id: string; booking_id: string; conversation_id: string | null; nights: number }>(db, `SELECT p.id AS payment_id, b.id AS booking_id, (SELECT c.id FROM conversations c WHERE c.booking_id = b.id AND c.kind = 'booking') AS conversation_id, b.product_session_id IS NULL AS nights FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
-        queryAll<{ payment_id: string }>(db, `SELECT payment_id FROM payment_orders WHERE payment_id IN (SELECT value FROM json_each(?))`, [json]),
       ])
-    : [new Map<string, PaymentPicture>(), [], [], []]
+    : [new Map<string, PaymentPicture>(), [], []]
   const base = `/dashboard/${encodeURIComponent(organizationSlug)}/bookings`
   return {
     next_cursor: page.next_cursor,
@@ -160,7 +154,7 @@ export async function paymentTransactions(db: DbClient, principal: FinancialPrin
       // A stay opens by its id, any other booking by its conversation, as the bookings pages address them.
       const to = booking?.nights === 1 ? `${base}/stay/${encodeURIComponent(booking.booking_id)}`
         : booking?.conversation_id ? `${base}/booking/${encodeURIComponent(booking.conversation_id)}`
-        : `${base}/${orders.some(row => row.payment_id === payment.id) ? 'order' : 'payment'}/${encodeURIComponent(payment.id)}`
+        : `${base}/payment/${encodeURIComponent(payment.id)}`
       return {
         id: payment.id, created_at: payment.created_at, currency: payment.currency, amount: payment.amount, captured_amount: payment.captured_amount, refunded_amount: payment.refunded_amount,
         title: picture.title, image_url: picture.image_url, buyer_name: buyers.find(row => row.id === payment.id)?.name ?? null,

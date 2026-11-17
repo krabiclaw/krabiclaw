@@ -1,6 +1,7 @@
 import type { EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import type { DashboardScopeHeaderModel } from '~/lib/components/workspace/dashboard/DashboardScopeHeader.vue'
 import { authClient } from '~/lib/auth-client'
+import type { organizationRoles } from '~/utils/organization-access'
 import { canOpenPlatformAccounts, canOpenPlatformReports } from '~/utils/platform-admin-access'
 import { onboardingLink } from '~/composables/useOnboardingFlow'
 import type { WebsiteOnboardingResumeAction } from '~/shared/onboarding-flow'
@@ -25,10 +26,11 @@ export function useOrganizationSettingsNavigation(
 
   const base = computed(() => organization.value ? `/dashboard/${encodeURIComponent(organization.value.slug)}` : null)
 
-  // Menu and Search share these exact organization checks. Personal has no
-  // organization permissions to read; no active-member role query is needed.
-  // The loaded context's role is part of the key, so a role change (a
-  // self-demotion on Team refreshes it) asks Better Auth again.
+  // Menu and Search share these exact organization checks, made locally from the
+  // member's role. The loaded workspace context carries the role; Account
+  // settings opened outside a workspace route asks Better Auth for it once.
+  // The context's role is part of the key, so a role change (a self-demotion
+  // on Team refreshes it) checks again.
   const contextRole = computed(() => dashboard.organization.value?.id === organization.value?.id ? dashboard.organization.value?.role ?? '' : '')
   const permissionLoad = useAsyncData(
     () => `menu-organization:${session.value.data?.user.id ?? ''}:${organization.value?.id ?? ''}:${contextRole.value}`,
@@ -36,16 +38,15 @@ export function useOrganizationSettingsNavigation(
       const target = organization.value
       const userId = session.value.data?.user.id
       if (!target || !userId) return null
-      const [payments, billing, team] = await Promise.all([
-        authClient.organization.hasPermission({ organizationId: target.id, permissions: { payments: ['read'] }, fetchOptions: { signal } }),
-        authClient.organization.hasPermission({ organizationId: target.id, permissions: { billing: ['read'] }, fetchOptions: { signal } }),
-        authClient.organization.hasPermission({ organizationId: target.id, permissions: { members: ['read'] }, fetchOptions: { signal } }),
-      ])
-      signal.throwIfAborted()
-      for (const permission of [payments, billing, team]) {
-        if (permission.error) throw new Error(permission.error.message || 'Your permissions could not be checked.')
+      let role = contextRole.value
+      if (!role) {
+        const result = await authClient.organization.getActiveMemberRole({ query: { organizationId: target.id }, fetchOptions: { signal } })
+        if (result.error) throw new Error(result.error.message || 'Your role could not be read.')
+        role = result.data.role
       }
-      return { organizationId: target.id, userId, payments: payments.data!.success, billing: billing.data!.success, team: team.data!.success }
+      const can = (permissions: Parameters<typeof authClient.organization.checkRolePermission>[0]['permissions']) =>
+        authClient.organization.checkRolePermission({ role: role as keyof typeof organizationRoles, permissions })
+      return { organizationId: target.id, userId, payments: can({ payments: ['read'] }), billing: can({ billing: ['read'] }), team: can({ members: ['read'] }) }
     },
     { enabled: () => Boolean(organization.value && session.value.data?.user.id), dedupe: 'defer' },
   )
