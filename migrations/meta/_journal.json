@@ -106,13 +106,6 @@
       "when": 1794876442568,
       "tag": "0014_remove_historical_booking_no_show",
       "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "6",
-      "when": 1794879319698,
-      "tag": "0015_drop_payment_orders",
-      "breakpoints": true
     }
   ]
 }

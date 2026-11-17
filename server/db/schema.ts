@@ -2934,6 +2934,28 @@ export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  check("payment_holds_subject_check", sql`(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL) OR (product_id IS NOT NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND date(starts_at, '+0 days') IS starts_at AND date(ends_at, '+0 days') IS ends_at AND ends_at > starts_at)`),
 ]);
 
+export const payment_orders = sqliteTable("payment_orders", {
+ id: text().primaryKey(),
+ organization_id: text().notNull(),
+ buyer_user_id: text().references(() => user.id, { onDelete: "set null" }),
+ payment_id: text().notNull().unique().references(() => payments.id, { onDelete: "restrict" }),
+ currency: text().notNull(),
+ amount: integer().notNull(),
+ created_at: text().notNull(),
+});
+export const payment_order_lines = sqliteTable("payment_order_lines", {
+ id: text().primaryKey(),
+ order_id: text().notNull().references(() => payment_orders.id, { onDelete: "restrict" }),
+ product_id: text().notNull(),
+ variant_id: text().notNull(),
+ price_id: text().notNull(),
+ title: text().notNull(),
+ unit_amount: integer().notNull(),
+ quantity: integer().notNull(),
+ currency: text().notNull(),
+ tax_behavior: text().notNull(),
+}, () => [check("payment_order_lines_amount_check", sql`unit_amount >= 0 AND quantity > 0`)]);
+
 export const payment_refunds = sqliteTable("payment_refunds", {
  id: text().primaryKey(),
  payment_id: text().notNull().references(() => payments.id, { onDelete: "restrict" }),
