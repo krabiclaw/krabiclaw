@@ -538,6 +538,7 @@ test('Airbnb settings preflight the whole catalog and unchanged settings do not 
     assert.deepEqual(replayedCatalog[0]!.channel_push, { state: 'pushed', detail: null })
     assert.equal(channex.settings.length, 4, 'a replay completes only the booking section the committed plan changed')
     assert.deepEqual(channex.take(), [])
+    channex.settings = []
 
     const inheritedDate = day(10)
     const overrideDate = day(11)
