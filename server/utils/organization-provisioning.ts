@@ -9,7 +9,7 @@ import { createSystemSubdomain, isSystemSubdomainSpent, organizationPublicUrl } 
 import { executeBatch, queryFirst, type BatchQuery } from '~/server/db'
 import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 import type { CurrencyCode } from '~/shared/currencies'
-import { TENANT_THEME_ID } from '~/utils/site-routing'
+import { PLATFORM_CONTACT_EMAIL, TENANT_THEME_ID } from '~/utils/site-routing'
 import { isOrganizationWideRole, organizationAdapter } from '~/server/utils/member-access'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { measurementOutcome, originatingOwnerId, recordAndDeliverConversion } from '~/server/utils/organization-conversions'
@@ -289,7 +289,7 @@ async function emailOwnerWelcome(env: SetupEnv, db: D1Database, organizationId: 
   const result = await sendEmail(env, {
     to: owner.email,
     fromName: 'Paul at Blawby',
-    replyTo: 'hello@krabiclaw.com',
+    replyTo: PLATFORM_CONTACT_EMAIL,
     subject: message.title,
     ...email,
     idempotencyKey: `onboarding-welcome:${organizationId}:${hashEmail(owner.email)}`,

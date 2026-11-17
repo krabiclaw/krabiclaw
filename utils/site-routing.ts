@@ -11,6 +11,7 @@ export type SiteSurface = 'tenant' | 'platform'
 
 /** KrabiClaw's own site is the one organization on this theme id. Every other id is a customer site. */
 export const PLATFORM_THEME_ID = 'krabiclaw-theme-v1'
+export const PLATFORM_CONTACT_EMAIL = 'hello@blawby.com'
 /** The theme id provisioning gives a customer site. */
 export const TENANT_THEME_ID = 'tenant-theme-v1'
 

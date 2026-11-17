@@ -1,6 +1,6 @@
 ---
 name: krabiclaw-publishing
-description: Prepare a focused editorial outline, verified facts, comprehensive SEO research plan, and real screenshot/video assets, then assign a GitHub writing issue to the human writer. Use for Blawby feature launches and blog planning; handle approved human copy, CMS draft assembly, and authorized distribution through canonical MCP tools afterward.
+description: Plan and write Blawby feature launch articles from verified facts, an SEO plan and real screenshot/video assets, stage them as CMS drafts for the owner's approval, and distribute them through canonical MCP tools when authorized. Use for Blawby feature launches, blog articles and social distribution.
 ---
 
 # Publishing Blawby news
@@ -46,109 +46,42 @@ do not repost the same announcement to fill a calendar. Explicit schedules use
 the intended audience's timezone and the actual available scheduling mechanism;
 this skill creates no recurring task.
 
-## Prepare a human writing handoff
+## Write the article
 
-The default deliverable is one focused GitHub writing issue, not an AI-written
-article or a bundle of finished channel captions. The owner confirmed the human
-writer is GitHub `bamboochow` on 2026-10-07. Verify that account is assignable in
-this repository and check for an existing issue before creating another. A new
-writer assignment or issue must be authorized by the owner; this skill alone
-does not authorize contacting a person. Do not assign an AI agent to write the
-article or impersonate the writer's personal experience.
+The agent writes the article. Since 2026-11-17 the owner approves articles
+directly; there is no writer handoff issue and no separate writer review. Write
+in Paul's voice from the product profile, never invent personal experience, and
+check every claim against the deployed product before publishing.
 
-Give the writer a brief they can use without reading the conversation:
+Plan before drafting, and keep the plan with the campaign:
 
 1. **Audience, product outcome and editorial objective.** Identify one primary
    audience and its specific problem. State what Blawby enables that audience
-   to accomplish for its own customers or guests (the product outcome), what the
+   to accomplish for its own clients or guests (the product outcome), what the
    article should make the reader understand, reconsider or want to do (the
    editorial objective), and the one next step the reader should take (the CTA).
-   Keep these distinct; do not use a product capability as a substitute for the
-   article's purpose. Then define one focused angle rather than a kitchen-sink
-   feature list.
-2. **Working title and beat outline.** 3–4 beats describing what each beat must
-   establish; let the human choose the narrative, voice, and phrasing.
-3. **Fact sheet and boundary conditions.** Explicit plan requirements (e.g. Basic
-   free vs Growth $49/mo vs Business $149/mo, or legacy Commerce $89/mo), country
-   availability, payout currency limits, and direct source links. Separate verified
-   production behavior from Sandbox or upcoming capabilities.
-4. **Comprehensive SEO Research Plan:**
-   - **Target Search Intent & Keyword Clusters:** Primary target keyword, secondary
-     queries, long-tail problem keywords, and explicit intent classification
-     (informational vs commercial vs transactional).
-   - **Rich Snippets & Structured Schema:** Target JSON-LD types (`Product`, `Offer`,
-     `Event`, `LegalService`, `FAQPage`), specifying the exact attributes the
-     article will establish (price currency, availability, geo coordinates, author).
-   - **SEO Gap & Competitor Analysis:** Queries where Blawby currently lacks
-     visibility, zero-click questions to answer upfront (answer-first formatting in
-     the first 40–60 words for Google AI Overviews and Perplexity citations), and
-     E-E-A-T grounding.
-   - **Internal & Backlink Architecture:** Anchor text and URLs to canonical platform
-     surfaces (e.g. `/pricing`, `/services`, `/experiences`), customer showcase sites,
-     and targeted industry reference destinations.
-5. **Media packet.** Genuine screenshots or recordings placed against the outline
-   beat they support, with captions, source environment/date, and accessible links.
-   State the exact missing capture when an essential screen is inaccessible.
-6. **Deliverables and finish criteria.** A human-written article and summary, one
-   CTA to an existing verified destination, factual review, and owner acceptance.
-   Derive channel excerpts after the article is accepted; do not scatter a brief
-   into separate article/social/email writing assignments by default.
+   Keep these distinct, and choose one focused angle rather than a feature list.
+2. **Beats.** Three or four beats, each establishing one thing: the friction,
+   the capability, the result in practice, the next step.
+3. **Facts and boundaries.** Plan requirements in Stripe's terms (Basic free,
+   Growth $49/month, Business $149/month), country and currency limits, and
+   source links. Separate verified production behavior from staging, Sandbox or
+   upcoming capabilities.
+4. **SEO plan:**
+   - **Intent and keywords:** primary keyword, secondary queries, long-tail
+     problem keywords, and intent (informational, commercial or transactional).
+   - **Structured data:** the JSON-LD types the article supports (`Product`,
+     `Offer`, `Event`, `LegalService`, `FAQPage`) and the attributes it establishes.
+   - **Gaps:** queries where Blawby lacks visibility, and the question answered
+     in the first 40–60 words for AI Overviews and Perplexity citations.
+   - **Links:** anchor text and URLs to canonical platform pages (`/pricing`,
+     `/docs/…`), showcase sites and references.
+5. **Media.** Genuine screenshots, recordings or the approved film, placed
+   against the beat they support, with captions and source environment and date.
 
-### Standardized GitHub Issue Creation
-
-Create the handoff issue using the GitHub CLI, assigning the confirmed writer:
-
-```bash
-gh issue create \
-  --repo Blawby/blawby \
-  --assignee bamboochow \
-  --title "Launch Brief: [Working Title]" \
-  --body "$(cat <<'EOF'
-## Editorial Brief & Human Writer Handoff
-
-### 1. Audience, Product Outcome & Editorial Objective
-- **Target Reader:** [One primary audience and its specific problem]
-- **Product Outcome:** [What Blawby enables this audience to accomplish for its own customers or guests; one sentence describing the supported action and visible result]
-- **Editorial Objective:** [What the article should make the reader understand, reconsider, or want to do; describe the content's purpose, not product functionality]
-- **Reader Action (CTA):** [One next step for the reader, pointing to an existing, verified destination]
-- **Angle:** [Why this audience should care now: the friction, unmet need, or opportunity that makes the story worth attention]
-
-Keep these outcomes distinct: the product outcome explains what the customer can achieve with Blawby; the editorial objective explains what the article must achieve with its reader; the CTA specifies the next action we want that reader to take.
-
-### 2. Beat Outline
-1. **Beat 1: The Friction / Need** — [What problem the operator or guest faces]
-2. **Beat 2: The New Capability** — [How the action works in Blawby]
-3. **Beat 3: The Result in Practice** — [The verified client outcome]
-4. **Beat 4: Next Steps / Horizon** — [CTA and preview of upcoming features]
-
-### 3. Factual & Technical Boundaries
-- **Plan Entitlement:** [e.g. Business ($149/month) required for direct paid stay bookings; distinguish manual stay records from guest payment collection]
-- **Geographic / Currency Limits:** [e.g. US Stripe Connect vs Thailand THB local payouts]
-- **Verified Sources:** [Links to documentation and canonical specs]
-
-### 4. SEO Research Plan
-- **Primary Keyword:** `[Primary keyword]`
-- **Secondary Keywords:** `[Keyword 1]`, `[Keyword 2]`, `[Keyword 3]`
-- **Search Intent:** [Informational / Commercial / Transactional]
-- **Rich Snippet / Schema:** [Target schema types: e.g. FAQPage, Product, Offer]
-- **Information Gain & Citation Gaps:** [Direct answers needed for AI search engines / Perplexity / Google AI Overviews]
-- **Internal Links:** [Links to /pricing, /docs/payments, etc.]
-
-### 5. Media Packet
-- Beat 1/2: `[Asset filename / URL]` — [Caption and verification date/env]
-- Beat 3: `[Asset filename / URL]` — [Caption and verification date/env]
-- Missing captures / notes: [Any pending Sandbox or client capture needed]
-
-### 6. Deliverable Checklist
-- [ ] Draft article in Markdown with frontmatter (title, summary, category)
-- [ ] Answer-first summary lead (40–60 words) answering the core query
-- [ ] Factual review against the /docs/payments help articles
-- [ ] Owner approval before CMS draft staging
-EOF
-)"
-```
-
-Read the created issue back with `gh issue view <number>` to verify both the body and assignee, and report the URL.
+Draft it as an unpublished CMS draft (below) with an answer-first summary of
+40–60 words, then show the owner the draft before publishing. Channel excerpts
+are derived after the article is approved.
 
 ## When to make a HyperFrames video
 
@@ -195,7 +128,7 @@ When an email broadcast to the Product News list is desired:
    report the connector failure, make at most one confirmation read and finish
    independent content preparation. Resume from fresh reads when the connection is restored.
 2. **Stage CMS draft:** Prepare ordered blocks with `create_blog_post` (keeping it as
-   an unpublished draft until copy is approved) or edit the existing article using
+   an unpublished draft until the owner approves it) or edit the existing article using
    `get_blog_post` and its latest `expected_updated_at`. Use the correct `blog` or
    `docs` collection and a category from `list_article_categories`. Save and place real
    media using canonical media tools.
@@ -257,8 +190,7 @@ Multi-vertical reality and geographic boundaries:
   The iOS app is a free account companion where distribution access is available;
   verify access before linking a download or announcing an App Store release.
 
-A focused writer outline follows an operator configuring their bookable session,
+A focused article follows an operator configuring their bookable session,
 a guest reserving and paying, and the confirmed calendar hold converting to a confirmed booking,
-**with verified sandbox evidence**. Assign the outline, verified SEO plan, and genuine
-assets to human writer `bamboochow` before adapting accepted copy for social channels.
-EOF
+**with verified sandbox evidence**. Write it from the plan, the verified SEO plan and genuine
+assets, and adapt the approved copy for social channels afterward.
