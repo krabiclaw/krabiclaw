@@ -75,7 +75,7 @@ test.describe('dashboard pane hierarchy', () => {
     await page.keyboard.press(shortcut)
     await expect(input).toBeFocused()
     await expect(dialog.getByText('Plan and billing', { exact: true })).toBeVisible()
-    expect(permissionRequests.length).toBeGreaterThan(0)
+    expect(permissionRequests).toHaveLength(0)
     await page.keyboard.press(shortcut)
     await expect(dialog).toBeHidden()
 

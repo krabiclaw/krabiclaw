@@ -28,9 +28,11 @@ jobs:
       - name: Check the live issuer and resource
         run: |
           set -euo pipefail
-          origin=$(jq -er '.websiteUrl | select(. == "https://blawby.com" or . == "https://krabiclaw.com")' server.json)
-          resource=$(jq -er --arg origin "$origin" '
-            select(.name == "io.github.krabiclaw/krabiclaw" and (.remotes | length) == 1) |
+          origin=$(jq -er '.websiteUrl | select(. == "https://blawby.com")' server.json)
+          namespace="io.github.${GITHUB_REPOSITORY_OWNER}/${GITHUB_REPOSITORY#*/}"
+          repository="https://github.com/${GITHUB_REPOSITORY}"
+          resource=$(jq -er --arg origin "$origin" --arg namespace "$namespace" --arg repository "$repository" '
+            select(.name == $namespace and .repository.url == $repository and (.remotes | length) == 1) |
             .remotes[0] | select(.type == "streamable-http" and .url == ($origin + "/api/mcp")) | .url
           ' server.json)
           curl -fsS "$origin/.well-known/oauth-authorization-server" |

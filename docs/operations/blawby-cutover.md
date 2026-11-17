@@ -1,6 +1,6 @@
 # Blawby apex cutover (#1869)
 
-This is the production operator handoff for [#1869](https://github.com/krabiclaw/krabiclaw/issues/1869).
+This is the production operator handoff for [#1869](https://github.com/Blawby/blawby/issues/1869).
 Staging runs at `https://staging.krabiclaw.com` with its existing aliases and
 media path. No production route, secret, zone, redirect, directory review,
 registry version or CMS operation is activated by the staging release.
@@ -28,7 +28,7 @@ registry version or CMS operation is activated by the staging release.
   WhatsApp and Channex endpoint. The Instagram callback includes
   `/api/auth/oauth2/callback/instagram`. There is no Google Calendar inbound
   watch to renew: change ingestion was retired in
-  [8093d7cc0](https://github.com/krabiclaw/krabiclaw/commit/8093d7cc02a9a39d94e9b64d83e8d1c189a608be).
+  [8093d7cc0](https://github.com/Blawby/blawby/commit/8093d7cc02a9a39d94e9b64d83e8d1c189a608be).
   Check live busy reads and the existing one-way booking event flow.
 - Read the production `platform` organization and its pages, articles,
   locales, Q&A and media with the authorized owner connection. Save full
