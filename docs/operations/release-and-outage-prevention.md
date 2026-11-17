@@ -82,8 +82,10 @@ migrations to `migrations-history/<version>/`. Prepare it while the old Worker
 stays live with `scripts/pull-production-snapshot.ts`: run the read-only
 preflight against the live source (`--source`, `--out`) and keep its report,
 bulk-load the unbound database, repoint the binding, wait for old HTTP and cron
-invocations to finish, then load the final delta with `--delta-from`. Inspect
-rows changed or deleted since the initial copy and carry them explicitly.
+invocations to finish, then load the final delta with `--delta-from`. The delta
+only inserts rows the initial copy did not hold, so it never overwrites a write
+already made on the replacement; it names every row that changed or was deleted
+on the source since the initial copy, and those are carried over by hand.
 
 Before dropping a table or writer, remove every runtime reader and writer, map
 any records the canonical schema still needs, and fail on unmapped records

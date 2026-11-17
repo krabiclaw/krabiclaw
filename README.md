@@ -44,9 +44,14 @@ Nuxt 5 nightly + Nitro 3 + Cloudflare Workers + D1.
 corepack yarn install
 cp .env.example .env        # then fill in the application secrets
 corepack yarn local:setup   # empty local D1 at the current migration
-corepack yarn dev           # http://localhost:3000
+corepack yarn dev           # http://localhost:3000; leave it running
+```
+
+In a second terminal:
+
+```bash
 corepack yarn playwright install chromium   # once
-corepack yarn local:seed    # with yarn dev running
+corepack yarn local:seed
 ```
 
 Use the exact Node version in `.nvmrc`. `.env` is the single local
