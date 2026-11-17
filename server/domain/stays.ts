@@ -397,7 +397,8 @@ function amount(value: unknown, field: string, allowNegative = false): number {
 }
 
 /** A nights booking at its home, with its conversation's guest contact: `s` is the booking. */
-const STAY_FROM = `bookings s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
+const STAY_FROM = `bookings s JOIN organization org ON org.id = s.organization_id
+  JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
   JOIN conversations r ON r.organization_id = s.organization_id AND r.booking_id = s.id AND r.kind = 'booking'`
 const STAY_COLUMNS = `s.id, s.product_id, s.booked_product_id,
   (SELECT COALESCE(home.internal_name, p.name) FROM product_stay_configs home
@@ -405,7 +406,7 @@ const STAY_COLUMNS = `s.id, s.product_id, s.booked_product_id,
     WHERE home.organization_id=s.organization_id AND home.product_id=s.booked_product_id) AS booked_home_name,
   s.location_id, s.timezone, s.channel, s.owner, s.status, s.overbooked, s.starts_at, s.ends_at,
   s.adults, s.children, s.infants, s.party_size, json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
-  s.user_id, s.total_minor, s.currency, s.private_notes, s.provider, s.external_booking_id, s.channel_booking_id, r.id AS conversation_id, s.cancelled_at, s.cancellation_reason,
+  s.user_id, s.total_minor, org.default_currency AS currency, s.private_notes, s.provider, s.external_booking_id, s.channel_booking_id, r.id AS conversation_id, s.cancelled_at, s.cancellation_reason,
   json_extract(s.policy_json, '$.cancellation') AS cancellation_policy, ${historicalNoShowAtSql('r')} AS no_show_at, s.answers, s.version, s.created_at, s.updated_at,
   ${stayRequestRespondBySql('s')} AS respond_by, ${stayRequestPayBySql('r.id')} AS pay_by`
 
@@ -2727,6 +2728,9 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   if (conversation && (conversation.organization_id !== organizationId || conversation.product_id !== productId)) {
     throw new HTTPError({ statusCode: 409, message: 'The provider booking and conversation belong to different homes', data: { code: 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', field: 'external_booking_id' } })
   }
+  const [home] = await stayHomesWhere(db, organizationId, landing, { sql: '1 = 1', params: [] })
+  if (!home) fail(404, 'STAY_HOME_NOT_FOUND', 'The channel booking home was not found', 'product_id')
+  if (booking.currency !== home.currency) fail(409, 'CURRENCY_MISMATCH', `The channel booking is in ${booking.currency} and the business is in ${home.currency}`, 'currency')
   // The channel's conversation about this reservation is its booking's one conversation: a booking that opened its own joins it.
   const joinChannelConversation = async (bookingId: string, from: string, into: string) => executeBatch(db,
     await joinBookingConversationQueries(db, { organizationId, bookingId, from, into, now: new Date().toISOString() }), { operation: 'Join channel booking conversation' })
@@ -2783,8 +2787,6 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   }
   const id = existing?.id ?? crypto.randomUUID()
   const previous = existing ? await storedStay(db, organizationId, existing.id) : null
-  const [home] = await stayHomesWhere(db, organizationId, landing, { sql: '1 = 1', params: [] })
-  if (!home) fail(404, 'STAY_HOME_NOT_FOUND', 'The channel booking home was not found', 'product_id')
   const guestName = [booking.guest_name, booking.guest_surname].map(part => part?.trim()).filter(Boolean).join(' ') || null
   // A reservation naming no one uses the channel's reservation title.
   const reservation = `${STAY_CHANNEL_LABELS[booking.channel]} reservation ${booking.channel_booking_id ?? booking.external_booking_id}`
@@ -3452,8 +3454,9 @@ export async function readCheckoutStay(db: DbClient, organizationId: string, sta
 export async function channelReservationAmounts(db: DbClient, organizationId: string, from: string, until: string) {
   // The arrival day is read in each home's clock; SQL narrows by instants a day wider either side.
   const reservations = await queryAll<{ channel: string; currency: string; total_minor: number; starts_at: string; timezone: string }>(db,
-    `SELECT channel, currency, total_minor, starts_at, timezone FROM bookings
-      WHERE organization_id = ? AND owner = 'channel' AND status = 'confirmed' AND product_session_id IS NULL AND starts_at >= ? AND starts_at < ?`,
+    `SELECT b.channel, org.default_currency AS currency, b.total_minor, b.starts_at, b.timezone
+       FROM bookings b JOIN organization org ON org.id = b.organization_id
+      WHERE b.organization_id = ? AND b.owner = 'channel' AND b.status = 'confirmed' AND b.product_session_id IS NULL AND b.starts_at >= ? AND b.starts_at < ?`,
     [organizationId, addDays(from, -1), `${addDays(until, 1)}T14:00:00.000Z`])
   const totals = new Map<string, { channel: string; currency: string; amount: number; count: number }>()
   for (const reservation of reservations) {
