@@ -179,7 +179,6 @@ export async function buildPublicShellPayload(
     can_schedule?: boolean
     compliance?: PublicCompliance | null
     page_links?: PublicPageLink[]
-    search_console_verification?: string | null
     localizations?: readonly ExactPublicLocalization[]
   },
 ): Promise<PublicShellPayload> {
@@ -276,6 +275,6 @@ export async function buildPublicShellPayload(
     can_schedule: extra?.can_schedule ?? false,
     compliance: extra?.compliance ?? null,
     page_links: extra?.page_links ?? [],
-    search_console_verification: extra?.search_console_verification ?? (organization.search_console_verification as string | null) ?? null,
+    search_console_verification: (organization.search_console_verification as string | null) ?? null,
   }
 }

@@ -46,8 +46,7 @@ import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { hasPublicLocationPages, resolvePublicSite } from '~/utils/site-routing'
 import { isPublicSourceRouteRoot } from '~/shared/public-locale-routes'
 import { siteRendersPageDocumentAt } from '~/shared/tenant-page-paths'
-import { getSourceLocale } from '~/server/utils/organization-locales'
-import { assertPublicOrganizationLanguage } from '~/server/utils/localization'
+import { assertPublicOrganizationLanguage, getPersistedSourceLocale } from '~/server/utils/localization'
 import {
   loadExactPublicLocalizations,
   projectExactLocalizedCollection,
@@ -306,11 +305,12 @@ async function loadPublicPageSource(
     if (mutateResponseHeaders) setHeader(event, "x-bootstrap-cache", "SKIP");
   }
 
-  const sourceLocale = await getSourceLocale(db, organizationId)
+  const source = await getPersistedSourceLocale(db, organizationId)
+  const sourceLocale = source.locale
   options.signal?.throwIfAborted();
 
   const orgId = organization.id;
-  const language = await assertPublicOrganizationLanguage(db, orgId, locale ?? sourceLocale)
+  const language = await assertPublicOrganizationLanguage(db, orgId, locale ?? sourceLocale, source)
   const localizedLocale = language.source ? null : language.locale
   let publicLocalizations: ExactPublicLocalization[] = []
   if (localizedLocale) {
@@ -354,8 +354,7 @@ async function loadPublicPageSource(
   // Build batch — one subrequest to D1 for all inline queries
   const batchStmts: BatchQuery[] = [];
   let idxLoc = -1;
-  let idxReviews = -1,
-    idxLocReviews = -1;
+  let idxReviews = -1;
   let idxFullReviews = -1,
     idxReviewAggregate = -1,
     idxPhotos = -1,
@@ -372,6 +371,8 @@ async function loadPublicPageSource(
 
   const previewRestaurant = isPreviewAuthorized && organization.vertical === 'restaurant'
   const previewMenu = previewRestaurant && page === 'menu'
+  const productKind = page === 'experiences' ? 'experience' : page === 'menu' ? 'dish'
+    : page === 'stays' ? 'stay' : page === 'reservations' ? 'table' : undefined
   const shellIndexes = appendPublicShellQueries(batchStmts, orgId, previewRestaurant);
   if (needsLocations) idxLoc = shellIndexes.locations;
 
@@ -382,10 +383,11 @@ async function loadPublicPageSource(
          JOIN media_assets ma ON ma.id = mp.asset_id
           AND ma.organization_id = mp.organization_id
           AND ma.status = 'active'
-        WHERE mp.organization_id = ? 
+        WHERE mp.organization_id = ?
           AND mp.owner_type = 'product' AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
+          ${productKind ? 'AND EXISTS (SELECT 1 FROM products p WHERE p.id = mp.owner_id AND p.organization_id = mp.organization_id AND p.kind = ?)' : ''}
         ORDER BY mp.owner_id, mp.slot, mp.sort_order, mp.id`,
-      [orgId],
+      [orgId, ...(productKind ? [productKind] : [])],
     )
   }
 
@@ -403,15 +405,6 @@ async function loadPublicPageSource(
       [organizationId],
     );
 
-
-  if (locationId && requestedDatasets.has("reviews"))
-    idxLocReviews = push(
-      `SELECT r.id, r.author_name, r.rating, r.content, r.created_at, r.source, r.original_review_date, r.original_reference, r.google_review_metadata, r.owner_reply, r.owner_reply_at,
-              ${publicReviewLocationProtectedSql('r')} AS is_stay_location
-       FROM reviews r WHERE r.location_id = ? AND r.organization_id = ? AND r.status = 'approved'
-       ORDER BY CASE WHEN r.source = 'google_places' THEN r.original_review_date ELSE r.created_at END DESC, r.id ASC LIMIT 3`,
-      [locationId, organizationId],
-    );
 
   if (locationId && requestedDatasets.has("reviews"))
     idxFullReviews = push(
@@ -484,10 +477,6 @@ async function loadPublicPageSource(
   const reviewRows =
     idxReviews >= 0
       ? (batchResults[idxReviews] as { results: Record<string, unknown>[] })
-      : { results: [] as Record<string, unknown>[] };
-  const locationReviewRows =
-    idxLocReviews >= 0
-      ? (batchResults[idxLocReviews] as { results: Record<string, unknown>[] })
       : { results: [] as Record<string, unknown>[] };
   const fullReviewRows =
     idxFullReviews >= 0
@@ -565,7 +554,7 @@ async function loadPublicPageSource(
     tenantPagePromise,
     buildPublicShellPayload(db, organization, batchResults, shellIndexes, env, undefined, { localizations: localizedLocale ? publicLocalizations : undefined }),
     includeProducts
-      ? listOrganizationProducts(db, { organizationId: orgId, kind: page === 'experiences' ? 'experience' : page === 'menu' ? 'dish' : page === 'stays' ? 'stay' : page === 'reservations' ? 'table' : undefined, publishedOnly: !previewMenu, env }).then(products => products.map(publicProduct))
+      ? listOrganizationProducts(db, { organizationId: orgId, kind: productKind, publishedOnly: !previewMenu, env }).then(products => products.map(publicProduct))
       : [],
     includeProducts
       ? locationId
@@ -757,7 +746,7 @@ async function loadPublicPageSource(
     tenant_page: tenantPage,
     products,
     collections,
-    location_reviews: (locationReviewRows?.results ?? []).map(({ is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))),
+    location_reviews: fullReviewList.slice(0, 3).map(({ title: _title, is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))),
     global_reviews: needsGlobalReviews ? (reviewRows.results ?? []).map(({ is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))) : [],
     reviews_aggregate: requestedDatasets.has("reviews") ? reviews_aggregate : null,
     reviews_list: requestedDatasets.has("reviews") ? fullReviews : [],

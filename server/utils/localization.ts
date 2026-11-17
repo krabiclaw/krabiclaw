@@ -151,11 +151,12 @@ export async function assertOrganizationLanguage(
   // Authoring needs the language to exist; the public site needs it published.
   // One question, one query, and the caller says which answer it needs.
   requires: 'available' | 'exists' | 'published' = 'exists',
+  sourceLocale?: OrganizationLocaleRecord,
 ): Promise<{ locale: string; source: boolean; status: OrganizationLocaleRecord['status'] | null; platform_messages: Record<string, string> | null }> {
   const locale = assertExactCanonicalLocale(localeInput)
   const catalog = platformLocale(locale)
   if (!catalog) localizationError(403, 'PLATFORM_LOCALE_UNAVAILABLE', 'The platform locale is unavailable', { locale })
-  const source = await getPersistedSourceLocale(db, organizationId)
+  const source = sourceLocale ?? await getPersistedSourceLocale(db, organizationId)
   if (locale === source.locale) return { locale, source: true, status: source.status, platform_messages: { ...catalog.messages } }
   const row = await queryFirst<OrganizationLanguageStateRow & { organization_slug: string | null }>(db, `
     SELECT sl.status AS locale_status, o.slug AS organization_slug
@@ -181,9 +182,10 @@ export async function assertPublicOrganizationLanguage(
   db: DbClient,
   organizationId: string,
   locale: string,
+  sourceLocale?: OrganizationLocaleRecord,
 ) {
   try {
-    return await assertOrganizationLanguage(db, organizationId, locale, 'published')
+    return await assertOrganizationLanguage(db, organizationId, locale, 'published', sourceLocale)
   } catch (error) {
     const code = error instanceof HTTPError ? error.data?.code : null
     if (
