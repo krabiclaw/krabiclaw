@@ -38,8 +38,7 @@ export default defineAppConfig({
       }
     },
     // One control size across the app, set once here: `lg`, 16px text in a
-    // 44px field with an 8px radius — Airbnb's host tools, measured
-    // (docs/design/airbnb-parity-audit.md). A page passes
+    // 44px field with an 8px radius — Airbnb's host tools, measured. A page passes
     // `size` only where a control genuinely differs; the commit bar's Save is
     // the one `xl`. Focus is a 2px ring in the text colour, as Airbnb's is
     // black. Buttons are neutral — navy in light, white in dark — and coral

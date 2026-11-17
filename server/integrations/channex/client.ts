@@ -2,7 +2,7 @@ import { HTTPError } from 'nitro'
 import { ChannexDataError, object, resource, type JsonRecord, type Resource } from './data'
 
 /**
- * The Channex API, as KrabiClaw calls it: one platform key, JSON:API bodies,
+ * The Channex API, as Blawby calls it: one platform key, JSON:API bodies,
  * and no wildcard passthrough. A failed write that Channex may still have
  * applied is `uncertain`; callers persist where they were and never retry it
  * blindly.
@@ -16,10 +16,10 @@ export interface ChannexEnv {
 }
 
 /**
- * A Channex call that failed, answered as KrabiClaw's coded error: 502 for a
+ * A Channex call that failed, answered as Blawby's coded error: 502 for a
  * provider failure, 504 when the background slice ended first, 500 when
- * KrabiClaw is not configured to call Channex. `providerStatus` is Channex's
- * own status (or the one KrabiClaw assigned a failure it detected), which
+ * Blawby is not configured to call Channex. `providerStatus` is Channex's
+ * own status (or the one Blawby assigned a failure it detected), which
  * decides whether a failure is worth retrying; `data.provider_status` carries
  * it to the caller.
  */

@@ -243,7 +243,7 @@ export async function upsertMcpWorkspacePreference(
 }
 
 /**
- * The last WhatsApp message a member sent KrabiClaw: its id, so Meta redelivering
+ * The last WhatsApp message a member sent Blawby: its id, so Meta redelivering
  * it is answered once, and Meta's own time for it, which opens the 24-hour
  * service window in which a photo can follow an alert.
  */

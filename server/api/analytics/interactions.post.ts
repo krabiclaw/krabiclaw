@@ -11,7 +11,7 @@ import type { InsightsClickEvent } from '~/shared/insights'
 
 const SIGNED_IN_EVENTS = new Set<string>(BROWSER_INTERACTION_EVENT_NAMES.filter(name => CONVERSION_EVENT_CATALOG[name].origin === 'authenticated'))
 
-// A signed-in KrabiClaw user's product usage. It is measured on the platform organization; the
+// A signed-in Blawby user's product usage. It is measured on the platform organization; the
 // signed-in user is the actor, and the organization they were working on (which they must belong
 // to) is the subject. Only the catalog's allowlisted scalar properties are kept.
 export default defineHandler(async (event) => {

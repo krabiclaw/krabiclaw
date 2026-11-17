@@ -164,7 +164,7 @@ test('a new booking, its cancellation and a guest message are unread until read,
     const seating = await openSeating(owner, 2, 2 * 86_400_000)
     const { requestId: reservationId, cancellationToken } = await bookTable(guest, { name: 'Unread schedule proof', email: `unread-schedule-${Date.now()}@playwright.example`, phone: '+61491570007', partySize: 2, seating })
 
-    // The booking's opening message is KrabiClaw's, so it is unread for the team until opened.
+    // The booking's opening message is Blawby's, so it is unread for the team until opened.
     expect(await unread()).toBe(before + 1)
     expect(await row(reservationId)).toMatchObject({ unread: true })
     // Reading the conversation writes nothing: it stays unread until the reader says how far they read.
@@ -176,7 +176,7 @@ test('a new booking, its cancellation and a guest message are unread until read,
     expect(await row(reservationId)).toMatchObject({ unread: false })
     expect(await unread()).toBe(before)
 
-    // The guest cancels: KrabiClaw's cancellation message is news, so the conversation is unread again.
+    // The guest cancels: Blawby's cancellation message is news, so the conversation is unread again.
     const cancelled = await guest.post(`/api/public/booking-requests/${reservationId}/cancel`, {
       headers: { ...tenantHeaders, authorization: `Bearer ${cancellationToken}` },
     })

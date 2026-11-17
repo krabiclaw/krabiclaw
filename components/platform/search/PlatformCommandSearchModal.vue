@@ -202,7 +202,7 @@ const surfaceLabel = computed(() => {
   return 'Dashboard'
 })
 
-// KrabiClaw is a proper noun; the other surfaces read as ordinary nouns mid-sentence.
+// Blawby is a proper noun; the other surfaces read as ordinary nouns mid-sentence.
 const surfacePhrase = computed(() => props.surface === 'public'
   ? surfaceLabel.value
   : surfaceLabel.value.toLowerCase())

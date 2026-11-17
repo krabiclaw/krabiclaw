@@ -68,7 +68,7 @@ export async function listChannelPosts(env: CloudflareEnv, organizationId: strin
     return { posts: result.items.map(item => facebookPost(item, input.target_id)), next_after: result.after }
   }
   if (connection.channel === 'discord') {
-    // The channel's messages newest first; only the KrabiClaw bot's are channel posts. `after` is the oldest message id read.
+    // The channel's messages newest first; only the Blawby bot's are channel posts. `after` is the oldest message id read.
     const messages = await listMessages(env, connection.target.channelId, { before: page.after, limit: page.limit })
     return {
       posts: messages.filter(message => message.author.id === env.DISCORD_CLIENT_ID).map(message => discordPost(message, connection.target)),

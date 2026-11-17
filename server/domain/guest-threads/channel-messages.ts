@@ -157,7 +157,7 @@ async function adoptThread(db: DbClient, env: ChannelEnv, home: HomeMapping, thr
   // The conversation the reservation opened when it landed joins the inquiry's, while nobody has written in it.
   // Any other timeline of the stay is its own, and two are reconciled by a person, never merged here.
   const joining = mapped && stay && mapped.conversation_id !== stay.conversation_id ? stay : null
-  // Nobody has written in it: no one's words, only what KrabiClaw recorded about the booking.
+  // Nobody has written in it: no one's words, only what Blawby recorded about the booking.
   if (joining && !await queryFirst(db, `SELECT 1 FROM conversations opened WHERE opened.id = ? AND opened.booking_id = ?
       AND NOT EXISTS (SELECT 1 FROM messages written WHERE written.conversation_id = opened.id AND (written.author_kind <> 'krabiclaw' OR written.event_name IN ('${MIRRORED_EVENT}', '${SCHEDULED_MESSAGE_EVENT}')))
       AND NOT EXISTS (SELECT 1 FROM channel_threads WHERE conversation_id = opened.id)`, [joining.conversation_id, joining.id])) {
@@ -226,7 +226,7 @@ async function mirrorMessage(db: DbClient, env: ChannelEnv, mapping: ChannelThre
       AND json_extract(payload_json, '$.provider_inserted_at') = ? AND json_array_length(payload_json, '$.attachments') = ?`,
     [mapping.conversation_id, authorKind, message.text, message.insertedAt, message.attachments.length])) return
   const entry = await appendMessage(db, {
-    // A channel's guest and host write on Airbnb, not as a KrabiClaw account; Airbnb Support is relayed by KrabiClaw.
+    // A channel's guest and host write on Airbnb, not as a Blawby account; Airbnb Support is relayed by Blawby.
     conversationId: mapping.conversation_id, authorKind, authorUserId: null,
     channel: 'airbnb', body: message.text, eventName: MIRRORED_EVENT, dedupeKey: `channex-message:${message.id}`,
     guard: { sql: "c.organization_id = ? AND NOT EXISTS (SELECT 1 FROM guest_thread_deliveries WHERE provider = 'channex' AND provider_message_id = ?)",

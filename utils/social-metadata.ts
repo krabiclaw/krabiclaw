@@ -5,7 +5,7 @@ import { mediaStillUrl, resolveOwnerPicture, type MediaPlacementOwnerType } from
 /**
  * Shared global OG/social SEO contract (#259).
  *
- * This is the single normalized payload every page — KrabiClaw's own and every
+ * This is the single normalized payload every page — Blawby's own and every
  * customer site's — feeds into `composeSocialMetadata()` to get a
  * complete, guaranteed set of `<title>`, meta description, canonical link, Open Graph,
  * and Twitter tags. Routes/composables provide data to this contract; they must not

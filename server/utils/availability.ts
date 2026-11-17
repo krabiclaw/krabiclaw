@@ -943,7 +943,7 @@ function fitsPublicWindow(session: SessionFacts, config: ProductBookingConfigRec
     outsideNotice(session.starts_at, config.advance_notice_minutes, Date.parse(now))
 }
 
-/** The one slot reader (docs/domain-model.md, "Open and blocked time"): one D1 batch for the window; openings and places computed in memory. */
+/** The one slot reader: one D1 batch for the window; openings and places computed in memory. */
 export interface SlotRead {
   /** SQL yielding the organization's id. */
   organization: BatchQuery

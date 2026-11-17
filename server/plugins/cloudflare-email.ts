@@ -52,7 +52,7 @@ async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
 async function processEmail(message: ForwardableEmailMessage, env: unknown, report: (error: unknown) => Promise<void>): Promise<void> {
   if (!isCloudflareEnvironment(env)) throw new Error('Inbound email needs the DB binding and EMAIL_REPLY_SECRET')
 
-  const reply = parseReplyToAddress(env, message.to)
+  const reply = parseReplyToAddress(message.to)
 
   const rawEmail = await readEmailBytes(message.raw)
   const parsed = await PostalMime.parse(rawEmail, { attachmentEncoding: 'arraybuffer' })

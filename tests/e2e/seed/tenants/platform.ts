@@ -1,6 +1,6 @@
 import type { SeedClient } from '../client.ts'
 
-// KrabiClaw's own site, as its administrator authors it: a home page whose hero
+// Blawby's own site, as its administrator authors it: a home page whose hero
 // carries its layered artwork, a pricing page that reads the plans from
 // billing, and the plugin and products pages. Only the structure the platform pages require is authored here.
 const PARALLAX_LAYERS = ['sky', 'clouds', 'mountains', 'far_trees', 'building_trees', 'foreground']

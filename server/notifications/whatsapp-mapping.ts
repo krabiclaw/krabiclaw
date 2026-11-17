@@ -1,4 +1,4 @@
-import type { WhatsAppTemplate } from '~/server/utils/whatsapp'
+import { WhatsAppTemplateRefusal, type WhatsAppTemplate } from '~/server/utils/whatsapp'
 import type { NotificationMessage } from './messages'
 
 /**
@@ -22,11 +22,9 @@ export interface WhatsAppMapping {
    */
   button?: { key: string }
   /**
-   * Fact keys this approved template has no slot for, and why.
-   *
-   * Only non-lead facts may appear here — a lead fact that cannot reach
-   * WhatsApp fails the build, because the whole point is that the important
-   * information cannot quietly stay behind in the email. Emptying this list
+   * Non-lead fact keys this approved template has no slot for, and why.
+   * Any other fact the template cannot carry refuses the WhatsApp send, so
+   * important information never stays behind in the email. Emptying this list
    * means asking Meta to approve a template with more slots.
    */
   cannotCarry?: Record<string, string>
@@ -136,16 +134,15 @@ export const WHATSAPP_MAPPINGS: Partial<Record<WhatsAppTemplate, WhatsAppMapping
 
 export interface WhatsAppMappingResult {
   vars: Record<string, string>
-  /** Fact keys the template could not carry, for logging and for the guard. */
+  /** The declared `cannotCarry` facts this message had. */
   omitted: string[]
 }
 
 /**
  * The same facts the email shows, in the slots the approved template offers.
- *
- * Facts are ordered by importance in the message, and this reads them by key,
- * so adding one to the email either lands in a slot or shows up here as
- * omitted — never as a silent difference between the two channels.
+ * A fact with no slot is refused (`WHATSAPP_TEMPLATE_FACT_UNCARRIED`) unless it
+ * is a non-lead fact the mapping declares in `cannotCarry`, so adding a fact to
+ * the email either lands in a slot or fails the send.
  */
 export function toWhatsAppVars(
   message: NotificationMessage,
@@ -167,6 +164,8 @@ export function toWhatsAppVars(
   }
 
   const carried = new Set(Object.values(mapping.facts))
-  const omitted = message.facts.filter(fact => !carried.has(fact.key)).map(fact => fact.key)
-  return { vars, omitted }
+  const omitted = message.facts.filter(fact => !carried.has(fact.key))
+  const uncarried = omitted.find(fact => fact.lead || !mapping.cannotCarry?.[fact.key])
+  if (uncarried) throw new WhatsAppTemplateRefusal('WHATSAPP_TEMPLATE_FACT_UNCARRIED', template, uncarried.key)
+  return { vars, omitted: omitted.map(fact => fact.key) }
 }

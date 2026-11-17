@@ -4,7 +4,7 @@ import { hasPlatformEventPermission } from '~/server/utils/platform-admin-users'
 import { isPlatformSite } from '~/utils/site-routing'
 
 /**
- * Platform reports, like Platform accounts, exist only inside KrabiClaw's own
+ * Platform reports, like Platform accounts, exist only inside Blawby's own
  * organization and only for a Better Auth admin who may ban users; anywhere
  * else they are not a route.
  */

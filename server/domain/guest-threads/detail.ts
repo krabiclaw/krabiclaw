@@ -38,7 +38,7 @@ export async function guestMessageAlertWindow(db: DbClient, entry: MessageRow, g
  * Who wrote a message or caused an event, from its own facts. A member's
  * message always records its member; the user FK sets that to null only when
  * the account is deleted, which is a recorded fact rather than a missing one.
- * KrabiClaw alone writes a relayed provider message, an automatic message or
+ * Blawby alone writes a relayed provider message, an automatic message or
  * an event nobody caused.
  */
 function actorLabel(entry: Pick<MessageRow, 'author_kind' | 'author_user_id' | 'event_name' | 'id'>, role: MessageRow['author_kind'], mirrored: boolean, actorNames: Map<string, string>, business: string): string | null {

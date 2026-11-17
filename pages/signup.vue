@@ -82,7 +82,7 @@ const verificationCallback = computed(() => {
 const { loading, error, signInWithGoogle, signInWithApple } = useAuthOperation()
 const pendingEmail = ref('')
 const agreed = ref(false)
-// The account is KrabiClaw's, so its policies are the platform's, whichever site serves this page.
+// The account is Blawby's, so its policies are the platform's, whichever site serves this page.
 const platformDomain = String(useRuntimeConfig().public.platformDomain)
 const policyUrl = (slug: string) => new URL(`/policies/${slug}`, platformDomain).toString()
 const resending = ref(false)

@@ -274,7 +274,7 @@ test('AVIF pictures render through native Images and a rename redraws 47 social 
   const { runtime, db, env, queue, meta, asset, restore } = await setUp()
   bindDatabaseEvents(db, env)
   try {
-    const source = readFileSync(new URL('../../docs/marketing/publishing-assets/lodging-2026-10-23/new-home.avif', import.meta.url))
+    const source = readFileSync(new URL('../e2e/seed/media/room.avif', import.meta.url))
     const sourceUrl = 'https://imagedelivery.example.test/hash/avif-source/public'
     const images = await runtime.getImagesBinding('IMAGES')
     const uploads = new Map<string, Uint8Array>()

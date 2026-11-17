@@ -187,7 +187,7 @@ export async function activateOrganization(db: D1Database, organizationId: strin
 
 /**
  * A new business finished setup: record the onboarding conversion and email the
- * KrabiClaw operator. Neither waits on or hides the other, and neither fails
+ * Blawby operator. Neither waits on or hides the other, and neither fails
  * the activation that already committed; each outcome is reported.
  */
 export async function completeOnboarding(env: SetupEnv, db: D1Database, organizationId: string, origin: { headers: Headers } | null) {
@@ -210,7 +210,7 @@ export async function completeOnboarding(env: SetupEnv, db: D1Database, organiza
 /** Records completion after the caller has committed its setup work. */
 async function recordOnboardingComplete(env: SetupEnv, db: D1Database, organizationId: string, origin: { headers: Headers } | null): Promise<void> {
   // The event is unique per organization, so replaying a completed setup request (or
-  // retrying after a failed record) never counts a second onboarding. KrabiClaw
+  // retrying after a failed record) never counts a second onboarding. Blawby
   // activating itself is not an acquisition.
   const platformOrganizationId = (await getPlatformOrganization(db)).id
   if (organizationId === platformOrganizationId) return

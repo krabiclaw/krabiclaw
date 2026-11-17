@@ -7,7 +7,7 @@ description: Make Blawby marketing and feature videos the owner-approved way, mo
 
 Approved 2026-11-10 with the Cedar Legal consultations film, and again 2026-11-17 with its Blawby rebuild (`consultations-film-blawby-v4.mp4`, 1:45), which set the wide camera below. This file records the method that produced it. Change this file only after the owner approves a new output; the approved output is what this skill encodes.
 
-Read [product-profile.md](../../../docs/marketing/product-profile.md) for product facts, pricing boundaries and brand. Read [PRODUCT.md](../../../PRODUCT.md) and the [MCP contract](../../../docs/mcp.md) before claiming a capability.
+Read [product-profile.md](product-profile.md) for product facts, voice and brand. Check a capability in the product itself before claiming it. Install the HyperFrames skills with `npx skills add heygen-com/hyperframes --all`.
 
 ## The model: Airbnb
 

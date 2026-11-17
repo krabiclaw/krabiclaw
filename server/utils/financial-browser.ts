@@ -8,7 +8,7 @@ export function requireFinancialBrowserOrigin(event:H3Event):void {
 /**
  * The same approval from the iPhone app as well: a Better Auth bearer session
  * with no cookie. A cross-site page cannot send an Authorization header without
- * a CORS preflight KrabiClaw never grants, so such a request is not one a
+ * a CORS preflight Blawby never grants, so such a request is not one a
  * browser was tricked into; every cookie request keeps the same-origin check.
  */
 export function requireFinancialBrowserOrAppRequest(event:H3Event):void {

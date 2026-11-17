@@ -3,7 +3,7 @@
 /**
  * Executes the full legal website setup dry run via MCP against Cedar Legal Demo.
  * Validates the real-world flow an attorney/law firm or AI agent executes using
- * KrabiClaw's canonical MCP tools.
+ * Blawby's canonical MCP tools.
  */
 import { createHash } from 'node:crypto'
 import { authHeaders, BASE_URL, expectValue, fail, mcp, pass, run, toolData } from './utils/mcp-check.mjs'

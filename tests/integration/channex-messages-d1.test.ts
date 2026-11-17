@@ -98,7 +98,7 @@ class Provider {
     if (method === 'POST' && ['/api/v1/restrictions', '/api/v1/availability'].includes(url.pathname)) return json({ data: [{ id: crypto.randomUUID(), type: 'task' }], meta: { message: 'Success', warnings: [] } })
     if (method === 'GET' && url.pathname === '/api/v1/message_threads') return json({ data: this.empty ? [] : [this.thread()], meta: { total: this.empty ? 0 : 1 } })
     if (method === 'GET' && url.pathname === `/api/v1/message_threads/${this.threadId}`) return json({ data: this.thread() })
-    // Bookings reach KrabiClaw as revisions only; a booking read by id is not answered.
+    // Bookings reach Blawby as revisions only; a booking read by id is not answered.
     if (method === 'GET' && url.pathname === '/api/v1/booking_revisions/feed') {
       assert.equal(url.searchParams.get('filter[property_id]'), this.propertyId)
       const pending = this.pendingRevisions.filter(revision => !this.acked.includes(revision.id))
@@ -610,7 +610,7 @@ test('photo replies retain their canonical media, replay without expired source 
     const afterLost = await hostMessages(db, env, mirrored.conversation_id)
     assert.equal(afterLost.length, 5, 'without Channex\'s message id the failed reply and the message Channex stored are both shown')
     assert.equal(afterLost.find(entry => entry.receipt === 'Not delivered')?.receipt, 'Not delivered')
-    // Mirroring keeps the photos Channex holds that KrabiClaw does not: the guest's, and the echo of the failed reply whose
+    // Mirroring keeps the photos Channex holds that Blawby does not: the guest's, and the echo of the failed reply whose
     // identity was never learned. The echo of the accepted reply is that reply's own photo, already stored, and is not read again.
     assert.deepEqual(provider.fileReads, ['/attachment/file', '/api/v1/attachments/photo-2'])
     const mirroredPhotos = 2
@@ -920,7 +920,7 @@ test('an Airbnb photo is in the owner alert, and replying to the alert answers t
     assert.doesNotMatch(sent.text, /are not delivered/u)
     // The reply address names the guest's message the alert was about.
     const guestEntry = await db.prepare("SELECT id FROM messages WHERE dedupe_key = 'channex-message:guest-photo'").first<string>('id')
-    const address = parseReplyToAddress(env, sent.replyTo)
+    const address = parseReplyToAddress(sent.replyTo)
     assert.deepEqual({ kind: address.kind, messageId: address.messageId }, { kind: 'member', messageId: guestEntry })
 
     // The owner replies to that email: the words reach the Airbnb conversation as the host's, once.

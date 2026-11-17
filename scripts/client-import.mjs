@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Deterministic client import pipeline for KrabiClaw.
+ * Deterministic client import pipeline for Blawby.
  *
  * Always runs --dry-run first to produce a reviewable manifest before any DB writes.
  *
@@ -698,7 +698,7 @@ function queryD1Row(query, remote) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 console.log(
-  `\n┌─ KrabiClaw Client Import ─────────────────────────────────────`,
+  `\n┌─ Blawby Client Import ────────────────────────────────────────`,
 );
 console.log(`│  Slug:     ${SLUG}`);
 console.log(`│  Vertical: ${VERTICAL}`);

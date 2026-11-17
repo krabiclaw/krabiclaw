@@ -82,7 +82,7 @@ export const CONVERSION_EVENT_CATALOG = {
   onboarding_complete: { kind: 'conversion', producer: 'server', origin: 'authenticated', stages: ['completed'], entityType: 'organization', valueBasis: null, conversionType: null, ga4: { name: 'tutorial_complete' }, ga4Sender: 'measurement_protocol', outcome: true },
   purchase: { kind: 'conversion', producer: 'server', origin: 'authenticated', stages: ['completed'], entityType: 'invoice', valueBasis: 'purchase', conversionType: 'subscription', ga4: { name: 'purchase' }, ga4Sender: 'measurement_protocol', outcome: true },
   refund: { kind: 'conversion', producer: 'server', origin: 'authenticated', stages: ['completed'], entityType: 'refund', valueBasis: 'refund', conversionType: 'subscription', ga4: { name: 'refund' }, ga4Sender: 'measurement_protocol', outcome: false },
-  // Product usage by signed-in KrabiClaw users, measured on the platform organization. The subject
+  // Product usage by signed-in Blawby users, measured on the platform organization. The subject
   // is the organization being worked on; the actor is the user. Only the listed scalars are kept.
   organization_created: interaction({ origin: 'authenticated', stages: ['occurred'], entityType: 'organization', ga4: { name: 'organization_created' }, ga4Sender: 'browser' }),
   domain_connected: interaction({ origin: 'authenticated', stages: ['occurred'], entityType: 'organization', ga4: { name: 'domain_connected' }, ga4Sender: 'browser', properties: ['domain'] }),

@@ -1,13 +1,8 @@
 #!/usr/bin/env node
-// Every fact the email leads with must reach WhatsApp.
-//
-// Each event used to be written twice — once as email props, once as WhatsApp
-// vars — and the two drifted without anyone noticing: a cancelled reservation
-// told WhatsApp neither the guest's email nor whether it had been confirmed,
-// and a new review never named its author. This is what stops that happening
-// again: a `lead` fact with nowhere to go is a build failure, and a non-lead
-// fact a template genuinely cannot carry has to be declared in `cannotCarry`
-// with a reason.
+// Runs every dual-channel catalog message through the real WhatsApp send path:
+// the mapping refuses a fact the template cannot carry, and the payload refuses
+// a missing slot. Each is rendered as sampled and with optional facts removed,
+// because real data is full of nulls.
 
 import { WHATSAPP_MAPPINGS, toWhatsAppVars } from '~/server/notifications/whatsapp-mapping'
 import { buildWhatsAppTemplatePayload, WhatsAppTemplateRefusal, type WhatsAppTemplate } from '~/server/utils/whatsapp'
@@ -34,33 +29,16 @@ for (const entry of dualChannel) {
     continue
   }
 
-  const { omitted } = toWhatsAppVars(message, template as WhatsAppTemplate)
-
-  for (const key of omitted) {
-    const fact = message.facts.find(entry => entry.key === key)!
-    if (fact.lead) {
-      failures.push(`${template}: lead fact "${key}" (${fact.label}) reaches the email but not WhatsApp`)
-    } else if (!mapping.cannotCarry?.[key]) {
-      failures.push(`${template}: fact "${key}" is unmapped and undeclared — map it or record why the template cannot carry it in cannotCarry`)
-    }
-  }
-
-  // An exemption the template now carries is worse than stale: it would hide
-  // the fact going missing again later.
+  // A declared exemption the template now carries would hide the fact going
+  // missing again later.
   for (const key of Object.keys(mapping.cannotCarry ?? {})) {
-    if (message.facts.some(entry => entry.key === key) && !omitted.includes(key)) {
-      failures.push(`${template}: cannotCarry names "${key}", but the template now carries it — drop the exemption`)
+    if (Object.values(mapping.facts).includes(key)) {
+      failures.push(`${template}: cannotCarry names "${key}", but the template carries it — drop the exemption`)
     }
   }
 
-  // The slots must actually fill, with the event's own facts. Checked twice —
-  // once with the sample as written (which may itself lack optional facts, as
-  // the booking sample has no notes), and once with every optional fact
-  // removed. Real data is full of nulls (a reservation with no phone), and no
-  // slot is ever filled with stand-in text for one: an absent optional fact
-  // selects the template variant without that slot. A variant Meta has not
-  // approved yet is refused at send, which is expected here; a slot that cannot
-  // fill because its fact is absent and not declared optional is a failure.
+  // A variant Meta has not approved yet is refused at send, which is expected
+  // here; any other refusal is a failure.
   const stripped: NotificationMessage = { ...message, facts: message.facts.filter(entry => entry.lead) }
   for (const [label, candidate] of [['as sampled', message], ['with optional facts removed', stripped]] as const) {
     let payload: ReturnType<typeof buildWhatsAppTemplatePayload>

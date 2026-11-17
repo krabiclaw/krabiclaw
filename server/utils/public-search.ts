@@ -347,7 +347,7 @@ function platformKnowledgeInstanceConfig(): Omit<AiSearchConfig, 'metadata'> {
   }
 }
 
-// The instance itself is provisioned infrastructure (docs/ai-search.md), not something a
+// The instance itself is provisioned infrastructure, not something a
 // blog write conjures into existence. This only re-asserts the retrieval configuration the
 // code depends on, and lets the error through: an earlier `update()` / catch `create()`
 // pair turned every real failure — a rate limit, a bad field — into "instance already

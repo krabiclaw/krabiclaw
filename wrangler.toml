@@ -78,7 +78,7 @@ AI_SEARCH_INSTANCE_ID = "krabiclaw-platform-knowledge"
 # likewise. EMAIL_FROM is the required sender; there is no default From address.
 EMAIL_DELIVERY_MODE = "provider"
 EMAIL_FROM = "Blawby <hello@blawby.com>"
-EMAIL_REPLY_DOMAIN = "reply.krabiclaw.com"
+EMAIL_REPLY_DOMAIN = "reply.blawby.com"
 WHATSAPP_DELIVERY_MODE = "provider"
 # Startup workflow debugging: detailed MCP inputs/results expire after seven days.
 MCP_DIAGNOSTICS_ENABLED = "true"
@@ -106,7 +106,7 @@ MCP_DIAGNOSTICS_ENABLED = "true"
 # PLATFORM_SEARCH_REINDEX_SECRET protects POST /api/internal/search/reindex and is required for
 # yarn ai-search:sync. Production CI syncs it from the PLATFORM_SEARCH_REINDEX_SECRET repo
 # secret and rebuilds the production index. Non-production has no AI Search binding
-# automatically (see .github/workflows/ci.yml and docs/ai-search.md). To set it by hand:
+# automatically (see .github/workflows/ci.yml). To set it by hand:
 #   yarn wrangler secret put PLATFORM_SEARCH_REINDEX_SECRET
 
 [[d1_databases]]
@@ -203,7 +203,7 @@ NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 MEDIA_BASE_URL = "https://media.krabiclaw.com"
 EMAIL_DELIVERY_MODE = "provider"
 EMAIL_FROM = "Blawby <hello@blawby.com>"
-EMAIL_REPLY_DOMAIN = "reply.krabiclaw.local"
+EMAIL_REPLY_DOMAIN = "reply.blawby.local"
 WHATSAPP_DELIVERY_MODE = "provider"
 
 [[env.dev.d1_databases]]
@@ -286,7 +286,7 @@ NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 ZARAZ_ANALYTICS = "absent"
 EMAIL_DELIVERY_MODE = "log_only"
 EMAIL_FROM = "Blawby <hello@blawby.com>"
-EMAIL_REPLY_DOMAIN = "reply.krabiclaw.com"
+EMAIL_REPLY_DOMAIN = "reply.blawby.com"
 WHATSAPP_DELIVERY_MODE = "log_only"
 E2E_ALLOW_DEV_ROUTES = "true"
 # E2E_DEV_ROUTE_SECRET is pushed via `wrangler secret put` in ci.yml, not a plaintext var here.
@@ -378,7 +378,7 @@ MEDIA_BASE_URL = "http://localhost:3000/__media"
 ZARAZ_ANALYTICS = "absent"
 EMAIL_DELIVERY_MODE = "log_only"
 EMAIL_FROM = "Blawby <hello@blawby.com>"
-EMAIL_REPLY_DOMAIN = "reply.krabiclaw.local"
+EMAIL_REPLY_DOMAIN = "reply.blawby.local"
 WHATSAPP_DELIVERY_MODE = "log_only"
 
 [[env.e2e.d1_databases]]

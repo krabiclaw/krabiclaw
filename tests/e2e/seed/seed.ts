@@ -44,7 +44,7 @@ interface TenantPlan {
   vertical: 'restaurant' | 'experience' | 'service' | 'lodging'
   currency: string
   timezone: string
-  /** The KrabiClaw plan the business pays for; null stays on Basic. */
+  /** The Blawby plan the business pays for; null stays on Basic. */
   subscription: 'growth' | 'business' | null
 }
 

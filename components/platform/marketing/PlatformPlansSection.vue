@@ -42,7 +42,7 @@ import type { Plan } from '~/composables/usePlans'
 import { STARTER_PLAN_ID, NEW_SALE_PAID_PLAN_IDS, pricingNotice, SERVICES, SERVICE_PRICES } from '~/shared/billing-model'
 
 /**
- * KrabiClaw's plans, published on KrabiClaw's own pages.
+ * Blawby's plans, published on Blawby's own pages.
  *
  * The block that places this section stores a heading and `source:
  * billing_plans`, nothing else. Every amount, interval, price id and
