@@ -14,7 +14,7 @@
     </template>
 
     <div class="mx-auto w-full" :class="personalScope ? 'max-w-[640px]' : 'max-w-[1200px]'">
-      <UAlert v-if="doneError" class="mb-6" color="error" variant="soft" title="The task could not be marked done" :description="getErrorMessage(doneError, 'The request failed')" />
+      <UAlert v-if="doneError" class="mb-6" color="error" variant="soft" title="The task could not be updated" :description="getErrorMessage(doneError, 'The request failed')" />
       <UAlert v-if="loadError" class="mb-6" color="error" variant="soft" :title="`${range === 'today' ? 'Today' : 'Upcoming'} could not be loaded`" :description="getErrorMessage(loadError, 'The request failed')">
         <template #actions><UButton color="error" variant="soft" size="xs" @click="() => refresh()">Retry</UButton></template>
       </UAlert>
@@ -39,7 +39,7 @@
         <UIcon name="i-lucide-loader-circle" class="size-6 animate-spin text-muted" />
       </div>
     </div>
-    <TodayTaskCreate v-if="canCreate && organizationId" v-model:open="createOpen" :organization-id="organizationId" :assignees="business?.assignees ?? []" @created="() => refresh()" />
+    <TodayTaskCreate v-if="canCreate && organizationId" v-model:open="createOpen" :organization-id="organizationId" :assignees="business?.assignees ?? []" :claim-options="business?.claim_options ?? null" @created="() => refresh()" />
   </DashboardIndexPanel>
 </template>
 
@@ -85,11 +85,16 @@ const addItems = computed(() => [
 const closing = ref<string | null>(null)
 const doneError = ref<unknown>(null)
 async function markDone(item: TodayItem) {
-  if (!item.done) return
+  if ((!item.done && !item.claim) || closing.value) return
   closing.value = item.id
   doneError.value = null
   try {
-    await applicationFetch(item.done.path, { method: 'POST', body: {}, validate: (value: unknown): value is { task: { status: string } } => isRecord(value) && isRecord(value.task) && value.task.status === 'done' })
+    if (item.claim) {
+      const { path, version } = item.claim
+      await applicationFetch(path, { method: 'PATCH', body: { claim: true, version },
+        validate: (value): value is { task: { version: number; assignee: { you: true } } } => isRecord(value) && isRecord(value.task)
+          && value.task.version === version + 1 && isRecord(value.task.assignee) && value.task.assignee.you === true })
+    } else if (item.done) await applicationFetch(item.done.path, { method: 'POST', body: {}, validate: (value: unknown): value is { task: { status: string } } => isRecord(value) && isRecord(value.task) && value.task.status === 'done' })
     await refresh()
   } catch (cause) {
     doneError.value = cause

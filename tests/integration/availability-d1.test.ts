@@ -32,7 +32,7 @@ import { createProduct, getProduct, removeProductLocation, setProductLocation, u
 import { occurrenceKey } from '../../shared/bookings.ts'
 import { addLocalDays, formatTimestamp, localDateTimeToInstant, localNow } from '../../utils/timezone.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
-import { assertAssignedBookingAccess, memberAccessPrincipal } from '../../server/utils/member-access.ts'
+import { assertAssignedBookingAccess, memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 
 const ORG = 'org-sessions'
 const LOCATION = 'loc-sessions'
@@ -814,7 +814,9 @@ test('provider allocation shares a class Session, excludes distinct overlapping 
   await db.prepare(`INSERT INTO member_scheduling(member_id, organization_id, timezone, weekly_json, time_off_json, public_name, public_approved, updated_at, updated_by)
     VALUES('responsible-member',?,'UTC',?,'[]','Responsible member',1,?,?)`).bind(ORG,JSON.stringify(weekly),NOW,ACTOR).run()
   await setProductBookingConfig(db,{organizationId:ORG,productId:winner!.product_id,actorId:ACTOR,env,patch:{assigned_member_id:'responsible-member'}})
-  await assertAssignedBookingAccess(db,{...memberAccessPrincipal({organizationId:ORG,userId:'responsible-user',role:'member'} as never,{env}),bookingId:winner!.id})
+  const responsible = await resolveMembership(env, { organizationId: ORG, userId: 'responsible-user' })
+  assert.ok(responsible)
+  await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(responsible, { env }), bookingId: winner!.id })
   assert.equal(await db.prepare('SELECT c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id WHERE b.id=?').bind(winner!.id).first('assigned_member_id'),'responsible-member','the booking follows its offering\'s responsibility')
  }finally{await runtime.dispose()}
 })

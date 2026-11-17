@@ -1,6 +1,8 @@
+import { listingGrantSql } from '~/server/domain/listing-access'
+import { assignedOperationsRoles, roleMatchesSql, workspaceOperationsRoles } from '~/utils/organization-access'
 import { HTTPError } from 'nitro'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { ASSIGNED_SERVICE_SQL, assertLocationAccess, assertProductAccess, locationMemberSql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assertLocationAccess, assertProductAccess, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { updateLocation } from '~/server/utils/location-management'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
@@ -87,15 +89,25 @@ const KIND_LABELS = { experience: 'Experience', service: 'Consultation' } as con
  */
 export function placesCalendarQueries(organization: BatchQuery, userId: string, window: { from: string; to: string }, only?: { kind: PlaceKind; id: string }): BatchQuery[] {
   const org = organization
+  const assigned = (product: string, location = false) => `EXISTS (SELECT 1 FROM member m
+    WHERE m.organizationId = ${product}.organization_id AND m.userId = ? AND (
+      ${roleMatchesSql('m.role', workspaceOperationsRoles)}
+      OR ${location ? `EXISTS (SELECT 1 FROM product_locations pl JOIN product_booking_configs cfg ON cfg.organization_id = pl.organization_id AND cfg.product_id = pl.product_id
+        JOIN products p ON p.organization_id = cfg.organization_id AND p.id = cfg.product_id
+        WHERE pl.organization_id = ${product}.organization_id AND pl.location_id = ${product}.id
+          AND ((${roleMatchesSql('m.role', assignedOperationsRoles)} AND cfg.assigned_member_id = m.id)
+            OR (p.kind = 'table' AND ${listingGrantSql('pl.organization_id', 'pl.product_id', 'm.id', 'calendar', 'm.role')})))`
+      : `(${roleMatchesSql('m.role', assignedOperationsRoles)} AND c.assigned_member_id = m.id)
+        OR ${listingGrantSql(`${product}.organization_id`, `${product}.id`, 'm.id', 'calendar', 'm.role')}`}))`
   const products: BatchQuery = {
     query: `SELECT p.id FROM products p JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
-      WHERE p.organization_id = ${org.query} AND ${only?.kind === 'location' ? "p.kind = 'table' AND p.id IN (SELECT product_id FROM product_locations WHERE location_id = ?)"
+      WHERE p.organization_id = ${org.query} AND ${assigned('p')} AND ${only?.kind === 'location' ? "p.kind = 'table' AND p.id IN (SELECT product_id FROM product_locations WHERE location_id = ?)"
         : only ? "p.kind IN ('experience', 'service') AND p.id = ?" : "p.kind IN ('experience', 'service', 'table')"}`,
-    params: [...org.params!, ...(only ? [only.id] : [])],
+    params: [...org.params!, userId, ...(only ? [only.id] : [])],
   }
   return [{
     query: only && only.kind !== 'location' ? 'SELECT NULL WHERE 0' : `
-    SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.opening_hours, l.special_hours, l.updated_at, ${locationMemberSql('l.organization_id', 'l.id')} AS assigned
+    SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.opening_hours, l.special_hours, l.updated_at, ${assigned('l', true)} AS assigned
     FROM business_locations l
     WHERE l.organization_id = ${org.query} AND (? IS NULL OR l.id = ?)
       ${only ? '' : `AND EXISTS (SELECT 1 FROM product_locations pl JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id
@@ -105,7 +117,7 @@ export function placesCalendarQueries(organization: BatchQuery, userId: string, 
     params: only && only.kind !== 'location' ? [] : [userId, ...org.params!, only?.id ?? null, only?.id ?? null],
   }, {
     query: only && only.kind !== 'offering' ? 'SELECT NULL WHERE 0' : `
-    SELECT p.id, p.name, p.kind, c.scheduling_mode, c.assigned_member_id, ${ASSIGNED_SERVICE_SQL} AS assigned,
+    SELECT p.id, p.name, p.kind, c.scheduling_mode, c.assigned_member_id, ${assigned('p')} AS assigned,
            COALESCE((SELECT l.timezone FROM product_locations pl JOIN business_locations l ON l.id = pl.location_id AND l.organization_id = pl.organization_id WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id ORDER BY l.title LIMIT 1),
              (SELECT ms.timezone FROM member_scheduling ms WHERE ms.member_id = c.assigned_member_id AND ms.organization_id = c.organization_id), o.timezone) AS timezone,
            (SELECT ${MEMBER_NAME_SQL} FROM member m JOIN user u ON u.id = m.userId LEFT JOIN member_scheduling ms ON ms.member_id = m.id AND ms.organization_id = m.organizationId WHERE m.id = c.assigned_member_id AND m.organizationId = c.organization_id) AS provider_name,
@@ -174,14 +186,9 @@ function byLocalDate<T extends { starts_at: string; timezone: string }>(rows: T[
 /** The calendar from its statements' results: the role decides which rows the reader sees, and Google is asked only for those. */
 export async function placesCalendarOf(principal: MemberAccessPrincipal, window: { from: string; to: string }, results: Array<{ results: unknown[] }>, only?: { kind: PlaceKind; id: string }): Promise<PlacesCalendar> {
   const [locationResult, offeringResult, ...slotResults] = results
-  const [everyLocation, everyOffering, manageLocations, manageOfferings] = await Promise.all([
-    roleAllows({ ...principal, permissions: { locations: ['read'] } }),
-    roleAllows({ ...principal, permissions: { products: ['read'] } }),
-    roleAllows({ ...principal, permissions: { locations: ['update'] } }),
-    roleAllows({ ...principal, permissions: { products: ['update'] } }),
-  ])
-  const locations = (locationResult!.results as LocationRow[]).filter(row => everyLocation || row.assigned)
-  const offerings = (offeringResult!.results as OfferingRow[]).filter(row => everyOffering || row.assigned)
+  const manage = await roleAllows({ ...principal, permissions: { operations: ['update'] } })
+  const locations = (locationResult!.results as LocationRow[]).filter(row => row.assigned)
+  const offerings = (offeringResult!.results as OfferingRow[]).filter(row => row.assigned)
   if (only && !locations.length && !offerings.length) fail(404, 'Place not found')
   const now = new Date().toISOString()
   // Only what the reader may see is computed: a hidden offering's settings never fail their calendar.
@@ -200,7 +207,7 @@ export async function placesCalendarOf(principal: MemberAccessPrincipal, window:
     return { onSale: calendar.onSale, days: byLocalDate(scheduleSessions(calendar, await calendar.places(), { statuses: ['scheduled', 'cancelled'], now }), window) }
   }))
   return {
-    from: window.from, to: window.to, manage: manageLocations && manageOfferings,
+    from: window.from, to: window.to, manage,
     places: [
       ...locations.map(row => ({ place: placeOf(row), days: locationDays(row, span, reservations.get(row.id)!) })),
       ...offerings.map((row, index) => ({ place: placeOf(row), days: offeringDays(row, span, sessions[index]!.days, sessions[index]!.onSale, now) })),
@@ -243,7 +250,9 @@ export async function setPlaceDates(db: D1Database, principal: MemberAccessPrinc
   const closed = body.closed
   const now = new Date().toISOString()
   if (kind === 'location') {
-    await assertLocationAccess(db, { ...principal, locationId: id, patch: { special_hours: null } })
+    if (!await roleAllows({ ...principal, permissions: { operations: ['update'] } })) {
+      await assertLocationAccess(db, { ...principal, locationId: id, patch: { special_hours: null } })
+    }
     const row = await queryFirst<LocationRow>(db, 'SELECT id, slug, title, status, timezone, address, opening_hours, special_hours, updated_at FROM business_locations WHERE organization_id = ? AND id = ?', [principal.organizationId, id])
     if (!row) fail(404, 'Place not found')
     const special = parseSpecialHours(row.special_hours ? JSON.parse(row.special_hours) : null)
@@ -256,7 +265,12 @@ export async function setPlaceDates(db: D1Database, principal: MemberAccessPrinc
       throw new HTTPError({ statusCode: result.status, statusMessage: data.error ?? 'The location dates could not be saved', data: { code: data.code ?? 'INVALID_PLACE_DATES', ...(data.field ? { field: data.field } : {}) } })
     }
   } else {
-    await assertProductAccess(db, { ...principal, productId: id })
+    if (!await roleAllows({ ...principal, permissions: { operations: ['update'] } })) {
+      const granted = await queryFirst(db, `SELECT 1 FROM member m JOIN products p ON p.organization_id = m.organizationId
+        WHERE p.id = ? AND m.id = ? AND m.organizationId = ? AND ${listingGrantSql('p.organization_id', 'p.id', 'm.id', 'update', 'm.role')}`,
+      [id, principal.memberId, principal.organizationId])
+      if (!granted) await assertProductAccess(db, { ...principal, productId: id })
+    }
     const offering = await queryFirst<{ id: string }>(db, `SELECT p.id FROM products p JOIN product_booking_configs c ON c.product_id = p.id AND c.organization_id = p.organization_id WHERE p.organization_id = ? AND p.id = ? AND p.kind IN ('experience', 'service')`, [principal.organizationId, id])
     if (!offering) fail(404, 'Place not found')
     const calendar = (await readSlots(db, principal.env, {

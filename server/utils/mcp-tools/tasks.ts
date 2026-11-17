@@ -33,12 +33,12 @@ export const TASK_TOOLS: McpToolDefinition[] = [
     inputSchema: { range: { type: 'string', enum: ['today', 'upcoming'] }, assignee: { type: 'string', description: 'me, all, or a member id.' }, location_id: { ...text, minLength: 1 }, status: { type: 'string', enum: ['open', 'done', 'skipped', 'cancelled'] }, kind: { type: 'string', enum: [...TASK_KINDS] } },
     outputSchema: { type: 'object', properties: { sections: { type: 'array', items: { type: 'object', properties: { id: text, title: nullableText, subtitle: nullableText, tasks: { type: 'array', items: task } }, required: ['id', 'title', 'subtitle', 'tasks'] } }, assignees: { type: 'array', items: person }, resolved_at: text }, required: ['sections', 'assignees', 'resolved_at'] },
   }),
-  organizationTool({ name: 'create_task', domain: 'tasks', minimumRole: 'admin', description: 'Create a task with optional dates and one assignee. Specify location_id when the product is offered at multiple locations. A new assignee may be notified according to their settings. Reuse idempotency_key only for the same request.',
-    inputSchema: { title: { ...text, minLength: 1, maxLength: 200 }, notes: { ...text, maxLength: 5000 }, starts_at: instant, due_at: instant, ...assignee, product_id: { ...text, minLength: 1 }, location_id: { ...text, minLength: 1 }, idempotency_key: { ...text, minLength: 1, maxLength: 200 } }, required: ['title', 'idempotency_key'],
+  organizationTool({ name: 'create_task', domain: 'tasks', minimumRole: 'member', description: 'Create a task with optional dates and one assignee. Specify location_id when the product is offered at multiple locations. A new assignee may be notified according to their settings. Reuse idempotency_key only for the same request.',
+    inputSchema: { claim_role: { ...text, description: 'Offer custom work to this role on the selected product_id.' }, title: { ...text, minLength: 1, maxLength: 200 }, notes: { ...text, maxLength: 5000 }, starts_at: instant, due_at: instant, ...assignee, product_id: { ...text, minLength: 1 }, location_id: { ...text, minLength: 1 }, idempotency_key: { ...text, minLength: 1, maxLength: 200 } }, required: ['title', 'idempotency_key'],
     outputSchema: taskResult,
   }),
-  organizationTool({ name: 'update_task', domain: 'tasks', minimumRole: 'admin', description: 'Reassign, reschedule or edit the notes of an open task. Pass version from list_tasks; a newer version is refused so another change is not overwritten. A new assignee is told.',
-    inputSchema: { task_id: { ...text, minLength: 1 }, version: { type: 'integer', minimum: 1 }, ...assignee, starts_at: { type: ['string', 'null'], format: 'date-time' }, due_at: { type: ['string', 'null'], format: 'date-time' }, notes: { type: ['string', 'null'], maxLength: 5000 }, title: { ...text, minLength: 1, maxLength: 200, description: 'Only for a task someone added.' } }, required: ['task_id', 'version'],
+  organizationTool({ name: 'update_task', domain: 'tasks', minimumRole: 'member', description: 'Reassign, reschedule or edit the notes of an open task. Pass version from list_tasks; a newer version is refused so another change is not overwritten. A new assignee is told.',
+    inputSchema: { claim: { type: 'boolean', description: 'Claim available work as yourself. Send only task_id and version with this action.' }, task_id: { ...text, minLength: 1 }, version: { type: 'integer', minimum: 1 }, ...assignee, starts_at: { type: ['string', 'null'], format: 'date-time' }, due_at: { type: ['string', 'null'], format: 'date-time' }, notes: { type: ['string', 'null'], maxLength: 5000 }, title: { ...text, minLength: 1, maxLength: 200, description: 'Only for a task someone added.' } }, required: ['task_id', 'version'],
     outputSchema: taskResult,
   }),
   organizationTool({ name: 'complete_task', domain: 'tasks', minimumRole: 'member', description: 'Mark a task done. Say what you found, with photos, in its conversation with send_message. Fix failed scheduled messages from their conversation.',
@@ -71,8 +71,10 @@ export async function handleTaskTools(ctx: McpExecutorContext): Promise<unknown>
       const result = await createTask(db, await taskViewer(principal), args)
       return { task: result.task }
     }
-    case 'update_task':
-      return { task: await updateTask(db, await taskViewer(principal), requiredString(args, 'task_id'), args) }
+    case 'update_task': {
+      const { task_id: _taskId, organization_id: _organizationId, ...patch } = args
+      return { task: await updateTask(db, await taskViewer(principal), requiredString(args, 'task_id'), patch) }
+    }
     case 'complete_task':
     case 'skip_task':
       return { task: await closeTask(db, await taskViewer(principal), requiredString(args, 'task_id'), { status: toolName === 'complete_task' ? 'done' : 'skipped', env }) }

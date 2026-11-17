@@ -46,6 +46,8 @@ pattern = "blawby.com/*"
 zone_name = "blawby.com"
 
 [vars]
+# Keep the first production deployment usable as the rollback target for stored staff roles.
+STAFF_ACCESS_WRITES = "hold"
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
 APPLE_SERVICES_ID = "com.krabiclaw.web"
