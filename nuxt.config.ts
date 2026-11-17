@@ -44,7 +44,6 @@ function pickIcons(collection: string, names: string[]) {
 }
 // Optional build analysis for bundle inspection; it has no runtime effect.
 const analyzeBundle = process.env.PERF_BUNDLE_ANALYZE === 'true'
-const publicPerfTestPage = process.env.PERF_PUBLIC_TEST_PAGE !== 'false'
 const workerWasmExternal = /(?:index_bg|yoga|webp_dec|squoosh_png_bg)\.wasm$/
 
 
@@ -193,7 +192,6 @@ export default defineNuxtConfig({
       vapidPublicKey: process.env.NUXT_PUBLIC_VAPID_PUBLIC_KEY || '',
 
       whatsappNumber: process.env.NUXT_PUBLIC_WHATSAPP_NUMBER || process.env.WHATSAPP_NUMBER || '16197200000',
-      perfPublicTestPage: publicPerfTestPage,
     },
 
   },
@@ -376,10 +374,6 @@ export default defineNuxtConfig({
     },
     {
       path: '~/components/ui',
-      pathPrefix: false,
-    },
-    {
-      path: '~/components/dev-perf',
       pathPrefix: false,
     },
     {

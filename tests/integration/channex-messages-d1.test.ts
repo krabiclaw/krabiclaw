@@ -917,7 +917,7 @@ test('an Airbnb photo is in the owner alert, and replying to the alert answers t
     assert.doesNotMatch(sent.text, /are not delivered/u)
     // The reply address names the guest's message the alert was about.
     const guestEntry = await db.prepare("SELECT id FROM messages WHERE dedupe_key = 'channex-message:guest-photo'").first<string>('id')
-    const address = parseReplyToAddress(env, sent.replyTo)
+    const address = parseReplyToAddress(sent.replyTo)
     assert.deepEqual({ kind: address.kind, messageId: address.messageId }, { kind: 'member', messageId: guestEntry })
 
     // The owner replies to that email: the words reach the Airbnb conversation as the host's, once.

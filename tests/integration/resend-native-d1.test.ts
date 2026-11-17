@@ -521,7 +521,7 @@ test('message alerts thread per recipient and replying to one answers the guest 
     assert.deepEqual([lostAlert?.status, lostAlert?.provider_message_id], ['failed', null])
     assert.ok(lostAlert?.error)
     const replyTo = [alerts[0]!.reply_to].flat()[0] as string
-    const address = parseReplyToAddress(env, replyTo)
+    const address = parseReplyToAddress(replyTo)
     // Each alert's reply-to names the guest message it was about, and every one answers the same conversation.
     assert.equal(new Set(alerts.map(email => [email.reply_to].flat()[0])).size, 3)
 
