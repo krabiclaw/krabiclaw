@@ -94,9 +94,9 @@ export function placesCalendarQueries(organization: BatchQuery, userId: string, 
       ${roleMatchesSql('m.role', workspaceOperationsRoles)}
       OR ${location ? `EXISTS (SELECT 1 FROM product_locations pl JOIN product_booking_configs cfg ON cfg.organization_id = pl.organization_id AND cfg.product_id = pl.product_id
         JOIN products p ON p.organization_id = cfg.organization_id AND p.id = cfg.product_id
-        WHERE pl.organization_id = ${product}.organization_id AND pl.location_id = ${product}.id AND p.kind = 'table'
+        WHERE pl.organization_id = ${product}.organization_id AND pl.location_id = ${product}.id
           AND ((${roleMatchesSql('m.role', assignedOperationsRoles)} AND cfg.assigned_member_id = m.id)
-            OR ${listingGrantSql('pl.organization_id', 'pl.product_id', 'm.id', 'calendar', 'm.role')}))`
+            OR (p.kind = 'table' AND ${listingGrantSql('pl.organization_id', 'pl.product_id', 'm.id', 'calendar', 'm.role')})))`
       : `(${roleMatchesSql('m.role', assignedOperationsRoles)} AND c.assigned_member_id = m.id)
         OR ${listingGrantSql(`${product}.organization_id`, `${product}.id`, 'm.id', 'calendar', 'm.role')}`}))`
   const products: BatchQuery = {
