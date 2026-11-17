@@ -108,7 +108,7 @@ export async function businessCurrencyFixed(db: DbClient, organizationId: string
   const row = await queryFirst<{ fixed: number }>(db, `SELECT default_currency <> ? AND (
       EXISTS (SELECT 1 FROM payments WHERE organization_id = organization.id)
       OR EXISTS (SELECT 1 FROM offline_payments WHERE organization_id = organization.id)
-      OR EXISTS (SELECT 1 FROM bookings WHERE organization_id = organization.id AND currency IS NOT NULL)
+      OR EXISTS (SELECT 1 FROM bookings WHERE organization_id = organization.id AND total_minor IS NOT NULL)
       OR EXISTS (SELECT 1 FROM channex_connections WHERE organization_id = organization.id AND channel_id IS NOT NULL)) AS fixed
     FROM organization WHERE id = ?`, [currency, organizationId])
   if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
