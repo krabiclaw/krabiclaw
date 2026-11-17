@@ -1,3 +1,4 @@
+import { listingGrantSql } from '~/server/domain/listing-access'
 import { paginationInputSchema, pageInfoObject, organizationTool, type McpToolDefinition } from './shared'
 import { PRODUCT_KINDS } from '~/shared/product-details'
 import { HTTPError } from 'nitro'
@@ -64,7 +65,7 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'create_product_booking', outputSchema: { type: 'object', anyOf: [
     { type: 'object', properties: { success: { const: true }, booking_id: text, conversation_id: text, status: { type: 'string', enum: [...BOOKING_STATUSES] }, replayed: { type: 'boolean' }, http_status: { type: 'integer', minimum: 200, maximum: 299 } }, required: ['success', 'booking_id', 'conversation_id', 'status', 'http_status'] },
     { ...nightBookingReceipt, properties: { ...nightBookingReceipt.properties, success: { const: true } }, required: [...nightBookingReceipt.required, 'success'] },
-  ] }, domain: 'bookings', minimumRole: 'admin', description: 'Book a guest in a timed offering or record a direct stay. Use an available session ID for a table, experience or legal consultation; for a stay give the arrival and departure dates, guests and amount due to the host. Reuse the same key for the same request. Timed bookings that require online payment need an approved dashboard checkout.',
+  ] }, domain: 'bookings', minimumRole: 'member', description: 'Book a guest in a timed offering or record a direct stay. Use an available session ID for a table, experience or legal consultation; for a stay give the arrival and departure dates, guests and amount due to the host. Reuse the same key for the same request. Timed bookings that require online payment need an approved dashboard checkout.',
     inputSchema: {
       ...nightBookingFields,
       product_slug: { type: 'string', description: 'Offering slug from list_products or get_product.' }, product_session_id: { type: 'string', description: 'Available time from list_product_booking_sessions.' }, product_variant_id: text,
@@ -149,7 +150,17 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
   if (toolName === 'list_product_bookings') {
     const filters: string[] = ['b.organization_id = ?']
     const params: Array<string | number | null> = [organizationId]
-    if (!managesBookings) { filters.push(assignedMemberSql('c')); params.push(organization.userId) }
+    if (!managesBookings) {
+      const assigned = await roleAllows({ ...principal, permissions: { operations: ['assigned'] } })
+      const listing = await roleAllows({ ...principal, permissions: { operations: ['listing_reply'] } })
+      const scopes = [
+        ...(assigned ? [assignedMemberSql('c')] : []),
+        ...(listing ? [listingGrantSql('b.organization_id', 'b.product_id', '?', 'details')] : []),
+      ]
+      filters.push(scopes.length ? `(${scopes.join(' OR ')})` : '0')
+      if (assigned) params.push(organization.userId)
+      if (listing) params.push(principal.memberId)
+    }
     for (const [argument, column] of [['assigned_member_id', 'c.assigned_member_id'], ['product_id', 'b.product_id']] as const) {
       if (typeof args[argument] === 'string') { filters.push(`${column} = ?`); params.push(args[argument] as string) }
     }
@@ -198,7 +209,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
   const action = statusActions[toolName]
   if (!action && !['get_product_booking', 'request_product_booking_change', 'update_product_booking'].includes(toolName)) return NOT_HANDLED
   const id = requiredString(args, 'booking_id')
-  await assertAssignedBookingAccess(db, { ...principal, bookingId: id })
+  await assertAssignedBookingAccess(db, { ...principal, bookingId: id, action: toolName === 'get_product_booking' ? 'read' : 'update' })
   const row = await queryFirst<{ conversation_id: string; version: number; updated_at: string; answers: string; unit: 'slot' | 'nights' }>(db, `SELECT c.id AS conversation_id,
     b.version, b.updated_at, b.answers, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit
     FROM bookings b JOIN conversations c ON c.booking_id=b.id AND c.organization_id=b.organization_id AND c.kind='booking'

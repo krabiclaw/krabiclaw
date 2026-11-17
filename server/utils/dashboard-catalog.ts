@@ -1,3 +1,5 @@
+import { listingGrantSql } from '~/server/domain/listing-access'
+import { queryAll } from '~/server/db'
 import { HTTPError, type H3Event } from 'nitro'
 import { getQuery } from 'nitro/h3'
 import { getDashboardMemberContext, listDashboardLocations } from '~/server/utils/dashboard-context'
@@ -19,6 +21,21 @@ const kinds = [
 
 export async function loadDashboardCatalog(event: H3Event) {
   const { db, organization } = await getDashboardMemberContext(event)
+  if (await roleAllows({ ...organization, permissions: { menu: ['read'] } })) {
+    const allowed = await queryAll<{ location_id: string }>(db, `
+      SELECT DISTINCT pl.location_id FROM product_locations pl JOIN products p ON p.organization_id = pl.organization_id AND p.id = pl.product_id
+      WHERE pl.organization_id = ? AND p.kind = 'table' AND ${listingGrantSql('pl.organization_id', 'pl.product_id', '?', 'task')}`,
+    [organization.id, organization.memberId])
+    const locations = new Set(allowed.map(row => row.location_id))
+    const selected = getQuery(event).location_id
+    if (selected !== undefined && (typeof selected !== 'string' || !locations.has(selected))) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
+    const dishes = locations.size ? await listOrganizationProducts(db, { organizationId: organization.id, kind: 'dish', publishedOnly: true }) : []
+    return {
+      title: 'Menu', fields: [], empty_title: 'No dishes',
+      rows: dishes.filter(dish => !dish.locations.length || dish.locations.some(binding => selected ? binding.location_id === selected : locations.has(binding.location_id)))
+        .map(dish => ({ id: dish.id, label: dish.name, summary: dish.description || undefined })),
+    } satisfies CatalogScreen
+  }
   const manages = await roleAllows({ ...organization, permissions: { products: ['read'] } })
   if (!manages) await assertRoleAllows({ ...organization, permissions: { products: ['assigned'] } })
   const can_create = await roleAllows({ ...organization, permissions: { products: ['create'] } })
