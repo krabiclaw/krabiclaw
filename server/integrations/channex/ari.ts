@@ -40,7 +40,7 @@ export async function completeChannelPush<T extends object>(outcome: ChannelPush
 
 /**
  * Outbound availability, prices and stay rules for a home connected through
- * Channex. KrabiClaw is the master. A change marks its nights pending in
+ * Channex. Blawby is the master. A change marks its nights pending in
  * channel_night_pushes, the delivery outbox; delivery reads the home's due
  * pending nights as they are now and sends Channex only what differs from
  * what Channex last confirmed for each (sent_json), contiguous nights with

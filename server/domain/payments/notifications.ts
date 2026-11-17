@@ -139,7 +139,7 @@ export async function notifyPayoutState(db: DbClient, env: CloudflareEnv, scope:
   })
 }
 
-/** Send the three KrabiClaw plan notices from Better Auth's signed event hook, after its subscription handlers run. */
+/** Send the three Blawby plan notices from Better Auth's signed event hook, after its subscription handlers run. */
 export async function notifySubscriptionPlanForEvent(env: CloudflareEnv, db: DbClient, event: Stripe.Event, loadPlans: StripePlanLoader) {
   if (event.account) return
   if (event.type === 'checkout.session.completed') {

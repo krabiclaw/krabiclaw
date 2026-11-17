@@ -1,2 +1,0 @@
-Official heygen-com/hyperframes skill, vendored unchanged from source revision a8ccda23f30092908183a876dfb546c40aec3aa3 on 2026-10-04. Source: https://github.com/heygen-com/hyperframes/tree/a8ccda23f30092908183a876dfb546c40aec3aa3/skills/hyperframes-audio
-Apache-2.0; see LICENSE. Local renderer remains 0.8.118. Documentation does not authorize installation, paid services, uploads or publishing; user instructions take precedence. Other workflow routes are optional external skills, not bundled here.

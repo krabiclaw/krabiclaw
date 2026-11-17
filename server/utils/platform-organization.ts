@@ -6,7 +6,7 @@ export interface PlatformTenantIdentity {
 }
 
 /**
- * KrabiClaw's own tenant is the one organization running the platform site.
+ * Blawby's own tenant is the one organization running the platform site.
  * Request handlers already have it as `event.context.organizationId` once the
  * platform host has resolved; this lookup is for work that runs outside a
  * request for that host (search corpus, llms.txt, analytics roll-ups).

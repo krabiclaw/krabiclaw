@@ -390,7 +390,7 @@ export function jobThreadParticipantsKey(subject: JobSubject, seatMemberIds: rea
 }
 
 /**
- * KrabiClaw writes into a stay's team conversation: a cleaning job, a
+ * Blawby writes into a stay's team conversation: a cleaning job, a
  * reminder, a move, a cancellation. The conversation with exactly these seats
  * is the one a member starts for the same people (`createTeamThread`), opened
  * here when nobody has yet. The message is sent once per key (kept as its
@@ -474,7 +474,7 @@ export async function reseatAutomaticThread(db: DbClient, input: { organizationI
 
 /**
  * Report a message in one of the caller's conversations (App Store guideline
- * 1.2). KrabiClaw's operators are emailed before the caller hears it worked;
+ * 1.2). Blawby's operators are emailed before the caller hears it worked;
  * the same key finds the same report.
  */
 export async function reportTeamMessage(env: ContentReportEnv, db: DbClient, access: MemberAccessPrincipal, threadId: string, messageId: string, input: { reason: unknown; idempotency_key: unknown }): Promise<ContentReport> {

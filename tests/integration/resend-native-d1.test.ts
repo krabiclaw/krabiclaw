@@ -23,7 +23,7 @@ const TOPIC = 'topic-product-news'
 const PROVIDER_ENV = {
   EMAIL_DELIVERY_MODE: 'provider',
   RESEND_API_KEY: 're_controlled_fake_resend',
-  EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>',
+  EMAIL_FROM: 'Blawby <hello@krabiclaw.com>',
   RESEND_PRODUCT_NEWS_SEGMENT_ID: SEGMENT,
   RESEND_PRODUCT_NEWS_TOPIC_ID: TOPIC,
   NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
@@ -521,7 +521,7 @@ test('message alerts thread per recipient and replying to one answers the guest 
     assert.deepEqual([lostAlert?.status, lostAlert?.provider_message_id], ['failed', null])
     assert.ok(lostAlert?.error)
     const replyTo = [alerts[0]!.reply_to].flat()[0] as string
-    const address = parseReplyToAddress(env, replyTo)
+    const address = parseReplyToAddress(replyTo)
     // Each alert's reply-to names the guest message it was about, and every one answers the same conversation.
     assert.equal(new Set(alerts.map(email => [email.reply_to].flat()[0])).size, 3)
 
@@ -730,7 +730,7 @@ test('an article is announced once as a native Broadcast whose id is stored befo
     await seedUsers(db)
     const published = new Date(Date.now() - 60_000).toISOString()
     for (const statement of [
-      "INSERT INTO organization (id, name, slug, subdomain, theme_id, status, default_currency, timezone) VALUES ('org-platform', 'KrabiClaw', 'krabiclaw', 'krabiclaw', 'krabiclaw-theme-v1', 'active', 'USD', 'UTC')",
+      "INSERT INTO organization (id, name, slug, subdomain, theme_id, status, default_currency, timezone) VALUES ('org-platform', 'Blawby', 'krabiclaw', 'krabiclaw', 'krabiclaw-theme-v1', 'active', 'USD', 'UTC')",
       "INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('locale-platform-en', 'org-platform', 'en', 1, 'published')",
       `INSERT INTO content_documents (id, organization_id, kind, row_role, locale, title, slug, summary, status, visibility, published_at, first_published_at, metadata_json)
        VALUES ('article-proof', 'org-platform', 'article', 'root', 'en', 'Proof article', 'proof-article', 'Why proof matters', 'published', 'listed', '${published}', '${published}', '{"collection":"blog"}')`,
@@ -750,7 +750,7 @@ test('an article is announced once as a native Broadcast whose id is stored befo
     const creates = resend.calls.filter(call => call.method === 'POST' && call.path === '/broadcasts')
     assert.equal(creates.length, 1)
     const draft = creates[0]!.body as Record<string, string>
-    assert.deepEqual([draft.segment_id, draft.topic_id, draft.subject, draft.from, draft.send], [SEGMENT, TOPIC, 'Proof article', 'KrabiClaw <hello@krabiclaw.com>', undefined])
+    assert.deepEqual([draft.segment_id, draft.topic_id, draft.subject, draft.from, draft.send], [SEGMENT, TOPIC, 'Proof article', 'Blawby <hello@krabiclaw.com>', undefined])
     assert.ok(draft.html.includes('{{{RESEND_UNSUBSCRIBE_URL}}}'))
     // The article's own text is the email, read in the order it was written,
     // with the repeated title dropped and the site link made absolute.

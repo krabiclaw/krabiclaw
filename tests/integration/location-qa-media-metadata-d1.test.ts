@@ -250,10 +250,10 @@ test('a Q&A can be edited and deleted through the scoped writers', async () => {
     assert.equal(created.status, 201)
     const qaId = (created.data as { id: string }).id
 
-    const updated = await updateQa(db, scope, qaId, { answer: 'Yes, on a KrabiClaw subdomain.' }, null)
+    const updated = await updateQa(db, scope, qaId, { answer: 'Yes, on a Blawby subdomain.' }, null)
     assert.deepEqual(updated, { updated: true, qa_id: qaId })
     const [row] = await listQa(db, ORG, null, false, '/pricing')
-    assert.equal(row?.answer, 'Yes, on a KrabiClaw subdomain.')
+    assert.equal(row?.answer, 'Yes, on a Blawby subdomain.')
     const purges = async () => Number((await db.prepare("SELECT count(*) AS n FROM public_resource_cache_invalidations WHERE organization_id = ? AND reason IN ('qa-update', 'qa-reorder')").bind(ORG).first('n')) ?? 0)
     assert.equal(await purges(), 1, 'an edited answer queues a purge of the cached pages')
 
@@ -283,12 +283,12 @@ test('media metadata is updated only within its organization', async () => {
   const { runtime, db } = await boot()
   try {
     await db.prepare(`INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, mime_type, alt_text, status, created_at, updated_at)
-      VALUES ('asset-1', ?, 'image', 'cloudflare_images', 'uploaded', 'https://imagedelivery.net/acct/asset-1/public', 'image/png', 'KrabiClaw crab', 'active', ?, ?)`)
+      VALUES ('asset-1', ?, 'image', 'cloudflare_images', 'uploaded', 'https://imagedelivery.net/acct/asset-1/public', 'image/png', 'Blawby crab', 'active', ?, ?)`)
       .bind(ORG, NOW, NOW).run()
 
     assert.equal(await updateMediaAssetMetadata(db, 'asset-1', OTHER_ORG, { alt_text: 'stolen' }), false)
-    assert.equal(await updateMediaAssetMetadata(db, 'asset-1', ORG, { alt_text: 'KrabiClaw crab' }), true)
-    assert.equal((await getMediaAsset(db, 'asset-1', ORG))?.alt_text, 'KrabiClaw crab')
+    assert.equal(await updateMediaAssetMetadata(db, 'asset-1', ORG, { alt_text: 'Blawby crab' }), true)
+    assert.equal((await getMediaAsset(db, 'asset-1', ORG))?.alt_text, 'Blawby crab')
   } finally {
     await runtime.dispose()
   }

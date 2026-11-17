@@ -27,6 +27,6 @@ export default defineHandler(async (event) => {
     requested_at: payload.iat ? new Date(payload.iat * 1000).toISOString() : null,
     description: remaining === 0
       ? 'The Meta authorization and every record naming it have been deleted.'
-      : `${remaining} record(s) from this Meta account remain. Contact support@krabiclaw.com.`,
+      : `${remaining} record(s) from this Meta account remain. Contact support@blawby.com.`,
   })
 })

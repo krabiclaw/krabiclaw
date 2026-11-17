@@ -319,7 +319,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     const alerted = await send(cook, contextualGroup.id, { body: 'Is the cabin ready?', photos: [], idempotencyKey: 'email-reply-alert', senderName: 'cook' })
     const alertEmail = await db.prepare("SELECT email_json FROM guest_thread_deliveries WHERE message_id = ? AND channel = 'email' AND email_json LIKE '%cleaner@example.test%'")
       .bind(alerted.id).first<string>('email_json')
-    const address = parseReplyToAddress(env, (JSON.parse(alertEmail!).message as { replyTo: string }).replyTo)
+    const address = parseReplyToAddress((JSON.parse(alertEmail!).message as { replyTo: string }).replyTo)
     // The reply address carries the message itself.
     assert.deepEqual([address.kind, address.messageId], ['member', alerted.id])
     // Another member writing in the same conversation is the same email thread for the cleaner: the first alert's subject, not a new one.

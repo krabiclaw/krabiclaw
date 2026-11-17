@@ -27,7 +27,7 @@
               {{ item.text ? `${item.text} ` : '' }}<NuxtLink :to="item.to" class="font-medium text-highlighted underline underline-offset-4" data-testid="conversation-show-reservation">Show reservation</NuxtLink>
             </p>
 
-            <!-- What KrabiClaw says in a team conversation sits in the middle, as Airbnb's own lines and cards do: a job is a card with its Done, a reminder is a line. -->
+            <!-- What Blawby says in a team conversation sits in the middle, as Airbnb's own lines and cards do: a job is a card with its Done, a reminder is a line. -->
             <div v-else-if="thread.kind === 'team' && item.runs.every(message => message.automatic)" class="my-2 flex w-full flex-col items-center gap-2" :data-message="item.key">
               <template v-for="message in item.runs" :key="message.id">
                 <div v-if="message.job" class="w-full max-w-md rounded-[28px] bg-accented/50 p-2" :data-team-message="message.id" data-automatic data-testid="conversation-job-card">

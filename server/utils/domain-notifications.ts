@@ -16,7 +16,7 @@ interface DomainNotificationInput {
   dashboardUrl: string
 }
 
-/** The KrabiClaw operator addresses operational mail is copied to. */
+/** The Blawby operator addresses operational mail is copied to. */
 export function platformOperatorEmails(env: { PLATFORM_OWNER_EMAILS?: string }): string[] {
   return String(env.PLATFORM_OWNER_EMAILS || '')
     .split(',')

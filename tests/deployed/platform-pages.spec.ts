@@ -3,7 +3,7 @@ import { openTenantPage, waitForNuxtHydration } from '../e2e/helpers'
 import { testBaseUrl } from '../e2e/test-env'
 import mcpCatalog from '../../server/utils/mcp-catalog-snapshots/tenant.json' with { type: 'json' }
 
-// KrabiClaw's own pages are authored on production; the platform project runs
+// Blawby's own pages are authored on production; the platform project runs
 // these there only.
 
 test('old-apex browser entry preserves the path and query on Blawby', async ({ request }) => {
@@ -20,7 +20,7 @@ test('old-apex browser entry preserves the path and query on Blawby', async ({ r
   expect(head.headers().location).toBe(`${origin}/dashboard/account/profile${query}`)
 })
 
-test('KrabiClaw pricing retains its billing plans after hydration', async ({ page }) => {
+test('Blawby pricing retains its billing plans after hydration', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' })
   await page.addInitScript(() => localStorage.setItem('krabiclaw-theme', 'light'))
   const baseURL = testBaseUrl()
@@ -41,7 +41,7 @@ test('KrabiClaw pricing retains its billing plans after hydration', async ({ pag
 // The docs renderer at a phone width: overflow and table scrolling fail there first.
 {
   const width = 390
-  test(`KrabiClaw MCP reference has usable anchors and contained tables at ${width}px`, async ({ page }) => {
+  test(`Blawby MCP reference has usable anchors and contained tables at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     const baseURL = testBaseUrl()
     const response = await openTenantPage(page, `${baseURL}/docs/mcp-tool-reference`, {})
@@ -105,7 +105,7 @@ test('KrabiClaw pricing retains its billing plans after hydration', async ({ pag
     }
   })
 
-  test(`KrabiClaw policies render their own headers and body at ${width}px`, async ({ page }) => {
+  test(`Blawby policies render their own headers and body at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     const errors: string[] = []
     page.on('pageerror', error => errors.push(error.message))
@@ -125,7 +125,7 @@ test('KrabiClaw pricing retains its billing plans after hydration', async ({ pag
   })
 }
 
-test('KrabiClaw social viewer keyboard navigation changes the visible media', async ({ page }) => {
+test('Blawby social viewer keyboard navigation changes the visible media', async ({ page }) => {
   const response = await openTenantPage(page, `${testBaseUrl()}/`, {})
   expect(response?.status()).toBe(200)
   await waitForNuxtHydration(page)
@@ -199,8 +199,8 @@ test('KrabiClaw social viewer keyboard navigation changes the visible media', as
 })
 
 // Video cannot be stored outside production (posters live in Cloudflare Images),
-// so playback is read here, on KrabiClaw's own published video posts.
-test('KrabiClaw video posts play in the feed and the post gallery and yield to the viewer', async ({ page }) => {
+// so playback is read here, on Blawby's own published video posts.
+test('Blawby video posts play in the feed and the post gallery and yield to the viewer', async ({ page }) => {
   // The post is one the feed's first page renders with a video preview.
   let post: { id: string; slug: string } | undefined
   const playing = (element: Element) => {
@@ -217,7 +217,7 @@ test('KrabiClaw video posts play in the feed and the post gallery and yield to t
     await waitForNuxtHydration(page)
     if (!post) {
       const id = await page.locator('[data-social-posts] [data-social-post]:has(video)').first().getAttribute('data-social-post')
-      expect(id, 'KrabiClaw\'s feed shows a post with a video').toBeTruthy()
+      expect(id, 'Blawby\'s feed shows a post with a video').toBeTruthy()
       const listed = await page.request.get(`${testBaseUrl()}/api/public/posts`, { params: { limit: 50 } })
       expect(listed.status()).toBe(200)
       post = (await listed.json() as { posts: Array<{ id: string; slug: string }> }).posts.find(row => row.id === id)

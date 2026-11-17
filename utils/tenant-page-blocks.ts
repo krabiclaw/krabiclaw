@@ -377,7 +377,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     },
     items: { kind: 'list', label: 'Items', section: 'items', of: GRID_ITEM_FIELDS, availableWhen: { field: 'source', equals: ['manual'] } },
     limit: { kind: 'number', label: 'Article count', translatable: false, section: 'settings', min: 1, availableWhen: { field: 'source', equals: ['organization_posts'] } },
-    // How KrabiClaw's own pages draw written items: as icon cards, or as
+    // How Blawby's own pages draw written items: as icon cards, or as
     // pictures with their words beneath.
     layout: {
       kind: 'enum', label: 'Layout', translatable: false, section: 'settings', default: 'cards',

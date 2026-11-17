@@ -3,7 +3,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 /**
  * The one HTTP boundary to Discord's API. An organization connects Discord
  * through Better Auth's Discord provider, which links the owner's Discord
- * account and, with the `bot` scope, adds the KrabiClaw bot to the server
+ * account and, with the `bot` scope, adds the Blawby bot to the server
  * they choose. The linked account's token lists the servers the owner
  * manages; the platform's bot token reads channels and sends, reads and
  * deletes the bot's own messages. No organization holds a Discord credential.

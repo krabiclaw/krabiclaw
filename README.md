@@ -38,132 +38,89 @@ Nuxt 5 nightly + Nitro 3 + Cloudflare Workers + D1.
 
 ---
 
-## Production Canary Runs
-
-Real-send production canaries are intentionally off on normal `main` deploys to avoid
-accidental email/WhatsApp spend on every merge. To run them on demand, use the GitHub
-Actions workflow `Production Real-Send Canaries` and choose whether to send:
-
-- the auth OTP canary
-- the notification email/WhatsApp canary
-
-That workflow always runs production smoke first, then only sends the real canaries you
-explicitly selected for that run.
-
----
-
-## Local Setup
-
-### 1. Install
+## Local setup
 
 ```bash
 corepack yarn install
+cp .env.example .env        # then fill in the application secrets
+corepack yarn local:setup   # empty local D1 at the current migration
+corepack yarn dev           # http://localhost:3000; leave it running
 ```
 
-The repository uses Node.js 24.18.1. Use the exact version declared in
-`.nvmrc` before installing dependencies. When changing Node, follow the
-[Node runtime upgrade runbook](docs/operations/node-runtime-upgrades.md) so
-local development, CI, type definitions, and Worker builds move together.
-
-Yarn accepts new direct and transitive package releases only after seven days.
-Routine `yarn add` and `yarn up` commands apply this rule automatically. CI
-installs the package graph immutably and rechecks registry metadata in its
-hardened job.
-
-For an urgent reviewed security fix, update only the affected package:
+In a second terminal:
 
 ```bash
-corepack yarn up <package>@<fixed-version> --no-time-gate
-```
-
-Record the advisory and the reason for bypassing the wait in the pull request.
-Do not add a package to `npmPreapprovedPackages` or disable the age gate in
-`.yarnrc.yml`.
-
-### 2. Environment
-
-Copy `.env.example` to `.env` and fill in the application secrets there. This is
-the single local configuration for Nuxt, Wrangler, setup scripts, and E2E tests.
-See [local development](docs/local-development.md) for setup and migrating an
-older `.dev.vars` file. No second secret file or symlink is needed.
-
-### 3. Prepare local development
-
-```bash
-corepack yarn local:setup
-```
-
-It leaves an empty local D1 at the current migration. Start the app (step 4),
-then build the synthetic businesses Playwright also uses:
-
-```bash
+corepack yarn playwright install chromium   # once
 corepack yarn local:seed
 ```
 
+Use the exact Node version in `.nvmrc`. `.env` is the single local
+configuration for Nuxt, Wrangler, setup scripts and E2E tests; if an older
+checkout has `.dev.vars`, move its values into `.env` and delete it, because
+Wrangler skips `.env` when `.dev.vars` exists.
+
+`local:seed` builds the same synthetic businesses Playwright uses
+(`tests/e2e/seed`) through the app's own boundaries: Better Auth, provisioning,
+MCP tools and editor uploads. Run `local:setup` again before reseeding, and
+after a new migration baseline. No production data reaches a developer machine.
+
 Sign in at `/login` as `platform-admin@playwright.example` with `E2E_PASSWORD`
-from `config/development-auth-fixtures.ts`: a Better Auth admin who owns every
-seeded business.
+from `config/development-auth-fixtures.ts`. That admin owns every seeded
+business:
 
-### 4. Run
+| Business | Dashboard | Website |
+| --- | --- | --- |
+| Ember & Slice | `/dashboard/ember-slice-demo` | `demo.localhost:3000` |
+| Clayhouse Studio | `/dashboard/clayhouse-studio` | `clayhouse.localhost:3000` |
+| Harbor Legal Aid | `/dashboard/harbor-legal-aid` | `harbor-legal.localhost:3000` |
 
-```bash
-corepack yarn dev
-```
+`yarn dev` is the editing loop. Work on the realtime inbox under
+`yarn dev:worker`: Nitro's dev server cannot upgrade the inbox WebSocket.
+`yarn dev:worker:start` restarts the last build without rebuilding.
 
-App at `http://localhost:3000`.
-
-`yarn dev` is the normal application-development loop. Nitro reads the bindings
-declared in `wrangler.toml`, emulates local D1/KV/R2 resources, and preserves
-Nuxt hot module replacement. It never resets D1. Run `corepack yarn local:setup`
-and `corepack yarn local:seed` again to start over.
-
-Open tenant dashboards from the dashboard UI instead of guessing their URLs.
-When a route must be constructed manually, the dashboard segment is the
-organization's `slug`, not its subdomain, and everything else sits directly
-under it: Kikuzuki's locations are
-`/dashboard/org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX/locations`.
-
-For production-runtime browser verification, use the generated Worker locally.
-Wrangler reads the same `.env` as Nuxt. Playwright also loads it and supplies
-test-specific local URLs and delivery settings to the Worker.
+Stop a server by its port, never by process name; several worktrees can run
+their own server at once:
 
 ```bash
-yarn test:e2e:local tests/e2e/tenant-content.spec.ts
+lsof -ti tcp:3000 | xargs kill
 ```
 
-For a production-like local Worker:
+On macOS, raise the file limit if the dev server runs out of handles:
+`ulimit -n 65536`.
+
+Yarn accepts new package releases only after seven days. For an urgent reviewed
+security fix, `corepack yarn up <package>@<fixed-version> --no-time-gate` and
+record the advisory in the pull request. Dependency patches live in `patches/`
+and are applied by Yarn's `patch:` protocol on every install.
+
+---
+
+## Tests
+
+Before pushing:
 
 ```bash
-yarn dev:worker
+corepack yarn quality && corepack yarn test:unit && corepack yarn test:d1 && corepack yarn test:migrations && corepack yarn test:mcp
 ```
 
-After a successful build, `yarn dev:worker:start` restarts that same `.output`
-without rebuilding. Source edits are not compiled into `.output` automatically;
-use `yarn dev` for the normal HMR editing loop.
-
-Playwright applies the local D1 schema to an empty database, builds the
-Cloudflare Worker, starts it under local workerd, and seeds the synthetic
-businesses through the app's own boundaries (`tests/e2e/seed`). Authenticated
-tests sign in through Better Auth as the seeded fixtures; no email inbox or
-authentication bypass route is involved.
-
-Local tenant tests use a shared-host routing contract: the browser targets
-`localhost` and the test helper supplies `x-preview-tenant` for the selected
-fixture. Deployed staging uses direct first-level tenant aliases instead. This is the authoritative local browser path; do not rely on direct
-`*.localhost` navigation for Worker browser verification.
-
-```text
-http://localhost:3000/                  (x-preview-tenant: harbor-legal)
-http://localhost:3000/services          (x-preview-tenant: harbor-legal)
-http://localhost:3000/experiences       (x-preview-tenant: clayhouse)
-http://localhost:3000/reservations      (x-preview-tenant: demo)
-```
-
-### macOS file limit fix
+When the MCP tool surface changes, regenerate and commit the catalog:
 
 ```bash
-ulimit -n 65536
+corepack yarn mcp:catalog:write
 ```
+
+`corepack yarn chatgpt:submission` writes the OpenAI app submission file when
+you submit to OpenAI; it is not committed.
+
+The E2E suite starts its own Worker on `PLAYWRIGHT_PORT` (default 3000) with its
+own local D1, seeds it, and signs in as the fixtures:
+
+```bash
+PLAYWRIGHT_PORT=3107 corepack yarn test:e2e tests/e2e/<file>.spec.ts --project=chromium
+```
+
+Cloudflare Images credentials exist only in production. Outside it, uploads and
+social cards that need Cloudflare Images answer 503 by design.
 
 ---
 
@@ -172,40 +129,38 @@ ulimit -n 65536
 Deployment follows the branches in `.github/workflows/ci.yml`:
 
 1. Pull requests run `Checks` and the `E2E` suite against a local Worker and a
-   local D1 seeded with synthetic businesses (`tests/e2e/seed`). Nothing is
-   deployed for a pull request, and no production data is read.
+   local D1 seeded with synthetic businesses. Nothing is deployed for a pull
+   request, and no production data is read.
 2. Pushes to `staging` run `Checks`, then deploy the staging Worker, apply
    staging migrations, and run read-only MCP and tenant rendering against
-   staging itself. Nothing writes test data into real staging.
+   staging itself.
 3. Pushes to `main` run `Checks`, then deploy the production Worker, apply
    production migrations, and run read-only production browser verification.
 
-CI invokes native Wrangler commands only in the matching branch job.
-
 During an incident, use Cloudflare's deployment history to restore the last
 known-good production deployment without changing D1 data. Then land the source
-fix through `staging` and `main` and repeat the browser gates.
+fix through `staging` and `main`.
 
-Production secrets live in the Cloudflare dashboard → Workers & Pages → krabiclaw → Settings → Variables.
-
-Set protected internal job secrets with Wrangler:
+Production secrets live in Cloudflare → Workers & Pages → krabiclaw → Settings →
+Variables. `CRON_SECRET` protects internal scheduled endpoints:
 
 ```bash
 openssl rand -base64 32
 yarn wrangler secret put CRON_SECRET
 ```
 
-`CRON_SECRET` protects internal scheduled endpoints. Local commands read their configuration from `.env`; deployed Workers use Cloudflare secrets and the variables in `wrangler.toml`.
+Real-send production canaries (auth OTP, notification email and WhatsApp) run
+only on demand, from the `Production Real-Send Canaries` workflow.
 
-MCP reconnect triage and Cloudflare auth debugging are documented in [docs/observability.md](docs/observability.md).
-
-The mandatory deployed-browser release gate and outage recovery rules are documented in [docs/operations/release-and-outage-prevention.md](docs/operations/release-and-outage-prevention.md).
+Schema and database releases follow
+[release-and-outage-prevention.md](docs/operations/release-and-outage-prevention.md).
 
 ---
 
 ## Schema
 
-`server/db/schema.ts` is the only schema source of truth; `migrations/` holds generated output. Hand-written migrations are prohibited.
+`server/db/schema.ts` is the only schema source of truth; `migrations/` holds
+generated output. Hand-written migrations are prohibited.
 
 ---
 
@@ -215,8 +170,7 @@ The mandatory deployed-browser release gate and outage recovery rules are docume
 yarn stripe:listen
 ```
 
-Copy the `whsec_...` signing secret it outputs into `.env` as `STRIPE_WEBHOOK_SECRET`. Swap back to the production webhook secret before deploying.
-
-Native marketplace onboarding uses a separate Accounts v2 thin-event
-destination and signing secret. See
-[Stripe Connect onboarding](docs/operations/stripe-connect.md).
+Copy the `whsec_...` signing secret it prints into `.env` as
+`STRIPE_WEBHOOK_SECRET`. Connected accounts use a separate Accounts v2
+thin-event destination and signing secret; see
+[Stripe Connect](https://docs.stripe.com/connect).

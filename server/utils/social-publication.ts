@@ -35,7 +35,7 @@ import {
  * One call per channel: the provider's post id is recorded on success and the
  * provider's error on failure. There is no scheduler and no queue.
  *
- * Discord has nothing to prepare: the KrabiClaw bot, added to the server when
+ * Discord has nothing to prepare: the Blawby bot, added to the server when
  * the owner linked Discord through Better Auth, creates the message in the
  * chosen channel and answers with the message it saved.
  */
@@ -500,7 +500,7 @@ async function publishToDiscord(context: ChannelContext, target: DiscordConnecti
   return { providerPostId: message.id, permalink: discordMessageLink(target.guildId, message.channel_id, message.id), publishedAt: instantOf(message.timestamp) }
 }
 
-/** The provider application a publication is made through: Meta's app, or KrabiClaw's Discord application. */
+/** The provider application a publication is made through: Meta's app, or Blawby's Discord application. */
 function providerAppId(env: CloudflareEnv, channel: SocialChannel): string {
   const [name, value] = channel === 'facebook' ? ['FACEBOOK_APP_ID', env.FACEBOOK_APP_ID] : channel === 'instagram' ? ['INSTAGRAM_APP_ID', env.INSTAGRAM_APP_ID] : ['DISCORD_CLIENT_ID', env.DISCORD_CLIENT_ID]
   if (typeof value !== 'string' || !value) throw new Error(`${name} is not configured`)
@@ -735,7 +735,7 @@ async function reconcileDiscordPublication(env: CloudflareEnv, organizationId: s
   return { publication: receipt(updated), state: updated.state }
 }
 
-/** One message the KrabiClaw bot sent to the connected channel; anything else is refused. */
+/** One message the Blawby bot sent to the connected channel; anything else is refused. */
 export async function readDiscordMessage(env: CloudflareEnv, target: DiscordConnection, messageId: string): Promise<DiscordMessage> {
   if (!/^\d{15,25}$/.test(messageId)) throw new HTTPError({ statusCode: 400, statusMessage: 'A Discord message id is a numeric snowflake.' })
   let message: DiscordMessage
@@ -745,6 +745,6 @@ export async function readDiscordMessage(env: CloudflareEnv, target: DiscordConn
     if (error instanceof DiscordError && error.objectMissing) throw new HTTPError({ statusCode: 404, statusMessage: `The connected Discord channel has no message ${messageId}` })
     throw error
   }
-  if (message.author.id !== env.DISCORD_CLIENT_ID) throw new HTTPError({ statusCode: 409, statusMessage: `Discord message ${message.id} was not sent by the KrabiClaw bot.` })
+  if (message.author.id !== env.DISCORD_CLIENT_ID) throw new HTTPError({ statusCode: 409, statusMessage: `Discord message ${message.id} was not sent by the Blawby bot.` })
   return message
 }

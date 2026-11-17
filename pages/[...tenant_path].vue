@@ -21,7 +21,7 @@ definePageMeta({ layout: false })
 
 const route = useRoute()
 const { site, id: organizationId } = useTenantOrganization().organization
-// An unclaimed path is a page document on whichever site resolved, KrabiClaw's
+// An unclaimed path is a page document on whichever site resolved, Blawby's
 
 const segments = route.params.tenant_path
 const pagePath = computed(() => {

@@ -7,7 +7,7 @@ import { mcpData, mcpRequest } from './helpers/mcp'
 import { seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
 import { seed, seededTenant } from './seed/manifest'
 
-// The seeded Saya restaurant, the Blawby practice and KrabiClaw's own site, read once the seed has run.
+// The seeded Saya restaurant, the Blawby practice and Blawby's own site, read once the seed has run.
 const restaurantId = () => seededTenant('restaurant').organizationId
 const legalId = () => seededTenant('legal').organizationId
 const platformId = () => seed().platformOrganizationId
@@ -247,7 +247,7 @@ test('every catalog preset saves through MCP and renders on Blawby and the platf
       expect(rendered.loaded.some(face => face.family === body), `${option.value} body face`).toBe(true)
     }
 
-    // KrabiClaw's own site renders the same setting.
+    // Blawby's own site renders the same setting.
     const platformSettings = `/api/organizations/${platformId()}/settings`
     const platformOriginal = await owner.get(platformSettings)
     await expectStatus(platformOriginal, 200)

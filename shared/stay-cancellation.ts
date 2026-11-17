@@ -4,7 +4,7 @@ import { localDateTimeToInstant } from '../utils/timezone.ts'
 /**
  * What a guest's cancellation returns, by the policy the stay was booked under,
  * as Airbnb's Help Center states each policy (airbnb.com/help/article/475).
- * The amounts are the nights' prices the guest paid; KrabiClaw adds no
+ * The amounts are the nights' prices the guest paid; Blawby adds no
  * service fee or taxes to a stay, so there is nothing else to return.
  */
 

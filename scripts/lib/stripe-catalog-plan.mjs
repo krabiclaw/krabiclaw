@@ -99,7 +99,7 @@ export const PLAN_DEFINITIONS = Object.freeze([
     features: [],
   })),
   {
-    // A service KrabiClaw's people perform, added to a business's plan subscription as its own item.
+    // A service Blawby's people perform, added to a business's plan subscription as its own item.
     name: 'SEO and marketing strategy',
     description: 'Julia leads your SEO strategy, hand-writes ranking blog posts, meets with you weekly and is on chat with you.',
     planId: 'strategy',

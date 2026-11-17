@@ -72,7 +72,7 @@ import { canOpenPlatformAccounts } from '~/utils/platform-admin-access'
 // admin has: pick a person and act as them. It sits beside Team and Billing
 // because it is about accounts rather than about a site — under a site's URL it
 // read as "this site's people", which it has never been. It exists only inside
-// KrabiClaw's own organization and only for a Better Auth admin; anywhere else
+// Blawby's own organization and only for a Better Auth admin; anywhere else
 // it is not a page, the same rule that decides Menu's row.
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
 

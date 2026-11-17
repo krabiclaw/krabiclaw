@@ -29,7 +29,7 @@ test('public discovery resolves translations through current publication owners'
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
     for (const id of ['platform', 'tenant', 'other']) {
-      // KrabiClaw's own organization is the one running the platform template.
+      // Blawby's own organization is the one running the platform template.
       // Public sites: discovery serves only a tenant that finished onboarding.
       await db.prepare(`INSERT INTO organization (id,name,slug,subdomain,theme_id,vertical, default_currency, timezone, onboarding_status) VALUES (?,?,?,?,?,?, 'USD', 'UTC', 'active')`)
         .bind(id, id, id, id, id === 'platform' ? 'krabiclaw-theme-v1' : 'tenant-theme-v1', id === 'platform' ? 'service' : 'restaurant').run()

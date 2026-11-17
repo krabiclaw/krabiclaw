@@ -148,7 +148,7 @@ export async function takeAlterationRequest(db: DbClient, env: CloudflareEnv, re
     const before: Terms = { check_in_date: stay.check_in_date, check_out_date: stay.check_out_date, adults: stay.adults, children: stay.children, infants: stay.infants, total_minor: stay.total_minor, currency: stay.currency }
     const proposal: Proposal = { source: 'airbnb', initiated_by: request.initiatedBy, live_feed_event_id: request.id, property_id: request.propertyId, booking_id: request.bookingId, stay_id: stayId, before, after: request.after }
     const guest = request.initiatedBy === 'guest'
-    // The guest's own request names their account; a host's proposal on Airbnb is KrabiClaw's to relay.
+    // The guest's own request names their account; a host's proposal on Airbnb is Blawby's to relay.
     entry = await appendMessage(db, {
       conversationId: threadId, authorKind: 'krabiclaw', authorUserId: guest ? stay.guest_user_id : null, channel: 'airbnb', eventName: 'booking_change.requested', dedupeKey,
       body: `${guest ? 'Asked' : 'Proposed'} on Airbnb to change the stay to ${nightsLabel(request.after, 'en')} for ${request.after.adults + request.after.children} guests (${formatMinorAmount(request.after.total_minor, request.after.currency, 'en-US')}).`,

@@ -224,7 +224,7 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
   server.setRequestHandler("tools/list", async () => {
     const { event, mcpUser, cfEnv, requestId } = factoryContextFrom(ctx);
     if (!mcpUser) throw new ProtocolError(MCP_ERROR.internal, "Missing authenticated MCP request context.");
-    // organization_id is a KrabiClaw-specific extension for site-scoped tool
+    // organization_id is a Blawby-specific extension for site-scoped tool
     // discovery — not part of the MCP spec's ListToolsRequestParams (only
     // cursor/_meta). @modelcontextprotocol/server validates tools/list
     // params against the spec's schema and silently drops unrecognized

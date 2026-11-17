@@ -110,7 +110,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     const threads = await teamThreads(cleaner)
     assert.deepEqual(threads.map(item => item.booking_id).sort(), [dee.id, lee.id].sort())
     const thread = threads.find(item => item.booking_id === dee.id)!
-    // KrabiClaw's post is a message from someone else: unread until read, for everyone in the conversation.
+    // Blawby's post is a message from someone else: unread until read, for everyone in the conversation.
     assert.deepEqual([thread.name, thread.booking_id, thread.participants.map(person => person.id).sort(), await isUnread(db, cleaner, thread.id)], [null, dee.id, ['admin', 'cleaner', 'owner'], true])
     const [job] = await automatic(thread.id)
     assert.equal(job!.key, jobKey(turnover))

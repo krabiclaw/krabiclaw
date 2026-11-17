@@ -95,7 +95,7 @@ const { social_profiles: socialProfiles, policies } = organization
 const { value: theme, setPreference } = usePlatformTheme()
 const isDark = computed(() => theme.value === 'dark')
 const year = new Date().getFullYear()
-// Every tenant site credits KrabiClaw, tagged so the platform's own analytics
+// Every tenant site credits Blawby, tagged so the platform's own analytics
 // can attribute the visit to the site and theme that sent it.
 const platformOrigin = useRuntimeConfig().public.siteUrl
 const requestHost = useRequestURL().host

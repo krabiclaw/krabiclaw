@@ -129,10 +129,10 @@ function metadataForInput(input: TenantPageEditorInput, locale: string, path: st
 /**
  * May this site hold a custom page?
  *
- * A custom page is a subscription feature a customer buys. KrabiClaw's own site
+ * A custom page is a subscription feature a customer buys. Blawby's own site
  * is the seller, not a subscriber: the platform organization holds no
  * subscription and never will, so asking `custom_pages` of it refused every
- * page KrabiClaw publishes about itself (#903).
+ * page Blawby publishes about itself (#903).
  */
 async function organizationMayHoldCustomPages(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<boolean> {
   const { site } = await loadOrganizationSite(db, organizationId)

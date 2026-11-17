@@ -161,7 +161,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
       .bind(ORG, home.id, stay.id, NOW, NOW, NOW, NOW).run()
     assert.deepEqual(await runAlterationRequestFeed(db, env, PROPERTY), { recorded: 1, reconciled: 0 })
     for (const archived of [true, false]) assert.deepEqual(await archiveConversation(db, { organizationId: ORG, conversationId: threadId, userId: OWNER, archived }), { archived })
-    // A payment the conversation records as KrabiClaw's event, as payments/notifications.ts writes it.
+    // A payment the conversation records as Blawby's event, as payments/notifications.ts writes it.
     await appendMessage(db, { conversationId: threadId, authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: 'Payment received\nAmount: $450.00',
       payload: { payment_id: 'contract-payment', status: 'succeeded', amount: 45000, currency: 'USD' }, dedupeKey: 'financial-operation:contract', occurredAt: NOW })
     const refused = await sendGuestThreadReply(db, { threadId, organizationId: ORG, body: 'Check-in is from 4 PM.', actorUserId: OWNER, idempotencyKey: 'contract-reply', env })

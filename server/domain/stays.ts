@@ -117,7 +117,7 @@ export interface Stay {
   provider: 'channex' | null
   external_booking_id: string | null
   channel_booking_id: string | null
-  /** The reservation on its channel's host pages, from its confirmation code; null where the channel has none KrabiClaw links to. */
+  /** The reservation on its channel's host pages, from its confirmation code; null where the channel has none Blawby links to. */
   channel_booking_url: string | null
   /** The guest conversation in the inbox; every booking has one. */
   conversation_id: string
@@ -253,7 +253,7 @@ export interface StayHome {
   assigned_member_id: string | null
   /**
    * The channel this home is connected to, if any. null is a home kept only in
-   * KrabiClaw: its night changes go nowhere else. A connected home pushes its
+   * Blawby: its night changes go nowhere else. A connected home pushes its
    * nights; one importing (a draft not yet activated among them) or disconnected does not.
    */
   channel: { provider: 'channex'; status: 'importing' | 'connected' | 'disconnected' } | null
@@ -428,7 +428,7 @@ function staysOverlap(stay: Pick<Stay, 'check_in_date' | 'check_out_date'>, from
   return stay.check_in_date < to && stay.check_out_date > from
 }
 
-/** A channel's stay is changed on its channel: refused, linking to the reservation there when KrabiClaw can. */
+/** A channel's stay is changed on its channel: refused, linking to the reservation there when Blawby can. */
 function channelOwned(stay: Stay, state: 'belongs to' | 'is paid through'): never {
   const url = stay.channel_booking_url
   fail(409, 'STAY_NOT_EDITABLE', url ? `This stay ${state} ${STAY_CHANNEL_LABELS[stay.channel]}; change it there: ${url}` : `This stay ${state} its channel; change it there`, undefined, { channel_booking_url: url })
@@ -1817,7 +1817,7 @@ function recordedArrival(stay: Pick<Stay, 'starts_at' | 'timezone'>, home: Pick<
   return time === home.check_in_time ? null : time
 }
 
-/** The terms a nights booking is made under: the home's guest terms, its payment, and the home's cancellation policy for its length; a stay imported from another channel has that channel's, which KrabiClaw does not hold. */
+/** The terms a nights booking is made under: the home's guest terms, its payment, and the home's cancellation policy for its length; a stay imported from another channel has that channel's, which Blawby does not hold. */
 async function stayPolicy(db: DbClient, organizationId: string, productId: string, payment: { price: Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'> } | null, cancellation: StayBookedPolicy | null): Promise<string> {
   const config = await requireBookingConfig(db, organizationId, productId)
   return JSON.stringify({ ...bookingPolicy(config, payment?.price ?? null), cancellation } satisfies BookingPolicy)

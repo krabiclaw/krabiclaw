@@ -67,7 +67,7 @@ const CLAIMS = mergeClaimedRoutes(
   [],
 )
 
-// A venue (restaurant, experience or stay) site, a legal practice's, and KrabiClaw's own.
+// A venue (restaurant, experience or stay) site, a legal practice's, and Blawby's own.
 function allows(site: 'venue' | 'legal' | 'platform', path: string) {
   const definition = site === 'platform' ? PLATFORM_SITE : resolvePublicSite({})
   return siteAllowsPageDocumentAt(definition, CLAIMS, path)
@@ -108,7 +108,7 @@ test('a constrained param claims only what it matches', () => {
 })
 
 test('the platform owns its marketing pages and excludes private auth routes from pageviews', () => {
-  // KrabiClaw's own site renders page documents through the same loader and the
+  // Blawby's own site renders page documents through the same loader and the
   // same catch-all every customer site uses (#903).
   assert.equal(allows('platform', '/about'), true)
   assert.equal(allows('platform', '/features'), true)

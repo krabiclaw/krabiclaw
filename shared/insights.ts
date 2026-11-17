@@ -66,7 +66,7 @@ export const INSIGHTS_PAGES = [
 
 export type InsightsPageId = typeof INSIGHTS_PAGES[number]['id']
 export type InsightsPageDefinition = typeof INSIGHTS_PAGES[number]
-/** The pages read from KrabiClaw's own records; the Marketing pages are read from Instagram and Google Ads. */
+/** The pages read from Blawby's own records; the Marketing pages are read from Instagram and Google Ads. */
 export type InsightsStoredPageId = Exclude<InsightsPageId, 'marketing/instagram' | 'marketing/google-ads'>
 export const INSIGHTS_STORED_PAGE_IDS = INSIGHTS_PAGES.filter(page => page.section !== 'marketing').map(page => page.id) as InsightsStoredPageId[]
 

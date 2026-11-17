@@ -79,7 +79,7 @@ const emit = defineEmits<{
 }>()
 
 const inputClass = FORM_INPUT_CLASS
-// The help form is the KrabiClaw site's contact form: it files into that site's inbox like every tenant's.
+// The help form is the Blawby site's contact form: it files into that site's inbox like every tenant's.
 const { id: organizationId } = useTenantOrganization().organization
 const { locale } = useI18n()
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/

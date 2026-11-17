@@ -61,9 +61,7 @@ class CalendarError extends Error {
 }
 const BASE = 'https://www.googleapis.com/calendar/v3'
 const BOOKING_CALENDAR_NAME = 'Blawby'
-const LEGACY_BOOKING_CALENDAR_NAME = 'KrabiClaw'
 const bookingCalendarMarker = (organizationId: string) => `Blawby bookings for organization ${organizationId}`
-const legacyBookingCalendarMarker = (organizationId: string) => `Krabiclaw bookings for organization ${organizationId}`
 async function google<T>(token: string, path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     ...init,
@@ -84,52 +82,18 @@ export async function listWritableCalendars(token: string): Promise<CalendarChoi
   return calendars
 }
 
-async function resolveBookingCalendarName(token: string, organizationId: string, calendar: CalendarChoice): Promise<string> {
-  const legacyMarker = legacyBookingCalendarMarker(organizationId)
-  if (calendar.primary || calendar.accessRole !== 'owner' || calendar.description !== legacyMarker) return calendar.summary
-
-  // Use the calendar resource's ETag, not the calendar-list entry's. A rename
-  // in Google between the read and write must keep the name the owner chose.
-  const path = `/calendars/${encodeURIComponent(calendar.id)}`
-  const current = await google<{ id: string; summary: string; description?: string; etag?: string }>(token, path)
-  if (current.id !== calendar.id || !current.summary) throw new Error('Google did not return the selected booking calendar.')
-  if (current.description !== legacyMarker) return current.summary
-  if (!current.etag) throw new Error('Google did not return a version for the booking calendar.')
-  const description = bookingCalendarMarker(organizationId)
-  const summary = current.summary === LEGACY_BOOKING_CALENDAR_NAME ? BOOKING_CALENDAR_NAME : current.summary
-  const saved = await google<typeof current>(token, path, {
-    method: 'PATCH', headers: { 'If-Match': current.etag },
-    body: JSON.stringify({ description, ...(summary !== current.summary ? { summary } : {}) }),
-  })
-  if (saved.id !== current.id || saved.summary !== summary || saved.description !== description) {
-    throw new Error('Google did not confirm the booking calendar update.')
-  }
-  return saved.summary
-}
-
-async function refreshBookingCalendarName(db: DbClient, organizationId: string, integration: GoogleCalendarIntegration, token: string, calendar: CalendarChoice) {
-  const name = await resolveBookingCalendarName(token, organizationId, calendar)
-  if (name === integration.calendar_name) return
-  const result = await execute(db, `UPDATE organization_integrations SET target_name=?, updated_at=?
-    WHERE organization_id=? AND provider='google_calendar' AND revision=? AND account_id=? AND target_id=? AND status<>'disabled'`,
-  [name, new Date().toISOString(), organizationId, integration.revision, integration.account_id, integration.calendar_id])
-  if (result.meta?.changes !== 1) throw new CalendarSelectionConflict('Calendar selection changed. Reload and try again.')
-  integration.calendar_name = name
-}
-
 /** Google owns the calendar; only its domain identity is stored locally. */
 export async function connectCalendar(db: DbClient, organizationId: string, accountId: string, token: string) {
   const current = await readCalendarIntegration(db, organizationId)
   if (current?.account_id === accountId && current.status !== 'disabled') {
-    await refreshBookingCalendarName(db, organizationId, current, token, await requireWriter(token, current.calendar_id))
+    await requireWriter(token, current.calendar_id)
     return
   }
   const pending = await queryFirst<{ n: number }>(db, "SELECT count(*) n FROM google_calendar_event_links WHERE organization_id=? AND state<>'deleted'", [organizationId])
   if (pending?.n) throw new CalendarSelectionConflict('Your previous calendar is still disconnecting. Try again shortly.')
   if (current?.account_id === accountId) {
     const calendar = await requireWriter(token, current.calendar_id)
-    const calendar_name = await resolveBookingCalendarName(token, organizationId, calendar)
-    await storeCalendarSelection(db, organizationId, { ...current, calendar_name }, { revision: current.revision })
+    await storeCalendarSelection(db, organizationId, { ...current, calendar_name: calendar.summary }, { revision: current.revision })
     return
   }
   const attempt = await queryFirst<{ account_id: string; revision: string }>(db,
@@ -139,8 +103,7 @@ export async function connectCalendar(db: DbClient, organizationId: string, acco
   // Google assigns the calendar ID. The provider's exact marker identifies a
   // calendar when a previous create may have succeeded before its reply arrived.
   const marker = bookingCalendarMarker(organizationId)
-  const legacyMarker = legacyBookingCalendarMarker(organizationId)
-  const calendars = (await listWritableCalendars(token)).filter(item => item.description === marker || item.description === legacyMarker)
+  const calendars = (await listWritableCalendars(token)).filter(item => item.description === marker)
   if (calendars.length > 1) throw new CalendarSelectionConflict('More than one booking calendar was found. Contact support.')
   let calendar = calendars[0]
   if (!calendar) {
@@ -174,8 +137,7 @@ export async function connectCalendar(db: DbClient, organizationId: string, acco
       throw error
     }
   }
-  const calendar_name = await resolveBookingCalendarName(token, organizationId, calendar)
-  await storeCalendarSelection(db, organizationId, { account_id: accountId, calendar_id: calendar.id, calendar_name }, { revision })
+  await storeCalendarSelection(db, organizationId, { account_id: accountId, calendar_id: calendar.id, calendar_name: calendar.summary }, { revision })
 }
 async function requireWriter(token: string, calendarId: string) {
   const calendar = await google<CalendarChoice>(token, `/users/me/calendarList/${encodeURIComponent(calendarId)}`)
@@ -308,22 +270,6 @@ export async function syncCalendarOrganization(env: CloudflareEnv, organizationI
   const links = await queryAll<EventLink>(db, `SELECT * FROM google_calendar_event_links WHERE organization_id = ?
     ${bookingId === null ? '' : 'AND booking_id=?'} AND state IN ('pending', 'cleanup', 'error') ORDER BY updated_at, id LIMIT ?`,
   [organizationId, ...(bookingId === null ? [] : [bookingId]), limit])
-  // A manual sync can refresh the old default name even when there are no
-  // bookings to send to Google. The background path already checks live links.
-  if (!checkEntitlement && links.length === 0 && bookingId === null &&
-    integration.status !== 'disabled' && integration.calendar_name === LEGACY_BOOKING_CALENDAR_NAME) {
-    try {
-      const token = await provider.token(integration.account_id)
-      const calendar = await requireWriter(token, integration.calendar_id)
-      await refreshBookingCalendarName(db, organizationId, integration, token, calendar)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      await execute(db, `UPDATE organization_integrations SET status='error', last_error=?
-        WHERE organization_id=? AND provider='google_calendar' AND revision=? AND status<>'disabled'`,
-      [message, organizationId, integration.revision])
-      return { checked: 0, failed: 1 }
-    }
-  }
   let checked = 0; let failed = 0
   for (const link of links) {
     checked++
@@ -340,10 +286,7 @@ export async function syncCalendarOrganization(env: CloudflareEnv, organizationI
         await execute(db, "UPDATE google_calendar_event_links SET state='pending' WHERE id=?", [link.id])
         continue
       }
-      const calendar = await requireWriter(token, link.calendar_id)
-      if (integration.revision === link.integration_revision && (calendar.description === legacyBookingCalendarMarker(organizationId) || integration.calendar_name === LEGACY_BOOKING_CALENDAR_NAME)) {
-        await refreshBookingCalendarName(db, organizationId, integration, token, calendar)
-      }
+      await requireWriter(token, link.calendar_id)
       const url = subject.request_id && subject.buyer_user_id ? composeBuyerActivityUrl(env, subject.product_kind === 'stay' ? 'stay' : 'booking', subject.request_id) : null
       const path = `/calendars/${encodeURIComponent(link.calendar_id)}/events`
       let existing: GoogleEvent | undefined

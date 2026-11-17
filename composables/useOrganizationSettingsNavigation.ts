@@ -56,8 +56,8 @@ export function useOrganizationSettingsNavigation(
   })
 
   /**
-   * Every account on the platform, and impersonation: KrabiClaw runs on
-   * KrabiClaw, so only its own organization's Menu carries this row, and only
+   * Every account on the platform, and impersonation: Blawby runs on
+   * Blawby, so only its own organization's Menu carries this row, and only
    * for a Better Auth admin. The template is read off the route's loaded
    * organization context, the same reading the page itself gates on. Airbnb
    * has no equivalent; internal admin tooling is not in the host's dashboard.
@@ -92,13 +92,13 @@ export function useOrganizationSettingsNavigation(
       { id: 'locations', icon: 'i-lucide-map-pin', label: dashboard.organization.value?.vertical === 'service' ? 'Offices' : 'Locations', to: `${base.value}/locations` },
       ...(permissions.value?.team ? [{ id: 'team', icon: 'i-lucide-users', label: 'Team', to: `${base.value}/team` }] : []),
       { id: 'integrations', icon: 'i-lucide-plug', label: 'Connections', to: `${base.value}/integrations` },
-      // What the organization pays KrabiClaw. Owners change it and admins read it; members have no row.
+      // What the organization pays Blawby. Owners change it and admins read it; members have no row.
       ...(permissions.value?.billing ? [{ id: 'billing', icon: 'i-lucide-receipt', label: 'Plan and billing', to: `${base.value}/billing` }] : []),
       // "Team" is this organization's members; this is every account there is.
       ...(showPlatformAccounts.value
         ? [{ id: 'platform-accounts', icon: 'i-lucide-shield-user', label: 'Platform accounts', to: `${base.value}/platform-accounts` }]
         : []),
-      // Members' reports of guests and teammates, decided by KrabiClaw staff within 24 hours.
+      // Members' reports of guests and teammates, decided by Blawby staff within 24 hours.
       ...(showPlatformReports.value
         ? [{ id: 'platform-reports', icon: 'i-lucide-flag', label: 'Platform reports', to: `${base.value}/platform-reports` }]
         : []),

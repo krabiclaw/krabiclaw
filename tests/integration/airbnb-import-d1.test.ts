@@ -338,7 +338,7 @@ async function importAll(connection: AirbnbConnection, db: D1Database, channex: 
   await advanceTo(connection, db, channex, productId, 'complete')
 }
 
-test('a listing imports through every stage into a home Channex and KrabiClaw agree on', { timeout: 120_000 }, async () => {
+test('a listing imports through every stage into a home Channex and Blawby agree on', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
@@ -1054,7 +1054,7 @@ test('the backfill route fills a home imported without content and the listings 
   }
 })
 
-test('a sync request is checked against the plan once, then KrabiClaw imports, activates and stops listings in the background', { timeout: 120_000 }, async (t) => {
+test('a sync request is checked against the plan once, then Blawby imports, activates and stops listings in the background', { timeout: 120_000 }, async (t) => {
   const { runtime, db, env, queue } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
@@ -1228,7 +1228,7 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { import_stage: 'complete', enabled: 1 })
 
     // Growth ends: Stripe deletes the subscription and Better Auth marks it canceled. On Basic, the newest live homes
-    // past the one it includes, the Airbnb one among them, go back to drafts: KrabiClaw queues its stop itself, and the task runs it.
+    // past the one it includes, the Airbnb one among them, go back to drafts: Blawby queues its stop itself, and the task runs it.
     await db.prepare("UPDATE organization SET stripeCustomerId = 'cus_org' WHERE id = ?").bind(ORG).run()
     await db.prepare("UPDATE subscription SET status = 'canceled' WHERE id = 'sub-org'").run()
     await returnExtrasToDraftsForPlanEnd(env, db, { type: 'customer.subscription.deleted', data: { object: { id: 'sub-org', customer: 'cus_org', status: 'canceled' } } } as unknown as Stripe.Event)

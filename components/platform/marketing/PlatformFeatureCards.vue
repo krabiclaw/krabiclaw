@@ -165,7 +165,7 @@ export interface PlatformFeatureCard {
 }
 
 /**
- * A grid of features, in the three shapes KrabiClaw's pages draw it: the
+ * A grid of features, in the three shapes Blawby's pages draw it: the
  * homepage band, the Features page's detailed cards, and the vertical pages'
  * plain grid.
  */
