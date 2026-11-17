@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { assertRoleAllows, resolveOrganizationMembership } from '~/server/utils/member-access'
+import { assertRoleAllows, resolveOrganizationMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import { linkedAccountAccessToken, requireIntegrationAccount, type CloudflareEnv } from '~/server/utils/auth'
 import { addLocalDays, localDateAt, localDateTimeToInstant, isValidTimezone, isValidInstant } from '~/utils/timezone'
 import { MEMBER_BUSY_SCOPES, MEMBER_NAME_SQL, type WorkingHours, type SchedulingInterval } from '~/shared/member-scheduling'
@@ -203,10 +203,19 @@ export async function memberAvailabilityJson(db: DbClient, env: CloudflareEnv, o
  }] as const))
  return JSON.stringify(Object.fromEntries(entries))
 }
+/** The connection summary counts selected calendars without fetching each member's free/busy report. */
+export async function memberCalendarCoverage(db: DbClient, membership: ResolvedMembership) {
+ const admin = await roleAllows({ ...membership, permissions: { members: ['read'] } })
+ return (await queryFirst<{ members: number; checking: number }>(db, `
+  SELECT count(*) AS members, count(*) FILTER (WHERE json_array_length(s.calendar_ids_json) > 0) AS checking
+    FROM member m JOIN user u ON u.id = m.userId
+    LEFT JOIN member_scheduling s ON s.member_id = m.id AND s.organization_id = m.organizationId
+   WHERE m.organizationId = ? AND (? = 1 OR m.userId = ?)`, [membership.organizationId, Number(admin), membership.userId]))!
+}
+
 export async function memberSchedulingList(actor: SchedulingActor) {
  const membership=await resolveOrganizationMembership(actor.env,{organizationId:actor.organizationId,userId:actor.userId})
  if(!membership)throw new HTTPError({statusCode:403,message:'Membership required'})
- const {roleAllows}=await import('~/server/utils/member-access')
  const admin=await roleAllows({...membership,permissions:{members:['read']}})
  const members=await queryAll<{id:string;name:string;image:string|null;is_self:number}>(actor.env.DB,`SELECT m.id,${MEMBER_NAME_SQL} name,u.image,m.userId=? AS is_self FROM member m JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.organizationId=? AND (?=1 OR m.userId=?)`,[actor.userId,actor.organizationId,Number(admin),actor.userId])
  return { members: await Promise.all(members.map(async ({is_self,...member})=>({...member,self:Boolean(is_self),scheduling:await readMemberScheduling(actor.env.DB,actor.env,actor.organizationId,member.id)}))) }
