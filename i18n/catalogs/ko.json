@@ -543,7 +543,7 @@
   "social_posts.load_failed": "추가 업데이트를 로드할 수 없습니다. 다시 시도하세요.",
   "social_posts.load_more": "더 많은 업데이트 보기",
   "social_posts.media_label": "사진 및 비디오 ({count})",
-  "social_posts.media_position": "{position} of {count}",
+  "social_posts.media_position": "{count}개 중 {position}번째",
   "social_posts.meta_description": "{organization}의 이야기, 뉴스 및 업데이트",
   "social_posts.next_media": "다음 사진 또는 비디오",
   "social_posts.play_video": "비디오 재생",

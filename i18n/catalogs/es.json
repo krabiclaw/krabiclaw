@@ -275,7 +275,7 @@
   "site.experience_detail.highlights": "Destacados",
   "site.experience_detail.home": "Inicio",
   "site.experience_detail.hours": "{count} hr",
-  "site.experience_detail.hours_minutes": "{hours} hr {minutes} min",
+  "site.experience_detail.hours_minutes": "{hours} h {minutes} min",
   "site.experience_detail.included": "Qué está incluido",
   "site.experience_detail.left": "{count} disponibles",
   "site.experience_detail.link_copied": "Enlace copiado",
