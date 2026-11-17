@@ -98,12 +98,14 @@ Before pushing:
 corepack yarn quality && corepack yarn test:unit && corepack yarn test:d1 && corepack yarn test:migrations && corepack yarn test:mcp
 ```
 
-When the MCP tool surface changes, regenerate and commit both artifacts:
+When the MCP tool surface changes, regenerate and commit the catalog:
 
 ```bash
 corepack yarn mcp:catalog:write
-corepack yarn chatgpt:submission:write
 ```
+
+`corepack yarn chatgpt:submission` writes the OpenAI app submission file when
+you submit to OpenAI; it is not committed.
 
 The E2E suite starts its own Worker on `PLAYWRIGHT_PORT` (default 3000) with its
 own local D1, seeds it, and signs in as the fixtures:

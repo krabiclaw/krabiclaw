@@ -3,7 +3,8 @@
 Blawby is licensed under [AGPL-3.0](LICENSE). Before your first pull request
 can be merged, sign the [Contributor License Agreement](https://cla-assistant.io/krabiclaw/krabiclaw);
 the CLA check on the pull request links to it. You keep the copyright in your
-contribution; the agreement lets KrabiClaw use, relicense and commercialize it.
+contribution; the agreement lets Aurelox LLC, which operates Blawby, use, relicense
+and commercialize it.
 
 - **Bugs and feature requests:** use the [issue forms](https://github.com/Blawby/blawby/issues/new/choose).
 - **Security:** see [SECURITY.md](SECURITY.md).

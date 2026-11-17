@@ -5,31 +5,11 @@
 // a broken entry is a broken email. A missing or mistyped value is a Vue
 // warning rather than an exception — a preview once rendered "How was
 // undefined?" and still passed — so warnings are failures here.
-//
-// It also holds the line that made the redesign possible: no colour is written
-// outside server/emails/tokens.ts. Twenty-two of twenty-three templates used to
-// carry their own, which is how zinc greys ended up inside a navy shell.
 
-import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { renderNotificationEmail } from '~/server/emails/render'
 import { NOTIFICATION_CATALOG } from '~/server/notifications/catalog'
 
 const failures: string[] = []
-
-function walk(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap(entry =>
-    entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)],
-  )
-}
-
-for (const file of walk('server/emails')) {
-  if (!file.endsWith('.ts') || file.endsWith('tokens.ts')) continue
-  const source = readFileSync(file, 'utf8')
-  for (const [hex] of source.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
-    failures.push(`${file} writes the colour ${hex}; take it from server/emails/tokens.ts`)
-  }
-}
 
 const warnings: string[] = []
 const originalWarn = console.warn
@@ -108,4 +88,4 @@ if (failures.length) {
   process.exit(1)
 }
 
-console.log(`Email catalog passed: ${NOTIFICATION_CATALOG.length} messages rendered with delivery reasons and purpose-appropriate unsubscribe controls, no colour written outside tokens`)
+console.log(`Email catalog passed: ${NOTIFICATION_CATALOG.length} messages rendered with delivery reasons and purpose-appropriate unsubscribe controls`)

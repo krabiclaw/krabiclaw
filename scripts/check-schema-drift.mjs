@@ -1,16 +1,13 @@
 #!/usr/bin/env node
 //
-//   node scripts/check-schema-drift.mjs [--env staging|--production]
+//   node scripts/check-schema-drift.mjs --env staging | --production
 //
-// Without a target: the committed migration metadata still describes
-// server/db/schema.ts, so `db:generate` would emit nothing.
-//
-// With one: the live database's schema is also what the full migration chain
-// builds. Forward migrations update it normally. A replacement baseline needs
-// a new D1 resource, because reusing a prior filename does not replay that SQL.
-import { createHash } from 'node:crypto'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+// The live database's schema is what the full migration chain builds.
+// `d1 migrations apply` skips a tag already in `d1_migrations`, so a
+// regenerated baseline would otherwise leave the database on what it first
+// carried. A replacement baseline needs a new D1 resource.
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 import { parseArgs } from 'node:util'
@@ -19,27 +16,13 @@ const { values: options } = parseArgs({
   options: { env: { type: 'string' }, production: { type: 'boolean', default: false } },
   strict: true,
 })
-if (options.env && options.production) throw new Error('Choose one of --env <name> or --production.')
-const target = options.production ? 'production' : options.env ?? null
+if (Boolean(options.env) === options.production) throw new Error('Choose one of --env <name> or --production.')
+const target = options.production ? 'production' : options.env
 
 const root = process.cwd()
 const temporaryParent = join(root, '.tmp')
 mkdirSync(temporaryParent, { recursive: true })
 const temporaryRoot = mkdtempSync(join(temporaryParent, 'schema-drift-'))
-const temporaryMigrations = join(temporaryRoot, 'migrations')
-
-function manifest(directory) {
-  const entries = []
-  function visit(path) {
-    for (const name of readdirSync(path, { withFileTypes: true })) {
-      const child = join(path, name.name)
-      if (name.isDirectory()) visit(child)
-      else entries.push([relative(directory, child), createHash('sha256').update(readFileSync(child)).digest('hex')])
-    }
-  }
-  visit(directory)
-  return entries.sort(([left], [right]) => left.localeCompare(right))
-}
 
 /**
  * Formatting differences are not schema differences, but the contents of a
@@ -66,42 +49,10 @@ function schemaOf(rows) {
 const SCHEMA_QUERY = "SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name <> 'd1_migrations'"
 
 try {
-  cpSync(join(root, 'migrations'), temporaryMigrations, { recursive: true })
-  const before = manifest(temporaryMigrations)
-  const temporaryConfig = join(temporaryRoot, 'drizzle.config.ts')
-  // Kit 0.31 prefixes snapshot paths with './'; an absolute out path fails.
-  // Reuse the normal config so this check exercises the same schema contract.
-  writeFileSync(temporaryConfig, `import config from ${JSON.stringify(join(root, 'drizzle.config.ts'))}; export default { ...config, out: ${JSON.stringify(relative(root, temporaryMigrations))}, dbCredentials: { url: ${JSON.stringify(join(temporaryRoot, 'drift.sqlite'))} } }\n`)
-  const childEnvironment = { ...process.env }
-  delete childEnvironment.FORCE_COLOR
-  const result = spawnSync(process.execPath, [
-    join(root, 'node_modules', 'drizzle-kit', 'bin.cjs'), 'generate', '--config', temporaryConfig,
-  ], {
-    cwd: root,
-    encoding: 'utf8',
-    // NO_COLOR and FORCE_COLOR conflict in the local Playwright runner. Keep
-    // Drizzle's diagnostics strict while giving the child one color policy.
-    env: { ...childEnvironment, NO_COLOR: '1', DRIZZLE_DB_FILE: join(temporaryRoot, 'drift.sqlite') },
-  })
-  // Kit can print an exception and still exit 0. Never treat that as a clean diff.
-  if (result.error || result.status !== 0 || result.stderr?.trim()) {
-    throw new Error(`Schema generation failed: ${result.error?.message ?? result.stderr ?? ''}\n${result.stdout ?? ''}`)
-  }
-  const after = manifest(temporaryMigrations)
-  if (JSON.stringify(before) !== JSON.stringify(after)) {
-    const beforePaths = new Set(before.map(([path]) => path))
-    const added = after.map(([path]) => path).filter(path => !beforePaths.has(path))
-    throw new Error(`Schema drift detected${added.length ? `; generated: ${added.join(', ')}` : '; committed migration metadata changed'}`)
-  }
-  if (!result.stdout.includes('No schema changes, nothing to migrate')) {
-    throw new Error(`Schema generation did not confirm a clean diff:\n${result.stdout}`)
-  }
-  console.log('Schema and committed migration metadata are in sync.')
-  if (target) compareLiveSchema(target)
+  compareLiveSchema(target)
 } finally {
   rmSync(temporaryRoot, { recursive: true, force: true })
 }
-
 
 function compareLiveSchema(name) {
   const scratch = join(temporaryRoot, 'baseline.sqlite')

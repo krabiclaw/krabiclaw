@@ -209,7 +209,7 @@ async function readLiveDatabase(databaseId: string, path: string): Promise<void>
 
 // The baseline this transfer builds must be the one server/db/schema.ts
 // describes, or the payload is written for a schema no deploy will run.
-execFileSync(process.execPath, ['scripts/check-schema-drift.mjs'], { cwd: process.cwd(), stdio: 'inherit' })
+execFileSync('yarn', ['lint:schema-drift'], { cwd: process.cwd(), stdio: 'inherit' })
 
 const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-snapshot-'))
 try {
