@@ -1,12 +1,13 @@
 import type { getOrganizationMembersData } from '~/server/utils/dashboard-members'
 import type { Serialize } from 'nitro/types'
+import { isOrganizationRole } from '~/utils/organization-access'
 import { isRecord } from '~/utils/api-clients'
 
 export type OrganizationMembersData = Serialize<Awaited<ReturnType<typeof getOrganizationMembersData>>>
 
 export function isOrganizationMembersData(value: unknown): value is OrganizationMembersData {
   const roles = (items: unknown) => Array.isArray(items) && items.every(item => isRecord(item) && typeof item.label === 'string'
-    && (item.value === 'member' || item.value === 'admin' || item.value === 'owner'))
+    && typeof item.value === 'string' && isOrganizationRole(item.value))
   return isRecord(value) && typeof value.canViewInvitations === 'boolean' && roles(value.inviteRoles) && Array.isArray(value.members)
     && value.members.every(member => isRecord(member) && typeof member.id === 'string' && typeof member.userId === 'string'
       && typeof member.isCurrentUser === 'boolean' && typeof member.role === 'string' && typeof member.roleLabel === 'string' && roles(member.roleChoices) && typeof member.canRemove === 'boolean'

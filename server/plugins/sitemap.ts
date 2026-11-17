@@ -115,35 +115,58 @@ export default definePlugin((nitroApp) => {
       return
     }
 
-    const entries: SitemapEntry[] = []
+    const organizationId = event.context.organizationId as string | undefined
+    const isPlatform = event.context.tenantType === TENANT_TYPES.PLATFORM
+    if (!organizationId || (!isPlatform && event.context.tenantType !== TENANT_TYPES.TENANT)) {
+      ctx.urls.length = 0
+      return
+    }
 
-    if (event.context.tenantType === TENANT_TYPES.PLATFORM) {
-      const platformOrganizationId = event.context.organizationId as string
+    const entries: SitemapEntry[] = []
+    const localizedLocales = await queryAll<{ locale: string; organization_id: string }>(db, `
+      SELECT l.locale, l.organization_id
+        FROM organization_locales l
+       WHERE l.organization_id = ? AND l.is_source = 0 AND l.status = 'published'
+       ORDER BY l.locale
+    `, [organizationId])
+    const publishedLocales: typeof localizedLocales = []
+    for (const candidate of localizedLocales) {
+      try {
+        await assertOrganizationLanguage(db, candidate.organization_id, candidate.locale)
+      } catch (error) {
+        if (error instanceof HTTPError && ['LANGUAGE_NOT_ENABLED', 'LANGUAGE_NOT_PUBLISHED', 'PLATFORM_LOCALE_UNAVAILABLE'].includes(error.data?.code)) continue
+        throw error
+      }
+      publishedLocales.push(candidate)
+      const pages = await queryAll<{ path: string; updated_at: string }>(db, `
+        SELECT d.path, d.updated_at FROM content_documents d
+          JOIN content_documents root ON root.id = d.root_id AND root.row_role = 'root'
+         WHERE d.organization_id = ? AND d.locale = ? AND d.row_role = 'representation' AND d.path IS NOT NULL
+           AND ((root.kind = 'page' AND ${publicTenantPageSql('root')}) OR (root.kind = 'article' AND root.status = 'published' AND root.visibility = 'listed')
+             OR (root.kind = 'social_post' AND root.status = 'published' AND root.visibility = 'listed'))
+         ORDER BY d.path
+      `, [organizationId, candidate.locale])
+      for (const page of pages) {
+        const localizedPath = page.path === '/' ? `/${candidate.locale}` : `/${candidate.locale}${page.path}`
+        entries.push({ loc: localizedPath, lastmod: page.updated_at })
+      }
+    }
+
+    if (isPlatform) {
       entries.push(...PLATFORM_SITEMAP_ROUTES.map(loc => ({ loc })))
 
       // Blawby's marketing pages are page documents on its own organization,
       // listed from the same table as every customer's pages.
-      for (const page of await listPublishedTenantSitemapPages(db, platformOrganizationId)) {
+      for (const page of await listPublishedTenantSitemapPages(db, organizationId)) {
         if (!page.path) continue
         entries.push({ loc: page.path, lastmod: page.lastmod ?? undefined })
       }
 
-      entries.push(...await listSitemapArticleEntries(db, platformOrganizationId))
+      entries.push(...await listSitemapArticleEntries(db, organizationId))
 
-      entries.push(...await socialPostEntries(db, platformOrganizationId))
+      entries.push(...await socialPostEntries(db, organizationId))
       ctx.urls.length = 0
       addUniqueEntries(ctx.urls, entries)
-      return
-    }
-
-    if (event.context.tenantType !== TENANT_TYPES.TENANT) {
-      ctx.urls.length = 0
-      return
-    }
-
-    const organizationId = event.context.organizationId as string | undefined
-    if (!organizationId || isDemoOrganization(event.context.organization as { subdomain?: string } | undefined)) {
-      ctx.urls.length = 0
       return
     }
 
@@ -163,36 +186,14 @@ export default definePlugin((nitroApp) => {
     const publicProducts = await listOrganizationProducts(db, { organizationId, publishedOnly: true, env })
     const publicProductIds = JSON.stringify(publicProducts.map(product => product.id))
 
-    const localizedLocales = await queryAll<{ locale: string; organization_id: string }>(db, `
-      SELECT l.locale, l.organization_id
-        FROM organization_locales l
-       WHERE l.organization_id = ? AND l.is_source = 0 AND l.status = 'published'
-       ORDER BY l.locale
-    `, [organizationId])
-    for (const candidate of localizedLocales) {
-      try {
-        await assertOrganizationLanguage(db, candidate.organization_id, candidate.locale)
-      } catch (error) {
-        if (error instanceof HTTPError && ['LANGUAGE_NOT_ENABLED', 'LANGUAGE_NOT_PUBLISHED', 'PLATFORM_LOCALE_UNAVAILABLE'].includes(error.data?.code)) continue
-        throw error
-      }
-      const [resources, pages] = await Promise.all([
-        queryAll<{ route_path: string; updated_at: string }>(db, `
+    for (const candidate of publishedLocales) {
+      const resources = await queryAll<{ route_path: string; updated_at: string }>(db, `
           SELECT route_path, updated_at FROM ${RESOURCE_LOCALIZATIONS_SQL} localized
            WHERE organization_id = ? AND locale = ? AND route_path IS NOT NULL
              AND (resource_type <> 'product' OR resource_id IN (SELECT value FROM json_each(?)))
              AND (resource_type <> 'business_location' OR resource_id IN (SELECT bl.id FROM business_locations bl WHERE bl.organization_id = localized.organization_id AND ${publicLocationSql('bl')}))
            ORDER BY route_path
-        `, [organizationId, candidate.locale, publicProductIds]),
-        queryAll<{ path: string; updated_at: string }>(db, `
-          SELECT d.path, d.updated_at FROM content_documents d
-            JOIN content_documents root ON root.id = d.root_id AND root.row_role = 'root'
-           WHERE d.organization_id = ? AND d.locale = ? AND d.row_role = 'representation' AND d.path IS NOT NULL
-             AND ((root.kind = 'page' AND ${publicTenantPageSql('root')}) OR (root.kind = 'article' AND root.status = 'published' AND root.visibility = 'listed')
-               OR (root.kind = 'social_post' AND root.status = 'published' AND root.visibility = 'listed'))
-           ORDER BY d.path
-        `, [organizationId, candidate.locale]),
-      ])
+        `, [organizationId, candidate.locale, publicProductIds])
       for (const resource of resources) entries.push({ loc: resource.route_path, lastmod: resource.updated_at })
       // A Product's localized route is derived from the location it is offered
       // at, so a Product offered at two locations lists both.
@@ -233,10 +234,6 @@ export default definePlugin((nitroApp) => {
         if (!isArticleCollection(category.collection)) throw new Error(`Category ${category.slug} has no valid collection`)
         entries.push({ loc: `/${candidate.locale}${ARTICLE_COLLECTIONS[category.collection].pathPrefix}` })
         entries.push({ loc: `/${candidate.locale}${collectionCategoryPath(category.collection, category.slug)}`, lastmod: category.lastmod ?? undefined })
-      }
-      for (const page of pages) {
-        const localizedPath = page.path === '/' ? `/${candidate.locale}` : `/${candidate.locale}${page.path}`
-        entries.push({ loc: localizedPath, lastmod: page.updated_at })
       }
     }
 

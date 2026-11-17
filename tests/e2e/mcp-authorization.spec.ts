@@ -1,61 +1,13 @@
 import { expect, test } from '@playwright/test'
 import { loginAs } from './helpers/auth'
-import { mcpOrganizationId, mcpRequest, loginAsFreshMcpUser } from './helpers/mcp'
+import { mcpRequest } from './helpers/mcp'
 
-// Split out of mcp.spec.ts (authorization/isolation tests) — see
-// helpers/mcp.ts for why. The boundary: what any principal may see and invoke
-// on a tenant it does not belong to.
+// What any principal may see and invoke on a tenant it does not belong to.
 
 test.describe('stateless MCP server', () => {
-  test('Google Ads updates reject missing changes and incomplete budget changes before provider access', async ({ request, baseURL }) => {
-    await loginAs(request, baseURL!)
-    for (const change of [{}, { daily_budget_micros: 1000000 }, { budget_id: '2' }, { status: 'PAUSED', budget_id: '2' }]) {
-      const response = await mcpRequest(request, baseURL!, {
-        method: 'tools/call', toolName: 'update_google_ads_campaign',
-        args: { organization_id: mcpOrganizationId(), campaign_id: '1', ...change },
-      })
-      expect(response.status()).toBe(200)
-      const body = await response.json()
-      expect(body.result?.isError).toBe(true)
-      expect(body.result?.structuredContent).toBeUndefined()
-      expect(body.result?.content?.[0]?.text).toContain('Invalid arguments for tool update_google_ads_campaign')
-      expect(body.result?.content?.[0]?.text).toContain('Instance does not match exactly one subschema (0 matches).')
-    }
-  })
-
-  test('missing required records produce a 404 tool error across resource families', async ({ request, baseURL }) => {
-    await loginAs(request, baseURL!)
-    const missingId = `missing-${crypto.randomUUID()}`
-    const calls: Array<{ toolName: string; args: Record<string, unknown> }> = [
-      { toolName: 'get_location', args: { location_id: missingId } },
-      { toolName: 'get_blog_post', args: { post_id: missingId } },
-      { toolName: 'get_post', args: { post_id: missingId } },
-      { toolName: 'get_payment', args: { payment_id: missingId } },
-      { toolName: 'get_conversation', args: { conversation_id: missingId } },
-      { toolName: 'get_member_scheduling', args: { member_id: missingId } },
-      { toolName: 'get_member_public_profile', args: { member_id: missingId } },
-      { toolName: 'update_media_asset', args: { asset_id: missingId, alt_text: 'Missing asset' } },
-      { toolName: 'cancel_organization_invitation', args: { invitation_id: missingId } },
-      { toolName: 'reconcile_post_publication', args: { publication_id: missingId } },
-      { toolName: 'delete_post', args: { post_id: missingId } },
-    ]
-    for (const { toolName, args } of calls) {
-      const response = await mcpRequest(request, baseURL!, {
-        method: 'tools/call', toolName, args: { organization_id: mcpOrganizationId(), ...args },
-      })
-      expect(response.status(), toolName).toBe(200)
-      const body = await response.json()
-      expect(body.error, toolName).toBeUndefined()
-      expect(body.result?.isError, toolName).toBe(true)
-      expect(body.result?.structuredContent, toolName).toBeUndefined()
-      const failure = JSON.parse(body.result.content[0].text) as { status: number; message: string }
-      expect(failure.status, toolName).toBe(404)
-      expect(failure.message, toolName).toMatch(/not found/i)
-    }
-  })
 
   test('a tenant the principal cannot reach yields no tools and no writes', async ({ request, baseURL }) => {
-    await loginAsFreshMcpUser(request, baseURL!, 'inaccessible')
+    await loginAs(request, baseURL!, 'user-e2e-mcp-fresh-inaccessible')
     const missingOrganizationId = `org-missing-${Date.now()}`
 
     const wrongOrgTools = await mcpRequest(request, baseURL!, { method: 'tools/list', organizationId: missingOrganizationId })

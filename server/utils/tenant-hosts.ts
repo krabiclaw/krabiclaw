@@ -37,16 +37,6 @@ export function getPlatformHosts(env: TenantHostEnv): string[] {
   ].filter((value): value is string => Boolean(value))))
 }
 
-export function getPlatformHtmlCacheHosts(
-  env: TenantHostEnv,
-  extraHosts: (string | null | undefined)[] = [],
-): string[] {
-  return Array.from(new Set([
-    ...extraHosts.map(normalizeHost),
-    ...getPlatformHosts(env),
-  ].filter((value): value is string => Boolean(value))))
-}
-
 export function isPlatformHost(host: string, env: TenantHostEnv): boolean {
   const hostname = hostnameOf(host)
   if (hostname === PAGES_DEV_HOST || hostname.endsWith(`.${PAGES_DEV_HOST}`)) {
@@ -110,10 +100,4 @@ export function isNonProductionHost(host: string): boolean {
   if (hostname === 'staging.krabiclaw.com') return true
   if (/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.trycloudflare\.com$/.test(hostname)) return true
   return isEnvironmentTenantAliasHost(hostname)
-}
-
-export function getFreeOrganizationDomain(env: TenantHostEnv): string {
-  const domain = normalizeHost(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
-  if (!domain) throw new Error('NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN is required')
-  return domain
 }

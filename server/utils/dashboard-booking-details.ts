@@ -221,8 +221,8 @@ async function loadBookingRow(
     WHERE ${lookup === 'booking' ? 'record.id' : 'r.id'} = ? AND record.product_session_id IS NOT NULL AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${CURRENT_GUEST_SQL('r')}` : 'r.organization_id = ?'}`, [bookingId, type, scope.buyerUserId ?? scope.organizationId])
 }
 
-async function assertBookingAccess(context: BookingAccessContext, row: BookingRow) {
-  await assertAssignedBookingAccess(context.db, { ...memberAccessPrincipal(context.organization, { env: context.env }), bookingId: row.booking_id })
+async function assertBookingAccess(context: BookingAccessContext, row: BookingRow, action: 'read' | 'update' = 'read') {
+  await assertAssignedBookingAccess(context.db, { ...memberAccessPrincipal(context.organization, { env: context.env }), bookingId: row.booking_id, action })
 }
 
 function localDateOf(row: Pick<BookingRow, 'starts_at' | 'timezone'>): string {
@@ -398,7 +398,7 @@ export async function listDashboardBookingChangeSessions(event: H3Event, input: 
   const context = await bookingContext(event)
   const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, 'booking', input.bookingId, 'booking')
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
-  await assertBookingAccess(context, row)
+  await assertBookingAccess(context, row, 'update')
   const elsewhere = input.locationId !== undefined && input.locationId !== row.location_id
   if (elsewhere && row.product_kind !== 'table') throw new HTTPError({ statusCode: 409, message: 'Only a table booking can move to another location' })
   const target = elsewhere

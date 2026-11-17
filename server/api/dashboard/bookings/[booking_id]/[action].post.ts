@@ -11,7 +11,7 @@ export default defineHandler(async event => {
   const action = getRouterParam(event, 'action')
   const stayChange = action === 'accept_change' || action === 'decline_change'
   if (!stayChange && action !== 'confirm' && action !== 'reject' && action !== 'cancel') throw new HTTPError({ statusCode: 404, message: 'Booking action not found' })
-  const context = await dashboardBookingContext(event)
+  const context = await dashboardBookingContext(event, 'update')
   const { db, env, organization, userId, access, principal, bookingId, booking } = context
   if (booking.unit === 'nights' && !access.manage) {
     throw new HTTPError({ statusCode: 403, message: 'Only organization owners and admins can change stays', data: { code: 'STAY_ROLE_REQUIRED' } })

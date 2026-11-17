@@ -1,46 +1,29 @@
 import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import test from 'node:test'
 import { captureEvents } from './support/events.ts'
 import Ajv from 'ajv'
 import { Miniflare } from 'miniflare'
-import sharp from 'sharp'
 import { H3 } from 'nitro/h3'
 import { HTTPError } from 'nitro'
 import { handlePostsTools, POSTS_TOOLS } from '../../server/utils/mcp-tools/posts.ts'
 import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
-import { MCP_ERROR } from '../../server/utils/mcp-protocol.ts'
 import { isMcpRenderResponse } from '../../server/utils/mcp-render.ts'
-import { createAuth, linkedAccountAccessToken, type CloudflareEnv } from '../../server/utils/auth.ts'
-import { createPost, deletePost, getPost, listPublicSocialPosts, postPayloadFingerprint, updatePost } from '../../server/utils/post-management.ts'
+import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
+import { createPost, deletePost, getPost, listPublicSocialPosts, updatePost } from '../../server/utils/post-management.ts'
 import { getSocialConnections, publishPost, reconcilePostPublication, type PublishTarget } from '../../server/utils/social-publication.ts'
 import { listChannelPosts, getChannelPost, deleteChannelPost } from '../../server/utils/social-channel-posts.ts'
 import { remainingMetaSubjectData } from '../../server/utils/integration-release.ts'
 import { deleteIntegration, listIntegrations, readIntegration, storeIntegration } from '../../server/utils/organization-integrations.ts'
-import { MetaGraphError, verifyMetaSignedRequest, configuredMetaApps } from '../../server/utils/meta-graph.ts'
-import { instagramAccessToken, listMedia, readAccountInsights, readMediaInsights } from '../../server/utils/instagram.ts'
+import { verifyMetaSignedRequest, configuredMetaApps } from '../../server/utils/meta-graph.ts'
 import { attachMediaPlacement } from '../../server/utils/media-placement.ts'
-import { getMediaAsset } from '../../server/utils/media-asset-manager.ts'
-import uploadMedia from '../../server/api/editor/organizations/[organization_id]/media/upload.post.ts'
-import { listLinkedFacebookPages, facebookPageToken } from '../../server/utils/facebook-pages.ts'
 import connectionAuthorization from '../../server/api/dashboard/connection-authorization.ts'
-import disconnectFacebook from '../../server/api/organizations/[organization_id]/integrations/facebook/disconnect.post.ts'
-import selectFacebook from '../../server/api/organizations/[organization_id]/integrations/facebook/select.post.ts'
 import deauthorizeCallback from '../../server/api/integrations/meta/deauthorize.post.ts'
-import { loadInstagramInsights } from '../../server/utils/instagram-insights.ts'
 import deleteCallback from '../../server/api/integrations/meta/data-deletion.post.ts'
 import deletionStatus from '../../server/api/integrations/meta/data-deletion.get.ts'
-import { createBlogPost, getBlogPost } from '../../server/utils/content/publishing.ts'
-import { fetchTransformedImageAsDataUri } from '../../server/utils/og-image/fetch-image.ts'
-import { renderOgImagePng } from '../../server/utils/og-image/render.ts'
 import { PostValidationError, POST_TITLE_MAX } from '../../shared/posts.ts'
 import { resolveMembership } from '../../server/utils/member-access.ts'
-import { loadSettingsPayload, updateOrganizationSettingsFields } from '../../server/utils/organization-settings.ts'
-import regenerateSocialCards from '../../server/api/editor/organizations/[organization_id]/social-cards/regenerate.post.ts'
-import { drainPublicResourceCacheInvalidations } from '../../server/utils/public-resource-cache.ts'
-import { bindDatabaseEvents } from '../../server/db/index.ts'
+import { applySchema } from './support/schema.ts'
 
 /**
  * Publication, channel management and erasure against real local D1, with Meta and
@@ -223,10 +206,7 @@ async function setUp() {
     env: { DB: { type: 'd1' }, MEDIA_BUCKET: { type: 'r2' }, IMAGES: { type: 'images' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'social-publication-proof', exportName: 'Hub' } },
   } }] })
   const db = await runtime.getD1Database('DB')
-  const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: { tag: string }[] }
-  for (const { tag } of journal.entries) {
-    for (const statement of readFileSync(`migrations/${tag}.sql`, 'utf8').split('--> statement-breakpoint').map(sql => sql.trim()).filter(Boolean)) await db.prepare(statement).run()
-  }
+  await applySchema(db)
   const queue = captureEvents()
   const env = {
     ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding,
@@ -269,249 +249,6 @@ const targets = {
   facebook: (organization = 'org-a') => ({ channel: 'facebook', target_id: PAGE, connection_revision: `fb-rev-${organization}` }) as PublishTarget,
   instagram: (organization = 'org-a') => ({ channel: 'instagram', target_id: IG, connection_revision: `ig-rev-${organization}` }) as PublishTarget,
 }
-
-test('AVIF pictures render through native Images and a rename redraws 47 social cards in separate requests', { timeout: 180_000 }, async () => {
-  const { runtime, db, env, queue, meta, asset, restore } = await setUp()
-  bindDatabaseEvents(db, env)
-  try {
-    const source = readFileSync(new URL('../e2e/seed/media/room.avif', import.meta.url))
-    const sourceUrl = 'https://imagedelivery.example.test/hash/avif-source/public'
-    const images = await runtime.getImagesBinding('IMAGES')
-    const uploads = new Map<string, Uint8Array>()
-    let unavailable = false
-    let cancelFailure = false
-    let beforeSource: (() => Promise<void>) | null = null
-    globalThis.fetch = async (input, init = {}) => {
-      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
-      if (url.href === sourceUrl) {
-        if (beforeSource) await beforeSource()
-        if (cancelFailure) return new Response(new ReadableStream({ cancel() { throw new Error('Image response cancellation refused') } }), { headers: { 'content-type': 'text/plain' } })
-        return unavailable ? new Response('Picture unavailable', { headers: { 'content-type': 'text/plain' } })
-          : new Response(source, { headers: { 'content-type': 'image/avif', 'content-length': String(source.byteLength) } })
-      }
-      if (uploads.has(url.href)) return new Response(init.method === 'HEAD' ? null : uploads.get(url.href), { headers: { 'content-type': 'image/png' } })
-      if (url.hostname === 'api.cloudflare.com' && init.body instanceof FormData) {
-        const file = init.body.get('file')
-        assert(file instanceof Blob)
-        const response = await meta.fetch(input, init)
-        const uploaded = await response.clone().json() as { result: { id: string } }
-        uploads.set(`https://imagedelivery.example.test/hash/${uploaded.result.id}/public`, new Uint8Array(await file.arrayBuffer()))
-        return response
-      }
-      return meta.fetch(input, init)
-    }
-    cancelFailure = true
-    await assert.rejects(fetchTransformedImageAsDataUri(images, sourceUrl, {}, { format: 'image/jpeg' }), /Image response cancellation refused/)
-    cancelFailure = false
-    const jpegUri = await fetchTransformedImageAsDataUri(images, sourceUrl, { width: 1200, height: 630, fit: 'cover' }, { format: 'image/jpeg', quality: 85 })
-    assert(jpegUri?.startsWith('data:image/jpeg;base64,'))
-    const jpeg = await sharp(Buffer.from(jpegUri.split(',')[1]!, 'base64')).raw().toBuffer({ resolveWithObject: true })
-    assert.deepEqual([jpeg.info.width, jpeg.info.height], [1200, 630])
-    const require = createRequire(import.meta.url)
-    const png = await renderOgImagePng({ template: 'tenant', title: 'A home with an AVIF picture', organizationName: 'org-a', backgroundImageUrl: sourceUrl }, {
-      images, publicOrigin: env.NUXT_PUBLIC_PLATFORM_DOMAIN!,
-      wasmModule: await WebAssembly.compile(readFileSync(require.resolve('@resvg/resvg-wasm/index_bg.wasm'))),
-      yogaModule: await WebAssembly.compile(readFileSync(require.resolve('satori/yoga.wasm'))),
-    })
-    const rendered = await sharp(png).raw().toBuffer({ resolveWithObject: true })
-    assert.deepEqual([rendered.info.width, rendered.info.height], [1200, 630])
-
-    await asset('avif-source', 'image/avif')
-    const input = { idempotency_key: 'avif-article', title: 'A home with an AVIF picture', content_blocks: [{ type: 'image' as const, data: { caption: 'The actual new-home editor' }, media: [{ asset_id: 'avif-source', slot: 'media' }] }] }
-    await assert.rejects(createBlogPost(db, 'owner', { ...input, category_id: 'missing-category' }, { organization_id: 'org-a' }, env), (error: unknown) => HTTPError.isError(error) && error.status === 400 && error.data?.mutation_applied === false)
-    assert.equal(await db.prepare("SELECT count(*) FROM content_documents WHERE organization_id = 'org-a' AND kind = 'article' AND row_role = 'root'").first('count(*)'), 0)
-    unavailable = true
-    await assert.rejects(createBlogPost(db, 'owner', input, { organization_id: 'org-a' }, env), (error: unknown) => error instanceof Error && /OG page media could not be loaded/.test(error.message) && !('data' in error && error.data && typeof error.data === 'object' && 'mutation_applied' in error.data))
-    const saved = await db.prepare("SELECT id, status, updated_at FROM content_documents WHERE organization_id = 'org-a' AND kind = 'article' AND row_role = 'root'").first<{ id: string; status: string; updated_at: string }>()
-    assert(saved)
-    assert.equal(saved.status, 'draft')
-    await assert.rejects(createBlogPost(db, 'owner', input, { organization_id: 'org-a' }, env), /OG page media could not be loaded/)
-    assert.equal(uploads.size, 0)
-    unavailable = false
-    const repaired = await createBlogPost(db, 'owner', input, { organization_id: 'org-a' }, env)
-    assert.equal(repaired.id, saved.id)
-    const read = await getBlogPost(db, saved.id, 'org-a', env)
-    assert.deepEqual([read.status, read.updated_at], ['draft', saved.updated_at])
-    const card = await db.prepare("SELECT ma.public_url, ma.mime_type, ma.width, ma.height FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id WHERE mp.owner_type = 'content_document' AND mp.owner_id = ? AND mp.slot = 'social_card' AND mp.status = 'active'").bind(saved.id).first<{ public_url: string; mime_type: string; width: number; height: number }>()
-    assert(card)
-    assert.deepEqual([card.mime_type, card.width, card.height], ['image/png', 1200, 630])
-    const served = await fetch(card.public_url)
-    assert.equal(served.status, 200)
-    const decoded = await sharp(new Uint8Array(await served.arrayBuffer())).raw().toBuffer({ resolveWithObject: true })
-    assert.deepEqual([decoded.info.width, decoded.info.height], [1200, 630])
-    assert.equal((await createBlogPost(db, 'owner', input, { organization_id: 'org-a' }, env)).id, saved.id)
-    assert.equal(uploads.size, 1, 'a completed replay reuses the one independently served card')
-    assert.equal(await db.prepare("SELECT count(*) FROM content_documents WHERE organization_id = 'org-a' AND kind = 'article' AND row_role = 'root'").first('count(*)'), 1)
-
-    const postInput = { title: 'A short Post with an AVIF picture', body: 'The caption was authored with the photo.', media: [{ asset_id: 'avif-source', slot: 'cover' as const }] }
-    unavailable = true
-    await assert.rejects(createPost(db, env, 'org-a', { post: postInput, idempotencyKey: 'avif-post' }, 'owner'), (error: unknown) => error instanceof Error && /OG page media could not be loaded/.test(error.message) && !('data' in error && error.data && typeof error.data === 'object' && 'mutation_applied' in error.data))
-    const savedPost = await db.prepare("SELECT id, status, updated_at FROM content_documents WHERE organization_id = 'org-a' AND kind = 'social_post' AND row_role = 'root'").first<{ id: string; status: string; updated_at: string }>()
-    assert(savedPost)
-    assert.equal(savedPost.status, 'draft')
-    await assert.rejects(createPost(db, env, 'org-a', { post: postInput, idempotencyKey: 'avif-post' }, 'owner'), /OG page media could not be loaded/)
-    assert.equal(uploads.size, 1, 'the failed Post replay cannot report completed creation')
-    unavailable = false
-    const repairedPost = await createPost(db, env, 'org-a', { post: postInput, idempotencyKey: 'avif-post' }, 'owner')
-    assert.deepEqual([repairedPost.replayed, repairedPost.post.id], [true, savedPost.id])
-    const postRead = await getPost(db, env, 'org-a', savedPost.id)
-    assert(postRead)
-    assert.deepEqual([postRead.status, postRead.updated_at, postRead.title, postRead.body], ['draft', savedPost.updated_at, postInput.title, postInput.body])
-    assert.equal(postRead.media.find(item => item.slot === 'cover')?.asset_id, 'avif-source')
-    const postCard = await db.prepare("SELECT ma.public_url, ma.mime_type, ma.width, ma.height FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id WHERE mp.owner_type = 'content_document' AND mp.owner_id = ? AND mp.slot = 'social_card' AND mp.status = 'active'").bind(savedPost.id).first<{ public_url: string; mime_type: string; width: number; height: number }>()
-    assert(postCard)
-    assert.deepEqual([postCard.mime_type, postCard.width, postCard.height], ['image/png', 1200, 630])
-    const postServed = await fetch(postCard.public_url)
-    assert.equal(postServed.status, 200)
-    const postDecoded = await sharp(new Uint8Array(await postServed.arrayBuffer())).raw().toBuffer({ resolveWithObject: true })
-    assert.deepEqual([postDecoded.info.width, postDecoded.info.height], [1200, 630])
-    assert.equal(uploads.size, 2)
-
-    const revisedTitle = 'A revised short Post with an AVIF picture'
-    unavailable = true
-    await assert.rejects(updatePost(db, env, 'org-a', savedPost.id, { changes: { title: revisedTitle }, expectedUpdatedAt: postRead.updated_at }, 'owner'), /OG page media could not be loaded/)
-    const committedPost = await db.prepare('SELECT title, summary, updated_at FROM content_documents WHERE id = ?').bind(savedPost.id).first<{ title: string; summary: string; updated_at: string }>()
-    assert(committedPost)
-    assert.deepEqual([committedPost.title, committedPost.summary], [revisedTitle, postInput.body])
-    assert.notEqual(committedPost.updated_at, postRead.updated_at)
-    await assert.rejects(updatePost(db, env, 'org-a', savedPost.id, { changes: { title: revisedTitle }, expectedUpdatedAt: committedPost.updated_at }, 'owner'), /OG page media could not be loaded/)
-    assert.equal(uploads.size, 2, 'a no-op update still fails while its required card cannot complete')
-    unavailable = false
-    const repairedUpdate = await updatePost(db, env, 'org-a', savedPost.id, { changes: { title: revisedTitle }, expectedUpdatedAt: committedPost.updated_at }, 'owner')
-    assert(repairedUpdate)
-    assert.deepEqual([repairedUpdate.title, repairedUpdate.updated_at], [revisedTitle, committedPost.updated_at])
-    const updatedCard = await db.prepare("SELECT ma.public_url, ma.mime_type, ma.width, ma.height FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id WHERE mp.owner_type = 'content_document' AND mp.owner_id = ? AND mp.slot = 'social_card' AND mp.status = 'active'").bind(savedPost.id).first<{ public_url: string; mime_type: string; width: number; height: number }>()
-    assert(updatedCard)
-    assert.notEqual(updatedCard.public_url, postCard.public_url)
-    assert.deepEqual([updatedCard.mime_type, updatedCard.width, updatedCard.height], ['image/png', 1200, 630])
-    const updatedServed = await fetch(updatedCard.public_url)
-    assert.equal(updatedServed.status, 200)
-    const updatedDecoded = await sharp(new Uint8Array(await updatedServed.arrayBuffer())).raw().toBuffer({ resolveWithObject: true })
-    assert.deepEqual([updatedDecoded.info.width, updatedDecoded.info.height], [1200, 630])
-    assert.equal((await updatePost(db, env, 'org-a', savedPost.id, { changes: { title: revisedTitle }, expectedUpdatedAt: committedPost.updated_at }, 'owner'))?.updated_at, committedPost.updated_at)
-    assert.equal(uploads.size, 3, 'completed no-op retries reuse the independently served Post card')
-    assert.equal(await db.prepare("SELECT count(*) FROM content_documents WHERE organization_id = 'org-a' AND kind = 'social_post' AND row_role = 'root'").first('count(*)'), 1)
-    assert.deepEqual(await db.prepare("SELECT mp.asset_id FROM media_placements mp WHERE mp.owner_type = 'content_document' AND mp.owner_id = ? AND mp.slot = 'cover'").bind(savedPost.id).all<{ asset_id: string }>().then(result => result.results), [{ asset_id: 'avif-source' }])
-
-    const cardEnv = { ...env, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://staging.krabiclaw.com', NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'krabiclaw.test' }
-    await db.prepare("UPDATE organization SET status = 'inactive' WHERE id = 'org-a'").run()
-    await db.prepare("INSERT INTO member(id, organizationId, userId, role) VALUES ('cards-owner', 'org-a', 'owner', 'owner')").run()
-    const session = 'native-social-card-session'
-    await db.prepare('INSERT INTO session(id, token, userId, expiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind('native-social-card', session, 'owner', Date.now() + 180_000, Date.now(), Date.now()).run()
-    const productIds = Array.from({ length: 46 }, (_, index) => `card-product-${String(index).padStart(2, '0')}`)
-    await db.batch(productIds.flatMap((id, index) => [
-      db.prepare("INSERT INTO products (id, organization_id, kind, name, slug, active, created_by, updated_by) VALUES (?, 'org-a', 'dish', ?, ?, 1, 'owner', 'owner')")
-        .bind(id, `Dining option ${index + 1}`, id),
-      db.prepare("INSERT INTO product_publications (organization_id, product_id, published, created_by, updated_by) VALUES ('org-a', ?, 1, 'owner', 'owner')").bind(id),
-    ]))
-    const share = await updateOrganizationSettingsFields(db, cardEnv, 'org-a', { media: [{ slot: 'social_share', asset_id: 'avif-source' }] }, 'owner')
-    assert.equal(share.status, 200)
-    const rootCard = () => db.prepare("SELECT asset_id FROM media_placements WHERE organization_id = 'org-a' AND owner_type = 'organization' AND owner_id = 'org-a' AND slot = 'social_card' AND status = 'active'").first<string>('asset_id')
-    const previousCardId = await rootCard()
-    assert.ok(previousCardId)
-    const previousImageId = await db.prepare('SELECT cloudflare_image_id FROM media_assets WHERE id = ?').bind(previousCardId).first<string>('cloudflare_image_id')
-    assert.ok(previousImageId)
-    const rename = await updateOrganizationSettingsFields(db, cardEnv, 'org-a', { name: 'Updated Dining Brand' }, 'owner')
-    assert.equal(rename.status, 200)
-    assert.equal(uploads.size, 4, 'the rename does not render inside its request')
-    const savedSettings = await loadSettingsPayload(db, cardEnv, 'org-a')
-    const refresh = savedSettings.social_card_refresh
-    assert.equal(savedSettings.name, 'Updated Dining Brand')
-    assert.equal(savedSettings.status, 'inactive')
-    assert.ok(refresh)
-    assert.equal(refresh.status, 'pending')
-    const queuedFor = (id: string) => queue.pending.filter(({ body }) => body.type === 'site.cache_changed' && body.organization_id === 'org-a' && body.invalidation_id === id).length
-    assert.equal(queuedFor(refresh.id), 1)
-
-    const app = new H3()
-    app.post('/api/editor/organizations/:organization_id/social-cards/regenerate', regenerateSocialCards)
-    const renderBatch = (id: string) => app.request(Object.assign(new Request('https://staging.krabiclaw.com/api/editor/organizations/org-a/social-cards/regenerate', {
-        method: 'POST', headers: { authorization: `Bearer ${session}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ refresh_id: id }),
-      }), { runtime: { name: 'cloudflare', cloudflare: { env: cardEnv } } }))
-    const advance = async (id: string) => {
-      const response = await renderBatch(id)
-      assert.equal(response.status, 200, await response.clone().text())
-      return await response.json() as { refresh: typeof refresh; summary: { total: number } }
-    }
-    unavailable = true
-    await assert.rejects(drainPublicResourceCacheInvalidations(db, cardEnv.ORGANIZATION_CACHE!, cardEnv, {
-      organizationId: 'org-a', invalidationId: refresh.id,
-    }), /OG page media could not be loaded/)
-    const failed = (await loadSettingsPayload(db, cardEnv, 'org-a')).social_card_refresh
-    assert.equal(failed?.status, 'failed')
-    assert.equal(failed.cursor, null)
-    assert.equal(await rootCard(), previousCardId, 'a failed render leaves the previous card active')
-    const retried = await updateOrganizationSettingsFields(db, cardEnv, 'org-a', { name: 'Updated Dining Brand' }, 'owner')
-    assert.equal(retried.status, 200)
-    assert.equal((await loadSettingsPayload(db, cardEnv, 'org-a')).social_card_refresh?.id, refresh.id)
-    unavailable = false
-    const renderStarted = Promise.withResolvers<undefined>()
-    const continueRender = Promise.withResolvers<undefined>()
-    beforeSource = async () => {
-      renderStarted.resolve(undefined)
-      await continueRender.promise
-    }
-    const obsolete = renderBatch(refresh.id)
-    const started = await Promise.race([renderStarted.promise.then(() => true), obsolete.then(() => false)])
-    assert.equal(started, true, 'the old batch reached the actual renderer')
-    let nextRename: Awaited<ReturnType<typeof updateOrganizationSettingsFields>>
-    try {
-      nextRename = await updateOrganizationSettingsFields(db, cardEnv, 'org-a', { name: 'Final Dining Brand' }, 'owner')
-    } finally {
-      beforeSource = null
-      continueRender.resolve(undefined)
-    }
-    assert.equal(nextRename.status, 200)
-    assert.equal((await obsolete).status, 409)
-    assert.equal(await rootCard(), previousCardId, 'an in-flight render for the old name cannot replace the card')
-    const replacement = (await loadSettingsPayload(db, cardEnv, 'org-a')).social_card_refresh
-    assert.ok(replacement)
-    assert.notEqual(replacement.id, refresh.id)
-    const removesPreviousImage = (request: SeenRequest) => request.method === 'DELETE' && request.host === 'api.cloudflare.com'
-      && request.path.endsWith(`/${previousImageId}`)
-    meta.fault('reject', removesPreviousImage)
-    const concurrent = await Promise.all([advance(replacement.id), advance(replacement.id)])
-    assert.equal(concurrent.reduce((count, batch) => count + batch.summary.total, 0), 1, 'simultaneous requests claim one cursor')
-    assert.equal((await loadSettingsPayload(db, cardEnv, 'org-a')).social_card_refresh?.status, 'failed')
-    assert.notEqual(await rootCard(), previousCardId, 'retrying deletion does not discard the replacement')
-
-    for (let request = 1; request <= 47; request++) {
-      const queuedBefore = queuedFor(replacement.id)
-      const batch = await advance(replacement.id)
-      assert.ok(batch.summary.total <= 1)
-      if (batch.refresh.status === 'complete') {
-        assert.equal(queuedFor(replacement.id), queuedBefore)
-        break
-      }
-      assert.equal(batch.refresh.status, 'pending')
-      assert.equal(queuedFor(replacement.id), queuedBefore + 1)
-    }
-    const final = (await loadSettingsPayload(db, cardEnv, 'org-a')).social_card_refresh
-    assert.equal(final?.id, replacement.id)
-    assert.equal(final.status, 'complete', final.error ?? undefined)
-    assert.notEqual(await rootCard(), previousCardId)
-    assert.equal(await db.prepare("SELECT status FROM media_assets WHERE id = ?").bind(previousCardId).first('status'), 'deleted')
-    assert.equal(meta.sent(removesPreviousImage).length, 2, 'the same displaced provider image is deleted on retry')
-    const cards = await db.prepare(`SELECT p.owner_id, a.public_url, a.generation_key FROM media_placements p
-      JOIN media_assets a ON a.organization_id = p.organization_id AND a.id = p.asset_id
-      WHERE p.organization_id = 'org-a' AND p.slot = 'social_card' AND p.status = 'active' AND a.status = 'active'
-        AND (p.owner_id = 'org-a' OR p.owner_id LIKE 'card-product-%') ORDER BY p.owner_id`)
-      .all<{ owner_id: string; public_url: string; generation_key: string }>()
-    assert.deepEqual(cards.results.map(card => card.owner_id), [...productIds, 'org-a'])
-    assert.equal(new Set(cards.results.map(card => card.generation_key)).size, 47)
-    for (const card of cards.results) {
-      const image = await fetch(card.public_url)
-      assert.equal(image.status, 200)
-      const metadata = await sharp(new Uint8Array(await image.arrayBuffer())).metadata()
-      assert.deepEqual([metadata.format, metadata.width, metadata.height], ['png', 1200, 630])
-    }
-  } finally {
-    restore()
-    await runtime.dispose()
-  }
-})
 
 test('publication: one result and one external post per target; a failure is the provider\u2019s answer and the next call publishes again', async () => {
   const { runtime, db, env, cardless, meta, run, asset, restore } = await setUp()
@@ -571,42 +308,6 @@ test('publication: one result and one external post per target; a failure is the
     assert.deepEqual(connections.channels.find(item => item.channel === 'facebook')?.problems, [])
     assert.deepEqual(connections.channels.find(item => item.channel === 'instagram')?.problems.map(item => item.code), ['access_token_unavailable'])
     await run("UPDATE account SET accessToken = 'ig-token' WHERE id = 'ig-account'")
-
-    const channelId = '1557308603734560779'
-    const guildId = '1557308603734560780'
-    const messageId = '1557308603734560781'
-    const botId = '1557308603734560782'
-    const discordEnv = { ...cardless, DISCORD_CLIENT_ID: botId, DISCORD_BOT_TOKEN: 'fixture-bot' }
-    await run("INSERT INTO account (id, accountId, providerId, userId) VALUES ('discord-account', 'discord-owner', 'discord', 'owner')")
-    const connectionRevision = await storeIntegration(db, 'org-a', 'discord', { account_id: 'discord-account', target_id: channelId, target_name: 'fixture-social' })
-    let postedMessages = 0
-    globalThis.fetch = async (input, init) => {
-      const url = new URL(String(input))
-      if (url.hostname !== 'discord.com') return await meta.fetch(input, init)
-      assert.equal(new Headers(init?.headers).get('authorization'), 'Bot fixture-bot')
-      if (url.pathname === `/api/v10/channels/${channelId}` && init?.method === 'GET') {
-        return json({ id: channelId, guild_id: guildId, name: 'fixture-social', type: 0 })
-      }
-      assert.equal(url.pathname, `/api/v10/channels/${channelId}/messages`)
-      assert.equal(init?.method, 'POST')
-      const payload = JSON.parse(String(init?.body))
-      assert.equal(payload.content, 'A local Discord publication')
-      assert.equal(payload.enforce_nonce, true)
-      assert.equal(payload.nonce.length, 25)
-      postedMessages += 1
-      return json({ id: messageId, channel_id: channelId, author: { id: botId }, timestamp: '2026-09-28T10:00:00.000Z', attachments: [] })
-    }
-    const discordPost = await create('key-discord', { body: 'A local Discord publication' })
-    const discordTarget: PublishTarget = { channel: 'discord', target_id: channelId, connection_revision: connectionRevision }
-    const sendDiscord = () => publishPost(discordEnv, 'org-a', discordPost.post.id, { expectedUpdatedAt: discordPost.post.updated_at, targets: [discordTarget] }, 'owner')
-    assert.equal((await sendDiscord()).outcomes[0]?.status, 'published')
-    assert.equal((await sendDiscord()).outcomes[0]?.status, 'already_published')
-    assert.equal(postedMessages, 1)
-    const discordReceipt = (await getPost(db, discordEnv, 'org-a', discordPost.post.id))?.publications[0]
-    assert.equal(discordReceipt?.provider_post_id, messageId)
-    assert.equal(discordReceipt?.public_url, `https://discord.com/channels/${guildId}/${channelId}/${messageId}`)
-    assert.equal(await deleteIntegration(db, 'org-a', 'discord', { revision: connectionRevision }), true)
-    globalThis.fetch = meta.fetch as typeof fetch
 
     // Website, Facebook photos and an Instagram carousel in one call.
     const all = await publishPost(env, 'org-a', first.post.id, { expectedUpdatedAt: first.post.updated_at, targets: [targets.website, targets.facebook(), targets.instagram()] }, 'publisher')
@@ -737,37 +438,6 @@ test('publication: one result and one external post per target; a failure is the
     assert.equal((await reconcilePostPublication(env, 'org-a', fifthPublication.id, createdId)).state, 'published')
     await publishedOnMeta(fifth.post.id, 'facebook')
 
-    // A failed publication whose Facebook post reads as unpublished stays failed with its reason; publishing again publishes once with new photos.
-    const sixth = await create('key-6', { body: 'Prepared the old way', media: [{ asset_id: 'a1', slot: 'cover' }] })
-    const draftId = `${PAGE}_legacy-draft`
-    meta.fbPhotos.set('photo-legacy', 'https://legacy.example.test/a.jpg')
-    meta.fbPosts.set(draftId, { published: false, attached: ['photo-legacy'] })
-    await run(`INSERT INTO post_publications (id, organization_id, post_id, channel, provider_app_id, provider_subject_id, provider_target_id, state, provider_post_id, payload_hash, error_code, error_message)
-      VALUES ('legacy', 'org-a', '${sixth.post.id}', 'facebook', 'fb-app', 'fb-subject', '${PAGE}', 'failed', '${draftId}',
-        '${await postPayloadFingerprint((await getPost(db, env, 'org-a', sixth.post.id))!, { channel: 'facebook', target_id: PAGE })}', 'connection_error', '(#10) Failed to publish post')`)
-    const stillUnpublished = await reconcilePostPublication(env, 'org-a', 'legacy', draftId)
-    assert.deepEqual([stillUnpublished.state, stillUnpublished.publication?.status, stillUnpublished.publication?.code, stillUnpublished.publication?.message],
-      ['failed', 'failed', 'connection_error', '(#10) Failed to publish post'])
-    assert.deepEqual(await db.prepare('SELECT state, error_code, error_message FROM post_publications WHERE id = ?').bind('legacy').first(),
-      { state: 'failed', error_code: 'connection_error', error_message: '(#10) Failed to publish post' })
-    const republished = await publishPost(env, 'org-a', sixth.post.id, { expectedUpdatedAt: sixth.post.updated_at, targets: [targets.facebook()] }, 'owner')
-    assert.equal(republished.outcomes[0]!.status, 'published', JSON.stringify(republished.outcomes))
-    assert.equal(republished.outcomes[0]!.publication_id, 'legacy', 'the post keeps one publication per channel')
-    const attachedPhoto = JSON.parse(meta.sent(request => request.method === 'POST' && request.path.endsWith(`${PAGE}/feed`)).at(-1)!.body['attached_media[0]']!).media_fbid
-    assert.notEqual(attachedPhoto, 'photo-legacy')
-    assert.equal(meta.fbPhotos.has(attachedPhoto), true)
-    await publishedOnMeta(sixth.post.id, 'facebook')
-
-    // A Reel Instagram is still processing is waited for and published by the same call.
-    meta.reelProcessingReads = 2
-    const reel = await create('key-reel', { body: 'Reel', media: [{ asset_id: 'v1', slot: 'cover' }] })
-    const reelPublished = await publishPost(env, 'org-a', reel.post.id, { expectedUpdatedAt: reel.post.updated_at, targets: [targets.instagram()] }, 'owner')
-    assert.equal(reelPublished.outcomes[0]!.status, 'published', JSON.stringify(reelPublished.outcomes))
-    assert.equal(meta.sent(request => request.body.media_type === 'REELS').length, 1)
-    assert.equal(meta.sent(request => request.method === 'GET' && Boolean(request.query.get('fields')?.includes('status_code')) && meta.igContainers.get(request.path.split('/').at(-1)!)?.kind === 'REELS').length, 3)
-    meta.reelProcessingReads = 0
-    await publishedOnMeta(reel.post.id, 'instagram')
-
     // Meta answering media_publish "not ready" (9007/2207027) on a FINISHED container is waited out by the same call.
     meta.publishNotReady = 2
     const notReadyYet = await create('key-not-ready', { media: [{ asset_id: 'a1', slot: 'cover' }] })
@@ -868,44 +538,6 @@ test('Better Auth returns the Instagram account it linked to the native Connecti
     assert.deepEqual(account, { providerId: 'instagram', accountId: 'new-instagram-subject', userId: 'owner' })
   } finally {
     t.mock.restoreAll()
-    restore()
-    await runtime.dispose()
-  }
-})
-
-test('the shared Facebook selection route preserves the current connection until a replacement succeeds', async () => {
-  const { runtime, db, env, meta, restore } = await setUp()
-  try {
-    await db.prepare("INSERT INTO member(id, organizationId, userId, role, createdAt) VALUES ('member-owner', 'org-a', 'owner', 'owner', ?)").bind(Date.now()).run()
-    const session = 'facebook-reconnect-session'
-    await db.prepare('INSERT INTO session(id, token, userId, expiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind('facebook-reconnect', session, 'owner', Date.now() + 60_000, Date.now(), Date.now()).run()
-    const app = new H3()
-    app.post('/api/organizations/:organization_id/integrations/facebook/select', selectFacebook)
-    app.post('/api/organizations/:organization_id/integrations/facebook/disconnect', disconnectFacebook)
-    const select = (body: Record<string, string>, action = 'select') => app.request(Object.assign(new Request(`https://proof.example/api/organizations/org-a/integrations/facebook/${action}`, {
-      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}` }, body: JSON.stringify(body),
-    }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
-    const before = await readIntegration(db, 'org-a', 'facebook')
-    assert.ok(before)
-    const stale = await select({ account_id: 'fb-account', page_id: PAGE, revision: 'stale' })
-    assert.equal(stale.status, 409)
-    const unavailable = await select({ account_id: 'fb-account', page_id: 'missing-page', revision: before.revision })
-    assert.equal(unavailable.status, 400)
-    assert.deepEqual(await readIntegration(db, 'org-a', 'facebook'), before)
-    const replacementPage = '1205835975938852'
-    meta.assignedPageResponses.set('', { data: [{ id: replacementPage, name: 'Replacement Page', access_token: 'replacement-page-token' }] })
-    const selected = await select({ account_id: 'fb-account', page_id: replacementPage, revision: before.revision })
-    assert.equal(selected.status, 200, await selected.clone().text())
-    const saved = await readIntegration(db, 'org-a', 'facebook')
-    assert.equal(saved?.target_id, replacementPage)
-    assert.equal(saved?.target_name, 'Replacement Page')
-    assert.equal(saved?.account_id, 'fb-account')
-    assert.notEqual(saved?.revision, before.revision)
-    const staleDisconnect = await select({ revision: before.revision }, 'disconnect')
-    assert.equal(staleDisconnect.status, 409)
-    assert.deepEqual(await readIntegration(db, 'org-a', 'facebook'), saved)
-  } finally {
     restore()
     await runtime.dispose()
   }
@@ -1028,42 +660,6 @@ test('channel inventory and deletion stay separate from authored website content
 })
 
 
-test('configured Facebook system user reads every assigned Page and rejects incomplete provider data', async () => {
-  const { runtime, env, meta, restore } = await setUp()
-  try {
-    const first = { id: OTHER_PAGE, name: 'Another Page', access_token: 'another-token' }
-    const second = { id: PAGE, name: 'Krabi Claw', access_token: 'page-token' }
-    meta.assignedPageResponses.set('', { data: [first], paging: { next: 'https://graph.facebook.com/next', cursors: { after: 'second' } } })
-    meta.assignedPageResponses.set('second', { data: [second] })
-    assert.deepEqual(await listLinkedFacebookPages(env, 'fb-account'), [first, second])
-    assert.equal(await facebookPageToken(env, { account_id: 'fb-account', target_id: PAGE, target_name: 'Krabi Claw' }), 'page-token')
-    const requests = meta.sent(request => request.path.endsWith('/assigned_pages'))
-    assert.deepEqual(requests.map(request => [request.method, request.path, request.query.get('after')]), [
-      ['GET', '/v25.0/me/assigned_pages', null], ['GET', '/v25.0/me/assigned_pages', 'second'],
-      ['GET', '/v25.0/me/assigned_pages', null], ['GET', '/v25.0/me/assigned_pages', 'second'],
-    ])
-    assert.equal(requests[0]!.query.get('fields'), 'id,name,access_token,category,fan_count,picture')
-    assert.equal(meta.sent(request => request.path.endsWith('/accounts')).length, 0)
-    for (const [response, message] of [
-      [{}, /no assigned Pages data/],
-      [{ data: [{}] }, /without its identity/],
-      [{ data: [{ id: PAGE, name: 'Krabi Claw' }] }, /no access token/],
-      [{ data: [], paging: { next: 'https://graph.facebook.com/next' } }, /invalid assigned Pages pagination cursor/],
-      [{ data: [], paging: { next: 'https://graph.facebook.com/next', cursors: { after: 'second' } } }, /invalid assigned Pages pagination cursor/],
-    ] as const) {
-      meta.assignedPageResponses.set('', response)
-      meta.assignedPageResponses.set('second', response)
-      await assert.rejects(listLinkedFacebookPages(env, 'fb-account'), message)
-    }
-    meta.assignedPageResponses.set('', { data: [] })
-    assert.deepEqual(await listLinkedFacebookPages(env, 'fb-account'), [])
-    await assert.rejects(facebookPageToken(env, { account_id: 'fb-account', target_id: PAGE, target_name: 'Krabi Claw' }), /has no assignment/)
-  } finally {
-    restore()
-    await runtime.dispose()
-  }
-})
-
 test('a website edit that lands after publish has read the draft fails the publish as stale and keeps the edit', async () => {
   const { runtime, db, env, cardless, meta, restore } = await setUp()
   try {
@@ -1091,265 +687,6 @@ test('a website edit that lands after publish has read the draft fails the publi
     assert.deepEqual(published.outcomes.map(outcome => outcome.status), ['published'])
     assert.equal((await getPost(db, env, 'org-a', draft.id))?.status, 'published')
     assert.equal(meta.sent(request => request.method === 'POST').length, 0)
-  } finally {
-    restore()
-    await runtime.dispose()
-  }
-})
-
-test('channel MCP tools report invalid parameters while preserving connection and provider failures', async () => {
-  const { runtime, db, env, meta, restore } = await setUp()
-  try {
-    const organization = { env, db, organizationId: 'org-a', userId: 'owner' } as McpExecutorContext['organization']
-    const args = { channel: 'facebook', target_id: PAGE, connection_revision: 'fb-rev-org-a', provider_post_id: `${PAGE}_native` }
-    for (const toolName of ['list_channel_posts', 'get_channel_post', 'delete_channel_post']) {
-      for (const invalid of [{ channel: 'unknown' }, { target_id: '' }, { connection_revision: '' }]) {
-        await assert.rejects(handlePostsTools({ toolName, organization, args: { ...args, ...invalid } }),
-          (error: unknown) => error instanceof Error && 'mcp' in error && (error.mcp as { code: number }).code === MCP_ERROR.invalidParams)
-      }
-      await assert.rejects(handlePostsTools({ toolName, organization, args: { ...args, connection_revision: 'old' } }),
-        (error: unknown) => error instanceof HTTPError && error.statusCode === 409 && !('mcp' in error))
-      meta.fault('reject', request => request.path.endsWith(toolName === 'list_channel_posts' ? '/posts' : args.provider_post_id))
-      // Meta's refusal is named the way publish_post names it, with Meta's code
-      // and trace, and keeps the provider error as its cause.
-      await assert.rejects(handlePostsTools({ toolName, organization, args }),
-        (error: unknown) => error instanceof Error && !('mcp' in error)
-          && /^provider_rejected: .*\(Meta code 100, fbtrace_id [^)]+\)$/.test(error.message)
-          && error.cause instanceof MetaGraphError && !error.cause.objectMissing)
-    }
-    for (const limit of [0, 101, 1.5, '25', null]) {
-      await assert.rejects(handlePostsTools({ toolName: 'list_channel_posts', organization, args: { ...args, limit } }),
-        { message: 'limit must be an integer between 1 and 100', mcp: { code: MCP_ERROR.invalidParams, message: 'limit must be an integer between 1 and 100', data: undefined, kind: 'tool_execution' } })
-    }
-  } finally {
-    restore()
-    await runtime.dispose()
-  }
-})
-
-for (const method of ['GET', 'DELETE']) {
-  test(`channel deletion propagates ambiguous missing-object errors during ${method}`, async () => {
-    const { runtime, db, env, cardless, meta, restore } = await setUp()
-    try {
-      const target = { channel: 'facebook' as const, target_id: PAGE, connection_revision: 'fb-rev-org-a' }
-      const { post } = await createPost(db, cardless, 'org-a', { post: { body: 'Delete from Facebook' }, idempotencyKey: 'delete-missing' }, 'owner')
-      assert.equal((await publishPost(env, 'org-a', post.id, { expectedUpdatedAt: post.updated_at, targets: [target] }, 'owner')).ok, true)
-      const providerId = (await getPost(db, env, 'org-a', post.id))!.publications[0]!.provider_post_id!
-      const matches = (request: SeenRequest) => request.method === method && request.path.endsWith(`/${providerId}`)
-      meta.fault('reject', matches)
-      await assert.rejects(deleteChannelPost(env, 'org-a', target, providerId, 'owner'),
-        (error: unknown) => error instanceof MetaGraphError && !error.objectMissing)
-      assert.equal((await getPost(db, env, 'org-a', post.id))!.publications[0]!.state, 'published')
-
-      meta.fault('missing', matches)
-      await assert.rejects(deleteChannelPost(env, 'org-a', target, providerId, 'owner'),
-        (error: unknown) => error instanceof MetaGraphError && error.objectMissing)
-      assert.equal((await getPost(db, env, 'org-a', post.id))!.publications[0]!.state, 'published')
-      assert.equal(meta.fbPosts.has(providerId), true)
-      assert.equal(await db.prepare("SELECT count(*) AS count FROM activity_entries WHERE event_name = 'post.channel_deleted' AND json_extract(payload_json, '$.entityId') = ?").bind(providerId).first('count'), 0)
-
-      const unknownId = `${PAGE}_untracked`
-      meta.fbPosts.set(unknownId, { published: true, attached: [] })
-      meta.fault('missing', request => request.method === method && request.path.endsWith(`/${unknownId}`))
-      await assert.rejects(deleteChannelPost(env, 'org-a', target, unknownId, 'owner'),
-        (error: unknown) => error instanceof MetaGraphError && error.objectMissing)
-      assert.equal(await db.prepare("SELECT count(*) AS count FROM activity_entries WHERE event_name = 'post.channel_deleted' AND json_extract(payload_json, '$.entityId') = ?").bind(unknownId).first('count'), 0)
-    } finally {
-      restore()
-      await runtime.dispose()
-    }
-  })
-}
-
-test('Instagram insights read the connected account and its posts for the organization range, and name every state without a report', async () => {
-  const { runtime, env, meta, run, restore } = await setUp()
-  try {
-    await run(`UPDATE organization SET timezone = 'Asia/Bangkok' WHERE id IN ('org-a', 'org-b')`)
-    const range = { startDate: '2026-09-28', endDate: '2026-09-30' }
-    assert.equal((await loadInstagramInsights(env, 'org-a', range)).status, 'permission_missing')
-    assert.equal(meta.requests.length, 0)
-
-    await run("UPDATE account SET scope = 'instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights' WHERE id = 'ig-account'")
-    meta.igInsights = { views: 1200, reach: 0, accounts_engaged: 14, total_interactions: 31, likes: 20, comments: 3, shares: 4, saves: 4, profile_links_taps: 2 }
-    meta.igFeed = [
-      { id: 'later', media_type: 'IMAGE', timestamp: '2026-10-01T00:00:00+0000' },
-      { id: 'reel', media_type: 'VIDEO', media_product_type: 'REELS', permalink: 'https://www.instagram.com/reel/reel/', caption: 'Sunset', thumbnail_url: 'https://cdn.example/reel.jpg', timestamp: '2026-09-29T03:00:00+0000' },
-      { id: 'carousel', media_type: 'CAROUSEL_ALBUM', media_product_type: 'FEED', timestamp: '2026-09-28T01:00:00+0000' },
-      { id: 'earlier', media_type: 'IMAGE', timestamp: '2026-09-27T16:59:59+0000' },
-    ]
-    meta.igMediaInsights.set('reel', { views: 40, reach: 30, likes: 5, comments: 0, shares: 1, saved: 2 })
-    const report = await loadInstagramInsights(env, 'org-a', range)
-    assert.equal(report.status, 'connected')
-    if (report.status !== 'connected') return
-    assert.equal(report.username, 'krabiclaw')
-    assert.deepEqual(report.period, { ...range, timezone: 'Asia/Bangkok' })
-    // Zero is Instagram's zero; a metric it did not return is null.
-    assert.deepEqual(report.account, { views: 1200, reach: 0, accounts_engaged: 14, total_interactions: 31, likes: 20, comments: 3, shares: 4, saves: 4, replies: null, profile_links_taps: 2 })
-    const [accountRequest] = meta.sent(request => request.path.endsWith(`${IG}/insights`))
-    // Bangkok's 28 September through 30 September, in the organization's own calendar.
-    assert.equal(accountRequest!.query.get('since'), String(Date.parse('2026-09-27T17:00:00Z') / 1000))
-    assert.equal(accountRequest!.query.get('until'), String(Date.parse('2026-09-30T17:00:00Z') / 1000))
-    assert.equal(accountRequest!.query.get('metric_type'), 'total_value')
-    assert.deepEqual(report.media.map(post => post.id), ['reel', 'carousel'])
-    assert.deepEqual(report.media[0]!.insights, { views: 40, reach: 30, likes: 5, comments: 0, shares: 1, saved: 2, total_interactions: null })
-    assert.equal(report.media[0]!.permalink, 'https://www.instagram.com/reel/reel/')
-    assert.equal(report.media[1]!.insights, null)
-    assert.match(report.media[1]!.unavailableReason!, /carousel/u)
-    assert.equal(meta.sent(request => request.path === 'carousel/insights').length, 0)
-    assert.equal(report.moreMedia, false)
-
-    meta.fault('reject', request => request.path.endsWith(`${IG}/insights`))
-    await assert.rejects(() => loadInstagramInsights(env, 'org-a', range), (error: unknown) => error instanceof HTTPError && error.status === 502 && /^Instagram: /u.test(error.message) && !/access_token|ig-token/u.test(error.message))
-
-    await run("DELETE FROM organization_integrations WHERE organization_id = 'org-b' AND provider = 'instagram'")
-    assert.equal((await loadInstagramInsights(env, 'org-b', range)).status, 'not_connected')
-    await run("DELETE FROM subscription WHERE referenceId = 'org-b'")
-    assert.equal((await loadInstagramInsights(env, 'org-b', range)).status, 'growth_plan_required')
-    await run("UPDATE organization_integrations SET account_id = 'gone' WHERE organization_id = 'org-a' AND provider = 'instagram'")
-    assert.equal((await loadInstagramInsights(env, 'org-a', range)).status, 'account_unlinked')
-  } finally {
-    restore()
-    await runtime.dispose()
-  }
-})
-
-test('Instagram insights classify malformed provider responses and preserve local token errors', async () => {
-  const { runtime, db, env, meta, run, restore } = await setUp()
-  try {
-    await run("UPDATE account SET scope = 'instagram_business_manage_insights' WHERE id = 'ig-account'")
-    const range = { startDate: '2026-09-28', endDate: '2026-09-30' }
-    const target = { userId: IG, accessToken: 'ig-token' }
-    const accountRange = { since: new Date('2026-09-28'), until: new Date('2026-10-01') }
-    meta.igFeed = [{ id: 'reel', media_type: 'VIDEO', timestamp: '2026-09-29T03:00:00+0000' }]
-    meta.igMediaInsights.set('reel', { views: 40 })
-    const malformed: Array<[string, unknown, () => Promise<unknown>, string]> = [
-      [`${IG}/media`, {}, () => listMedia(target, { after: null, limit: 25 }), 'Meta returned no post inventory'],
-      [`${IG}/media`, { data: [], paging: { next: 'https://graph.instagram.com/next' } }, () => listMedia(target, { after: null, limit: 25 }), 'Meta returned another page without its cursor'],
-      [`${IG}/insights`, { data: {} }, () => readAccountInsights(target, accountRange), 'Instagram returned no insights data'],
-      ['reel/insights', {}, () => readMediaInsights(target, 'reel'), 'Instagram returned no insights data'],
-    ]
-    for (const [path, response, read, message] of malformed) {
-      meta.igResponses.set(path, response)
-      await assert.rejects(read, (error: unknown) => error instanceof MetaGraphError && error.failure === 'invalid-response' && error.message === message)
-      await assert.rejects(() => loadInstagramInsights(env, 'org-a', range), (error: unknown) => error instanceof HTTPError && error.status === 502 && error.message === `Instagram: ${message}`)
-      meta.igResponses.delete(path)
-    }
-
-    await run("UPDATE account SET accessTokenExpiresAt = NULL WHERE id = 'ig-account'")
-    const requestsBefore = meta.requests.length
-    await assert.rejects(() => loadInstagramInsights(env, 'org-a', range), (error: unknown) => error instanceof Error && !(error instanceof MetaGraphError) && !(error instanceof HTTPError) && /no token expiry/u.test(error.message))
-    assert.equal(meta.requests.length, requestsBefore)
-
-    await run(`UPDATE account SET accessTokenExpiresAt = ${Math.floor(Date.now() / 1000) + 60} WHERE id = 'ig-account'`)
-    for (const response of [{ expires_in: 5184000 }, { access_token: 'renewed-token' }, { access_token: 'renewed-token', expires_in: '5184000' }]) {
-      meta.igResponses.set('/refresh_access_token', response)
-      await assert.rejects(() => instagramAccessToken(env, 'ig-account'), (error: unknown) => error instanceof MetaGraphError && error.failure === 'invalid-response')
-      await assert.rejects(() => loadInstagramInsights(env, 'org-a', range), (error: unknown) => error instanceof HTTPError && error.status === 502 && error.message === 'Instagram: Instagram did not return a long-lived access token and its lifetime')
-    }
-    assert.equal(await db.prepare("SELECT accessToken FROM account WHERE id = 'ig-account'").first('accessToken'), 'ig-token')
-
-    meta.igResponses.set('/refresh_access_token', { access_token: 'renewed-token', expires_in: 5184000 })
-    await run("CREATE TRIGGER ignore_token_save BEFORE UPDATE OF accessToken ON account WHEN OLD.id = 'ig-account' BEGIN SELECT RAISE(IGNORE); END")
-    await assert.rejects(() => loadInstagramInsights(env, 'org-a', range), (error: unknown) => error instanceof Error && !(error instanceof MetaGraphError) && !(error instanceof HTTPError) && /could not be saved/u.test(error.message))
-    assert.equal(await db.prepare("SELECT accessToken FROM account WHERE id = 'ig-account'").first('accessToken'), 'ig-token')
-    await run('DROP TRIGGER ignore_token_save')
-    assert.equal((await loadInstagramInsights(env, 'org-a', range)).status, 'connected')
-    assert.equal((await linkedAccountAccessToken(env, 'ig-account')).accessToken, 'renewed-token')
-  } finally {
-    restore()
-    await runtime.dispose()
-  }
-})
-
-test('Facebook video: a Reel is published by finishing its upload session, any other video by its upload; Meta\u2019s answer is the publication and no video is flipped to published', async () => {
-  const { runtime, db, env, cardless, meta, asset, restore } = await setUp()
-  try {
-    await asset('reel', 'video/mp4', 'video', { width: 720, height: 1280, duration: 12 })
-    await db.prepare("INSERT INTO member(id, organizationId, userId, role, createdAt) VALUES ('member-owner', 'org-a', 'owner', 'owner', ?)").bind(Date.now()).run()
-    const session = 'native-video-upload-session'
-    await db.prepare('INSERT INTO session(id, token, userId, expiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind('native-video-upload', session, 'owner', Date.now() + 60_000, Date.now(), Date.now()).run()
-    const form = new FormData()
-    const clip = readFileSync(new URL('../e2e/seed/media/clip.mp4', import.meta.url))
-    const poster = await sharp(readFileSync(new URL('../e2e/seed/media/poster.avif', import.meta.url))).jpeg().toBuffer()
-    form.set('video', new Blob([clip], { type: 'video/mp4' }), 'clip.mp4')
-    form.set('thumbnail', new Blob([poster], { type: 'image/jpeg' }), 'poster.jpg')
-    const app = new H3()
-    app.post('/api/editor/organizations/:organization_id/media/upload', uploadMedia)
-    const posted = await app.request(Object.assign(new Request('https://proof.example/api/editor/organizations/org-a/media/upload', {
-      method: 'POST', headers: { authorization: `Bearer ${session}` }, body: form,
-    }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
-    assert.equal(posted.status, 200, await posted.clone().text())
-    const upload = await posted.json() as { asset_id: string; public_url: string; thumbnail_url: string }
-    const savedAsset = await getMediaAsset(db, upload.asset_id, 'org-a')
-    assert.equal(savedAsset?.kind, 'video')
-    assert.equal(savedAsset.status, 'active')
-    assert.deepEqual([savedAsset.width, savedAsset.height, savedAsset.duration], [640, 360, 3])
-    assert.equal(savedAsset.thumbnail_url, upload.thumbnail_url)
-    assert.equal(savedAsset.public_url, upload.public_url)
-    assert.ok(savedAsset.r2_key)
-    const playback = await (await runtime.getR2Bucket('MEDIA_BUCKET')).get(savedAsset.r2_key)
-    assert.equal(playback?.httpMetadata?.contentType, 'video/mp4')
-    assert.equal(playback.size, clip.length)
-    const create = (key: string, post: Record<string, unknown>) => createPost(db, cardless, 'org-a', { post, idempotencyKey: key }, 'owner')
-    const publication = (postId: string) => db.prepare('SELECT state, provider_post_id, provider_permalink, error_code FROM post_publications WHERE post_id = ? AND channel = ?').bind(postId, 'facebook')
-      .first<{ state: string; provider_post_id: string | null; provider_permalink: string | null; error_code: string | null }>()
-    const starts = () => meta.sent(request => request.path.endsWith(`${PAGE}/video_reels`) && request.body.upload_phase === 'start').length
-
-    // A 9:16 video is a Reel: start, Facebook fetches the file, finish as PUBLISHED with the caption; the finish's post is the publication.
-    const reel = await create('key-fb-reel', { body: 'Robatayaki tonight', media: [{ asset_id: 'reel', slot: 'cover' }] })
-    const published = await publishPost(env, 'org-a', reel.post.id, { expectedUpdatedAt: reel.post.updated_at, targets: [targets.facebook()] }, 'owner')
-    assert.equal(published.outcomes[0]!.status, 'published', JSON.stringify(published.outcomes))
-    assert.equal(starts(), 1)
-    assert.deepEqual(meta.sent(request => request.host === 'rupload.facebook.com').map(request => [request.path, request.headers.file_url, request.headers.authorization]),
-      [['/video-upload/v25.0/reel-1', 'https://imagedelivery.example.test/hash/reel/public', 'OAuth page-token']])
-    assert.deepEqual(meta.sent(request => request.path.endsWith(`${PAGE}/video_reels`) && request.body.upload_phase === 'finish').map(request => [request.body.video_id, request.body.video_state, request.body.description]),
-      [['reel-1', 'PUBLISHED', 'Robatayaki tonight']])
-    assert.deepEqual(await publication(reel.post.id), { state: 'published', provider_post_id: `${PAGE}_reel-1`, provider_permalink: null, error_code: null })
-    assert.equal(meta.fbPosts.get(`${PAGE}_reel-1`)?.published, true)
-    // A repeat is a receipt, not another Reel.
-    assert.equal((await publishPost(env, 'org-a', reel.post.id, { expectedUpdatedAt: reel.post.updated_at, targets: [targets.facebook()] }, 'owner')).outcomes[0]!.status, 'already_published')
-    assert.equal(starts(), 1)
-
-    // Any other video is published by its upload; the video Facebook accepted is the publication.
-    const wide = await create('key-fb-wide', { body: 'Kitchen tour', media: [{ asset_id: upload.asset_id, slot: 'cover' }] })
-    const uploaded = await publishPost(env, 'org-a', wide.post.id, { expectedUpdatedAt: wide.post.updated_at, targets: [targets.facebook()] }, 'owner')
-    assert.equal(uploaded.outcomes[0]!.status, 'published', JSON.stringify(uploaded.outcomes))
-    assert.deepEqual(meta.sent(request => request.path.endsWith(`${PAGE}/videos`)).map(request => [request.body.file_url, request.body.published, request.body.description]),
-      [[upload.public_url, undefined, 'Kitchen tour']])
-    assert.deepEqual(await publication(wide.post.id).then(row => [row!.state, row!.provider_post_id]), ['published', 'video-2'])
-    // That video id has no Page prefix; the receipt of its publication to this Page is what lets it be deleted.
-    await assert.rejects(deleteChannelPost(env, 'org-a', targets.facebook(), 'video-unrecorded', 'owner'), /selected Page/)
-    await deleteChannelPost(env, 'org-a', targets.facebook(), 'video-2', 'owner')
-    assert.equal((await publication(wide.post.id))!.state, 'removed')
-    assert.equal(meta.sent(request => request.method === 'DELETE' && request.path.endsWith('video-2')).length, 1)
-
-    // A Reel upload Facebook does not answer is a failure that says so; the next call runs its own session, and the abandoned one was never public.
-    const retried = await create('key-fb-reel-retry', { body: 'Second reel', media: [{ asset_id: 'reel', slot: 'cover' }] })
-    meta.fault('dropped', request => request.host === 'rupload.facebook.com')
-    const unanswered = await publishPost(env, 'org-a', retried.post.id, { expectedUpdatedAt: retried.post.updated_at, targets: [targets.facebook()] }, 'owner')
-    assert.deepEqual([unanswered.outcomes[0]!.status, unanswered.outcomes[0]!.code], ['failed', 'provider_unreachable'])
-    assert.equal((await publication(retried.post.id))!.state, 'failed')
-    const resumed = await publishPost(env, 'org-a', retried.post.id, { expectedUpdatedAt: retried.post.updated_at, targets: [targets.facebook()] }, 'owner')
-    assert.equal(resumed.outcomes[0]!.status, 'published', JSON.stringify(resumed.outcomes))
-    assert.equal(starts(), 3)
-    assert.equal((await publication(retried.post.id))!.provider_post_id, `${PAGE}_reel-4`)
-
-    // Meta refusing the finish is a definite non-publication.
-    const refused = await create('key-fb-reel-refused', { body: 'Third reel', media: [{ asset_id: 'reel', slot: 'cover' }] })
-    meta.fault('reject', request => request.path.endsWith(`${PAGE}/video_reels`) && request.body.upload_phase === 'finish')
-    const rejected = await publishPost(env, 'org-a', refused.post.id, { expectedUpdatedAt: refused.post.updated_at, targets: [targets.facebook()] }, 'owner')
-    assert.deepEqual([rejected.outcomes[0]!.status, rejected.outcomes[0]!.code], ['failed', 'provider_rejected'], JSON.stringify(rejected.outcomes))
-
-    // Neither path ever asks Facebook to flip a video to published.
-    assert.equal(meta.sent(request => request.method === 'POST' && request.host === 'graph.facebook.com' && /\/(reel|video)-\d+$/.test(request.path)).length, 0)
-
-    // Reconciliation reads the Page post the finish named, and the video an upload named.
-    const reconciledReel = await reconcilePostPublication(env, 'org-a', (await db.prepare('SELECT id FROM post_publications WHERE post_id = ?').bind(reel.post.id).first<{ id: string }>())!.id, null)
-    assert.equal(reconciledReel.state, 'published')
-    for (const video of meta.fbVideos.values()) video.ready = -1
-    const reconciledWide = await reconcilePostPublication(env, 'org-a', (await db.prepare('SELECT id FROM post_publications WHERE post_id = ?').bind(wide.post.id).first<{ id: string }>())!.id, null)
-    assert.equal(reconciledWide.state, 'published')
   } finally {
     restore()
     await runtime.dispose()

@@ -3,10 +3,9 @@ import { environmentTenantAliasHostname } from '../../server/utils/tenant-hosts'
 
 // The real customer sites the deployed checks read. Staging serves each at its
 // environment alias (<slug>-staging.krabiclaw.com); production at its own domain.
-export const POTTERY_HOUSE_CANONICAL_URL = 'https://www.potteryhousekrabi.com'
-export const KIKUZUKI_CANONICAL_URL = 'https://www.kikuzuki-thailand.com'
-export const STRUT_CANONICAL_URL = 'https://strut-management-e5163f.krabiclaw.com'
-export const NCLS_CANONICAL_URL = 'https://www.northcarolinalegalservices.org'
+const POTTERY_HOUSE_CANONICAL_URL = 'https://www.potteryhousekrabi.com'
+const KIKUZUKI_CANONICAL_URL = 'https://www.kikuzuki-thailand.com'
+const NCLS_CANONICAL_URL = 'https://www.northcarolinalegalservices.org'
 
 function deployedSite(slug: string, canonical: string): string {
   const base = new URL(testBaseUrl())
@@ -19,7 +18,6 @@ function deployedSite(slug: string, canonical: string): string {
 }
 
 export const potteryHouseBaseURL = deployedSite('pottery-house', POTTERY_HOUSE_CANONICAL_URL)
-export const strutBaseURL = deployedSite('strut-management-e5163f', STRUT_CANONICAL_URL)
 export const blawbyBaseURL = deployedSite('ncls', NCLS_CANONICAL_URL)
 export const kikuzukiBaseURL = deployedSite('kikuzuki-krabi-thailand', KIKUZUKI_CANONICAL_URL)
 // A deployed site is addressed by its own host; no tenant header is sent.

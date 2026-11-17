@@ -128,13 +128,8 @@ export async function seedE2e(baseURL: string) {
     manifest.tenants.restaurant = await seedRestaurant(create)
     manifest.tenants.experience = await seedExperience(create)
     manifest.tenants.legal = await seedLegal(create)
-    const { seedTraffic } = await import('./traffic.ts')
-    await seedTraffic(baseURL, manifest)
     const { seedPlatform } = await import('./tenants/platform.ts')
     await seedPlatform(admin, platformOrganizationId)
-    // A booking made during the seed has to have ended before any test reads it as past.
-    const ended = Math.max(0, ...Object.values(manifest.tenants).map(tenant => tenant.endedSessionEndsAt ? Date.parse(tenant.endedSessionEndsAt) : 0))
-    if (ended > Date.now()) await new Promise(resolve => setTimeout(resolve, ended - Date.now() + 1_000))
     mkdirSync(new URL('.', SEED_MANIFEST_PATH), { recursive: true })
     writeFileSync(SEED_MANIFEST_PATH, JSON.stringify(manifest, null, 2))
     return manifest

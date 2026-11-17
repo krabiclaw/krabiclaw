@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
-import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { acceptConversationGuestInvite, createConversationGuestInvite, removeConversationGuest, setListingMessagingAccess } from '../../server/domain/conversation-participants.ts'
+import { acceptConversationGuestInvite, createConversationGuestInvite, removeConversationGuest, setListingAccess } from '../../server/domain/conversation-participants.ts'
 import { readGuestConversation, resolveConversationAccess  } from '../../server/domain/conversations.ts'
 import { createStay, updateStay, type StayAccess } from '../../server/domain/stays.ts'
 import { getConversationDetails } from '../../server/domain/guest-threads/inbox.ts'
@@ -16,6 +14,7 @@ import { listConversations } from '../../server/domain/guest-threads/repository.
 import { findSubmissionByPhone } from '../../server/utils/submission-messages.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { applySchema } from './support/schema.ts'
 
 // A stay's guest conversation lives in the one inbox: a host stay with a guest
 // email or phone opens it, the listing's messaging participants see it,
@@ -46,7 +45,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof',
       EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     bindDatabaseEvents(db, env)
-    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
@@ -124,8 +123,8 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     if (saved.guest_email === null) await updateStay(db, env, manager, cy.id, { version: saved.version, guest_email: 'cy@example.test' })
     assert.deepEqual(await db.prepare("SELECT json_extract(r.payload_json, '$.guest.email') AS guest_email, r.id AS conversation_id FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking' WHERE b.id = ?").bind(cy.id).first(), { guest_email: 'cy@example.test', conversation_id: cy.conversation_id })
 
-    // A booking lands as a stay, not as a conversation: until someone writes, the inbox does not list it.
-    assert.deepEqual(await listConversations(db, ORG, { userId: OWNER, type: 'stay' }), [])
+    // A booking is a conversation from the moment it is made: the inbox lists the stay before anyone writes.
+    assert.ok((await listConversations(db, ORG, { userId: OWNER, type: 'stay' })).some(row => row.id === ana.conversation_id))
 
     // The thread is answered like any other; a stay is changed from its own screen, not its thread.
     const hostConversation = await conversationPageFor(db, principal(OWNER, 'owner'), ana.conversation_id)
@@ -138,30 +137,32 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual(await db.prepare(`SELECT d.channel, d.status FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id
       WHERE e.conversation_id = ? AND d.purpose = 'member_reply'`).bind(ana.conversation_id).first(), { channel: 'email', status: 'sent' })
 
-    // Once written to, the inbox lists it for its host with the guest, home and dates in the home's own clock.
+    // The inbox lists every stay for its host, the one just written to first, with the guest, home and dates in the home's own clock.
     // The member assigned to the home sees the thread without a separate grant.
     const listed = await listConversations(db, ORG, { userId: OWNER, type: 'stay' })
-    assert.deepEqual(listed.map(row => row.id), [ana.conversation_id])
+    const stays = (await db.prepare("SELECT c.id FROM conversations c JOIN bookings b ON b.id = c.booking_id WHERE c.organization_id = ? AND c.kind = 'booking' AND b.product_session_id IS NULL").bind(ORG).all<{ id: string }>()).results.map(row => row.id)
+    assert.deepEqual(listed.map(row => row.id).sort(), stays.sort())
+    assert.equal(listed[0]!.id, ana.conversation_id)
     const homeToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
     const arrivalIn = Math.round((Date.parse(`${day(3)}T00:00:00Z`) - Date.parse(`${homeToday}T00:00:00Z`)) / 86_400_000)
     assert.deepEqual({ ...listed[0]!, time: undefined }, { id: ana.conversation_id, kind: 'guest', title: 'Ana Silva', avatar_initial: 'A', channel: 'direct', home: 'Cabin',
       when: `In ${arrivalIn} days`, preview: 'The gate code is in your confirmation.', preview_from: 'You', time: undefined, unread: false })
     assert.deepEqual(await db.prepare("SELECT b.product_id, b.channel, c.id AS conversation_id FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.id = ?").bind(ana.id).first(), { product_id: cabin.id, channel: 'direct', conversation_id: ana.conversation_id })
     assert.equal((await sheet())?.actions.archive, true)
-    assert.deepEqual((await listConversations(db, ORG, { userId: CLEANER })).map(row => row.id), [ana.conversation_id])
+    assert.deepEqual((await listConversations(db, ORG, { userId: CLEANER })).map(row => row.id).sort(), stays.sort())
     assert.deepEqual(await listConversations(db, ORG, { userId: OUTSIDER }), [])
     const host = principal(OWNER, 'owner')
     const cohost = principal(CLEANER, 'member')
     const grant = { listingId: cabin.id, memberId: `m-${CLEANER}` }
-    await assert.rejects(setListingMessagingAccess(db, env, cohost, { ...grant, allowed: true }), { statusCode: 403 })
-    await setListingMessagingAccess(db, env, host, { ...grant, allowed: true })
-    assert.deepEqual((await listConversations(db, ORG, { userId: CLEANER })).map(row => row.id), [ana.conversation_id])
+    await assert.rejects(setListingAccess(db, env, cohost, { ...grant, access: 'messaging' }), { statusCode: 403 })
+    await setListingAccess(db, env, host, { ...grant, access: 'messaging' })
+    assert.deepEqual((await listConversations(db, ORG, { userId: CLEANER })).map(row => row.id).sort(), stays.sort())
     const newReservation = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cohost-future', check_in_date: day(51), check_out_date: day(52), adults: 1,
       guest_name: 'Leah', guest_email: 'leah@example.test', total_minor: 15_000 })
     assert.deepEqual(await db.prepare(`SELECT role, host_listing_id FROM conversation_participants WHERE conversation_id = ? AND user_id = ?`).bind(newReservation.conversation_id, CLEANER).first(),
       { role: 'member', host_listing_id: cabin.id })
-    await setListingMessagingAccess(db, env, host, { ...grant, allowed: false })
-    assert.deepEqual((await listConversations(db, ORG, { userId: CLEANER })).map(row => row.id), [ana.conversation_id], 'revoking the separate grant leaves the active assignment')
+    await setListingAccess(db, env, host, { ...grant, access: null })
+    assert.deepEqual((await listConversations(db, ORG, { userId: CLEANER })).map(row => row.id).sort(), [...stays, newReservation.conversation_id].sort(), 'revoking the separate grant leaves the active assignment, which covers every stay at the home')
     assert.deepEqual(await db.prepare('SELECT role, host_listing_id FROM conversation_participants WHERE conversation_id = ? AND user_id = ?').bind(newReservation.conversation_id, CLEANER).first(),
       { role: null, host_listing_id: null })
 
