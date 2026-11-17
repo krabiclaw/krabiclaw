@@ -1,3 +1,4 @@
+import { listingGrantSql, listingLevelSql } from '~/server/domain/listing-access'
 import { bookingReviewDueAt, historicalNoShowAtSql } from '~/server/utils/review-requests'
 import { changedTaskIds, publishEvent, type DomainEvent, type EventsEnv } from '~/server/events'
 import { PUBLIC_PROVIDER_JSON_SQL, PUBLISHED_PROFILE_SQL, RESERVATION_HOST_SQL, type PublicProvider } from '~/shared/member-scheduling'
@@ -11,8 +12,9 @@ import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevisio
 import { validateFormAnswers } from '~/server/domain/form-questions'
 import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, STAY_DIRECT_DISCOUNTS, stayChannelCalendarRules, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertResponsibleMember, assertRoleAllows, assignedMemberSql, BATCH_VIEWER, bookingOperationsScope, withViewer, type MemberAccessPrincipal } from '~/server/utils/member-access'
-import { bookedRecordsInRange, businessWideViewer, type BookedRecordInRange } from '~/server/domain/product-bookings'
+import { assignedOperationsRoles, roleMatchesSql } from '~/utils/organization-access'
+import { assertResponsibleMember, assertRoleAllows, assignedMemberSql, BATCH_VIEWER, bookingOperationsScope, roleAllows, withViewer, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
 import { organizationEventQuery, type OrganizationEvent } from '~/server/utils/organization-events'
 import { createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
 import { liveHomeSql } from '~/server/utils/billing'
@@ -68,15 +70,18 @@ import { requireStays } from '~/server/utils/cms-capabilities'
  */
 
 /** Who is asking: managers act on every home; assigned members read the homes they look after. */
-export type StayAccess = { organizationId: string; actorId: string; audit?: OrganizationEvent['context'] } & ({ manage: true } | { manage: false; userId: string })
+export type StayAccess = { organizationId: string; actorId: string; audit?: OrganizationEvent['context'] } & ({ manage: true; listingId?: string; operationalOnly?: boolean } | { manage: false; userId: string; memberId?: string; role?: string })
 type StayMutationEnv = ChannexEnv & GuestInboxPublicationEnv & EventsEnv
 
 /** Resolve a member's stay access from their Better Auth role: operations update manages, operations assigned reads assigned homes. */
 export async function stayAccessFor(principal: MemberAccessPrincipal): Promise<StayAccess> {
   const scope = await bookingOperationsScope(principal)
-  if (scope === 'manage') return { organizationId: principal.organizationId, actorId: principal.userId, manage: true }
+  if (scope === 'manage') return {
+    organizationId: principal.organizationId, actorId: principal.userId, manage: true,
+    operationalOnly: !await roleAllows({ ...principal, permissions: { products: ['update'] } }),
+  }
   if (scope === null) await assertRoleAllows({ ...principal, permissions: { operations: ['assigned'] } })
-  return { organizationId: principal.organizationId, actorId: principal.userId, manage: false, userId: principal.userId }
+  return { organizationId: principal.organizationId, actorId: principal.userId, manage: false, userId: principal.userId, memberId: principal.memberId, role: principal.role }
 }
 
 export const STAY_STATUSES = ['pending', 'confirmed', 'cancelled'] as const
@@ -437,14 +442,31 @@ function channelOwned(stay: Stay, state: 'belongs to' | 'is paid through'): neve
 
 /** The SQL that limits rows to homes this caller may see, and its parameters. */
 function visibleHomes(access: StayAccess, alias = 'c'): { sql: string; params: string[] } {
-  return access.manage ? { sql: '1 = 1', params: [] } : {
-    sql: `EXISTS (SELECT 1 FROM product_booking_configs looked_after WHERE looked_after.organization_id = ${alias}.organization_id AND looked_after.product_id = ${alias}.product_id AND ${assignedMemberSql('looked_after')})`,
+  return access.manage ? access.listingId
+    ? { sql: `${alias}.product_id = ?`, params: [access.listingId] }
+    : { sql: '1 = 1', params: [] } : {
+    sql: `EXISTS (SELECT 1 FROM member m WHERE m.organizationId = ${alias}.organization_id AND m.userId = ? AND ((${access.role ? roleMatchesSql('m.role', assignedOperationsRoles) : '1'} AND EXISTS (SELECT 1 FROM product_booking_configs looked_after WHERE looked_after.organization_id = ${alias}.organization_id AND looked_after.product_id = ${alias}.product_id AND looked_after.assigned_member_id = m.id))
+      OR ${listingGrantSql(`${alias}.organization_id`, `${alias}.product_id`, 'm.id', 'calendar', 'm.role')}))`,
     params: [access.userId],
   }
 }
 
 function requireManager(access: StayAccess): asserts access is StayAccess & { manage: true } {
-  if (!access.manage) fail(403, 'STAY_ROLE_REQUIRED', 'Only organization owners and admins can change stays')
+  if (!access.manage || access.operationalOnly) fail(403, 'STAY_ROLE_REQUIRED', 'Only workspace owners and admins can perform this operation')
+}
+
+async function stayOperationAccess(db: DbClient, access: StayAccess, target: { listingId: string } | { bookingId: string }): Promise<Extract<StayAccess, { manage: true }>> {
+  if (access.manage) return access
+  const listing = 'listingId' in target
+    ? { clause: 'c.product_id = ?', id: target.listingId }
+    : { clause: `c.product_id = (SELECT product_id FROM bookings WHERE organization_id = c.organization_id AND id = ? AND product_session_id IS NULL)`, id: target.bookingId }
+  const granted = await queryFirst<{ product_id: string }>(db, `SELECT c.product_id FROM product_stay_configs c
+    JOIN member m ON m.organizationId = c.organization_id AND m.userId = ?
+    WHERE c.organization_id = ? AND ${listing.clause}
+      AND ${listingGrantSql('c.organization_id', 'c.product_id', 'm.id', 'update', 'm.role')}`,
+  [access.userId, access.organizationId, listing.id])
+  if (!granted) fail(403, 'STAY_ROLE_REQUIRED', 'This operation requires access to the home')
+  return { ...access, manage: true, listingId: granted.product_id, operationalOnly: true }
 }
 
 /** The homes this caller may see, or one of them; one query for the homes and one for their prices. */
@@ -1314,7 +1336,7 @@ const STAY_NIGHT_PRICE_SQL = `(SELECT pr.unit_amount FROM product_variants v JOI
  */
 export async function readStayCalendar(db: DbClient, access: StayAccess, input: { productId?: string; from: unknown; to: unknown }): Promise<{ from: string; to: string } & ReturnType<typeof stayCalendarOf>> {
   const { from, to } = range(input)
-  const viewer: BatchQuery = { query: 'SELECT ? AS organization_id, ? AS user_id, NULL AS member_id, ? AS organization_wide', params: [access.organizationId, access.actorId, access.manage ? 1 : 0] }
+  const viewer: BatchQuery = { query: 'SELECT ? AS organization_id, ? AS user_id, ? AS member_id, ? AS role, ? AS organization_wide', params: [access.organizationId, access.actorId, access.manage ? null : access.memberId ?? null, access.manage ? '' : access.role ?? 'member', access.manage ? 1 : 0] }
   const calendar = stayCalendarOf(await executeBatch(db, stayCalendarQueries(viewer, { from, to, productId: input.productId ?? null }), { operation: 'Read homes calendar' }), access.manage, { from, to })
   if (input.productId && !calendar.homes.length) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
   return { from, to, ...calendar }
@@ -1353,14 +1375,16 @@ export interface StayCalendarStay {
  */
 export function stayCalendarQueries(membership: BatchQuery, input: { from: string; to: string; productId: string | null }): BatchQuery[] {
   const organization: BatchQuery = { query: BATCH_VIEWER.organization, params: [] }
-  const scope = { sql: `(${BATCH_VIEWER.organizationWide} = 1 OR EXISTS (SELECT 1 FROM product_booking_configs looked_after WHERE looked_after.organization_id = c.organization_id
-    AND looked_after.product_id = c.product_id AND ${assignedMemberSql('looked_after', BATCH_VIEWER.user)}))`, params: [] }
+  const scope = { sql: `(${BATCH_VIEWER.organizationWide} = 1 OR (${roleMatchesSql(BATCH_VIEWER.role!, assignedOperationsRoles)} AND EXISTS (
+    SELECT 1 FROM product_booking_configs looked_after WHERE looked_after.organization_id = c.organization_id
+    AND looked_after.product_id = c.product_id AND ${assignedMemberSql('looked_after', BATCH_VIEWER.user)}))
+    OR ${listingGrantSql('c.organization_id', 'c.product_id', BATCH_VIEWER.member, 'calendar', BATCH_VIEWER.role)})`, params: [] }
   const homes: BatchQuery = { query: `SELECT c.product_id FROM product_stay_configs c WHERE c.organization_id = ${BATCH_VIEWER.organization}
     ${input.productId ? 'AND c.product_id = ?' : ''} AND ${scope.sql}`, params: input.productId ? [input.productId] : [] }
   // The calendar keeps the stays of the homes it shows, so it reads every booked record of the business.
   return [
     ...stayHomeQueries(organization, input.productId, scope).map(query => withViewer(membership, query)),
-    withViewer(businessWideViewer(membership), bookedRecordsInRange(BATCH_VIEWER, input)),
+    withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, { ...input, includeAssignedStays: true, includeCalendarGrants: true })),
     ...homeNightsQueries(organization, homes, input.from, input.to, true).map(query => withViewer(membership, query)),
   ]
 }
@@ -1878,8 +1902,8 @@ type StayCreationHome = TurnoverHome & Pick<StayHome, 'max_guests' | 'cancellati
     replay: number
   }
 
-export async function createStay(db: DbClient, env: StayMutationEnv & CloudflareEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; idempotency_key: string }, options?: { imported: HostawayStaySource }): Promise<StayDetail> {
-  requireManager(access)
+export async function createStay(db: DbClient, env: StayMutationEnv & CloudflareEnv, inputAccess: StayAccess, input: Record<string, unknown> & { product_id: string; idempotency_key: string }, options?: { imported: HostawayStaySource }): Promise<StayDetail> {
+  const access = await stayOperationAccess(db, inputAccess, { listingId: input.product_id })
   const key = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
   if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
   const imported = options?.imported
@@ -1996,8 +2020,8 @@ function versionChanged(results: unknown): boolean {
   return (results as Array<{ meta?: { changes?: number } }>)[0]?.meta?.changes === 1
 }
 
-export async function updateStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: Record<string, unknown> & { version: unknown }): Promise<StayDetail> {
-  requireManager(access)
+export async function updateStay(db: DbClient, env: StayMutationEnv, inputAccess: StayAccess, stayId: string, input: Record<string, unknown> & { version: unknown }): Promise<StayDetail> {
+  const access = await stayOperationAccess(db, inputAccess, { bookingId: stayId })
   const [currentResult, homeResult] = await executeBatch(db, [
     stayDetailQuery(access, stayId),
     stayTurnoverHomeQuery(access.organizationId, stayId, typeof input.check_in_date === 'string' ? input.check_in_date : null),
@@ -2098,8 +2122,8 @@ function turnoverTaskIdsQuery(organizationId: string, keys: string[]): BatchQuer
  * the caller that holds it (server/api/dashboard/payments/refund.post.ts).
  * Without one the cancellation is refused with where to approve it.
  */
-export async function cancelStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: { version: unknown; reason?: unknown; authorization_id?: string; financial_writes_allowed?: boolean; actorRole: string }): Promise<StayDetail> {
-  requireManager(access)
+export async function cancelStay(db: DbClient, env: StayMutationEnv, inputAccess: StayAccess, stayId: string, input: { version: unknown; reason?: unknown; authorization_id?: string; financial_writes_allowed?: boolean; actorRole: string }): Promise<StayDetail> {
+  const access = await stayOperationAccess(db, inputAccess, { bookingId: stayId })
   const [currentResult, paymentResult, homeResult] = await executeBatch(db, [
     stayDetailQuery(access, stayId),
     visitRefundPaymentQuery(access.organizationId, stayId),
@@ -2233,7 +2257,7 @@ export async function readStayReservationHome(db: DbClient, input: {
         FROM listing_message_members grant
         JOIN member_scheduling ms ON ms.organization_id = grant.organization_id AND ms.member_id = grant.member_id
         WHERE grant.organization_id = c.organization_id AND grant.listing_id = c.product_id
-          AND grant.member_id IS NOT b.assigned_member_id AND ${PUBLISHED_PROFILE_SQL}
+          AND ${listingLevelSql('grant', 'reply')} AND grant.member_id IS NOT b.assigned_member_id AND ${PUBLISHED_PROFILE_SQL}
         ORDER BY lower(ms.public_name), ms.member_id
       )) AS co_hosts_json
       FROM product_stay_configs c
@@ -2485,8 +2509,11 @@ function nightAudit(home: StayHome, access: StayAccess, dates: readonly string[]
   }
 }
 
-export async function setStayNights(db: DbClient, env: StayMutationEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; from: unknown; to: unknown }): Promise<{ home: StayCalendarHome; nights: StayNight[]; stays: StayCalendarStay[]; channel_push: SuccessfulChannelPush | null }> {
-  requireManager(access)
+export async function setStayNights(db: DbClient, env: StayMutationEnv, inputAccess: StayAccess, input: Record<string, unknown> & { product_id: string; from: unknown; to: unknown }): Promise<{ home: StayCalendarHome; nights: StayNight[]; stays: StayCalendarStay[]; channel_push: SuccessfulChannelPush | null }> {
+  const access = await stayOperationAccess(db, inputAccess, { listingId: input.product_id })
+  if (access.operationalOnly && ('price_minor' in input || 'price_change_percent' in input)) {
+    fail(403, 'STAY_ROLE_REQUIRED', 'Only workspace owners and admins can change prices')
+  }
   const unknown = Object.keys(input).find(key => !['organization_id', 'product_id', 'from', 'to', 'weekdays', 'reset', 'closed', 'price_minor', 'price_change_percent', 'min_stay_arrival', 'max_stay', 'closed_to_arrival', 'closed_to_departure'].includes(key))
   if (unknown) fail(422, 'INVALID_STAY_FIELD', `${unknown} is not a night setting`, unknown)
   const { from, to } = range(input, STAY_CALENDAR_DAYS)

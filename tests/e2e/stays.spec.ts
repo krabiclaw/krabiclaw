@@ -160,16 +160,42 @@ test('listing messaging grants and verified trip invites use the live conversati
     await expectStatus(made, 201)
     const { booking } = await made.json() as { booking: NightBooking }
     const path = `/api/messages/${booking.conversation_id}`
+    const staffScreen = await page.request.get('/api/dashboard/members', { params: { org: slug, view: 'invite' } })
+    await expectStatus(staffScreen, 200)
+    expect(await staffScreen.json()).toMatchObject({
+      roles: expect.arrayContaining([expect.objectContaining({ value: 'cleaner', access: [{ value: 'tasks', label: 'Tasks' }] })]),
+      listings: expect.arrayContaining([expect.objectContaining({ listing_id: productId })]),
+    })
+    const cleaner = await browser.newContext({ baseURL })
+    try {
+      const fixture = findE2eAuthFixture('user-e2e-mcp-fresh-cross-b')
+      await loginAs(cleaner.request, baseURL!, fixture.id)
+      const invited = await page.request.post('/api/auth/organization/invite-member', { headers, data: {
+        organizationId, email: fixture.email, role: 'cleaner', listing_access: JSON.stringify([{ listing_id: productId, access: 'tasks' }]),
+      } })
+      await expectStatus(invited, 200)
+      const opened = await invited.json()
+      const joined = await acceptOrganizationInvitation(cleaner.request, baseURL!, opened.id)
+      expect(joined.role).toBe('cleaner')
+      const grants = await page.request.get(`/api/messages/listings/${productId}/participants`, { params: { organization_id: organizationId } })
+      expect(await grants.json()).toMatchObject({ grants: expect.arrayContaining([{ member_id: joined.id, access: 'tasks' }]) })
+      await expectStatus(await cleaner.request.get(path), 404)
+      await expectStatus(await page.request.put(`/api/messages/listings/${productId}/participants`, {
+        headers, params: { organization_id: organizationId }, data: { member_id: joined.id, access: null },
+      }), 200)
+    } finally {
+      await cleaner.close()
+    }
     const reply = 'Hello, the cabin is ready.'
     await expectStatus(await page.request.post(path, { headers, data: { body: reply, idempotency_key: crypto.randomUUID() } }), 200)
     await expectStatus(await cohost.request.get(path), 404)
     await expectStatus(await traveler.request.get(path), 404)
     const grants = `/api/messages/listings/${productId}/participants`
-    const setGrant = (allowed: boolean) => page.request.put(grants, { headers, params: { organization_id: organizationId }, data: { member_id: memberId, allowed } })
+    const setGrant = (allowed: boolean) => page.request.put(grants, { headers, params: { organization_id: organizationId }, data: { member_id: memberId, access: allowed ? 'messaging' : null } })
     await expectStatus(await setGrant(true), 200)
     const currentGrants = await page.request.get(grants, { params: { organization_id: organizationId } })
     await expectStatus(currentGrants, 200)
-    expect(await currentGrants.json()).toEqual({ member_ids: [memberId] })
+    expect(await currentGrants.json()).toEqual({ grants: [{ member_id: memberId, access: 'messaging' }], staff_access_writes: true })
     const cohostTranscript = await cohost.request.get(path)
     await expectStatus(cohostTranscript, 200)
     expect(await cohostTranscript.json()).toMatchObject({ conversation: { booking_id: null }, viewer_role: 'member' })
