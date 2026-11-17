@@ -84,11 +84,13 @@ type TemplateComponent = TemplateHeaderComponent | TemplateBodyComponent | Templ
  * sent and the refusal is the delivery's recorded reason.
  */
 export class WhatsAppTemplateRefusal extends Error {
-  readonly code: 'WHATSAPP_TEMPLATE_FACT_MISSING' | 'WHATSAPP_TEMPLATE_NOT_APPROVED'
+  readonly code: 'WHATSAPP_TEMPLATE_FACT_MISSING' | 'WHATSAPP_TEMPLATE_FACT_UNCARRIED' | 'WHATSAPP_TEMPLATE_NOT_APPROVED'
   readonly template: string
   readonly field: string | null
   constructor(code: WhatsAppTemplateRefusal['code'], template: string, field: string | null) {
-    super(code === 'WHATSAPP_TEMPLATE_FACT_MISSING' ? `${code}: ${template} requires ${field}` : `${code}: ${template}`)
+    super(code === 'WHATSAPP_TEMPLATE_FACT_MISSING' ? `${code}: ${template} requires ${field}`
+      : code === 'WHATSAPP_TEMPLATE_FACT_UNCARRIED' ? `${code}: ${template} has no slot for ${field}`
+        : `${code}: ${template}`)
     this.code = code
     this.template = template
     this.field = field
