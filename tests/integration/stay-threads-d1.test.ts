@@ -124,8 +124,8 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     if (saved.guest_email === null) await updateStay(db, env, manager, cy.id, { version: saved.version, guest_email: 'cy@example.test' })
     assert.deepEqual(await db.prepare("SELECT json_extract(r.payload_json, '$.guest.email') AS guest_email, r.id AS conversation_id FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking' WHERE b.id = ?").bind(cy.id).first(), { guest_email: 'cy@example.test', conversation_id: cy.conversation_id })
 
-    // A booking lands as a stay, not as a conversation: until someone writes, the inbox does not list it.
-    assert.deepEqual(await listConversations(db, ORG, { userId: OWNER, type: 'stay' }), [])
+    // A booking is a conversation from the moment it is made: the inbox lists the stay before anyone writes.
+    assert.ok((await listConversations(db, ORG, { userId: OWNER, type: 'stay' })).some(row => row.id === ana.conversation_id))
 
     // The thread is answered like any other; a stay is changed from its own screen, not its thread.
     const hostConversation = await conversationPageFor(db, principal(OWNER, 'owner'), ana.conversation_id)

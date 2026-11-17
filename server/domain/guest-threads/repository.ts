@@ -83,11 +83,10 @@ function mailboxWhere(mailbox: GuestThreadMailbox | null, now: string, buyerAudi
 const STAY_CONVERSATION_SQL = `(gt.kind = 'booking' AND (op.unit = 'nights' OR (op.unit IS NULL AND EXISTS (SELECT 1 FROM channel_threads stay_channel WHERE stay_channel.conversation_id = gt.id))))`
 
 /**
- * A stay lands as a booking, not as a conversation: a stay is in the inbox once someone has written.
+ * Every booking is a conversation in the inbox from the moment it is made, a stay's as much as any other, as Airbnb lists every reservation.
  * A checkout's conversation waits on the guest: it is a conversation once payment has created its booking.
  */
-const HAS_CONVERSATION_SQL = `(gt.kind = 'team' OR ((op.unit IS NOT 'nights' OR EXISTS (SELECT 1 FROM messages e WHERE e.conversation_id = gt.id AND e.author_kind <> 'krabiclaw' AND ${messageHasContentSql('e')}))
-  AND (json_extract(gt.payload_json, '$.provenance.creation_kind') IS NOT 'checkout' OR gt.booking_id IS NOT NULL)))`
+const HAS_CONVERSATION_SQL = `(gt.kind = 'team' OR json_extract(gt.payload_json, '$.provenance.creation_kind') IS NOT 'checkout' OR gt.booking_id IS NOT NULL)`
 
 /** A conversation's type as the inbox filters it: a contact, a stay's, or any other booking's. */
 function threadTypeWhere(type: GuestThreadSubmissionType): string {
