@@ -16,7 +16,7 @@ import { guestPresentation, notifyBookingChangeOwner } from '~/server/utils/noti
 import { platformLocale } from '~/shared/platform-locales'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
-import { publishConversationEvent, scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
+import { publishAccessInvalidation, publishConversationEvent, scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
 import { CURRENT_GUEST_SQL, MessageStateConflictError, appendMessage, findMessageByDedupeKey, getMessage, messageQueries, type MessageRow } from '~/server/domain/conversations'
 import { createDeliveryReceipt, deliverGuestThreadEmail, isDeliverySent } from './deliveries'
 import { getEmailDeliveryMode } from '~/server/utils/email-delivery'
@@ -354,6 +354,7 @@ export async function deliverBookingChange(env: CloudflareEnv, event: Extract<Do
     await planSourceMessages(db, thread.organization_id, proposal.before.recordId)
     const record = await getThreadOperationalRecord(db, thread.id)
     if (!record) throw new Error('The changed booking disappeared')
+    if (record.product_id !== proposal.before.productId) await publishAccessInvalidation(env, { organizationId: thread.organization_id })
     if (record.status === 'confirmed') {
       const dueAt = bookingReviewDueAt(record.ends_at)
       if (dueAt !== null) await scheduleBusinessWake(env, thread.organization_id, 'reviews', dueAt)

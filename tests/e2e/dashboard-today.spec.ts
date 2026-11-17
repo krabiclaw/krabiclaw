@@ -263,7 +263,7 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
   }
 })
 
-test('booking assignment and workspace admin promotion do not grant a conversation seat', async ({ page, browser, request, baseURL }, testInfo) => {
+test('booking assignment grants guest messaging and workspace admins keep access after reassignment', async ({ page, browser, request, baseURL }, testInfo) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Table bookings and role changes use disposable local data only')
   const release = await acquireTenantMutationLock(testInfo, seededTenant('restaurant').organizationId)
@@ -310,57 +310,65 @@ test('booking assignment and workspace admin promotion do not grant a conversati
     bookingId = made.bookingId
     expect(reservationId).toEqual(expect.any(String))
     const bookingPath = `/api/dashboard/bookings/${bookingId}`
-    const destination = `${ORG}/bookings/${bookingId}`
+    const threadPath = `/api/messages/${reservationId}`
+    const destination = `${ORG}/messages/${reservationId}`
     const ownerBooking = await page.request.get(bookingPath, { params: { org } })
     expect(ownerBooking.status(), await ownerBooking.text()).toBe(200)
     const { booking } = await ownerBooking.json() as { booking: DashboardBookingDetails }
     expect(booking).toMatchObject({ conversation_id: reservationId, organization_id: organizationId, location_id: locationId, guest_name: guestName, status: 'confirmed', booking_date: day.date, timezone: slot.timezone, party_size: 2 })
-    const ownerThread = await page.request.get(`/api/messages/${reservationId}`)
+    const ownerThread = await page.request.get(threadPath)
     expect(ownerThread.status(), await ownerThread.text()).toBe(200)
     const { conversation: ownerConversation, viewer_role: role } = await ownerThread.json() as ConversationPage
     expect(role).toBe('member')
     expect(ownerConversation).toMatchObject({ id: reservationId, kind: 'guest', title: guestName, booking_id: booking.booking_id, composer: { channel: 'email' } })
     await loginAs(memberRequest, baseURL!, actor.userId)
-    const verifyAccess = async (assigned: boolean) => {
+    const verifyAccess = async (canRead: boolean) => {
       const agendaResponse = await memberRequest.get('/api/dashboard/agenda', { params: { org, from: day.date, to: day.date } })
       expect(agendaResponse.status(), await agendaResponse.text()).toBe(200)
       const agenda = await agendaResponse.json() as AgendaPayload
-      if (assigned) expect(agenda.items.find(item => item.conversation_id === reservationId)).toMatchObject({ id: `booking:${reservationId}`, kind: 'booking', conversation_id: reservationId, booking_id: booking.booking_id, location_id: locationId, title: guestName, status: 'confirmed', starts_at: slot.starts_at, to: destination })
+      if (canRead) expect(agenda.items.find(item => item.conversation_id === reservationId)).toMatchObject({ id: `booking:${reservationId}`, kind: 'booking', conversation_id: reservationId, booking_id: booking.booking_id, location_id: locationId, title: guestName, status: 'confirmed', starts_at: slot.starts_at, to: destination })
       else expect(agenda.items.some(item => item.conversation_id === reservationId)).toBe(false)
       const response = await memberRequest.get(listPath, { params: { organization_id: organizationId, org, location_id: locationId, type: 'booking' } })
       expect(response.status(), await response.text()).toBe(200)
       const { threads } = await response.json() as InboxListPage
-      expect(threads.some(thread => thread.id === reservationId)).toBe(false)
-      const detail = await memberRequest.get(`/api/messages/${reservationId}`)
-      expect(detail.status(), await detail.text()).toBe(404)
+      expect(threads.some(thread => thread.id === reservationId)).toBe(canRead)
+      const detail = await memberRequest.get(threadPath)
+      expect(detail.status(), await detail.text()).toBe(canRead ? 200 : 404)
+      if (canRead) expect(await detail.json()).toMatchObject({ viewer_role: 'member', conversation: { id: reservationId, booking_id: bookingId, organization_id: organizationId } })
       const record = await memberRequest.get(bookingPath, { params: { org } })
-      expect(record.status(), await record.text()).toBe(assigned ? 200 : 404)
-      if (assigned) expect((await record.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ booking_id: bookingId, conversation_id: reservationId, location_id: locationId, status: 'confirmed' })
+      expect(record.status(), await record.text()).toBe(canRead ? 200 : 404)
+      if (canRead) expect((await record.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ booking_id: bookingId, conversation_id: reservationId, location_id: locationId, status: 'confirmed' })
     }
     await verifyAccess(false)
     await assign(actor.id)
     reassigned = true
     await verifyAccess(true)
-    const deniedSend = await memberRequest.post(`/api/messages/${reservationId}`, {
-      headers: authRequestHeaders(baseURL!), data: { body: 'Assignment alone cannot send this', idempotency_key: crypto.randomUUID() },
+    const reply = 'Your table is ready'
+    const sent = await memberRequest.post(threadPath, {
+      headers: authRequestHeaders(baseURL!), data: { body: reply, idempotency_key: crypto.randomUUID() },
     })
-    expect(deniedSend.status(), await deniedSend.text()).toBe(404)
+    expect(sent.status(), await sent.text()).toBe(200)
+    const transcript = await page.request.get(threadPath)
+    expect(transcript.status(), await transcript.text()).toBe(200)
+    expect((await transcript.json() as ConversationPage).entries).toContainEqual(expect.objectContaining({ type: 'message', body: reply }))
     const promoted = await page.request.post('/api/auth/organization/update-member-role', {
       headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: 'admin' },
     })
     expect(promoted.status(), await promoted.text()).toBe(200)
+    await assign(chefMemberId)
+    reassigned = false
     await loginAs(memberRequest, baseURL!, actor.userId)
-    const stillDenied = await memberRequest.get(`/api/messages/${reservationId}`)
-    expect(stillDenied.status(), await stillDenied.text()).toBe(404)
+    await verifyAccess(true)
     const demoted = await page.request.post('/api/auth/organization/update-member-role', {
       headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: 'member' },
     })
     expect(demoted.status(), await demoted.text()).toBe(200)
     await loginAs(memberRequest, baseURL!, actor.userId)
-    await verifyAccess(true)
-    await assign(chefMemberId)
-    reassigned = false
     await verifyAccess(false)
+    const deniedSend = await memberRequest.post(threadPath, {
+      headers: authRequestHeaders(baseURL!), data: { body: 'This reply should be refused', idempotency_key: crypto.randomUUID() },
+    })
+    expect(deniedSend.status(), await deniedSend.text()).toBe(404)
   } catch (error) {
     failures.push(error)
   } finally {

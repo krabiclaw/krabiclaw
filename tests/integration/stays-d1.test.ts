@@ -283,6 +283,7 @@ test('a moved channel revision repairs its audited home scopes without rewriting
       { type: 'nights.changed', product_id: cabin.id, location_id: 'cabin-site', booking_id: first.id },
       { type: 'stay.changed', product_id: lake.id, location_id: 'lake-site', booking_id: first.id },
       { type: 'nights.changed', product_id: lake.id, location_id: 'lake-site', booking_id: first.id },
+      { type: 'access.changed' },
       // The reservation's conversation, which every channel stay has from its first revision.
       { type: 'MESSAGE_UPDATE' },
     ])
@@ -1493,7 +1494,7 @@ test('members see only the homes they look after and change nothing; a home with
   }
 })
 
-test('a member reads a stay at a home they look after as its turnover on every read path, and nothing of its guest, money or conversation', { timeout: 120_000 }, async (t) => {
+test('a member assigned to a home reads its guest conversation and the turnover details of its stay', { timeout: 120_000 }, async (t) => {
   const { runtime, db, env } = await boot()
   try {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T18:00:00.000Z') })
@@ -1508,8 +1509,8 @@ test('a member reads a stay at a home they look after as its turnover on every r
     const window = { from: '2026-11-01', to: '2026-11-04' }
 
     assert.deepEqual(await getStay(db, cleaner, stay.id), turnover)
-    // Every calendar read draws a member's stay as its days, status, party and the guest's first name.
-    const calendarTurnover = { unit: 'nights', booking_id: stay.id, conversation_id: null, product_id: cabin.id, status: 'confirmed', guest_name: 'Ana', adults: 2, children: 1, check_in_date: '2026-11-01', check_out_date: '2026-11-03' }
+    // The calendar links the assigned member to the guest thread and limits the booking fields to turnover details.
+    const calendarTurnover = { unit: 'nights', booking_id: stay.id, conversation_id: stay.conversation_id, product_id: cabin.id, status: 'confirmed', guest_name: 'Ana', adults: 2, children: 1, check_in_date: '2026-11-01', check_out_date: '2026-11-03' }
     assert.deepEqual((await readHomeCalendar(db, cleaner, { productId: cabin.id, ...window })).stays, [calendarTurnover])
     assert.deepEqual((await readStayCalendar(db, cleaner, window)).stays, [calendarTurnover])
     // Owners and admins read the whole stay, unchanged.
@@ -1542,11 +1543,11 @@ test('a member reads a stay at a home they look after as its turnover on every r
     assert.ok(managerOutbox.messages.some(message => message.booking_id === stay.id && message.author_user_id === null))
     assert.deepEqual((await listScheduledGuestMessages(db, cleanerPrincipal, { limit: 20, offset: 0 }, null)).messages, [])
 
-    // The stay's guest conversation is not the member's, and its alerts do not reach them.
-    await assert.rejects(listScheduledGuestMessages(db, cleanerPrincipal, { limit: 20, offset: 0 }, stay.conversation_id), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
-    await assert.rejects(assertConversationAccess(db, cleanerPrincipal, stay.conversation_id), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
+    // Assignment opens the guest thread and its alerts; automatic outbox messages remain for managers.
+    assert.deepEqual((await listScheduledGuestMessages(db, cleanerPrincipal, { limit: 20, offset: 0 }, stay.conversation_id)).messages, [])
+    assert.equal((await assertConversationAccess(db, cleanerPrincipal, stay.conversation_id)).id, stay.conversation_id)
     await assertConversationAccess(db, ownerPrincipal, stay.conversation_id)
-    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.conversation_id })).map(member => member.userId), [OWNER])
+    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.conversation_id, guestMessage: true })).map(member => member.userId).sort(), [CLEANER, OWNER].sort())
 
     // Today names the guest by first name for the member and in full for the owner.
     const today = (membership: typeof ownerMembership) => listTodayAgenda(db, { organizationId: ORG }, { principal: { env, membership }, organizationSlug: 'org' }, new Date('2026-11-01T18:00:00.000Z'))

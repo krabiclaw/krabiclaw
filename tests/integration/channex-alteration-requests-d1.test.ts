@@ -251,19 +251,17 @@ test('a guest change request lands once in the stay conversation, survives a rel
     const setup = ['payments.connect:org', 'Set up payments', 'Connect with Stripe', '/dashboard/org/payments/payout-method']
     assert.deepEqual(await today(), [[`task:${changeTask}`, 'Lee’s group of 2 asked to change their stay', 'Review the change', `/dashboard/org/messages/${stay.conversation_id}`], setup])
 
-    // Assignment allows the turnover to be read. Even with a thread seat, it gives no decision permission.
+    // Assignment allows the conversation and turnover to be read. Deciding the request is still a stay manager's action.
     await db.prepare("UPDATE product_booking_configs SET assigned_member_id = 'assigned-member-membership' WHERE organization_id = ?").bind(ORG).run()
-    await db.prepare("INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role, created_at) VALUES (?, ?, ?, 'member', ?)").bind(stay.conversation_id, ORG, MEMBER, '2026-10-15T00:00:00.000Z').run()
+    assert((await listConversations(db, ORG, { userId: MEMBER })).some(row => row.id === stay.conversation_id))
     const turnover = await reservation(stay.id, MEMBER)
     assert.equal(turnover.manage, false)
     assert.equal('pending_changes' in turnover.booking, false)
     await denied(await answer(stay.id, request!.id, 'accept_change', MEMBER), 403, 'STAY_ROLE_REQUIRED')
-    // A stay manager who left the conversation keeps the reservation and loses access to the request.
+    // The owner can still review and decide the request without a stored conversation seat.
     await db.prepare("DELETE FROM conversation_participants WHERE conversation_id = ? AND user_id = ?").bind(stay.conversation_id, OWNER).run()
-    assert.deepEqual((await reservation(stay.id)).booking.pending_changes, [])
-    await denied(await answer(stay.id, request!.id, 'accept_change'), 404, 'THREAD_NOT_FOUND')
+    assert.deepEqual((await reservation(stay.id)).booking.pending_changes?.map(change => change.id), [request!.id])
     assert.deepEqual(channex.resolutions, [])
-    await db.prepare("INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role, created_at) VALUES (?, ?, ?, 'member', ?)").bind(stay.conversation_id, ORG, OWNER, '2026-10-15T00:00:00.000Z').run()
 
     channex.failAckOnce = true
     const incomplete = await answer(stay.id, request!.id, 'accept_change')

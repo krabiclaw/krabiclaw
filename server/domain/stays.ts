@@ -42,7 +42,7 @@ import { assertBookingBatchWrite, bookingBatchWriteRefused, requireBookingConfig
 import { GUEST_NOTE_EVENT, openingMessageQueries, openingSentence } from '~/server/domain/guest-threads/opening'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
-import { publishBusinessInvalidation, publishConversationEvent, publishStayInvalidation, scheduleBusinessWake, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { publishAccessInvalidation, publishBusinessInvalidation, publishConversationEvent, publishStayInvalidation, scheduleBusinessWake, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planSourceMessages } from '~/server/domain/scheduled-guest-messages'
 import { listingCalendar } from '~/server/integrations/channex/airbnb-listing'
 import { joinBookingConversationQueries } from '~/server/domain/guest-threads/channel-messages'
@@ -2915,6 +2915,7 @@ export async function reactToStayChange(env: CloudflareEnv, event: Extract<Domai
     const input = { organization_id, location_id, product_id, booking_id }
     await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { version })
     if (event.nights_changed) await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { version })
+    if (event.prior_homes?.length) await publishAccessInvalidation(env, { organizationId: organization_id })
     await publishConversationEvent(env, db, { conversationId: conversation_id, type: 'MESSAGE_UPDATE' })
     if (event.guest_cancellation_refund_minor !== undefined) {
       const { notifyStayCancelled } = await import('~/server/utils/notifications')

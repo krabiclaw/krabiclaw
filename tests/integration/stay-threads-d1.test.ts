@@ -139,7 +139,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
       WHERE e.conversation_id = ? AND d.purpose = 'member_reply'`).bind(ana.conversation_id).first(), { channel: 'email', status: 'sent' })
 
     // Once written to, the inbox lists it for its host with the guest, home and dates in the home's own clock.
-    // A stay's guest conversation is not a member's, even the member who looks after the home: they read its stays as turnovers.
+    // The member assigned to the home sees the thread without a separate grant.
     const listed = await listConversations(db, ORG, { userId: OWNER, type: 'stay' })
     assert.deepEqual(listed.map(row => row.id), [ana.conversation_id])
     const homeToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
@@ -148,7 +148,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
       when: `In ${arrivalIn} days`, preview: 'The gate code is in your confirmation.', preview_from: 'You', time: undefined, unread: false })
     assert.deepEqual(await db.prepare("SELECT b.product_id, b.channel, c.id AS conversation_id FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.id = ?").bind(ana.id).first(), { product_id: cabin.id, channel: 'direct', conversation_id: ana.conversation_id })
     assert.equal((await sheet())?.actions.archive, true)
-    assert.deepEqual(await listConversations(db, ORG, { userId: CLEANER }), [])
+    assert.deepEqual((await listConversations(db, ORG, { userId: CLEANER })).map(row => row.id), [ana.conversation_id])
     assert.deepEqual(await listConversations(db, ORG, { userId: OUTSIDER }), [])
     const host = principal(OWNER, 'owner')
     const cohost = principal(CLEANER, 'member')
@@ -161,8 +161,9 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual(await db.prepare(`SELECT role, host_listing_id FROM conversation_participants WHERE conversation_id = ? AND user_id = ?`).bind(newReservation.conversation_id, CLEANER).first(),
       { role: 'member', host_listing_id: cabin.id })
     await setListingMessagingAccess(db, env, host, { ...grant, allowed: false })
-    assert.deepEqual(await listConversations(db, ORG, { userId: CLEANER }), [])
-    assert.equal(await db.prepare('SELECT COUNT(*) n FROM conversation_participants WHERE organization_id = ? AND user_id = ?').bind(ORG, CLEANER).first('n'), 0)
+    assert.deepEqual((await listConversations(db, ORG, { userId: CLEANER })).map(row => row.id), [ana.conversation_id], 'revoking the separate grant leaves the active assignment')
+    assert.deepEqual(await db.prepare('SELECT role, host_listing_id FROM conversation_participants WHERE conversation_id = ? AND user_id = ?').bind(newReservation.conversation_id, CLEANER).first(),
+      { role: null, host_listing_id: null })
 
     const invite = await createConversationGuestInvite(db, host, { conversationId: ana.conversation_id, email: `${OUTSIDER.toUpperCase()}@example.test` })
     await assert.rejects(acceptConversationGuestInvite(db, env, { token: invite.token, user: { id: CLEANER, email: `${OUTSIDER}@example.test`, emailVerified: true } }), { statusCode: 404 })
@@ -175,8 +176,8 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual(await listConversations(db, ORG, { userId: OUTSIDER }), [])
     const outstanding = await createConversationGuestInvite(db, host, { conversationId: ana.conversation_id, email: traveler.email })
     const removal = { organizationId: ORG, conversationId: ana.conversation_id, userId: OWNER, travelerUserId: OUTSIDER }
-    await assert.rejects(removeConversationGuest(db, env, { ...removal, userId: CLEANER }), { statusCode: 404 })
-    assert.deepEqual(await removeConversationGuest(db, env, removal), { removed: true })
+    await assert.rejects(removeConversationGuest(db, env, { ...removal, userId: OUTSIDER }), { statusCode: 404 })
+    assert.deepEqual(await removeConversationGuest(db, env, { ...removal, userId: CLEANER }), { removed: true })
     assert.equal(await readGuestConversation(db, OUTSIDER, ana.conversation_id), null)
     for (const token of [invite.token, outstanding.token]) await assert.rejects(acceptConversationGuestInvite(db, env, { token, user: traveler }), { statusCode: 404 })
     assert.deepEqual(await removeConversationGuest(db, env, removal), { removed: true })

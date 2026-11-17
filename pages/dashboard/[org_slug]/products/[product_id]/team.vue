@@ -2,7 +2,7 @@
   <DashboardLeafPanel
     id="product-team"
     :title="p.sectionLabels.team"
-    lead="Choose the host responsible for this home’s stays."
+    lead="Choose the host responsible for this home’s stays and guest conversations."
     :saving="p.saving.value"
     :disabled="p.saveDisabled.value"
     :save-label="p.saveLabel.value"
@@ -14,13 +14,13 @@
     <section v-if="canManageAccess" class="mt-8 space-y-4 border-t border-default pt-6" aria-labelledby="guest-messaging-access">
       <div>
         <h2 id="guest-messaging-access" class="font-semibold text-highlighted">Guest messaging access</h2>
-        <p class="mt-1 text-sm text-muted">Choose which workspace members can read and reply to guest conversations for this listing.</p>
+        <p class="mt-1 text-sm text-muted">Owners, admins and the assigned host already have access. Add other co-hosts who should read and reply to this home’s guest messages.</p>
       </div>
       <UAlert v-if="accessError || saveAccessError" color="error" variant="soft" :description="saveAccessError || getErrorMessage(accessError, 'Guest messaging access could not be loaded')" />
       <p v-else-if="accessPending" class="text-sm text-muted" role="status">Loading access…</p>
-      <p v-else-if="access && !access.members.length" class="text-sm text-muted">There are no co-hosts in this workspace.</p>
+      <p v-else-if="access && !cohosts.length" class="text-sm text-muted">Everyone on this team already has access.</p>
       <ul v-if="access" class="divide-y divide-default">
-        <li v-for="member in access.members" :key="member.member_id" class="py-3">
+        <li v-for="member in cohosts" :key="member.member_id" class="py-3">
           <USwitch
             :model-value="access.member_ids.includes(member.member_id)"
             :label="member.name"
@@ -40,6 +40,7 @@ import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import ResponsibilityPicker from '~/components/dashboard/ResponsibilityPicker.vue'
 import { isTeamMembersResponse } from '~/lib/components/workspace/messages/team-thread-client'
 import { getErrorMessage } from '~/utils/errors'
+import { workspaceGuestMessagingRoles } from '~/utils/organization-access'
 
 definePageMeta({ layout: 'dashboard' })
 
@@ -63,9 +64,16 @@ const { data: access, pending: accessPending, error: accessError } = await useAs
       applicationFetch(grantPath.value, { query: grantQuery.value, signal, validate: isGrantList }),
       api('/api/dashboard/team/members', { signal, validate: isTeamMembersResponse }),
     ])
-    return { member_ids: grants.member_ids, members: roster.members.filter(member => !member.role.split(',').includes('owner')) }
+    return { member_ids: grants.member_ids, members: roster.members }
   },
 )
+const cohosts = computed(() => {
+  const current = access.value
+  if (!current) return []
+  const assigned = p.product.value?.stay?.assigned_member_id
+  return current.members.filter(member => current.member_ids.includes(member.member_id)
+    || (member.member_id !== assigned && !member.role.split(',').some(role => workspaceGuestMessagingRoles.includes(role.trim()))))
+})
 const savingAccess = ref<string | null>(null)
 const saveAccessError = ref('')
 async function setAccess(memberId: string, allowed: boolean) {

@@ -156,7 +156,7 @@ export const conversation_participants = sqliteTable("conversation_participants"
 	conversation_id: text().notNull(),
 	organization_id: text().notNull(),
 	user_id: text().notNull().references((): AnySQLiteColumn => user.id, { onDelete: "cascade" }),
-	// Read and archive rows written by a rolling old Worker carry no grant.
+	// A row can track a reader's state without putting them on the roster.
 	role: text({ enum: ["guest", "member"] }),
 	// A listing grant supplies these member seats. Initial hosts and explicit guest invites have no listing source.
 	host_listing_id: text().references((): AnySQLiteColumn => products.id, { onDelete: "cascade" }),
@@ -170,8 +170,8 @@ export const conversation_participants = sqliteTable("conversation_participants"
 	check("conversation_participants_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND (archived_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', archived_at, '+0 days') IS archived_at)`),
 ]);
 
-// Only a listing's messaging co-hosts join its guest conversations. The grant
-// references a Better Auth membership and can be revoked without changing operational assignments.
+// A per-home messaging grant for additional co-hosts. The grant references a
+// Better Auth membership and is independent of the home's assignment.
 export const listing_message_members = sqliteTable("listing_message_members", {
 	organization_id: text().notNull(),
 	listing_id: text().notNull(),
