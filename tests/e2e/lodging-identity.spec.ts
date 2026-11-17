@@ -257,7 +257,7 @@ test.describe('lodging identity boundary', () => {
       await page.setViewportSize({ width: 390, height: 844 })
       await expect(composer).toBeVisible()
       await expect(page.locator('[data-team-delivery-failure]')).toContainText('Message saved. A notification failed.')
-      await page.locator('input[type="file"]').setInputFiles({ name: 'team-message-proof.avif', mimeType: 'image/avif', buffer: await sharp('public/platform/apple-touch-icon.png').avif().toBuffer() })
+      await page.locator('input[type="file"]').setInputFiles({ name: 'team-message-proof.avif', mimeType: 'image/avif', buffer: await sharp('public/platform/blawby-180.png').avif().toBuffer() })
       const photoSent = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === teamPath)
       await page.getByRole('button', { name: 'Send message', exact: true }).click()
       const photoResponse = await photoSent
