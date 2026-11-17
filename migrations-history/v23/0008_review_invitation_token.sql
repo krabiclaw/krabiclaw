@@ -1,1 +1,0 @@
-ALTER TABLE `review_requests` ADD `token` text;

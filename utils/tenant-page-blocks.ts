@@ -1,4 +1,5 @@
 import { hasPublicLocationPages } from '~/utils/site-routing'
+import { parsePricingAmount, pricingCalculatorConfig, pricingCalculatorRows } from '~/utils/pricing-calculator'
 import { FAQ_BLOCK_SOURCES } from '../shared/faq-block'
 import { videoUploadDate, youTubeVideoId } from '../shared/youtube-video'
 import { isSupportedMediaPlacement } from '../shared/media-placement-contract'
@@ -747,6 +748,9 @@ export function validateContentBlockData(type: string, data: Record<string, unkn
         if (field.required && (!Array.isArray(value) || value.length < (field.min ?? 1))) throw new Error(`${type}.${key} requires at least ${field.min ?? 1} item.`)
         if (value !== undefined && (!Array.isArray(value) || value.some(item => typeof item !== 'string' || !item.trim()))) throw new Error(`${type}.${key} must be an array of non-empty strings.`)
       } else if (value !== undefined && value !== null && typeof value !== 'string') throw new Error(`${type}.${key} must be a string.`)
+    }
+    if (field.kind === 'calculator' && value !== undefined && value !== null) {
+      for (const row of pricingCalculatorRows(pricingCalculatorConfig(value))) row.slice(1).forEach(parsePricingAmount)
     }
     if (field.kind !== 'list') continue
     if (field.required && (!Array.isArray(value) || value.length < (field.min ?? 1))) throw new Error(`${type}.${key} requires at least ${field.min ?? 1} item.`)

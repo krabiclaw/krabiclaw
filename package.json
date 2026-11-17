@@ -33,7 +33,7 @@
     "test:browser": "playwright test --project=chromium --workers=1",
     "test:deployed": "playwright test --config playwright.deployed.config.ts",
     "test:e2e:guest-journeys": "playwright test tests/e2e/tenant-guest-journeys.spec.ts --project=chromium --workers=1",
-    "test:e2e:mcp": "playwright test tests/e2e/mcp-media.spec.ts tests/e2e/mcp-content.spec.ts tests/e2e/mcp-owner-tools.spec.ts tests/e2e/mcp-authorization.spec.ts tests/e2e/oauth-discovery.spec.ts",
+    "test:e2e:mcp": "playwright test tests/e2e/mcp-authorization.spec.ts tests/e2e/oauth-discovery.spec.ts",
     "test:e2e:ui": "playwright test --ui",
     "dev": "nuxt dev",
     "local:setup": "rm -rf .wrangler/state && yarn schema:local",

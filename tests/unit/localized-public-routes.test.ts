@@ -3,7 +3,6 @@ import { test } from 'node:test'
 import { validateLocaleCatalog } from '../../shared/platform-locale-catalog.ts'
 import { projectExactLocalizedResource } from '../../server/utils/public-localization.ts'
 import { resolveTenantLocalePath } from '../../utils/tenant-locale-path.ts'
-import { tenantBlogPostPath } from '../../utils/tenant-blog-route.ts'
 import { validateLocalizedRoutePath } from '../../server/utils/localization-registry.ts'
 import { alignTenantPageTranslationBlocks, createTenantPageBlock, createTenantPageTranslationBlocks, tenantPageLocalizedTextFields } from '../../utils/tenant-page-blocks.ts'
 
@@ -81,10 +80,6 @@ test('localized projection clears untranslated localizable fields', () => {
   assert.equal(projected.description, '')
   // Prices are not language, so they survive verbatim.
   assert.deepEqual(projected.variants, [{ id: 'var-1', prices: [{ unit_amount: 2500 }] }])
-})
-
-test('professional-service blog paths use the canonical /blog route', () => {
-  assert.equal(tenantBlogPostPath('thai-law'), '/blog/thai-law')
 })
 
 test('a location translation retains its saved historical route and refuses an explicit move', () => {

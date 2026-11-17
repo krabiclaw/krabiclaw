@@ -178,7 +178,7 @@ export async function listAgenda(
 
   const staff = query.principal && !await roleAllows({ ...query.principal.membership, permissions: { operations: ['read'] } })
     ? query.principal.membership : null
-  if (staff) await assertRoleAllows({ ...staff, permissions: { operations: ['assigned'] } })
+  if (staff && !await roleAllows({ ...staff, permissions: { operations: ['listing_calendar'] } })) await assertRoleAllows({ ...staff, permissions: { operations: ['assigned'] } })
   const assignedRequests = staff ? assignedGuestThreadScope('rq', staff.userId) : null
 
   // Read configured and historical activity kinds plus the explicit locations
@@ -225,12 +225,12 @@ export async function listAgenda(
   // Calendar read them; each surface keeps the days it shows, in the record's own zone.
   // A member's are the offerings and homes they are named on.
   const viewer: BatchQuery = scope.buyerUserId
-    ? { query: 'SELECT NULL AS organization_id, ? AS user_id, NULL AS member_id, 0 AS organization_wide', params: [scope.buyerUserId] }
-    : { query: 'SELECT ? AS organization_id, ? AS user_id, NULL AS member_id, 1 AS organization_wide', params: [scope.organizationId, query.principal?.membership.userId ?? null] }
-  const read = withViewer(viewer, bookedRecordsInRange(BATCH_VIEWER, { from: query.from, to: query.to, guest: Boolean(scope.buyerUserId) }))
+    ? { query: 'SELECT NULL AS organization_id, ? AS user_id, NULL AS member_id, NULL AS role, 0 AS organization_wide', params: [scope.buyerUserId] }
+    : { query: 'SELECT ? AS organization_id, ? AS user_id, ? AS member_id, ? AS role, ? AS organization_wide', params: [scope.organizationId, query.principal?.membership.userId ?? null, staff?.memberId ?? null, staff?.role ?? null, staff ? 0 : 1] }
+  const read = withViewer(viewer, bookedRecordsInRange(BATCH_VIEWER, { from: query.from, to: query.to, guest: Boolean(scope.buyerUserId), includeAssignedStays: true, includeCalendarGrants: true }))
   const records = requestedKinds.has('booking') || requestedKinds.has('stay') ? await queryAll<BookedRecordInRange>(db, read.query, read.params) : []
   const visible = records.filter(record => record.conversation_id !== null && (!query.organizationId || record.organization_id === query.organizationId)
-    && (!query.locationId || record.location_id === query.locationId) && (!staff || record.assigned_member_id === staff.memberId))
+    && (!query.locationId || record.location_id === query.locationId))
   if (requestedKinds.has('booking')) {
     sourceQueries.push(Promise.resolve(visible.filter(record => record.unit === 'slot').map((record): SourceRow => {
       const table = record.product_kind === 'table'

@@ -3,6 +3,7 @@ import { useNitroApp } from 'nitro/app'
 import { MEMBER_BUSY_SCOPES } from '~/shared/member-scheduling'
 import { BUSINESS_PLAN_ID, GROWTH_PLAN_ID, STARTER_PLAN_ID } from '~/shared/billing-model'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
+import { vrboEnabled } from '~/server/integrations/channex/hosted-channel'
 import { INTEGRATIONS, type IntegrationKey } from '~/shared/integrations'
 import type { CatalogAnswer, CatalogRow, CatalogScreen } from '~/shared/catalog-screen'
 import { getOrganizationEntitlements } from '~/server/utils/billing-access'
@@ -57,7 +58,8 @@ export async function connectionRows(
   const base = `/dashboard/${encodeURIComponent(organization.slug)}/integrations`
   const maps = summary.google_maps
   const mapped = maps.filter(location => location.google_place_id).length
-  const rows = INTEGRATIONS.filter(item => !item.feature || features.includes(item.feature)).map((item): ConnectionRow => {
+  const rows = INTEGRATIONS.filter(item => (!item.feature || features.includes(item.feature))
+    && (item.key !== 'vrbo' || vrboEnabled(env))).map((item): ConnectionRow => {
     const state = target(summary, item.key)
     const plan = plans.find(plan => !item.entitlement || getPlanEntitlements(plan)[item.entitlement] === true) ?? BUSINESS_PLAN_ID
     const locked = item.entitlement && allowed[item.entitlement] !== true
@@ -67,12 +69,13 @@ export async function connectionRows(
           : state && state.state !== 'disabled' && state.state !== 'not_connected' ? 'success' : 'neutral'
     const description = locked ? `Included with ${planLabel(plan)}`
       : item.key === 'google-maps' ? maps.length ? `${mapped} of ${maps.length} ${maps.length === 1 ? 'location' : 'locations'} connected` : 'No locations yet'
+        : item.key === 'vrbo' ? 'Manage listings'
         : state?.state === 'error' ? [state.name, 'Needs attention'].filter(Boolean).join(' · ')
           : state?.state === 'needs_review' ? 'Needs review'
             : state?.state === 'disabled' || state?.state === 'not_connected' ? 'Not connected' : state?.name ?? (state ? 'Connected' : 'Not connected')
     return {
       id: item.key, label: item.name, summary: description, status, group: item.group, plan, icon: item.logo,
-      to: `${base}/${item.key}`, native: item.key === 'airbnb' ? 'airbnb-connections' : 'connection', query: { integration: item.key },
+      to: `${base}/${item.key}`, native: item.key === 'airbnb' || item.key === 'vrbo' ? `${item.key}-connections` : 'connection', query: { integration: item.key },
     }
   })
   if (features.includes('stays') && await roleAllows({ ...organization, permissions: { operations: ['update'] } })) {

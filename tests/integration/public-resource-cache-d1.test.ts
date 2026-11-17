@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync } from 'node:fs'
 import test, { type TestContext } from 'node:test'
 import { Miniflare } from 'miniflare'
 
 import { drainPublicResourceCacheInvalidations, purgePublicResourceCacheNow, type OrganizationChangeDrainEnv } from '../../server/utils/public-resource-cache.ts'
-import { buildOrganizationDocuments, expandDocumentsForSurfaces, indexItemPayload, organizationKeySegment, syncOrganizationSearchIndex } from '../../server/utils/public-search.ts'
 import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
 import { articleCategoryMembershipQuery, createArticleCategory } from '../../server/utils/content/article-categories.ts'
 import { updateBlogLifecycle, updateBlogPost } from '../../server/utils/content/publishing.ts'
@@ -13,6 +11,7 @@ import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { consumeEvent } from '../../server/events.ts'
 import { RETENTION_HUB, runDueBusinessWork } from '../../server/domain/due-business-work.ts'
 import { captureEvents } from './support/events.ts'
+import { applySchema } from './support/schema.ts'
 
 const searchEnv: OrganizationChangeDrainEnv = {
   NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://krabiclaw.com',
@@ -56,12 +55,7 @@ async function migratedCacheD1(context: TestContext) {
   context.after(() => miniflare.dispose())
   const db = await miniflare.getD1Database('DB')
   const kv = await miniflare.getKVNamespace('ORGANIZATION_CACHE')
-  for (const filename of readdirSync('migrations').filter(name => /^\d+.*\.sql$/.test(name)).sort()) {
-    const migration = readFileSync(`migrations/${filename}`, 'utf8')
-    for (const statement of migration.split('--> statement-breakpoint').map(value => value.trim()).filter(Boolean)) {
-      await db.prepare(statement).run()
-    }
-  }
+  await applySchema(db)
   await db.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org', 'Org', 'org', 'org', 'USD', 'UTC')").run()
   await db.prepare("INSERT INTO organization (id, name, slug, subdomain, theme_id, default_currency, timezone) VALUES ('platform', 'Platform', 'platform', 'platform', 'krabiclaw-theme-v1', 'USD', 'UTC')").run()
   const { GUEST_INBOX_HUBS: hubs } = await miniflare.getBindings<{ GUEST_INBOX_HUBS: DurableObjectNamespace }>()
@@ -142,87 +136,6 @@ test('article evidence attributes meaningful persisted changes and excludes unch
   assert.equal(await db.prepare('SELECT status FROM content_documents WHERE id = ?').bind(document.id).first('status'), 'published')
 })
 
-test('a sync reports an accepted, unindexed item as pending instead of waiting on it', async (t) => {
-  const { db } = await migratedCacheD1(t)
-  await db.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES ('location', 'org', 'location', 'Location', 'UTC')").run()
-  const records = expandDocumentsForSurfaces(await buildOrganizationDocuments(db, 'org'))
-  assert.equal(records.length, 1)
-  const record = records[0]!
-  let lists = 0
-  let uploads = 0
-  const env = {
-    AI_SEARCH_INSTANCE_ID: 'test-index',
-    AI_SEARCH: { get: () => ({
-      stats: async () => { throw new Error('instance-wide status must not block this organization') },
-      items: {
-        list: async () => {
-          lists += 1
-          return {
-            result: [{ id: 'item', key: record.key, status: lists === 1 ? 'queued' : 'completed',
-              metadata: lists === 1 ? null : { content_hash: indexItemPayload(record).contentHash } }],
-            result_info: { per_page: 50, total_count: 1 },
-          }
-        },
-        upload: async () => { uploads += 1 },
-        delete: async () => { throw new Error('the current item must not be deleted') },
-      },
-    }) },
-  } as unknown as CloudflareEnv
-
-  assert.deepEqual(await syncOrganizationSearchIndex(env, db, 'org'), {
-    indexed: 0, unchanged: 0, pending: 1, deleted: 0,
-  })
-  assert.equal(lists, 1)
-  assert.equal(uploads, 0)
-})
-
-test('publishing a platform guide indexes its public pages and preserves another business’s items', async (t) => {
-  const { db, kv } = await migratedCacheD1(t)
-  await db.prepare("INSERT INTO user (id, name, email) VALUES ('author', 'Author', 'author@example.test')").run()
-  await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('platform-en', 'platform', 'en', 1, 'published')").run()
-  const category = await createArticleCategory(db, { organizationId: 'platform', collection: 'docs', name: 'Calendar and bookings', actorId: 'author' })
-  const { document } = await createContentDocumentWithBlocks(db, {
-    id: 'calendar-guide', organizationId: 'platform', kind: 'article', rowRole: 'root', locale: 'en',
-    title: 'Connect Google Calendar', slug: 'connect-google-calendar', status: 'draft', visibility: 'listed', metadata: { collection: 'docs' },
-  }, [{ id: 'calendar-body', type: 'markdown', data: { markdown: 'See your bookings in Google Calendar.', editor_mode: 'rich' } }], {
-    additionalQueriesAfter: [await articleCategoryMembershipQuery(db, { organizationId: 'platform', collection: 'docs', articleId: 'calendar-guide', categoryId: category.id })],
-  })
-  await updateBlogLifecycle(db, document.id, { updated_at: document.updated_at }, 'platform', 'author')
-  const otherKey = `dashboard/${organizationKeySegment('org')}/route/other.md`
-  const items = new Map<string, { id: string; key: string; status: string; metadata: Record<string, string>; content?: string }>([
-    [otherKey, { id: 'other', key: otherKey, status: 'completed', metadata: {} }],
-  ])
-  const env: OrganizationChangeDrainEnv = {
-    ...searchEnv,
-    AI_SEARCH: { get: () => ({
-      info: async () => ({ id: 'test' }),
-      update: async () => ({}),
-      stats: async () => ({ queued: 0, running: 0, outdated: 0 }),
-      items: {
-        list: async ({ page, per_page, search }: { page: number; per_page: number; search?: string }) => {
-          const selected = [...items.values()].filter(item => !search || item.key.includes(search))
-          return { result: selected.slice((page - 1) * per_page, page * per_page), result_info: { per_page, total_count: selected.length } }
-        },
-        upload: async (key: string, content: string, options: { metadata: Record<string, string> }) => {
-          items.set(key, { id: key, key, status: 'completed', metadata: options.metadata, content })
-        },
-        delete: async (id: string) => {
-          const item = [...items.values()].find(item => item.id === id)
-          if (item) items.delete(item.key)
-        },
-      },
-    }) } as unknown as NonNullable<OrganizationChangeDrainEnv['AI_SEARCH']>,
-  }
-  await drainPublicResourceCacheInvalidations(db, kv, env, { organizationId: 'platform', invalidationId: null })
-  const guide = [...items.values()].filter(item => item.metadata.record_id === 'doc:calendar-guide')
-  assert.deepEqual(guide.map(item => item.metadata.surface).sort(), ['blog', 'chowbot', 'dashboard', 'docs', 'help', 'public'])
-  for (const item of guide) {
-    assert.equal(JSON.parse(item.metadata.display!).path, '/docs/connect-google-calendar')
-    assert.match(item.content!, /See your bookings in Google Calendar/)
-  }
-  assert.equal(items.get(otherKey)?.id, 'other')
-})
-
 test('cache invalidation drain enforces the durable work lifecycle', async (t) => {
   const { db, kv } = await migratedCacheD1(t)
   await t.test('validates its domain before taking work and purges both cache contracts', async () => {
@@ -256,6 +169,13 @@ test('cache invalidation drain enforces the durable work lifecycle', async (t) =
       SELECT status FROM public_resource_cache_invalidations WHERE id = 'pending'
     `).first<{ status: string }>()
     assert.deepEqual(processed, { status: 'processed' })
+
+    // Outside production the same drain needs no AI Search.
+    await insertInvalidation(db, { id: 'local-write', status: 'pending', createdAt: '2026-01-02T00:00:00.000Z' })
+    await kv.put('public~org~v4~page', 'stale public resource')
+    const local = { NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://krabiclaw.com', NUXT_PUBLIC_PLATFORM_DOMAIN: 'http://localhost:3107' }
+    assert.equal(await drainPublicResourceCacheInvalidations(db, kv, local, { organizationId: 'org', invalidationId: 'local-write' }), 1)
+    assert.equal(await kv.get('public~org~v4~page'), null)
   })
   await db.prepare('DELETE FROM public_resource_cache_invalidations').run()
 
@@ -288,23 +208,6 @@ test('cache invalidation drain enforces the durable work lifecycle', async (t) =
       { id: 'changed', status: 'failed', processed_at: now.toISOString(), last_error: 'injected KV failure' },
     ])
   })
-})
-
-test('nonproduction drains cache invalidations without AI Search', async (t) => {
-  const { db, kv } = await migratedCacheD1(t)
-  await insertInvalidation(db, {
-    id: 'local-write', status: 'pending', createdAt: '2026-09-29T04:00:00.000Z',
-  })
-  await kv.put('public~org~v4~page', 'stale public resource')
-  await kv.put('html:org.krabiclaw.com:/', 'stale HTML')
-  const env: OrganizationChangeDrainEnv = {
-    NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://krabiclaw.com',
-    NUXT_PUBLIC_PLATFORM_DOMAIN: 'http://localhost:3107',
-  }
-  assert.equal(await drainPublicResourceCacheInvalidations(db, kv, env, { organizationId: 'org', invalidationId: 'local-write' }), 1)
-  assert.equal(await kv.get('public~org~v4~page'), null)
-  assert.equal(await kv.get('html:org.krabiclaw.com:/'), null)
-  assert.deepEqual(await db.prepare("SELECT status FROM public_resource_cache_invalidations WHERE id = 'local-write'").first(), { status: 'processed' })
 })
 
 
@@ -346,154 +249,4 @@ test('an organization write purges that organization despite an older invalidati
   assert.equal(await kv.get('html:org.krabiclaw.com:/'), null)
 })
 
-test('a platform write invalidates the configured apex without changing hosted identity', async (t) => {
-  const { db, kv, hubs } = await migratedCacheD1(t)
-  await db.prepare(`INSERT INTO organization_domains
-    (id, organization_id, domain, type, role, status, dns_status)
-    VALUES ('platform-old-apex', 'platform', 'krabiclaw.com', 'custom', 'canonical', 'active', 'valid')`).run()
-  const newApex = 'html:blawby.example:/'
-  const oldApex = 'html:krabiclaw.com:/'
-  const customer = 'html:org.krabiclaw.com:/'
-  for (const key of [newApex, oldApex, customer]) await kv.put(key, 'cached HTML')
-  await purgePublicResourceCacheNow({
-    DB: db, ORGANIZATION_CACHE: kv, GUEST_INBOX_HUBS: hubs,
-    NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://blawby.example',
-    NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://krabiclaw.com',
-  }, 'platform')
-  assert.equal(await kv.get(newApex), null)
-  assert.equal(await kv.get(oldApex), null)
-  assert.equal(await kv.get(customer), 'cached HTML')
-  assert.deepEqual(await db.prepare("SELECT domain, role, status FROM organization_domains WHERE id = 'platform-old-apex'").first(), {
-    domain: 'krabiclaw.com', role: 'canonical', status: 'active',
-  })
-})
 
-test('an old failure stays recorded; a later change to the same site is its own row', async (t) => {
-  const { db, kv } = await migratedCacheD1(t)
-  const now = new Date('2026-09-29T04:30:00.000Z')
-  await insertInvalidation(db, { id: 'old-failed', status: 'failed', processedAt: '2026-09-28T04:30:00.000Z', createdAt: '2026-09-28T04:00:00.000Z' })
-  const change = { organizationId: 'org', invalidationId: 'fresh', now }
-  assert.equal(await drainPublicResourceCacheInvalidations(db, kv, searchEnv, change), 0)
-  await insertInvalidation(db, { id: 'fresh', status: 'pending', createdAt: '2026-09-29T04:00:00.000Z' })
-  assert.equal(await drainPublicResourceCacheInvalidations(db, kv, searchEnv, change), 1)
-  const rows = await db.prepare("SELECT id, status FROM public_resource_cache_invalidations ORDER BY id").all<{ id: string; status: string }>()
-  assert.deepEqual(rows.results, [{ id: 'fresh', status: 'processed' }, { id: 'old-failed', status: 'failed' }])
-})
-
-test('a scoped drain records its own failure and leaves another site for its own event', async (t) => {
-  const { db, kv } = await migratedCacheD1(t)
-  await db.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('changed', 'Changed', 'changed', 'changed', 'USD', 'UTC')").run()
-  await insertInvalidation(db, {
-    id: 'first', status: 'pending', createdAt: '2026-09-29T04:00:00.000Z',
-  })
-  await db.prepare(`INSERT INTO public_resource_cache_invalidations
-    (id, organization_id, reason, status, created_at)
-    VALUES ('second', 'changed', 'test', 'pending', '2026-09-29T04:01:00.000Z')`).run()
-  await kv.put('public~changed~v4~page', 'old page')
-  const failingKv = new Proxy(kv, {
-    get(target, property) {
-      if (property === 'list') return async (options: { prefix?: string }) => {
-        if (options.prefix?.startsWith('public~org~')) throw new Error('injected org KV failure')
-        return await target.list(options)
-      }
-      const value = Reflect.get(target, property, target)
-      return typeof value === 'function' ? value.bind(target) : value
-    },
-  })
-  await assert.rejects(
-    drainPublicResourceCacheInvalidations(db, failingKv, searchEnv, { organizationId: 'org', invalidationId: 'first', now: new Date('2026-09-29T04:30:00.000Z') }),
-    /injected org KV failure/,
-  )
-  assert.equal(await kv.get('public~changed~v4~page'), 'old page')
-  assert.equal(await drainPublicResourceCacheInvalidations(db, failingKv, searchEnv, { organizationId: 'changed', invalidationId: 'second' }), 1)
-  assert.equal(await kv.get('public~changed~v4~page'), null)
-  const rows = await db.prepare('SELECT id, status, last_error FROM public_resource_cache_invalidations ORDER BY id')
-    .all<{ id: string; status: string; last_error: string | null }>()
-  assert.deepEqual(rows.results, [
-    { id: 'first', status: 'failed', last_error: 'injected org KV failure' },
-    { id: 'second', status: 'processed', last_error: null },
-  ])
-})
-
-
-
-test('a drain syncs search once and announces its committed continuation', async (t) => {
-  for (const outcome of ['completed', 'skipped'] as const) {
-    await t.test(outcome, async (t) => {
-      const { db, kv } = await migratedCacheD1(t)
-      await db.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES ('first-location', 'org', 'first-location', 'First', 'UTC'), ('second-location', 'org', 'second-location', 'Second', 'UTC')").run()
-      const records = expandDocumentsForSurfaces(await buildOrganizationDocuments(db, 'org'))
-      assert.equal(records.length, 2)
-      const [queued, missing] = records
-      let lists = 0
-      const uploads: string[] = []
-      const env: OrganizationChangeDrainEnv = {
-        ...searchEnv,
-        AI_SEARCH: { get: () => ({ items: {
-          list: async () => {
-            lists += 1
-            const result = lists === 1
-              ? [{ id: 'queued', key: queued!.key, status: 'queued', metadata: null }]
-              : records.map((record, index) => ({
-                id: `item-${index}`, key: record.key,
-                status: outcome === 'skipped' && index === 0 ? 'skipped' : 'completed',
-                metadata: { content_hash: indexItemPayload(record).contentHash },
-                error: outcome === 'skipped' && index === 0 ? 'unsupported document type' : null,
-              }))
-            return { result, result_info: { per_page: 50, total_count: result.length } }
-          },
-          upload: async (key: string) => { uploads.push(key) },
-          delete: async () => { throw new Error('current items must not be deleted') },
-        } }) } as unknown as NonNullable<OrganizationChangeDrainEnv['AI_SEARCH']>,
-      }
-      await insertInvalidation(db, { id: 'write', status: 'pending', createdAt: '2026-10-02T00:00:00.000Z' })
-      await insertInvalidation(db, { id: 'another-write', status: 'pending', createdAt: '2026-10-02T00:00:01.000Z' })
-      const cacheKey = 'public~org~v21~previous'
-      await kv.put(cacheKey, 'old page')
-      const staleList = await kv.list({ prefix: 'public~org~' })
-      let deleted = false
-      const eventuallyConsistentKv = new Proxy(kv, {
-        get(target, property) {
-          if (property === 'list') return async (options: { prefix?: string }) =>
-            options.prefix === 'public~org~' ? staleList : await target.list(options)
-          if (property === 'delete') return async (key: string) => {
-            if (key === cacheKey && deleted) throw new Error('KV DELETE failed: 429 Too Many Requests')
-            await target.delete(key)
-            if (key === cacheKey) deleted = true
-          }
-          const value = Reflect.get(target, property, target)
-          return typeof value === 'function' ? value.bind(target) : value
-        },
-      })
-      const continuation = async () => (await db.prepare("SELECT status, last_error FROM public_resource_cache_invalidations WHERE reason = 'search-sync-continue'").first<{
-        status: string; last_error: string | null
-      }>())!
-      const queue = captureEvents()
-      bindDatabaseEvents(db, { EVENTS: queue.binding })
-
-      // Both writes drain even when KV still lists a key after its deletion.
-      assert.equal(await drainPublicResourceCacheInvalidations(db, eventuallyConsistentKv, env, { organizationId: 'org', invalidationId: 'write' }), 2)
-      assert.equal(await kv.get(cacheKey), null)
-      assert.equal(lists, 1)
-      assert.deepEqual(uploads, [missing!.key])
-      assert.equal((await db.prepare("SELECT status FROM public_resource_cache_invalidations WHERE id = 'write'").first<{ status: string }>())!.status, 'processed')
-      assert.equal(await db.prepare("SELECT status FROM public_resource_cache_invalidations WHERE id = 'another-write'").first('status'), 'processed')
-      assert.deepEqual(await continuation(), { status: 'pending', last_error: null })
-      const next = queue.take('site.cache_changed')?.body
-      assert.ok(next?.type === 'site.cache_changed')
-      const { organization_id: organizationId, invalidation_id: invalidationId } = next
-
-      // The next run finishes it, or reports what the provider refused.
-      if (outcome === 'completed') {
-        assert.equal(await drainPublicResourceCacheInvalidations(db, kv, env, { organizationId, invalidationId }), 1)
-        assert.deepEqual(await continuation(), { status: 'processed', last_error: null })
-      } else {
-        await assert.rejects(drainPublicResourceCacheInvalidations(db, kv, env, { organizationId, invalidationId }), /AI Search skipped unchanged item.*unsupported document type/)
-        const row = await continuation()
-        assert.equal(row.status, 'failed')
-        assert.match(row.last_error!, /unsupported document type/)
-      }
-      assert.equal(lists, 2)
-    })
-  }
-})

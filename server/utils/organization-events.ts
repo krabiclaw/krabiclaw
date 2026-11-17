@@ -33,7 +33,7 @@ export type OrganizationEventType =
   | 'domain_added' | 'domain_deleted' | 'domain_state_changed'
   | 'member.invited' | 'member.role_changed' | 'member.removed' | 'member.access_scope_revoked'
   | 'owner.alerted'
-  | 'google_ads.campaign_change_requested' | 'google_ads.campaign_created' | 'google_ads.campaign_updated' | 'google_ads.campaign_change_failed' | 'google_ads.campaign_change_unconfirmed'
+  | 'google_ads.campaign_created' | 'google_ads.campaign_updated'
 
 export interface OrganizationEvent {
   /** An operation may retain this identity as its causal activity reference. */

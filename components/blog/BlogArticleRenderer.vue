@@ -41,7 +41,7 @@
     <slot name="before-content" />
 
     <div class="space-y-4">
-      <template v-for="(block, index) in blocks" :key="block.id || index">
+      <template v-for="{ block, index } in shownBlocks" :key="block.id || index">
         <section :data-block-index="index" :tabindex="editable && !hasTextCaret(block) ? 0 : undefined" class="group relative outline-none" @focusin="focusedIndex = index" @focusout="releaseFocus(index, $event)" @keydown="handleStructuralKey(index, block, $event)">
           <!--
             One control, on the block the caret is in, and only while that block
@@ -232,6 +232,18 @@ const authorInitials = computed(() => String(props.authorName || props.organizat
 provideMediaPreviews(ref(false))
 const reducedMotion = usePreferredReducedMotion()
 const hasCover = computed(() => props.blocks[0]?.type === 'image')
+/**
+ * A published article with a video leads with it: Google indexes a video only
+ * on a watch page, one where the video is the main thing in the first screen.
+ * The video takes the cover's place; the cover stays the share card and poster.
+ * While editing, blocks stay in the order they are written.
+ */
+const shownBlocks = computed(() => {
+  const all = props.blocks.map((block, index) => ({ block, index }))
+  const lead = props.editable ? -1 : props.blocks.findIndex(block => block.type === 'video')
+  if (lead < 0) return all
+  return [all[lead]!, ...all.filter(({ index }) => index !== lead && !(index === 0 && hasCover.value))]
+})
 const { t, locale } = useI18n()
 function formatDate(value: string) { return formatTimestamp(value, locale.value, 'UTC', { dateStyle: 'medium' }) }
 // At two hundred words a minute, from the words a reader reads.

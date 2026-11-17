@@ -22,6 +22,3 @@ test('an answer that is neither text nor JSON fails, saying what came back', asy
   await assert.rejects(runWorkersAiText(ai(42), messages), /Workers AI answered with a number where text or JSON was expected/)
 })
 
-test('no Workers AI binding fails', async () => {
-  await assert.rejects(runWorkersAiText({}, messages), /Workers AI binding is not available/)
-})

@@ -1,7 +1,7 @@
 import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import { expect, test, type APIResponse } from '@playwright/test'
 import { acceptOrganizationInvitation, authRequestHeaders, loginAs, sendOrganizationInvitation } from './helpers/auth'
-import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
+import { dismissPreviewToolbar, openTenantPage, waitForNuxtHydration } from './helpers'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededSiteHeaders } from './test-env'
 import { seededTenant } from './seed/manifest'
@@ -13,7 +13,7 @@ const SLUG = 'harbor-legal-aid'
 const DASHBOARD = `/dashboard/${SLUG}`
 const ACTOR = 'user-e2e-ncls-consultation-owner'
 
-async function body<T>(response: APIResponse, status: number): Promise<T> {
+async function body<T>(response: Pick<APIResponse, 'status' | 'text' | 'json'>, status: number): Promise<T> {
   expect(response.status(), await response.text()).toBe(status)
   return response.json() as Promise<T>
 }
@@ -25,6 +25,8 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
   const EDITOR = `/api/editor/organizations/${ORGANIZATION}`
   const release = await acquireTenantMutationLock(testInfo, ORGANIZATION)
   const memberContext = await browser.newContext()
+  // The client reads the practice's hours in UTC, the attorney's own zone here.
+  const clientContext = await browser.newContext({ timezoneId: 'UTC', viewport: { width: 1280, height: 900 } })
   let product: Product | null = null
   let requestId: string | null = null
   let bookingId: string | null = null
@@ -67,10 +69,25 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     const session = availability.sessions.find(slot => slot.starts_at === `${day}T14:00:00.000Z`)
     expect(session, 'The saved provider hours expose an actual bookable future consultation').toBeTruthy()
     if (!session) throw new Error('The provider appointment is not bookable')
-    const booked = await body<{ conversation_id: string; booking_id: string; status: string }>(await request.post(`/api/public/products/${product.slug}/book`, { headers, data: {
-      product_session_id: session.id, product_variant_id: product.variants[0]!.id, party_size: 1, guest_name: guestName,
-      guest_email: `today-assigned-${Date.now()}@playwright.example`, idempotency_key: crypto.randomUUID(),
-    } }), 201)
+    // The client requests the consultation on the practice area's own public page.
+    expect(product.page, 'the consultation has its bound public page').toBeTruthy()
+    const client = await clientContext.newPage()
+    await openTenantPage(client, new URL(product.page!.path, baseURL!).href, headers)
+    await expect(client.getByRole('heading', { name: product.name, exact: true, level: 1 })).toBeVisible()
+    await client.getByRole('button', { name: 'Request appointment', exact: true }).click()
+    const requestDialog = client.getByRole('dialog', { name: product.name, exact: true })
+    await requestDialog.getByRole('button', { name: '2:00 PM Available', exact: true }).first().click()
+    await requestDialog.getByRole('button', { name: 'Continue', exact: true }).click()
+    await requestDialog.getByLabel('Full name', { exact: true }).fill(guestName)
+    await requestDialog.getByLabel('Email address', { exact: true }).fill(`today-assigned-${Date.now()}@playwright.example`)
+    const submitted = client.waitForResponse(response => new URL(response.url()).pathname === `/api/public/products/${product!.slug}/book` && response.request().method() === 'POST')
+    await requestDialog.getByRole('button', { name: 'Request appointment', exact: true }).click()
+    const submission = await submitted
+    expect(submission.request().postDataJSON()).toMatchObject({ product_session_id: session.id, guest_name: guestName })
+    const booked = await body<{ conversation_id: string; booking_id: string; status: string }>(submission, 201)
+    await expect(client).toHaveURL(/\/bookings\/confirmed/)
+    await expect(client.getByRole('heading', { name: `Thank you, ${guestName}!`, exact: true, level: 1 })).toBeVisible()
+    await expect(client.getByText('Request received', { exact: true })).toBeVisible()
     requestId = booked.conversation_id
     bookingId = booked.booking_id
     expect(booked.status).toBe('pending')
@@ -84,6 +101,9 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
       headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: actor.id, role: 'member' },
     }), 200)
     roleChanged = true
+    // Organization-wide surfaces conceal what a member's role cannot reach with 404.
+    const deniedAnalytics = await memberContext.request.get('/api/dashboard/analytics', { params: { org: SLUG } })
+    expect(deniedAnalytics.status(), await deniedAnalytics.text()).toBe(404)
     const assignedRead = await body<{ booking: DashboardBookingDetails }>(
       await memberContext.request.get(`/api/dashboard/bookings/${bookingId}`, { params: { org: SLUG } }), 200)
     expect(assignedRead.booking).toMatchObject({ conversation_id: requestId, assigned_member_id: actor.id })
@@ -255,6 +275,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
   } catch (error) {
     failures.unshift(error)
   } finally {
+    await clientContext.close()
     await memberContext.close()
     await release()
   }

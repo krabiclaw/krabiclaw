@@ -42,9 +42,6 @@ const matchesApiShape = (value: unknown, shape: ApiShape): boolean => {
 export const validateApiShape = <T>(shape: ApiShape): Validator<T> =>
   (value: unknown): value is T => matchesApiShape(value, shape)
 
-export const validateApiArray = <T>(): Validator<T[]> =>
-  (value: unknown): value is T[] => Array.isArray(value)
-
 export const validateApiArrayItems = <T>(shape: ApiShape): Validator<T[]> =>
   (value: unknown): value is T[] =>
     Array.isArray(value) && value.every(item => matchesApiShape(item, shape))

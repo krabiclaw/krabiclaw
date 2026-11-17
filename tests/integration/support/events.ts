@@ -1,20 +1,20 @@
 import assert from 'node:assert/strict'
 import type { MessageBatch } from '@cloudflare/workers-types'
 import { consumeEventBatch } from '../../../server/cloudflare/queue-consumer.ts'
-import type { DomainEvent, EventsEnv } from '../../../server/events.ts'
+import type { AirbnbSyncMessage, DomainEvent } from '../../../server/events.ts'
 import type { CloudflareEnv } from '../../../server/utils/auth.ts'
 
-type Delivery = { id: string; body: DomainEvent; delaySeconds: number }
 
-/** Capture Cloudflare queue sends and deliver through the Worker consumer. */
-export function captureEvents() {
+/** Capture Cloudflare queue sends (EVENTS by default, or AIRBNB_SYNC's messages) and deliver through the Worker consumer. */
+export function captureEvents<Message extends DomainEvent | AirbnbSyncMessage = DomainEvent>() {
+  type Delivery = { id: string; body: Message; delaySeconds: number }
   const pending: Delivery[] = []
-  const binding: NonNullable<EventsEnv['EVENTS']> = {
-    async send(body, options) {
+  const binding = {
+    async send(body: Message, options?: { delaySeconds: number }) {
       pending.push({ id: crypto.randomUUID(), body, delaySeconds: options?.delaySeconds ?? 0 })
     },
   }
-  const take = (type?: DomainEvent['type'], delaySeconds = 0) => {
+  const take = (type?: Message['type'], delaySeconds = 0) => {
     const index = pending.findIndex(item => (!type || item.body.type === type) && item.delaySeconds === delaySeconds)
     return index < 0 ? undefined : pending.splice(index, 1)[0]
   }
@@ -34,12 +34,12 @@ export function captureEvents() {
     }
     assert.equal(acknowledgements, 1)
   }
-  const runNext = async (env: CloudflareEnv, type?: DomainEvent['type'], delaySeconds = 0) => {
+  const runNext = async (env: CloudflareEnv, type?: Message['type'], delaySeconds = 0) => {
     const item = take(type, delaySeconds)
     assert(item, `No queued ${type ?? 'domain event'} with delay ${delaySeconds}`)
     await deliver(env, item)
   }
-  const drain = async (env: CloudflareEnv, type?: DomainEvent['type']) => {
+  const drain = async (env: CloudflareEnv, type?: Message['type']) => {
     for (let count = 0; ; count++) {
       const item = take(type)
       if (!item) return
