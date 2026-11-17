@@ -130,7 +130,7 @@ const { values } = parseArgs({ options: {
 if (values.staging === values.production) throw new Error('Pass exactly one of --staging or --production.')
 const envName = values.staging ? 'staging' : undefined
 const config = unstable_readConfig({ config: 'wrangler.toml', env: envName }, { hideWarnings: true })
-const database = config.d1_databases.find(binding => binding.binding === 'DB')
+const database = config.d1_databases.find((binding: { binding: string }) => binding.binding === 'DB')
 if (!database?.database_id) throw new Error(`Missing Wrangler DB binding for ${envName ?? 'production'}`)
 
 const session = await startRemoteProxySession({ DB: { type: 'd1', database_id: database.database_id } })
