@@ -29,7 +29,7 @@ export function isBookingDetailsResponse(value: unknown): value is { booking: Da
     && isRecord(value.booking)
     && (value.booking.type === 'booking'
       ? typeof value.booking.conversation_id === 'string' && typeof value.booking.booking_id === 'string' && value.booking.payment_id === null
-      : (value.booking.type === 'order' || value.booking.type === 'payment') && typeof value.booking.payment_id === 'string'
+      : value.booking.type === 'payment' && typeof value.booking.payment_id === 'string'
         && value.booking.conversation_id === null && value.booking.booking_id === null)
     && typeof value.booking.organization_id === 'string'
     && (value.booking.guest_name === null || typeof value.booking.guest_name === 'string')

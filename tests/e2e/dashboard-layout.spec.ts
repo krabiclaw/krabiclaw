@@ -1737,7 +1737,7 @@ test.describe('dashboard pane hierarchy', () => {
       expect(isAccountActivityResponse(activity), 'the account API returns actual owned activity').toBe(true)
       if (!isAccountActivityResponse(activity)) throw new Error('Invalid account activity response')
       await expect(page.getByRole('heading', { name: 'Past activity', exact: true })).toBeVisible()
-      const past = activity.activities.filter(item => item.kind === 'order' || item.kind === 'payment' || (item.status !== 'cancelled' && item.ends_at !== null && Date.parse(item.ends_at) < Date.now()))
+      const past = activity.activities.filter(item => item.kind === 'payment' || (item.status !== 'cancelled' && item.ends_at !== null && Date.parse(item.ends_at) < Date.now()))
       const cancelled = activity.activities.filter(item => item.kind === 'booking' && item.status === 'cancelled')
       await expect(page.getByTestId('account-activity-cancelled')).toHaveCount(cancelled.length ? 1 : 0)
       await expect(page.locator('[data-testid^="account-activity-"]:not([data-testid="account-activity-cancelled"])')).toHaveCount(past.length)

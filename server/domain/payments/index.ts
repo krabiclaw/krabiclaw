@@ -5,7 +5,6 @@ import { assertRoleAllows } from '~/server/utils/member-access'
 import { getStripeConnectedAccount, paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { publishPaymentNotification } from './notifications'
-import { readPaymentOrder } from './orders'
 import { recordPaymentRefunded } from '~/server/domain/booking-analytics'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { isRecord } from '~/server/utils/type-guards'
@@ -41,7 +40,7 @@ export interface Payment {
   buyer_user_id: string | null
   stripe_account_id: string
   livemode: number
-  subject_type: 'booking' | 'order' | 'invoice'
+  subject_type: 'booking'
   subject_id: string | null
   location_id: string | null
   currency: string
@@ -110,17 +109,16 @@ async function stripePaymentFacts(env:CloudflareEnv,payment:Payment){
 /** Full merchant detail; callers must authorize before reading or projecting it. */
 export async function readPaymentDetails(db:DbClient,env:CloudflareEnv,organizationId:string,paymentId:string){
  const recorded=await requirePayment(db,organizationId,paymentId)
- const [refundRows,disputeRows,booking,order,stripeFacts]=await Promise.all([
+ const [refundRows,disputeRows,booking,stripeFacts]=await Promise.all([
   queryAll<{id:string;amount:number;status:string;stripe_refund_id:string|null}>(db,'SELECT * FROM payment_refunds WHERE payment_id=?',[recorded.id]),
   queryAll<{id:string;stripe_dispute_id:string;amount:number;currency:string;reason:string;status:string;evidence_due_at:string|null;updated_at:string}>(db,'SELECT * FROM payment_disputes WHERE payment_id=?',[recorded.id]),
   recorded.subject_type==='booking'?queryFirst<{conversation_id:string|null}>(db,`SELECT (SELECT c.id FROM conversations c WHERE c.booking_id=b.id AND c.kind='booking') AS conversation_id FROM bookings b WHERE b.id=? AND b.organization_id=?`,[recorded.subject_id,organizationId]):Promise.resolve(null),
-   readPaymentOrder(db,organizationId,recorded.id),
   stripePaymentFacts(env,recorded),
  ])
  const payment=visiblePayment(stripeFacts?{...recorded,captured_amount:stripeFacts.captured,refunded_amount:stripeFacts.refunded}:recorded)
  // Stripe's refunds, with the note and author only we hold; a refund not yet sent to Stripe exists only here.
  const refunds=stripeFacts?[...stripeFacts.refunds.map(refund=>({...refundRows.find(row=>row.stripe_refund_id===refund.id),id:refundRows.find(row=>row.stripe_refund_id===refund.id)?.id??refund.id,stripe_refund_id:refund.id,amount:refund.amount,status:refund.status??'pending'})),...refundRows.filter(row=>!row.stripe_refund_id)]:refundRows
- return {payment,refunds,disputes:stripeFacts?stripeFacts.disputes.map(dispute=>{const row=disputeRows.find(item=>item.stripe_dispute_id===dispute.id);return {id:row?.id??dispute.id,stripe_dispute_id:dispute.id,amount:dispute.amount,currency:dispute.currency.toUpperCase(),reason:dispute.reason,status:dispute.status,evidence_due_at:dispute.evidence_details?.due_by?new Date(dispute.evidence_details.due_by*1000).toISOString():null,updated_at:row?.updated_at??new Date(dispute.created*1000).toISOString()}}):disputeRows,visit:booking?.conversation_id?{kind:payment.subject_type,conversation_id:booking.conversation_id}:null,order}
+ return {payment,refunds,disputes:stripeFacts?stripeFacts.disputes.map(dispute=>{const row=disputeRows.find(item=>item.stripe_dispute_id===dispute.id);return {id:row?.id??dispute.id,stripe_dispute_id:dispute.id,amount:dispute.amount,currency:dispute.currency.toUpperCase(),reason:dispute.reason,status:dispute.status,evidence_due_at:dispute.evidence_details?.due_by?new Date(dispute.evidence_details.due_by*1000).toISOString():null,updated_at:row?.updated_at??new Date(dispute.created*1000).toISOString()}}):disputeRows,visit:booking?.conversation_id?{kind:payment.subject_type,conversation_id:booking.conversation_id}:null}
 }
 export type PaymentsEarningsType = 'paid' | 'refunded'
 export async function listPayments(db: DbClient, principal: FinancialPrincipal, input: { from: string; to: string; after?: string; limit?: number; location_id?: string; earnings_type?: PaymentsEarningsType }) {

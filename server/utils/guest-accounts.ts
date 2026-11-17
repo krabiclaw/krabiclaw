@@ -26,7 +26,7 @@ export function anonymousLinkQueries(from: string, to: string, now: string): Bat
       query: `UPDATE ${table} SET user_id = ? WHERE user_id = ?`,
       params: [to, from],
     })),
-    ...['payments', 'payment_orders', 'payment_checkout_holds'].map(table => ({
+    ...['payments', 'payment_checkout_holds'].map(table => ({
       query: `UPDATE ${table} SET buyer_user_id = ? WHERE buyer_user_id = ?`,
       params: [to, from],
     })),

@@ -488,7 +488,7 @@ test('MCP paid booking cancellation and rejection hand off without preparing mon
    await db.prepare("UPDATE payments SET subject_id=?,captured_amount=10000,stripe_payment_intent_id='pi_paid',stripe_charge_id='ch_paid' WHERE id='paid'").bind(booking.bookingId).run()
    await db.prepare("UPDATE payment_checkout_holds SET conversation_id=?,status='converted',converted_booking_id=? WHERE payment_id='paid'").bind(opening.id,booking.bookingId).run()
    const input = { organizationId: ORG, threadId: opening.id, action, actorUserId: 'verified', idempotencyKey: 'same-request', env }
-   const tables = ['bookings', 'conversations', 'messages', 'guest_thread_deliveries', 'payments', 'payment_checkout_holds', 'payment_orders', 'payment_order_lines', 'payment_authorizations', 'payment_refunds', 'usage_events']
+   const tables = ['bookings', 'conversations', 'messages', 'guest_thread_deliveries', 'payments', 'payment_checkout_holds', 'payment_authorizations', 'payment_refunds', 'usage_events']
    const before = await Promise.all(tables.map(async table => (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results))
    for (let retry = 0; retry < 2; retry++) {
     await assert.rejects(() => executeGuestThreadOperation(db, { ...input, financialWritesAllowed: false }), error => {
@@ -590,7 +590,7 @@ test('MCP financial reads return bounded reports and authenticated detail links 
   assert(membership)
   const organization: McpOrganizationContext = { env,db,userId:'verified',isPlatformAdmin:false,scopes:['organization:read'],organizationId:ORG,organizationSlug:membership.organizationSlug!,role:'owner',membership }
   const call = (toolName:string,args:Record<string,unknown>={}) => handlePaymentsTools({organization,toolName,args}) as Promise<Record<string,unknown>>
-  const tables = ['payments','payment_checkout_holds','payment_orders','payment_order_lines','payment_authorizations','payment_refunds','usage_events','stripe_connected_accounts']
+  const tables = ['payments','payment_checkout_holds','payment_authorizations','payment_refunds','usage_events','stripe_connected_accounts']
   const before = await Promise.all(tables.map(async table => (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results))
   const listed = await call('list_payments',{from:'2000-01-01T00:00:00.000Z',to:'2099-01-01T00:00:00.000Z'})
   assert.equal(listed.organization_id,ORG)
@@ -689,7 +689,7 @@ test('Checkout proof attaches ownership without exposing merchant financial data
   assert.equal(owned.name,'Consultation')
   assert.equal(owned.conversation_id,null)
   // refunded_amount is 0 in our row; the 1000 can only have come from Stripe's Charge.
-  assert.deepEqual(owned.payments,[{payment:{id:'claim',currency:'USD',captured_amount:10000,refunded_amount:1000,surcharge_amount:0,receipt_url:'https://example.com/receipt'},refunds:[{id:'refund:claim',amount:1000,status:'pending',note:null}],order:null}])
+  assert.deepEqual(owned.payments,[{payment:{id:'claim',currency:'USD',captured_amount:10000,refunded_amount:1000,surcharge_amount:0,receipt_url:'https://example.com/receipt'},refunds:[{id:'refund:claim',amount:1000,status:'pending',note:null}]}])
   for(const field of ['stripe_account_id','stripe_payment_intent_id','stripe_charge_id','livemode','buyer_user_id','price_snapshot_json'])assert.equal(Object.hasOwn(owned.payments![0]!.payment,field),false)
   for(const field of ['idempotency_key','stripe_refund_id','reason','error','attempted_at','created_by'])assert.equal(Object.hasOwn(owned.payments![0]!.refunds[0]!,field),false)
   assert.deepEqual(await db.prepare("SELECT stripe_account_id,stripe_payment_intent_id,stripe_charge_id,buyer_user_id FROM payments WHERE id='claim'").first(),{stripe_account_id:'acct_seller',stripe_payment_intent_id:'pi:claim',stripe_charge_id:'ch:claim',buyer_user_id:'verified'})
@@ -894,17 +894,6 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   assert.equal(detail.assigned_member_name,null)
   await assert.rejects(()=>loadBuyerBookingDetails(db, env,'verified','booking',booking.bookingId),error=>error instanceof HTTPError&&error.statusCode===404)
   await assert.rejects(()=>loadBuyerBookingDetails(db, env,'other','booking',opening.id),error=>error instanceof HTTPError&&error.statusCode===404)
-  await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,currency,amount,captured_amount,price_snapshot_json,created_at,updated_at) VALUES('order-payment',?,'verified','acct_seller',0,'order','USD',2500,2500,?,?,?)").bind(ORG,JSON.stringify({title:'Immutable item'}),NOW,NOW).run()
-  await db.prepare("INSERT INTO payment_orders(id,organization_id,buyer_user_id,payment_id,currency,amount,created_at) VALUES('immutable-order',?,'verified','order-payment','USD',2500,?)").bind(ORG,NOW).run()
-  await db.prepare("INSERT INTO payment_order_lines(id,order_id,product_id,variant_id,price_id,title,unit_amount,quantity,currency,tax_behavior) VALUES('immutable-line','immutable-order','product','variant','historic-price','Original item title',1250,2,'USD','exclusive')").run()
-  const requestsBefore=(await db.prepare('SELECT * FROM conversations ORDER BY id').all()).results
-  const order=await loadBuyerBookingDetails(db, env,'verified','order','order-payment')
-  assert.equal(order.type,'order')
-  assert.equal(order.conversation_id,null)
-  assert.equal(order.party_size,null)
-  assert.deepEqual(order.payments![0]!.order,{lines:[{id:'immutable-line',title:'Original item title',unit_amount:1250,quantity:2,currency:'USD'}]})
-  assert.deepEqual((await db.prepare('SELECT * FROM conversations ORDER BY id').all()).results,requestsBefore)
-  await assert.rejects(()=>loadBuyerBookingDetails(db, env,'other','order','order-payment'),error=>error instanceof HTTPError&&error.statusCode===404)
   await db.batch([
     db.prepare("UPDATE bookings SET user_id='other' WHERE id=?").bind(booking.bookingId),
     ...transferBookingGuestSeat({ query: 'c.id = ?', params: [opening.id] }, 'other', NOW).map(write => db.prepare(write.query).bind(...(write.params ?? []))),
