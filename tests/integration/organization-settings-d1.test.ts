@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
-import * as schema from '../../server/db/schema.ts'
 import { getConfig, setConfig } from '../../server/utils/organization-config.ts'
 import { deleteIntegration, listIntegrations, readIntegration, storeIntegration } from '../../server/utils/organization-integrations.ts'
 import { isLastWhatsAppInbound, recordWhatsAppInbound, whatsAppServiceWindowOpen, getMcpWorkspacePreference, upsertMcpWorkspacePreference } from '../../server/utils/mcp-context.ts'
+import { applySchema } from './support/schema.ts'
 
 test('organization settings and workspace patches preserve independent owners and hold no provider credentials', async () => {
   const miniflare = new Miniflare({ workers: [{ config: {
@@ -16,8 +15,7 @@ test('organization settings and workspace patches preserve independent owners an
   } }] })
   try {
     const db = await miniflare.getD1Database('DB')
-    const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-    await db.batch(statements.map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare("INSERT INTO organization(id,name,slug,subdomain, default_currency, timezone) VALUES('org','Org','org','org', 'USD', 'UTC')").run()
     await db.prepare("INSERT INTO user(id,name,email) VALUES('user','User','user@example.test')").run()
     await setConfig(db, 'org', 'press_email', 'press@example.test')

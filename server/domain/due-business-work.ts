@@ -1,5 +1,5 @@
 import { execute, queryAllPages, queryFirst } from '~/server/db'
-import { publishEvent, type DomainEvent } from '~/server/events'
+import { publishAirbnbSync, publishEvent, type DomainEvent } from '~/server/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { runScheduledManagedAdSpend } from '~/server/domain/payments/ad-spend'
 import { cleanupMcpToolCallEvents, MCP_AUDIT_RETENTION_DAYS, MCP_DIAGNOSTIC_RETENTION_DAYS } from '~/server/utils/mcp-telemetry'
@@ -50,14 +50,14 @@ export async function enqueueOutstandingWork(env: CloudflareEnv): Promise<void> 
       UNION ALL SELECT organization_id, kind, NULL, 1 FROM projections
       UNION ALL SELECT organization_id, 'airbnb', id, 2 FROM airbnb_sync_jobs WHERE state = 'pending'
     )
-    ORDER BY phase, kind, CASE WHEN job_id IS NULL THEN organization_id END, job_id
+    ORDER BY phase, kind, COALESCE(job_id, organization_id)
   `, [new Date(due - REVIEW_REQUEST_TTL_DAYS * 86_400_000).toISOString(), `${SOCIAL_CARD_REFRESH_PREFIX}%`])
   await publishEvent(env, { type: 'business.wake', organization_id: RETENTION_HUB, kind: 'retention', due_at: due })
   for (const { organization_id, kind, job_id } of work) {
     if (kind === 'site') await publishEvent(env, { type: 'site.cache_changed', organization_id, invalidation_id: null })
     else if (kind === 'calendar') await publishEvent(env, { type: 'calendar.changed', organization_id, booking_id: null })
     else if (kind === 'calendar_cleanup') await publishEvent(env, { type: 'calendar.cleanup', organization_id })
-    else if (kind === 'airbnb') await publishEvent(env, { type: 'airbnb.sync', organization_id, job_id })
+    else if (kind === 'airbnb') await publishAirbnbSync(env, { type: 'airbnb.sync_step', organization_id, job_id })
     else await publishEvent(env, { type: 'business.wake', organization_id, kind, due_at: due })
   }
 }

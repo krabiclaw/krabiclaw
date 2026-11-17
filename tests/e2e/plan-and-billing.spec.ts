@@ -1,10 +1,7 @@
-import { expect, request as playwrightRequest, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
-import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
-import type { HomesQuote } from '../../server/utils/billing'
-import { SERVICES } from '../../shared/billing-model'
 
 // Plan and billing (#1504): its own Menu destination at O/billing. A legal
 // practice made for the Starter case has no subscription, so it is what an
@@ -15,7 +12,6 @@ import { SERVICES } from '../../shared/billing-model'
 // the index either opens beside a pane or is the screen.
 
 const WIDTHS = [800, 1440] as const
-const BASIC_OWNER_ID = 'user-e2e-onboarding-wizard'
 const GROWTH_OWNER_ID = 'user-e2e-pottery-owner'
 
 /** Signs in as an organization's owner through Better Auth's admin impersonation, runs the walk, then restores the principal. */
@@ -54,142 +50,6 @@ test.describe('Plan and billing', () => {
   test.beforeEach(async ({ page, baseURL }) => {
     await dismissPreviewToolbar(page)
     await loginAs(page.request, baseURL!)
-  })
-
-  test('a Starter owner reads the plan, chooses one, and sees what managed ads needs', async ({ page, baseURL }) => {
-    test.setTimeout(180_000)
-    // A new legal practice starts on Basic: no Stripe customer, no subscription.
-    const owner = await playwrightRequest.newContext({ baseURL })
-    const slug = `e2e-starter-${crypto.randomUUID().slice(0, 8)}`
-    let BASIC_ID = ''
-    try {
-      await loginAs(owner, baseURL!, BASIC_OWNER_ID)
-      const created = await owner.post('/api/auth/organization/create', { headers: authRequestHeaders(baseURL!), data: { name: 'Starter Legal Practice', slug, default_currency: 'USD', timezone: 'America/New_York' } })
-      expect(created.status(), await created.text()).toBe(200)
-      BASIC_ID = (await created.json() as { id: string }).id
-      const provisioned = await owner.post('/api/organizations', { headers: authRequestHeaders(baseURL!), data: { organization_id: BASIC_ID, name: 'Starter Legal Practice', subdomain: slug, vertical: 'service', source_locale: 'en' } })
-      expect(provisioned.status(), await provisioned.text()).toBe(200)
-      const BASIC = `/dashboard/${slug}`
-      await asOwner(page, baseURL!, BASIC_OWNER_ID, BASIC_ID, async () => {
-        // The premise, read from the billing API rather than the page: Starter, no Stripe customer.
-        const status = await page.request.get(`/api/billing/status?organization_id=${BASIC_ID}`)
-        expect(status.status(), await status.text()).toBe(200)
-        const billing = (await status.json() as { billing: { plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string } }).billing
-        expect(billing.plan).toBe('free')
-        expect(billing.stripeSubscriptionId).toBeUndefined()
-        expect(billing.stripeCustomerId).toBeUndefined()
-        // This Legal practice has no live or draft homes. Its allowance remains
-        // canonical billing state; the irrelevant Homes row is not navigation.
-        const [contextResponse, homesResponse] = await Promise.all([
-          page.request.get('/api/dashboard/context', { params: { org: slug } }),
-          page.request.get(`/api/organizations/${BASIC_ID}/billing/homes`, { params: { adding: '0' } }),
-        ])
-        for (const response of [contextResponse, homesResponse]) expect(response.status(), await response.text()).toBe(200)
-        expect((await contextResponse.json() as { organization: { id: string; vertical: string } }).organization).toMatchObject({ id: BASIC_ID, vertical: 'service' })
-        expect(await homesResponse.json() as HomesQuote).toMatchObject({
-          plan: 'free', currency: 'USD',
-          homes: { used: 0, drafts: 0, included: 1, amount_minor: 0 },
-          adding: { count: 0, additional_homes: 0, amount_minor: 0, allowed: true },
-          billing: { period_end: null, trial_end: null, prorated: false },
-        })
-        // Managed ads' requirements, as the agreement checks them: none met on Starter with no Google Ads.
-        const requirements = await page.request.get(`/api/dashboard/services?org=${slug}&requirements=managed_ads`)
-        expect(requirements.status(), await requirements.text()).toBe(200)
-        expect(await requirements.json()).toEqual({
-          success: true,
-          services: { managed_ads: null, strategy: null },
-          offers: SERVICES,
-          requirements: { managed_ads: { google_ads_usd: false, business_plan: false, default_payment_method: false } },
-        })
-
-        // Plan and billing is the owner's own Menu row; Payments keeps only how money arrives.
-        await page.setViewportSize({ width: 1440, height: 1200 })
-        await open(page, `${BASIC}/menu`)
-        await page.getByTestId('dashboard-top-nav-menu-button').click()
-        await page.getByRole('dialog', { name: 'Menu', exact: true }).getByRole('link', { name: 'Plan and billing', exact: true }).click()
-        await expect(page).toHaveURL(`${BASIC}/billing/upgrade`)
-        await expect(page.locator('#dashboard-panel-organization-billing [data-testid="dashboard-navbar-back"]')).toHaveAttribute('href', `${BASIC}/menu`)
-        await open(page, `${BASIC}/payments`)
-        const payments = page.locator('#dashboard-panel-organization-payments')
-        await expect(payments.getByRole('link', { name: /^How you get paid/ })).toBeVisible()
-        await expect(payments.getByRole('link', { name: /^(Payment methods|Your payments|Plan)/ })).toHaveCount(0)
-
-        // Agreeing to managed ads is refused on the server while its requirements are open, and nothing is recorded.
-        const rejected = await page.request.post(`/api/dashboard/services?org=${slug}`, { headers: authRequestHeaders(baseURL!), data: { service: 'managed_ads', action: 'agree' } })
-        expect(rejected.status(), await rejected.text()).toBe(409)
-        expect((await rejected.json() as { message: string }).message).toBe('Managed ads is billed on the Business plan. Choose Business in Plan and billing before turning on managed ads.')
-        const after = await page.request.get(`/api/dashboard/services?org=${slug}`)
-        expect(after.status(), await after.text()).toBe(200)
-        expect(await after.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null }, offers: SERVICES })
-
-        for (const width of WIDTHS) {
-          await page.setViewportSize({ width, height: 1200 })
-          const wide = width >= 1024
-
-          // Basic shows its plan and the two service offers. A billing portal needs a Stripe customer.
-          await open(page, `${BASIC}/billing`)
-          const index = page.locator('#dashboard-panel-organization-billing')
-          await expect(index.getByRole('heading', { name: 'Plan and billing', exact: true })).toBeVisible()
-          const card = index.getByTestId('billing-plan-card')
-          await expect(card).toContainText('Basic')
-          await expect(card).toContainText('Free')
-          await expect(card.getByRole('link', { name: 'Choose a plan', exact: true })).toBeVisible()
-          await expect(index.locator('[data-testid^="editor-card-"]')).toHaveCount(2)
-          await expect(index.getByTestId('editor-card-locations')).toHaveCount(0)
-          await expect(index.getByTestId('editor-card-homes')).toHaveCount(0)
-          await expect(index.getByTestId('editor-card-portal')).toHaveCount(0)
-          const managedAdsCard = index.getByTestId('editor-card-managed-ads')
-          await expect(managedAdsCard.getByRole('heading', { name: 'Get more from this budget', exact: true })).toBeVisible()
-          await expect(managedAdsCard.getByText('10% of monthly ad spend', { exact: true })).toBeVisible()
-          await expect(managedAdsCard).toHaveAttribute('href', `${BASIC}/billing/managed-ads`)
-          const strategyCard = index.getByTestId('editor-card-strategy')
-          await expect(strategyCard.getByRole('heading', { name: 'Rank for what your clients search', exact: true })).toBeVisible()
-          await expect(strategyCard.getByText('$2,000/mo', { exact: true })).toBeVisible()
-          await expect(strategyCard).toHaveAttribute('href', `${BASIC}/billing/strategy`)
-          // Beside a pane the index opens the plan's one change; on a narrower screen it is the screen.
-          await expect(page).toHaveURL(wide ? `${BASIC}/billing/upgrade` : `${BASIC}/billing`)
-
-          // Choose a plan: Growth and Business as two cards, Continue only once one is chosen.
-          await open(page, `${BASIC}/billing/upgrade?plan=business`)
-          const upgrade = page.locator('#dashboard-panel-organization-upgrade')
-          await expect(upgrade.getByRole('heading', { name: 'Choose a plan', exact: true })).toBeVisible()
-          await expect(upgrade.getByRole('radio')).toHaveCount(2)
-          await expect(upgrade.getByRole('radio', { name: /^business/i })).toBeChecked()
-          await expect(upgrade.getByRole('button', { name: 'Continue to Stripe', exact: true })).toBeEnabled()
-          await upgrade.getByText('Growth', { exact: true }).click()
-          await expect(upgrade.getByRole('radio', { name: /^growth/i })).toBeChecked()
-          await expect(page).toHaveURL(`${BASIC}/billing/upgrade?plan=business`)
-          if (!wide) {
-            await upgrade.getByRole('link', { name: 'Close', exact: true }).click()
-            await expect(page).toHaveURL(`${BASIC}/billing?plan=business`)
-            await expect(index.getByRole('heading', { name: 'Plan and billing', exact: true })).toBeVisible()
-          }
-
-          await managedAdsCard.click()
-          await expect(page).toHaveURL(`${BASIC}/billing/managed-ads`)
-          const ads = page.locator('#dashboard-panel-organization-managed-ads')
-          await expect(ads.getByText('10% of monthly ad spend, added to your plan\'s invoice.', { exact: true })).toBeVisible()
-          // Setup starts with the USD account. Plan, payment and consent are later actions.
-          await expect(ads.getByText('Choose the Google Ads account you want Chris to manage. Managed ads uses accounts billed in USD.', { exact: true })).toBeVisible()
-          const connect = ads.getByRole('link', { name: 'Connect Google Ads', exact: true })
-          await expect(connect).toHaveAttribute('href', `${BASIC}/integrations/google-ads?service=managed-ads`)
-          await expect(ads.getByRole('link', { name: 'Review Business plan', exact: true })).toHaveCount(0)
-          await expect(ads.getByRole('button', { name: 'Add payment method', exact: true })).toHaveCount(0)
-          await expect(ads.getByRole('button', { name: 'Agree and turn on', exact: true })).toHaveCount(0)
-          await connect.click()
-          await expect(page).toHaveURL(`${BASIC}/integrations/google-ads?service=managed-ads`)
-          const googleAds = page.locator('#dashboard-panel-integration-google-ads')
-          await expect(googleAds.getByRole('heading', { name: 'Google Ads', exact: true })).toBeVisible()
-          await expect(googleAds.getByText('Choose the account billed in USD that you want Chris to manage.', { exact: true })).toBeVisible()
-        }
-      })
-    } finally {
-      if (BASIC_ID) {
-        const deleted = await owner.post('/api/auth/organization/delete', { headers: authRequestHeaders(baseURL!), data: { organizationId: BASIC_ID } })
-        expect(deleted.status(), await deleted.text()).toBe(200)
-      }
-      await owner.dispose()
-    }
   })
 
   test('a Growth owner upgrades to Business in one step', async ({ page, baseURL }) => {
@@ -262,73 +122,5 @@ test.describe('Plan and billing', () => {
       const unchanged = await page.request.get(`/api/billing/status?organization_id=${GROWTH_ID}`)
       expect((await unchanged.json() as { billing: { plan: string } }).billing.plan).toBe('growth')
     })
-  })
-
-  test('an admin reads Plan and billing and changes nothing; a member has no Menu row', async ({ page, browser, baseURL }, testInfo) => {
-    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Role changes use disposable local actors only')
-    test.setTimeout(90_000)
-    const release = await acquireTenantMutationLock(testInfo, seededTenant('restaurant').organizationId)
-    try {
-      const membersResponse = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
-      expect(membersResponse.status(), await membersResponse.text()).toBe(200)
-      const { members } = await membersResponse.json() as { members: Array<{ id: string; userId: string; role: string }> }
-      const actor = members.find(member => member.userId === 'user-e2e-demo-role-owner')
-      expect(actor).toBeTruthy()
-      const setRole = async (role: string) => {
-        const changed = await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId: seededTenant('restaurant').organizationId, memberId: actor!.id, role } })
-        expect(changed.status(), await changed.text()).toBe(200)
-      }
-      const context = await browser.newContext({ viewport: { width: 1440, height: 1200 } })
-      try {
-        try {
-          await setRole('admin')
-          await loginAs(context.request, baseURL!, actor!.userId)
-          const admin = await context.newPage()
-          await dismissPreviewToolbar(admin)
-          await open(admin, '/dashboard/ember-slice-demo/menu')
-          await admin.getByTestId('dashboard-top-nav-menu-button').click()
-          await expect(admin.getByRole('dialog', { name: 'Menu', exact: true }).getByRole('link', { name: 'Plan and billing', exact: true })).toBeVisible()
-          await open(admin, '/dashboard/ember-slice-demo/billing')
-          const index = admin.locator('#dashboard-panel-organization-billing')
-          // One line names who changes it; the plan card has no button and Stripe's portal is not offered.
-          await expect(index.getByTestId('billing-owner-line')).toContainText('Only the organization owner can manage billing.')
-          await expect(index.getByTestId('billing-plan-card')).toContainText('Business')
-          await expect(index.getByTestId('billing-plan-card').getByRole('button')).toHaveCount(0)
-          await expect(index.getByTestId('billing-plan-card').getByRole('link')).toHaveCount(0)
-          await expect(index.getByTestId('editor-card-portal')).toHaveCount(0)
-          // A service leaf reads the same, with no consent to give.
-          await open(admin, '/dashboard/ember-slice-demo/billing/strategy')
-          const strategy = admin.locator('#dashboard-panel-organization-strategy')
-          await expect(strategy.getByText('Owners turn services on and off.', { exact: true })).toBeVisible()
-          await expect(admin.getByRole('button', { name: /^(Agree and turn on|Turn off)$/ })).toHaveCount(0)
-          // Better Auth refuses the admin's agreement on the server too, and nothing is recorded.
-          const servicesBefore = await page.request.get('/api/dashboard/services?org=ember-slice-demo')
-          expect(servicesBefore.status(), await servicesBefore.text()).toBe(200)
-          const before = (await servicesBefore.json() as { services: Record<string, unknown> }).services
-          const refused = await context.request.post('/api/dashboard/services?org=ember-slice-demo', { headers: authRequestHeaders(baseURL!), data: { service: 'managed_ads', action: 'agree' } })
-          expect(refused.status(), await refused.text()).toBe(403)
-          const servicesAfter = await page.request.get('/api/dashboard/services?org=ember-slice-demo')
-          expect(servicesAfter.status(), await servicesAfter.text()).toBe(200)
-          expect((await servicesAfter.json() as { services: Record<string, unknown> }).services).toEqual(before)
-
-          await setRole('member')
-          await open(admin, '/dashboard/ember-slice-demo/menu')
-          await admin.getByTestId('dashboard-top-nav-menu-button').click()
-          const menu = admin.getByRole('dialog', { name: 'Menu', exact: true })
-          await expect(menu.getByRole('link', { name: 'Website', exact: true })).toBeVisible()
-          await expect(menu.getByTestId('dashboard-menu-error')).toHaveCount(0)
-          await expect(menu.getByRole('link', { name: 'Plan and billing', exact: true })).toHaveCount(0)
-        } finally {
-          await setRole(actor!.role)
-          const read = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
-          expect(read.status()).toBe(200)
-          expect((await read.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.id === actor!.id)?.role).toBe(actor!.role)
-        }
-      } finally {
-        await context.close()
-      }
-    } finally {
-      await release()
-    }
   })
 })

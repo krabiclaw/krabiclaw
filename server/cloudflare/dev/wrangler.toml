@@ -23,6 +23,19 @@ max_batch_size = 10
 max_batch_timeout = 1
 max_retries = 5
 
+# Airbnb sync and disconnect steps (server/integrations/channex/airbnb-sync.ts): one delivery at a time,
+# so a repeated delivery reads the stage the earlier one saved and never sends the same Channex create twice.
+[[queues.producers]]
+binding = "AIRBNB_SYNC"
+queue = "blawby-airbnb-sync-local"
+
+[[queues.consumers]]
+queue = "blawby-airbnb-sync-local"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
+max_concurrency = 1
+
 [[migrations]]
 tag = "v1_guest_inbox_hub"
 new_sqlite_classes = ["GuestInboxHubObject"]

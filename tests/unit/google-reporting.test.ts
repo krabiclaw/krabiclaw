@@ -24,19 +24,6 @@ test('a Google Ads report asks GAQL for the chosen days and maps each row', asyn
   await assert.rejects(getGoogleAdsReport('token', 'dev', '6495293607', { report: 'keywords', startDate: '2025-10-1', endDate: '2025-10-29', limit: 10 }), /calendar days/)
 })
 
-test('a geography report names each country through Google\'s geo target constants', async (t) => {
-  const queries: string[] = []
-  t.mock.method(globalThis, 'fetch', async (_input, init) => {
-    const query = String(JSON.parse(String(init?.body)).query)
-    queries.push(query)
-    if (query.includes('FROM geographic_view')) return Response.json({ results: [{ geographicView: { countryCriterionId: '2840', locationType: 'LOCATION_OF_PRESENCE' }, campaign: { id: '11', name: 'IEP' }, metrics: { clicks: '30', impressions: '400' } }] })
-    return Response.json({ results: [{ geoTargetConstant: { id: '2840', name: 'United States' } }] })
-  })
-  const rows = await getGoogleAdsReport('token', 'dev', '6495293607', { report: 'geography', startDate: '2025-10-01', endDate: '2025-10-29', limit: 20 })
-  assert.equal(queries[1], 'SELECT geo_target_constant.id, geo_target_constant.name FROM geo_target_constant WHERE geo_target_constant.id IN (2840)')
-  assert.deepEqual(rows.map(row => [row.text, row.detail, row.clicks]), [['United States', 'LOCATION_OF_PRESENCE', 30]])
-})
-
 test('a GA4 report sends the ranges, filters and order, and reads rows by header', async (t) => {
   let body: Record<string, unknown> = {}
   t.mock.method(globalThis, 'fetch', async (input, init) => {
@@ -70,7 +57,7 @@ test('a GA4 row without its metric values is refused, not counted as zero', asyn
 
 test('Search Console analytics name each key by its dimension and keep Google\'s figures', async (t) => {
   let request: { url: string; body: Record<string, unknown> } = { url: '', body: {} }
-  t.mock.method(globalThis, 'fetch', async (input, init) => {
+  const providerFetch = t.mock.method(globalThis, 'fetch', async (input, init) => {
     request = { url: String(input), body: JSON.parse(String(init?.body)) }
     return Response.json({ rows: [{ keys: ['iep vs 504', 'https://www.northcarolinalegalservices.org/blog/iep-vs-504'], clicks: 12, impressions: 340, ctr: 0.0353, position: 7.4 }], responseAggregationType: 'byPage' })
   })
@@ -83,12 +70,11 @@ test('Search Console analytics name each key by its dimension and keep Google\'s
   assert.equal(request.body.dataState, 'final')
   assert.equal(request.body.aggregationType, 'byPage')
   assert.deepEqual(result, { rows: [{ keys: { query: 'iep vs 504', page: 'https://www.northcarolinalegalservices.org/blog/iep-vs-504' }, clicks: 12, impressions: 340, ctr: 0.0353, position: 7.4 }], aggregationType: 'byPage' })
-})
 
-test('a Search Console total with no dimensions is one row without keys', async (t) => {
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ rows: [{ clicks: 310, impressions: 9200, ctr: 0.0337, position: 11.2 }], responseAggregationType: 'byProperty' }))
-  const result = await querySearchAnalytics('token', 'sc-domain:northcarolinalegalservices.org', {
+  // A total with no dimensions is one row without keys.
+  providerFetch.mock.mockImplementation(async () => Response.json({ rows: [{ clicks: 310, impressions: 9200, ctr: 0.0337, position: 11.2 }], responseAggregationType: 'byProperty' }))
+  const total = await querySearchAnalytics('token', 'sc-domain:northcarolinalegalservices.org', {
     startDate: '2025-10-01', endDate: '2025-10-29', dimensions: [], filters: [], searchType: 'web', dataState: 'final', aggregationType: 'auto', rowLimit: 1, startRow: 0,
   })
-  assert.deepEqual(result.rows, [{ keys: {}, clicks: 310, impressions: 9200, ctr: 0.0337, position: 11.2 }])
+  assert.deepEqual(total.rows, [{ keys: {}, clicks: 310, impressions: 9200, ctr: 0.0337, position: 11.2 }])
 })

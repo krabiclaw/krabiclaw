@@ -11,9 +11,8 @@ try {
   if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error
 }
 
-const liveGooglePlaces = process.env.E2E_GOOGLE_PLACES === 'true'
-if (!liveGooglePlaces) process.env.GOOGLE_PLACES_API_KEY = ''
-else if (!process.env.GOOGLE_PLACES_API_KEY?.trim()) throw new Error('E2E_GOOGLE_PLACES requires GOOGLE_PLACES_API_KEY')
+// Onboarding is manual in E2E; the local Worker never calls Google Places.
+process.env.GOOGLE_PLACES_API_KEY = ''
 
 const previewUrl = process.env.PLAYWRIGHT_PREVIEW_URL
 const port = Number(process.env.PLAYWRIGHT_PORT ?? 3000)
@@ -26,7 +25,7 @@ const localDevRouteSecret = previewUrl ? '' : 'local-playwright-dev-route-secret
 
 if (!previewUrl) {
   process.env.E2E_DEV_ROUTE_SECRET = localDevRouteSecret
-  // The Connections check inspects the OAuth redirect without contacting Google.
+  // Better Auth's Google provider gets a local client; nothing contacts Google.
   process.env.GOOGLE_CLIENT_ID = 'local-playwright-google-client'
   process.env.GOOGLE_CLIENT_SECRET = 'local-playwright-google-secret'
   // The provider-ingress spec signs Resend webhooks with this and the local
@@ -68,7 +67,7 @@ const localWorkerCommand = [
   `--inspector-port ${port + 10000}`,
   '--var E2E_ALLOW_DEV_ROUTES:true',
   `--var E2E_DEV_ROUTE_SECRET:${localDevRouteSecret}`,
-  ...(!liveGooglePlaces ? ['--var GOOGLE_PLACES_API_KEY:'] : []),
+  '--var GOOGLE_PLACES_API_KEY:',
 ].join(' ')
 
 export default defineConfig({
@@ -116,6 +115,5 @@ export default defineConfig({
     // The local suite measures the site's own analytics, so its browser is a visitor:
     // without the automation flag, which the collector reads as not one (automatedBrowser()).
     { name: 'chromium', use: { ...devices['Desktop Chrome'], launchOptions: { args: ['--disable-blink-features=AutomationControlled'] } } },
-    { name: 'webkit-mobile-layout', use: { ...devices['Desktop Safari'], viewport: { width: 390, height: 844 } }, testMatch: '**/dashboard-layout.spec.ts', grep: /mobile scroll/ },
   ]
 })

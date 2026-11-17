@@ -11,6 +11,7 @@ import { assertOrganizationWideAccess, isOrganizationWideRole, resolveOrganizati
 import { getOrganizationEntitlements } from '~/server/utils/billing-access'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { publicTenantVisibilitySql } from '~/server/utils/public-base'
+import { isOrganizationRole } from '~/utils/organization-access'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 export type McpToolRole = 'owner' | 'admin' | 'member'
@@ -26,7 +27,7 @@ export type McpToolRole = 'owner' | 'admin' | 'member'
  * `owner` owns billing and deletion.
  */
 const TOOL_ROLE_PERMISSIONS: Record<McpToolRole, OrganizationPermissions> = {
-  member: { scheduling: ['own'] },
+  member: { task: ['read'] },
   admin: { settings: ['update'] },
   owner: { organization: ['delete'] },
 }
@@ -52,7 +53,7 @@ export interface McpOrganizationContext extends McpUserContext {
   subdomain?: string | null
   customDomain?: string | null
   publicUrl?: string | null
-  role: McpToolRole
+  role: string
   // The membership this call resolved for (organizationId, userId). Tool
   // executors authorize from it rather than pairing role with an organization
   // id from elsewhere.
@@ -304,8 +305,8 @@ export async function requireMcpOrganization(
     })
   }
 
-  const role = normalizeRole(membership.role)
-  if (!role || !await roleSatisfies(organization.id, membership.role, minimumRole)) {
+  const role = membership.role
+  if (!role.split(',').every(value => isOrganizationRole(value.trim())) || !await roleSatisfies(organization.id, membership.role, minimumRole)) {
     throw new HTTPError({
       statusCode: 403,
       statusMessage: `Insufficient permissions: '${minimumRole}' role required for organization '${organizationId}'.`,
@@ -340,7 +341,7 @@ export async function requireMcpOrganization(
 export async function getVisibleOrganizationContext(
   event: H3Event,
   organizationId: string,
-): Promise<{ role: McpToolRole; organizationId: string } | null> {
+): Promise<{ role: string; organizationId: string } | null> {
   try {
     const context = await requireMcpOrganization(event, organizationId, 'member')
     return { role: context.role, organizationId: context.organizationId }
@@ -365,9 +366,4 @@ export async function getActiveEntitlements(env: CloudflareEnv, organizationId: 
 
 export async function roleSatisfies(organizationId: string, actual: string, minimum: McpToolRole): Promise<boolean> {
   return await roleAllows({ organizationId, role: actual, permissions: TOOL_ROLE_PERMISSIONS[minimum] })
-}
-
-export function normalizeRole(role: string | null | undefined): McpToolRole | null {
-  if (role === 'owner' || role === 'admin' || role === 'member') return role
-  return null
 }

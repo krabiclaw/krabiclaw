@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
-import * as schema from '../../server/db/schema.ts'
 import { linkGuestIdentitiesByVerifiedEmail } from '../../server/utils/guest-accounts.ts'
 import { appendMessage } from '../../server/domain/conversations.ts'
+import { applySchema } from './support/schema.ts'
 
 const NOW = '2026-10-06T00:00:00.000Z'
 
@@ -12,7 +11,7 @@ test('a verified account gathers the guest identities that used only its email, 
   const runtime = new Miniflare({ workers: [{ config: { name: 'guest-accounts-proof', compatibilityDate: '2024-11-01', manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } }, env: { DB: { type: 'd1' } } } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(sql => db.prepare(sql)))
+    await applySchema(db)
     await db.prepare("INSERT INTO organization(id,name,slug,subdomain,status, default_currency, timezone) VALUES('pottery','Pottery','pottery','pottery','active', 'USD', 'UTC'),('kikuzuki','Kikuzuki','kikuzuki','kikuzuki','active', 'USD', 'UTC')").run()
     const users: Array<[string, string, number, number]> = [
       ['jane', 'Jane@Example.com', 1, 0], ['unverified', 'sam@example.com', 0, 0],

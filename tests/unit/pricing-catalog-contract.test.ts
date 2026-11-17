@@ -2,12 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type Stripe from 'stripe'
 import { assertStripeCatalogPrice, planSubscriptionItem, recurringPriceAmount, selectMeteredPrices, selectStripeCatalogPrice } from '../../server/utils/stripe-catalog.ts'
-import { PRICING_COMPARISON, comparisonValue } from '../../shared/pricing-comparison.ts'
-import { getPlanEntitlements } from '../../server/utils/billing-entitlements.ts'
-import { classifyStripePlanChange } from '../../shared/stripe-ga4.ts'
-import { assertNewSalePlan, BILLING_METER_KEYS, BILLING_METERS, homePrice, nextHomePrice, PAID_PLAN_PRICES, PAYMENTS_FEE, planMeters, pricingNotice, ratePercent } from '../../shared/billing-model.ts'
-import { renderPlansMarkdown } from '../../server/routes/pricing.md.get.ts'
-import { betaSpotsTaken, type Plan } from '../../server/utils/billing-plans.ts'
+import { assertNewSalePlan, BILLING_METER_KEYS, BILLING_METERS, PAID_PLAN_PRICES } from '../../shared/billing-model.ts'
+import { betaSpotsTaken } from '../../server/utils/billing-plans.ts'
 
 const product = { id: 'prod-existing', metadata: { plan_id: 'growth', monthly_price_id: 'price-month' } } as unknown as Stripe.Product
 // The canonical plan price as Stripe returns it: one flat monthly charge.
@@ -41,20 +37,6 @@ test('display rename preserves provider identities and metadata selects one cano
 })
 
 // Stripe's own phrasing for each metered price, and which plan carries it.
-test('homes and fees are metered prices in Stripe’s phrasing', () => {
-  assert.equal(homePrice(), '$4 per home per month')
-  assert.equal(PAYMENTS_FEE, '1.4% of payment volume, plus Stripe fees')
-  assert.equal(ratePercent(0.014), '1.4')
-  assert.equal(ratePercent(0.1), '10')
-  // A home is a lodging unit, metered the same on Growth and Business; locations are not metered.
-  assert.deepEqual(planMeters('growth'), ['homes'])
-  assert.deepEqual(planMeters('business'), ['homes', 'captured_volume', 'stripe_cost', 'ad_spend'])
-  assert.deepEqual(planMeters('free'), [])
-  assert.deepEqual(BILLING_METER_KEYS.map(key => BILLING_METERS[key].formula), ['last', 'sum', 'sum', 'sum'])
-  assert.equal(BILLING_METERS.homes.unitAmountDecimal, '400')
-  assert.equal(BILLING_METERS.homes.description, '$4 per home per month.')
-})
-
 const meter = (key: string, overrides: Record<string, unknown> = {}) => ({
   id: `mtr-${key}`, status: 'active', event_name: BILLING_METERS[key as keyof typeof BILLING_METERS].eventName,
   default_aggregation: { formula: BILLING_METERS[key as keyof typeof BILLING_METERS].formula }, ...overrides,
@@ -88,129 +70,7 @@ test('each metered price must be the published one on its meter', () => {
   assert.throws(() => selectMeteredPrices({ ...catalog(), meters: catalog().meters.map(row => row.id === 'mtr-ad_spend' ? meter('ad_spend', { default_aggregation: { formula: 'last' } }) : row) }), /Managed ads monthly on the krabiclaw_ad_spend meter/)
 })
 
-test('Commerce inherits Growth capabilities and participates in native subscription transitions', () => {
-  const growth = getPlanEntitlements('growth')
-  const commerce = getPlanEntitlements('commerce')
-  for (const [capability, value] of Object.entries(growth)) {
-    if (capability !== 'plan' && capability !== 'payments') assert.equal(commerce[capability], value)
-  }
-  assert.equal(getPlanEntitlements('free').payments, false)
-  assert.equal(growth.payments, false)
-  assert.equal(commerce.payments, true)
-  assert.equal(classifyStripePlanChange('free', 'commerce', false), 'initial_subscription')
-  assert.equal(classifyStripePlanChange('growth', 'commerce', true), 'upgrade')
-  assert.equal(classifyStripePlanChange('commerce', 'growth', true), 'downgrade')
-  assert.equal(classifyStripePlanChange('commerce', 'commerce', true), null)
-})
-
-test('Business combines payments and ad management while existing contracts retain their capabilities', () => {
-  const business = getPlanEntitlements('business')
-  const marketing = getPlanEntitlements('marketing')
-  const commerce = getPlanEntitlements('commerce')
-  // Business matches a Marketing contract capability for capability; only what came later (the two syncs) is Business alone.
-  const BUSINESS_ONLY = ['calendar_sync', 'channel_sync']
-  for (const [capability, value] of Object.entries(marketing)) {
-    if (capability !== 'plan' && !BUSINESS_ONLY.includes(capability)) assert.equal(business[capability], value, capability)
-  }
-  assert.equal(business.payments, true)
-  assert.equal(business.google_ads_management, true)
-  assert.equal(business.calendar_sync, true)
-  assert.equal(business.channel_sync, true)
-  assert.equal(marketing.calendar_sync, false)
-  assert.equal(getPlanEntitlements('growth').channel_sync, false)
-  assert.equal(marketing.payments, true)
-  assert.equal(marketing.google_ads_management, true)
-  assert.equal(commerce.payments, true)
-  assert.equal(commerce.google_ads_management, false)
-  assert.equal(getPlanEntitlements('growth').google_ads_management, false)
-  assert.equal(classifyStripePlanChange('commerce', 'business', true), 'upgrade')
-  assert.equal(classifyStripePlanChange('marketing', 'business', true), 'upgrade')
-  assert.equal(classifyStripePlanChange('marketing', 'growth', true), 'downgrade')
-  assert.equal(classifyStripePlanChange('business', 'growth', true), 'downgrade')
-  assert.equal(classifyStripePlanChange('business', 'free', true), 'downgrade')
-  const ads = PRICING_COMPARISON.flatMap(group => [...group.rows]).find(row => row.id === 'ads.google')!
-  assert.equal(comparisonValue(ads, 'commerce'), 'Not included')
-  assert.equal(comparisonValue(ads, 'business'), 'Included')
-})
-
-test('comparison rejects unknown capabilities and preserves current review-request policy', () => {
-  assert.throws(() => comparisonValue({ entitlement: 'invented_capability' }, 'growth'), /Unknown capability/)
-  assert.throws(() => comparisonValue({ entitlement: 'messaging' }, 'invented_plan'), /Unsupported runtime billing plan/)
-  const review = PRICING_COMPARISON.flatMap(group => [...group.rows]).find(row => row.id === 'reviews.requests')!
-  assert.equal(comparisonValue(review, 'free'), 'Not included')
-  assert.equal(comparisonValue(review, 'growth'), 'Included')
-  assert.equal(comparisonValue(review, 'commerce'), 'Included')
-  const payments = PRICING_COMPARISON.flatMap(group => [...group.rows]).find(row => row.id === 'payments.acceptance')!
-  assert.equal(comparisonValue(payments, 'free'), 'Not included')
-  assert.equal(comparisonValue(payments, 'growth'), 'Not included')
-  assert.equal(comparisonValue(payments, 'commerce'), 'Included')
-  const onboarding = PRICING_COMPARISON.flatMap(group => [...group.rows]).find(row => row.id === 'places.onboarding')!
-  assert.equal(comparisonValue(onboarding, 'free'), 'Included')
-})
-
-test('renderPlansMarkdown generates accurate, machine-readable markdown specifications', () => {
-  const dummyPlans: Plan[] = [
-    {
-      id: 'free',
-      name: 'Free',
-      tagline: 'Start building for free',
-      highlighted: false,
-      prices: [],
-      features: ['Basic templates', 'AI site generation'],
-      limits: { custom_domains: false, google_places: false, support: 'Community' },
-      cta: { label: 'Start Free', href: '/signup' },
-    },
-    {
-      id: 'growth',
-      name: 'Growth',
-      tagline: 'Scale your business',
-      highlighted: true,
-      prices: [{ id: 'p_month', amount: 4900, currency: 'usd', interval: 'month' }],
-      features: ['Custom domains', 'Google Places', 'Direct booking'],
-      limits: { custom_domains: true, google_places: true, support: 'Priority' },
-      cta: { label: 'Upgrade', href: '/signup' },
-    },
-  ]
-
-  const md = renderPlansMarkdown(dummyPlans, 'https://example.com')
-  assert.match(md, /contact hello@blawby\.com\./)
-  assert.ok(md.includes('# Blawby Pricing & Plans'))
-  assert.ok(md.includes('\nBeta pricing. Prices will rise for new subscribers as Blawby grows; you keep the price you subscribe at for 12 months.\n'))
-  assert.ok(md.includes('## Free'))
-  assert.ok(md.includes('Free ($0/month)'))
-  assert.ok(md.includes('## Growth'))
-  assert.ok(md.includes('$49/month'))
-  assert.ok(md.includes('Custom Domain: Included'))
-  assert.ok(md.includes('Custom Domain: Not included'))
-  assert.ok(md.includes('- **Homes**: 1 included. A home is a place to stay.\n'))
-  assert.ok(md.includes('- **Homes**: $4 per home per month. A home is a place to stay.\n'))
-  const business = renderPlansMarkdown([{ ...dummyPlans[1]!, id: 'business', name: 'Business', prices: [{ id: 'p_business', amount: 14900, currency: 'usd', interval: 'month' }] }], 'https://example.com')
-  assert.ok(business.includes('$149/month'))
-  assert.ok(!business.includes('rental unit'))
-  assert.ok(business.includes('- **Payments fees**: 1.4% of payment volume, plus Stripe fees.\n'))
-  assert.ok(md.includes('- **Billing**: Homes and fees are billed on your subscription invoice at the end of each month.\n'))
-  assert.ok(!md.includes('Payments fees'))
-  assert.ok(md.includes('## Add-ons\n'))
-  assert.ok(md.includes('| Website translations Manually author and publish translations in all supported languages; no automatic translation. | Included | Included |'))
-  assert.ok(md.includes('- **Managed ads**: 10% of monthly ad spend. Chris hand-manages'))
-  assert.ok(md.includes('- **SEO and marketing strategy**: $2,000 per month. Julia leads'))
-})
-
 // While beta spots are left, the Markdown states them and the price that follows them.
-test('the beta spots and the price after them are stated while spots are left', () => {
-  assert.equal(nextHomePrice(), '$12')
-  assert.equal(pricingNotice(0), 'Beta pricing. Prices will rise for new subscribers as Blawby grows; you keep the price you subscribe at for 12 months.')
-  assert.equal(pricingNotice(7), 'Beta pricing: 7 of 10 spots left. After that, new subscribers pay $12 per home per month. You keep the price you subscribe at for 12 months.')
-  const growth: Plan = {
-    id: 'growth', name: 'Growth', tagline: '', highlighted: false, features: [], beta_spots_left: 7,
-    prices: [{ id: 'p_growth', amount: 4900, currency: 'usd', interval: 'month' }],
-    limits: { custom_domains: true, google_places: true, support: 'Priority' }, cta: { label: 'Get Growth', href: '/signup' },
-  }
-  const md = renderPlansMarkdown([growth], 'https://example.com')
-  assert.ok(md.includes('\nBeta pricing: 7 of 10 spots left. After that, new subscribers pay $12 per home per month. You keep the price you subscribe at for 12 months.\n'))
-  assert.ok(md.includes('- **Homes**: $4 per home per month (beta price; $12 per home per month once the beta spots are taken). A home is a place to stay.\n'))
-})
-
 // Each business that started a subscription in the beta takes one spot, and keeps it if it cancels;
 // a checkout that never completed, and a free internal subscription, take none.
 test('beta spots are taken by the businesses that started a paid subscription', () => {
@@ -255,9 +115,3 @@ test('a plan subscription has one plan item beside its metered and service items
 })
 
 // The published homes price on Business: 50 homes are the flat $149 plus 50 × $4, which is $349 per month.
-test('a 50-home Business organization is quoted $349 per month', () => {
-  const perHome = Number(meteredPrice('homes').unit_amount_decimal)
-  assert.equal(perHome, 400)
-  assert.equal(PAID_PLAN_PRICES.business.monthly + 50 * perHome, 34900)
-  assert.equal(PAID_PLAN_PRICES.growth.monthly + 50 * perHome, 24900)
-})

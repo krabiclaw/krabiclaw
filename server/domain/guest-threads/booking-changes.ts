@@ -466,7 +466,7 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
   const summary = await sourceSummary(db, thread)
   const membership = await resolveOrganizationMembership(env, { organizationId: thread.organization_id, userId: actorUserId })
   if (!membership) throw new HTTPError({ statusCode: 403, message: 'Organization access required' })
-  await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(membership, { env }), bookingId: before.recordId })
+  await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(membership, { env }), bookingId: before.recordId, action: 'update' })
   const externalId = `booking-change-request:${thread.id}:${idempotencyKey}`
   let entry = await findMessageByDedupeKey(db, externalId)
   if (entry) {
@@ -538,7 +538,7 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
   const summary = await sourceSummary(db, thread)
   const membership = await resolveOrganizationMembership(env, { organizationId: thread.organization_id, userId: actor.userId })
   if (!membership) throw new HTTPError({ statusCode: 403, message: 'Organization access required' })
-  await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(membership, { env }), bookingId: before.recordId })
+  await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(membership, { env }), bookingId: before.recordId, action: 'update' })
   const dedupeKey = `booking-change-move:${thread.id}:${idempotencyKey}`
   let entry = await findMessageByDedupeKey(db, dedupeKey)
   if (entry) {

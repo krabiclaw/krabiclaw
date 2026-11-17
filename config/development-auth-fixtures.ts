@@ -41,24 +41,6 @@ export const E2E_AUTH_FIXTURES: readonly E2eAuthFixture[] = [
     memberships: [{ tenant: 'restaurant', role: 'owner' }, { tenant: 'experience', role: 'owner' }, { tenant: 'legal', role: 'owner' }],
   },
   {
-    // A buyer with no organization: bookings, purchases, saved cards and account deletion.
-    id: 'user-e2e-buyer',
-    name: 'E2E Buyer',
-    email: 'buyer@playwright.example',
-  },
-  {
-    // A person with no organization and nothing booked: post-login offers onboarding. Nothing writes to it.
-    id: 'user-e2e-newcomer',
-    name: 'E2E Newcomer',
-    email: 'newcomer@playwright.example',
-  },
-  {
-    // A guest whose only activity is the table the stays spec books signed in: post-login is Personal.
-    id: 'user-e2e-table-guest',
-    name: 'E2E Table Guest',
-    email: 'table-guest@playwright.example',
-  },
-  {
     id: 'user-e2e-demo-owner',
     name: 'E2E Demo Owner',
     email: 'demo-owner@playwright.example',
@@ -103,24 +85,16 @@ export const E2E_AUTH_FIXTURES: readonly E2eAuthFixture[] = [
     memberships: [{ tenant: 'legal', role: 'owner' }],
   },
   ...[
-    'oauth-cimd',
+    // The account the invitations spec shows cannot accept another's invitation.
     'oauth-private-cimd',
     // Drives the new-site wizard end to end, owning the organization it creates.
     'onboarding-wizard',
-    // Signs in like the native app, with a bearer session and no cookies, and
-    // owns the organization it creates for the lodging-identity spec.
-    'lodging-native',
-    // Joins that organization through an email invitation.
+    // Joins an organization through an email invitation.
     'lodging-invitee',
     // Owns the lodging organization the stays spec creates, with its homes and stays.
     'lodging-host',
-    ...[
-      'inaccessible',
-      'wrong-site',
-      'cross-a',
-      'cross-b',
-      'owner-reply',
-    ].map(key => `mcp-fresh-${key}`),
+    // Belongs to no organization, so MCP offers it no tenant tools.
+    'mcp-fresh-inaccessible',
   ].map((key) => ({
     id: `user-e2e-${key}`,
     name: `E2E ${key.replaceAll('-', ' ')}`,
