@@ -44,12 +44,8 @@ missing queue. Airbnb sync and disconnect steps run on `blawby-airbnb-sync`
 (`blawby-airbnb-sync-staging` on staging), one delivery at a time.
 
 After the deploy, the `adopt-pending-work` step re-queues every pending
-`airbnb_sync_jobs` row there. An `airbnb.sync` message the previous Worker left
-on the events queue is forwarded, never run. Before calling the release done,
-check that the events queue holds no `airbnb.sync` backlog and the
-`blawby-airbnb-sync` dead-letter queue is empty. The release after that one
-deletes the forwarding and drops `operation_id`, `pending_step` and
-`needs_review` from `channex_connections`.
+`airbnb_sync_jobs` row there. Check the `blawby-airbnb-sync` dead-letter queue
+when qualifying a release that changes Airbnb synchronization.
 
 ## Verifying a release
 

@@ -663,12 +663,6 @@ test('a sync request is checked against the plan once, then Blawby imports, acti
     assert.equal(channex.seen.filter(request => request.method === 'POST' && request.path === '/properties').length, propertyCreatesBefore, 'one delivery performs one provider step')
     assert.deepEqual(nextSyncs(), [step], 'the next delivery names the same persisted job')
     assert.deepEqual(((await call('GET')).body.listings as Array<Record<string, unknown>>).map(listing => [listing.status, listing.stage]), [['running', 'property']])
-    // A step the Worker before AIRBNB_SYNC left on EVENTS is forwarded, never run there.
-    await queue.binding.send({ type: 'airbnb.sync', organization_id: ORG, job_id: String(queuedId) })
-    const createsBefore = channex.seen.filter(request => request.method === 'POST').length
-    await queue.drain(env, 'airbnb.sync')
-    assert.equal(channex.seen.filter(request => request.method === 'POST').length, createsBefore)
-    assert.deepEqual(nextSyncs(), [step, step])
     // Every step is delivered twice, one after the other as AIRBNB_SYNC delivers them: each create reaches Channex once.
     for (let item = syncs.take(); item; item = syncs.take()) {
       await syncs.deliver(env, item)

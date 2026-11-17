@@ -134,6 +134,13 @@
       "when": 1794922103015,
       "tag": "0018_drop_payment_orders",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1794922618758,
+      "tag": "0019_retire_airbnb_cutover",
+      "breakpoints": true
     }
   ]
 }
