@@ -23,4 +23,4 @@ body:
     id: site
     attributes:
       label: Website or business
-      placeholder: https://example.krabiclaw.com
+      placeholder: https://example.com

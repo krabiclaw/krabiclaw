@@ -3,6 +3,30 @@ import { loginAs } from '../e2e/helpers/auth'
 import { waitForNuxtHydration } from '../e2e/helpers'
 import { docsCategoryArt } from '../../utils/docs-category-art'
 
+test('platform website and legacy icon URLs serve the Blawby icons', async ({ request }) => {
+  const home = await request.get('/')
+  expect(home.status()).toBe(200)
+  const html = await home.text()
+  expect(html).toContain('/platform/blawby.ico')
+  expect(html).toContain('/platform/blawby-180.png')
+  for (const [oldPath, activePath] of [
+    ['/platform/favicon.ico', '/platform/blawby.ico'],
+    ['/platform/apple-touch-icon.png', '/platform/blawby-180.png'],
+  ] as const) {
+    const response = await request.get(oldPath, { maxRedirects: 0 })
+    expect(response.status()).toBe(301)
+    expect(response.headers().location).toBe(activePath)
+    expect((await request.get(activePath)).status()).toBe(200)
+  }
+  const manifest = await request.get('/manifest.webmanifest')
+  expect(manifest.status()).toBe(200)
+  const body = await manifest.json()
+  expect(body.name).toBe('Blawby')
+  expect(body.icons.map((icon: { src: string }) => icon.src)).toEqual(expect.arrayContaining([
+    '/platform/blawby.svg', '/platform/blawby-192.png', '/platform/blawby-512.png',
+  ]))
+})
+
 test('platform blog renders its public API posts in server HTML', async ({ request }) => {
   const api = await request.get('/api/public/blog')
   expect(api.ok()).toBe(true)
@@ -202,8 +226,8 @@ test('docs reading header exposes one mobile search shortcut without a second co
 test('docs category landings explain published tasks and preserve canonical guide identities', async ({ page, request, baseURL }) => {
   const response = await request.get('/api/public/blog?collection=docs')
   expect(response.status()).toBe(200)
-  const { posts, categories } = await response.json() as { posts: Array<{ slug: string; title: string; excerpt: string | null; category: { slug: string } }>; categories: Array<{ slug: string; name: string }> }
-  const accountGuide = posts.find(post => post.slug === 'create-your-krabiclaw-account')
+  const { posts, categories } = await response.json() as { posts: Array<{ id: string; slug: string; title: string; excerpt: string | null; category: { slug: string } }>; categories: Array<{ slug: string; name: string }> }
+  const accountGuide = posts.find(post => post.id === 'doc-013')
   if (!accountGuide) throw new Error('The published account guide is missing')
   // Every category landing is opened in the browser.
   test.setTimeout(30_000 + categories.length * 10_000)
@@ -236,7 +260,7 @@ test('docs category landings explain published tasks and preserve canonical guid
     })
     if (category.slug === 'getting-started') {
       await expect(feature.getByRole('heading')).toHaveText(accountGuide.title)
-      await expect(feature.locator('a[href="/docs/create-your-krabiclaw-account"]')).toHaveCount(1)
+      await expect(feature.locator(`a[href="/docs/${accountGuide.slug}"]`)).toHaveCount(1)
       const image = page.locator('[data-category-illustration]')
       await expect(image).toHaveAttribute('src', '/platform/docs/categories/krabiclaw-getting-started-category.png')
       await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).complete && (element as HTMLImageElement).naturalWidth > 0)).toBe(true)
