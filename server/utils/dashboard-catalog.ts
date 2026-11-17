@@ -2,7 +2,8 @@ import { HTTPError, type H3Event } from 'nitro'
 import { getQuery } from 'nitro/h3'
 import { getDashboardMemberContext, listDashboardLocations } from '~/server/utils/dashboard-context'
 import { roleAllows, assertRoleAllows, isOrganizationWideRole } from '~/server/utils/member-access'
-import { hydrateProductMedia, listCollections, listOrganizationProducts } from '~/server/utils/product-management'
+import { listCollections, listOrganizationProducts } from '~/server/utils/product-management'
+import { readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { groupProductsByCollection } from '~/utils/product-presentation'
 import { formatProductPriceRange, summarizeProductPrices } from '~/utils/product-money'
 import { isCurrencyCode } from '~/shared/currencies'
@@ -24,7 +25,7 @@ export async function loadDashboardCatalog(event: H3Event) {
   const can_create = await roleAllows({ ...organization, permissions: { products: ['create'] } })
   const scope = { organizationId: organization.id, assignedUserId: manages ? undefined : organization.userId }
   const [products, collections, locations] = await Promise.all([
-    listOrganizationProducts(db, scope).then(rows => hydrateProductMedia(db, organization.id, rows)),
+    listOrganizationProducts(db, scope),
     listCollections(db, scope),
     listDashboardLocations(db, organization.id, scope.assignedUserId, true),
   ])
@@ -59,7 +60,6 @@ export async function loadDashboardCatalog(event: H3Event) {
       id: product.id, label: product.stay ? product.stay.internal_name : product.name,
       summary: [price ?? (typeof note === 'string' && note.trim() ? note : 'No price set'), product.booking?.held_online ? 'Online' : null, ...bindings,
         ...(!bindings.length && !product.booking?.held_online ? ['No locations set'] : [])].filter(Boolean).join(' · '),
-      image: mediaStillUrl(product.image),
       to: `${base}/${product.id}${locationId ? `?location_id=${encodeURIComponent(locationId)}&kind=${product.kind}` : ''}`,
       native: product.kind === 'stay' ? 'stay' : 'offering',
       query: { product_id: product.id, ...(locationId ? { location_id: locationId } : {}) },
@@ -130,5 +130,8 @@ export async function loadDashboardCatalog(event: H3Event) {
     }
     screen.rows.push(...scopedProducts.filter(product => product.kind !== 'dish' && (kind === 'all' || kind === product.kind)).map(product => item(product, location?.id)))
   }
+  const offeringRows = screen.rows.filter(row => row.native === 'offering' || row.native === 'stay')
+  const images = await readMediaPlacements(db, { organizationId: organization.id, ownerType: 'product', ownerIds: offeringRows.map(row => row.id), slot: 'image' })
+  for (const row of offeringRows) row.image = mediaStillUrl(images.get(row.id)?.[0])
   return { screen, filters, kind, can_create, has_stays: offers('stay') }
 }
