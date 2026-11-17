@@ -178,6 +178,14 @@ export function calendarEvent(subject: CalendarSubject, managementUrl: string | 
 export async function readCalendarIntegration(db: DbClient, organizationId: string): Promise<GoogleCalendarIntegration | null> {
   return (await queryFirst<GoogleCalendarIntegration>(db, "SELECT account_id, target_id AS calendar_id, target_name AS calendar_name, status, last_error, revision, created_at, updated_at FROM organization_integrations WHERE organization_id=? AND provider='google_calendar' AND status <> 'setting_up'", [organizationId])) ?? null
 }
+export async function readCalendarConnection(db: DbClient, organizationId: string) {
+  const calendar = await readCalendarIntegration(db, organizationId)
+  const pending = calendar?.status === 'disabled'
+    ? await queryFirst<{ pending: number }>(db, "SELECT EXISTS(SELECT 1 FROM google_calendar_event_links WHERE organization_id = ? AND state <> 'deleted') AS pending", [organizationId])
+    : null
+  return { calendar, cleanup_pending: Boolean(pending?.pending) }
+}
+
 // The canonical subject query serves both changed-subject batches and one
 // provider identity's lifecycle fences. The database bounds each result.
 export async function calendarSubjects(db: DbClient, organizationId: string, integration: GoogleCalendarIntegration, identity?: Pick<EventLink, 'booking_id'>): Promise<CalendarSubject[]> {

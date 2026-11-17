@@ -81,6 +81,25 @@ function buildSlug(value: string): string {
     .slice(0, 30)
 }
 
+const INTEGRATION_LOCATIONS_JSON = `(SELECT json_group_array(json_object('id', id, 'slug', slug, 'title', title, 'address', address,
+                     'phone', phone, 'website_url', website_url, 'image', image,
+                     'google_place_id', google_place_id, 'rating', rating, 'review_count', review_count,
+                     'last_synced_at', last_synced_at))
+              FROM (SELECT bl.*, COALESCE(hma.thumbnail_url, hma.public_url) AS image FROM business_locations bl
+                      LEFT JOIN media_placements hmp ON hmp.organization_id = bl.organization_id AND hmp.owner_type = 'business_location' AND hmp.owner_id = bl.id
+                        AND hmp.slot = 'hero' AND hmp.sort_order = 0 AND hmp.status = 'active'
+                      LEFT JOIN media_assets hma ON hma.organization_id = hmp.organization_id AND hma.id = hmp.asset_id AND hma.status = 'active'
+                     WHERE bl.organization_id = organization.id AND bl.status = 'active' ORDER BY bl.title, bl.id))`
+
+export async function loadConnectionSummary(db: DbClient, env: CloudflareEnv, organizationId: string) {
+  const [organization, integrations] = await Promise.all([
+    queryFirst<{ locations_json: string }>(db, `SELECT ${INTEGRATION_LOCATIONS_JSON} AS locations_json FROM organization WHERE id = ?`, [organizationId]),
+    listIntegrations(db, organizationId),
+  ])
+  if (!organization) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
+  return integrationsSummary(db, env, organizationId, integrations, JSON.parse(organization.locations_json) as IntegrationLocation[])
+}
+
 export async function loadSettingsPayload(
   db: DbClient,
   env: CloudflareEnv,
@@ -104,15 +123,7 @@ export async function loadSettingsPayload(
            vertical, theme_id,
            COALESCE(NULLIF((SELECT COUNT(*) FROM reviews WHERE organization_id = organization.id AND status = 'approved'), 0), (SELECT SUM(review_count) FROM business_locations WHERE organization_id = organization.id AND status = 'active'), 0) AS reviews_count,
            COALESCE((SELECT ROUND(AVG(rating), 2) FROM reviews WHERE organization_id = organization.id AND status = 'approved'), (SELECT ROUND(AVG(rating), 2) FROM business_locations WHERE organization_id = organization.id AND status = 'active' AND rating > 0), 0) AS average_rating,
-           (SELECT json_group_array(json_object('id', id, 'slug', slug, 'title', title, 'address', address,
-                     'phone', phone, 'website_url', website_url, 'image', image,
-                     'google_place_id', google_place_id, 'rating', rating, 'review_count', review_count,
-                     'last_synced_at', last_synced_at))
-              FROM (SELECT bl.*, COALESCE(hma.thumbnail_url, hma.public_url) AS image FROM business_locations bl
-                      LEFT JOIN media_placements hmp ON hmp.owner_type = 'business_location' AND hmp.owner_id = bl.id
-                        AND hmp.slot = 'hero' AND hmp.sort_order = 0 AND hmp.status = 'active'
-                      LEFT JOIN media_assets hma ON hma.id = hmp.asset_id AND hma.status = 'active'
-                     WHERE bl.organization_id = organization.id AND bl.status = 'active' ORDER BY bl.title, bl.id)) AS locations_json
+           ${INTEGRATION_LOCATIONS_JSON} AS locations_json
     FROM organization
     LEFT JOIN media_placements amp ON amp.organization_id = organization.id AND amp.owner_type = 'organization'
       AND amp.owner_id = organization.id AND amp.slot = 'announcement' AND amp.sort_order = 0 AND amp.status = 'active'
