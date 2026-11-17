@@ -16,9 +16,9 @@
               <UIcon v-else name="i-lucide-receipt" class="size-6 text-dimmed" />
             </span>
             <span class="min-w-0 flex-1">
-              <span class="block text-base font-medium text-highlighted">{{ entry.kind === 'paid' ? 'Paid' : 'Refunded' }} {{ formatTimestamp(entry.created_at, 'en', 'UTC', { month: 'short', day: 'numeric' }) }}</span>
+              <span class="block text-base font-medium text-highlighted">{{ paymentHeadline(entry) }}</span>
               <span class="block truncate text-sm text-muted">{{ entry.organization_name }}</span>
-              <span class="block truncate text-sm text-muted">{{ whenLabel(entry) }}</span>
+              <span class="block truncate text-sm text-muted">{{ paymentWhenLabel(entry) }}</span>
             </span>
             <span class="shrink-0 text-right">
               <span class="block text-base font-medium tabular-nums text-highlighted">{{ paymentMoney(entry.amount, entry.currency) }}</span>
@@ -38,7 +38,7 @@
 import { authClient } from '~/lib/auth-client'
 import { isBuyerPaymentEntry, type BuyerPaymentEntry } from '~/shared/account-activity'
 import { paymentMoney } from '~/shared/payment-display'
-import { formatTimestamp } from '~/utils/timezone'
+import { paymentHeadline, paymentWhenLabel, paymentYearLabel } from '~/shared/account-screen'
 
 definePageMeta({ layout: 'dashboard' })
 useSeoMeta({ title: 'Payments | Blawby', robots: 'noindex, nofollow' })
@@ -51,21 +51,12 @@ const { data, error } = await useAsyncData(
   () => applicationFetch<{ entries: BuyerPaymentEntry[] }>('/api/account/payments', { validate: (value): value is { entries: BuyerPaymentEntry[] } => isRecord(value) && Array.isArray(value.entries) && value.entries.every(isBuyerPaymentEntry) }),
 )
 const entries = computed(() => data.value?.entries ?? [])
-// Airbnb heads the current year "Completed" and each past year by its number.
 const years = computed(() => {
-  const current = String(new Date().getUTCFullYear())
   const groups = new Map<string, BuyerPaymentEntry[]>()
   for (const entry of entries.value.slice(0, shown.value)) {
-    const year = entry.created_at.slice(0, 4)
-    groups.set(year, [...(groups.get(year) ?? []), entry])
+    const label = paymentYearLabel(entry)
+    groups.set(label, [...(groups.get(label) ?? []), entry])
   }
-  return [...groups].map(([year, list]) => ({ label: year === current ? 'Completed' : year, entries: list }))
+  return [...groups].map(([label, list]) => ({ label, entries: list }))
 })
-// "Thủ Đức · Aug 11–Oct 11": what, and the dates of the visit it paid for.
-function whenLabel(entry: BuyerPaymentEntry): string {
-  if (!entry.starts_at || !entry.ends_at || !entry.timezone) return entry.title
-  const start = formatTimestamp(entry.starts_at, 'en', entry.timezone, { month: 'short', day: 'numeric' })
-  const end = formatTimestamp(entry.ends_at, 'en', entry.timezone, { month: 'short', day: 'numeric' })
-  return `${entry.title} · ${start === end ? start : `${start}–${end}`}`
-}
 </script>
