@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       run_auth_canary:
-        description: "Send a real production auth OTP canary"
+        description: "Check production sign-in with the scoped canary credentials"
         required: true
         type: boolean
         default: false
@@ -107,8 +107,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CANARY_BASE_URL: ${{ secrets.CANARY_BASE_URL }}
-          CANARY_PHONE_E164: ${{ secrets.CANARY_PHONE_E164 }}
+          CANARY_BASE_URL: https://blawby.com
+          CANARY_LOGIN_EMAIL: ${{ secrets.CANARY_LOGIN_EMAIL }}
+          CANARY_LOGIN_PASSWORD: ${{ secrets.CANARY_LOGIN_PASSWORD }}
           CANARY_ORG_ID: ${{ secrets.CANARY_ORG_ID }}
         run: |
           set -euo pipefail

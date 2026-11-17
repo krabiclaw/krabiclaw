@@ -26,7 +26,7 @@ registry version or CMS operation is activated by the staging release.
   #1869. Use the same Google web client, Meta app, Apple Services ID and
   Discord app; retain every current callback and verified Stripe, Resend,
   WhatsApp and Channex endpoint. The Instagram callback includes
-  `/api/auth/oauth2/callback/instagram`. There is no Google Calendar inbound
+  `/api/auth/callback/instagram`. There is no Google Calendar inbound
   watch to renew: change ingestion was retired in
   [8093d7cc0](https://github.com/Blawby/blawby/commit/8093d7cc02a9a39d94e9b64d83e8d1c189a608be).
   Check live busy reads and the existing one-way booking event flow.
