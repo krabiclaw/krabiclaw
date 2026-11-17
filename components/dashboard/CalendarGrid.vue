@@ -546,5 +546,5 @@ const realtime = useDashboardInvalidations()
 watch(realtime.event, event => {
   if (homesView && (event?.type === 'stay.changed' || event?.type === 'nights.changed') && !editor.busy.value) void refresh()
 })
-watch(realtime.connectionEpoch, epoch => { if (epoch > 0 && !editor.busy.value) void refresh() })
+watch(realtime.reconnectEpoch, epoch => { if (epoch > 0 && !editor.busy.value) void refresh() })
 </script>

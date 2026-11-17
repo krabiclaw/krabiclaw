@@ -640,7 +640,7 @@ watch(realtime.event, (event) => {
     void refreshDetails()
   }
 })
-watch(realtime.connectionEpoch, epoch => {
+watch(realtime.reconnectEpoch, epoch => {
   if (epoch > 0 && !purchase) void refreshDetails()
 })
 

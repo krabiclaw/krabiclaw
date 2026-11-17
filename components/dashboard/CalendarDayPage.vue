@@ -115,7 +115,7 @@ if (!props.personalScope) {
   watch(realtime.event, event => {
     if (event?.type === 'stay.changed' || event?.type === 'nights.changed') void refresh()
   })
-  watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
+  watch(realtime.reconnectEpoch, epoch => { if (epoch > 0) void refresh() })
 }
 
 const items = computed(() => sessionProduct.value ? calendarSessions!.itemsOn(day.value) : data.value?.items ?? [])
