@@ -18,7 +18,6 @@ import type { PublicLocationDisclosure } from '../../types/public-location'
 import type { StayPhotoRoom } from '../../shared/stay-photos'
 import type { BusinessToday } from '../../shared/dashboard-today'
 import type { StayHomeAccessibility } from '../../shared/stay-accessibility'
-import { formatMinorAmount } from '../../shared/prices'
 import type { TaskSection } from '../../server/domain/tasks'
 import type { ConversationPage } from '../../shared/messages-contract'
 import type { InboxRow } from '../../server/domain/guest-threads/types'
@@ -5167,8 +5166,6 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   expect(read.homes[0]!.nights.map(night => night.price_minor)).toEqual(Array(7).fill(320_000))
 
   const gridPath = `/dashboard/${slug}/calendar?view=homes&from=${localDay(1)}`
-  // A free night reads its home's price as the grid formats it: the shared formatter, whole amounts without .00.
-  const gridPrice = (minor: number) => formatMinorAmount(minor, 'THB').replace(/\.00$/, '')
   const grid = page.getByTestId('stay-homes-grid')
   const night = (home: string, offset: number) => grid.locator(`div[role="rowheader"]:has([data-home="${home}"]) + div [data-night="${localDay(offset)}"]`)
   const inspector = page.getByTestId('stay-night-inspector')
@@ -5179,7 +5176,8 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   // A bar leads with its channel's mark and counts adults and children as guests.
   await expect(grid.locator(`[data-stay="${stayIds[0]}"]`)).toHaveText('Grid Guest · 1 guest')
   await expect(grid.locator(`[data-stay="${stayIds[0]}"]`)).toHaveAttribute('data-channel', 'direct')
-  await expect(night(bay, 3).getByText(gridPrice(320_000), { exact: true })).toBeVisible()
+  await expect(night(bay, 3).getByText('฿3,200', { exact: true })).toBeVisible()
+  await expect(night(bay, 3)).toHaveAttribute('aria-label', /THB\s3,200\.00/)
   await expect(night(bay, 3).getByText('1', { exact: true })).toBeVisible()
   await expect(night(sea, 3).getByText('21', { exact: true })).toBeVisible()
   // The grid scrolls inside itself; the phone page does not scroll sideways.
@@ -5331,8 +5329,8 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   const unchecked = await nightsAt(productId, 10, 17)
   expect(unchecked).toHaveLength(7)
   expect(unchecked.every(entry => entry.source === null)).toBe(true)
-  await expect(night(bay, 12).getByText(gridPrice(288_000), { exact: true })).toBeVisible()
-  await expect(night(sea, 12).getByText(gridPrice(180_000), { exact: true })).toBeVisible()
+  await expect(night(bay, 12).getByText('฿2,880', { exact: true })).toBeVisible()
+  await expect(night(sea, 12).getByText('฿1,800', { exact: true })).toBeVisible()
   await grid.getByRole('checkbox', { name: 'Include Sea Loft', exact: true }).click()
   await expect(inspector.getByRole('button', { name: /^Nightly price for selected dates/ })).toContainText('2,880')
   await expect(inspector.getByText(/^Default nightly price:/)).toContainText('3,200')

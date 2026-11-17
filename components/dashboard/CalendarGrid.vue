@@ -69,8 +69,12 @@
                   :aria-selected="inSelection(rowIndex, index)"
                   :aria-label="cell.title"
                   :tabindex="cursor.row === rowIndex && cursor.day === index ? 0 : -1"
-                  class="relative flex min-h-16 flex-col justify-end border-r border-default px-1.5 py-1 text-left text-xs leading-4 tabular-nums sm:min-h-18 outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inverted"
-                  :class="[cell.open ? 'bg-default text-highlighted' : 'bg-elevated/60 text-muted', inSelection(rowIndex, index) && !chosenWeekday(cell.date) ? 'text-dimmed' : '']"
+                  class="relative flex flex-col justify-end border-r border-default px-1.5 text-left text-xs leading-4 tabular-nums outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inverted"
+                  :class="[
+                    row.home ? 'min-h-19 pb-2 pt-8 sm:min-h-22 sm:pt-10' : 'min-h-16 py-1 sm:min-h-18',
+                    cell.open ? 'bg-default text-highlighted' : 'bg-elevated/60 text-muted',
+                    inSelection(rowIndex, index) && !chosenWeekday(cell.date) ? 'text-dimmed' : '',
+                  ]"
                   :style="{ gridRow: 1, gridColumn: index + 1 }"
                   :title="cell.title"
                   :data-night="cell.date"
@@ -79,9 +83,14 @@
                   @keydown="keydown($event, rowIndex, index)"
                   @focus="cursor = { row: rowIndex, day: index }"
                 >
-                  <UIcon v-if="cell.mark" :name="CHANNEL_MARKS[cell.mark]" class="absolute right-1 top-1 size-3" :class="cell.mark === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-homes-channel-${cell.mark}`" aria-hidden="true" />
-                  <StayNightMinimum v-if="cell.minimum !== undefined" :nights="cell.minimum" aria-hidden="true" :class="cell.label ? 'mb-0.5' : 'mb-[1.125rem]'" />
-                  <span v-if="cell.label" class="truncate" :class="cell.strike ? 'line-through' : ''">{{ cell.label }}</span>
+                  <span v-if="cell.minimum !== undefined" class="flex min-h-9 w-full flex-col items-start gap-1">
+                    <span class="flex w-full items-center justify-between gap-1">
+                      <StayNightMinimum :nights="cell.minimum" aria-hidden="true" />
+                      <UIcon v-if="cell.mark" :name="CHANNEL_MARKS[cell.mark]" class="size-3 shrink-0" :class="cell.mark === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-homes-channel-${cell.mark}`" aria-hidden="true" />
+                    </span>
+                    <span v-if="cell.label" class="max-w-full break-all text-[11px] font-medium leading-3.5" :class="cell.strike ? 'line-through' : ''">{{ cell.label }}</span>
+                  </span>
+                  <span v-else-if="cell.label" class="truncate" :class="cell.strike ? 'line-through' : ''">{{ cell.label }}</span>
                 </button>
                 <div
                   v-for="(piece, pieceIndex) in pills(rowIndex)"
@@ -158,8 +167,8 @@ import type { Place, PlaceDay } from '~/server/domain/places'
 import { MAX_STAY_NIGHTS, STAY_CALENDAR_DAYS, STAY_CHANNEL_COLORS, STAY_CHANNEL_LABELS, parseStayCalendarRules, type StayChannel } from '~/shared/bookings'
 import { bookingConversationOrRecordPath } from '~/shared/messages-contract'
 import ChannelMark from '~/lib/components/workspace/messages/ChannelMark.vue'
-import { isCurrencyCode } from '~/shared/currencies'
-import { formatMinorAmount } from '~/shared/prices'
+import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
+import { formatMinorAmount, minorAmountToMajor } from '~/shared/prices'
 import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidTimezone } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 import { CHANNEL_MARKS, channelNote, isBookedNight, isPlaceDay, isStayNight, nightMinimumLabel, nightWeekday, placeDaySource, stayNightSource, useStayNightEditor } from '~/composables/useStayNightEditor'
@@ -299,9 +308,14 @@ const homeRows = computed<GridRow[]>(() => {
           title: stay ? `${[label, ...(stay.channel ? [STAY_CHANNEL_LABELS[stay.channel]] : [])].join(' · ')} · ${formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric' })}` : label })
       })
       const gaps = unbookableGaps(nights)
+      const compactPrice = new Intl.NumberFormat('en-US', {
+        style: 'currency', currency: home.currency, currencyDisplay: 'narrowSymbol',
+        minimumFractionDigits: 0, maximumFractionDigits: currencyFractionDigits(home.currency),
+      })
       const cells = nights.map((night, index): GridCell => ({
         date: night.date, open: night.available, held: isBookedNight(night), strike: night.closed, minimum: night.min_stay_arrival, mark: channelState(night),
-        label: isBookedNight(night) ? '' : price(home, night), title: nightTitle(home, night, gaps.get(index)?.text),
+        label: isBookedNight(night) ? '' : night.price_minor === null ? 'No price' : compactPrice.format(Number(minorAmountToMajor(night.price_minor, home.currency))),
+        title: nightTitle(home, night, gaps.get(index)?.text),
       }))
       return { id: home.product_id, name: home.internal_name, detail: addressOf(home), to: homeTo(home.product_id), cells, bars, gaps, home, nights }
     })
@@ -341,15 +355,13 @@ function unbookableGaps(nights: StayNight[]) {
 }
 
 const windowLabel = computed(() => `${formatCalendarDate(from.value, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(dates.value.at(-1)!, 'en', { month: 'short', day: 'numeric', year: 'numeric' })}`)
-// Each home's own currency, as the night inspector shows it: a Krabi villa and a
-// Santa Monica studio sit in the same grid, so a bare number would mislead.
-const price = (home: Home, night: StayNight) => night.price_minor === null ? 'No price' : formatMinorAmount(night.price_minor, home.currency).replace(/\.00$/, '')
 /** A night the channel has not confirmed: still queued for it, or refused and needing review. */
 const channelState = (night: StayNight) => night.channel?.state === 'pending' || night.channel?.state === 'needs_review' ? night.channel.state : null
 function nightTitle(home: Home, night: StayNight, gap?: string) {
   const state = night.booking_id ? 'Booked' : night.closed ? 'Blocked' : 'Available'
   const note = channelNote(night)
-  return `${home.internal_name} · ${formatCalendarDate(night.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${state} · ${price(home, night)} · ${nightMinimumLabel(night.min_stay_arrival)}${gap ? ` · ${gap}` : ''}${note ? ` · ${note}` : night.channel?.state === 'pushed' ? ' · On Airbnb' : ''}`
+  const price = night.price_minor === null ? 'No price' : formatMinorAmount(night.price_minor, home.currency)
+  return `${home.internal_name} · ${formatCalendarDate(night.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${state} · ${price} · ${nightMinimumLabel(night.min_stay_arrival)}${gap ? ` · ${gap}` : ''}${note ? ` · ${note}` : night.channel?.state === 'pushed' ? ' · On Airbnb' : ''}`
 }
 function homeTo(productId: string, date?: string) {
   return { path: `/dashboard/${orgSlug}/calendar`, query: { product_id: productId, ...(date ? { month: date.slice(0, 7), date } : {}) } }
