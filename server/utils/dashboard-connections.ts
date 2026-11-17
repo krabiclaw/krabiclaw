@@ -67,12 +67,13 @@ export async function connectionRows(
           : state && state.state !== 'disabled' && state.state !== 'not_connected' ? 'success' : 'neutral'
     const description = locked ? `Included with ${planLabel(plan)}`
       : item.key === 'google-maps' ? maps.length ? `${mapped} of ${maps.length} ${maps.length === 1 ? 'location' : 'locations'} connected` : 'No locations yet'
+        : item.key === 'vrbo' ? 'Manage listings'
         : state?.state === 'error' ? [state.name, 'Needs attention'].filter(Boolean).join(' · ')
           : state?.state === 'needs_review' ? 'Needs review'
             : state?.state === 'disabled' || state?.state === 'not_connected' ? 'Not connected' : state?.name ?? (state ? 'Connected' : 'Not connected')
     return {
       id: item.key, label: item.name, summary: description, status, group: item.group, plan, icon: item.logo,
-      to: `${base}/${item.key}`, native: item.key === 'airbnb' ? 'airbnb-connections' : 'connection', query: { integration: item.key },
+      to: `${base}/${item.key}`, native: item.key === 'airbnb' || item.key === 'vrbo' ? `${item.key}-connections` : 'connection', query: { integration: item.key },
     }
   })
   if (features.includes('stays') && await roleAllows({ ...organization, permissions: { operations: ['update'] } })) {
