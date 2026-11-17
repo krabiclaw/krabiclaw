@@ -1,19 +1,14 @@
 import { HTTPError } from 'nitro'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { publishAccessInvalidation, publishConversationEvent, publishDashboardInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
-import { conversationAccessDenied, currentParticipantSql, CURRENT_GUEST_SQL } from '~/server/domain/conversations'
+import { conversationAccessDenied, conversationProductSql, currentParticipantSql, CURRENT_GUEST_SQL } from '~/server/domain/conversations'
 import { hashIdentifier } from '~/server/utils/hourly-rate-limit'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 
 const OWNER_ROLE = "((',' || replace(m.role, ' ', '') || ',') LIKE '%,owner,%')"
 const GUEST_THREAD = "c.kind IN ('contact', 'booking')"
 
-/** A channel conversation belongs to the listing where the guest booked. */
-const listingOfConversation = `COALESCE(
-  (SELECT b.product_id FROM bookings b WHERE b.organization_id = c.organization_id
-    AND b.id = c.booking_id AND b.product_session_id IS NULL),
-  (SELECT t.product_id FROM channel_threads t WHERE t.organization_id = c.organization_id AND t.conversation_id = c.id)
-)`
+const listingOfConversation = conversationProductSql('c')
 
 /** Runs immediately after conversation creation in the same batch. */
 export function initialConversationParticipants(conversationId: string, organizationId: string): BatchQuery {
@@ -82,7 +77,7 @@ export function linkGuestConversationSeats(from: string, to: string): BatchQuery
 
 export function reconcileGuestListingParticipants(organizationId: string, scope: BatchQuery): BatchQuery[] {
   return [{
-    query: `DELETE FROM conversation_participants WHERE host_listing_id IS NOT NULL
+    query: `UPDATE conversation_participants SET role = NULL, host_listing_id = NULL WHERE host_listing_id IS NOT NULL
       AND EXISTS (SELECT 1 FROM conversations c WHERE c.id = conversation_participants.conversation_id
         AND c.organization_id = conversation_participants.organization_id AND c.organization_id = ? AND ${GUEST_THREAD} AND (${scope.query})
         AND conversation_participants.host_listing_id IS NOT ${listingOfConversation})`,
@@ -132,7 +127,7 @@ export async function setListingMessagingAccess(db: DbClient, env: GuestInboxPub
     query: 'INSERT INTO listing_message_members (organization_id, listing_id, member_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING',
     params: grant,
   }, ...reconcileGuestListingParticipants(organizationId, selector)] : [{
-    query: "DELETE FROM conversation_participants WHERE organization_id = ? AND host_listing_id = ? AND user_id = ? AND role = 'member'",
+    query: "UPDATE conversation_participants SET role = NULL, host_listing_id = NULL WHERE organization_id = ? AND host_listing_id = ? AND user_id = ? AND role = 'member'",
     params: [organizationId, input.listingId, subject.user_id],
   }, {
     query: 'DELETE FROM listing_message_members WHERE organization_id = ? AND listing_id = ? AND member_id = ?',

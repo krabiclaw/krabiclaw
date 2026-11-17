@@ -93,6 +93,10 @@ test('a table booking opens with its own message and the guest note, written onc
     await db.batch([booker, traveler].map(user => db.prepare(`INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt)
       VALUES (?, ?, ?, 1, 0, 0)`).bind(user.id, user.name, user.email)))
     await reservation('shared', 'Private booking note', sentence, booker.id)
+    await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-booker', ?, ?, 'admin', 0)").bind(ORG, booker.id).run()
+    const workspace = await listConversations(db, ORG, { userId: booker.id })
+    assert(workspace.some(row => row.id === 'new'))
+    assert(!workspace.some(row => row.id === 'shared'), 'an admin’s own reservation stays in their guest inbox')
     const companionInvite = { conversationId: 'shared', email: traveler.email }
     const invite = await createConversationGuestInvite(db, { organizationId: ORG, userId: booker.id }, companionInvite)
     const publication = { GUEST_INBOX_HUBS: { idFromName: () => 'hub', get: () => ({ fetch: () => Promise.resolve(new Response(null, { status: 204 })) }) } } as unknown as Parameters<typeof acceptConversationGuestInvite>[1]
@@ -132,6 +136,7 @@ test('a table booking opens with its own message and the guest note, written onc
     assert.equal(await guestUnread(db, traveler.id), 0)
     assert.deepEqual((await list()).map(row => [row.preview, row.preview_from, row.unread]), [['I will be there', 'You', false]])
     const original = await page(booker.id)
+    assert.equal(original.viewer_role, 'guest')
     assert.equal(original.conversation.booking_id, 'res-shared')
     assert.equal(original.page.newest, latestPayment.sequence)
     assert(original.entries.some(entry => entry.type === 'message' && entry.body === sentence))

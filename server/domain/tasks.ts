@@ -5,7 +5,7 @@ import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, t
 import { assertRoleAllows, assignedMemberSql, locationMemberSql, roleAllows, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
 import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { publishBusinessInvalidation, publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
-import { messageQueries, participantGuard } from '~/server/domain/conversations'
+import { conversationMemberSql, messageQueries, participantGuard } from '~/server/domain/conversations'
 import { firstName } from '~/server/domain/guest-threads/presentation'
 import { bookingEditorPath, guestConversationPath } from '~/server/utils/dashboard-links'
 import { ownerPicture } from '~/server/notifications/hero'
@@ -820,7 +820,7 @@ export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
         CASE WHEN b.id IS NULL THEN NULL WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS booking_unit, b.party_size,
         json_extract(r.payload_json, '$.guest.name') AS guest_name, p.kind AS product_kind, COALESCE(sc.internal_name, p.name) AS product_name, l.title AS location_title,
         r.id AS guest_conversation_id,
-        EXISTS (SELECT 1 FROM conversation_participants seat WHERE seat.conversation_id = r.id AND seat.user_id = ${viewer.user} AND seat.role = 'member') AS viewer_seated,
+        ${conversationMemberSql('r', viewer.user)} AS viewer_seated,
         (SELECT c.id FROM conversations c JOIN conversation_participants seat ON seat.conversation_id = c.id AND seat.user_id = ${viewer.user} AND seat.role = 'member'
           WHERE c.organization_id = x.organization_id AND c.kind = 'team' AND c.booking_id = x.booking_id
             AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.author_kind = 'krabiclaw' AND instr(json_extract(m.payload_json, '$.key'), 'job:' || x.id || ':') = 1)

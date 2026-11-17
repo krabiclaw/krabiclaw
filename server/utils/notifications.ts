@@ -58,7 +58,7 @@ import { buildOwnerThreadInboxUrl, buildBuyerRequestActivityUrl, dashboardOrigin
 import { insightsPath, reviewEditorPath } from '~/server/utils/dashboard-links'
 import { bookingConversationOrRecordPath } from '~/shared/messages-contract'
 import { createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isDeliverySent, recordDeliveryOutcome, type DeliverySubject } from '~/server/domain/guest-threads/deliveries'
-import { GUEST_NOTE_EVENT, appendMessage, findMessageByDedupeKey, getMessage, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
+import { GUEST_NOTE_EVENT, appendMessage, findMessageByDedupeKey, getMessage, guestConversationMemberSql, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
 import { listMessagePhotos, messagePreview } from '~/server/domain/guest-threads/attachments'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import type { GuestThreadDeliveryPurpose, GuestThreadDeliveryRow } from '~/server/domain/guest-threads/types'
@@ -800,8 +800,9 @@ export async function notifyOwner(
   if (isScheduleNotification(opts.template)) {
     if (!bookingRecordId) throw new Error(`Schedule notification ${opts.template} has no booking destination`)
     const destination = await queryFirst<{ slug: string; seats: string }>(db, `SELECT slug,
-      (SELECT json_group_array(seat.user_id) FROM conversation_participants seat
-       WHERE seat.organization_id = organization.id AND seat.conversation_id = ? AND seat.role = 'member') AS seats
+      (SELECT json_group_array(m.userId) FROM conversations c
+       JOIN member m ON m.organizationId = c.organization_id
+       WHERE c.organization_id = organization.id AND c.id = ? AND ${guestConversationMemberSql('c', 'm')}) AS seats
       FROM organization WHERE id = ?`, [conversationId, opts.organizationId])
     if (!destination) throw destinationUnavailable('organization_id', opts.organizationId)
     schedule = { slug: destination.slug, seats: new Set(JSON.parse(destination.seats) as string[]), bookingId: bookingRecordId }

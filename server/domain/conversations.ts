@@ -7,6 +7,7 @@ import type { GuestThreadDeliveryChannel, GuestThreadDeliveryProvider, GuestThre
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { ConversationParticipant } from '~/shared/messages-contract'
 import { PUBLISHED_PROFILE_SQL } from '~/shared/member-scheduling'
+import { workspaceGuestMessagingRoles } from '~/utils/organization-access'
 
 /**
  * Conversations, as Slack and Discord have them (docs/domain-model.md): a
@@ -47,7 +48,8 @@ export function conversationParticipantsSql(conversation: string, viewerRole: st
       LEFT JOIN member m ON m.organizationId = seat.organization_id AND m.userId = seat.user_id
       LEFT JOIN member_scheduling ms ON ms.organization_id = seat.organization_id AND ms.member_id = m.id
       WHERE seat.organization_id = ${conversation}.organization_id AND seat.conversation_id = ${conversation}.id
-        AND (seat.role = 'guest' OR (seat.role = 'member' AND m.id IS NOT NULL))
+        AND (seat.role = 'guest' OR (seat.role = 'member' AND m.id IS NOT NULL
+          AND (${conversation}.kind = 'team' OR ${guestConversationMemberSql(conversation, 'm')})))
       ORDER BY seat.role, seat.created_at, seat.user_id`
 }
 
@@ -182,13 +184,17 @@ export async function readConversation(db: DbClient, organizationId: string, con
 /** A person's read position and archive in one conversation. */
 export interface ConversationGuard { sql: string; params: unknown[] }
 
+const FORWARD_READ_POSITION_SQL = `(SELECT sequence FROM messages WHERE id = excluded.last_read_message_id)
+  > COALESCE((SELECT sequence FROM messages WHERE id = conversation_participants.last_read_message_id), 0)`
+
 function updateParticipant(input: { conversationId: string; organizationId: string; userId: string; set: 'last_read_message_id' | 'archived_at'; value: string | null; guard?: ConversationGuard }): BatchQuery {
   const guard = input.guard ?? participantGuard('c', input.userId)
   return {
-    query: `UPDATE conversation_participants SET ${input.set} = ?
-      WHERE user_id = ? AND conversation_id = ? AND organization_id = ?
-        AND EXISTS (SELECT 1 FROM conversations c WHERE c.id = conversation_participants.conversation_id AND ${guard.sql})`,
-    params: [input.value, input.userId, input.conversationId, input.organizationId, ...guard.params],
+    query: `INSERT INTO conversation_participants (conversation_id, organization_id, user_id, ${input.set})
+      SELECT c.id, c.organization_id, ?, ? FROM conversations c
+      WHERE c.id = ? AND c.organization_id = ? AND ${guard.sql}
+      ON CONFLICT (conversation_id, user_id) DO UPDATE SET ${input.set} = excluded.${input.set}`,
+    params: [input.userId, input.value, input.conversationId, input.organizationId, ...guard.params],
   }
 }
 
@@ -249,9 +255,11 @@ export function messageQueries(input: MessageInput): { id: string; dedupeKey: st
   }]
   if (input.authorUserId && input.authorKind !== 'krabiclaw') {
     queries.push({
-      query: `UPDATE conversation_participants SET last_read_message_id = ?
-        WHERE user_id = ? AND conversation_id = ? AND ${written}`,
-      params: [id, input.authorUserId, input.conversationId, id],
+      query: `INSERT INTO conversation_participants (conversation_id, organization_id, user_id, last_read_message_id)
+        SELECT conversation_id, organization_id, ?, id FROM messages WHERE id = ?
+        ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_message_id = excluded.last_read_message_id
+        WHERE ${FORWARD_READ_POSITION_SQL}`,
+      params: [input.authorUserId, id],
     })
   }
   return { id, dedupeKey, queries }
@@ -420,13 +428,13 @@ export function parseMessagePayload(message: Pick<MessageRow, 'payload_json'>): 
 export function readThroughQuery(input: { conversationId: string; organizationId: string; userId: string; messageId: string; guard?: ConversationGuard; now: string }): BatchQuery {
   const guard = input.guard ?? participantGuard('c', input.userId)
   return {
-    query: `UPDATE conversation_participants AS reader SET last_read_message_id = ?
-      WHERE reader.user_id = ? AND reader.conversation_id = ? AND reader.organization_id = ?
-        AND EXISTS (SELECT 1 FROM messages m JOIN conversations c ON c.id = m.conversation_id
-          WHERE m.id = ? AND m.conversation_id = reader.conversation_id AND ${guard.sql}
-            AND (reader.role = 'member' OR ${guestVisibleSql('m', 'c.user_id = reader.user_id')})
-            AND m.sequence > COALESCE((SELECT sequence FROM messages WHERE id = reader.last_read_message_id), 0))`,
-    params: [input.messageId, input.userId, input.conversationId, input.organizationId, input.messageId, ...guard.params],
+    query: `INSERT INTO conversation_participants (conversation_id, organization_id, user_id, last_read_message_id)
+      SELECT c.id, c.organization_id, ?, m.id FROM messages m
+      JOIN conversations c ON c.id = m.conversation_id AND c.organization_id = m.organization_id
+      WHERE m.id = ? AND c.id = ? AND c.organization_id = ? AND ${guard.sql} AND ${viewerMessageVisibility('m', 'c')}
+      ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_message_id = excluded.last_read_message_id
+      WHERE ${FORWARD_READ_POSITION_SQL}`,
+    params: [input.userId, input.messageId, input.conversationId, input.organizationId, ...guard.params, input.userId],
   }
 }
 
@@ -476,18 +484,53 @@ export function archiveQuery(input: { organizationId: string; conversationId: st
 export const guestConversationSql = (alias: string) => `${alias}.kind IN ('contact', 'booking')`
 export type ParticipantRole = 'guest' | 'member'
 
-/** The seat is the grant. A staff seat requires a current Better Auth membership. */
+const guestReplyRoles = JSON.stringify(workspaceGuestMessagingRoles)
+
+/** The current booking product or the channel's home for a guest who has not booked. */
+export function conversationProductSql(conversation: string): string {
+  return `COALESCE(
+    (SELECT b.product_id FROM bookings b WHERE b.organization_id = ${conversation}.organization_id AND b.id = ${conversation}.booking_id),
+    (SELECT t.product_id FROM channel_threads t WHERE t.organization_id = ${conversation}.organization_id
+      AND t.conversation_id = ${conversation}.id AND ${conversation}.booking_id IS NULL)
+  )`
+}
+
+/** Staff access to guest conversations follows current membership and responsibility or a listing grant. */
+export function guestConversationMemberSql(conversation: string, member: string): string {
+  const product = conversationProductSql(conversation)
+  return `(${guestConversationSql(conversation)} AND ${member}.organizationId = ${conversation}.organization_id
+    AND NOT EXISTS (SELECT 1 FROM conversation_participants guest
+      WHERE guest.conversation_id = ${conversation}.id AND guest.organization_id = ${conversation}.organization_id
+        AND guest.user_id = ${member}.userId AND guest.role = 'guest')
+    AND (EXISTS (SELECT 1 FROM json_each('${guestReplyRoles}') allowed
+          WHERE instr(',' || replace(${member}.role, ' ', '') || ',', ',' || allowed.value || ',') > 0)
+      OR EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.organization_id = ${conversation}.organization_id
+          AND cfg.product_id = ${product} AND cfg.assigned_member_id = ${member}.id)
+      OR EXISTS (SELECT 1 FROM listing_message_members grant WHERE grant.organization_id = ${conversation}.organization_id
+          AND grant.listing_id = ${product} AND grant.member_id = ${member}.id)))`
+}
+
+/** An explicit roster seat for staff requires a current Better Auth membership. */
 export const currentParticipantSql = (seat: string) => `(${seat}.role = 'guest' OR (${seat}.role = 'member'
   AND EXISTS (SELECT 1 FROM member m WHERE m.organizationId = ${seat}.organization_id AND m.userId = ${seat}.user_id)))`
 
+/** Workspace access for a trusted SQL expression naming the authenticated user. */
+export function conversationMemberSql(conversation: string, userExpression: string): string {
+  return `EXISTS (SELECT 1 FROM member staff WHERE staff.organizationId = ${conversation}.organization_id AND staff.userId = ${userExpression}
+    AND (${guestConversationMemberSql(conversation, 'staff')} OR (${conversation}.kind = 'team'
+      AND EXISTS (SELECT 1 FROM conversation_participants seat
+        WHERE seat.conversation_id = ${conversation}.id AND seat.organization_id = staff.organizationId
+          AND seat.user_id = staff.userId AND seat.role = 'member'))))`
+}
+
 export function participantGuard(alias: string, userId: string, role?: ParticipantRole): { sql: string; params: string[] } {
-  return {
-    sql: `EXISTS (SELECT 1 FROM conversation_participants seat
-      WHERE seat.conversation_id = ${alias}.id AND seat.organization_id = ${alias}.organization_id AND seat.user_id = ?
-        ${role ? 'AND seat.role = ?' : ''}
-        AND ${currentParticipantSql('seat')})`,
-    params: role ? [userId, role] : [userId],
-  }
+  const guest = `(${alias}.kind <> 'team' AND EXISTS (SELECT 1 FROM conversation_participants seat
+    WHERE seat.conversation_id = ${alias}.id AND seat.organization_id = ${alias}.organization_id
+      AND seat.user_id = ? AND seat.role = 'guest'))`
+  if (role === 'guest') return { sql: guest, params: [userId] }
+  const member = conversationMemberSql(alias, '?')
+  if (role === 'member') return { sql: member, params: [userId] }
+  return { sql: `(${guest} OR ${member})`, params: [userId, userId] }
 }
 
 export function conversationAccessSql(alias: string, principal: Pick<MemberAccessPrincipal, 'userId'>): ConversationGuard {
@@ -517,15 +560,17 @@ export type ConversationAccessRow = ConversationRow & {
 }
 
 export function conversationAccessQuery(userId: string, conversationId: string, organizationId?: string): BatchQuery {
+  const member = `(membership.id IS NOT NULL AND (${guestConversationMemberSql('c', 'membership')}
+    OR (c.kind = 'team' AND seat.role = 'member')))`
   return { query: `
-    SELECT c.*, seat.role AS viewer_role, reader.sequence AS read_through, membership.id AS member_id, membership.role AS member_role
-    FROM conversation_participants seat JOIN conversations c ON c.id = seat.conversation_id AND c.organization_id = seat.organization_id
-    LEFT JOIN member membership ON seat.role = 'member' AND membership.organizationId = seat.organization_id AND membership.userId = seat.user_id
+    SELECT c.*, CASE WHEN seat.role = 'guest' THEN 'guest' ELSE 'member' END AS viewer_role, reader.sequence AS read_through,
+      membership.id AS member_id, membership.role AS member_role
+    FROM conversations c
+    LEFT JOIN conversation_participants seat ON seat.conversation_id = c.id AND seat.organization_id = c.organization_id AND seat.user_id = ?
+    LEFT JOIN member membership ON seat.role IS NOT 'guest' AND membership.organizationId = c.organization_id AND membership.userId = ?
     LEFT JOIN messages reader ON reader.id = seat.last_read_message_id AND reader.conversation_id = c.id
-    WHERE seat.conversation_id = ? AND seat.user_id = ?
-      AND ((seat.role = 'guest' AND c.kind <> 'team') OR membership.id IS NOT NULL)
-      ${organizationId === undefined ? '' : "AND c.organization_id = ? AND seat.role = 'member'"}`,
-  params: organizationId === undefined ? [conversationId, userId] : [conversationId, userId, organizationId] }
+    WHERE c.id = ? AND ${organizationId === undefined ? `((seat.role = 'guest' AND c.kind <> 'team') OR ${member})` : `c.organization_id = ? AND ${member}`}`,
+  params: organizationId === undefined ? [userId, userId, conversationId] : [userId, userId, conversationId, organizationId] }
 }
 
 export function conversationAccessFromRow(row: ConversationAccessRow | undefined, userId: string) {
