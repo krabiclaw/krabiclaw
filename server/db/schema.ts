@@ -1642,6 +1642,9 @@ export const organization_integrations = sqliteTable("organization_integrations"
 export const channex_connections = sqliteTable("channex_connections", {
 	organization_id: text().primaryKey().references(() => organization.id, { onDelete: "cascade" }),
 	status: text().$type<'not_connected' | 'authorizing' | 'connected' | 'disconnecting'>().notNull(),
+	// Unread since #1916; dropped, with needs_review below, by the release after the Worker that stopped using them is live.
+	operation_id: text(),
+	pending_step: text(),
 	group_id: text(),
 	setup_property_id: text(),
 	state_hash: text(),
@@ -1656,7 +1659,7 @@ export const channex_connections = sqliteTable("channex_connections", {
 }, (table) => [
 	uniqueIndex("channex_connections_group_unique").on(table.group_id).where(sql`group_id IS NOT NULL`),
 	uniqueIndex("channex_connections_channel_unique").on(table.channel_id).where(sql`channel_id IS NOT NULL`),
-	check("channex_connections_status_check", sql`status IN ('not_connected', 'authorizing', 'connected', 'disconnecting')`),
+	check("channex_connections_status_check", sql`status IN ('not_connected', 'authorizing', 'connected', 'disconnecting', 'needs_review')`),
 	check("channex_connections_connected_check", sql`status <> 'connected' OR (channel_id IS NOT NULL AND group_id IS NOT NULL AND connected_at IS NOT NULL)`),
 	check("channex_connections_authorizing_check", sql`status <> 'authorizing' OR (authorization_url IS NOT NULL AND state_hash IS NOT NULL AND authorization_expires_at IS NOT NULL AND authorization_title IS NOT NULL)`),
 	check("channex_connections_instants_check", sql`(authorization_expires_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', authorization_expires_at, '+0 days') IS authorization_expires_at) AND (connected_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', connected_at, '+0 days') IS connected_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),

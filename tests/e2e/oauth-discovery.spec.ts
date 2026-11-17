@@ -29,9 +29,10 @@ test.describe('OAuth discovery endpoints', () => {
     const challenge = probe.headers()['www-authenticate']!
     expect(challenge).toContain('Bearer')
     const resourceMetadata = challenge.match(/resource_metadata="([^"]+)"/)?.[1]
-    expect(new URL(resourceMetadata!).pathname).toBe('/.well-known/oauth-protected-resource')
+    // RFC 9728: the metadata for the /api/mcp resource sits at the path-suffixed well-known URL.
+    expect(new URL(resourceMetadata!).pathname).toBe('/.well-known/oauth-protected-resource/api/mcp')
 
-    const protectedResource = await request.get(`${baseURL}/.well-known/oauth-protected-resource`)
+    const protectedResource = await request.get(resourceMetadata!)
     expect(protectedResource.status()).toBe(200)
     const resourceBody = await protectedResource.json() as { resource: string; authorization_servers: string[]; bearer_methods_supported: string[] }
     expect(resourceBody.resource).toBe(`${baseURL}/api/mcp`)
