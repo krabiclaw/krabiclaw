@@ -6,7 +6,7 @@ import { oncePerRequest } from '~/server/utils/request-scope'
 import type { H3Event } from 'nitro';
 import {  setHeader } from 'nitro/h3';
 import { cloudflareEnv } from '~/server/utils/api-response'
-import { executeBatch, queryAll, queryFirst, type BatchQuery } from '~/server/db'
+import { executeBatch, queryAll, type BatchQuery } from '~/server/db'
 import { buildPublicResourceCacheKey, getPublicResourceCache, putPublicResourceCache } from '~/server/utils/public-resource-cache'
 import { loadPublicBase } from '~/server/utils/public-base'
 import { appendPublicShellQueries, buildPublicShellPayload } from '~/server/utils/public-shell-query'
@@ -18,8 +18,7 @@ import { previewSecretOf, resolvePreviewAuthorization } from '~/server/utils/pre
 import { isNonProductionHost } from '~/server/utils/tenant-hosts'
 import { recordRequestPhase } from '~/server/utils/request-metrics'
 import { isPublicShellPayload } from '~/utils/public-resource-contracts'
-import { assertExactCanonicalLocale, assertPublicOrganizationLanguage } from '~/server/utils/localization'
-import { getSourceLocale } from '~/server/utils/organization-locales'
+import { assertExactCanonicalLocale, assertPublicOrganizationLanguage, getPersistedSourceLocale } from '~/server/utils/localization'
 import { isLegalPracticeSite } from '~/utils/site-routing'
 import {
   indexStoredPublicLocalizations,
@@ -85,10 +84,11 @@ export async function loadPublicShellSource(
     setHeader(event, 'x-bootstrap-cache', useCache ? 'NO-KV' : 'SKIP')
   }
 
-  const [{ organization }, sourceLocale] = await Promise.all([
+  const [{ organization }, source] = await Promise.all([
     loadPublicBase(event, organizationId, { previewAuthorized }),
-    getSourceLocale(db, organizationId),
+    getPersistedSourceLocale(db, organizationId),
   ])
+  const sourceLocale = source.locale
   const shellQueries: BatchQuery[] = []
   const shellIndexes = appendPublicShellQueries(shellQueries, organization.id, previewAuthorized && organization.vertical === 'restaurant')
   // The language, the shell rows and the bookable experiences depend on the
@@ -100,20 +100,15 @@ export async function loadPublicShellSource(
     sourceConsultation,
     sourceCompliance,
     publishedPages,
-    verification,
     localizedRows,
   ] = await Promise.all([
-    assertPublicOrganizationLanguage(db, organization.id, locale ?? sourceLocale),
+    assertPublicOrganizationLanguage(db, organization.id, locale ?? sourceLocale, source),
     executeBatch(db, shellQueries),
     listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, env }),
     // Only a legal practice books consultations; a venue's site has no schedule page.
     isLegalPracticeSite({ themeId: organization.theme_id, vertical: organization.vertical }) ? getOptionalPublicConsultationSettings(db, organization.id) : null,
     getPublicCompliance(db, organization.id),
     listPublishedTenantPagePaths(db, organization.id, locale ?? sourceLocale),
-    queryFirst<{ token: string | null }>(db, `
-      SELECT (SELECT i.verification_token FROM organization_integrations i WHERE i.organization_id = organization.id AND i.provider = 'google_search_console') AS token
-        FROM organization WHERE id = ? LIMIT 1
-    `, [organization.id]),
     locale && locale !== sourceLocale ? queryAll<StoredPublicLocalizationRow>(db, `
       SELECT resource_type, resource_id, locale, values_json, route_path
        FROM ${RESOURCE_LOCALIZATIONS_SQL}
@@ -148,7 +143,6 @@ export async function loadPublicShellSource(
       can_schedule,
       compliance: sourceCompliance,
       page_links,
-      search_console_verification: verification?.token ?? organization.search_console_verification ?? null,
       localizations,
     })),
     count: shellResults[shellIndexes.locations]?.results?.length ?? 0,
