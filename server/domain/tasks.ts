@@ -330,8 +330,10 @@ export function taskScopeSql(alias: string, who: () => ViewerTerms): string {
   return `${alias}.kind IN (SELECT value FROM json_each('${SUPPORTED_TASK_KINDS}')) AND EXISTS (
     SELECT 1 FROM member m WHERE m.id = ${who().member} AND m.organizationId = ${who().organization} AND m.userId = ${who().user}
     AND (${who().organizationWide} = 1
-      OR (${alias}.assigned_member_id = m.id AND ${alias}.kind NOT IN ('message_delivery', 'booking_change', 'booking_review'))
-      OR (${alias}.assigned_member_id IS NULL AND ${alias}.status = 'open' AND ${claimAudienceSql(alias, 'm')})
+      OR (${alias}.claim_role IS NULL AND ${alias}.assigned_member_id = m.id
+        AND ${alias}.kind NOT IN ('message_delivery', 'booking_change', 'booking_review'))
+      OR ((${alias}.assigned_member_id = m.id OR (${alias}.assigned_member_id IS NULL AND ${alias}.status = 'open'))
+        AND ${claimAudienceSql(alias, 'm')})
       OR (${alias}.claim_role IS NULL AND ${roleMatchesSql('m.role', assignedOperationsRoles)}
         AND NOT (${alias}.kind = 'booking_review' AND EXISTS (SELECT 1 FROM bookings b WHERE b.id = ${alias}.subject_id
           AND b.organization_id = ${alias}.organization_id AND b.product_session_id IS NULL))

@@ -186,6 +186,12 @@ for (const [key, role, kind] of [['legal', 'paralegal', 'service'], ['experience
       expect(await persisted.json()).toMatchObject({ task: { notes: 'Private work instructions', assignee: { id: memberships[winner]!.id } } })
       const denied = await users[1 - winner]!.user.get(`${tasks}/${task.id}`)
       expect(denied.status()).toBe(404)
+      const revoked = await request.put(grantsPath, { ...options, data: { member_id: memberships[winner]!.id, access: null } })
+      expect(revoked.status(), await revoked.text()).toBe(200)
+      expect((await users[winner]!.user.get(`${tasks}/${task.id}`)).status()).toBe(404)
+      const afterRevoke = await request.get(`${tasks}/${task.id}`)
+      expect(afterRevoke.status(), await afterRevoke.text()).toBe(200)
+      expect(await afterRevoke.json()).toMatchObject({ task: { assignee: { id: memberships[winner]!.id } } })
 
       const manager = await playwright.request.newContext({ baseURL })
       try {
