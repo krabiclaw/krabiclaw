@@ -84,7 +84,7 @@ export function isReservedTestDomain(email: string): boolean {
 }
 
 /**
- * The From header for mail KrabiClaw sends: the configured sender, with its
+ * The From header for mail Blawby sends: the configured sender, with its
  * display name replaced when the message is sent on a business's behalf.
  * EMAIL_FROM is required; there is no default sender.
  */

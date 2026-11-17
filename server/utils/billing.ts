@@ -132,7 +132,7 @@ function subscriptionMeters(native: Stripe.Subscription): BillingMeterKey[] {
   return BILLING_METER_KEYS.filter(key => native.items.data.some(row => typeof row.price.product !== 'string' && !row.price.product.deleted && row.price.product.metadata.product_family === key))
 }
 
-/** Every plan is monthly: a subscription on any other interval is not one KrabiClaw sells. */
+/** Every plan is monthly: a subscription on any other interval is not one Blawby sells. */
 function billingInterval(value: string | undefined): 'month' | undefined {
   if (value === undefined || value === 'month') return value
   throw new Error(`Subscription billing interval ${value} is not a plan interval`)
@@ -311,7 +311,7 @@ function additionalHomes(included: number, used: number, adding: number): number
 
 /**
  * A homes price as Stripe bills it: the same amount for every live home. Any
- * other shape is not one KrabiClaw sells and fails visibly.
+ * other shape is not one Blawby sells and fails visibly.
  */
 function homePriceMinor(price: Stripe.Price): number {
   const amount = Number(String(price.unit_amount_decimal))

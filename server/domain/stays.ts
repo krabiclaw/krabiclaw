@@ -117,7 +117,7 @@ export interface Stay {
   provider: 'channex' | null
   external_booking_id: string | null
   channel_booking_id: string | null
-  /** The reservation on its channel's host pages, from its confirmation code; null where the channel has none KrabiClaw links to. */
+  /** The reservation on its channel's host pages, from its confirmation code; null where the channel has none Blawby links to. */
   channel_booking_url: string | null
   /** The guest conversation in the inbox; every booking has one. */
   conversation_id: string
@@ -253,7 +253,7 @@ export interface StayHome {
   assigned_member_id: string | null
   /**
    * The channel this home is connected to, if any. null is a home kept only in
-   * KrabiClaw: its night changes go nowhere else. A connected home pushes its
+   * Blawby: its night changes go nowhere else. A connected home pushes its
    * nights; one importing (a draft not yet activated among them) or disconnected does not.
    */
   channel: { provider: 'channex'; status: 'importing' | 'connected' | 'disconnected' } | null
@@ -320,7 +320,7 @@ export interface StayNight {
   closed_to_arrival: boolean
   closed_to_departure: boolean
   source: 'host' | 'import' | null
-  /** What the connected channel last took for this night; null when the home has no channel or the night was never pushed. */
+  /** Delivery status for this night, including a mismatch with current settings. Null when there is no recorded push. */
   channel: { state: 'pending' | 'pushed' | 'needs_review'; detail: string | null } | null
 }
 
@@ -428,7 +428,7 @@ function staysOverlap(stay: Pick<Stay, 'check_in_date' | 'check_out_date'>, from
   return stay.check_in_date < to && stay.check_out_date > from
 }
 
-/** A channel's stay is changed on its channel: refused, linking to the reservation there when KrabiClaw can. */
+/** A channel's stay is changed on its channel: refused, linking to the reservation there when Blawby can. */
 function channelOwned(stay: Stay, state: 'belongs to' | 'is paid through'): never {
   const url = stay.channel_booking_url
   fail(409, 'STAY_NOT_EDITABLE', url ? `This stay ${state} ${STAY_CHANNEL_LABELS[stay.channel]}; change it there: ${url}` : `This stay ${state} its channel; change it there`, undefined, { channel_booking_url: url })
@@ -1424,7 +1424,13 @@ function homeNightsQueries(organization: BatchQuery, products: BatchQuery, from:
         AND (product_id IN (${ids}) OR booked_product_id IN (${ids}))`,
     params: [...organization.params!, ...window.params, ...products.params!, ...products.params!],
   }, ...(channel ? [{
-    query: `SELECT product_id, date, state, detail FROM channel_night_pushes WHERE organization_id = ${org} AND product_id IN (${ids}) AND date >= ? AND date < ?`,
+    query: `SELECT push.product_id, push.date, push.state, push.detail,
+        CASE WHEN mapping.enabled = 1 AND push.state = 'pushed'
+          THEN json_extract(push.sent_json, '$.min_stay_arrival') END AS sent_minimum
+      FROM channel_night_pushes push
+      JOIN product_channel_mappings mapping ON mapping.product_id = push.product_id
+        AND mapping.provider = push.provider AND mapping.organization_id = push.organization_id
+      WHERE push.organization_id = ${org} AND push.product_id IN (${ids}) AND push.date >= ? AND push.date < ?`,
     params: [...organization.params!, ...products.params!, from, to],
   }] : [])]
 }
@@ -1439,15 +1445,15 @@ async function homesOpenNights(db: DbClient, organizationId: string, homes: read
   return homeNightsFrom(homes, await executeBatch(db, homeNightsQueries({ query: '?', params: [organizationId] }, { query: 'SELECT value FROM json_each(?)', params: [d1JsonStringSet(homes.map(home => home.product_id))] }, from, to, false), { operation: 'Read home nights' }), from, to)
 }
 
-/** The nights of each home, from `homeNightsQueries`' results; with the channel statement, each night carries what its channel last took. */
-function homeNightsFrom(homes: ReadonlyArray<Pick<StayHomeCore, 'product_id' | 'min_nights' | 'base_price_minor' | 'calendar_rules'>>, results: Array<{ results: unknown[] }>, from: string, to: string): Array<Array<Omit<StayNight, 'channel'> & Partial<Pick<StayNight, 'channel'>>>> {
+/** The effective nights and claims at each home, with the channel status when requested. */
+function homeNightsFrom(homes: ReadonlyArray<Pick<StayHomeCore, 'product_id' | 'min_nights' | 'base_price_minor' | 'calendar_rules' | 'timezone'>>, results: Array<{ results: unknown[] }>, from: string, to: string): Array<Array<Omit<StayNight, 'channel'> & Partial<Pick<StayNight, 'channel'>>>> {
   const [overrides, claims = [], overbooked = [], pushes] = results.map(result => result.results) as [
     Array<Record<string, unknown>>,
     Array<{ product_id: string; date: string; booking_id: string }>,
     Array<OverbookedStay & { product_id: string; booked_product_id: string | null }>,
-    Array<{ product_id: string; date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null }> | undefined,
+    Array<{ product_id: string; date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null; sent_minimum: number | null }> | undefined,
   ]
-  const pushByNight = pushes && new Map(pushes.map(row => [`${row.product_id} ${row.date}`, { state: row.state, detail: row.detail }]))
+  const pushByNight = pushes && new Map(pushes.map(row => [`${row.product_id} ${row.date}`, row]))
   const overrideByNight = new Map(overrides.map(row => [`${String(row.product_id)} ${String(row.date)}`, row]))
   const bookingByNight = new Map(claims.map(row => [`${row.product_id} ${row.date}`, row.booking_id]))
   // The channel's confirmed booking still occupies its dates while the host resolves the overlap.
@@ -1464,23 +1470,31 @@ function homeNightsFrom(homes: ReadonlyArray<Pick<StayHomeCore, 'product_id' | '
   }
   return homes.map((home) => {
     const nights: Array<Omit<StayNight, 'channel'> & Partial<Pick<StayNight, 'channel'>>> = []
+    const today = pushByNight?.size ? homeToday(home.timezone) : null
     for (let offset = 0; offset < days(from, to); offset++) {
       const night = addDays(from, offset)
       const key = `${home.product_id} ${night}`
       const row = overrideByNight.get(key)
       const stayId = bookingByNight.get(key) ?? null
       const closed = Number(row?.closed ?? 0) === 1
+      const policy = resolveStayNightPolicy(home, night, {
+        price_minor: row?.price_minor == null ? null : Number(row.price_minor),
+        min_stay_arrival: row?.min_stay_arrival == null ? null : Number(row.min_stay_arrival),
+      })
+      const push = pushByNight?.get(key)
+      const minimumDiffers = push && today !== null && night >= today
+        && typeof push.sent_minimum === 'number' && push.sent_minimum !== policy.min_stay_arrival
+      const channel: StayNight['channel'] = push ? minimumDiffers
+        ? { state: 'needs_review', detail: `Blawby has a ${policy.min_stay_arrival}-night minimum. Channex last confirmed a ${push.sent_minimum}-night minimum.` }
+        : { state: push.state, detail: push.detail } : null
       nights.push({
         date: night, available: !closed && stayId === null, booking_id: stayId, closed,
-        ...resolveStayNightPolicy(home, night, {
-          price_minor: row?.price_minor == null ? null : Number(row.price_minor),
-          min_stay_arrival: row?.min_stay_arrival == null ? null : Number(row.min_stay_arrival),
-        }),
+        ...policy,
         max_stay: row?.max_stay == null ? null : Number(row.max_stay),
         closed_to_arrival: Number(row?.closed_to_arrival ?? 0) === 1,
         closed_to_departure: Number(row?.closed_to_departure ?? 0) === 1,
         source: row ? row.source as 'host' | 'import' : null,
-        ...(pushByNight ? { channel: pushByNight.get(key) ?? null } : {}),
+        ...(pushByNight ? { channel } : {}),
       })
     }
     return nights
@@ -1817,7 +1831,7 @@ function recordedArrival(stay: Pick<Stay, 'starts_at' | 'timezone'>, home: Pick<
   return time === home.check_in_time ? null : time
 }
 
-/** The terms a nights booking is made under: the home's guest terms, its payment, and the home's cancellation policy for its length; a stay imported from another channel has that channel's, which KrabiClaw does not hold. */
+/** The terms a nights booking is made under: the home's guest terms, its payment, and the home's cancellation policy for its length; a stay imported from another channel has that channel's, which Blawby does not hold. */
 async function stayPolicy(db: DbClient, organizationId: string, productId: string, payment: { price: Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'> } | null, cancellation: StayBookedPolicy | null): Promise<string> {
   const config = await requireBookingConfig(db, organizationId, productId)
   return JSON.stringify({ ...bookingPolicy(config, payment?.price ?? null), cancellation } satisfies BookingPolicy)

@@ -61,7 +61,7 @@ test('unread is a message from someone else after your read position, the same c
       return unread.sort()
     }
 
-    // A booking's opening message is KrabiClaw's, written as the guest booked: unread to the business until opened, never to the guest.
+    // A booking's opening message is Blawby's, written as the guest booked: unread to the business until opened, never to the guest.
     await db.batch(requestInsertQueries({ id: 'booking-conversation', kind: 'booking', organization_id: ORG, location_id: 'loc', booking_id: 'booking', user_id: GUEST,
       payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@proof.example' }), created_at: NOW }, undefined, { opening: 'Class for 1 on Jan 1', note: null })
       .map(write => db.prepare(write.query).bind(...write.params)))
@@ -72,7 +72,7 @@ test('unread is a message from someone else after your read position, the same c
     await markConversationRead(db, { organizationId: ORG, conversationId: 'booking-conversation', userId: OWNER, throughMessageId: opening })
     assert.deepEqual(await surfaces(OWNER), [])
 
-    // KrabiClaw's messages count as unread: an event in the conversation (here a payment) is unread to the business and the guest.
+    // Blawby's messages count as unread: an event in the conversation (here a payment) is unread to the business and the guest.
     await appendMessage(db, { conversationId: 'booking-conversation', authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: 'Payment received' })
     assert.deepEqual(await surfaces(OWNER), ['booking-conversation'])
     assert.equal(await guestUnread(GUEST), 1)
@@ -93,7 +93,7 @@ test('unread is a message from someone else after your read position, the same c
     await assert.rejects(markConversationUnread(db, { organizationId: ORG, conversationId: 'own-contact', userId: OWNER }), { status: 409, data: { code: 'NOTHING_TO_MARK', field: 'conversation_id' } })
 
     // A team conversation behaves alike: a teammate's message is unread until read, mark unread brings it back, and
-    // KrabiClaw's automatic message (a job reminder) is unread too. Who sees it is its participants.
+    // Blawby's automatic message (a job reminder) is unread too. Who sees it is its participants.
     await db.batch([
       db.prepare(`INSERT INTO conversations (id,organization_id,kind,is_group,participants_key,created_by_user_id,last_message_at,created_at) VALUES ('team','${ORG}','team',0,'owner|cleaner','${OWNER}','${NOW}','${NOW}')`),
       db.prepare(`INSERT INTO conversation_participants (conversation_id,organization_id,user_id,role) VALUES ('team','${ORG}','${OWNER}','member'), ('team','${ORG}','${CLEANER}','member')`),

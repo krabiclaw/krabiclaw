@@ -18,7 +18,7 @@ const REPLY_CHANNEL_SQL = "CASE WHEN EXISTS (SELECT 1 FROM channel_threads ct WH
 
 /**
  * A business response is visible on the web or evidenced by the guest's real
- * delivery, or is the host's own message on Airbnb. KrabiClaw's replies sent
+ * delivery, or is the host's own message on Airbnb. Blawby's replies sent
  * through Airbnb are not mirrored back (channel-messages.ts), so a mirrored
  * host message is one typed on Airbnb.
  */

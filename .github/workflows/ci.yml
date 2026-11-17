@@ -44,7 +44,6 @@ jobs:
       - run: yarn test:d1
       - run: yarn mcp:catalog
       - run: yarn contracts
-      - run: yarn chatgpt:submission:check
       - run: yarn lint:migrations
       - run: yarn lint:schema-drift
       - run: yarn test:migrations
@@ -85,7 +84,6 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       # CIMD client metadata must be public HTTPS, which localhost cannot serve.
-      # Staging's test-client documents are the ones docs/testing-strategy.md names.
       MCP_CIMD_CLIENT_URL: https://staging.krabiclaw.com/api/auth/oauth2/test-client-metadata
       MCP_PRIVATE_CIMD_CLIENT_URL: https://staging.krabiclaw.com/api/auth/oauth2/test-private-client-metadata
       PLAYWRIGHT_WORKERS: "1"
@@ -247,7 +245,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: corepack yarn lint:schema-drift --env staging
+        run: corepack yarn lint:live-schema --env staging
       - name: Deploy staging Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -349,7 +347,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: corepack yarn lint:schema-drift --production
+        run: corepack yarn lint:live-schema --production
       - name: Deploy production Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

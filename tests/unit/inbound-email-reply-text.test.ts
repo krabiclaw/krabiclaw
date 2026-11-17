@@ -9,14 +9,14 @@ import { guestReplyText } from '../../server/domain/guest-threads/inbound-email.
 
 // The reply exactly as Gmail delivered it to production on 2026-09-24: CRLF line
 // endings, a narrow no-break space before "PM", a blank line under the header and
-// the KrabiClaw email's invisible preheader padding inside the quote.
+// the Blawby email's invisible preheader padding inside the quote.
 const gmailQuote = [
   'On Thu, Sep 24, 2026 at 7:16\u202FPM Ember & Slice <hello@krabiclaw.com> wrote:',
   '',
   '> Yo heads up',
   '>',
   `>  ${' \u200C\u200B\u200D\u200E\u200F\uFEFF'.repeat(40)}`,
-  '> [image: KrabiClaw]',
+  '> [image: Blawby]',
   '> Reply from Ember & Slice',
   '>',
   '> Yo heads up',
@@ -24,9 +24,9 @@ const gmailQuote = [
   '> Reply to this email and your message goes straight back to the same',
   '> conversation.',
   '>',
-  '> © 2026 KrabiClaw · krabiclaw.com',
+  '> © 2026 Blawby · krabiclaw.com',
   '>',
-  '> Sent by Ember & Slice via KrabiClaw.',
+  '> Sent by Ember & Slice via Blawby.',
   '>',
 ].join('\r\n')
 
@@ -64,7 +64,7 @@ test('an HTML-only Gmail reply keeps only the new text', () => {
 <div class="gmail_quote">
   <div dir="ltr" class="gmail_attr">On Thu, Sep 24, 2026 at 7:16 PM Ember &amp; Slice &lt;hello@krabiclaw.com&gt; wrote:<br></div>
   <blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex">
-    <p>Yo heads up</p><img alt="KrabiClaw" src="https://krabiclaw.com/logo.png"><p>Reply from Ember &amp; Slice</p>
+    <p>Yo heads up</p><img alt="Blawby" src="https://krabiclaw.com/logo.png"><p>Reply from Ember &amp; Slice</p>
   </blockquote>
 </div>`
   assert.equal(guestReplyText({ html }), 'Wtf')

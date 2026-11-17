@@ -16,7 +16,10 @@
     <div v-else class="min-h-0 flex-1" :class="level.mode.value === 'index' ? 'lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(18rem,3fr)]' : undefined">
       <div class="min-w-0 overflow-y-auto px-4 pb-24 sm:px-6 lg:pb-8" :aria-busy="status === 'pending'">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <p class="w-full text-sm text-muted sm:w-auto">{{ data?.home.timezone }} · {{ data?.home.currency }}</p>
+          <div v-if="data" class="w-full sm:w-auto">
+            <p class="text-sm text-muted">{{ data.home.timezone }} · {{ data.home.currency }}</p>
+            <StayNightMinimum :nights="data.home.min_nights" is-default />
+          </div>
           <div class="flex gap-2">
             <UButton v-if="data && level.mode.value === 'index'" label="Select nights" color="neutral" variant="outline" class="sm:hidden" :disabled="busy" @click="openDates" />
             <UButton label="Today" color="neutral" variant="outline" :disabled="busy" @click="goToToday" />
@@ -47,11 +50,13 @@
               :class="selected(day) ? 'bg-inverted text-inverted' : night(day)?.available === false ? 'bg-muted text-muted' : 'bg-default text-highlighted'"
               :data-testid="`stay-night-${day.toString()}`"
               :title="nightTitle(day)"
+              v-night-minimum-description="night(day)?.min_stay_arrival"
             >
               <span class="flex items-center justify-between gap-1">
                 <span class="block text-sm sm:text-base" :class="night(day)?.available === false ? 'line-through' : ''">{{ day.day }}</span>
                 <UIcon v-if="channelState(day)" :name="CHANNEL_MARKS[channelState(day)!]" class="size-3.5 shrink-0" :class="channelState(day) === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-night-channel-${channelState(day)}`" aria-hidden="true" />
               </span>
+              <StayNightMinimum v-if="data && night(day) && night(day)!.min_stay_arrival !== data.home.min_nights" :nights="night(day)!.min_stay_arrival" />
               <span v-if="night(day)?.booking_id" class="hidden truncate text-xs sm:block">{{ stayLabel(day) }}</span>
               <span class="block break-all text-[10px] leading-tight tabular-nums sm:hidden">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : compactMoney(night(day)!.price_minor!) : '…' }}</span>
               <span class="hidden truncate text-sm sm:block">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : money(night(day)!.price_minor!) : '…' }}</span>
@@ -124,34 +129,32 @@
       <StayNightInspector v-bind="inspectorProps" v-on="editor.listeners" @dates="openDates" @clear="clearSelection" @weekdays="weekdays = $event" />
     </template>
   </UDrawer>
-  <UModal v-model:open="datesOpen" title="Select nights">
-    <template #body>
-      <UAlert v-if="dateError" class="mb-4" color="error" variant="soft" :description="dateError" />
-      <div class="grid gap-5 sm:grid-cols-2">
-        <UFormField label="Start night"><UInput v-model="dateDraft.start" type="date" :min="currentDay?.toString()" class="w-full" /></UFormField>
-        <UFormField label="End night (optional)"><UInput v-model="dateDraft.end" type="date" :min="currentDay?.toString()" class="w-full" /></UFormField>
-      </div>
-    </template>
-    <template #footer>
-      <UButton label="Cancel" color="neutral" variant="link" @click="datesOpen = false" />
-      <UButton label="Edit selected nights" color="neutral" @click="chooseDates" />
-    </template>
-  </UModal>
+  <StayNightRangeDialog
+    v-if="currentDay"
+    v-model:open="datesOpen"
+    :first-night="currentDay.toString()"
+    :selection="selectedRange"
+    past-message="Choose today or a future night in the home’s timezone."
+    :select="chooseDates"
+  />
 </template>
 
 <script setup lang="ts">
-import { parseDate, today, type DateValue } from '@internationalized/date'
+import { parseDate, today, type CalendarDate, type DateValue } from '@internationalized/date'
+import type { Directive } from 'vue'
 import type { StayCalendarStay, StayHome, StayNight } from '~/server/domain/stays'
 import { bookingConversationOrRecordPath } from '~/shared/messages-contract'
 import { MAX_STAY_NIGHTS, STAY_CHANNEL_LABELS, parseStayCalendarRules } from '~/shared/bookings'
 import StayNightInspector from './StayNightInspector.vue'
+import StayNightMinimum from './StayNightMinimum.vue'
+import StayNightRangeDialog from './StayNightRangeDialog.vue'
 import EditorNavigationList from './EditorNavigationList.vue'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, minorAmountToMajor } from '~/shared/prices'
 import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
 import { STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES } from '~/shared/stay-listing'
 import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidTimezone } from '~/utils/timezone'
-import { CHANNEL_MARKS, channelNote, isStayNight, stayNightSource, useStayNightEditor } from '~/composables/useStayNightEditor'
+import { CHANNEL_MARKS, channelNote, isStayNight, nightMinimumLabel, stayNightSource, useStayNightEditor } from '~/composables/useStayNightEditor'
 import { getErrorMessage } from '~/utils/errors'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'cancellation_policy' | 'long_term_cancellation_policy'>
@@ -267,6 +270,12 @@ const nightsByDate = computed(() => new Map((data.value?.nights ?? []).map(night
 const staysById = computed(() => new Map((data.value?.bookings ?? []).map(stay => [stay.booking_id, stay])))
 const stayTo = (id: string) => bookingConversationOrRecordPath(orgSlug, id, staysById.value.get(id)?.conversation_id ?? null)
 const night = (day: DateValue) => nightsByDate.value.get(day.toString())
+// The Calendar day slot supplies content inside its date trigger.
+const vNightMinimumDescription: Directive<HTMLElement, number | undefined> = (content, { value }) => {
+  const trigger = content.closest('[data-slot="cellTrigger"]')
+  if (value === undefined) trigger?.removeAttribute('aria-description')
+  else trigger?.setAttribute('aria-description', nightMinimumLabel(value))
+}
 function stayLabel(day: DateValue) {
   const bookingId = night(day)?.booking_id
   const stay = bookingId ? staysById.value.get(bookingId) : undefined
@@ -285,7 +294,7 @@ const channelState = (day: DateValue) => {
 function nightTitle(day: DateValue) {
   const value = night(day)
   const note = value ? channelNote(value) : null
-  return value ? `${day.toString()} · ${value.booking_id ? stayLabel(day) : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${note ? ` · ${note}` : ''}` : day.toString()
+  return value ? `${day.toString()} · ${value.booking_id ? stayLabel(day) : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)} · ${nightMinimumLabel(value.min_stay_arrival)}${note ? ` · ${note}` : ''}` : day.toString()
 }
 const dateLabel = computed(() => {
   const range = selectedRange.value
@@ -297,8 +306,6 @@ const dateLabel = computed(() => {
 })
 const drawerOpen = ref(Boolean(requestedDate))
 const datesOpen = ref(false)
-const dateDraft = reactive({ start: '', end: '' })
-const dateError = ref('')
 const weekdays = ref<number[] | null>(null)
 const editor = useStayNightEditor({
   source: stayNightSource,
@@ -313,9 +320,17 @@ const editor = useStayNightEditor({
   },
 })
 const { busy, error: writeError } = editor
-const inspectorProps = computed(() => ({ ...editor.inspector.value, stayTo, dateLabel: dateLabel.value, scope: data.value ? `${data.value.home.timezone} · ${data.value.home.currency}` : '', selectDates: true }))
+const productPath = computed(() => `/dashboard/${orgSlug}/products/${encodeURIComponent(props.productId)}`)
+const inspectorProps = computed(() => ({
+  ...editor.inspector.value,
+  stayTo,
+  dateLabel: dateLabel.value,
+  scope: data.value ? `${data.value.home.timezone} · ${data.value.home.currency}` : '',
+  selectDates: true,
+  homeEditorTo: props.manage ? productPath.value : undefined,
+}))
 const overviewGroups = computed(() => [{ id: 'home', items: [
-  { id: 'price', label: 'Pricing', summary: data.value?.home.base_price_minor == null ? 'No base nightly price set' : `${money(data.value.home.base_price_minor)} per night`, to: `/dashboard/${String(route.params.org_slug)}/products/${props.productId}/price` },
+  { id: 'price', label: 'Pricing', summary: data.value?.home.base_price_minor == null ? 'No base nightly price set' : `${money(data.value.home.base_price_minor)} per night`, to: `${productPath.value}/price` },
   { id: 'availability', label: 'Availability', summary: data.value ? `${data.value.home.min_nights} night minimum` : 'Loading availability…', to: `/dashboard/${String(route.params.org_slug)}/products/${props.productId}/availability` },
   { id: 'cancellation', label: 'Cancellations', summary: [data.value?.home.cancellation_policy ? STAY_CANCELLATION_POLICIES[data.value.home.cancellation_policy].label : 'Short-term policy not set', data.value?.home.long_term_cancellation_policy ? STAY_LONG_TERM_CANCELLATION_POLICIES[data.value.home.long_term_cancellation_policy].label : 'Long-term policy not set'].join(' · '), to: `/dashboard/${String(route.params.org_slug)}/products/${props.productId}/cancellation` },
 ] }])
@@ -330,22 +345,12 @@ function closeDrawer(open: boolean) {
   if (!open) editor.edit('summary')
 }
 function openDates() {
-  if (!currentDay.value) return
-  dateDraft.start = selectedRange.value?.from ?? currentDay.value.toString()
-  dateDraft.end = selectedRange.value && selectedCount.value > 1 ? addLocalDays(selectedRange.value.to, -1) : ''
-  dateError.value = ''
-  datesOpen.value = true
+  if (currentDay.value) datesOpen.value = true
 }
-async function chooseDates() {
-  if (!isValidCalendarDate(dateDraft.start) || dateDraft.end && !isValidCalendarDate(dateDraft.end)) { dateError.value = 'Choose valid start and end nights.'; return }
-  const start = parseDate(dateDraft.start)
-  const end = parseDate(dateDraft.end || dateDraft.start)
-  if (!currentDay.value || start.compare(currentDay.value) < 0) { dateError.value = 'Choose today or a future night in the home’s timezone.'; return }
-  if (end.compare(start) < 0 || end.compare(start) >= 500) { dateError.value = 'Choose an end night on or after the start, with at most 500 nights.'; return }
-  if (!await changeMonth(start)) { dateError.value = writeError.value; return }
+async function chooseDates(start: CalendarDate, end: CalendarDate) {
+  if (!await changeMonth(start)) return writeError.value
   // Reka focuses the last selected value; keep a range edit on its start.
   selectedDates.value = Array.from({ length: end.compare(start) + 1 }, (_, index) => end.subtract({ days: index }))
-  datesOpen.value = false
   if (!pane.value) drawerOpen.value = true
 }
 async function changeMonth(value: DateValue) {

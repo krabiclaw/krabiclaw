@@ -32,7 +32,7 @@ export async function useArticleNav() {
   return computed<ArticleNav>(() => ({
     categories: categoryTree.value,
     indexLabel: collection.value === 'docs' ? t('site.footer.docs') : t('site.footer.blog'),
-    // KrabiClaw searches its own blog and docs; a site searches its articles, in English only.
+    // Blawby searches its own blog and docs; a site searches its articles, in English only.
     search: site.slug === 'platform'
       ? { surface: collection.value, variant: 'platform' }
       : publicLocale.value === 'en' ? { surface: 'tenant_blog', variant: 'tenant' } : null,

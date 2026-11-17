@@ -55,7 +55,7 @@ missing or ambiguous matches; another Chrome window is never substituted.
    "fps=1/2,scale=320:-1,drawtext=text='%{pts\:hms}':x=3:y=3:fontsize=22:fontcolor=red:box=1,tile=10x12"
    -frames:v 1 sheet.png`.
 4. **Clean account.** Before recording a consent screen, remove any earlier
-   Krabiclaw grant from the Google account (myaccount.google.com/connections)
+   Blawby grant from the Google account (myaccount.google.com/connections)
    so the screen lists only the scopes under review; Google treats every scope
    it shows as requested. Don't blur or redact: record from the owner's own
    accounts.
@@ -79,7 +79,7 @@ missing or ambiguous matches; another Chrome window is never substituted.
   consent). Plan scene order so the account ends where it started.
 - Close the recording window when done and put the owner's tabs back where
   they were.
-- Removing the Krabiclaw grant cuts off every Google integration linked
+- Removing the Blawby grant cuts off every Google integration linked
   through that account (Analytics, Search Console, Ads, Calendar). List them
   first (`organization_integrations` by `account_id`), then Disconnect →
   Connect → pick → save each one and load its leaf to see it reads data.

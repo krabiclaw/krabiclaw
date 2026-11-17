@@ -77,7 +77,7 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
   const status = ref<DashboardInvalidationStatus>('closed')
   const held = heldReads(status, reads)
   // `nuxt dev` cannot carry this socket: its dev server answers the upgrade
-  // with a plain 200 (docs/local-development.md). Realtime runs under
+  // with a plain 200. Realtime runs under
   // `yarn dev:worker`, staging and production; here the dashboard stays on its
   // reads instead of retrying a connection that cannot open and reporting it.
   if (import.meta.dev) {

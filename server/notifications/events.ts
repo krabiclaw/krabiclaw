@@ -666,7 +666,7 @@ export interface OnboardingCompletedInput {
   viewCustomerUrl: string
 }
 
-/** Tells the KrabiClaw operator a new business finished onboarding and is live. */
+/** Tells the Blawby operator a new business finished onboarding and is live. */
 export interface ContentReportedInput {
   organizationName: string
   reporter: string
@@ -677,7 +677,7 @@ export interface ContentReportedInput {
   reviewUrl: string
 }
 
-/** A member reported a guest or a teammate; KrabiClaw acts on it within 24 hours. */
+/** A member reported a guest or a teammate; Blawby acts on it within 24 hours. */
 export function contentReportedMessage(input: ContentReportedInput): MemberAlertMessage {
   const what = input.subject === 'conversation' ? 'a guest conversation' : 'a team message'
   return {

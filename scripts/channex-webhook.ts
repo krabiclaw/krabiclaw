@@ -1,5 +1,5 @@
 /**
- * Verifies, and with --apply registers, KrabiClaw's webhook in the Channex
+ * Verifies, and with --apply registers, Blawby's webhook in the Channex
  * account an environment calls: callback <BETTER_AUTH_URL>/api/integrations/channex/webhook,
  * the events the handler takes, and CHANNEX_WEBHOOK_SECRET in
  * x-channex-webhook-secret. Repeating it over a matching webhook changes nothing.

@@ -137,7 +137,7 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
 /**
  * Queue each listing's change, replacing any earlier request for it. A request
  * gives the row a new id, so a run still on the old request writes nothing
- * over this one. `requestedBy` is null only for a stop KrabiClaw asks for itself.
+ * over this one. `requestedBy` is null only for a stop Blawby asks for itself.
  */
 async function queueJobs(db: DbClient, env: CloudflareEnv, organizationId: string, requestedBy: string | null, jobs: Array<{ listing: string; product: string | null; action: 'sync' | 'stop'; details: string | null }>): Promise<void> {
   const at = now()
@@ -190,7 +190,7 @@ type Step = 'done' | 'continue' | 'later'
 
 /** One step of a job: what the listing needs next to reach what was asked, as one AirbnbConnection call. */
 async function step(env: CloudflareEnv, db: DbClient, job: JobRow, signal: AbortSignal): Promise<Step> {
-  // A sync acts for the person who asked; a stop writes nothing of theirs, so one KrabiClaw asked for, or whose requester left, still runs.
+  // A sync acts for the person who asked; a stop writes nothing of theirs, so one Blawby asked for, or whose requester left, still runs.
   if (job.action === 'sync') {
     if (!job.requested_by) fail(409, 'REQUESTER_REMOVED', 'The person who asked for this sync is no longer a member; ask again')
     const membership = await resolveOrganizationMembership(env, { organizationId: job.organization_id, userId: job.requested_by })

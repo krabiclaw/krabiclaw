@@ -119,7 +119,7 @@ export async function businessCurrencyFixed(db: DbClient, organizationId: string
  * Better Auth Stripe wraps the organization plugin's delete hook with its own
  * subscription guard. This plugin is deliberately registered after Stripe so
  * that provider-owned billing checks run first; only then do we release the
- * KrabiClaw resources Better Auth cannot know about. Once the organization is
+ * Blawby resources Better Auth cannot know about. Once the organization is
  * gone, Zaraz is reconciled so its measurement id stops being served.
  */
 function organizationDeletionCleanupPlugin(env: CloudflareEnv): BetterAuthPlugin {
@@ -312,7 +312,7 @@ async function requireDisconnectedGoogleAds(db: ReturnType<typeof createDb>, acc
 
 /**
  * What has to hold, and what has to be undone elsewhere, before an account is
- * deleted (docs/shared-auth-contract.md D6). Each step fails the deletion: the
+ * deleted. Each step fails the deletion: the
  * account stays until all of them succeed.
  */
 async function prepareAccountDeletion(env: CloudflareEnv, db: ReturnType<typeof createDb>, userId: string, request: Request | undefined) {
@@ -959,7 +959,7 @@ function buildAuth(env: CloudflareEnv) {
       },
       // Facebook Login for Business: a configuration id carries the Page
       // permissions and yields a system-user token that does not expire, so
-      // there is nothing to refresh. It is linked to a KrabiClaw user for Page
+      // there is nothing to refresh. It is linked to a Blawby user for Page
       // access, never used to create one.
       facebook: {
         clientId: env.FACEBOOK_APP_ID ?? '',
@@ -971,8 +971,8 @@ function buildAuth(env: CloudflareEnv) {
         disableDefaultScope: true,
         disableSignUp: true,
       },
-      // Linked to a KrabiClaw user to choose where posts go, never used to
-      // create one. The `bot` scope adds the KrabiClaw bot, with these
+      // Linked to a Blawby user to choose where posts go, never used to
+      // create one. The `bot` scope adds the Blawby bot, with these
       // permissions, to the server the owner picks on Discord's consent screen.
       discord: {
         clientId: env.DISCORD_CLIENT_ID ?? '',

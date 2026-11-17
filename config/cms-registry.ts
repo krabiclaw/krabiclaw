@@ -82,7 +82,7 @@ const customerSiteCatalog: CmsSiteCatalog = {
   locationVocabularyDefault: 'location',
 }
 
-// KrabiClaw's own site. Its documentation is ordinary page documents under /docs,
+// Blawby's own site. Its documentation is ordinary page documents under /docs,
 // so the pages index lists them without a catalog entry per page. The platform
 // owner's operations (organizations, every domain, platform analytics, staff) are
 // dashboard pages gated on this site, not content managers.
@@ -100,12 +100,12 @@ const platformSiteCatalog: CmsSiteCatalog = {
 }
 
 // A customer site's editors are its vertical's: a legal practice edits its
-// practice pages, every other vertical its venue pages. KrabiClaw's own site has its own.
+// practice pages, every other vertical its venue pages. Blawby's own site has its own.
 function catalogFor(site: SiteSurface): CmsSiteCatalog {
   return site === 'platform' ? platformSiteCatalog : customerSiteCatalog
 }
 
-// Which (vertical, site) pairs are real products today: KrabiClaw's own site is a service site.
+// Which (vertical, site) pairs are real products today: Blawby's own site is a service site.
 const supportedCombinations: Record<OrganizationVertical, readonly SiteSurface[]> = {
   restaurant: ['tenant'],
   experience: ['tenant'],

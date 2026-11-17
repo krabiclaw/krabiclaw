@@ -212,15 +212,11 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   const missingId = await deliver('reject email without a Message-ID', replyTo!, null)
   expect(missingId.status(), await missingId.text()).toBe(400)
   expect(await missingId.text()).toBe('Email could not be parsed: invalid or no message id provided')
+  // The signed token, not the domain, decides: mail to an earlier reply domain still threads.
   const [localPart, domain] = replyTo!.split('@')
-  for (const { phase, address, reason } of [
-    { phase: 'reject altered signature', address: `${localPart!.slice(0, -1)}${localPart!.endsWith('0') ? '1' : '0'}@${domain}`, reason: 'This reply address is not valid.' },
-    { phase: 'reject wrong domain', address: `${localPart}@invalid.example`, reason: 'This address does not accept email.' },
-  ]) {
-    const rejected = await deliver(phase, address, `<${randomUUID()}@e2e.example.test>`)
-    expect(rejected.status()).toBe(400)
-    expect(await rejected.text()).toBe(`Worker rejected email with the following reason: ${reason}`)
-  }
+  const altered = await deliver('reject altered signature', `${localPart!.slice(0, -1)}${localPart!.endsWith('0') ? '1' : '0'}@${domain}`, `<${randomUUID()}@e2e.example.test>`)
+  expect(altered.status()).toBe(400)
+  expect(await altered.text()).toBe('Worker rejected email with the following reason: This reply address is not valid.')
   const finalResponse = await fetchPhase('verify final entries', detailUrl, {})
   expect(finalResponse.status(), await finalResponse.text()).toBe(200)
   const final = await finalResponse.json() as ConversationPage
@@ -302,7 +298,7 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
     data: [
       `From: Owner <${from}>`, `To: ${memberReplyTo}`, `Subject: Re: ${ownerAlerts[0]!.message.subject}`, `Message-ID: ${messageId}`, ...headers,
       `Date: ${new Date().toUTCString()}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8', '',
-      ownerBody, '', `On ${new Date().toUTCString()} KrabiClaw <hello@krabiclaw.com> wrote:`, `> ${body}`, '',
+      ownerBody, '', `On ${new Date().toUTCString()} Blawby <hello@krabiclaw.com> wrote:`, `> ${body}`, '',
     ].join('\r\n'),
   })
   const ownerMessageId = `<${randomUUID()}@e2e.example.test>`

@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { register } from 'node:module'
 import Ajv2020 from 'ajv/dist/2020.js'
 
@@ -280,11 +280,6 @@ const submission = {
 ],
 }
 
-const mode = process.argv[2] ?? '--write'
-if (mode !== '--write' && mode !== '--check') {
-  throw new Error('Usage: generate-chatgpt-app-submission.mjs [--write|--check]')
-}
-
 const response = await fetch(SCHEMA_URL)
 if (!response.ok) {
   throw new Error(`Unable to fetch ChatGPT submission schema: ${response.status} ${response.statusText}`)
@@ -296,12 +291,5 @@ if (!validate(submission)) {
   throw new Error(`ChatGPT submission is invalid: ${JSON.stringify(validate.errors)}`)
 }
 
-const serialized = `${JSON.stringify(submission, null, 2)}\n`
-if (mode === '--check') {
-  const committed = await readFile(OUTPUT_PATH, 'utf8')
-  if (committed !== serialized) {
-    throw new Error(`ChatGPT submission is stale. Run yarn chatgpt:submission:write and commit ${OUTPUT_PATH}.`)
-  }
-} else {
-  await writeFile(OUTPUT_PATH, serialized)
-}
+await writeFile(OUTPUT_PATH, `${JSON.stringify(submission, null, 2)}\n`)
+console.log(`Wrote ${OUTPUT_PATH}; upload it with the OpenAI submission.`)

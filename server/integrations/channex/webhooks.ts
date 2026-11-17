@@ -3,7 +3,7 @@ import { ChannexDataError, object, resource, string, type Resource } from './dat
 import { CHANNEX_WEBHOOK_CALLER } from '~/server/utils/internal-secret'
 
 /**
- * KrabiClaw's webhook in a Channex account (docs.channex.io webhook-collection):
+ * Blawby's webhook in a Channex account (docs.channex.io webhook-collection):
  * Channex POSTs these events to /api/integrations/channex/webhook with the
  * environment's CHANNEX_WEBHOOK_SECRET in x-channex-webhook-secret, and with
  * send_data so a booking event names its revision. A webhook is global (every
@@ -43,7 +43,7 @@ function propertyOf(webhook: Resource): string | null {
   return property === undefined ? null : string(object(object(property, 'property').data, 'property.data').id, 'webhook property id')
 }
 
-/** What differs between a webhook Channex has and the one KrabiClaw needs, by field; the secret is never echoed. */
+/** What differs between a webhook Channex has and the one Blawby needs, by field; the secret is never echoed. */
 function differences(webhook: Resource, want: ReturnType<typeof desired>): string[] {
   const has = webhook.attributes
   const found: string[] = []
@@ -60,7 +60,7 @@ function differences(webhook: Resource, want: ReturnType<typeof desired>): strin
 }
 
 /**
- * Find KrabiClaw's webhook for this callback and scope and report how it
+ * Find Blawby's webhook for this callback and scope and report how it
  * differs; with `apply`, create it or bring it into line. Running it again
  * over a matching webhook changes nothing. Two webhooks for the same callback
  * and scope are refused: which one Channex delivers to cannot be told.
@@ -73,7 +73,7 @@ export async function ensureChannexWebhook(env: ChannexEnv, target: WebhookTarge
     if (matches.length > 1) throw new ChannexDataError(`Channex has ${matches.length} webhooks for ${want.callback_url} (${target.propertyId ?? 'global'}): ${matches.map(webhook => webhook.id).join(', ')}. Delete all but one in Channex first.`)
     return matches[0]
   }
-  /** A write is done when Channex's own list shows the webhook KrabiClaw needs. */
+  /** A write is done when Channex's own list shows the webhook Blawby needs. */
   const confirm = async (id: string) => {
     const written = await find()
     const left = written ? differences(written, want) : ['no webhook']

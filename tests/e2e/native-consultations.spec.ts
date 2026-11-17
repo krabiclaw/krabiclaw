@@ -729,7 +729,7 @@ test('native online review uses canonical Products, holds capacity, and releases
         const externalAction = scheduleHero.locator('[data-parity-section="page-hero"]').getByRole('link', { name: expectedLabel, exact: true })
         await expect(externalAction).toHaveCount(1)
         await expect(externalAction).toHaveAttribute('href', modeShell.consultation!.external_url!)
-        // Leaving for the practice's own scheduler is the consultation click KrabiClaw records.
+        // Leaving for the practice's own scheduler is the consultation click Blawby records.
         await waitForNuxtHydration(page)
         const handoffClicksBefore = await insightsMetric(page.request, baseURL!, org, 'conversion/booking-conversion', 'clicked_to_book')
         const handoffResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events' && response.request().postDataJSON()?.event_name === 'consultation_cta_click')

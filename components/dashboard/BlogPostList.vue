@@ -97,7 +97,7 @@ const isPlatform = computed(() => orgSlug === 'platform')
 
 // A post's life in order, so the tabs read as the pipeline they are. Drafts
 // exist as a status now, and a post created from this list starts as one.
-// Only KrabiClaw platform has documentation; tenant sites only have a blog.
+// Only Blawby platform has documentation; tenant sites only have a blog.
 const statusTabs = computed(() => [
   { value: 'all', label: 'All' },
   { value: 'draft', label: 'Drafts' },

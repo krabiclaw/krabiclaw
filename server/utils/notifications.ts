@@ -604,12 +604,19 @@ function memberNotificationSends(
   if (recipient.phone && input.whatsappTemplate) {
     const toPhone = recipient.phone
     const template = input.whatsappTemplate
-    const mapped = toWhatsAppVars(input.message, template)
-    if (mapped.omitted.length) console.info('whatsapp_facts_omitted', { template, omitted: mapped.omitted })
     sends.push((async () => {
       if (!await sendWhatsAppThreadNotification(env, db, {
         delivery: threadDelivery(input.context, 'owner_alert', 'whatsapp', template, toPhone, input.eventKey),
-        send: () => sendWhatsAppNotification(env, { organizationId: input.organizationId, locationId: input.locationId ?? null, toPhone, template, vars: mapped.vars }),
+        send: () => {
+          let vars: Record<string, string>
+          try {
+            vars = toWhatsAppVars(input.message, template).vars
+          } catch (error) {
+            if (!(error instanceof WhatsAppTemplateRefusal)) throw error
+            return Promise.resolve({ success: false as const, status: 'failed' as const, error: error.message })
+          }
+          return sendWhatsAppNotification(env, { organizationId: input.organizationId, locationId: input.locationId ?? null, toPhone, template, vars })
+        },
       })) throw new RecordedDeliveryFailure(`WhatsApp notification was not delivered for organization ${input.organizationId}`)
       // No approved template has an image header, so the message's photos follow it as images,
       // which Meta delivers only while the member's 24-hour service window is open.
@@ -1997,12 +2004,11 @@ export async function renderNotificationCatalog(origin: string): Promise<Catalog
 
     let whatsapp: CatalogPreviewEntry['whatsapp'] = null
     if (entry.whatsappTemplate) {
-      const { vars } = toWhatsAppVars(entry.message, entry.whatsappTemplate)
-      // A sample missing a fact the template's slot needs is refused at send,
-      // and the preview shows that refusal rather than a message it would not send.
+      // A sample the template cannot carry is refused at send, and the preview
+      // shows that refusal rather than a message it would not send.
       let text: string
       try {
-        text = buildWhatsAppTemplatePayload(entry.whatsappTemplate, vars).components
+        text = buildWhatsAppTemplatePayload(entry.whatsappTemplate, toWhatsAppVars(entry.message, entry.whatsappTemplate).vars).components
           .flatMap(component => component.parameters.map(parameter => parameter.text))
           .join('\n')
       } catch (error) {

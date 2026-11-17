@@ -13,13 +13,14 @@ test('a guest reply address round-trips to its entry and verifies only as the gu
   const address = await buildReplyToAddress(env, entry, { kind: 'guest' })
   const token = sign(`guest:${entry}`)
   assert.equal(address, `rg${entry.replaceAll('-', '')}${token}@reply.example.com`)
-  assert.deepEqual(parseReplyToAddress(env, address), { kind: 'guest', messageId: entry, token })
+  assert.deepEqual(parseReplyToAddress(address), { kind: 'guest', messageId: entry, token })
   assert.equal(await verifyReplyToken(env, entry, { kind: 'guest' }, token), true)
   assert.equal(await verifyReplyToken(env, entry, { kind: 'member', userId: 'owner' }, token), false)
-  assert.throws(() => parseReplyToAddress(env, address.replace('@reply.example.com', '@other.example.com')), InboundEmailRejection)
-  assert.throws(() => parseReplyToAddress(env, `${address}@reply.example.com`), InboundEmailRejection)
+  // Mail sent before the reply domain moved still threads.
+  assert.deepEqual(parseReplyToAddress(address.replace('@reply.example.com', '@reply.previous.example.com')), { kind: 'guest', messageId: entry, token })
+  assert.throws(() => parseReplyToAddress(`${address}@reply.example.com`), InboundEmailRejection)
   // The retired request-addressed format is no longer accepted.
-  assert.throws(() => parseReplyToAddress(env, `rr${entry.replaceAll('-', '')}${token}@reply.example.com`), InboundEmailRejection)
+  assert.throws(() => parseReplyToAddress(`rr${entry.replaceAll('-', '')}${token}@reply.example.com`), InboundEmailRejection)
   await assert.rejects(verifyReplyToken({ EMAIL_REPLY_DOMAIN: 'reply.example.com' }, entry, { kind: 'guest' }, token), /EMAIL_REPLY_SECRET/u)
 })
 
@@ -27,7 +28,7 @@ test('a member reply address verifies only for its member', async () => {
   const address = await buildReplyToAddress(env, entry, { kind: 'member', userId: 'user-owner' })
   const token = sign(`member:${entry}:user-owner`)
   assert.ok(address.split('@')[0]!.length <= 64)
-  assert.deepEqual(parseReplyToAddress(env, address), { kind: 'member', messageId: entry, token })
+  assert.deepEqual(parseReplyToAddress(address), { kind: 'member', messageId: entry, token })
   assert.equal(await verifyReplyToken(env, entry, { kind: 'member', userId: 'user-owner' }, token), true)
   assert.equal(await verifyReplyToken(env, entry, { kind: 'member', userId: 'user-other' }, token), false)
   // A conversation id that is a 64-character hash is never put in an address.

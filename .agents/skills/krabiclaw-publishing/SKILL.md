@@ -5,8 +5,8 @@ description: Plan and write Blawby feature launch articles from verified facts, 
 
 # Publishing Blawby news
 
-Read [product-profile.md](../../../docs/marketing/product-profile.md) for verified
-facts and Paul's voice and [PRODUCT.md](../../../PRODUCT.md) for current policy.
+Read [product-profile.md](../krabiclaw-marketing/product-profile.md) for verified
+facts and Paul's voice.
 Use [write-help-docs](../write-help-docs/SKILL.md) for customer instructions and
 [krabiclaw-marketing](../krabiclaw-marketing/SKILL.md) for capture, Flow,
 HyperFrames, media QA, authorized publishing and private archive cleanup.
@@ -119,7 +119,7 @@ When an email broadcast to the Product News list is desired:
 ## Publish and distribute through MCP
 
 1. **Verify organization context:** Read `get_workspace_context` and explicitly
-   target the selected organization. KrabiClaw's own content uses `organization_id: "platform"`;
+   target the selected organization. Blawby's own content uses `organization_id: "platform"`;
    the active workspace may be a customer site. Inspect `list_blog_posts` for the intended
    collection, `list_posts`, and the relevant live provider posts. Reuse the
    exact existing document when appropriate; do not duplicate a launch.
@@ -157,9 +157,8 @@ When an email broadcast to the Product News list is desired:
 
 Check existing material first: the live platform blog already contains
 “Make room for your next booking.” Build on it rather than announce Calendar
-as brand new again. Read [Google Calendar](../../../docs/integrations/google-calendar.md)
-and [Payments](../../../docs/payments/payments.md) plus current qualification
-records.
+as brand new again. Check Calendar and Payments behavior in the product and the
+published help articles.
 
 Plan entitlement: New customers need **Business ($149/month)** for online payments
 and direct paid stay bookings, plus a ready Stripe connected account. Basic (free)

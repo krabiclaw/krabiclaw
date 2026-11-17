@@ -20,8 +20,8 @@
 //
 // Billing is the owner's, in a browser, because financial approvals are
 // same-origin browser actions: the Commerce plan for four locations (the four
-// homes) on both, and on staging the test-mode Stripe Connect onboarding
-// (docs/operations/lodging-demo.md). Until the plan covers four locations the
+// homes) on both, and on staging the test-mode Stripe Connect onboarding.
+// Until the plan covers four locations the
 // script stops before adding the next home, naming what is missing.
 
 import { parseArgs } from 'node:util'
@@ -347,7 +347,7 @@ async function main() {
     if (published.status === 409) unpublished.push({ name: spec.name, missing: published.data })
   }
   if (unpublished.length) {
-    throw new StepError(`Homes are ready but not published, because online payments are not ready: ${JSON.stringify(unpublished[0]!.missing)}. Finish Payments setup (docs/operations/lodging-demo.md), then run this again.`)
+    throw new StepError(`Homes are ready but not published, because online payments are not ready: ${JSON.stringify(unpublished[0]!.missing)}. Finish Payments setup in the organization's dashboard, then run this again.`)
   }
   console.log(`Published ${HOMES.length} homes. Site: ${TARGET.site}`)
 }

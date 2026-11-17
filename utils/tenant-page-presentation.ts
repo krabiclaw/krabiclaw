@@ -1,7 +1,7 @@
 // Which component draws a block.
 //
 // A page is an ordered list of typed blocks. The block says what the content
-// *is* — a hero, a feature grid, a question set. KrabiClaw's own marketing site
+// *is* — a hero, a feature grid, a question set. Blawby's own marketing site
 // draws them one way; every customer site draws them the same other way, and
 // its look comes from its site settings, not from its vertical.
 //
@@ -46,7 +46,7 @@ type BlockPresentation = Component<{ block: TenantPageBlock, page: PublicTenantP
 const feedOrBlock = (component: unknown) => component as BlockPresentation
 
 const PRESENTATIONS: Readonly<Record<string, BlockPresentation>> = {
-  // KrabiClaw's own platform marketing site.
+  // Blawby's own platform marketing site.
   'platform:hero': PlatformMarketingHero,
   'platform:button_group': PlatformProductNavigation,
   'platform:feature_grid': PlatformFeatureCards,

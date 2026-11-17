@@ -13,7 +13,7 @@ import { publishConversationEvent, type GuestInboxPublicationEnv } from '~/serve
 
 /**
  * Members report a guest conversation or a message in a team conversation, and block a guest,
- * for App Store guideline 1.2. Every report is emailed to the KrabiClaw
+ * for App Store guideline 1.2. Every report is emailed to the Blawby
  * operator addresses and waits in Platform reports, where staff remove the
  * content and ban its author's account, or dismiss it, within 24 hours.
  */
@@ -186,9 +186,9 @@ export async function listContentReports(db: DbClient, status: unknown): Promise
 /**
  * Staff decide an open report. Remove takes the content away — a team message
  * is deleted with its photos' placements, a guest conversation is blocked for
- * its business — and bans the author's KrabiClaw account through Better Auth,
- * which also ends their sessions. An Airbnb guest has no KrabiClaw account to
- * ban; blocking is what KrabiClaw controls.
+ * its business — and bans the author's Blawby account through Better Auth,
+ * which also ends their sessions. An Airbnb guest has no Blawby account to
+ * ban; blocking is what Blawby controls.
  */
 export async function resolveContentReport(env: CloudflareEnv & GuestInboxPublicationEnv, db: DbClient, input: {
   reportId: string

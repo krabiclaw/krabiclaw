@@ -256,7 +256,7 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
 }
 
 /**
- * The outbox's sender sends a task's due row: a reminder as KrabiClaw's
+ * The outbox's sender sends a task's due row: a reminder as Blawby's
  * message in the job's conversation (the warning alerts the hosts, the rest
  * the person doing the job), or the start alert of a task that has no
  * conversation. A task no longer open sends nothing.

@@ -55,7 +55,7 @@ function revisedBooking(revision: Resource, propertyId: string): ChannelBooking 
   const status = string(attributes.status, 'booking status')
   if (status !== 'new' && status !== 'modified' && status !== 'cancelled') throw new ChannexDataError(`booking ${bookingId} has unknown status ${status}`)
   const channel = CHANNELS[string(attributes.ota_name, 'ota_name').toLowerCase()]
-  if (!channel) throw new ChannexDataError(`booking ${bookingId} comes from ${String(attributes.ota_name)}, which KrabiClaw does not take yet`)
+  if (!channel) throw new ChannexDataError(`booking ${bookingId} comes from ${String(attributes.ota_name)}, which Blawby does not take yet`)
   const customer = object(attributes.customer, 'customer')
   const occupancy = object(attributes.occupancy, 'occupancy')
   const currency = string(attributes.currency, 'currency')

@@ -49,8 +49,8 @@ import { canOpenPlatformReports } from '~/utils/platform-admin-access'
 import { isRecord } from '~/utils/api-clients'
 import { formatTimestamp } from '~/utils/timezone'
 
-// Content reports from every business, decided by KrabiClaw staff. Like
-// Platform accounts it exists only inside KrabiClaw's own organization and only
+// Content reports from every business, decided by Blawby staff. Like
+// Platform accounts it exists only inside Blawby's own organization and only
 // for a Better Auth admin who may ban users; the server enforces both again.
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
 

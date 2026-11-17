@@ -338,7 +338,7 @@ async function importAll(connection: AirbnbConnection, db: D1Database, channex: 
   await advanceTo(connection, db, channex, productId, 'complete')
 }
 
-test('a listing imports through every stage into a home Channex and KrabiClaw agree on', { timeout: 120_000 }, async () => {
+test('a listing imports through every stage into a home Channex and Blawby agree on', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
@@ -679,9 +679,13 @@ test('a connected home can resend its full calendar without tearing down its map
     const messages = channex.messagesProperty
     const requests: Array<{ path: string; values: FakeBody['values'] }> = []
     let during: (() => Promise<void>) | undefined
+    let defaultsUnavailable = false
     let limited = false
     globalThis.fetch = async (input, init = {}) => {
       const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+      if (defaultsUnavailable && url.pathname === `/api/v1/rate_plans/${channex.ratePlan}`) {
+        return Response.json({ errors: { message: 'Rate plan unavailable' } }, { status: 503 })
+      }
       if (init.method === 'POST' && ['/api/v1/restrictions', '/api/v1/availability'].includes(url.pathname)) {
         requests.push({ path: url.pathname.slice('/api/v1'.length), values: (JSON.parse(String(init.body)) as FakeBody).values })
         const run = during
@@ -693,6 +697,14 @@ test('a connected home can resend its full calendar without tearing down its map
     }
     assert.deepEqual((await setStayNights(db, env, manager, { product_id: productId, from: addDays(today(), 20), to: addDays(today(), 21), price_minor: 24500 })).channel_push, { state: 'pushed', detail: null })
     requests.length = 0
+    defaultsUnavailable = true
+    const defaultsFailure = await call()
+    assert.equal(defaultsFailure.status, 502)
+    assert.match(String(defaultsFailure.body.message), /Rate plan unavailable/)
+    assert.deepEqual(requests, [])
+    assert.deepEqual(await db.prepare("SELECT state, json_extract(sent_json, '$.rate') AS rate FROM channel_night_pushes WHERE product_id = ? AND date = ?").bind(productId, addDays(today(), 20)).first(),
+      { state: 'pushed', rate: '245.00' })
+    defaultsUnavailable = false
     const fullSyncStart = channex.seen.length
     const resynced = await call()
     assert.deepEqual(resynced, { status: 200, body: { product_id: productId, channel_push: { state: 'pushed', detail: null } } })
@@ -1054,7 +1066,7 @@ test('the backfill route fills a home imported without content and the listings 
   }
 })
 
-test('a sync request is checked against the plan once, then KrabiClaw imports, activates and stops listings in the background', { timeout: 120_000 }, async (t) => {
+test('a sync request is checked against the plan once, then Blawby imports, activates and stops listings in the background', { timeout: 120_000 }, async (t) => {
   const { runtime, db, env, queue } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
@@ -1228,7 +1240,7 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { import_stage: 'complete', enabled: 1 })
 
     // Growth ends: Stripe deletes the subscription and Better Auth marks it canceled. On Basic, the newest live homes
-    // past the one it includes, the Airbnb one among them, go back to drafts: KrabiClaw queues its stop itself, and the task runs it.
+    // past the one it includes, the Airbnb one among them, go back to drafts: Blawby queues its stop itself, and the task runs it.
     await db.prepare("UPDATE organization SET stripeCustomerId = 'cus_org' WHERE id = ?").bind(ORG).run()
     await db.prepare("UPDATE subscription SET status = 'canceled' WHERE id = 'sub-org'").run()
     await returnExtrasToDraftsForPlanEnd(env, db, { type: 'customer.subscription.deleted', data: { object: { id: 'sub-org', customer: 'cus_org', status: 'canceled' } } } as unknown as Stripe.Event)

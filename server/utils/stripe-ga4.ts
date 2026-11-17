@@ -258,7 +258,7 @@ async function resolveStripeGa4Context(
   return { organizationId, userId, clientId, intent, sessionId, sessionCapturedAt, customerId }
 }
 
-// KrabiClaw is the seller of every subscription this handler sees, so the
+// Blawby is the seller of every subscription this handler sees, so the
 // measuring organization is the platform organization; the organization that
 // subscribed is the subject, kept in the event's metadata. Invoice ids are
 // unique within the seller's Stripe account, which is that same namespace.

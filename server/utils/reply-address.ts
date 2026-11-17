@@ -81,10 +81,15 @@ export async function buildReplyToAddress(env: ReplyAddressEnv, messageId: strin
   return `r${KIND_CODE[as.kind]}${compact}${await buildReplyToken(replySecret(env), messageId, as)}@${getReplyDomain(env)}`
 }
 
-/** The identity of a reply address; an address on another domain, or one KrabiClaw never issued, is refused. */
-export function parseReplyToAddress(env: ReplyAddressEnv, address: string): ReplyAddress {
+/**
+ * The identity of a reply address. Cloudflare decides which domains reach the
+ * Worker, and mail sent before the reply domain changed still carries the old
+ * one, so the domain is not checked here: the signed token is what proves
+ * Blawby issued the address.
+ */
+export function parseReplyToAddress(address: string): ReplyAddress {
   const parts = address.split('@')
-  const match = parts.length === 2 && parts[1]!.toLowerCase() === getReplyDomain(env)
+  const match = parts.length === 2 && parts[1]
     ? /^r([gm])([0-9a-f]{32})([0-9a-f]{24})$/i.exec(parts[0]!) : null
   if (!match) throw new InboundEmailRejection('This address does not accept email.')
   const id = match[2]!.toLowerCase()

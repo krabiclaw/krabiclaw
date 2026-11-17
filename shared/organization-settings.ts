@@ -24,7 +24,7 @@ export const INTEGRATION_SCOPES = {
   // is requested and a linked Facebook account is matched by provider alone.
   'facebook': [],
   'meta-ads': ['ads_management', 'ads_read'],
-  // `bot` adds the KrabiClaw bot to the server the owner picks on Discord's
+  // `bot` adds the Blawby bot to the server the owner picks on Discord's
   // consent screen; `guilds` lets the linked account say which servers it manages.
   'discord': ['guilds', 'bot'],
 } as const satisfies Record<string, readonly string[]>
