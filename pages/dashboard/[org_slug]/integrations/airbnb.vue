@@ -28,7 +28,7 @@
       :items-status="itemsStatus"
       :applying="applying || pending"
       @choose="choose"
-      @act="addDetails"
+      @act="actOnListing"
       @retry-failed="retryFailed"
       @disconnect="disconnect"
     >
@@ -49,8 +49,10 @@ import AirbnbListingDetailsDialog, { type AirbnbListingDetails } from '~/compone
 import OfferCard from '~/components/dashboard/OfferCard.vue'
 import { integrationDefinition, itemsApplyLabel } from '~/shared/integrations'
 import { IMPORT_STAGES, importStageTitle, isInterruptedStage, type ImportStage } from '~/shared/airbnb-import'
+import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
 import { offer } from '~/shared/offers'
 import { getErrorMessage } from '~/utils/errors'
+import { organizationRoles } from '~/utils/organization-access'
 import { integrationsKey } from '../integrations.vue'
 
 definePageMeta({ layout: 'dashboard' })
@@ -88,6 +90,10 @@ const route = useRoute()
 const dashboardApi = useDashboardApi()
 const dashboard = useDashboardOrganization()
 const entitled = computed(() => dashboard.entitlements.value.channel_sync === true)
+const canManage = computed(() => {
+  const role = dashboard.organization.value?.role as keyof typeof organizationRoles | undefined
+  return !!role && organizationRoles[role]?.authorize({ integrations: ['update'] }).success === true
+})
 const api = `/api/organizations/${integrations.organizationId}/integrations/airbnb`
 const detailsDialog = useOverlay().create(AirbnbListingDetailsDialog)
 
@@ -178,6 +184,9 @@ const needsDetails = (listing: AirbnbListing) => {
 
 /** "Backup" in the title, or a title already used by an earlier listing on the account. */
 const isBackup = (listing: AirbnbListing) => /backup/i.test(listing.title) || listings.value.find(other => other.title === listing.title)?.id !== listing.id
+const fullSyncProduct = (listing: AirbnbListing) => entitled.value && canManage.value
+  && listing.import.status === 'imported' && listing.import.stage === 'complete' && listing.import.syncing ? listing.import.product_id : null
+const fullSyncStatus = ref<{ id: string; status: IntegrationLeafItem['status']; note: string } | null>(null)
 
 const rows = computed<IntegrationLeafItem[]>(() => listings.value.map((listing) => {
   const job = jobOf(listing.id)
@@ -188,10 +197,12 @@ const rows = computed<IntegrationLeafItem[]>(() => listings.value.map((listing) 
     const note = job.action === 'stop' ? 'Stopping sync…' : job.status === 'queued' ? 'Waiting to sync' : job.stage ? importStageTitle(job.stage) : 'Preparing your home…'
     return { id: listing.id, title: listing.title, subtitle, status: 'pending', note, to }
   }
-  if (job?.status === 'failed') return { id: listing.id, title: listing.title, subtitle, status: 'attention', note: job.error!.message, to }
+  const action = fullSyncProduct(listing) ? 'Full sync' : undefined
+  if (action && fullSyncStatus.value?.id === listing.id) return { title: listing.title, subtitle, to, action, ...fullSyncStatus.value }
+  if (job?.status === 'failed') return { id: listing.id, title: listing.title, subtitle, status: 'attention', note: job.error!.message, to, action }
   if (interrupted(listing)) return { id: listing.id, title: listing.title, subtitle, status: 'attention', note: 'Setup didn’t finish · it finishes when you apply', to }
   if (needsDetails(listing)) return { id: listing.id, title: listing.title, subtitle, status: 'not_syncing', note: hint, action: 'Add details' }
-  return { id: listing.id, title: listing.title, subtitle, status: syncing(listing) ? 'syncing' : 'not_syncing', note: listing.import.status === 'imported' && listing.import.stage === 'draft' ? 'Draft' : hint, to }
+  return { id: listing.id, title: listing.title, subtitle, status: syncing(listing) ? 'syncing' : 'not_syncing', note: listing.import.status === 'imported' && listing.import.stage === 'draft' ? 'Draft' : hint, to, action }
 }))
 
 /** Listings whose details are still being read or asked for: nothing applies until each is settled. */
@@ -273,9 +284,33 @@ async function addDetails(id: string): Promise<boolean> {
   }
 }
 
+async function actOnListing(id: string) {
+  if (applying.value || pending.value || disconnecting.value) return
+  const listing = listings.value.find(candidate => candidate.id === id)
+  if (!listing) return
+  if (needsDetails(listing)) { await addDetails(id); return }
+  const productId = fullSyncProduct(listing)
+  if (!productId) return
+  applying.value = true
+  failure.value = ''
+  fullSyncStatus.value = { id, status: 'pending', note: 'Sending calendar…' }
+  try {
+    const { channel_push: channel } = await dashboardApi(`${api}/imports/${encodeURIComponent(productId)}/calendar`, {
+      method: 'POST',
+      validate: (value): value is { product_id: string; channel_push: SuccessfulChannelPush } =>
+        isRecord(value) && value.product_id === productId && value.channel_push !== null && isSuccessfulChannelPush(value.channel_push),
+    })
+    fullSyncStatus.value = { id, status: 'syncing', note: channel.state === 'pushed' ? 'Calendar sent to Channex.' : `Calendar sync queued. ${channel.detail}` }
+  } catch (cause) {
+    fullSyncStatus.value = { id, status: 'attention', note: getErrorMessage(cause, 'Could not sync this calendar.') }
+  } finally {
+    applying.value = false
+  }
+}
+
 /** Hands the change to Blawby, then follows its progress until nothing is waiting. */
 async function apply() {
-  if (!applyLabel.value) return
+  if (!applyLabel.value || applying.value) return
   applying.value = true
   failure.value = ''
   try {
