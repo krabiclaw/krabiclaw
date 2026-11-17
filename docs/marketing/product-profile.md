@@ -188,9 +188,9 @@ the release content.
 
 ## Assets and customer-proof permissions
 
-- Canonical logo source: `public/platform/krabiclaw-symbol.svg`. Every other logo file in the
-  repository is generated from it and none of them is a second master.
-- Square logo, 1024×1024: `docs/marketing/directory-assets/00-krabiclaw-logo-1024.png`, a derived
+- Canonical logo source: `public/platform/blawby.svg`, the Blawby shield. Every other Blawby logo
+  file in the repository is generated from it and none of them is a second master.
+- Square logo, 1024×1024: `docs/marketing/directory-assets/blawby-logo-1024.png`, a derived
   distribution export of that source.
 - Today's bookings, 1270×760: `docs/marketing/directory-assets/01-todays-bookings.png`
 - Operations calendar, 1270×760: `docs/marketing/directory-assets/02-operations-calendar.png`
