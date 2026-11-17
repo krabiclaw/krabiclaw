@@ -1446,13 +1446,14 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 // activated, and only then is the mapping enabled. import_property holds the listing details the host approved
 // (what the Channex property, room type and rate plan are created from), and
 // import_calendar the Airbnb calendar the inventory stage writes and verifies;
-// both are cleared when the import completes. Deleting the home deletes the mapping.
+// both are cleared when the import completes. Hosted channels have no Airbnb listing or channel ID.
+// Deleting the home deletes the mapping.
 export const product_channel_mappings = sqliteTable("product_channel_mappings", {
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text().notNull(),
 	provider: text().$type<'channex'>().notNull(),
-	listing_id: text().notNull(),
-	channel_id: text().notNull(),
+	listing_id: text(),
+	channel_id: text(),
 	property_id: text(),
 	room_type_id: text(),
 	rate_plan_id: text(),
@@ -1478,11 +1479,12 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 	index("product_channel_mappings_org_idx").on(table.organization_id),
 	check("product_channel_mappings_provider_check", sql`provider = 'channex'`),
 	check("product_channel_mappings_stage_check", sql`import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'content', 'draft', 'mapping', 'activate', 'reservations', 'messages', 'complete')`),
+	check("product_channel_mappings_airbnb_ids_check", sql`(listing_id IS NULL) = (channel_id IS NULL) AND (listing_id IS NOT NULL OR import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'complete'))`),
 	check("product_channel_mappings_ids_check", sql`(import_stage = 'property' OR property_id IS NOT NULL) AND (import_stage IN ('property', 'room') OR room_type_id IS NOT NULL) AND (import_stage IN ('property', 'room', 'rate') OR rate_plan_id IS NOT NULL)`),
 	check("product_channel_mappings_calendar_check", sql`import_calendar IS NULL OR (json_valid(import_calendar) AND json_type(import_calendar) = 'array')`),
 	check("product_channel_mappings_property_json_check", sql`import_property IS NULL OR (json_valid(import_property) AND json_type(import_property) = 'object')`),
 	check("product_channel_mappings_content_json_check", sql`import_content IS NULL OR (json_valid(import_content) AND json_type(import_content) = 'object')`),
-	check("product_channel_mappings_enabled_check", sql`enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'messages', 'complete'))`),
+	check("product_channel_mappings_enabled_check", sql`enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('draft', 'mapping', 'activate', 'reservations', 'messages', 'complete'))`),
 	check("product_channel_mappings_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
 
