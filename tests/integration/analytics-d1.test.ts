@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import { recordTenantPageview, updateTenantPageviewDuration, type TenantPageviewInput } from '../../server/utils/pageview-tracking.ts'
 import { recordOrganizationConversionEvent } from '../../server/utils/organization-conversions.ts'
+import { applySchema } from './support/schema.ts'
 
 async function database(name: string) {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -13,8 +12,7 @@ async function database(name: string) {
     env: { DB: { type: 'd1' } },
   } }] })
   const db = await runtime.getD1Database('DB')
-  const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-  await db.batch(statements.map(statement => db.prepare(statement)))
+  await applySchema(db)
   return { runtime, db }
 }
 
@@ -62,6 +60,10 @@ test('the visit and click writes keep sessions and add each new visit or click t
       stage: 'external_handoff', surface: 'website', id, occurredAt, timezone: 'Asia/Bangkok' })
     await Promise.all([call('00000000-0000-4000-8000-000000000001', '2026-09-05T16:59:59.000Z'), call('00000000-0000-4000-8000-000000000001', '2026-09-05T16:59:59.000Z')])
     await call('00000000-0000-4000-8000-000000000002', '2026-09-05T17:00:00.000Z')
+    // A click id already recorded for this business is refused for another one.
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone) VALUES ('org-other', 'Other', 'other', 'other', '{}', 'USD', 'Asia/Bangkok')`).run()
+    await assert.rejects(recordOrganizationConversionEvent(db, null, { organizationId: 'org-other', eventName: 'phone_click', stage: 'external_handoff', surface: 'website',
+      id: '00000000-0000-4000-8000-000000000002', occurredAt: '2026-09-05T17:00:00.000Z', timezone: 'Asia/Bangkok' }), /another organization/)
 
     const counts = await db.prepare(`SELECT kind, date, key, CAST(payload_json ->> '$.page_views' AS INTEGER) AS views FROM analytics_summaries
       WHERE organization_id = 'org-proof' AND kind <> 'session' ORDER BY kind, date, key`).all<{ kind: string; date: string; key: string; views: number }>()

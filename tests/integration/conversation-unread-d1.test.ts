@@ -1,15 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { appendMessage, markConversationRead, markConversationUnread } from '../../server/domain/conversations.ts'
 import { loadConversationPage } from '../../server/domain/conversation-history.ts'
-import { setListingMessagingAccess } from '../../server/domain/conversation-participants.ts'
+import { setListingAccess } from '../../server/domain/conversation-participants.ts'
 import { archiveConversation, listConversations, readGuestInbox, readWorkspaceInbox, unreadBadge } from '../../server/domain/guest-threads/repository.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { joinedMemberPrincipal, listOrganizationNotificationMembers } from '../../server/utils/member-access.ts'
+import { applySchema } from './support/schema.ts'
 
 // Unread is one statement (conversations.ts unreadSql): a message from someone
 // else newer than the person's read position. Every surface reads it: the list
@@ -28,7 +27,7 @@ test('unread is a message from someone else after your read position, the same c
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.batch([
       `INSERT INTO organization (id,name,slug,default_currency,timezone) VALUES ('${ORG}','Proof','proof','USD','UTC')`,
       ...[[OWNER, 'Owner'], [CLEANER, 'Cleaner'], [GUEST, 'Guest'], [ADMIN, 'Admin'], [SUCCESSOR, 'Successor']].map(([id, name]) => `INSERT INTO user (id,name,email,emailVerified) VALUES ('${id}','${name}','${id}@proof.example',1)`),
@@ -162,7 +161,7 @@ test('unread is a message from someone else after your read position, the same c
       BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests' }
     const owner = joinedMemberPrincipal({ userId: OWNER, organizationId: ORG, memberId: 'm-owner', role: 'owner' }, { env })
     const coHostGrant = { listingId: 'home', memberId: 'm-cleaner' }
-    await setListingMessagingAccess(db, env, owner, { ...coHostGrant, allowed: true })
+    await setListingAccess(db, env, owner, { ...coHostGrant, access: 'messaging' })
     await db.prepare("UPDATE product_booking_configs SET assigned_member_id = 'm-successor' WHERE assigned_member_id = 'm-cleaner'").run()
     assert.deepEqual(await guestThreads(ADMIN), assigned)
     assert.deepEqual(await guestThreads(SUCCESSOR), assigned)
@@ -174,7 +173,7 @@ test('unread is a message from someone else after your read position, the same c
       (await listOrganizationNotificationMembers(env, ORG, { guestMessage: true, requestId })).map(recipient => recipient.userId).sort()
     assert.deepEqual(await recipients('consultation-conversation'), [ADMIN, OWNER, SUCCESSOR])
     assert.deepEqual(await recipients('home-conversation'), [ADMIN, CLEANER, OWNER, SUCCESSOR])
-    await setListingMessagingAccess(db, env, owner, { ...coHostGrant, allowed: false })
+    await setListingAccess(db, env, owner, { ...coHostGrant, access: null })
     assert.deepEqual(await guestThreads(CLEANER), [])
     assert.equal((await transcript(CLEANER, 'team')).conversation.kind, 'team')
 

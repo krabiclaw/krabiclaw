@@ -16,8 +16,6 @@ import { organizationAccessControl, organizationRoles } from '~/utils/organizati
 export interface BillingEnv {
   STRIPE_SECRET_KEY?: string
   STRIPE_WEBHOOK_SECRET?: string
-  /** Deadline of a bounded background operation; ordinary billing calls keep SDK defaults. */
-  requestSignal?: AbortSignal
 }
 
 export interface OrganizationBillingStatus {
@@ -50,7 +48,7 @@ const billingAuthorizationOptions = {
 
 export function getStripe(env: BillingEnv): Stripe {
   if (!env.STRIPE_SECRET_KEY) throw new Error('Stripe secret key not configured')
-  return createStripeClient(env.STRIPE_SECRET_KEY, 'canonical', env.requestSignal)
+  return createStripeClient(env.STRIPE_SECRET_KEY)
 }
 
 

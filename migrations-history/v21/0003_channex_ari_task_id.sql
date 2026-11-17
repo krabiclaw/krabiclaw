@@ -1,1 +1,0 @@
-ALTER TABLE `channel_sync_log` ADD `task_id` text;

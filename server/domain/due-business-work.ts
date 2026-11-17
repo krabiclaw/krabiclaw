@@ -1,5 +1,5 @@
 import { execute, queryAllPages, queryFirst } from '~/server/db'
-import { publishEvent } from '~/server/events'
+import { publishAirbnbSync, publishEvent } from '~/server/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { runScheduledManagedAdSpend } from '~/server/domain/payments/ad-spend'
 import { cleanupMcpToolCallEvents, MCP_AUDIT_RETENTION_DAYS, MCP_DIAGNOSTIC_RETENTION_DAYS } from '~/server/utils/mcp-telemetry'
@@ -61,7 +61,7 @@ export async function enqueueOutstandingWork(env: CloudflareEnv): Promise<void> 
   const jobs = await queryAllPages<{ organization_id: string; id: string }>(env.DB,
     "SELECT organization_id, id FROM airbnb_sync_jobs WHERE state = 'pending' ORDER BY id", [])
   for (const { organization_id, id } of jobs) {
-    await publishEvent(env, { type: 'airbnb.sync', organization_id, job_id: id })
+    await publishAirbnbSync(env, { type: 'airbnb.sync_step', organization_id, job_id: id })
   }
 }
 

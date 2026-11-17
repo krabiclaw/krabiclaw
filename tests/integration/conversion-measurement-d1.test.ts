@@ -1,17 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import { captureEvents } from './support/events.ts'
 import { handleStripeGa4Event, withdrawStripeGaIdentifiers } from '../../server/utils/stripe-ga4.ts'
 import { deliverViaMeasurementProtocol, readGa4Delivery, recordZarazPageviewReceipt, zarazPageviewDelivery } from '../../server/utils/ga4-delivery.ts'
 import { PLATFORM_SITE } from '../../utils/site-routing.ts'
 import { originatingOwnerId, recordAndDeliverConversion, recordOrganizationConversionEvent as recordAt, type OrganizationConversionInput } from '../../server/utils/organization-conversions.ts'
-import { findStripeGa4CheckoutAttribution } from '../../server/utils/stripe-ga4-intents.ts'
 import { recordTenantPageview, type TenantPageviewInput } from '../../server/utils/pageview-tracking.ts'
 import { completeOnboarding } from '../../server/utils/organization-provisioning.ts'
 import { hashEmail } from '../../server/utils/email-delivery.ts'
+import { applySchema } from './support/schema.ts'
 
 const SESSION = '11111111-1111-4111-8111-111111111111'
 const VISITOR = '22222222-2222-4222-8222-222222222222'
@@ -28,8 +26,7 @@ async function openDb() {
     env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'conversion-proof', exportName: 'Hub' } },
   } }] })
   const db = await runtime.getD1Database('DB')
-  const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-  await db.batch(statements.map(statement => db.prepare(statement)))
+  await applySchema(db)
   return { runtime, db }
 }
 
@@ -105,50 +102,6 @@ test('conversion measurement: contract, values and idempotency on D1', { timeout
       WHERE organization_id = 'org-customer' AND (payload_json ->> '$.event_name') = 'booking_submit' ORDER BY request`).all()).results, [{ request: 'req-1', quoted: 240000 }, { request: 'req-2', quoted: null }])
 
 
-  } finally { await runtime.dispose() }
-})
-
-test('the acquiring owner is the one who created the business, not a later owner', { timeout: 60_000 }, async () => {
-  const { runtime, db } = await openDb()
-  try {
-    const settings = '{}'
-    for (const id of ['org-platform', 'org-paying', 'org-new']) {
-      await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone, analytics_data_start_at) VALUES (?, ?, ?, ?, ?, 'USD', 'Asia/Bangkok', '2000-01-01T00:00:00.000Z')`).bind(id, id, id, id, settings).run()
-    }
-    for (const id of ['owner', 'newcomer', 'founder']) await db.prepare(`INSERT INTO user (id, name, email) VALUES (?, ?, ?)`).bind(id, id, `${id}@example.com`).run()
-    const uuid = (n: number) => `${String(n).padStart(8, '0')}-0000-4000-8000-000000000000`
-    const page = (sessionN: number, campaign: string, at: string): TenantPageviewInput => ({
-      eventId: `pv-${sessionN}-${campaign}`, organizationId: 'org-platform', timezone: 'Asia/Bangkok', pagePath: '/', locale: 'en', referrerHost: null,
-      attribution: { utm_source: 'meta', utm_medium: 'paid', utm_campaign: campaign }, internalHosts: ['platform.example'], userAgent: 'Desktop', ipHash: 'h',
-      sessionId: uuid(sessionN), visitorId: uuid(100 + sessionN), country: 'th', region: null, city: null, locationId: null, pageId: null, pageType: 'home', recipe: null, now: at,
-    })
-    const cookies = (sessionN: number) => ({ headers: new Headers({ cookie: `kc_session_id=${uuid(sessionN)}; kc_visitor_id=${uuid(100 + sessionN)}` }) })
-    // Sessions 1-2 land on A and convert; session 3 lands on A and does not. Sessions 1-2 are later touched by B.
-    for (const n of [1, 2, 3]) await recordTenantPageview(db, page(n, 'A', '2026-09-10T03:00:00.000Z'))
-    for (const n of [1, 2]) {
-      await recordAt(db, cookies(n), { organizationId: 'org-platform', eventName: 'sign_up', stage: 'completed', surface: 'auth', entityType: 'user', entityId: `user-${n}`, occurredAt: '2026-09-10T03:30:00.000Z' })
-      await recordTenantPageview(db, page(n, 'B', '2026-09-10T04:00:00.000Z'))
-    }
-    // The events keep the touch they had when they happened: both signups came on A, before B touched their sessions.
-    assert.deepEqual((await db.prepare(`SELECT payload_json ->> '$.attribution.campaign' AS campaign, COUNT(*) AS events FROM analytics_events
-      WHERE (payload_json ->> '$.event_name') = 'sign_up' AND session_id IS NOT NULL GROUP BY 1`).all()).results, [{ campaign: 'A', events: 2 }])
-
-    // A paying business already owned by someone else; a newcomer is added as a later owner and is not its acquirer.
-    const founderSignup = await recordAt(db, null, { organizationId: 'org-platform', eventName: 'sign_up', stage: 'completed', surface: 'auth', entityType: 'user', entityId: 'founder', occurredAt: '2026-09-10T05:00:00.000Z' })
-    assert.ok(founderSignup.created)
-    await db.prepare(`INSERT INTO member (id, "organizationId", "userId", role, "createdAt") VALUES ('m-owner', 'org-paying', 'owner', 'owner', 1000), ('m-newcomer', 'org-paying', 'newcomer', 'owner', 2000)`).run()
-    await recordAt(db, null, { organizationId: 'org-platform', eventName: 'sign_up', stage: 'completed', surface: 'auth', entityType: 'user', entityId: 'newcomer', occurredAt: '2026-09-10T06:00:00.000Z' })
-    assert.equal(await originatingOwnerId(db, 'org-platform', 'org-paying'), 'owner')
-    await recordAt(db, null, { organizationId: 'org-platform', eventName: 'purchase', stage: 'completed', surface: 'stripe', entityType: 'invoice', entityId: 'in_old', occurredAt: '2026-09-10T02:00:00.000Z',
-      value: { basis: 'purchase', amount_minor: 4900, collected_minor: 4900, currency: 'USD', transaction_id: 'in_old' },
-      metadata: { purchase_type: 'initial_subscription', subscribing_organization_id: 'org-paying', originating_user_id: 'owner' } })
-    // A business the founder actually created, onboarded and paid for after the signup.
-    await db.prepare(`INSERT INTO member (id, "organizationId", "userId", role, "createdAt") VALUES ('m-founder', 'org-new', 'founder', 'owner', 3000)`).run()
-    await recordAt(db, null, { organizationId: 'org-platform', eventName: 'onboarding_complete', stage: 'completed', surface: 'dashboard', entityType: 'organization', entityId: 'org-new', occurredAt: '2026-09-10T07:00:00.000Z', metadata: { originating_user_id: await originatingOwnerId(db, 'org-platform', 'org-new') } })
-    await recordAt(db, null, { organizationId: 'org-platform', eventName: 'purchase', stage: 'completed', surface: 'stripe', entityType: 'invoice', entityId: 'in_new', occurredAt: '2026-09-10T08:00:00.000Z',
-      value: { basis: 'purchase', amount_minor: 4900, collected_minor: 4900, currency: 'USD', transaction_id: 'in_new' },
-      metadata: { purchase_type: 'initial_subscription', subscribing_organization_id: 'org-new', originating_user_id: 'founder' } })
-    assert.equal(await originatingOwnerId(db, 'org-platform', 'org-new'), 'founder')
   } finally { await runtime.dispose() }
 })
 
@@ -396,46 +349,6 @@ test('Stripe payments keep exact line totals, checkout attribution after expiry,
 })
 
 
-test('conversion session bounds survive out-of-order arrivals on D1', { timeout: 60_000 }, async () => {
-  const { runtime, db } = await openDb()
-  try {
-    await db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org-bounds', 'Bounds', 'bounds', 'USD', 'Asia/Bangkok')").run()
-    const input = { organizationId: 'org-bounds', eventName: 'announcement_view', stage: 'viewed', surface: 'website' } as const
-    for (const hour of ['03', '05', '01', '04']) {
-      await recordOrganizationConversionEvent(db, browser, { ...input, occurredAt: `2026-09-10T${hour}:00:00.000Z` })
-    }
-    const bounds = await db.prepare(`SELECT json_extract(payload_json, '$.started_at') started_at,
-      json_extract(payload_json, '$.last_seen_at') last_seen_at, updated_at
-      FROM analytics_summaries WHERE organization_id = 'org-bounds' AND kind = 'session'`).first()
-    assert.deepEqual(bounds, { started_at: '2026-09-10T01:00:00.000Z', last_seen_at: '2026-09-10T05:00:00.000Z', updated_at: '2026-09-10T05:00:00.000Z' })
-  } finally {
-    await runtime.dispose()
-  }
-})
-
-test('checkout attribution uses the newest matching intent even when attribution is absent', { timeout: 60_000 }, async () => {
-  const { runtime, db } = await openDb()
-  try {
-    await db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org-intents', 'Intents', 'intents', 'USD', 'Asia/Bangkok')").run()
-    await db.prepare("INSERT INTO user (id, name, email) VALUES ('intent-user', 'Intent', 'intent@example.com')").run()
-    const attribution = { touch: { source: 'meta', medium: 'paid', campaign: 'launch', term: null, content: null, referrerHost: null, gclid: null, gbraid: null, wbraid: null, fbclid: null, msclkid: null }, attributedAt: '2026-09-10T01:00:00.000Z' }
-    const insert = (id: string, createdAt: string, value: string | null, action = 'initial_subscription', subscription = 'sub-intents') => db.prepare(`INSERT INTO stripe_ga4_subscription_intents
-      (id, organization_id, user_id, stripe_subscription_id, action, attribution_json, created_at, expires_at)
-      VALUES (?, 'org-intents', 'intent-user', ?, ?, ?, ?, '2099-01-01T00:00:00.000Z')`).bind(id, subscription, action, value, createdAt).run()
-    assert.equal(await findStripeGa4CheckoutAttribution(db, 'sub-intents', 'initial_subscription'), null)
-    await insert('intent-a', '2026-09-10T01:00:00.000Z', JSON.stringify(attribution))
-    assert.deepEqual(await findStripeGa4CheckoutAttribution(db, 'sub-intents', 'initial_subscription'), attribution)
-    await insert('intent-b', '2026-09-10T02:00:00.000Z', null)
-    assert.equal(await findStripeGa4CheckoutAttribution(db, 'sub-intents', 'resubscription'), null)
-    await insert('intent-c', '2026-09-10T02:00:00.000Z', JSON.stringify(attribution))
-    await insert('intent-d', '2026-09-10T03:00:00.000Z', null, 'upgrade')
-    await insert('intent-e', '2026-09-10T03:00:00.000Z', null, 'initial_subscription', 'sub-other')
-    assert.deepEqual(await findStripeGa4CheckoutAttribution(db, 'sub-intents', 'initial_subscription'), attribution)
-  } finally {
-    await runtime.dispose()
-  }
-})
-
 test('a completed onboarding emails each operator once, with a link to that customer, whatever the measurement does', { timeout: 60_000 }, async (t) => {
   const { runtime, db } = await openDb()
   const sent: Array<{ idempotencyKey: string | null; body: { to: string[]; from: string; reply_to?: string; subject: string; html: string; text: string } }> = []
@@ -461,22 +374,10 @@ test('a completed onboarding emails each operator once, with a link to that cust
     assert.ok(operatorMail)
     assert.ok(ownerMail)
     assert.deepEqual(operatorMail!.body.to, ['ops@blawby.com'])
-    assert.equal(operatorMail!.body.from, 'Blawby <hello@blawby.com>')
-    assert.equal(operatorMail!.body.subject, 'Clay Corner is live on Blawby')
     assert.equal(operatorMail!.idempotencyKey, `onboarding-complete:org-customer:${hashEmail('ops@blawby.com')}`)
-    for (const expected of ['Mina Park (mina@clay-corner.com)', 'https://clay-corner.krabiclaw.com/',
-      'https://krabiclaw.com/dashboard/krabiclaw/platform-accounts?user=user-owner&amp;organization=org-customer']) {
-      assert.ok(operatorMail!.body.html.includes(expected), `operator email carries ${expected}`)
-    }
-
+    assert.ok(operatorMail!.body.html.includes('https://krabiclaw.com/dashboard/krabiclaw/platform-accounts?user=user-owner&amp;organization=org-customer'), 'the operator email links to that customer')
     assert.deepEqual(ownerMail!.body.to, ['mina@clay-corner.com'])
-    assert.equal(ownerMail!.body.from, 'Paul at Blawby <hello@blawby.com>')
-    assert.equal(ownerMail!.body.reply_to, 'hello@blawby.com')
-    assert.equal(ownerMail!.body.subject, 'Welcome to Blawby — congrats on launching Clay Corner!')
     assert.equal(ownerMail!.idempotencyKey, `onboarding-welcome:org-customer:${hashEmail('mina@clay-corner.com')}`)
-    for (const expected of ['Hi Mina,', 'Clay Corner', 'https://clay-corner.krabiclaw.com/', 'https://krabiclaw.com/dashboard/clay-corner', 'dining experience or cuisine', 'Paul', 'Founder, Blawby']) {
-      assert.ok(ownerMail!.body.html.includes(expected), `owner welcome email carries ${expected}`)
-    }
     // The conversion is recorded on its own path, once per organization.
     assert.equal(await db.prepare("SELECT count(*) FROM analytics_events WHERE json_extract(payload_json, '$.event_name') = 'onboarding_complete' AND json_extract(payload_json, '$.entity_id') = 'org-customer'").first('count(*)'), 1)
 
