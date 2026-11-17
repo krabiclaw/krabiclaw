@@ -127,6 +127,19 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   test.setTimeout(240_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, headers, slug, organizationId, location, call, productId, ownerMemberId } = await createStayHome(page, baseURL!)
+  const invitePath = `/api/dashboard/members?view=invite&org=${encodeURIComponent(slug)}`
+  const staffInvite = await request.get(invitePath)
+  await expectStatus(staffInvite, 200)
+  const { organization_id, roles } = await staffInvite.json() as { organization_id: string; roles: Array<{ value: string }> }
+  expect(organization_id).toBe(organizationId)
+  expect(roles.map(role => role.value).sort()).toEqual(['admin', 'cleaner', 'maintenance', 'member', 'owner', 'property_manager'])
+  const outsider = await browser.newContext({ baseURL })
+  try {
+    await loginAs(outsider.request, baseURL!, 'user-e2e-oauth-private-cimd')
+    await expectStatus(await outsider.request.get(invitePath), 404)
+  } finally {
+    await outsider.close()
+  }
   const sitePages = await call<{ built_in_pages: Array<{ path: string }>; pages: Array<{ id: string; path: string }> }>('list_site_pages', {})
   expect(sitePages.error).toBeNull()
   expect(sitePages.data!.built_in_pages.map(item => item.path)).toContain('/stays')

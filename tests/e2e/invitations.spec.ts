@@ -14,6 +14,14 @@ test('the email link returns through normal sign-in and only the invited account
   const invitee = findE2eAuthFixture('user-e2e-lodging-invitee')
   const other = findE2eAuthFixture('user-e2e-oauth-private-cimd')
   await loginAs(request, baseURL!)
+  for (const [key, specialtyRoles] of [['legal', ['attorney', 'paralegal']], ['experience', []]] as const) {
+    const workspace = seededTenant(key)
+    const form = await request.get('/api/dashboard/members', { params: { org: workspace.slug, view: 'invite' } })
+    expect(form.status(), await form.text()).toBe(200)
+    const { organization_id, roles } = await form.json() as { organization_id: string; roles: Array<{ value: string }> }
+    expect(organization_id).toBe(workspace.organizationId)
+    expect(roles.map(role => role.value).sort()).toEqual(['member', 'owner', 'admin', ...specialtyRoles].sort())
+  }
   const owner = await browser.newContext({ baseURL, viewport: { width: 360, height: 780 } })
   let invitationId: string
   try {
@@ -97,6 +105,12 @@ test('the email link returns through normal sign-in and only the invited account
   expect(teamData.invitations).toEqual([])
   expect(teamData.members.length).toBeGreaterThan(0)
   expect(teamData.members.every(member => !member.canRemove && !member.roleChoices.length)).toBe(true)
+  const ownInviteForm = await page.request.get('/api/dashboard/members', { params: { org: restaurant.slug, view: 'invite' } })
+  expect(ownInviteForm.status(), await ownInviteForm.text()).toBe(403)
+  for (const key of ['legal', 'experience'] as const) {
+    const foreignInviteForm = await page.request.get('/api/dashboard/members', { params: { org: seededTenant(key).slug, view: 'invite' } })
+    expect(foreignInviteForm.status(), await foreignInviteForm.text()).toBe(404)
+  }
   const reopened = await page.request.get('/api/auth/organization/get-invitation', { params: { id: invitationId } })
   expect(reopened.status()).toBe(400)
   await expect(reopened.json()).resolves.toMatchObject({ message: 'Invitation not found!' })
