@@ -1710,7 +1710,7 @@ test('standalone Channex homes migration preserves calendar delivery and channel
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
   try {
-    const migration = '0015_standalone_channex_homes'
+    const migration = '0016_standalone_channex_homes'
     const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
     for (const { tag } of journal.entries.slice(0, journal.entries.findIndex(entry => entry.tag === migration))) {
       database.exec(readFileSync(`migrations/${tag}.sql`, 'utf8'))
