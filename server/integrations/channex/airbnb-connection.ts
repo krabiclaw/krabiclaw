@@ -315,20 +315,23 @@ export class AirbnbConnection {
   }
 
   /**
-   * The property an earlier attempt created with this exact title in this
-   * organization's group before its id was saved, found in Channex: no Blawby
-   * row names it. Null when there is none; two such are refused.
+   * The property an earlier attempt created in this organization's group before
+   * its id was saved, found in Channex: it has every value that attempt sent
+   * (title, address, contact, currency, time zone and type), and no Blawby row
+   * names it, so it is indistinguishable from the one this attempt would
+   * create. Null when there is none; two such are refused.
    */
-  private async createdProperty(title: string, groupId: string): Promise<string | null> {
+  private async createdProperty(title: string, groupId: string, sent: Record<string, unknown> = {}): Promise<string | null> {
     const rows = await channexList(this.env, '/properties', 'property', { 'filter[title]': title })
     const known = new Set((await queryAll<{ id: string }>(this.db, `SELECT property_id AS id FROM product_channel_mappings WHERE organization_id = ? AND provider = 'channex' AND property_id IS NOT NULL
       UNION SELECT setup_property_id FROM channex_connections WHERE organization_id = ? AND setup_property_id IS NOT NULL`, [this.organizationId, this.organizationId])).map(row => row.id))
     const created = provided(() => rows.filter((row) => {
       const groups = object(object(row.relationships, 'property.relationships').groups, 'property.relationships.groups').data
       if (!Array.isArray(groups)) throw new ChannexDataError('property.relationships.groups.data must be a list')
-      return row.attributes.title === title && groups.some(group => object(group, 'property group').id === groupId) && !known.has(row.id)
+      return row.attributes.title === title && Object.entries(sent).every(([key, value]) => value === undefined || row.attributes[key] === value)
+        && groups.some(group => object(group, 'property group').id === groupId) && !known.has(row.id)
     }))
-    if (created.length > 1) fail(502, 'PROVIDER_STATE_AMBIGUOUS', `Channex has ${created.length} unrecorded properties titled ${JSON.stringify(title)} in this organization's group.`)
+    if (created.length > 1) fail(502, 'PROVIDER_STATE_AMBIGUOUS', `Channex has ${created.length} unrecorded properties titled ${JSON.stringify(title)} with the same details in this organization's group.`)
     return created[0]?.id ?? null
   }
 
@@ -536,11 +539,13 @@ export class AirbnbConnection {
     switch (stage) {
       case 'property': {
         if (!property) throw new Error(`Import of ${productId} has no approved listing details`)
-        const earlier = await this.createdProperty(property.title, groupId)
+        const sent = {
+          currency: property.currency, timezone: property.timezone, property_type: property.property_type, email: property.email, phone: property.phone,
+          country: property.country, state: property.state, city: property.city, address: property.address, zip_code: property.zip_code,
+        }
+        const earlier = await this.createdProperty(property.title, groupId, sent)
         const created = earlier ? { id: earlier } : await channexCreate(this.env, '/properties', { property: {
-          title: property.title, currency: property.currency, timezone: property.timezone, group_id: groupId, property_type: property.property_type,
-          email: property.email, phone: property.phone, country: property.country, state: property.state, city: property.city,
-          address: property.address, zip_code: property.zip_code, settings: { state_length: STAY_CALENDAR_DAYS, min_stay_type: 'arrival' },
+          title: property.title, group_id: groupId, ...sent, settings: { state_length: STAY_CALENDAR_DAYS, min_stay_type: 'arrival' },
         } }, 'property')
         await save({ property_id: created.id, import_stage: 'room' })
         break
@@ -1079,53 +1084,67 @@ export class AirbnbConnection {
   async disconnect(): Promise<{ disconnected: boolean }> {
     const row = await this.row()
     if (!row?.channel_id) return { disconnected: true }
+    const { status, disconnect_error: error } = row
     await this.save(row, { status: 'disconnecting', disconnect_error: null })
-    await publishAirbnbSync(this.env, { type: 'airbnb.disconnect', organization_id: this.organizationId, user_id: this.userId })
+    try {
+      await publishAirbnbSync(this.env, { type: 'airbnb.disconnect', organization_id: this.organizationId, user_id: this.userId, channel_id: row.channel_id })
+    } catch (cause) {
+      // Not queued, so not asked: the connection reads as it did and the request fails.
+      await this.save(row, { status, disconnect_error: error })
+      throw cause
+    }
     return { disconnected: false }
   }
 
   /**
-   * One step of disconnecting, run by the AIRBNB_SYNC queue (and by organization
-   * deletion): removes one mapping per call, then deactivates and deletes the
-   * channel and the setup property. False means another step remains.
+   * One step of the disconnect asked for `channelId`, run by the AIRBNB_SYNC
+   * queue: removes one mapping per call, then deactivates the channel, deletes
+   * the setup property and the channel. False means another step remains. A
+   * delivery for a disconnect no longer asked for (a later reconnect, a failed
+   * step) does nothing.
    */
-  async disconnectStep(): Promise<boolean> {
+  async disconnectStep(channelId: string): Promise<boolean> {
     const row = await this.connection()
-    if (!row.channel_id) return true
-    const path = `/channels/${encodeURIComponent(row.channel_id)}`
-    // An earlier step may have deleted the channel, or the setup property, before saving that it had.
-    if (!await this.present(path, 'channel')) return await this.disconnected(row)
-    const channel = await this.channel(row, row.channel_id)
-    await this.save(row, { status: 'disconnecting' })
-    // Homes that stop syncing may stop being live: the counts are reported again.
-    await executeWithinCapacity(this.env, this.db, this.organizationId, [{
-      query: "UPDATE product_channel_mappings SET enabled = 0, updated_at = ? WHERE organization_id = ? AND provider = 'channex' AND channel_id = ?",
-      params: [now(), this.organizationId, channel.id],
-    }], { operation: 'Disconnect Airbnb listings', action: 'disconnect them' })
+    if (row.status !== 'disconnecting' || row.channel_id !== channelId) return true
+    const path = `/channels/${encodeURIComponent(channelId)}`
+    // An earlier step may have deleted the channel before saving that it had.
+    if (!await this.present(path, 'channel')) return await this.disconnected(row, channelId)
+    const channel = await this.channel(row, channelId)
     const first = channel.ratePlans[0]
     if (first !== undefined) {
       const mappingId = provided(() => string(first.id, 'Mapping id'))
       await channexRequest(this.env, `${path}/mappings/${encodeURIComponent(mappingId)}`, 'DELETE')
+      // The home stops syncing once its Airbnb mapping is gone, so it may stop being live: the counts are reported again.
+      await this.stopSyncing(channelId, String(first.rate_plan_id))
       return false
     }
     if (channel.active) await channexRequest(this.env, `${path}/deactivate`, 'POST')
-    await channexRequest(this.env, path, 'DELETE')
-    return await this.disconnected(row)
+    return await this.disconnected(row, channelId)
+  }
+
+  private async stopSyncing(channelId: string, ratePlanId: string | null): Promise<void> {
+    await executeWithinCapacity(this.env, this.db, this.organizationId, [{
+      query: `UPDATE product_channel_mappings SET enabled = 0, updated_at = ? WHERE organization_id = ? AND provider = 'channex' AND channel_id = ? AND enabled = 1${ratePlanId === null ? '' : ' AND rate_plan_id = ?'}`,
+      params: [now(), this.organizationId, channelId, ...(ratePlanId === null ? [] : [ratePlanId])],
+    }], { operation: 'Disconnect Airbnb listings', action: 'disconnect them' })
   }
 
   /** A disconnect step failed: the connection reads as it is now, with the reason, and Disconnect can be asked again. */
-  async disconnectFailed(reason: string): Promise<void> {
-    await execute(this.db, `UPDATE channex_connections SET status = CASE WHEN channel_id IS NULL THEN 'not_connected' ELSE 'connected' END, disconnect_error = ?, updated_at = ?
-      WHERE organization_id = ?`, [reason, now(), this.organizationId])
+  async disconnectFailed(channelId: string, reason: string): Promise<void> {
+    await execute(this.db, `UPDATE channex_connections SET status = 'connected', disconnect_error = ?, updated_at = ?
+      WHERE organization_id = ? AND status = 'disconnecting' AND channel_id = ?`, [reason, now(), this.organizationId, channelId])
   }
 
-  private async disconnected(row: ConnectionRow): Promise<true> {
-    await this.save(row, { channel_id: null, connected_at: null, status: 'not_connected' })
+  /** The channel's last steps; the connection reads not connected only once every one of them is done. */
+  private async disconnected(row: ConnectionRow, channelId: string): Promise<true> {
+    await this.stopSyncing(channelId, null)
     if (row.setup_property_id) {
       const setupPath = `/properties/${encodeURIComponent(row.setup_property_id)}`
-      if (await this.present(setupPath, 'property')) await channexRequest(this.env, setupPath, 'DELETE')
-      await this.save(row, { setup_property_id: null })
+      if (await this.present(setupPath, 'property')) await channexRequest(this.env, `${setupPath}?force=true`, 'DELETE')
     }
+    const channelPath = `/channels/${encodeURIComponent(channelId)}`
+    if (await this.present(channelPath, 'channel')) await channexRequest(this.env, channelPath, 'DELETE')
+    await this.save(row, { channel_id: null, connected_at: null, status: 'not_connected', setup_property_id: null })
     return true
   }
 

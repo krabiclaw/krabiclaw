@@ -28,10 +28,10 @@ export async function consumeAirbnbSync(env: CloudflareEnv, message: AirbnbSyncM
   const connection = new AirbnbConnection(env.DB, env, message.organization_id, message.user_id)
   let disconnected: boolean
   try {
-    disconnected = await connection.disconnectStep()
+    disconnected = await connection.disconnectStep(message.channel_id)
   } catch (error) {
     // The owner reads the reason with the connection and asks again; Cloudflare does not repeat it.
-    await connection.disconnectFailed(error instanceof Error ? error.message : String(error))
+    await connection.disconnectFailed(message.channel_id, error instanceof Error ? error.message : String(error))
     return
   }
   if (!disconnected) await publishAirbnbSync(env, message)

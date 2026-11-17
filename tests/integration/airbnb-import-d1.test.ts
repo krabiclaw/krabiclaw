@@ -76,6 +76,7 @@ class FakeChannex {
   channelId = 'chan-1'
   messagesProperty: string | null = null
   failMessages = false
+  failMappingRemoval = false
   /** Airbnb failing behind Channex: Channex answers 422 carrying Airbnb's own 500, as it did on production 2026-10-23. */
   airbnbDown = false
   /** An Airbnb image id whose CDN fetch answers 503. */
@@ -232,6 +233,7 @@ class FakeChannex {
     if (method === 'POST' && path === '/channels/chan-1/deactivate') { this.channel.active = false; return json({ meta: { message: 'Success' } }) }
     if (method === 'DELETE' && path === '/channels/chan-1') return json({ meta: { message: 'Success' } })
     if (method === 'DELETE' && path.startsWith('/channels/chan-1/mappings/')) {
+      if (this.failMappingRemoval) return new Response('Airbnb is not answering', { status: 503 })
       this.channel.ratePlans = this.channel.ratePlans.filter(entry => entry.id !== path.split('/').pop())
       return json({ meta: { message: 'Success' } })
     }
@@ -310,7 +312,7 @@ async function advanceTo(connection: AirbnbConnection, db: D1Database, channex: 
 }
 
 test('a listing imports through every stage into a home Channex and Blawby agree on', { timeout: 120_000 }, async () => {
-  const { runtime, db, env } = await boot()
+  const { runtime, db, env, syncs } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
@@ -352,6 +354,8 @@ test('a listing imports through every stage into a home Channex and Blawby agree
     for (let step = 0; step < 14; step++) {
       await track(db, channex, productId)
       const at = await db.prepare('SELECT import_stage FROM product_channel_mappings WHERE product_id = ?').bind(productId).first<string>('import_stage')
+      // Another listing's unsaved property with the same title but its own address: never adopted for this one.
+      if (at === 'property') channex.properties.push({ id: 'prop-other-listing', title: 'Cliff Cabin', group_id: 'grp-1', address: '2 Cliff Rd', zip_code: '84532', city: 'Moab' })
       if (at === 'property' || at === 'room' || at === 'rate') {
         // The Worker ends after Channex created the resource and before its id is saved.
         await db.prepare(`CREATE TRIGGER lose_created_id BEFORE UPDATE OF import_stage ON product_channel_mappings BEGIN SELECT RAISE(ABORT, 'Worker ended'); END`).run()
@@ -360,6 +364,10 @@ test('a listing imports through every stage into a home Channex and Blawby agree
         await track(db, channex, productId)
       }
       const result = await connection.advance(productId)
+      if (at === 'property') {
+        assert.notEqual(await db.prepare('SELECT property_id FROM product_channel_mappings WHERE product_id = ?').bind(productId).first('property_id'), 'prop-other-listing')
+        channex.properties.splice(channex.properties.findIndex(property => property.id === 'prop-other-listing'), 1)
+      }
       stages.push(result.stage)
       if (result.stage === 'content') {
         // A photo Airbnb cannot serve stops the stage naming the image; the retry keeps the photo already stored.
@@ -519,6 +527,24 @@ test('a listing imports through every stage into a home Channex and Blawby agree
     const refreshed = await connection.refreshContent(productId)
     assert(refreshed.content.kept_host_edits.includes('description'))
     assert.equal((await readStayHome(db, manager, productId)).description, 'Our own words, again.')
+
+    // Disconnect: a mapping Airbnb fails to remove leaves its home syncing and the connection connected with the reason.
+    const enabled = () => db.prepare('SELECT enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first('enabled')
+    channex.failMappingRemoval = true
+    assert.deepEqual(await connection.disconnect(), { disconnected: false })
+    const asked = syncs.take()!
+    await syncs.deliver(env, asked)
+    assert.deepEqual([await enabled(), await db.prepare('SELECT status, disconnect_error FROM channex_connections').first()],
+      [1, { status: 'connected', disconnect_error: `Channex answered 503 to DELETE /channels/chan-1/mappings/${channex.channel.ratePlans[0]!.id}: Airbnb is not answering` }])
+    // The same delivery again, for a disconnect no longer asked for, does nothing.
+    const writes = channex.seen.filter(request => request.method !== 'GET').length
+    await syncs.deliver(env, { ...asked, id: crypto.randomUUID() })
+    assert.equal(channex.seen.filter(request => request.method !== 'GET').length, writes)
+    channex.failMappingRemoval = false
+    assert.deepEqual(await connection.disconnect(), { disconnected: false })
+    await syncs.drain(env)
+    assert.deepEqual([await enabled(), channex.channel.ratePlans, await db.prepare('SELECT status, channel_id, disconnect_error FROM channex_connections').first()],
+      [0, [], { status: 'not_connected', channel_id: null, disconnect_error: null }])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

@@ -208,6 +208,10 @@ test('a disconnect that fails on the queue shows its reason with the connection,
     await owner.start()
     assert.deepEqual(await owner.complete(channex.token!, 'chan-1'), { connected: true })
     channex.channel.active = true
+    // A disconnect the queue did not take is not asked: the request fails and the connection reads as before.
+    const unqueued = new AirbnbConnection(db, { ...queued, AIRBNB_SYNC: { send: async () => { throw new Error('Queue unavailable') } } } as unknown as CloudflareEnv, ORG, OWNER)
+    await assert.rejects(unqueued.disconnect(), /Queue unavailable/)
+    assert.deepEqual([(await owner.status()).status, (await owner.status()).disconnect_error], ['connected', null])
     channex.failDeactivate = true
     assert.deepEqual(await owner.disconnect(), { disconnected: false })
     assert.equal((await owner.status()).status, 'disconnecting')
@@ -253,7 +257,7 @@ test('deleting the organization releases its Airbnb channel, every property in i
     assert.deepEqual([channex.channelExists, channex.groupExists, channex.groupProperties], [false, false, []])
     const writes = channex.seen.filter(request => request.method !== 'GET').map(request => `${request.method} ${request.path}`)
     assert.deepEqual(writes.slice(writes.indexOf('POST /channels/chan-1/deactivate')), [
-      'POST /channels/chan-1/deactivate', 'DELETE /channels/chan-1', 'DELETE /properties/setup-1', 'DELETE /properties/prop-2', 'DELETE /groups/grp-1',
+      'POST /channels/chan-1/deactivate', 'DELETE /properties/setup-1', 'DELETE /channels/chan-1', 'DELETE /properties/prop-2', 'DELETE /groups/grp-1',
     ])
     assert.deepEqual(await db.prepare('SELECT status, channel_id, group_id, setup_property_id FROM channex_connections').first(),
       { status: 'not_connected', channel_id: null, group_id: null, setup_property_id: null })

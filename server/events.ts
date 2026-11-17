@@ -67,7 +67,7 @@ export interface EventsEnv { EVENTS?: { send(_event: DomainEvent, _options?: Eve
  */
 export type AirbnbSyncMessage =
   | { type: 'airbnb.sync_step'; organization_id: string; job_id: string }
-  | { type: 'airbnb.disconnect'; organization_id: string; user_id: string }
+  | { type: 'airbnb.disconnect'; organization_id: string; user_id: string; channel_id: string }
 
 export interface AirbnbSyncEnv { AIRBNB_SYNC?: { send(_message: AirbnbSyncMessage, _options?: { delaySeconds: number }): Promise<void> } }
 

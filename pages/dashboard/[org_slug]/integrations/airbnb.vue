@@ -422,23 +422,39 @@ async function startConnection() {
 }
 
 async function disconnect() {
-  disconnecting.value = true
   failure.value = ''
   try {
-    // Blawby disconnects in the background, between sync steps; the status reads not_connected when it is done.
-    let finished = (await dashboardApi(`${api}/disconnect`, { method: 'POST', validate: isDisconnect })).disconnected
-    while (!finished) {
-      await new Promise(resolve => setTimeout(resolve, 2000))
+    if ((await dashboardApi(`${api}/disconnect`, { method: 'POST', validate: isDisconnect })).disconnected) await Promise.all([refreshStatus(), integrations.refresh()])
+    else await watchDisconnect()
+  } catch (cause) {
+    failure.value = getErrorMessage(cause, 'Could not disconnect Airbnb.')
+  }
+}
+
+// Blawby disconnects in the background, between sync steps; the status reads not_connected when it is done,
+// or connected again with the reason it failed. A page opened mid-disconnect follows it too.
+let watching = false
+async function watchDisconnect() {
+  if (watching) return
+  watching = true
+  disconnecting.value = true
+  try {
+    for (let first = true; ; first = false) {
+      if (!first) await new Promise(resolve => setTimeout(resolve, 2000))
+      if (!watching) return
       await refreshStatus()
       if (statusError.value) throw statusError.value
-      finished = status.value?.status !== 'disconnecting'
+      if (status.value?.status !== 'disconnecting') break
     }
     await Promise.all([refreshStatus(), integrations.refresh()])
     if (status.value?.disconnect_error) failure.value = `Disconnecting failed: ${status.value.disconnect_error}`
-  } catch (cause) {
-    failure.value = getErrorMessage(cause, 'Could not disconnect Airbnb.')
   } finally {
+    watching = false
     disconnecting.value = false
   }
 }
+onMounted(() => {
+  if (status.value?.status === 'disconnecting') watchDisconnect().catch((cause) => { failure.value = getErrorMessage(cause, 'Could not disconnect Airbnb.') })
+})
+onBeforeUnmount(() => { watching = false })
 </script>
