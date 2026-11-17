@@ -2927,7 +2927,7 @@ export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  expires_at: text().notNull(),
  created_at: text().notNull(),
  converted_booking_id: text(),
-}, t => [
+}, () => [
  check("payment_holds_quantity_check", sql`quantity > 0 AND amount > 0`),
  // A session or a stay. For a stay, starts_at and ends_at are the check-in
  // and check-out dates at the home.
