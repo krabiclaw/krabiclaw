@@ -427,7 +427,7 @@ import { formatCalendarDate, formatTime, formatTimestamp, localDateAt } from '~/
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import { getErrorMessage } from '~/utils/errors'
-import { getVerticalCopy } from '~/utils/vertical-copy'
+import { getVerticalCopy, normalizeVertical } from '~/utils/vertical-copy'
 import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS } from '~/shared/stay-listing'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import { isChannelManagedStay, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
@@ -795,7 +795,8 @@ const reservationActions = computed<PanelAction[]>(() => {
       actions.push({ label: `Cancel ${noun.value}`, icon: 'i-lucide-ban', run: () => selectAction('cancel') })
     }
   }
-  if (itinerary.value) actions.push(itineraryAction)
+  // Airbnb's travel itinerary is for a trip; a law firm's consultation is not one.
+  if (itinerary.value && normalizeVertical(record.vertical) !== 'service') actions.push(itineraryAction)
   return actions
 })
 
