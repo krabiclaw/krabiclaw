@@ -1721,6 +1721,13 @@ test.describe('dashboard pane hierarchy', () => {
     await open(page, `${ORG}/earnings/performance?month=2026-01`)
     await expect(page.getByRole('heading', { name: 'January 2026', exact: true }).first()).toBeVisible()
 
+    const requests: Array<{ year: string | null; month: string | null }> = []
+    page.on('request', (request) => {
+      const { pathname, searchParams } = new URL(request.url())
+      if (pathname === '/api/dashboard/payments' && searchParams.get('view') === 'performance') {
+        requests.push({ year: searchParams.get('year'), month: searchParams.get('month') })
+      }
+    })
     await page.route(url => url.pathname === '/api/dashboard/payments' && url.searchParams.get('month') === selectedMonth, async (route) => {
       const response = await route.fetch()
       const performance: unknown = await response.json()
@@ -1733,6 +1740,7 @@ test.describe('dashboard pane hierarchy', () => {
     await page.getByRole('button', { name: 'Previous year' }).click()
     await expect(page.getByText('Performance could not be loaded', { exact: true })).toBeVisible()
     await expect(page.getByText(`Earnings are missing for ${selectedMonth}`, { exact: true })).toBeVisible()
+    expect(requests).toEqual([{ year: '2025', month: selectedMonth }])
   })
 
   test('personal navigation keeps owned activity and Notifications in its own context', async ({ page, baseURL }) => {
