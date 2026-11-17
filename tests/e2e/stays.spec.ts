@@ -657,7 +657,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const turnoverFields = { product_id: productId, location_id: stay.location_id, timezone: stay.timezone, status: stay.status, starts_at: stay.starts_at, ends_at: stay.ends_at, check_in_date: localDay(0), check_out_date: localDay(2),
       adults: 2, children: 1, infants: 0, guest_name: guestName }
     expect(new Intl.DateTimeFormat('en-GB', { timeZone: stay.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(stay.starts_at))).toBe('15:30')
-    const leaks = (body: unknown) => [surname, guestEmail, notes, stay.conversation_id!].filter(secret => JSON.stringify(body).includes(secret))
+    const leaks = (body: unknown) => [surname, guestEmail, notes].filter(secret => JSON.stringify(body).includes(secret))
     const stayPath = api(`bookings/${stay.booking_id}`)
     const memberStay = await memberContext.request.get(stayPath)
     await expectStatus(memberStay, 200)
@@ -669,7 +669,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     await expectStatus(memberList, 200)
     // The bookings list, the host Calendar and the calendar tool draw a member's stay as its days, status, party and the guest's first name.
     const { product_id, status, guest_name, adults, children, check_in_date, check_out_date } = turnoverFields
-    const calendarRow = { unit: 'nights', booking_id: stay.booking_id, conversation_id: null, product_id, status, guest_name, adults, children, check_in_date, check_out_date }
+    const calendarRow = { unit: 'nights', booking_id: stay.booking_id, conversation_id: stay.conversation_id, product_id, status, guest_name, adults, children, check_in_date, check_out_date }
     expect(await memberList.json()).toEqual({ bookings: [{ ...calendarRow, name: 'Cliff Cabin' }], manage: false })
     for (const product of [undefined, productId]) {
       const calendar = await memberContext.request.get(api(nightCalendarPath(localDay(0), localDay(3), product)))
@@ -706,11 +706,13 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const memberAgenda = await memberContext.request.get(api(`agenda?from=${localDay(0)}&to=${localDay(3)}`))
     await expectStatus(memberAgenda, 200)
     const memberAgendaBody = await memberAgenda.json() as { items: Array<{ id: string; booking_id: string }> }
-    expect(memberAgendaBody.items.find(item => item.id === `stay:${stay.booking_id}:arrival`)).toMatchObject({ booking_id: stay.booking_id })
+    expect(memberAgendaBody.items.find(item => item.id === `stay:${stay.booking_id}:arrival`)).toMatchObject({ booking_id: stay.booking_id, to: `/dashboard/${slug}/messages/${stay.conversation_id}` })
     expect(leaks(memberAgendaBody)).toEqual([])
     expect(leaks(todayBody)).toEqual([])
-    // The guest's conversation, automatic messages, money and changes are the managers': the member's outbox holds only their own replies.
-    await expectStatus(await memberContext.request.get(`/api/messages/${stay.conversation_id}`), 404)
+    // The assigned member can reply to this guest. Their outbox holds only their own scheduled replies.
+    const guestThread = await memberContext.request.get(`/api/messages/${stay.conversation_id}`)
+    await expectStatus(guestThread, 200)
+    expect(await guestThread.json()).toMatchObject({ viewer_role: 'member', conversation: { id: stay.conversation_id, kind: 'guest' } })
     const scheduled = await memberContext.request.get(api('scheduled-guest-messages?limit=20&offset=0'))
     await expectStatus(scheduled, 200)
     expect((await scheduled.json() as { messages: unknown[] }).messages).toEqual([])
@@ -818,6 +820,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const afterList = await memberContext.request.get(api(`bookings?unit=nights&from=${localDay(0)}&to=${localDay(3)}`))
     await expectStatus(afterList, 200)
     expect(await afterList.json()).toEqual({ bookings: [], manage: false })
+    await expectStatus(await memberContext.request.get(`/api/messages/${stay.conversation_id}`), 404)
     // Unassigned, nothing of the home is the member's work.
     const afterUpcoming = await memberContext.request.get(api('today?range=upcoming'))
     await expectStatus(afterUpcoming, 200)
@@ -4894,7 +4897,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const todayResponse = await cleaner.request.get(api('today'))
       await expectStatus(todayResponse, 200)
       const today = await todayResponse.json() as BusinessToday
-      const arrivalPath = `/dashboard/${slug}/bookings/${stays[0]!.booking_id}`
+      const arrivalPath = `/dashboard/${slug}/messages/${stays[0]!.conversation_id}`
       expect([today.title, today.cards]).toEqual(['Nothing needs you today', []])
       const upcomingResponse = await cleaner.request.get(api('today'), { params: { range: 'upcoming' } })
       await expectStatus(upcomingResponse, 200)
