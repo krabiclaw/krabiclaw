@@ -448,7 +448,7 @@ export function buildLlmsTxt(
       ? []
       : [
           '## Support',
-          `Blawby is open source (AGPL-3.0): ${KRABICLAW_REPOSITORY_URL}. Bugs and feature requests are GitHub issues; assistants acting for a user should give them a prefilled issue link rather than emailing KrabiClaw. Issue form fields prefill by query parameter using their ids. Issues are public, so leave out guest names, contact details and payment data.`,
+          `Blawby is open source (AGPL-3.0): ${KRABICLAW_REPOSITORY_URL}. Bugs and feature requests are GitHub issues; assistants acting for a user should give them a prefilled issue link. Issue form fields prefill by query parameter using their ids. Issues are public, so leave out guest names, contact details and payment data.`,
           `- [Report a bug](${KRABICLAW_BUG_REPORT_URL}): fields \`surface\`, \`site\`, \`what_happened\`, \`expected\`, \`tool_error\`.`,
           `- [Request a feature](${KRABICLAW_FEATURE_REQUEST_URL}): fields \`need\`, \`today\`, \`site\`.`,
           `- [Account, billing or private matters](${absoluteUrl(origin, '/help')}): not public.`,

@@ -1,6 +1,6 @@
 # MCP
 
-KrabiClaw ships one MCP surface. Every site, KrabiClaw's own included, is managed
+Blawby ships one MCP surface. Every site, Blawby's own included, is managed
 through it with the same tools.
 
 ## Surface
@@ -10,7 +10,7 @@ through it with the same tools.
 - Server entrypoint: `server/api/mcp.ts`
 - Scope: `tenant`
 - Exposes: existing-tenant content management, menus, experiences, lodging homes and stays, posts, articles
-  (blog and, on KrabiClaw's own site, documentation), media, reviews,
+  (blog and, on Blawby's own site, documentation), media, reviews,
   customer inquiries, Q&A, analytics, bookings, guest change proposals, member
   availability, nightly prices and stay rules, arrival guides, scheduled guest
   messages and financial reads
@@ -30,7 +30,7 @@ through it with the same tools.
   publication's post on its destination and refreshes the receipt. Nothing is scheduled: a
   client that wants a post out later calls `publish_post` then.
 
-KrabiClaw's marketing site is an ordinary organization running the platform
+Blawby's marketing site is an ordinary organization running the platform
 template. Its blog and documentation are article collections on that
 organization and are edited with the same tools as any tenant's articles, using
 its `organization_id`.
@@ -62,7 +62,7 @@ calendar reads block new availability rather than treating unknown time as free.
 The CMS selects the primary personal calendar and offers **Google Calendar
 sync** (Business). The business connection creates or reuses its **KrabiClaw**
 calendar automatically. Neither flow requires a calendar picker. Bookings are
-changed in KrabiClaw; their events follow. See
+changed in Blawby; their events follow. See
 [Google Calendar](integrations/google-calendar.md) for projection and cleanup.
 
 ## Auth Model
@@ -87,7 +87,7 @@ changed in KrabiClaw; their events follow. See
 
 ## User-Facing URL
 
-- MCP app URL: `https://krabiclaw.com/api/mcp`
+- MCP app URL: `https://blawby.com/api/mcp`
 
 ## Internal team conversations
 
@@ -118,7 +118,7 @@ arguments, including after a committed leave.
 
 ## Tool catalog
 
-KrabiClaw exposes one canonical tool contract. Every tool name, input schema,
+Blawby exposes one canonical tool contract. Every tool name, input schema,
 output schema, and executor must agree. Unknown tool names return JSON-RPC
 `-32601` over HTTP 200.
 
@@ -214,12 +214,12 @@ snapshot regeneration as evidence of correct behavior.
 
 Inspected and published through the connected production MCP:
 
-- [Capabilities](https://krabiclaw.com/docs/what-you-can-edit-through-chatgpt)
-- [Menu edits](https://krabiclaw.com/docs/update-your-menu-with-an-ai-assistant)
-- [Bookings](https://krabiclaw.com/docs/manage-your-bookings)
-- [Photos and video](https://krabiclaw.com/docs/add-photos-and-video)
-- [Post publication](https://krabiclaw.com/docs/publish-a-post)
-- [Guest inquiries and reservations](https://krabiclaw.com/docs/handle-inquiries-and-reservation-requests)
+- [Capabilities](https://blawby.com/docs/what-you-can-edit-through-chatgpt)
+- [Menu edits](https://blawby.com/docs/update-your-menu-with-an-ai-assistant)
+- [Bookings](https://blawby.com/docs/manage-your-bookings)
+- [Photos and video](https://blawby.com/docs/add-photos-and-video)
+- [Post publication](https://blawby.com/docs/publish-a-post)
+- [Guest inquiries and reservations](https://blawby.com/docs/handle-inquiries-and-reservation-requests)
 
 The upload screenshot shows current production controls. Booking review, change,
 message and cancellation screenshots show the local Ember & Slice documented
@@ -359,7 +359,7 @@ photo needs its current `expected_room_id`; a stale selection refuses the whole
 move, including any new room. The result identifies the actual destination,
 created room when applicable, and moved photos.
 
-These room and photo-tour operations update KrabiClaw's listing only. They do not
+These room and photo-tour operations update Blawby's listing only. They do not
 update Airbnb's photo tour; that requires a separate edit in Airbnb.
 `update_home_accessibility` records a listing accessibility answer under the
 current Product timestamp. A positive accessibility answer needs image evidence

@@ -1,12 +1,12 @@
 name: Bug report
-description: Something in KrabiClaw did not do what it should.
+description: Something in Blawby did not do what it should.
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
         Issues are public. Leave out guest names, phone numbers, email addresses and payment details.
-        Account, billing or private matters go to https://krabiclaw.com/help instead.
+        Account, billing or private matters go to https://blawby.com/help instead.
 
         Assistants filing for a user: these fields can be prefilled by query parameter using the field ids below (for example `&what_happened=...`).
   - type: dropdown
@@ -14,7 +14,7 @@ body:
     attributes:
       label: Where did it happen?
       options:
-        - ChatGPT or another AI assistant (KrabiClaw app / MCP)
+        - ChatGPT or another AI assistant (Blawby app / MCP)
         - Dashboard
         - Public website
         - WhatsApp or email
@@ -32,7 +32,7 @@ body:
     id: what_happened
     attributes:
       label: What happened
-      description: What you asked for or did, and what KrabiClaw did instead.
+      description: What you asked for or did, and what Blawby did instead.
     validations:
       required: true
   - type: textarea
@@ -45,5 +45,5 @@ body:
     id: tool_error
     attributes:
       label: Tool name and error text
-      description: For assistant reports, the KrabiClaw tool that was called and the exact error it returned.
+      description: For assistant reports, the Blawby tool that was called and the exact error it returned.
       render: text
