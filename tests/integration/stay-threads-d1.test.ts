@@ -176,8 +176,8 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual(await listConversations(db, ORG, { userId: OUTSIDER }), [])
     const outstanding = await createConversationGuestInvite(db, host, { conversationId: ana.conversation_id, email: traveler.email })
     const removal = { organizationId: ORG, conversationId: ana.conversation_id, userId: OWNER, travelerUserId: OUTSIDER }
-    await assert.rejects(removeConversationGuest(db, env, { ...removal, userId: CLEANER }), { statusCode: 404 })
-    assert.deepEqual(await removeConversationGuest(db, env, removal), { removed: true })
+    await assert.rejects(removeConversationGuest(db, env, { ...removal, userId: OUTSIDER }), { statusCode: 404 })
+    assert.deepEqual(await removeConversationGuest(db, env, { ...removal, userId: CLEANER }), { removed: true })
     assert.equal(await readGuestConversation(db, OUTSIDER, ana.conversation_id), null)
     for (const token of [invite.token, outstanding.token]) await assert.rejects(acceptConversationGuestInvite(db, env, { token, user: traveler }), { statusCode: 404 })
     assert.deepEqual(await removeConversationGuest(db, env, removal), { removed: true })
