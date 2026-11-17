@@ -94,6 +94,7 @@
 import { authClient } from '~/lib/auth-client'
 import type { LocationQueryRaw } from 'vue-router'
 import { getErrorMessage } from '~/utils/errors'
+import { getVerticalCopy } from '~/utils/vertical-copy'
 import { isThreadListResponse, type ThreadListItem, type ThreadListPage } from '~/lib/components/workspace/messages/guest-thread-client'
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
@@ -152,7 +153,7 @@ const emptyDescription = computed(() => {
   if (search.value) return `Nothing matched “${search.value}”.`
   if (blockedOnly.value) return 'Guests you block appear here until you unblock them.'
   if (pastOnly.value) return 'Conversations move here when you archive them, or once they have been quiet for 30 days after the last message and any stay or booking has ended.'
-  return props.personalScope ? 'Your conversations with businesses will appear here.' : 'When a guest writes, the conversation appears here.'
+  return props.personalScope ? 'Your conversations with businesses will appear here.' : `When a ${getVerticalCopy(dashboard.organization.value?.vertical).guestLabel} writes, the conversation appears here.`
 })
 
 const listQuery = computed(() => ({
