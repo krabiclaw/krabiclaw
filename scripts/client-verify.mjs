@@ -520,7 +520,7 @@ if (OUT_DIR) {
 
   // Write human-readable txt
   const txtLines = [
-    "KrabiClaw Site Verification Report",
+    "Blawby Site Verification Report",
     `URL:      ${BASE}`,
     `Vertical: ${VERTICAL}`,
     `Date:     ${reportJson.verified_at}`,

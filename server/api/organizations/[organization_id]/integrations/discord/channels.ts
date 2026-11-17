@@ -48,7 +48,7 @@ async function list(event: H3Event) {
       .map(channel => ({ id: channel.id, name: channel.name, server: guild.name }))))).flat()
     return jsonResponse({
       success: true, account_id: accountId, connection: summary, choices,
-      error: choices.length ? null : 'The KrabiClaw bot is in no server you manage, or sees no text channel there. Connect Discord again and choose the server.',
+      error: choices.length ? null : 'The Blawby bot is in no server you manage, or sees no text channel there. Connect Discord again and choose the server.',
     })
   } catch (error) {
     if (!(error instanceof DiscordError)) throw error

@@ -745,6 +745,6 @@ export async function readDiscordMessage(env: CloudflareEnv, target: DiscordConn
     if (error instanceof DiscordError && error.objectMissing) throw new HTTPError({ statusCode: 404, statusMessage: `The connected Discord channel has no message ${messageId}` })
     throw error
   }
-  if (message.author.id !== env.DISCORD_CLIENT_ID) throw new HTTPError({ statusCode: 409, statusMessage: `Discord message ${message.id} was not sent by the KrabiClaw bot.` })
+  if (message.author.id !== env.DISCORD_CLIENT_ID) throw new HTTPError({ statusCode: 409, statusMessage: `Discord message ${message.id} was not sent by the Blawby bot.` })
   return message
 }

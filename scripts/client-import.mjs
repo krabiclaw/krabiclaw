@@ -698,7 +698,7 @@ function queryD1Row(query, remote) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 console.log(
-  `\n┌─ KrabiClaw Client Import ─────────────────────────────────────`,
+  `\n┌─ Blawby Client Import ────────────────────────────────────────`,
 );
 console.log(`│  Slug:     ${SLUG}`);
 console.log(`│  Vertical: ${VERTICAL}`);
