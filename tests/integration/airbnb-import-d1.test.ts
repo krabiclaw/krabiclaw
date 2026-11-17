@@ -679,9 +679,13 @@ test('a connected home can resend its full calendar without tearing down its map
     const messages = channex.messagesProperty
     const requests: Array<{ path: string; values: FakeBody['values'] }> = []
     let during: (() => Promise<void>) | undefined
+    let defaultsUnavailable = false
     let limited = false
     globalThis.fetch = async (input, init = {}) => {
       const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+      if (defaultsUnavailable && url.pathname === `/api/v1/rate_plans/${channex.ratePlan}`) {
+        return Response.json({ errors: { message: 'Rate plan unavailable' } }, { status: 503 })
+      }
       if (init.method === 'POST' && ['/api/v1/restrictions', '/api/v1/availability'].includes(url.pathname)) {
         requests.push({ path: url.pathname.slice('/api/v1'.length), values: (JSON.parse(String(init.body)) as FakeBody).values })
         const run = during
@@ -693,6 +697,14 @@ test('a connected home can resend its full calendar without tearing down its map
     }
     assert.deepEqual((await setStayNights(db, env, manager, { product_id: productId, from: addDays(today(), 20), to: addDays(today(), 21), price_minor: 24500 })).channel_push, { state: 'pushed', detail: null })
     requests.length = 0
+    defaultsUnavailable = true
+    const defaultsFailure = await call()
+    assert.equal(defaultsFailure.status, 502)
+    assert.match(String(defaultsFailure.body.message), /Rate plan unavailable/)
+    assert.deepEqual(requests, [])
+    assert.deepEqual(await db.prepare("SELECT state, json_extract(sent_json, '$.rate') AS rate FROM channel_night_pushes WHERE product_id = ? AND date = ?").bind(productId, addDays(today(), 20)).first(),
+      { state: 'pushed', rate: '245.00' })
+    defaultsUnavailable = false
     const fullSyncStart = channex.seen.length
     const resynced = await call()
     assert.deepEqual(resynced, { status: 200, body: { product_id: productId, channel_push: { state: 'pushed', detail: null } } })

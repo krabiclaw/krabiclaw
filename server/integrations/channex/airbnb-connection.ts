@@ -1150,20 +1150,20 @@ export class AirbnbConnection {
       if (!mapping || mapping.channel_id !== row.channel_id) fail(404, 'IMPORT_NOT_FOUND', 'Listing import not found')
       if (mapping.import_stage !== 'complete' || mapping.enabled !== 1) fail(409, 'CHANNEL_PROPERTY_NOT_READY', 'Finish connecting this home before syncing its full calendar.')
       for (const field of ['property_id', 'room_type_id', 'rate_plan_id'] as const) string(mapping[field], field)
-      await forgetConfirmedNights(this.db, productId)
-      const pushed = await this.deliverCalendar(row, mapping)
+      const pushed = await this.deliverCalendar(row, mapping, true)
       return { product_id: productId, channel_push: pushed }
     })
   }
 
   /** Send the configured home's calendar through the outbox: one restrictions call and one availability call. */
-  private async deliverCalendar(row: ConnectionRow, mapping: MappingRow): Promise<SuccessfulChannelPush> {
+  private async deliverCalendar(row: ConnectionRow, mapping: MappingRow, fullSync = false): Promise<SuccessfulChannelPush> {
     const target = { property_id: string(mapping.property_id, 'property_id'), room_type_id: string(mapping.room_type_id, 'room_type_id'), rate_plan_id: string(mapping.rate_plan_id, 'rate_plan_id') }
     await configureStayCalendar(this.db, this.env, this.organizationId, await readStayHome(this.db, this.manager(), mapping.product_id), target, async (action) => {
       await this.save(row, {})
       await action()
       await this.save(row, {})
     })
+    if (fullSync) await forgetConfirmedNights(this.db, mapping.product_id)
     const pushed = await syncStayCalendar(this.db, this.env, this.manager(), mapping.product_id, target)
     if (pushed.state === 'needs_review') fail(502, 'PROVIDER_VERIFICATION_FAILED', `Channex rejected part of the calendar: ${pushed.detail}`)
     return pushed

@@ -5,9 +5,12 @@
       <span v-else class="rounded-full bg-inverted px-4 py-2 text-sm font-medium text-inverted">{{ dateLabel }}</span>
       <UButton icon="i-lucide-x" :aria-label="`Clear selected ${nouns.units}`" color="neutral" variant="soft" square class="rounded-full" :disabled="busy" @click="$emit('clear')" />
     </div>
-    <div class="flex items-center justify-between gap-3">
-      <p class="text-xs text-muted">{{ scope }}</p>
-      <ULink v-if="calendarTo" :to="calendarTo" class="text-xs font-medium text-highlighted underline">Open calendar</ULink>
+    <div class="flex items-start justify-between gap-3">
+      <p class="min-w-0 break-words text-xs text-muted">{{ scope }}</p>
+      <div v-if="calendarTo || homeEditorTo" class="flex shrink-0 flex-wrap justify-end gap-x-3 gap-y-1">
+        <ULink v-if="calendarTo" :to="calendarTo" class="text-xs font-medium text-highlighted underline">Open calendar</ULink>
+        <UButton v-if="homeEditorTo" :to="`${homeEditorTo}/internal-name`" label="Edit internal name" color="neutral" variant="link" size="xs" class="p-0 underline" :disabled="busy" />
+      </div>
     </div>
     <div v-if="rangeWeekdays.length > 1">
       <p class="mb-2 text-sm font-medium text-highlighted">Apply to</p>
@@ -56,10 +59,16 @@
         <UButton v-for="id in stayIds" :key="id" :to="stayTo(id)" label="View stay" color="neutral" variant="outline" class="mt-3" />
       </UCard>
       <UButton v-if="addStayTo" :to="addStayTo" label="Add stay" icon="i-lucide-plus" color="neutral" variant="outline" class="w-full justify-center rounded-full" :disabled="busy" />
-      <UButton v-if="pricing" label="Nightly price" color="neutral" class="w-full flex-col items-start rounded-3xl p-6 text-left" :disabled="busy || !manage || !nights.length" @click="$emit('edit', 'price')">
-        <span class="block text-sm font-normal">Nightly price</span>
-        <span class="mt-4 block text-3xl font-semibold">{{ priceLabel }}</span>
-      </UButton>
+      <template v-if="pricing">
+        <UButton label="Nightly price for selected dates" color="neutral" class="w-full flex-col items-start rounded-3xl p-6 text-left" :disabled="busy || !manage || !nights.length" @click="$emit('edit', 'price')">
+          <span class="block text-sm font-normal">Nightly price for selected dates</span>
+          <span class="mt-4 block text-3xl font-semibold">{{ priceLabel }}</span>
+        </UButton>
+        <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1 text-sm text-muted">
+          <p>{{ basePriceLabel }}</p>
+          <UButton v-if="homeEditorTo" :to="`${homeEditorTo}/price`" label="Edit default price" color="neutral" variant="link" size="xs" class="p-0 underline" :disabled="busy" />
+        </div>
+      </template>
       <UButton v-if="pricing" label="Minimum nights" color="neutral" variant="soft" class="w-full flex-col items-start rounded-3xl p-6 text-left" :disabled="busy || !manage || !nights.length" @click="$emit('edit', 'minimum')">
         <span class="block text-sm font-normal">Minimum nights</span>
         <span class="mt-4 block text-3xl font-semibold">{{ minimumLabel }}</span>
@@ -170,6 +179,7 @@ const props = defineProps<{
   selectDates?: boolean
   /** The one selected home's own calendar on the first selected night. */
   calendarTo?: { path: string; query: Record<string, string> }
+  homeEditorTo?: string
   /** The one selected home's nights as a new stay: the creation page with the home and dates filled in. */
   addStayTo?: { path: string; query: Record<string, string> }
   manage: boolean
@@ -230,8 +240,8 @@ const availabilityLabel = computed(() => {
 const price = computed(() => props.currency ? common('price_minor') : 'mixed')
 const priceLabel = computed(() => price.value === 'mixed' ? 'Mixed prices' : price.value === null ? 'No price set' : money(price.value))
 const basePriceLabel = computed(() => props.homes.length === 1
-  ? `Base nightly price: ${props.homes[0]!.base_price_minor === null ? 'Not set' : money(props.homes[0]!.base_price_minor)}.`
-  : 'Each home keeps its own listing price when restored.')
+  ? `Default nightly price: ${props.homes[0]!.base_price_minor === null ? 'Not set' : money(props.homes[0]!.base_price_minor)}`
+  : 'Default nightly prices are set per home.')
 const percentLabel = computed(() => {
   const percent = Number(props.draft.price_change_percent)
   if (!Number.isInteger(percent) || percent === 0) return `Each night’s own price changes by this percent, from −${NIGHT_PRICE_CHANGE_PERCENT}% to +${NIGHT_PRICE_CHANGE_PERCENT}%.`
@@ -248,7 +258,7 @@ const minimumPresets = computed(() => [
   { label: homeDefault.value === null ? 'Home default' : `Home default (${homeDefault.value})`, value: '' },
 ])
 const presetChosen = (value: string) => props.draft.min_stay_arrival === value && (value !== '' || props.dirty)
-const concernTitle = computed(() => ({ summary: '', custom: 'Custom settings', price: 'Nightly price', minimum: 'Minimum nights', maximum: 'Maximum nights', arrival: 'Check-in and checkout', reset: 'Reset all night settings' })[props.concern])
+const concernTitle = computed(() => ({ summary: '', custom: 'Custom settings', price: 'Nightly price for selected dates', minimum: 'Minimum nights', maximum: 'Maximum nights', arrival: 'Check-in and checkout', reset: 'Reset all night settings' })[props.concern])
 const settingItems = [{ concern: 'maximum', label: 'Maximum nights' }, { concern: 'arrival', label: 'Check-in and checkout' }] as const
 const arrivalFields = [{ key: 'closed_to_arrival', label: 'Allow check-in' }, { key: 'closed_to_departure', label: 'Allow checkout' }] as const
 const permissionItems = [{ label: 'Keep each night’s setting', value: 'keep' }, { label: 'Allowed', value: 'allow' }, { label: 'Not allowed', value: 'block' }]

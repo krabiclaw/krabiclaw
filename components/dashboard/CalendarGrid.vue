@@ -22,7 +22,7 @@
           </div>
         </header>
         <UAlert v-if="error" color="error" variant="soft" :title="words.loadError" :description="getErrorMessage(error, 'Calendar request failed')" :actions="[{ label: 'Try again', color: 'neutral', variant: 'soft', onClick: () => refresh() }]" />
-        <div v-else-if="status === 'pending' && !data" class="overflow-x-auto rounded-xl shadow-sm ring ring-default animate-pulse" role="status" aria-label="Loading calendar...">
+        <div v-else-if="status === 'pending' && !windowData" class="overflow-x-auto rounded-xl shadow-sm ring ring-default animate-pulse" role="status" aria-label="Loading calendar...">
           <div class="p-6 space-y-4">
             <div class="h-6 w-48 rounded bg-elevated/80" />
             <div class="space-y-3">
@@ -33,9 +33,9 @@
             </div>
           </div>
         </div>
-        <p v-else-if="data && !rows.length" class="py-10 text-center text-sm text-muted">{{ search ? words.noMatch : words.none }}</p>
+        <p v-else-if="windowData && !rows.length" class="py-10 text-center text-sm text-muted">{{ search ? words.noMatch : words.none }}</p>
         <!-- The grid is its own scroller on both axes: the day header pins to its top and the home column to its left, the corner over both. -->
-        <div v-else-if="data" class="min-h-0 overflow-auto rounded-xl shadow-sm ring ring-default" :aria-busy="status === 'pending'" :data-testid="`${words.testId}-grid`">
+        <div v-else-if="windowData" class="min-h-0 overflow-auto rounded-xl shadow-sm ring ring-default" :aria-busy="status === 'pending'" :data-testid="`${words.testId}-grid`">
           <div
             ref="gridElement"
             class="grid w-max select-none [--home-column:8rem] sm:[--home-column:14rem]"
@@ -47,7 +47,7 @@
           >
             <div role="row" class="contents">
               <div role="columnheader" class="sticky left-0 top-0 z-30 border-b border-r border-default bg-default" />
-              <div v-for="day in dates" :key="day" role="columnheader" class="sticky top-0 z-20 border-b border-default px-1 py-1 text-center text-xs sm:py-2" :class="day === todayKey ? 'bg-primary/10' : 'bg-default'">
+              <div v-for="day in dates" :key="day" role="columnheader" :data-date="day" class="sticky top-0 z-20 border-b border-default px-1 py-1 text-center text-xs sm:py-2" :class="day === todayKey ? 'bg-primary/10' : 'bg-default'">
                 <span class="block text-muted">{{ day.endsWith('-01') || day === dates[0] ? formatCalendarDate(day, 'en', { month: 'short' }) : formatCalendarDate(day, 'en', { weekday: 'short' }) }}</span>
                 <span class="block font-semibold" :class="day === todayKey ? 'text-primary' : 'text-highlighted'">{{ Number(day.slice(-2)) }}</span>
               </div>
@@ -57,7 +57,8 @@
                 <UCheckbox v-if="selection" :model-value="selectedRow(row.id)" :aria-label="`Include ${row.name}`" :disabled="editor.busy.value" @update:model-value="includeRow(row.id, Boolean($event))" />
                 <NuxtLink :to="row.to" class="flex min-w-0 flex-col hover:underline" :data-home="row.home?.product_id" :data-place="row.place ? `${row.place.kind}:${row.place.id}` : undefined">
                   <span class="line-clamp-2 text-sm font-medium text-highlighted">{{ row.name }}</span>
-                  <span class="hidden truncate text-xs text-muted sm:block">{{ row.detail }}</span>
+                  <span class="text-xs text-muted" :class="row.home ? 'line-clamp-2 break-words' : 'hidden truncate sm:block'" :title="row.detail">{{ row.detail }}</span>
+                  <StayNightMinimum v-if="row.home" :nights="row.home.min_nights" is-default />
                 </NuxtLink>
               </div>
               <div class="relative grid border-b border-default" :data-row-index="rowIndex" :style="{ gridColumn: `2 / span ${dates.length}`, gridTemplateColumns: `repeat(${dates.length}, 4rem)` }">
@@ -69,8 +70,12 @@
                   :aria-selected="inSelection(rowIndex, index)"
                   :aria-label="cell.title"
                   :tabindex="cursor.row === rowIndex && cursor.day === index ? 0 : -1"
-                  class="relative flex h-16 flex-col justify-end border-r border-default px-1.5 py-1 text-left text-xs leading-4 tabular-nums sm:h-18 outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inverted"
-                  :class="[cell.open ? 'bg-default text-highlighted' : 'bg-elevated/60 text-muted', inSelection(rowIndex, index) && !chosenWeekday(cell.date) ? 'text-dimmed' : '']"
+                  class="relative flex flex-col justify-end border-r border-default px-1.5 text-left text-xs leading-4 tabular-nums outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inverted"
+                  :class="[
+                    row.home ? 'min-h-19 pb-2 pt-8 sm:min-h-22 sm:pt-10' : 'min-h-16 py-1 sm:min-h-18',
+                    cell.open ? 'bg-default text-highlighted' : 'bg-elevated/60 text-muted',
+                    inSelection(rowIndex, index) && !chosenWeekday(cell.date) ? 'text-dimmed' : '',
+                  ]"
                   :style="{ gridRow: 1, gridColumn: index + 1 }"
                   :title="cell.title"
                   :data-night="cell.date"
@@ -79,8 +84,14 @@
                   @keydown="keydown($event, rowIndex, index)"
                   @focus="cursor = { row: rowIndex, day: index }"
                 >
-                  <UIcon v-if="cell.mark" :name="CHANNEL_MARKS[cell.mark]" class="absolute right-1 top-1 size-3" :class="cell.mark === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-homes-channel-${cell.mark}`" aria-hidden="true" />
-                  <span v-if="cell.label" class="truncate" :class="cell.strike ? 'line-through' : ''">{{ cell.label }}</span>
+                  <span v-if="row.home" class="flex min-h-9 w-full flex-col items-start gap-1">
+                    <span class="flex h-4 w-full items-center gap-1">
+                      <StayNightMinimum v-if="cell.minimumOverride !== undefined" :nights="cell.minimumOverride" aria-hidden="true" />
+                      <UIcon v-if="cell.mark" :name="CHANNEL_MARKS[cell.mark]" class="ml-auto size-3 shrink-0" :class="cell.mark === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-homes-channel-${cell.mark}`" aria-hidden="true" />
+                    </span>
+                    <span v-if="cell.label" class="max-w-full break-all text-[11px] font-medium leading-3.5" :class="cell.strike ? 'line-through' : ''">{{ cell.label }}</span>
+                  </span>
+                  <span v-else-if="cell.label" class="truncate" :class="cell.strike ? 'line-through' : ''">{{ cell.label }}</span>
                 </button>
                 <div
                   v-for="(piece, pieceIndex) in pills(rowIndex)"
@@ -103,7 +114,7 @@
                   :data-channel="bar.channel"
                   :data-booked="bar.date"
                 >
-                  <ChannelMark v-if="bar.channel" :channel="bar.channel" class="size-4 shrink-0 border-0" />
+                  <ChannelMark v-if="bar.channel" :channel="bar.channel" class="size-4 shrink-0 rounded-none! border-0!" />
                   <span class="truncate">{{ bar.label }}</span>
                 </NuxtLink>
               </div>
@@ -112,7 +123,7 @@
         </div>
       </div>
       <aside v-if="selection && pane && targets.length" class="max-h-full self-start overflow-y-auto rounded-2xl p-5 ring ring-default">
-        <StayNightInspector v-bind="inspectorProps" v-on="editor.listeners" @clear="clearSelection" @weekdays="setWeekdays" @blocker="fixBlocker" />
+        <StayNightInspector v-bind="inspectorProps" v-on="editor.listeners" @dates="datesOpen = true" @clear="clearSelection" @weekdays="setWeekdays" @blocker="fixBlocker" />
       </aside>
     </div>
     <div v-if="selection && !pane && !drawerOpen" class="fixed inset-x-3 bottom-20 z-30 flex items-center justify-between gap-3 rounded-xl bg-inverted px-4 py-3 text-sm font-medium text-inverted shadow-lg" :data-testid="`${words.testId}-hint`">
@@ -134,27 +145,37 @@
       @update:open="closeDrawer"
     >
       <template #body>
-        <StayNightInspector v-bind="inspectorProps" v-on="editor.listeners" @clear="clearSelection" @weekdays="setWeekdays" @blocker="fixBlocker" />
+        <StayNightInspector v-bind="inspectorProps" v-on="editor.listeners" @dates="datesOpen = true" @clear="clearSelection" @weekdays="setWeekdays" @blocker="fixBlocker" />
       </template>
     </UDrawer>
+    <StayNightRangeDialog
+      v-if="homesView"
+      v-model:open="datesOpen"
+      :first-night="firstSelectableNight"
+      :selection="selection"
+      past-message="Choose today or a future night in the selected homes’ timezones."
+      :select="chooseExactNights"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { getLocalTimeZone, parseDate, today } from '@internationalized/date'
+import { getLocalTimeZone, parseDate, today, type CalendarDate } from '@internationalized/date'
 import { useEventListener } from '@vueuse/core'
 import type { LocationQueryRaw, RouteLocationRaw } from 'vue-router'
 import type { StayCalendarStay, StayHome, StayNight } from '~/server/domain/stays'
 import type { Place, PlaceDay } from '~/server/domain/places'
-import { MAX_STAY_NIGHTS, STAY_CHANNEL_COLORS, STAY_CHANNEL_LABELS, parseStayCalendarRules, type StayChannel } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, STAY_CALENDAR_DAYS, STAY_CHANNEL_COLORS, STAY_CHANNEL_LABELS, parseStayCalendarRules, type StayChannel } from '~/shared/bookings'
 import { bookingConversationOrRecordPath } from '~/shared/messages-contract'
 import ChannelMark from '~/lib/components/workspace/messages/ChannelMark.vue'
-import { isCurrencyCode } from '~/shared/currencies'
-import { formatMinorAmount } from '~/shared/prices'
+import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
+import { formatMinorAmount, minorAmountToMajor } from '~/shared/prices'
 import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidTimezone } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
-import { CHANNEL_MARKS, channelNote, isBookedNight, isPlaceDay, isStayNight, nightWeekday, placeDaySource, stayNightSource, useStayNightEditor } from '~/composables/useStayNightEditor'
+import { CHANNEL_MARKS, channelNote, isBookedNight, isPlaceDay, isStayNight, nightMinimumLabel, nightWeekday, placeDaySource, stayNightSource, useStayNightEditor } from '~/composables/useStayNightEditor'
 import StayNightInspector from './StayNightInspector.vue'
+import StayNightMinimum from './StayNightMinimum.vue'
+import StayNightRangeDialog from './StayNightRangeDialog.vue'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'address'>
 // A manager reads each stay's channel; a member's turnover has none.
@@ -163,7 +184,7 @@ interface HomesPayload { from: string; to: string; homes: { home: Home; nights: 
 interface PlacesPayload { from: string; to: string; places: { place: Place; days: PlaceDay[] }[]; manage: boolean }
 interface GridBar { key: string; date: string; column: number; span: number; label: string; title: string; to: RouteLocationRaw; stayId: string | null; channel: StayChannel | null }
 /** One day on one row as the grid draws it: its label, whether it reads open, and what holds it. */
-interface GridCell { date: string; open: boolean; held: boolean; label: string; strike: boolean; mark: 'pending' | 'needs_review' | null; title: string }
+interface GridCell { date: string; open: boolean; held: boolean; label: string; strike: boolean; minimumOverride?: number; mark: 'pending' | 'needs_review' | null; title: string }
 interface GridRow { id: string; name: string; detail: string; to: RouteLocationRaw; cells: GridCell[]; bars: GridBar[]; gaps: Map<number, { text: string; start: number; end: number }>; home?: Home; place?: Place; nights?: StayNight[]; days?: PlaceDay[] }
 
 // The two views: homes (nights at every home) and places (days at every restaurant location, experience and consultation).
@@ -174,7 +195,7 @@ const words = homesView
   : { rows: 'places', span: 'dates', unit: 'date', units: 'dates', none: 'No places yet.', noMatch: 'No places match these filters.', gridLabel: 'Days at every place', loadError: 'The places calendar could not be loaded', testId: 'places' }
 
 // Today and thirty days after it, paged by a week or a month; the URL keeps where you were and what is selected.
-const SPAN = 31
+const WINDOW_DAYS = 31
 const route = useRoute()
 const router = useRouter()
 const orgSlug = String(route.params.org_slug)
@@ -183,8 +204,6 @@ const pane = useDashboardPane()
 const todayKey = today(getLocalTimeZone()).toString()
 if (Object.hasOwn(route.query, 'from') && (typeof route.query.from !== 'string' || !isValidCalendarDate(route.query.from))) throw createError({ statusCode: 400, statusMessage: `Choose a valid first ${words.unit}.` })
 const from = computed(() => typeof route.query.from === 'string' ? route.query.from : todayKey)
-const to = computed(() => parseDate(from.value).add({ days: SPAN }).toString())
-const dates = computed(() => Array.from({ length: SPAN }, (_, index) => parseDate(from.value).add({ days: index }).toString()))
 const search = computed(() => typeof route.query.q === 'string' ? route.query.q : '')
 // The page's search narrows the rows, but not under a save that is reading back the homes it wrote.
 const appliedSearch = ref(search.value)
@@ -199,6 +218,14 @@ const selection = computed(() => {
   if (!ids.length || !first || !end || !isValidCalendarDate(first) || !isValidCalendarDate(end) || end <= first) throw createError({ statusCode: 400, statusMessage: `Choose valid ${words.rows} and ${words.units}.` })
   return { rows: ids, from: first, to: end }
 })
+const windowDays = computed(() => {
+  const range = selection.value
+  if (!homesView || !range || range.from !== from.value) return WINDOW_DAYS
+  const days = parseDate(range.to).compare(parseDate(range.from))
+  return days > STAY_CALENDAR_DAYS ? WINDOW_DAYS : Math.max(WINDOW_DAYS, days)
+})
+const to = computed(() => addLocalDays(from.value, windowDays.value))
+const dates = computed(() => Array.from({ length: windowDays.value }, (_, index) => addLocalDays(from.value, index)))
 const weekdays = computed<number[] | null>(() => {
   const value = route.query.weekdays
   if (value === undefined) return null
@@ -222,14 +249,14 @@ const isPlace = (value: unknown): value is Place => isRecord(value) && (value.ki
   && (value.provider === null || isRecord(value.provider) && typeof value.provider.member_id === 'string' && typeof value.provider.name === 'string')
 const isWindow = (value: unknown): value is Record<string, unknown> & { manage: boolean } => isRecord(value) && value.from === from.value && value.to === to.value && typeof value.manage === 'boolean'
 const isHomesPayload = (value: unknown): value is HomesPayload => isWindow(value) && Array.isArray(value.homes) && Array.isArray(value.bookings)
-  && value.homes.every(entry => isRecord(entry) && isHome(entry.home) && Array.isArray(entry.nights) && entry.nights.length === SPAN
+  && value.homes.every(entry => isRecord(entry) && isHome(entry.home) && Array.isArray(entry.nights) && entry.nights.length === windowDays.value
     && entry.nights.every((night, index) => isStayNight(night) && night.date === dates.value[index]))
   && value.bookings.every(stay => isRecord(stay) && stay.unit === 'nights' && typeof stay.booking_id === 'string' && isText(stay.conversation_id) && typeof stay.product_id === 'string' && isText(stay.guest_name) && isCount(stay.adults) && isCount(stay.children)
     && (value.manage ? Object.hasOwn(STAY_CHANNEL_LABELS, String(stay.channel)) : !('channel' in stay)) && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date))
 const isPlacesPayload = (value: unknown): value is PlacesPayload => isWindow(value) && Array.isArray(value.places)
-  && value.places.every(entry => isRecord(entry) && isPlace(entry.place) && Array.isArray(entry.days) && entry.days.length === SPAN && entry.days.every((day, index) => isPlaceDay(day) && day.date === dates.value[index]))
+  && value.places.every(entry => isRecord(entry) && isPlace(entry.place) && Array.isArray(entry.days) && entry.days.length === windowDays.value && entry.days.every((day, index) => isPlaceDay(day) && day.date === dates.value[index]))
 
-const cacheKey = () => `${words.testId}-grid:${orgSlug}:${from.value}`
+const cacheKey = () => `${words.testId}-grid:${orgSlug}:${from.value}:${to.value}`
 // Whether this visit read the window itself; a window shown from an earlier visit is read again once it is on screen.
 let readNow = false
 const { data, error, status, refresh } = await useAsyncData<HomesPayload | PlacesPayload>(
@@ -247,8 +274,9 @@ const { data, error, status, refresh } = await useAsyncData<HomesPayload | Place
     },
   },
 )
-const homesData = computed(() => homesView ? data.value as HomesPayload | null : null)
-const placesData = computed(() => !homesView ? data.value as PlacesPayload | null : null)
+const windowData = computed(() => data.value?.from === from.value && data.value.to === to.value ? data.value : null)
+const homesData = computed(() => homesView ? windowData.value as HomesPayload | null : null)
+const placesData = computed(() => !homesView ? windowData.value as PlacesPayload | null : null)
 
 if (import.meta.client) {
   onMounted(() => {
@@ -281,9 +309,15 @@ const homeRows = computed<GridRow[]>(() => {
           title: stay ? `${[label, ...(stay.channel ? [STAY_CHANNEL_LABELS[stay.channel]] : [])].join(' · ')} · ${formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric' })}` : label })
       })
       const gaps = unbookableGaps(nights)
+      const compactPrice = new Intl.NumberFormat('en-US', {
+        style: 'currency', currency: home.currency, currencyDisplay: 'narrowSymbol',
+        minimumFractionDigits: 0, maximumFractionDigits: currencyFractionDigits(home.currency),
+      })
       const cells = nights.map((night, index): GridCell => ({
         date: night.date, open: night.available, held: isBookedNight(night), strike: night.closed, mark: channelState(night),
-        label: isBookedNight(night) ? '' : price(home, night), title: nightTitle(home, night, gaps.get(index)?.text),
+        minimumOverride: night.min_stay_arrival === home.min_nights ? undefined : night.min_stay_arrival,
+        label: isBookedNight(night) ? '' : night.price_minor === null ? 'No price' : compactPrice.format(Number(minorAmountToMajor(night.price_minor, home.currency))),
+        title: nightTitle(home, night, gaps.get(index)?.text),
       }))
       return { id: home.product_id, name: home.internal_name, detail: addressOf(home), to: homeTo(home.product_id), cells, bars, gaps, home, nights }
     })
@@ -323,15 +357,13 @@ function unbookableGaps(nights: StayNight[]) {
 }
 
 const windowLabel = computed(() => `${formatCalendarDate(from.value, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(dates.value.at(-1)!, 'en', { month: 'short', day: 'numeric', year: 'numeric' })}`)
-// Each home's own currency, as the night inspector shows it: a Krabi villa and a
-// Santa Monica studio sit in the same grid, so a bare number would mislead.
-const price = (home: Home, night: StayNight) => night.price_minor === null ? 'No price' : formatMinorAmount(night.price_minor, home.currency).replace(/\.00$/, '')
 /** A night the channel has not confirmed: still queued for it, or refused and needing review. */
 const channelState = (night: StayNight) => night.channel?.state === 'pending' || night.channel?.state === 'needs_review' ? night.channel.state : null
 function nightTitle(home: Home, night: StayNight, gap?: string) {
   const state = night.booking_id ? 'Booked' : night.closed ? 'Blocked' : 'Available'
   const note = channelNote(night)
-  return `${home.internal_name} · ${formatCalendarDate(night.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${state} · ${price(home, night)}${gap ? ` · ${gap}` : ''}${note ? ` · ${note}` : night.channel?.state === 'pushed' ? ' · On Airbnb' : ''}`
+  const price = night.price_minor === null ? 'No price' : formatMinorAmount(night.price_minor, home.currency)
+  return `${home.internal_name} · ${formatCalendarDate(night.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${state} · ${price} · ${nightMinimumLabel(night.min_stay_arrival)}${gap ? ` · ${gap}` : ''}${note ? ` · ${note}` : night.channel?.state === 'pushed' ? ' · On Airbnb' : ''}`
 }
 function homeTo(productId: string, date?: string) {
   return { path: `/dashboard/${orgSlug}/calendar`, query: { product_id: productId, ...(date ? { month: date.slice(0, 7), date } : {}) } }
@@ -355,6 +387,7 @@ function goToToday() { moveTo(todayKey) }
 const anchor = ref<{ row: string; day: number } | null>(null)
 const cursor = ref({ row: 0, day: 0 })
 const drawerOpen = ref(false)
+const datesOpen = ref(false)
 const gridElement = useTemplateRef<HTMLElement>('gridElement')
 const drag = ref<{ row: number; day: number; moved: boolean } | null>(null)
 let suppressClick = false
@@ -363,8 +396,8 @@ const span = computed(() => {
   const value = selection.value
   // A selection outside the window on screen (a link kept past its dates) selects nothing here.
   if (!value || value.to <= from.value || value.from >= to.value) return null
-  const start = Math.max(0, dates.value.indexOf(value.from) === -1 ? (value.from < from.value ? 0 : SPAN) : dates.value.indexOf(value.from))
-  const end = value.to > to.value ? SPAN : dates.value.indexOf(value.to) === -1 ? SPAN : dates.value.indexOf(value.to)
+  const start = value.from < from.value ? 0 : dates.value.indexOf(value.from)
+  const end = value.to >= to.value ? windowDays.value : dates.value.indexOf(value.to)
   return end > start ? { start, end } : null
 })
 const inSelection = (row: number, day: number) => Boolean(span.value && selectedRow(rows.value[row]!.id) && day >= span.value.start && day < span.value.end)
@@ -396,7 +429,7 @@ function cellAt(event: PointerEvent) {
   const element = document.elementsFromPoint(event.clientX, event.clientY).find((item): item is HTMLElement => item instanceof HTMLElement && item.dataset.rowIndex !== undefined)
   if (!element) return null
   const box = element.getBoundingClientRect()
-  return { row: Number(element.dataset.rowIndex), day: Math.min(SPAN - 1, Math.max(0, Math.floor((event.clientX - box.left) / (box.width / SPAN)))) }
+  return { row: Number(element.dataset.rowIndex), day: Math.min(windowDays.value - 1, Math.max(0, Math.floor((event.clientX - box.left) / (box.width / windowDays.value)))) }
 }
 function dragTo(event: PointerEvent) {
   const origin = drag.value
@@ -423,7 +456,7 @@ function keydown(event: KeyboardEvent, row: number, day: number) {
   const move = moves[event.key]
   if (!move) return
   event.preventDefault()
-  const next = { row: Math.min(rows.value.length - 1, Math.max(0, row + move[0])), day: Math.min(SPAN - 1, Math.max(0, day + move[1])) }
+  const next = { row: Math.min(rows.value.length - 1, Math.max(0, row + move[0])), day: Math.min(windowDays.value - 1, Math.max(0, day + move[1])) }
   cursor.value = next
   void nextTick(() => gridElement.value?.querySelector<HTMLElement>(`[data-row-index="${next.row}"] [data-night="${dates.value[next.day]}"]`)?.focus())
   if (!event.shiftKey) return
@@ -451,6 +484,24 @@ function closeDrawer(open: boolean) {
 }
 
 const selectedRows = computed(() => span.value ? rows.value.filter(row => selectedRow(row.id)) : [])
+const firstSelectableNight = computed(() => selectedRows.value.flatMap(row => row.home ? [today(row.home.timezone).toString()] : []).sort().at(-1) ?? '')
+async function chooseExactNights(start: CalendarDate, end: CalendarDate) {
+  if (editor.busy.value) return 'Wait for the current calendar changes to finish before choosing new nights.'
+  const first = start.toString()
+  const exclusiveEnd = end.add({ days: 1 }).toString()
+  const includedWeekdays = new Set(Array.from({ length: Math.min(7, end.compare(start) + 1) }, (_, index) => nightWeekday(addLocalDays(first, index))))
+  const keptWeekdays = weekdays.value?.filter(day => includedWeekdays.has(day))
+  const inWindow = first >= from.value && exclusiveEnd <= addLocalDays(from.value, WINDOW_DAYS)
+  await router.replace({ query: {
+    ...route.query,
+    [words.span]: `${first}..${exclusiveEnd}`,
+    weekdays: keptWeekdays?.length ? keptWeekdays.join(',') : undefined,
+    ...(inWindow ? {} : { from: first === todayKey ? undefined : first }),
+  } })
+  anchor.value = null
+  await nextTick()
+  gridElement.value?.querySelector(`[data-date="${first}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+}
 const slice = <T,>(items: T[]) => items.slice(span.value!.start, span.value!.end)
 const homeTargets = computed(() => selectedRows.value.flatMap(row => row.home ? [{ home: row.home, nights: slice(row.nights!) }] : []))
 const placeTargets = computed(() => selectedRows.value.flatMap(row => row.place ? [{ home: row.place, nights: slice(row.days!) }] : []))
@@ -504,16 +555,21 @@ async function fixBlocker() {
   await nextTick()
   editor.edit('minimum')
 }
-const inspectorProps = computed(() => ({
-  blocker: blocker.value?.text ?? null,
-  blockerAction: blocker.value?.action ?? null,
-  ...editor.inspector.value,
-  stayTo,
-  dateLabel: selectionLabel.value,
-  scope: scopeLabel.value,
-  calendarTo: selectedRows.value.length === 1 && span.value ? selectedRows.value[0]!.home ? homeTo(selectedRows.value[0]!.home!.product_id, dates.value[span.value.start]) : placeTo(selectedRows.value[0]!.place!, dates.value[span.value.start]!) : undefined,
-  addStayTo: addStayTo.value,
-}))
+const inspectorProps = computed(() => {
+  const row = selectedRows.value.length === 1 ? selectedRows.value[0] : undefined
+  return {
+    blocker: blocker.value?.text ?? null,
+    blockerAction: blocker.value?.action ?? null,
+    ...editor.inspector.value,
+    stayTo,
+    dateLabel: selectionLabel.value,
+    selectDates: homesView,
+    scope: scopeLabel.value,
+    calendarTo: row && span.value ? row.home ? homeTo(row.home.product_id, dates.value[span.value.start]) : placeTo(row.place!, dates.value[span.value.start]!) : undefined,
+    homeEditorTo: row?.home && windowData.value?.manage ? `/dashboard/${orgSlug}/products/${encodeURIComponent(row.home.product_id)}` : undefined,
+    addStayTo: addStayTo.value,
+  }
+})
 /** One home's selected nights as a stay to record: the creation page, with the home, check-in and checkout filled in. A stay is every night in the span, so a weekday narrowing or a held night in it offers none. */
 const addStayTo = computed(() => {
   const row = selectedRows.value.length === 1 && span.value && !weekdays.value && data.value?.manage ? selectedRows.value[0]! : undefined
@@ -538,7 +594,10 @@ function pills(row: number) {
   return pieces
 }
 // Filters can remove the row the keyboard cursor was on; keep one day in the tab order.
-watch(() => rows.value.length, length => { if (cursor.value.row >= length) cursor.value = { row: Math.max(0, length - 1), day: cursor.value.day } })
+watch([() => rows.value.length, windowDays], ([rowCount, days]) => {
+  const { row, day } = cursor.value
+  if (row >= rowCount || day >= days) cursor.value = { row: Math.min(row, Math.max(0, rowCount - 1)), day: Math.min(day, days - 1) }
+})
 watch([search, () => editor.busy.value], ([value, busy]) => { if (!busy) appliedSearch.value = value })
 watch(() => route.query[words.rows] === undefined ? null : `${String(route.query[words.rows])}|${String(route.query[words.span])}`, () => editor.edit('summary'))
 

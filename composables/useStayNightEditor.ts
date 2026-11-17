@@ -78,6 +78,8 @@ export const CHANNEL_MARKS = { pending: 'i-lucide-arrow-up', needs_review: 'i-lu
 export const channelNote = (night: StayNight) => night.channel?.state === 'needs_review' ? night.channel.detail
   : night.channel?.state === 'pending' ? `Not on the channel yet. ${night.channel.detail ?? 'Waiting to be sent.'}` : null
 
+export const nightMinimumLabel = (nights: number) => `Minimum stay: ${nights} ${nights === 1 ? 'night' : 'nights'}`
+
 const SETTINGS = ['closed', 'price_minor', 'min_stay_arrival', 'max_stay', 'closed_to_arrival', 'closed_to_departure'] as const
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
