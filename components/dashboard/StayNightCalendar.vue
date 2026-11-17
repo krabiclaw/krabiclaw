@@ -16,7 +16,10 @@
     <div v-else class="min-h-0 flex-1" :class="level.mode.value === 'index' ? 'lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(18rem,3fr)]' : undefined">
       <div class="min-w-0 overflow-y-auto px-4 pb-24 sm:px-6 lg:pb-8" :aria-busy="status === 'pending'">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <p class="w-full text-sm text-muted sm:w-auto">{{ data?.home.timezone }} · {{ data?.home.currency }}</p>
+          <div v-if="data" class="w-full sm:w-auto">
+            <p class="text-sm text-muted">{{ data.home.timezone }} · {{ data.home.currency }}</p>
+            <StayNightMinimum :nights="data.home.min_nights" is-default />
+          </div>
           <div class="flex gap-2">
             <UButton v-if="data && level.mode.value === 'index'" label="Select nights" color="neutral" variant="outline" class="sm:hidden" :disabled="busy" @click="openDates" />
             <UButton label="Today" color="neutral" variant="outline" :disabled="busy" @click="goToToday" />
@@ -47,12 +50,13 @@
               :class="selected(day) ? 'bg-inverted text-inverted' : night(day)?.available === false ? 'bg-muted text-muted' : 'bg-default text-highlighted'"
               :data-testid="`stay-night-${day.toString()}`"
               :title="nightTitle(day)"
+              v-night-minimum-description="night(day)?.min_stay_arrival"
             >
               <span class="flex items-center justify-between gap-1">
                 <span class="block text-sm sm:text-base" :class="night(day)?.available === false ? 'line-through' : ''">{{ day.day }}</span>
                 <UIcon v-if="channelState(day)" :name="CHANNEL_MARKS[channelState(day)!]" class="size-3.5 shrink-0" :class="channelState(day) === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-night-channel-${channelState(day)}`" aria-hidden="true" />
               </span>
-              <StayNightMinimum v-if="night(day)" :nights="night(day)!.min_stay_arrival" />
+              <StayNightMinimum v-if="data && night(day) && night(day)!.min_stay_arrival !== data.home.min_nights" :nights="night(day)!.min_stay_arrival" />
               <span v-if="night(day)?.booking_id" class="hidden truncate text-xs sm:block">{{ stayLabel(day) }}</span>
               <span class="block break-all text-[10px] leading-tight tabular-nums sm:hidden">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : compactMoney(night(day)!.price_minor!) : '…' }}</span>
               <span class="hidden truncate text-sm sm:block">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : money(night(day)!.price_minor!) : '…' }}</span>
@@ -137,6 +141,7 @@
 
 <script setup lang="ts">
 import { parseDate, today, type CalendarDate, type DateValue } from '@internationalized/date'
+import type { Directive } from 'vue'
 import type { StayCalendarStay, StayHome, StayNight } from '~/server/domain/stays'
 import { bookingConversationOrRecordPath } from '~/shared/messages-contract'
 import { MAX_STAY_NIGHTS, STAY_CHANNEL_LABELS, parseStayCalendarRules } from '~/shared/bookings'
@@ -265,6 +270,12 @@ const nightsByDate = computed(() => new Map((data.value?.nights ?? []).map(night
 const staysById = computed(() => new Map((data.value?.bookings ?? []).map(stay => [stay.booking_id, stay])))
 const stayTo = (id: string) => bookingConversationOrRecordPath(orgSlug, id, staysById.value.get(id)?.conversation_id ?? null)
 const night = (day: DateValue) => nightsByDate.value.get(day.toString())
+// The Calendar day slot supplies content inside its date trigger.
+const vNightMinimumDescription: Directive<HTMLElement, number | undefined> = (content, { value }) => {
+  const trigger = content.closest('[data-slot="cellTrigger"]')
+  if (value === undefined) trigger?.removeAttribute('aria-description')
+  else trigger?.setAttribute('aria-description', nightMinimumLabel(value))
+}
 function stayLabel(day: DateValue) {
   const bookingId = night(day)?.booking_id
   const stay = bookingId ? staysById.value.get(bookingId) : undefined

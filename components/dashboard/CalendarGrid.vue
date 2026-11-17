@@ -58,6 +58,7 @@
                 <NuxtLink :to="row.to" class="flex min-w-0 flex-col hover:underline" :data-home="row.home?.product_id" :data-place="row.place ? `${row.place.kind}:${row.place.id}` : undefined">
                   <span class="line-clamp-2 text-sm font-medium text-highlighted">{{ row.name }}</span>
                   <span class="text-xs text-muted" :class="row.home ? 'line-clamp-2 break-words' : 'hidden truncate sm:block'" :title="row.detail">{{ row.detail }}</span>
+                  <StayNightMinimum v-if="row.home" :nights="row.home.min_nights" is-default />
                 </NuxtLink>
               </div>
               <div class="relative grid border-b border-default" :data-row-index="rowIndex" :style="{ gridColumn: `2 / span ${dates.length}`, gridTemplateColumns: `repeat(${dates.length}, 4rem)` }">
@@ -83,10 +84,10 @@
                   @keydown="keydown($event, rowIndex, index)"
                   @focus="cursor = { row: rowIndex, day: index }"
                 >
-                  <span v-if="cell.minimum !== undefined" class="flex min-h-9 w-full flex-col items-start gap-1">
-                    <span class="flex w-full items-center justify-between gap-1">
-                      <StayNightMinimum :nights="cell.minimum" aria-hidden="true" />
-                      <UIcon v-if="cell.mark" :name="CHANNEL_MARKS[cell.mark]" class="size-3 shrink-0" :class="cell.mark === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-homes-channel-${cell.mark}`" aria-hidden="true" />
+                  <span v-if="row.home" class="flex min-h-9 w-full flex-col items-start gap-1">
+                    <span class="flex h-4 w-full items-center gap-1">
+                      <StayNightMinimum v-if="cell.minimumOverride !== undefined" :nights="cell.minimumOverride" aria-hidden="true" />
+                      <UIcon v-if="cell.mark" :name="CHANNEL_MARKS[cell.mark]" class="ml-auto size-3 shrink-0" :class="cell.mark === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-homes-channel-${cell.mark}`" aria-hidden="true" />
                     </span>
                     <span v-if="cell.label" class="max-w-full break-all text-[11px] font-medium leading-3.5" :class="cell.strike ? 'line-through' : ''">{{ cell.label }}</span>
                   </span>
@@ -113,7 +114,7 @@
                   :data-channel="bar.channel"
                   :data-booked="bar.date"
                 >
-                  <ChannelMark v-if="bar.channel" :channel="bar.channel" class="size-4 shrink-0 border-0" />
+                  <ChannelMark v-if="bar.channel" :channel="bar.channel" class="size-4 shrink-0 rounded-none! border-0!" />
                   <span class="truncate">{{ bar.label }}</span>
                 </NuxtLink>
               </div>
@@ -183,7 +184,7 @@ interface HomesPayload { from: string; to: string; homes: { home: Home; nights: 
 interface PlacesPayload { from: string; to: string; places: { place: Place; days: PlaceDay[] }[]; manage: boolean }
 interface GridBar { key: string; date: string; column: number; span: number; label: string; title: string; to: RouteLocationRaw; stayId: string | null; channel: StayChannel | null }
 /** One day on one row as the grid draws it: its label, whether it reads open, and what holds it. */
-interface GridCell { date: string; open: boolean; held: boolean; label: string; strike: boolean; minimum?: number; mark: 'pending' | 'needs_review' | null; title: string }
+interface GridCell { date: string; open: boolean; held: boolean; label: string; strike: boolean; minimumOverride?: number; mark: 'pending' | 'needs_review' | null; title: string }
 interface GridRow { id: string; name: string; detail: string; to: RouteLocationRaw; cells: GridCell[]; bars: GridBar[]; gaps: Map<number, { text: string; start: number; end: number }>; home?: Home; place?: Place; nights?: StayNight[]; days?: PlaceDay[] }
 
 // The two views: homes (nights at every home) and places (days at every restaurant location, experience and consultation).
@@ -313,7 +314,8 @@ const homeRows = computed<GridRow[]>(() => {
         minimumFractionDigits: 0, maximumFractionDigits: currencyFractionDigits(home.currency),
       })
       const cells = nights.map((night, index): GridCell => ({
-        date: night.date, open: night.available, held: isBookedNight(night), strike: night.closed, minimum: night.min_stay_arrival, mark: channelState(night),
+        date: night.date, open: night.available, held: isBookedNight(night), strike: night.closed, mark: channelState(night),
+        minimumOverride: night.min_stay_arrival === home.min_nights ? undefined : night.min_stay_arrival,
         label: isBookedNight(night) ? '' : night.price_minor === null ? 'No price' : compactPrice.format(Number(minorAmountToMajor(night.price_minor, home.currency))),
         title: nightTitle(home, night, gaps.get(index)?.text),
       }))
