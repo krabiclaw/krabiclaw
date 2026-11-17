@@ -3,7 +3,9 @@ import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import type { ConversationEntriesPage, ConversationEntry, ConversationHeader, ConversationMessage, ConversationPage, ConversationViewerRole } from '~/shared/messages-contract'
 import { accountActivityPath } from '~/shared/account-activity'
 import { formatFormAnswer } from '~/shared/form-questions'
+import type { ProductKind } from '~/shared/product-details'
 import { formatCalendarRange } from '~/utils/timezone'
+import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { assignedMemberSql, bookingOperationsScope } from '~/server/utils/member-access'
 import {
   conversationAccessDenied, conversationAccessFromRow, conversationAccessQuery, conversationParticipantsSql, guestVisibleSql, isEventMessage, MEMBER_REPLY_EVENT, messageRole,
@@ -25,7 +27,7 @@ type HistoryContext = { organization_name: string; timezone: string; record_titl
 type ConversationJob = { task_id: string; version: number; message_id: string | null }
 
 type ReservationFacts = {
-  created_at: string; starts_at: string; ends_at: string; timezone: string; party_size: number; status: string; stay: 0 | 1
+  created_at: string; starts_at: string; ends_at: string; timezone: string; party_size: number; status: string; stay: 0 | 1; product_kind: ProductKind; vertical: string | null
   confirmation: { at: string; message_id: string; event: 'booking.confirm' | 'payment.payment_captured' } | null
 }
 
@@ -41,8 +43,10 @@ function reservationInThread(context: HistoryContext, viewer: { conversation: Co
   if (facts.status === 'confirmed' && conversation.kind === 'booking') {
     const from = bookingDay(facts.starts_at, facts.timezone)
     const dates = facts.stay ? formatCalendarRange(from, bookingDay(facts.ends_at, facts.timezone), 'en-US') : calendarDate(from)
-    const party = `${facts.party_size} ${facts.party_size === 1 ? 'guest' : 'guests'}`
-    const subject = role === 'guest' ? 'Your reservation is confirmed' : 'Reservation confirmed'
+    // A stay is a reservation of guests; anything else is named as its business names it: a law firm's consultation of clients.
+    const words = facts.stay ? null : resolveBookingPresentation(facts.product_kind, facts.vertical)
+    const party = words ? words.formatCount(facts.party_size) : `${facts.party_size} ${facts.party_size === 1 ? 'guest' : 'guests'}`
+    const subject = role === 'guest' ? `Your ${words?.noun ?? 'reservation'} is confirmed` : `${words?.label ?? 'Reservation'} confirmed`
     confirmation = { message_id: facts.confirmation?.event === 'booking.confirm' ? facts.confirmation.message_id : null, text: `${subject} for ${party} on ${dates}.` }
   }
   return { at, day: { type: 'day', id: `day:${day.key}`, label: dayFormat.label(instant, day) }, confirmation }
@@ -222,7 +226,8 @@ export async function loadConversationPage(
           WHERE ch.organization_id = c.organization_id AND ch.kind = 'booking_change' AND ch.status = 'open' AND ch.subject_id = c.booking_id) END` : 'NULL'} AS review,
         ${head ? `CASE WHEN b.id IS NOT NULL THEN json_object(
           'created_at', b.created_at, 'starts_at', b.starts_at, 'ends_at', b.ends_at, 'timezone', b.timezone,
-          'party_size', b.party_size, 'status', b.status, 'stay', b.product_session_id IS NULL,
+          'party_size', b.party_size, 'status', b.status, 'stay', b.product_session_id IS NULL, 'vertical', o.vertical,
+          'product_kind', (SELECT booked.kind FROM products booked WHERE booked.id = b.product_id AND booked.organization_id = b.organization_id),
           'confirmation', CASE WHEN c.kind = 'booking' AND b.status = 'confirmed' THEN
             (SELECT json_object('at', m.occurred_at, 'message_id', m.id, 'event', m.event_name) FROM messages m
               WHERE m.organization_id = c.organization_id AND m.conversation_id = c.id AND m.author_kind = 'krabiclaw'

@@ -188,7 +188,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     expect([after.title, after.cards]).toEqual(['Nothing needs you today', []])
     const upcoming = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG, range: 'upcoming' } }), 200)
     expect([upcoming.title, upcoming.cards.map(card => [card.id, card.headline, card.action.title, card.to])]).toEqual(['You have 1 upcoming consultation',
-      [[`booking:${bookingId}`, `${guestFirstName}’s consultation`, 'Say hello to your guests', conversationPath]]])
+      [[`booking:${bookingId}`, `${guestFirstName}’s consultation`, 'Say hello to your client', conversationPath]]])
     await memberPage.setViewportSize({ width: 1440, height: 900 })
     await memberPage.goto(DASHBOARD)
     await expect(memberPage.getByTestId('today-title')).toHaveText('Nothing needs you today')
