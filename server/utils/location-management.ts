@@ -405,7 +405,7 @@ export async function updateLocation(
   organizationId: string,
   locationIdOrSlug: string,
   input: UpdateLocationInput,
-  /** The member making the change, or null for KrabiClaw's own (recorded as a system event). */
+  /** The member making the change, or null for Blawby's own (recorded as a system event). */
   userId: string | null,
   env: CloudflareEnv,
   /** Statements that run first in the same batch: a caller's guard, or the rest of an import this write is part of. */

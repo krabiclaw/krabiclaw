@@ -2570,7 +2570,7 @@ test('native calendar writes retain real session and impersonator evidence with 
     const app = new H3()
     app.put('/api/dashboard/stay-homes/:product_id/nights', editNightsRoute)
     const put = (sessionCookie: string, minimum: number) => app.request(Object.assign(new Request(`https://proof.example/api/dashboard/stay-homes/${cabin.id}/nights?org=org`, {
-      method: 'PUT', headers: { cookie: sessionCookie, origin: 'https://proof.example', 'content-type': 'application/json', 'user-agent': 'Krabiclaw/25 CalendarAuditProof', 'x-request-id': 'calendar-audit-proof', 'cf-ray': 'calendar-proof-ray' },
+      method: 'PUT', headers: { cookie: sessionCookie, origin: 'https://proof.example', 'content-type': 'application/json', 'user-agent': 'Blawby/25 CalendarAuditProof', 'x-request-id': 'calendar-audit-proof', 'cf-ray': 'calendar-proof-ray' },
       body: JSON.stringify({ from: '2026-11-04', to: '2026-11-05', min_stay_arrival: minimum }),
     }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     const ownerCookie = await login(OWNER)
@@ -2579,7 +2579,7 @@ test('native calendar writes retain real session and impersonator evidence with 
     assert.equal(changed.status, 200, await changed.text())
     const first = (await payloads('stay.nights_changed'))[0]!
     assert.equal(first.actor, OWNER)
-    assert.deepEqual(first.payload.context, { source: 'dashboard', user_id: OWNER, request_id: 'calendar-audit-proof', ray_id: 'calendar-proof-ray', method: 'PUT', path: `/api/dashboard/stay-homes/${cabin.id}/nights`, user_agent: 'Krabiclaw/25 CalendarAuditProof', session_id: ownerSession!.session.id, impersonated_by: null })
+    assert.deepEqual(first.payload.context, { source: 'dashboard', user_id: OWNER, request_id: 'calendar-audit-proof', ray_id: 'calendar-proof-ray', method: 'PUT', path: `/api/dashboard/stay-homes/${cabin.id}/nights`, user_agent: 'Blawby/25 CalendarAuditProof', session_id: ownerSession!.session.id, impersonated_by: null })
     assert.deepEqual(first.payload.metadata.settings, { min_stay_arrival: 1 })
     assert.equal(first.payload.beforeState.nights[0].override.min_stay_arrival, 21)
     assert.equal(first.payload.afterState.nights[0].override.min_stay_arrival, 1)

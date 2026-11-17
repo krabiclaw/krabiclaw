@@ -779,7 +779,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
       await expectStatus(read, 200)
       return (await read.json() as ConversationPage).entries.flatMap(entry => entry.type === 'message' && entry.automatic && entry.body ? [entry.body.split('\n')[0]] : [])
     }, { timeout: 30_000, message: 'the hub posts the turnover into the conversation after the stay write' }).toEqual([cleanPost])
-    // KrabiClaw's job message is news to the member until they open the conversation.
+    // Blawby's job message is news to the member until they open the conversation.
     expect((await teamRows()).find(row => row.id === jobThreadId)).toMatchObject({ kind: 'team', unread: true })
     await memberPage.goto(`/dashboard/${slug}/messages/${jobThreadId}?kind=team`)
     const turnoverPost = memberPage.locator('[data-team-message][data-automatic]').filter({ hasText: cleanPost })
@@ -4922,7 +4922,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const denied = await cleaner.request.get(api(`bookings/${stays[1]!.booking_id}`))
       expect(denied.status()).toBe(404)
       // A job always has someone: the host cannot leave the turnover with nobody. A cleaner's job is a team
-      // conversation with the owners: the job is posted there as KrabiClaw's message, that message is the
+      // conversation with the owners: the job is posted there as Blawby's message, that message is the
       // cleaner's alert (push, email, WhatsApp), and it is unread until read.
       const unassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, version: turnover.version, assigned_member_id: null })
       expect(JSON.parse(unassigned.error!)).toMatchObject({ status: 422, code: 'JOB_ASSIGNEE_REQUIRED', field: 'assigned_member_id' })

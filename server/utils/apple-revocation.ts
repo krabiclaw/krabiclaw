@@ -3,9 +3,9 @@ import { APIError } from 'better-auth'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
 // Apple requires an app that offers Sign in with Apple to revoke the user's
-// Apple grant when they delete their account (App Review 5.1.1(v)). KrabiClaw
+// Apple grant when they delete their account (App Review 5.1.1(v)). Blawby
 // keeps no Apple tokens: the native app asks Apple to authorize again at
-// deletion, sends the fresh authorization code, and KrabiClaw exchanges it for
+// deletion, sends the fresh authorization code, and Blawby exchanges it for
 // a refresh token and revokes that. Better Auth's Apple provider implements
 // neither the native code exchange nor revocation, so these two calls are made
 // here against Apple's documented endpoints.
@@ -62,7 +62,7 @@ export async function exchangeAppleAuthorizationCode(env: CloudflareEnv, code: s
   if (!response.ok || !tokens.refresh_token || !tokens.id_token) {
     throw new APIError('BAD_REQUEST', { code: 'APPLE_CODE_EXCHANGE_FAILED', message: `Apple did not accept the authorization code (${response.status}${tokens.error ? `: ${tokens.error}` : ''}). Sign in with Apple again and retry.` })
   }
-  // Apple returned this token directly over TLS to KrabiClaw's authenticated
+  // Apple returned this token directly over TLS to Blawby's authenticated
   // request, so its claims are read, not re-verified.
   const claims = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(tokens.id_token.split('.')[1]!.replaceAll('-', '+').replaceAll('_', '/')), char => char.charCodeAt(0)))) as { sub?: string }
   if (claims.sub !== appleAccountId) {

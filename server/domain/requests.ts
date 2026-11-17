@@ -228,7 +228,7 @@ export const BOOKING_RECORDS_SQL = `(
       LEFT JOIN product_stay_configs sc ON sc.product_id = b.product_id AND sc.organization_id = b.organization_id
   )`
 
-/** One row of BOOKING_RECORDS_SQL. received_at is null for a booking imported or known before KrabiClaw received it. */
+/** One row of BOOKING_RECORDS_SQL. received_at is null for a booking imported or known before Blawby received it. */
 export interface BookedRecord extends Omit<ThreadOperationalRecord, 'review_id' | 'pay_by' | 'payment_processing'> {
   conversation_id: string | null
   offering_id: string
@@ -523,7 +523,7 @@ export async function cancelBookingRequest(db: DbClient, input: GuestCancellatio
         AND EXISTS (SELECT 1 FROM conversations WHERE id = ? AND organization_id = ? AND booking_id = bookings.id
           AND json_extract(payload_json, '$.cancellation.used_at') = ?)`,
         params: [record.version, record.status, ...(input.buyerUserId ? [input.buyerUserId] : []), input.id, input.organizationId, input.now] } }),
-    // The one record of the guest's cancellation: KrabiClaw's message, by the guest.
+    // The one record of the guest's cancellation: Blawby's message, by the guest.
     ...messageQueries({ conversationId: input.id, authorKind: 'krabiclaw', authorUserId: current.user_id, eventName: 'booking.cancel',
       payload: { action: 'cancel', beforeStatus: record.status, afterStatus: 'cancelled', booking_id: record.id },
       dedupeKey: `booking:${record.id}:guest-cancel`, occurredAt: input.now,

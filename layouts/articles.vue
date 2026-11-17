@@ -46,7 +46,7 @@ provide(articleNavKey, nav)
 const searchLabel = computed(() => t('site.search.dialog_title', { surface: nav.value.indexLabel }))
 
 // The sidebar shows exactly where the site's header stops collapsing:
-// KrabiClaw's header at `nav` (1080px), the tenant templates' at `lg`. The
+// Blawby's header at `nav` (1080px), the tenant templates' at `lg`. The
 // container is the one the site's header sits in.
 const split = computed(() => site.slug === 'platform'
   ? { container: isDocs.value ? 'mx-auto max-w-360 px-5 sm:px-8 lg:px-10' : 'mx-auto max-w-7xl px-5 sm:px-8 lg:px-10', grid: isDocs.value ? 'nav:grid nav:grid-cols-[280px_minmax(0,1fr)] nav:gap-10' : 'nav:grid nav:grid-cols-[220px_minmax(0,1fr)] nav:gap-12', aside: 'nav:sticky nav:top-28 nav:block nav:h-fit nav:max-h-[calc(100vh-8rem)] nav:overflow-y-auto' }

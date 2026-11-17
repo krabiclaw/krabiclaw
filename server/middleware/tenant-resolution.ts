@@ -1,5 +1,5 @@
 import { PUBLIC_CACHE_REVISION_SQL, publicCacheRevision } from '~/server/utils/edge-cache'
-// Tenant resolution middleware: every host, KrabiClaw's own included, resolves
+// Tenant resolution middleware: every host, Blawby's own included, resolves
 // to an organization. The organization's site decides whether it renders as
 // the platform (marketing, docs, blog) or as a customer site.
 
@@ -79,7 +79,7 @@ const TENANT_SELECT_SQL = `SELECT o.id,
              o.settings_json ->> '$.config.button_color' AS button_color,
              o.settings_json ->> '$.config.heading_casing' AS heading_casing`
 
-// KrabiClaw's own tenant is the one active organization running the platform
+// Blawby's own tenant is the one active organization running the platform
 // site. Platform hosts differ per environment (localhost, staging, the
 // apex), so the host itself is not the key; the site is.
 async function resolvePlatformTenant(db: DbClient): Promise<TenantRow | null> {
@@ -184,7 +184,7 @@ async function resolveRegisteredSubdomainTenant(
  * on its real host, rendered by the real templates, with unpublished content
  * and no caching.
  *
- * `suspended` is KrabiClaw's own hold and is nobody's to look past, the owner's
+ * `suspended` is Blawby's own hold and is nobody's to look past, the owner's
  * preview token included.
  *
  * Returns false when the request may not see this tenant at all.

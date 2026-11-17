@@ -10,7 +10,7 @@
       <UFormField name="whatsapp" class="border-b border-default">
         <SettingRow v-model="draft.whatsapp" label="WhatsApp" :disabled="!phoneVerified || saving" />
       </UFormField>
-      <!-- Reaches every device the person registered: the KrabiClaw app and subscribed browsers. -->
+      <!-- Reaches every device the person registered: the Blawby app and subscribed browsers. -->
       <UFormField name="push">
         <SettingRow :model-value="draft.push" label="Push" :description="pushLine" :disabled="saving || enablingPush" @update:model-value="setPush">
           <UButton v-if="offHere" label="Turn on" color="neutral" variant="link" class="p-0" :loading="enablingPush" @click="turnOnHere" />

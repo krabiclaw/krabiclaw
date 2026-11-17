@@ -1,7 +1,7 @@
 import type { LayoutKey } from 'nuxt/app'
 
 /**
- * Which renderer a site runs: KrabiClaw's own marketing site, or a customer
+ * Which renderer a site runs: Blawby's own marketing site, or a customer
  * site. Every customer site — restaurant, experience, lodging or legal
  * practice — draws the same blocks with the same components; its look is its
  * own settings (palette, fonts and site recipe). Domain capabilities decide
@@ -9,7 +9,7 @@ import type { LayoutKey } from 'nuxt/app'
  */
 export type SiteSurface = 'tenant' | 'platform'
 
-/** KrabiClaw's own site is the one organization on this theme id. Every other id is a customer site. */
+/** Blawby's own site is the one organization on this theme id. Every other id is a customer site. */
 export const PLATFORM_THEME_ID = 'krabiclaw-theme-v1'
 export const PLATFORM_CONTACT_EMAIL = 'hello@blawby.com'
 /** The theme id provisioning gives a customer site. */
@@ -89,13 +89,13 @@ export function isPublicLocationPath(path: string): boolean {
 /**
  * Is this site a legal practice's? A security gate as well as a rendering
  * decision — the consultation, compliance and consent paths read it — so it
- * names KrabiClaw's own site out explicitly: that site is also `service`.
+ * names Blawby's own site out explicitly: that site is also `service`.
  */
 export function isLegalPracticeSite(input: { themeId?: string | null; vertical?: string | null }): boolean {
   return String(input.themeId ?? '').trim().toLowerCase() !== PLATFORM_THEME_ID && isLegalPractice(input.vertical)
 }
 
-// KrabiClaw's own site: the marketing pages, documentation and blog. It is an
+// Blawby's own site: the marketing pages, documentation and blog. It is an
 // ordinary site row rendered by the platform layout; the platform host resolves
 // to whichever site owns the apex domain (see server/middleware/tenant-resolution.ts).
 export const PLATFORM_SITE: PublicSiteDefinition = {
@@ -111,7 +111,7 @@ export const PLATFORM_SITE: PublicSiteDefinition = {
     dynamicPrefixes: ['/blog/', '/docs/', '/posts/'],
   },
   nonIndexableExactPaths: ['/login', '/forgot-password', '/reset-password', '/accept-invitation'],
-  // KrabiClaw's own marketing pages are ordinary page documents on the
+  // Blawby's own marketing pages are ordinary page documents on the
   // platform site, read by the same loader every customer site uses (#903).
   // The routes that are not editorial — /blog, /docs, /help, /templates —
   // are absent on purpose: they render their own data, and a document stored
@@ -120,8 +120,8 @@ export const PLATFORM_SITE: PublicSiteDefinition = {
     recipes: { home: '/', about: '/about', pricing: '/pricing' },
     optionalLocalizedPaths: [],
     // Only a path a route file still claims needs naming here. /experiences is
-    // the catalog's route on a customer host and KrabiClaw's own page on
-    // this one. Everything else KrabiClaw publishes is an unclaimed path the
+    // the catalog's route on a customer host and Blawby's own page on
+    // this one. Everything else Blawby publishes is an unclaimed path the
     // catch-all serves, the same as any tenant's.
     paths: ['/experiences', '/products'],
     prefixes: [],
@@ -131,7 +131,7 @@ export const PLATFORM_SITE: PublicSiteDefinition = {
 /** The platform shell and the shared customer shell. */
 export const PUBLIC_SITES: readonly PublicSiteDefinition[] = [PLATFORM_SITE, CUSTOMER_SITE]
 
-/** Is this KrabiClaw's own site? Its theme id alone says. */
+/** Is this Blawby's own site? Its theme id alone says. */
 export function isPlatformSite(input: { themeId?: string | null }): boolean {
   return String(input.themeId ?? '').trim().toLowerCase() === PLATFORM_THEME_ID
 }
@@ -141,7 +141,7 @@ export const TENANT_NON_INDEXABLE_EXACT_PATHS = new Set(
 )
 
 /**
- * The renderer and routes for a site. KrabiClaw's own site is selected only by
+ * The renderer and routes for a site. Blawby's own site is selected only by
  * its theme id; every customer site uses the same definition.
  */
 export function resolvePublicSite(input: {

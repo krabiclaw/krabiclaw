@@ -202,7 +202,7 @@ export const conversation_guest_invites = sqliteTable("conversation_guest_invite
 ]);
 
 // One message in one conversation, in `sequence` order. Its author is a person
-// (author_user_id: a member, or the guest's Better Auth user) or KrabiClaw
+// (author_user_id: a member, or the guest's Better Auth user) or Blawby
 // (`krabiclaw`): an automatic message, a booking's opening, a relayed Airbnb
 // Support message, or an event (event_name: a cancellation, a change, a
 // payment, a review), which names the person who caused it in author_user_id
@@ -1024,7 +1024,7 @@ export const product_sessions = sqliteTable("product_sessions", {
 //   policy and its payments row; it records no total. A confirmed booking is
 //   NOT a successful payment.
 // private_notes: the host's note, never shown to the guest.
-// received_at: when KrabiClaw received the booking; NULL for one imported or
+// received_at: when Blawby received the booking; NULL for one imported or
 //   known before it arrived here.
 // Deletion: cancelled, not deleted. Deleting the session, the variant or the
 //   home it names is refused while it exists (NO ACTION); the organization's
@@ -1304,7 +1304,7 @@ export const message_templates = sqliteTable("message_templates", {
 //   occupancy is never stored here. These rules are what guests and channels
 //   are offered; a stay the host enters themselves is not refused by them.
 // A night’s own rate is a prices row for its date.
-// `source`: 'host' (edited in KrabiClaw) or 'import' (read from a channel when
+// `source`: 'host' (edited in Blawby) or 'import' (read from a channel when
 //   the home was connected).
 // Deletion: cascades from the home.
 export const product_nights = sqliteTable("product_nights", {
@@ -1346,7 +1346,7 @@ export const stay_nights = sqliteTable("stay_nights", {
 
 // Row meaning: the host recorded receiving (or, negative, refunding) this
 //   amount for a booking outside Stripe: cash, a bank transfer, a card taken
-//   elsewhere. Not KrabiClaw-processed volume. A payments row is a Stripe
+//   elsewhere. Not Blawby-processed volume. A payments row is a Stripe
 //   PaymentIntent (account, mode, captured and refunded amounts kept by
 //   webhooks); this has none of those, so it is its own row of Payments.
 // `idempotency_key` makes a retried record the same row, never a second payment.
@@ -1484,7 +1484,7 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 	check("product_channel_mappings_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
 
-// What a host asked KrabiClaw to do with each Airbnb listing of its connected
+// What a host asked Blawby to do with each Airbnb listing of its connected
 // account, done in the background: `sync` imports the listing as a home if it
 // is not one yet and makes it live; `stop` takes its home back to a free draft.
 // One row per listing; a new request for it replaces the row. The airbnb-sync
@@ -1581,7 +1581,7 @@ export const channel_night_pushes = sqliteTable("channel_night_pushes", {
 // Read/write: server/utils/organization-integrations.ts.
 // ---------------------------------------------------------------------------
 /**
- * A service the business asked KrabiClaw's people for, with the consent that
+ * A service the business asked Blawby's people for, with the consent that
  * started it: who agreed, when, and to which terms. Managed ads is the only
  * service whose fee is usage (the Business subscription's ad-spend meter), so
  * its consent lives here rather than on a Stripe subscription item. A row with `ended_at` is
@@ -1614,7 +1614,7 @@ export const organization_integrations = sqliteTable("organization_integrations"
 	// Google Analytics only: the property's web stream, which Zaraz serves.
 	measurement_id: text(),
 	// Search Console only: whether Google confirmed ownership, and the meta tag
-	// KrabiClaw serves while Google still requires it.
+	// Blawby serves while Google still requires it.
 	verified: integer({ mode: "boolean" }),
 	verification_token: text(),
 	status: text({ enum: ["setting_up", "active", "disabled", "error"] }),
@@ -1702,7 +1702,7 @@ export const stripe_connected_accounts = sqliteTable("stripe_connected_accounts"
 	/** Pass on credit card fees: the surcharge rate in basis points, bounded by Stripe's maximum per card; NULL is off. */
 	surcharge_basis_points: integer(),
 	// Normalized requirements needed by the dashboard. Stripe remains the
-	// authority; KrabiClaw never collects or stores the requested KYC values.
+	// authority; Blawby never collects or stores the requested KYC values.
 	requirements_json: text().default("[]").notNull(),
 	stripe_refreshed_at: text(),
 	last_error: text(),
@@ -2152,7 +2152,7 @@ export const content_reports = sqliteTable("content_reports", {
 	subject: text({ enum: ["conversation", "message"] }).notNull(),
 	conversation_id: text().references((): AnySQLiteColumn => conversations.id, { onDelete: "cascade" }),
 	message_id: text().references((): AnySQLiteColumn => messages.id, { onDelete: "set null" }),
-	// The KrabiClaw account that wrote the reported content, when it has one:
+	// The Blawby account that wrote the reported content, when it has one:
 	// the team message's sender, or the guest's account. Staff ban this user.
 	author_user_id: text().references(() => user.id, { onDelete: "set null" }),
 	reason: text().notNull(),
@@ -2784,7 +2784,7 @@ export const analytics_summaries = sqliteTable("analytics_summaries", {
 // number may receive the message at all.
 //
 // `push_enabled` reaches every device the person registered from a signed-in
-// session (device_tokens): KrabiClaw app phones and subscribed browsers.
+// session (device_tokens): Blawby app phones and subscribed browsers.
 //
 // account_security email is not stored here as a switchable value: the API
 // refuses to disable it, because losing a password reset locks a person out of

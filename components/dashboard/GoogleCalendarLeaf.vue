@@ -25,7 +25,7 @@ import { offer } from '~/shared/offers'
 import { integrationsKey } from '~/pages/dashboard/[org_slug]/integrations.vue'
 import { INTEGRATION_SCOPES, type GoogleCalendarIntegration } from '~/shared/organization-settings'
 const route = useRoute()
-// The Integrations summary names the KrabiClaw user who linked the account; the leaf's own read does not.
+// The Integrations summary names the Blawby user who linked the account; the leaf's own read does not.
 const integrations = inject(integrationsKey, null)
 const organizationId = useDashboardOrganizationId()
 const dashboard = useDashboardOrganization()

@@ -12,7 +12,7 @@ import { PUBLISHED_PROFILE_SQL } from '~/shared/member-scheduling'
  * Conversations, as Slack and Discord have them: a
  * guest's with the business (`contact`, `booking`) or the team's own (`team`),
  * each person's read position and archive (`conversation_participants`), and
- * the messages, written by people or by KrabiClaw (`messages`).
+ * the messages, written by people or by Blawby (`messages`).
  *
  * This module is the one writer of a message (`messageQueries`,
  * `appendMessage`), the one statement of unread (`unreadSql`), the one place
@@ -76,7 +76,7 @@ export function messageHasContentSql(message: string): string {
   return `(NULLIF(TRIM(${message}.body), '') IS NOT NULL OR COALESCE(json_array_length(${message}.payload_json, '$.attachments'), 0) > 0 OR EXISTS (SELECT 1 FROM media_placements mp WHERE mp.owner_type = 'message' AND mp.owner_id = ${message}.id AND mp.slot = 'attachments' AND mp.status = 'active'))`
 }
 
-/** KrabiClaw's events a guest sees in their own conversation. Staff diagnostics and disputes are the business's. */
+/** Blawby's events a guest sees in their own conversation. Staff diagnostics and disputes are the business's. */
 export const GUEST_VISIBLE_EVENTS = [
   'booking.confirm', 'booking.reject', 'booking.cancel',
   'booking_change.requested', 'booking_change.accepted', 'booking_change.declined', 'booking_change.withdrawn', 'booking_change.moved',
@@ -90,17 +90,17 @@ export const MIRRORED_EVENT = 'channel.message_mirrored'
 export const SUBMISSION_EVENT = 'thread.submission'
 /** A booking guest's note, written with the booking as their own message. */
 export const GUEST_NOTE_EVENT = 'thread.guest_note'
-/** KrabiClaw's messages that are words to read, not events about the booking. */
+/** Blawby's messages that are words to read, not events about the booking. */
 const KRABICLAW_WORDS = new Set<string | null>([null, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, MIRRORED_EVENT])
 
-/** An event KrabiClaw recorded (a cancellation, a change, a payment), as opposed to words someone wrote. */
+/** An event Blawby recorded (a cancellation, a change, a payment), as opposed to words someone wrote. */
 export function isEventMessage(message: Pick<MessageRow, 'author_kind' | 'event_name'>): boolean {
   return message.author_kind === 'krabiclaw' && !KRABICLAW_WORDS.has(message.event_name)
 }
 
 /**
  * The part a message's person plays in its conversation: its guest, the team,
- * or KrabiClaw alone. An event names the person who caused it, so its role is
+ * or Blawby alone. An event names the person who caused it, so its role is
  * read from who that is.
  */
 export function messageRole(message: Pick<MessageRow, 'author_kind' | 'author_user_id' | 'event_name'>, guestUserId: string | null): MessageAuthorKind {
@@ -128,7 +128,7 @@ function viewerMessageVisibility(message: string, conversation: string): string 
 /**
  * Unread, the one statement: the conversation `conversation` has a message
  * from someone other than the viewer that is newer than the viewer's read
- * position. KrabiClaw's automatic messages have no actor and count for everyone who can
+ * position. Blawby's automatic messages have no actor and count for everyone who can
  * see them. A guest counts only what they can see. Every list row, the Unread filter, the
  * filter counts, the nav count, the app badge and MCP read this.
  */
@@ -197,7 +197,7 @@ export interface MessageInput {
   id?: string
   conversationId: string
   authorKind: MessageAuthorKind
-  /** The person who wrote it, or who caused KrabiClaw's event; null for KrabiClaw alone. */
+  /** The person who wrote it, or who caused Blawby's event; null for Blawby alone. */
   authorUserId: string | null
   channel?: MessageChannel | null
   body?: string | null

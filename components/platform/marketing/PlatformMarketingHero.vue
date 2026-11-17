@@ -172,7 +172,7 @@ type ParallaxLayer = {
  * Each plane requires its exact breakpoint slots (parallax_sky_xxs, _xs,
  * _sm, _md, _lg). These placements keep the
  * original art-directed mobile/tablet/desktop compositions editable through
- * KrabiClaw's normal media tools instead of baking image URLs into the frontend.
+ * Blawby's normal media tools instead of baking image URLs into the frontend.
  */
 const PARALLAX_BREAKPOINTS: ParallaxBreakpoint[] = ['xxs', 'xs', 'sm', 'md', 'lg']
 

@@ -139,7 +139,7 @@ export async function listingRecord(env: ChannexEnv, channelId: string, listingI
 }
 
 /**
- * The listing's booking settings KrabiClaw has none of its own for, which
+ * The listing's booking settings Blawby has none of its own for, which
  * Channex refuses a booking-settings update without (422s seen on staging
  * 2026-10-30): who may book instantly, and the guest controls beside the pets,
  * smoking and events rules (children, infants, pet capacity). Every update

@@ -70,7 +70,7 @@ async function boot(){
  await db.batch(migration.map(query=>db.prepare(query)))
  // A business taking payments is billed for them on its plan's Stripe customer, and the platform site records what it billed.
  await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at, timezone, "stripeCustomerId") VALUES(?,'Payments','payments','payments','{}','theme','USD','active','complete','flat','experience',?, 'America/New_York','cus_operating')`).bind(ORG,NOW).run()
- await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at,timezone) VALUES('platform','KrabiClaw','krabiclaw','krabiclaw','{}','krabiclaw-theme-v1','USD','active','complete','flat','service',?,'America/Los_Angeles')`).bind(NOW).run()
+ await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at,timezone) VALUES('platform','Blawby','krabiclaw','krabiclaw','{}','krabiclaw-theme-v1','USD','active','complete','flat','service',?,'America/Los_Angeles')`).bind(NOW).run()
  await db.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status) VALUES('payments-en',?,'en',1,'published')").bind(ORG).run()
  for(const id of ['guest','verified','other'])await db.prepare("INSERT INTO user(id,name,email,emailVerified,isAnonymous) VALUES(?,?,?,1,?)").bind(id,id,`${id}@example.com`,Number(id==='guest')).run()
  await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('service','product',?,'Consultation','consultation','guest','guest')").bind(ORG).run()
@@ -939,7 +939,7 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   for(const secret of secrets)assert.equal(JSON.stringify(thread).includes(secret),false,secret)
   const inbox=await listConversations(db,null,{userId:'verified',buyerAudience:true})
   // The newest messages are the internal note and the dispute; the buyer's row previews the newest message they can read
-  // (KrabiClaw's payment message, from the business), unread.
+  // (Blawby's payment message, from the business), unread.
   assert.deepEqual(inbox.map(row=>[row.id,row.preview,row.preview_from,row.title,row.unread]),[['buyer-conversation','Payment received','Payments','Payments',true]])
   assert.deepEqual(await listConversations(db,null,{userId:'other',buyerAudience:true}),[])
   // Opening it reads it through the newest message they were shown; what they cannot see does not keep it unread.
@@ -1507,7 +1507,7 @@ const inMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000).t
 const holdOf = (db: D1Database, id: string) => db.prepare('SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id=?').bind(id).first<{ status: string; expires_at: string }>()
 const stripeEnv = (env: CloudflareEnv) => ({ ...env, STRIPE_SECRET_KEY: 'sk_test_local_boundary', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', EMAIL_REPLY_SECRET: 'local-proof-reply' } as CloudflareEnv)
 /** Email goes to Resend, as in production. */
-const resendEnv = (env: CloudflareEnv) => ({ ...env, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 're_test_local', EMAIL_FROM: 'KrabiClaw <proof@example.com>' } as CloudflareEnv)
+const resendEnv = (env: CloudflareEnv) => ({ ...env, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 're_test_local', EMAIL_FROM: 'Blawby <proof@example.com>' } as CloudflareEnv)
 /** Resend's API: every email it is asked to send, as the request body sent it, and each one read back as sent. */
 function resendOutbox(t: TestContext): string[] {
  const emails: string[] = []

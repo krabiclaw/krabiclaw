@@ -34,7 +34,7 @@ export default defineConfig({
   projects: [
     // Customer sites, checked after every staging and production deploy.
     { name: 'tenants', testMatch: 'tenant-*.spec.ts', use: { ...devices['Desktop Chrome'] } },
-    // KrabiClaw's own pricing, products and docs are authored on production;
+    // Blawby's own pricing, products and docs are authored on production;
     // staging's copy is not kept current, so production alone checks them.
     { name: 'platform', testMatch: ['pricing-presentation.spec.ts', 'platform-*.spec.ts'], use: { ...devices['Desktop Chrome'] } },
   ],

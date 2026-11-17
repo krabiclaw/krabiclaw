@@ -136,7 +136,7 @@ const CHECK_IN_STAYS_SQL = `SELECT br.*, c.check_in_instructions FROM ${BOOKING_
 /**
  * Every confirmed stay is sent its home's check-in instructions at 10:00 the day
  * before arrival in the home's timezone, or at once when it was booked after
- * that. Airbnb guests never see KrabiClaw's instructions otherwise. The body is
+ * that. Airbnb guests never see Blawby's instructions otherwise. The body is
  * refreshed from the home until it is sent; a home without instructions, or a
  * stay with no guest conversation, sends nothing.
  */

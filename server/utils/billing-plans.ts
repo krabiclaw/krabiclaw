@@ -231,7 +231,7 @@ const UNSTARTED_STATUSES = new Set<Stripe.Subscription.Status>(['incomplete', 'i
  * The beta spots taken: the businesses (Stripe customers) that started a
  * subscription since beta pricing began. A business that cancels keeps its
  * spot, since the first ten to start take them. One a coupon makes free
- * (KrabiClaw's own demo and internal sites) takes no spot. Discounts are
+ * (Blawby's own demo and internal sites) takes no spot. Discounts are
  * expanded to their coupons.
  */
 export function betaSpotsTaken(subscriptions: readonly Stripe.Subscription[]): number {

@@ -27,7 +27,7 @@ const { previewAuthorized, organization } = useTenantOrganization()
 const { id: organizationId, site } = organization
 const isPlatform = site.slug === 'platform'
 const { locale: i18nLocale, localePath } = useI18n()
-// Page ownership is a resolved site, not a tenant type. KrabiClaw's own site is
+// Page ownership is a resolved site, not a tenant type. Blawby's own site is
 // a site row with page documents like any other, and requiring `isTenant` here
 // is what forced its marketing pages to be hardcoded components (#903).
 if (!organizationId) throw showNotFound('Organization context is unavailable')
@@ -153,7 +153,7 @@ if (data.value?.page) {
 
 useSocialMetadata(() => page.value && ({
   path: page.value.path,
-  // KrabiClaw's own brand name is the platform name: its layout's title
+  // Blawby's own brand name is the platform name: its layout's title
   // site and useSocialMetadata already state it once for every platform
   // surface, so the page names only itself. A tenant states its own name.
   title: isPlatform ? page.value.title : `${page.value.title} | ${organization.name}`,

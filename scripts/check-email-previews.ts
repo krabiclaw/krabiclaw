@@ -29,7 +29,7 @@ for (const entry of NOTIFICATION_CATALOG) {
       unsubscribeUrl,
     })
     if (!html.includes('email-surface')) failures.push(`${entry.id} did not render through EmailFrame`)
-    // The mark is whose mail it is. KrabiClaw's crab is on its own mail only;
+    // The mark is whose mail it is. Blawby's crab is on its own mail only;
     // a tenant's carries its logo, or its name alone — never the crab.
     const tenant = entry.message.organizationName
     if (!tenant && !html.includes('/platform/blawby-512.png')) failures.push(`${entry.id} is Blawby's mail and does not carry its mark`)

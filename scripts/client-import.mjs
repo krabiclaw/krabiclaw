@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Deterministic client import pipeline for KrabiClaw.
+ * Deterministic client import pipeline for Blawby.
  *
  * Always runs --dry-run first to produce a reviewable manifest before any DB writes.
  *

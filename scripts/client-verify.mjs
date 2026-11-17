@@ -3,7 +3,7 @@ import { parseOpeningHours } from '../shared/reservation-hours.ts';
 import { formatOpeningHours } from '../utils/formatters.ts';
 import { ALL_VERTICALS } from '../utils/vertical-copy.ts';
 /**
- * Post-deploy smoke test for a KrabiClaw tenant site.
+ * Post-deploy smoke test for a Blawby tenant site.
  *
  * Usage:
  *   node scripts/client-verify.mjs --url https://www.potteryhousekrabi.com --vertical experience

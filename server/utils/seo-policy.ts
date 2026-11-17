@@ -5,7 +5,7 @@ import { isDemoHost, isDemoOrganization } from '../../shared/demo.ts'
 
 /**
  * The platform routes that hold no page document: each renders its own data.
- * KrabiClaw's editorial marketing pages are not here —
+ * Blawby's editorial marketing pages are not here —
  * they are published page documents, and the sitemap reads them from
  * content_documents so there is one inventory rather than two (#903).
  */
@@ -37,7 +37,7 @@ export const PRIVATE_EXACT_ROUTES = new Set([
 ])
 
 // Paths that only a customer site answers. `/experiences` is not among them:
-// on KrabiClaw's own host it is the published marketing page that sells the
+// on Blawby's own host it is the published marketing page that sells the
 // booking product (#903). Its subtree stays tenant-only — an individual
 // experience belongs to a customer's catalog.
 export const TENANT_ONLY_EXACT_ROUTES = new Set([

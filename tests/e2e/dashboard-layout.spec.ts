@@ -2707,9 +2707,9 @@ test.describe('dashboard pane hierarchy', () => {
     if (failures.length) throw new AggregateError(failures, 'Legal Product creation or cleanup failed')
   })
 
-  // KrabiClaw runs on KrabiClaw: the row and its page exist only inside
-  // KrabiClaw's own organization, and only for a Better Auth admin.
-  test('Platform accounts opens only inside KrabiClaw, and only for a Better Auth admin', async ({ page, baseURL, playwright }) => {
+  // Blawby runs on Blawby: the row and its page exist only inside
+  // Blawby's own organization, and only for a Better Auth admin.
+  test('Platform accounts opens only inside Blawby, and only for a Better Auth admin', async ({ page, baseURL, playwright }) => {
     const services = '/dashboard/harbor-legal-aid'
     const krabiclaw = '/dashboard/platform'
     const menu = page.locator('#dashboard-panel-organization-settings')
@@ -2742,7 +2742,7 @@ test.describe('dashboard pane hierarchy', () => {
       await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
       await expectNoPlatformAccounts()
 
-      // KrabiClaw's own organization, opened by its owner, who is a Better Auth admin.
+      // Blawby's own organization, opened by its owner, who is a Better Auth admin.
       await page.context().clearCookies()
       await loginAs(page.request, baseURL!)
       const signedIn = await (await page.request.get('/api/auth/get-session')).json() as { user: { role?: string | null } }

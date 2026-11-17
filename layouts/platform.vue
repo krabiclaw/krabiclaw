@@ -25,12 +25,12 @@ useHead({
   link: import.meta.dev ? [] : [{ rel: 'stylesheet', href: '/_nuxt/surfaces/platform.css' }],
 })
 
-// KrabiClaw's blog and docs pages name their collection; the header says which.
+// Blawby's blog and docs pages name their collection; the header says which.
 const route = useRoute()
 const section = computed(() => route.meta.articleCollection === 'docs' ? 'docs' as const
   : route.meta.articleCollection === 'blog' ? 'blog' as const : 'platform' as const)
 
-// KrabiClaw's public pages have one theme: dark. It is rendered on the server
+// Blawby's public pages have one theme: dark. It is rendered on the server
 // so a visitor never sees a light frame first.
 useHead(() => ({
   htmlAttrs: { class: section.value === 'docs' ? 'dark platform-documentation' : 'dark', 'data-theme': 'dark', style: 'color-scheme: dark' },

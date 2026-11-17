@@ -22,7 +22,7 @@ export default defineHandler((event) => {
 })
 
 /**
- * The Discord leaf: the connected channel, and the channels the KrabiClaw bot
+ * The Discord leaf: the connected channel, and the channels the Blawby bot
  * can post to in the servers a linked Discord account manages.
  *
  * Which account is the caller's to say (`account_id`, one of their own linked
@@ -60,7 +60,7 @@ async function list(event: H3Event) {
  * The tenant's answer to "which channel". This is the only thing that writes a
  * Discord connection, so a channel is connected because somebody chose it,
  * through the linked Discord account they named, in a server that account
- * manages and the KrabiClaw bot is in.
+ * manages and the Blawby bot is in.
  */
 async function select(event: H3Event) {
   const organizationId = getRouterParam(event, 'organization_id')

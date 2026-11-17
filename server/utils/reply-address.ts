@@ -81,7 +81,7 @@ export async function buildReplyToAddress(env: ReplyAddressEnv, messageId: strin
   return `r${KIND_CODE[as.kind]}${compact}${await buildReplyToken(replySecret(env), messageId, as)}@${getReplyDomain(env)}`
 }
 
-/** The identity of a reply address; an address on another domain, or one KrabiClaw never issued, is refused. */
+/** The identity of a reply address; an address on another domain, or one Blawby never issued, is refused. */
 export function parseReplyToAddress(env: ReplyAddressEnv, address: string): ReplyAddress {
   const parts = address.split('@')
   const match = parts.length === 2 && parts[1]!.toLowerCase() === getReplyDomain(env)

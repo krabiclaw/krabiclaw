@@ -56,7 +56,7 @@ useSocialMetadata(() => ({
   schemaNodes: [itemList.value],
   // A page about the business: its image is the organization's.
   socialImage: organization.social_image,
-  // KrabiClaw's layout already titles every page with its own name.
+  // Blawby's layout already titles every page with its own name.
   title: isPlatform ? title.value : `${title.value} | ${organizationName}`,
   description: index.value?.summary || t(props.collection === 'docs' ? 'site.posts.docs_meta_description' : 'site.posts.meta_description', { organization: organizationName }),
   breadcrumbs: [

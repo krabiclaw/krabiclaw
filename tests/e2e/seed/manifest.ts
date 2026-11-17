@@ -30,7 +30,7 @@ export interface SeedTenant {
 export interface SeedManifest {
   baseURL: string
   adminUserId: string
-  /** KrabiClaw's own organization, which runs the platform template. */
+  /** Blawby's own organization, which runs the platform template. */
   platformOrganizationId: string
   tenants: Record<SeedTenantKey, SeedTenant>
 }

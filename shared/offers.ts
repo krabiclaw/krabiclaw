@@ -1,7 +1,7 @@
 import { BUSINESS_PLAN_ID, GROWTH_PLAN_ID, SERVICES, type NewSalePlanId } from './billing-model'
 
 /**
- * What KrabiClaw offers a business that does not have it yet: a plan
+ * What Blawby offers a business that does not have it yet: a plan
  * capability, or one of Chris and Julia's services. Each is described once —
  * its illustration, headline, one line and how it works — and every surface
  * that offers something (Menu, Today, a locked leaf, Plan and billing) reads

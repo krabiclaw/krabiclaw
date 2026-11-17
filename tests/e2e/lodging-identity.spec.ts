@@ -712,7 +712,7 @@ test.describe('lodging identity boundary', () => {
     // A lodging site takes no table reservations.
     expect((await api.get('/reservations', { headers: { 'x-preview-tenant': slug } })).status).toBe(404)
 
-    // Everything it holds lives in KrabiClaw, so its owner deletes it outright.
+    // Everything it holds lives in Blawby, so its owner deletes it outright.
     const deleted = await api.post('/api/auth/organization/delete', { headers: bearer, data: { organizationId: organization.id } })
     expect(deleted.status, await deleted.text()).toBe(200)
     const remaining = await api.get('/api/auth/organization/list', { headers: bearer })

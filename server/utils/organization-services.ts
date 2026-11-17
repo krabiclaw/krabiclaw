@@ -9,7 +9,7 @@ import { readIntegration } from '~/server/utils/organization-integrations'
 import { getGoogleAdsCustomer } from '~/server/utils/google-ads'
 
 /**
- * The services a business asked KrabiClaw's people for. Managed ads: Chris and
+ * The services a business asked Blawby's people for. Managed ads: Chris and
  * Julia run the Google Ads campaigns, billed at the ad-spend price on the
  * Business subscription. Agreeing writes the consent; ending it closes the row.
  */

@@ -56,7 +56,7 @@ export function openingSentence(facts: OpeningFacts): string {
 }
 
 /**
- * The opening messages, written with the record: KrabiClaw's sentence for the
+ * The opening messages, written with the record: Blawby's sentence for the
  * booking, by whoever made it (the guest, or the host who took it), then the
  * guest's note as their own message. Gated on the opening's dedupe key, so a
  * replay of the creation writes nothing.

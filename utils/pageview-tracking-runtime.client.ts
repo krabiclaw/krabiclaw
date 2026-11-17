@@ -68,7 +68,7 @@ export function whenLeaving(): Promise<null> {
 }
 
 /**
- * A browser driven by automation, which says so itself: KrabiClaw's own
+ * A browser driven by automation, which says so itself: Blawby's own
  * deployed checks after every release, and crawlers that run a real browser.
  * Its visits are not visitors. A test that means to be counted launches its
  * browser without the automation flag, as the local E2E suite does.

@@ -138,7 +138,7 @@ export function guestPaymentMessage(event: GuestPaymentNotificationEvent): Notif
 }
 
 /**
- * The business's own KrabiClaw plan: a new plan, a change of plan, or a plan
+ * The business's own Blawby plan: a new plan, a change of plan, or a plan
  * set not to renew. Stripe emails the receipts, renewal and trial reminders and
  * failed payments itself (https://docs.stripe.com/billing/revenue-recovery/customer-emails).
  */
