@@ -46,8 +46,8 @@ type Noun = keyof typeof NOUNS
 /** A card as it is built: what it counts as, where it sorts, the bookings it stands for and the local day it is on. */
 interface Card extends TodayItem { noun: Noun; order: [number, string]; bookings: string[]; day: string }
 
-export async function readToday(db: DbClient, input: { slug: string; userId: string; range: Range; now: Date }): Promise<BusinessToday> {
-  const { range, now } = input
+export async function readToday(db: DbClient, input: { slug: string; userId: string; range: Range; now: Date; staffAccessWrites?: boolean }): Promise<BusinessToday> {
+  const { range, now, staffAccessWrites = true } = input
   const utcDay = now.toISOString().slice(0, 10)
   const from = utcDay, to = range === 'today' ? utcDay : addLocalDays(utcDay, UPCOMING_RESERVATION_DAYS + 1)
   const wideFrom = `${addLocalDays(from, -1)}T00:00:00.000Z`, wideTo = `${addLocalDays(to, 1)}T23:59:59.999Z`
@@ -70,7 +70,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     // The setup the business has not finished is Today's, after the day's cards.
     ...setupQueries(range === 'today' ? management : { sql: 'NULL' }, { now }).map(query => withViewer(membership, query)),
     withViewer(membership, taskAssigneesQuery(managed)),
-    withViewer(membership, staffListingsQuery(managed.sql, '(SELECT vertical FROM viewer)')),
+    ...(staffAccessWrites ? [withViewer(membership, staffListingsQuery(managed.sql, '(SELECT vertical FROM viewer)'))] : []),
   ], { operation: 'Read Today' })
   const viewer = viewerResult!.results[0] as { organization_id: string; slug: string; vertical: string | null; role: string; organization_wide: number } | undefined
   if (!viewer) throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
@@ -259,10 +259,10 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   return {
     title: heading(cards, range), cards: cards.map(({ noun: _noun, order: _order, bookings: _bookings, day: _day, ...card }) => card),
     claim_options: manage ? {
-      roles: rolesForVertical(viewer.vertical)
+      roles: (staffAccessWrites ? rolesForVertical(viewer.vertical) : [])
         .filter(role => rolesAllowing({ task: ['claim'] }).includes(role) && organizationRoleCards[role].access.includes('tasks'))
         .map(value => ({ value, label: organizationRoleCards[value].label })),
-      listings: listingResult!.results as NonNullable<BusinessToday['claim_options']>['listings'],
+      listings: (listingResult?.results ?? []) as NonNullable<BusinessToday['claim_options']>['listings'],
     } : null,
     assignees: taskAssignees(assigneeResult!.results, input.userId), resolved_at: now.toISOString(),
   }

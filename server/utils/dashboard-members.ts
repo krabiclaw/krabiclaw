@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { staffListings } from '~/server/domain/listing-access'
+import { staffAccessWritesEnabled, staffListings } from '~/server/domain/listing-access'
 import { organizationOptions, type CloudflareEnv } from '~/server/utils/auth'
 import { listAllOrganizationMembers, organizationAdapter, roleAllows } from '~/server/utils/member-access'
 import { createDb, queryAll, type DbClient } from '~/server/db'
@@ -38,7 +38,7 @@ export async function getOrganizationMembersData(env: CloudflareEnv, organizatio
   const hasCreatorRole = (role: string) => role.split(',').map(value => value.trim()).includes(creatorRole)
   const roleLabel = (role: string) => role.split(',').map(value => organizationRoleLabel(value.trim())).join(', ')
   const canGrantOwner = hasCreatorRole(organization.role)
-  const memberRoles = rolesForVertical(organization.vertical)
+  const memberRoles = rolesForVertical(organization.vertical).filter(role => staffAccessWritesEnabled(env) || !organizationRoleCards[role].vertical)
   const roleChoices = memberRoles
     .filter(role => role !== creatorRole || canGrantOwner)
     .map(value => ({ value, label: organizationRoleLabel(value) }))
@@ -89,14 +89,16 @@ export async function getOrganizationMembersData(env: CloudflareEnv, organizatio
   return { members, invitations, inviteRoles, canViewInvitations }
 }
 
-export async function getStaffInviteScreen(db: DbClient, organization: { id: string; role: string; vertical: string | null }) {
+export async function getStaffInviteScreen(env: CloudflareEnv, db: DbClient, organization: { id: string; role: string; vertical: string | null }) {
   const canInvite = await roleAllows({ organizationId: organization.id, role: organization.role, permissions: { invitation: ['create'] } })
   if (!canInvite) throw new HTTPError({ statusCode: 403, message: 'You cannot invite staff to this workspace', data: { code: 'FORBIDDEN' } })
+  const enabled = staffAccessWritesEnabled(env)
   const roles = rolesForVertical(organization.vertical)
+    .filter(role => enabled || !organizationRoleCards[role].vertical)
     .filter(role => role !== 'owner' || organization.role.split(',').some(value => value.trim() === 'owner'))
     .map(value => {
       const { label, description, access } = organizationRoleCards[value]
-      return { value, label, description, access: access.map(level => ({ value: level, label: listingAccessLevels[level] })) }
+      return { value, label, description, access: (enabled ? access : []).map(level => ({ value: level, label: listingAccessLevels[level] })) }
     })
   return {
     organization_id: organization.id,
@@ -109,6 +111,6 @@ export async function getStaffInviteScreen(db: DbClient, organization: { id: str
     resend_label: 'Resend invite',
     default_role: 'member',
     roles,
-    listings: await staffListings(db, organization),
+    listings: enabled ? await staffListings(db, organization) : [],
   }
 }

@@ -1,4 +1,4 @@
-import { canGrantListingAccess, listingLevelSql } from '~/server/domain/listing-access'
+import { canGrantListingAccess, listingLevelSql, staffAccessWritesEnabled } from '~/server/domain/listing-access'
 import type { StoredListingAccess } from '~/utils/organization-access'
 import { HTTPError } from 'nitro'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -108,6 +108,9 @@ export function initialListingParticipants(organizationId: string, conversationI
 export async function setListingAccess(db: DbClient, env: GuestInboxPublicationEnv, principal: MemberAccessPrincipal, input: { listingId: string; memberId: string; access: StoredListingAccess | null }) {
   const { organizationId, userId } = principal
   const { listingId, memberId } = input
+  if (input.access !== null && input.access !== 'messaging' && !staffAccessWritesEnabled(principal.env)) {
+    throw new HTTPError({ statusCode: 503, message: 'New listing access is not available yet', data: { code: 'STAFF_ACCESS_ROLLOUT' } })
+  }
   const owner = `EXISTS (SELECT 1 FROM member m WHERE m.organizationId = ? AND m.userId = ? AND ${OWNER_ROLE})`
   const ownerParams = [organizationId, userId]
   if (!await queryFirst(db, `SELECT 1 WHERE ${owner}`, ownerParams)) {

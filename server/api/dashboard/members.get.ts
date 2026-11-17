@@ -6,6 +6,6 @@ import { getOrganizationMembersData, getStaffInviteScreen } from '~/server/utils
 
 export default defineHandler(async (event) => {
   const { env, db, organization, userId } = await getDashboardMemberContext(event, {})
-  if (getQuery(event).view === 'invite') return jsonResponse(await getStaffInviteScreen(db, organization), { headers: { 'cache-control': 'private, no-store' } })
+  if (getQuery(event).view === 'invite') return jsonResponse(await getStaffInviteScreen(env, db, organization), { headers: { 'cache-control': 'private, no-store' } })
   return jsonResponse(await getOrganizationMembersData(env, organization, userId))
 })

@@ -1,4 +1,4 @@
-import { listingGrantSql } from '~/server/domain/listing-access'
+import { listingGrantSql, staffAccessWritesEnabled } from '~/server/domain/listing-access'
 import { assignedOperationsRoles, isOrganizationRole, organizationRoleCards, roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import { publishChangedJobs } from '~/server/events'
 import { HTTPError } from 'nitro'
@@ -986,6 +986,7 @@ export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<
   const assignedMemberId = body.assigned_member_id ?? null
   const claimRole = body.claim_role ?? null
   if (claimRole !== null) {
+    if (!staffAccessWritesEnabled(viewer.principal.env)) fail(503, 'STAFF_ACCESS_ROLLOUT', 'Offering work for claiming is not available yet')
     if (typeof claimRole !== 'string' || !isOrganizationRole(claimRole) || !claimRoles.includes(claimRole)
       || !organizationRoleCards[claimRole].access.includes('tasks') || typeof productId !== 'string' || assignedMemberId !== null) {
       fail(422, 'INVALID_TASK_CLAIM_ROLE', 'Choose an eligible role and listing for available work', 'claim_role')

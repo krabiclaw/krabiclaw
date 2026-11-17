@@ -49,8 +49,8 @@ const canManageAccess = computed(() => Boolean(p.product.value && ['stay', 'tabl
 const grantPath = computed(() => `/api/messages/listings/${encodeURIComponent(listingId.value ?? '')}/participants`)
 const grantQuery = computed(() => ({ organization_id: dashboard.organizationId.value }))
 
-function isGrantList(value: unknown): value is { grants: Array<{ member_id: string; access: StoredListingAccess }> } {
-  return isRecord(value) && Array.isArray(value.grants) && value.grants.every(grant => isRecord(grant) && typeof grant.member_id === 'string'
+function isGrantList(value: unknown): value is { staff_access_writes: boolean; grants: Array<{ member_id: string; access: StoredListingAccess }> } {
+  return isRecord(value) && typeof value.staff_access_writes === 'boolean' && Array.isArray(value.grants) && value.grants.every(grant => isRecord(grant) && typeof grant.member_id === 'string'
     && typeof grant.access === 'string' && (grant.access === 'messaging' || Object.hasOwn(listingAccessLevels, grant.access)))
 }
 
@@ -62,15 +62,19 @@ const { data: access, pending: accessPending, error: accessError } = await useAs
       applicationFetch(grantPath.value, { query: grantQuery.value, signal, validate: isGrantList }),
       api('/api/dashboard/team/members', { signal, validate: isTeamMembersResponse }),
     ])
-    return { grants: grants.grants, members: roster.members }
+    return { ...grants, members: roster.members }
   },
 )
 const cohosts = computed(() => access.value?.members.filter(member => accessChoices(member).length > 1) ?? [])
 function accessChoices(member: { member_id: string; role: string }) {
   const saved = access.value?.grants.find(grant => grant.member_id === member.member_id)?.access
-  const levels = new Set(member.role.split(',').flatMap(role => isOrganizationRole(role.trim()) ? organizationRoleCards[role.trim() as keyof typeof organizationRoleCards].access : []))
+  const roles = member.role.split(',').map(role => role.trim()).filter(isOrganizationRole)
+  const writes = access.value?.staff_access_writes
+  const levels = new Set(writes ? roles.flatMap(role => organizationRoleCards[role].access) : [])
+  const messaging = saved === 'messaging' || (!writes && roles.some(role => role === 'owner' || role === 'admin' || role === 'member'))
   return [{ value: 'none', label: 'No additional access' }, ...[...levels].map(value => ({ value, label: listingAccessLevels[value] })),
-    ...(saved === 'messaging' ? [{ value: 'messaging', label: 'Messaging' }] : [])]
+    ...(messaging ? [{ value: 'messaging', label: 'Messaging' }] : []),
+    ...(!writes && saved && saved !== 'messaging' ? [{ value: saved, label: listingAccessLevels[saved] }] : [])]
 }
 const savingAccess = ref<string | null>(null)
 const saveAccessError = ref('')
@@ -84,7 +88,7 @@ async function setAccess(memberId: string, value: string) {
       validate: isGrantList,
     })
     if ((saved.grants.find(grant => grant.member_id === memberId)?.access ?? 'none') !== value) throw new Error('The server did not confirm the access change')
-    access.value = { ...access.value, grants: saved.grants }
+    access.value = { ...access.value, ...saved }
   } catch (cause) {
     saveAccessError.value = getErrorMessage(cause, 'Listing access could not be saved')
   } finally {

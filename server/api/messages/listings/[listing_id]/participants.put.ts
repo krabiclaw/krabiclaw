@@ -1,5 +1,6 @@
 import { listingAccessLevels, type StoredListingAccess } from '~/utils/organization-access'
 import { defineHandler, HTTPError } from 'nitro'
+import { staffAccessWritesEnabled } from '~/server/domain/listing-access'
 import { jsonResponse, readStrictBody } from '~/server/utils/api-response'
 import { listingAccessContext } from '~/server/utils/conversation-request'
 import { requireFinancialBrowserOrAppRequest } from '~/server/utils/financial-browser'
@@ -13,5 +14,5 @@ export default defineHandler(async event => {
     throw new HTTPError({ statusCode: 422, message: 'Select a member and listing access level', data: { code: 'INVALID_LISTING_ACCESS' } })
   }
   await setListingAccess(db, env, principal, { listingId, memberId, access })
-  return jsonResponse({ grants: await grants() })
+  return jsonResponse({ grants: await grants(), staff_access_writes: staffAccessWritesEnabled(env) })
 })

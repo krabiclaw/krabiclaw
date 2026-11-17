@@ -6,6 +6,11 @@ import {
   roleMatchesSql, rolesForVertical, type OrganizationRole, type StoredListingAccess,
 } from '~/utils/organization-access'
 
+/** The first production release reads the new schema before it writes new access. */
+export function staffAccessWritesEnabled(env: { STAFF_ACCESS_WRITES?: unknown }): boolean {
+  return env.STAFF_ACCESS_WRITES !== 'hold'
+}
+
 const listingKinds: Record<string, string> = { lodging: 'stay', restaurant: 'table', service: 'service', experience: 'experience' }
 
 export const listingGrantsSchema = z.array(z.object({

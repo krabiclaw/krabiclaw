@@ -2,6 +2,7 @@ import { defineHandler, HTTPError } from 'nitro'
 import { getQuery } from 'nitro/h3'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
+import { staffAccessWritesEnabled } from '~/server/domain/listing-access'
 import { readToday } from '~/server/domain/today'
 import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
 import { dashboardOrgQueryParam } from '~/server/utils/dashboard-context'
@@ -18,6 +19,6 @@ export default defineHandler(async (event) => {
   if (!slug) throw new HTTPError({ statusCode: 400, message: 'Organization context is required. Use /dashboard/{orgSlug} routes.', data: { code: 'ORGANIZATION_REQUIRED', field: 'org' } })
   const range = getQuery(event).range ?? 'today'
   if (range !== 'today' && range !== 'upcoming') throw new HTTPError({ statusCode: 400, message: 'range must be today or upcoming', data: { code: 'INVALID_TODAY_QUERY', field: 'range' } })
-  const today = await readToday(env.DB, { slug, userId: session.user.id, range, now: new Date() })
+  const today = await readToday(env.DB, { slug, userId: session.user.id, range, now: new Date(), staffAccessWrites: staffAccessWritesEnabled(env) })
   return jsonResponse(finalizeRequestMetrics(event, 'dashboard-today', today), { headers: { 'cache-control': 'private, no-store' } })
 })

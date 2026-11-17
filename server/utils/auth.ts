@@ -24,8 +24,8 @@ import { getPlatformOrganization } from '~/server/utils/platform-organization'
 import { sendPasswordResetEmail, sendVerificationEmail } from '~/server/utils/auth-email'
 import { validatePassword } from '~/utils/password-validation'
 import { organizationEventQuery } from '~/server/utils/organization-events'
-import { assertStaffRole, validateInvitationGrants } from '~/server/domain/listing-access'
-import { organizationAccessControl, organizationRoles } from '~/utils/organization-access'
+import { assertStaffRole, staffAccessWritesEnabled, validateInvitationGrants } from '~/server/domain/listing-access'
+import { organizationAccessControl, organizationRoleCards, organizationRoles } from '~/utils/organization-access'
 import { platformAdminAccessControl, platformAdminRoles } from '~/utils/platform-admin-access'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
 import { handleStripeGa4Event } from '~/server/utils/stripe-ga4'
@@ -156,6 +156,7 @@ function organizationDeletionCleanupPlugin(env: CloudflareEnv): BetterAuthPlugin
 // derive the type actually produced by this file's own createAuth() instead.
 
 export interface CloudflareEnv {
+  STAFF_ACCESS_WRITES?: string
   DB: D1Database
   IMAGES: ImagesBinding
   BETTER_AUTH_SECRET: string
@@ -406,11 +407,17 @@ function buildAuth(env: CloudflareEnv) {
   // Deletion removes memberships and clears guest ownership before the after hook runs.
   type AccountDeparture = { kind: 'member' | 'calendar'; id: string; organizationId: string; userId: string }
   const accountDepartures = new Map<string, AccountDeparture[]>()
+  const verifyNewStaffAccess = (role: keyof typeof organizationRoles, grants?: unknown) => {
+    if (!staffAccessWritesEnabled(env) && (organizationRoleCards[role].vertical || grants != null)) {
+      throw new APIError('SERVICE_UNAVAILABLE', { code: 'STAFF_ACCESS_ROLLOUT', message: 'New staff access is not available yet.' })
+    }
+  }
   const configuredOrganizationOptions = {
     ...organizationOptions,
     organizationHooks: {
       beforeCreateInvitation: async ({ invitation, organization }: { invitation: { role: string; listing_access?: unknown }; organization: { id: string; vertical?: string } }) => {
         const role = assertStaffRole(organization.vertical ?? null, invitation.role)
+        verifyNewStaffAccess(role, invitation.listing_access)
         await validateInvitationGrants(db, { id: organization.id, vertical: organization.vertical ?? null }, role, invitation.listing_access)
       },
       beforeAcceptInvitation: async ({ invitation, organization, user }: { invitation: { role: string; listing_access?: unknown }; organization: { id: string; vertical?: string }; user: { emailVerified: boolean } }) => {
@@ -424,7 +431,7 @@ function buildAuth(env: CloudflareEnv) {
         await validateInvitationGrants(db, { id: organization.id, vertical: organization.vertical ?? null }, role, grants)
       },
       beforeUpdateMemberRole: async ({ newRole, organization }: { newRole: string; organization: { id: string; vertical?: string } }) => {
-        assertStaffRole(organization.vertical ?? null, newRole)
+        verifyNewStaffAccess(assertStaffRole(organization.vertical ?? null, newRole))
       },
       beforeCreateOrganization: async ({ organization, user }: { organization: Record<string, unknown>; user: { email: string } }) => {
         assertOrganizationFacts(organization)
