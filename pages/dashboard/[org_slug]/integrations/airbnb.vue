@@ -90,10 +90,10 @@ const route = useRoute()
 const dashboardApi = useDashboardApi()
 const dashboard = useDashboardOrganization()
 const entitled = computed(() => dashboard.entitlements.value.channel_sync === true)
-const canManage = computed(() => {
-  const role = dashboard.organization.value?.role as keyof typeof organizationRoles | undefined
-  return !!role && organizationRoles[role]?.authorize({ integrations: ['update'] }).success === true
-})
+const canManage = computed(() => dashboard.organization.value?.role.split(',').some((role) => {
+  const access = organizationRoles[role.trim() as keyof typeof organizationRoles]
+  return access?.authorize({ integrations: ['update'] }).success === true
+}) ?? false)
 const api = `/api/organizations/${integrations.organizationId}/integrations/airbnb`
 const detailsDialog = useOverlay().create(AirbnbListingDetailsDialog)
 
