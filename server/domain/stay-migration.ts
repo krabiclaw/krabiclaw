@@ -218,7 +218,7 @@ export async function previewStayMigration(db: DbClient, access: StayAccess, val
       const home = homes.find(home => home.product_id === productId)
       const own = existing.find(stay => stay.idempotency_key === keyFor(sourceId))
       if (own) {
-        if (!home) throw new Error('Match this Hostaway property to a KrabiClaw home')
+        if (!home) throw new Error('Match this Hostaway property to a Blawby home')
         if (own.product_id !== productId) throw new Error('This reservation was already imported at another home; review the existing stay and property match')
         row.state = 'existing'; row.existing_booking_id = own.id; row.imported_source = true; row.skip_reason = 'Already imported. Current host edits are preserved.'
         continue
@@ -231,7 +231,7 @@ export async function previewStayMigration(db: DbClient, access: StayAccess, val
       const length = (Date.parse(checkOut) - Date.parse(checkIn)) / 86_400_000
       if (length < 1 || length > MAX_STAY_NIGHTS) throw new Error(`Checkout must be after check-in and a stay is at most ${MAX_STAY_NIGHTS} nights`)
       if (!home && checkOut < new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)) { row.state = 'skipped'; row.skip_reason = 'This stay has already ended; its source row is retained in the migration receipt.'; continue }
-      if (!home) throw new Error('Match this Hostaway property to a KrabiClaw home')
+      if (!home) throw new Error('Match this Hostaway property to a Blawby home')
       if (checkOut < today(home.timezone)) { row.state = 'skipped'; row.skip_reason = 'This stay has already ended; its source row is retained in the migration receipt.'; continue }
       const channel = channelValue(readCell(source, 'channel'))
       const confirmation = source.channel_booking_id || null

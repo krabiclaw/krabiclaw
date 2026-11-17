@@ -98,7 +98,7 @@ test('a stale domain result changes nothing and permanent subdomain reservations
         code: 'DOMAIN_LIVE_CUTOVER',
         live_cutover_warning: {
           hostname: 'live.example.org', records: [{ type: 'A', value: '192.0.2.17' }],
-          message: 'live.example.org already resolves and may be live. Changing DNS can take it offline until KrabiClaw validation finishes.',
+          message: 'live.example.org already resolves and may be live. Changing DNS can take it offline until Blawby validation finishes.',
         },
       },
     })

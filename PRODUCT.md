@@ -1,6 +1,6 @@
-# KrabiClaw
+# Blawby
 
-KrabiClaw helps restaurants, experience operators, law firms and lodging hosts
+Blawby helps restaurants, experience operators, law firms and lodging hosts
 build and manage a website through the dashboard and compatible MCP clients,
 including ChatGPT and Claude. All four verticals share one tenant backend for
 locations, products, content, media and guest activity. The `service` vertical is
@@ -56,7 +56,7 @@ confirms the stay. Recording a stay taken by phone takes no payment. It applies
 existing automatic guest-message schedules and updates availability on the home's
 connected Airbnb listing through Channex. A failed channel update reports that
 the stay was saved; read the calendar and channel state before retrying with the
-same idempotency key. Recording money received outside KrabiClaw moves no money.
+same idempotency key. Recording money received outside Blawby moves no money.
 
 A home is live when it is active at its active location and either published on
 the site or syncing through an enabled Channex mapping. Live homes count toward
@@ -96,7 +96,7 @@ never resent automatically. Each home holds a private arrival guide — check-in
 method and instructions, wifi, directions, house manual and checkout
 instructions. Every confirmed stay is sent its home's check-in instructions at
 10:00 the day before arrival, or at once when booked later than that, because
-Airbnb guests never see KrabiClaw's instructions otherwise. A member can also
+Airbnb guests never see Blawby's instructions otherwise. A member can also
 write a reply and send it later; it is theirs alone until it is sent.
 
 Workspace members can receive owner notifications as push notifications on the
@@ -135,7 +135,7 @@ add. An invitation states when it expires.
 
 A host can link a home's Vrbo iCal calendar to import occupied dates, and copy
 the home's KrabiClaw calendar link into Vrbo to share its occupied dates back.
-KrabiClaw reads the linked calendar every five minutes; Vrbo controls its own
+Blawby reads the linked calendar every five minutes; Vrbo controls its own
 refresh timing. Imported occupied nights block direct booking and affect the
 availability sent to connected Airbnb listings. Conflicts and failed reads are
 reported to the host. Calendar links carry dates, without Vrbo prices, guest
@@ -146,7 +146,7 @@ instant synchronization across channels.
 
 A host connects their Airbnb account through Channex and requests which listings
 to sync. The request checks the resulting live-home allowance before queuing
-anything. KrabiClaw imports new homes and completes their setup, mapping,
+anything. Blawby imports new homes and completes their setup, mapping,
 activation, future reservations and conversation feed in the background; the
 app need not stay open or advance each stage. A draft is an intermediate state,
 not a separate activation decision. Progress and failures are read from the

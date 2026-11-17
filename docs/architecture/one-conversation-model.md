@@ -433,7 +433,7 @@ Rough size: about 420 kind branches across `server/`, `pages/` and `components/`
 - **What and where:** `product_id`, `product_variant_id`, `product_session_id`, `location_id`, `assigned_member_id`.
 - **When:** `starts_at` and `ends_at` (instants for every kind; a stay's are its check-in and check-out times), `timezone`.
 - **Party:** `party_size`, the one count; `adults`, `children` and `infants` as an optional breakdown on any booking.
-- **Status:** `pending | confirmed | cancelled`, with `cancelled_at`, `cancellation_reason`, `no_show_at`.
+- **Status:** `pending | confirmed | cancelled`, with `cancelled_at` and `cancellation_reason`. Historical no-shows remain in conversation events.
 - **Guest:** guest name, email and phone; `answers`; `party_size_is_minimum`.
 - **Notes:** `private_notes`, for the host.
 - **Terms and money:** `policy_json`, `total_minor`, `currency`.
@@ -441,7 +441,7 @@ Rough size: about 420 kind branches across `server/`, `pages/` and `components/`
 - **Channel, on every booking:** `channel` (not null, default `direct`), `owner`, `provider`, `external_booking_id`, `channel_booking_id`, `revision_id`, `provider_updated_at`, `overbooked`, and `booked_product_id` (the listing it was booked on).
 - **No stay-only columns.** Check-in and check-out dates are `starts_at` and `ends_at` in the booking's timezone, so the separate date columns are deleted. Nights stay in `stay_nights`, which is inventory, just as sessions and table slots are for the other kinds.
 
-Every reference becomes `booking_id`: payments, checkout holds, tasks, scheduled messages, conversations, calendar links (stays included), reviews, `stay_nights` and `stay_payments`. Each lifecycle step has one implementation (create, convert, confirm, cancel, change, no-show, details, list, notifications, MCP, access), and one detail screen on web and iOS for every kind.
+Every reference becomes `booking_id`: payments, checkout holds, tasks, scheduled messages, conversations, calendar links (stays included), reviews, `stay_nights` and `stay_payments`. Each lifecycle step has one implementation (create, convert, confirm, cancel, change, details, list, notifications, MCP, access), and one detail screen on web and iOS for every kind.
 
 **Stays per kind, because it really is different:**
 

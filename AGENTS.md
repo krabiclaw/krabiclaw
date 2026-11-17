@@ -1,4 +1,4 @@
-# KrabiClaw — agent instructions
+# Blawby — agent instructions
 
 ## Completion standard
 
@@ -297,7 +297,7 @@ behavior.
 Use Stripe's exact pricing terms, phrasing and breakdown wherever they apply. This governs public pages, SEO metadata, LLM-readable content,
 customer-facing billing and documentation. Do not replace their wording with
 technical jargon or invent a different pricing tone. Add plain wording only for
-KrabiClaw's own subscription and fee.
+Blawby's own subscription and fee.
 
 Read the current primary [Stripe pricing](https://stripe.com/pricing) before
 changing pricing copy. Preserve the actual amounts, charge basis, currency,
@@ -359,7 +359,7 @@ For feature launches, blogs and social distribution, read
 `.agents/skills/krabiclaw-publishing/SKILL.md` before publishing. It covers
 content selection, writer handoffs, SEO research plans, and authorized distribution.
 
-For KrabiClaw marketing videos, use `.agents/skills/krabiclaw-marketing/SKILL.md`.
+For Blawby marketing videos, use `.agents/skills/krabiclaw-marketing/SKILL.md`.
 Product facts and voice remain in `docs/marketing/product-profile.md`.
 
 The relevant official HyperFrames skills are tracked in `.agents/skills/hyperframes*/`, `.agents/skills/product-launch-video/` and `.agents/skills/media-use/`; load their `SKILL.md` through the marketing wrapper as needed. Upstream provenance and licenses accompany each.

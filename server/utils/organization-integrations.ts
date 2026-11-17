@@ -99,7 +99,7 @@ export async function storeIntegration(
     changes = (await execute(db, statement.query, statement.params)).meta?.changes
   } catch (error) {
     if (/UNIQUE constraint failed: organization_integrations\.provider, organization_integrations\.target_id/.test(messages(error))) {
-      throw new HTTPError({ statusCode: 409, message: `${TARGETS[provider]} is already connected to another KrabiClaw site. Disconnect it there first.` })
+      throw new HTTPError({ statusCode: 409, message: `${TARGETS[provider]} is already connected to another Blawby site. Disconnect it there first.` })
     }
     throw error
   }

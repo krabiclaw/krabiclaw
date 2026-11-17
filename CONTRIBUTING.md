@@ -1,6 +1,6 @@
 # Contributing
 
-KrabiClaw is licensed under [AGPL-3.0](LICENSE). Before your first pull request
+Blawby is licensed under [AGPL-3.0](LICENSE). Before your first pull request
 can be merged, sign the [Contributor License Agreement](https://cla-assistant.io/krabiclaw/krabiclaw);
 the CLA check on the pull request links to it. You keep the copyright in your
 contribution; the agreement lets KrabiClaw use, relicense and commercialize it.

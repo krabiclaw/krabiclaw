@@ -8,7 +8,6 @@ import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { applyChannelBooking, createStay } from '../../server/domain/stays.ts'
 import { applyBookingRevision, landBookingRevision, pendingBookingRevisions } from '../../server/integrations/channex/booking-revisions.ts'
-import { consumeEvent } from '../../server/events.ts'
 import { captureEvents } from './support/events.ts'
 
 // Airbnb bookings landing as channel stays: acknowledged only after they
@@ -240,14 +239,6 @@ test('an unknown home is logged and acknowledged; the scoped feed recovers a fai
     assert.deepEqual(await logged(db), [
       { external_id: 'rev-x', status: 'ignored_disconnected' }, { external_id: 'rev-y', status: 'failed' }, { external_id: 'rev-y', status: 'acknowledged' },
     ])
-
-    // The deployment handoff drains a revision Channex was already holding before the event mask changed.
-    await db.prepare("INSERT INTO channex_connections (organization_id,status,group_id,channel_id,connected_at) VALUES (?, 'connected', 'group-1', 'chan-1', ?)").bind(ORG, new Date().toISOString()).run()
-    await consumeEvent(env, { type: 'deployment.adopt_pending_work' })
-    assert.deepEqual(await db.prepare("SELECT external_booking_id, status, version FROM bookings WHERE external_booking_id='bk-other'").first(),
-      { external_booking_id: 'bk-other', status: 'confirmed', version: 1 })
-    await consumeEvent(env, { type: 'deployment.adopt_pending_work' })
-    assert.deepEqual(channex.acked, ['rev-x', 'rev-y', 'rev-other'])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

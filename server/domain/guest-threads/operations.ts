@@ -632,8 +632,8 @@ export function sendGuestThreadReply(db: DbClient, input: ReplyInput): Promise<R
   return deliverGuestReply(db, input, appendChatMessage)
 }
 
-/** Why a reply to a guest with no email, no Airbnb thread and no KrabiClaw account is refused. */
-export const GUEST_UNREACHABLE_MESSAGE = 'This guest has no email or KrabiClaw account to reply to.'
+/** Why a reply to a guest with no email, no Airbnb thread and no Blawby account is refused. */
+export const GUEST_UNREACHABLE_MESSAGE = 'This guest has no email or Blawby account to reply to.'
 /** Why a reply to an Airbnb conversation whose home was disconnected from Channex is refused. */
 const GUEST_DISCONNECTED_MESSAGE = 'This home is disconnected from Airbnb, so its guest cannot be replied to here.'
 
@@ -652,7 +652,7 @@ type GuestReplyAccount = { email: string | null; readable: number }
  *
  * Airbnb's conversation, while its home is still connected to Channex; a channel
  * stay with no addressable conversation is nowhere. Otherwise the guest's email
- * (a direct stay's current contact), or their KrabiClaw account inbox, also
+ * (a direct stay's current contact), or their Blawby account inbox, also
  * emailed when that account has a verified email.
  */
 export async function guestReplyDestination(
@@ -678,7 +678,7 @@ export async function guestReplyDestination(
 
 /**
  * Report the guest, or block and report them: the report and the block land
- * together, and KrabiClaw's operators are emailed before the member hears it
+ * together, and Blawby's operators are emailed before the member hears it
  * worked. The report's id comes from the key, so a retry files nothing new.
  */
 export async function moderateGuestThread(db: DbClient, input: {

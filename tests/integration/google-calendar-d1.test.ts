@@ -315,7 +315,7 @@ test('automatic Calendar connection recovers a hidden calendar after ambiguous c
   await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}),await generateSQLiteDrizzleJson(schema))).map(sql=>db.prepare(sql)))
   await db.prepare("INSERT INTO organization(id,name,slug, default_currency, timezone)VALUES('org','Org','org', 'USD', 'UTC')").run()
   const calendars:{id:string;summary:string;description:string;accessRole:string;hidden:boolean}[]=[]
-  let inserts=0, visible=false
+  let inserts=0, patches=0, visible=false, concurrentRename=false
   t.mock.method(globalThis,'fetch',async(input,init)=>{
    const url=new URL(String(input))
    assert.equal(url.hostname,'www.googleapis.com')
@@ -323,12 +323,25 @@ test('automatic Calendar connection recovers a hidden calendar after ambiguous c
    if(init?.method==='POST') {
     assert.equal(url.pathname,'/calendar/v3/calendars')
     const payload=JSON.parse(String(init.body))
-    assert.deepEqual(payload,{summary:'KrabiClaw',description:'Krabiclaw bookings for organization org'})
+    assert.deepEqual(payload,{summary:'Blawby',description:'Blawby bookings for organization org'})
     inserts++
     calendars.push({...payload,id:'created-calendar',accessRole:'owner',hidden:true})
     throw new Error('Timeout after Google committed the calendar')
    }
    if(url.pathname.endsWith('/calendarList'))return Response.json({items:visible?calendars.filter(calendar=>!calendar.hidden || url.searchParams.get('showHidden')==='true'):[]})
+   if(url.pathname==='/calendar/v3/calendars/created-calendar') {
+    if(init?.method==='PATCH') {
+     assert.equal(new Headers(init.headers).get('If-Match'),'"calendar-version"')
+     patches++
+     if(concurrentRename) {
+      calendars[0].summary='My bookings'
+      concurrentRename=false
+      return new Response(null,{status:412})
+     }
+     Object.assign(calendars[0],JSON.parse(String(init.body)))
+    }
+    return Response.json({...calendars[0],etag:'"calendar-version"'})
+   }
    assert.equal(url.pathname,'/calendar/v3/users/me/calendarList/created-calendar')
    return Response.json(calendars[0])
   })
@@ -339,13 +352,45 @@ test('automatic Calendar connection recovers a hidden calendar after ambiguous c
   await connectCalendar(db,'org','linked','token')
   const connection=await readCalendarIntegration(db,'org')
   assert.equal(connection?.calendar_id,'created-calendar')
-  assert.equal(connection?.calendar_name,'KrabiClaw')
+  assert.equal(connection?.calendar_name,'Blawby')
   assert.equal(await db.prepare("SELECT revision FROM organization_integrations WHERE organization_id = 'org' AND status = 'setting_up'").first(),null)
   await disconnectCalendar(db,'org')
   await connectCalendar(db,'org','linked','token')
   assert.equal((await readCalendarIntegration(db,'org'))?.status,'active')
   assert.equal((await readCalendarIntegration(db,'org'))?.calendar_id,'created-calendar')
   assert.equal(inserts,1,'disconnect and reconnect use the same calendar')
+  const revision=(await readCalendarIntegration(db,'org'))?.revision
+  const legacyMarker='Krabiclaw bookings for organization org'
+  Object.assign(calendars[0],{summary:'KrabiClaw',description:legacyMarker})
+  await connectCalendar(db,'org','linked','token')
+  const renamed=await readCalendarIntegration(db,'org')
+  assert.equal(renamed?.calendar_id,'created-calendar')
+  assert.equal(renamed?.calendar_name,'Blawby')
+  assert.equal(renamed?.revision,revision,'refreshing the name must preserve the event sync revision')
+  assert.deepEqual({summary:calendars[0].summary,description:calendars[0].description},{summary:'Blawby',description:'Blawby bookings for organization org'})
+  await connectCalendar(db,'org','linked','token')
+  assert.equal(patches,1,'a subsequent reconnect leaves the renamed calendar alone')
+  await storeCalendarSelection(db,'org',{account_id:'linked',calendar_id:'created-calendar',calendar_name:'KrabiClaw'})
+  Object.assign(calendars[0],{summary:'KrabiClaw',description:legacyMarker})
+  const manual = await syncCalendarOrganization({DB:db} as CloudflareEnv,'org',25,{token:async ()=>'token'})
+  assert.equal(manual.checked,0,'manual sync can refresh the name without event work')
+  assert.equal(manual.failed,0)
+  assert.equal((await readCalendarIntegration(db,'org'))?.calendar_name,'Blawby')
+  assert.equal(calendars[0].summary,'Blawby')
+  assert.equal(calendars[0].description,'Blawby bookings for organization org')
+  Object.assign(calendars[0],{summary:'KrabiClaw',description:legacyMarker})
+  concurrentRename=true
+  await assert.rejects(connectCalendar(db,'org','linked','token'),/412/)
+  await connectCalendar(db,'org','linked','token')
+  assert.equal((await readCalendarIntegration(db,'org'))?.calendar_name,'My bookings')
+  assert.equal(calendars[0].summary,'My bookings')
+  assert.equal(calendars[0].description,'Blawby bookings for organization org')
+  Object.assign(calendars[0],{summary:'KrabiClaw',description:'A description written by its owner'})
+  await connectCalendar(db,'org','linked','token')
+  assert.equal(calendars[0].description,'A description written by its owner')
+  assert.equal(calendars[0].summary,'KrabiClaw')
+  assert.equal(patches,4,'a non-matching calendar description must never be overwritten')
+  assert.equal(inserts,1)
  } finally {await runtime.dispose()}
 })
 
