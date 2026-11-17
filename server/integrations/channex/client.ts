@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { ChannexDataError, object, resource, type JsonRecord, type Resource } from './data'
+import { ChannexDataError, object, resource, string, type JsonRecord, type Resource } from './data'
 
 /**
  * The Channex API, as Blawby calls it: one platform key, JSON:API bodies,
@@ -115,6 +115,25 @@ function provided<T>(read: () => T, uncertain = false, context: { field: string;
     if (error instanceof ChannexDataError) throw new ChannexError(`Channex returned an invalid response: ${error.message}`, 502, uncertain, { code: 'INVALID_PROVIDER_RESPONSE', ...context })
     throw error
   }
+}
+
+export function channelInventory(channel: Resource) {
+  return provided(() => {
+    const attributes = channel.attributes
+    if (!Array.isArray(attributes.properties) || !Array.isArray(attributes.rate_plans) || typeof attributes.is_active !== 'boolean') {
+      throw new ChannexDataError('Channel has invalid properties, rate mappings or activation state')
+    }
+    return {
+      properties: attributes.properties.map(id => string(id, 'Channel property ID')),
+      ratePlans: attributes.rate_plans.map((value) => {
+        const mapping = object(value, 'Channel rate mapping')
+        string(mapping.id, 'Channel rate mapping ID')
+        string(mapping.rate_plan_id, 'Channel rate plan ID')
+        return mapping
+      }),
+      active: attributes.is_active,
+    }
+  }, false, { field: 'attributes', resource: 'channel' })
 }
 
 export async function channexGet(env: ChannexEnv, path: string, type: string): Promise<Resource> {
