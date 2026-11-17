@@ -82,3 +82,7 @@ export const organizationRoles = {
   }),
   admin: organizationAccessControl.newRole(adminStatements),
 }
+
+export const workspaceGuestMessagingRoles = Object.entries(organizationRoles)
+  .filter(([, role]) => role.authorize({ operations: ['reply'] }).success)
+  .map(([name]) => name)

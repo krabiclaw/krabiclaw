@@ -150,9 +150,9 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.equal((await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id, 'm-cleaner')
     const stayConversation = await db.prepare("SELECT id FROM conversations WHERE booking_id = ? AND kind = 'booking'").bind(stay.id).first<string>('id')
     assert.ok(stayConversation)
-    // A stay's guest conversation is owners' and admins': the member looking after the home reads its turnover.
-    await assert.rejects(assertConversationAccess(db, principal('cleaner', 'member'), stayConversation), refused(404, 'THREAD_NOT_FOUND', 'conversation_id'))
-    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stayConversation })).map(member => member.userId).sort(), ['owner'], 'a stay conversation alerts owner oversight, not the member looking after the home')
+    // Assignment gives the member the same stay conversation access and alerts.
+    assert.equal((await assertConversationAccess(db, principal('cleaner', 'member'), stayConversation)).id, stayConversation)
+    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stayConversation, guestMessage: true })).map(member => member.userId).sort(), ['cleaner', 'owner'])
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner' })
     await events.drain(env, 'jobs.changed')
     // Giving the home to the cleaner posted the stay's clean in its conversation, which is the one "Message host" opens.
@@ -172,7 +172,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     // Giving cook the site's tables gives cook access to reuse and view the location conversation
     await createTables(db, env, { organizationId: ORG, locationId: 'cabin-site', actorId: 'owner', memberId: 'm-cook', name: 'Cabin tables', durationMinutes: 90, seats: 12, open: '18:00', lastSeating: '20:00', idempotencyKey: 'cabin-tables' })
     await assert.rejects(assertConversationAccess(db, principal('cook', 'member'), stayConversation), refused(404, 'THREAD_NOT_FOUND', 'conversation_id'))
-    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stayConversation })).map(member => member.userId).sort(), ['owner'], 'handling the site\'s tables does not reach a lodging conversation either')
+    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stayConversation, guestMessage: true })).map(member => member.userId).sort(), ['cleaner', 'owner'], 'handling the site\'s tables does not reach a lodging conversation either')
     assert.deepEqual(await createTeamThread(env, db, cook, { member_user_ids: ['owner'], location_id: 'cabin-site' }), { id: floorChat.id, created: false })
     const cookFloorView = await teamThread(cook, floorChat.id)
     assert.deepEqual([cookFloorView.id, cookFloorView.capabilities.can_leave], [floorChat.id, false])

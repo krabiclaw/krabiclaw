@@ -14,11 +14,12 @@ import { sendGuestThreadReply, sendScheduledGuestReply } from '../../server/doma
 import { conversationPageFor } from './support/conversation-page.ts'
 import { listConversations, readWorkspaceInbox } from '../../server/domain/guest-threads/repository.ts'
 import { appendMessage, assertConversationAccess, type MessageRow } from '../../server/domain/conversations.ts'
+import { setListingMessagingAccess } from '../../server/domain/conversation-participants.ts'
 import { createDeliveryReceipt, listThreadDeliveries, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { getGuestRequest } from '../../server/domain/requests.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { guestThreadListPage, parseGuestThreadListQuery } from '../../server/utils/dashboard-guest-threads.ts'
-import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
+import { joinedMemberPrincipal, memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
 import { receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
 import { InboundEmailRejection, parseReplyToAddress } from '../../server/utils/reply-address.ts'
@@ -484,7 +485,7 @@ test('an existing stay timeline is adopted intact; two existing timelines fail e
 })
 
 test('a reply is sent with the message id Channex returns, and any Channex error is a failed reply sent again under its key', async () => {
-  const { runtime, db, env } = await boot()
+  const { runtime, db, env, productId } = await boot()
   const provider = new Provider(), realFetch = globalThis.fetch
   let releaseRetry: (() => void) | undefined
   globalThis.fetch = provider.fetch as typeof fetch
@@ -525,7 +526,9 @@ test('a reply is sent with the message id Channex returns, and any Channex error
     const refusedInput = { ...input, body: 'Reply that fails: refused', idempotencyKey: 'refused' }
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('retry-cohost', 'Cohost', 'retry-cohost@example.test', 1, 0, 0)").run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('retry-cohost-member', ?, 'retry-cohost', 'member', 0)").bind(ORG).run()
-    await db.prepare("INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role) VALUES (?, ?, 'retry-cohost', 'member')").bind(result.conversation_id, ORG).run()
+    const owner = joinedMemberPrincipal({ userId: OWNER, organizationId: ORG, memberId: 'owner-member', role: 'owner' }, { env })
+    const grant = { listingId: productId, memberId: 'retry-cohost-member' }
+    await setListingMessagingAccess(db, env, owner, { ...grant, allowed: true })
     const cohostRetry = { ...refusedInput, actorUserId: 'retry-cohost' }
     await assert.rejects(sendGuestThreadReply(db, cohostRetry), code('IDEMPOTENCY_CONFLICT'))
     assert.deepEqual(await sendGuestThreadReply(db, { ...cohostRetry, retryMessageId: 'missing-message' }),
@@ -549,7 +552,7 @@ test('a reply is sent with the message id Channex returns, and any Channex error
     }
     assert.equal(provider.sends - sendsBefore, 1, 'concurrent retries send once')
     assert.equal(await db.prepare('SELECT author_user_id FROM messages WHERE id = ?').bind(refusedEntry.id).first('author_user_id'), OWNER)
-    await db.prepare("DELETE FROM conversation_participants WHERE conversation_id = ? AND user_id = 'retry-cohost'").bind(result.conversation_id).run()
+    await setListingMessagingAccess(db, env, owner, { ...grant, allowed: false })
     assert.deepEqual(await sendGuestThreadReply(db, explicitRetry), { ok: false, status: 404, reason: 'thread_not_found' })
     assert.equal(provider.sends - sendsBefore, 1, 'a revoked cohost cannot replay the delivered message')
     assert.deepEqual(await db.prepare('SELECT status, provider_message_id, error FROM guest_thread_deliveries WHERE message_id = ?').bind(refusedEntry.id).first(),
