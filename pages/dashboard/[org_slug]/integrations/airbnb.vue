@@ -57,7 +57,7 @@ definePageMeta({ layout: 'dashboard' })
 
 /*
   The Airbnb sync checklist, as the iOS app has it: every listing on the
-  connected account, checked when it syncs with KrabiClaw. Checking one brings
+  connected account, checked when it syncs with Blawby. Checking one brings
   it over and turns its sync on; unchecking stops the sync and keeps the home
   as a free draft. The changes apply together from one button, after the plan
   check, and Blawby runs them in the background (sync.post, then sync.get

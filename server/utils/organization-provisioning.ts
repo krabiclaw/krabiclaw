@@ -288,7 +288,7 @@ async function emailOwnerWelcome(env: SetupEnv, db: D1Database, organizationId: 
 
   const result = await sendEmail(env, {
     to: owner.email,
-    fromName: 'Paul at KrabiClaw',
+    fromName: 'Paul at Blawby',
     replyTo: 'hello@krabiclaw.com',
     subject: message.title,
     ...email,

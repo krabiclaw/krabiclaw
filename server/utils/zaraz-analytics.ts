@@ -279,7 +279,7 @@ function upsertTenantZarazAnalytics(
   config.historyChange = false
   config.triggers[NATIVE_PAGEVIEW_TRIGGER_KEY] = {
     name: 'Native pageview accepted',
-    description: 'Fires when the KrabiClaw collector reports a recorded native pageview',
+    description: 'Fires when the Blawby collector reports a recorded native pageview',
     loadRules: [{ id: 'kc-native-pageview', match: '{{ client.__zarazTrack }}', op: 'EQUALS', value: NATIVE_PAGEVIEW_ZARAZ_EVENT }],
     excludeRules: [],
   }

@@ -1,4 +1,4 @@
-# KrabiClaw marketing source of truth
+# Blawby marketing source of truth
 
 Current lodging, MCP and template claim reconciliation: 2026-10-23 against the staging [MCP contract](../mcp.md), [stay tools](../../server/utils/mcp-tools/stays.ts), [native app contract](../shared-auth-contract.md), [website setup tools](../../server/utils/mcp-tools/organizations.ts), [location tools](../../server/utils/mcp-tools/locations.ts), [media contract](../../server/utils/mcp-tools/shared.ts), [billing policy](../../shared/billing-model.ts), [entitlements](../../server/utils/billing-entitlements.ts), and [starting-design marketing](../../utils/template-marketing.ts). Company and voice sources were reconciled on 2026-10-04 against staging `baa1bd2ee` and owner-approved issue bodies #941/#939. This source review does not establish production availability, App Store distribution, new client sessions, directory approval, email delivery or customer outcomes. Use this file for directory listings, launch pages, press requests, social profiles, and reusable marketing copy. Update facts here before reusing them elsewhere.
 
@@ -6,8 +6,8 @@ Current lodging, MCP and template claim reconciliation: 2026-10-23 against the s
 
 | Field | Canonical value | Evidence / status |
 |---|---|---|
-| Public company/product name | KrabiClaw | Owner-approved #941; runtime/repository identifiers retain their spelling |
-| Website | https://krabiclaw.com | Production platform site |
+| Public company/product name | Blawby | Public brand after #1869; runtime/repository identifiers retain their spelling |
+| Website | https://blawby.com | Production platform site |
 | Contact email | hello@krabiclaw.com | Cloudflare forwarding verified end to end on 2026-09-07 |
 | Founder / listing owner | Paul Chris Luke | Repository history and signed-in directory profiles |
 | Founder LinkedIn | https://www.linkedin.com/in/paulchrisluke/ | Supplied by the owner on 2026-09-07 |
@@ -16,7 +16,7 @@ Current lodging, MCP and template claim reconciliation: 2026-10-23 against the s
 | Product type | Web SaaS | Product contract and pricing model |
 | Business model | Free Basic, Growth and Business subscriptions | PRODUCT.md; paid display name and prices belong to Stripe |
 | Primary audience | Restaurants, experience operators, law firms and lodging hosts | Four verticals in `utils/vertical-copy.ts`; `service` means Legal Services |
-| MCP endpoint | https://krabiclaw.com/api/mcp | `docs/mcp.md` |
+| MCP endpoint | https://blawby.com/api/mcp | `docs/mcp.md` |
 | MCP registry identity | io.github.krabiclaw/krabiclaw | Published 2026-10-16 under the krabiclaw GitHub org; the former io.github.paulchrisluke/krabiclaw entry was deleted to release the endpoint URL |
 
 Owner-approved company facts ([#941](https://github.com/paulchrisluke/krabiclaw/issues/941), reviewed 2026-10-04): bootstrapped/self-funded; no outside investment to date; open to investment; Salt Lake City, Utah, USA; global from day one. Do not publish a street address for general marketing.
@@ -27,13 +27,13 @@ Public contacts approved in #941: hello@krabiclaw.com (general), privacy@krabicl
 
 ## Positioning
 
-KrabiClaw helps restaurants, experience operators, law firms and lodging hosts build and keep their websites current through the dashboard and compatible MCP clients, including Claude and ChatGPT. One MCP service manages the same business data with the same membership, assignment and plan permissions as the dashboard. Compatibility does not establish public directory approval or a successful current client session.
+Blawby helps restaurants, experience operators, law firms and lodging hosts build and keep their websites current through the dashboard and compatible MCP clients, including Claude and ChatGPT. One MCP service manages the same business data with the same membership, assignment and plan permissions as the dashboard. Compatibility does not establish public directory approval or a successful current client session.
 
 Owners can save and revise website setup, publish the completed website draft, and add locations through MCP using supplied business facts. Publication requires the saved draft's current revision and completed required fields; location creation respects the plan's existing location allowance. Domain setup, Google Places lookup, external-account linking, and location copying/deletion remain in the dashboard. See the [MCP contract](../mcp.md) and its owning tools linked above.
 
-All four verticals use the shared customer-site renderer, with vertical-specific routes and the owner's own brand settings. Legal Services focuses on lawyers and law firms; lodging uses homes and stays. Basic is free and includes 1 live home; locations are not billed on any plan. Paid capabilities and additional capacity follow the [current pricing](https://krabiclaw.com/pricing) and canonical billing policy; the site renderer does not grant every paid feature.
+All four verticals use the shared customer-site renderer, with vertical-specific routes and the owner's own brand settings. Legal Services focuses on lawyers and law firms; lodging uses homes and stays. Basic is free and includes 1 live home; locations are not billed on any plan. Paid capabilities and additional capacity follow the [current pricing](https://blawby.com/pricing) and canonical billing policy; the site renderer does not grant every paid feature.
 
-Lodging hosts manage home listings, nightly availability and prices, minimum/maximum stays, photos, guest conversations and internal team messages. Business enables direct paid stay booking on a published home after Stripe setup. Hosts can keep a private arrival guide and choose scheduled check-in/check-out messages. A configured Airbnb connection through Channex applies to the selected account and mapped homes. Vrbo connects through occupied-date calendar import and export: KrabiClaw checks its linked calendar every five minutes, while Vrbo controls when it reads the exported dates. This calendar link does not synchronize Vrbo prices, guest details or messages. Do not generalize either connection to every booking channel or claim synchronization succeeded without checking its result. See the [linked-calendar product policy](../../PRODUCT.md#linked-vrbo-calendars) and its [domain operation](../../server/domain/stays.ts). The iOS app is a free companion where distribution access is available, not evidence of a public App Store release. Native screenshots and illustrative Demo graphics are different assets; never add channel bookings or staff messages to a screenshot to imply they were captured.
+Lodging hosts manage home listings, nightly availability and prices, minimum/maximum stays, photos, guest conversations and internal team messages. Business enables direct paid stay booking on a published home after Stripe setup. Hosts can keep a private arrival guide and choose scheduled check-in/check-out messages. A configured Airbnb connection through Channex applies to the selected account and mapped homes. Vrbo connects through occupied-date calendar import and export: Blawby checks its linked calendar every five minutes, while Vrbo controls when it reads the exported dates. This calendar link does not synchronize Vrbo prices, guest details or messages. Do not generalize either connection to every booking channel or claim synchronization succeeded without checking its result. See the [linked-calendar product policy](../../PRODUCT.md#linked-vrbo-calendars) and its [domain operation](../../server/domain/stays.ts). The iOS app is a free companion where distribution access is available, not evidence of a public App Store release. Native screenshots and illustrative Demo graphics are different assets; never add channel bookings or staff messages to a screenshot to imply they were captured.
 
 Compatible clients can select and place existing media-library assets through ordinary MCP tools. New conversation attachments currently use ChatGPT's file-reference rewriting (`download_url` and `file_id`) and OpenAI file-parameter annotations in [media tools](../../server/utils/mcp-tools/media.ts). Do not promise identical attachment uploads in Claude or every other client. Videos require a poster image.
 
@@ -41,7 +41,7 @@ The next restaurant campaign should show a supported task being completed: the r
 
 ### Pricing and claim boundaries
 
-[PRODUCT.md](../../PRODUCT.md) describes the product contract; the canonical billing policy and operation gates determine current plan availability. Paid names, amounts, currency and cadence come from the current `/api/billing/plans` Stripe-backed response and [pricing page](https://krabiclaw.com/pricing), not this profile or an old snapshot. Never infer an annual amount, substitute an interval or turn missing data into zero. Basic is the free/no-subscription contract; its runtime identity remains `free`.
+[PRODUCT.md](../../PRODUCT.md) describes the product contract; the canonical billing policy and operation gates determine current plan availability. Paid names, amounts, currency and cadence come from the current `/api/billing/plans` Stripe-backed response and [pricing page](https://blawby.com/pricing), not this profile or an old snapshot. Never infer an annual amount, substitute an interval or turn missing data into zero. Basic is the free/no-subscription contract; its runtime identity remains `free`.
 
 Review-request sending and WhatsApp business notifications follow their paid entitlements; authentication OTP is separate. Community/Priority support copy does not establish a service promise. Customer GA4/Search Console integration, automatic social synchronization and ranking guarantees are not established by internal analytics or a tool name.
 
@@ -59,7 +59,7 @@ Use first-person experience only when sourced; admit changed thinking when real.
 
 Owner direction (2026-10-04): use direct, concrete, commercially minded scripts that show the feature. “Need to get your menu online? Take a picture of your menu, give it to KrabiClaw, done!” illustrates the desired cadence, not a verified end-to-end capability claim. Verify the supported photo/request/result workflow before using that promise. Avoid teaching elementary concepts or telling viewers what is useful; show the task and its outcome.
 
-Feature blogs/docs also need relevant images, GIFs or short clips of the actual process, with existing media placement/provenance, descriptive alt text/captions and required posters. Choose chat or CMS footage according to the feature; an avatar is optional. Any avatar prompt must define setting, outfit, action and framing. Use purposeful HyperFrames animation to focus on authentic interaction and sharp results, not a static screenshot slideshow. Use the canonical logo symbol without redundant KrabiClaw text beside it.
+Feature blogs/docs also need relevant images, GIFs or short clips of the actual process, with existing media placement/provenance, descriptive alt text/captions and required posters. Choose chat or CMS footage according to the feature; an avatar is optional. Any avatar prompt must define setting, outfit, action and framing. Use purposeful HyperFrames animation to focus on authentic interaction and sharp results, not a static screenshot slideshow. Use the canonical logo symbol without redundant Blawby text beside it.
 
 Video method, voice, UI rebuild and ending: [krabiclaw-marketing skill](../../.agents/skills/krabiclaw-marketing/SKILL.md), modeled on Airbnb's host feature tours and approved by the owner on 2026-11-10 with the Cedar Legal consultations film.
 
@@ -76,15 +76,15 @@ The software worked, but maintaining the websites did not scale. Many owners had
 
 AI changed what was possible. With ChatGPT and modern agent tools, restaurant owners could describe a new item or ask for a change in plain language to keep their website current.
 
-I returned to the idea in May 2026 and built KrabiClaw. It helps restaurants, tour operators, and other local businesses manage content, bookings, inquiries, products, media, and translations through AI while preserving the fundamentals that make a website effective: structured content, multilingual pages, and clear paths for customers.
+I returned to the idea in May 2026 and built what is now Blawby. It helps restaurants, tour operators, and other local businesses manage content, bookings, inquiries, products, media, and translations through AI while preserving the fundamentals that make a website effective: structured content, multilingual pages, and clear paths for customers.
 
-My name is Paul Chris Luke, and my background is in marketing. KrabiClaw combines that marketing discipline with a simpler way for business owners to maintain the information their customers depend on. The goal is straightforward: give local businesses a website that performs well without turning website administration into another job.
+My name is Paul Chris Luke, and my background is in marketing. Blawby combines that marketing discipline with a simpler way for business owners to maintain the information their customers depend on. The goal is straightforward: give local businesses a website that performs well without turning website administration into another job.
 ```
 
 **Short version — directories and founder profiles**
 
 ```text
-During COVID, restaurant owners and tour operators I knew urgently needed online ordering, bookings, and better websites. We built an early open-source product, but maintaining every menu, photo, and update for clients became impossible to scale. AI made the workflow owners already preferred practical: send a photo or describe a change, and let the system keep the website current. I returned to the idea in May 2026 and built KrabiClaw to combine conversational website management with structured content and multilingual pages.
+During COVID, restaurant owners and tour operators I knew urgently needed online ordering, bookings, and better websites. We built an early open-source product, but maintaining every menu, photo, and update for clients became impossible to scale. AI made the workflow owners already preferred practical: send a photo or describe a change, and let the system keep the website current. I returned to the idea in May 2026 and built what is now Blawby to combine conversational website management with structured content and multilingual pages.
 ```
 
 **One-paragraph version — compact forms**
@@ -98,12 +98,12 @@ Story chronology:
 - COVID era: an early open-source predecessor helped restaurants and tour operators move ordering and bookings online.
 - The predecessor was shut down because hands-on content maintenance could not scale.
 - May 2026: Paul Chris Luke began the current KrabiClaw product after AI made conversational maintenance practical.
-- Do not describe the COVID-era predecessor as the current KrabiClaw product or use the COVID period as KrabiClaw's start date.
+- Do not describe the COVID-era predecessor as the current Blawby product or use the COVID period as Blawby's start date.
 
 **Short tagline**
 
 ```text
-Keep your business website current with KrabiClaw
+Keep your business website current with Blawby
 ```
 
 **Alternative tagline under 60 characters**
@@ -115,19 +115,19 @@ Manage your business website through AI conversation.
 **Short description under 160 characters**
 
 ```text
-Manage your KrabiClaw site with Claude or ChatGPT: edit content, set nightly prices, and review inquiries, bookings and stays.
+Manage your Blawby site with Claude or ChatGPT: edit content, set nightly prices, and review inquiries, bookings and stays.
 ```
 
 **Directory description**
 
 ```text
-KrabiClaw helps restaurants, experience operators, law firms and lodging hosts build and manage websites through the dashboard or compatible MCP clients, including Claude and ChatGPT. Owners can prepare and publish website drafts, update menus and pages, manage homes and nightly calendars, place media-library photos, and review inquiries, bookings and stays from the same permissioned business data. Attachment uploads and available actions depend on the client, role and plan.
+Blawby helps restaurants, experience operators, law firms and lodging hosts build and manage websites through the dashboard or compatible MCP clients, including Claude and ChatGPT. Owners can prepare and publish website drafts, update menus and pages, manage homes and nightly calendars, place media-library photos, and review inquiries, bookings and stays from the same permissioned business data. Attachment uploads and available actions depend on the client, role and plan.
 ```
 
 **Founder motivation**
 
 ```text
-KrabiClaw exists so restaurants, experience operators, law firms and lodging hosts can keep a polished website current without wrestling with a traditional CMS. Owners manage real website content, bookings, stays, nightly prices, inquiries, products, experiences, media-library assets and analytics through compatible MCP clients, including Claude and ChatGPT, while the dashboard and assistant use the same permissioned business data. Manually authored translations in all supported languages are available on every plan without a translation-count limit.
+Blawby exists so restaurants, experience operators, law firms and lodging hosts can keep a polished website current without wrestling with a traditional CMS. Owners manage real website content, bookings, stays, nightly prices, inquiries, products, experiences, media-library assets and analytics through compatible MCP clients, including Claude and ChatGPT, while the dashboard and assistant use the same permissioned business data. Manually authored translations in all supported languages are available on every plan without a translation-count limit.
 ```
 
 ## Calendar release content
@@ -163,7 +163,7 @@ Airbnb's ICS import/export instructions or its two-way booking claims.
 
 After deployment and release qualification, publish the guides and launch article
 through MCP. Update the existing **Invite your team**, **Connect your accounts to
-KrabiClaw**, and **What AI assistants can and cannot do** guides to include Member
+Blawby**, and **What AI assistants can and cannot do** guides to include Member
 self-service, Calendar connection and scheduling tools. Preserve their existing
 content and media when editing.
 

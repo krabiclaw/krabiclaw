@@ -914,7 +914,7 @@ test('a provider resource belongs to one organization, and an organization has o
   const { runtime, db, restore } = await setUp()
   try {
     // An agency's login also manages its client's Page; choosing it on the agency's own site is refused.
-    const conflict = (error: unknown) => error instanceof HTTPError && error.status === 409 && /already connected to another KrabiClaw site/.test(error.message)
+    const conflict = (error: unknown) => error instanceof HTTPError && error.status === 409 && /already connected to another Blawby site/.test(error.message)
     await assert.rejects(storeIntegration(db, 'org-b', 'facebook', { account_id: 'fb-account', target_id: PAGE, target_name: 'Krabi Claw' }, { revision: 'fb-rev-org-b' }), conflict)
     await assert.rejects(storeIntegration(db, 'org-b', 'instagram', { account_id: 'ig-account', target_id: IG, target_name: 'krabiclaw' }, { revision: 'ig-rev-org-b' }), conflict)
     assert.equal((await readIntegration(db, 'org-b', 'facebook'))!.target_id, OTHER_PAGE)

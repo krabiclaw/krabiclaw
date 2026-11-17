@@ -143,7 +143,7 @@ async function handleMessage(db: D1Database, env: ApiRecord, message: WhatsAppMe
   if (!user) {
     // Not a verified owner/staff account: a guest answering their booking conversation, or someone to point at the app.
     const received = await receiveGuestWhatsApp(env as CloudflareEnv, { phone: toPhone, messageId: message.id, body: messageText(message), files: await messageFiles(env, message) })
-    if (!received) await reply(env, toPhone, `To continue, open KrabiClaw: ${platformLoginUrl(env)}`)
+    if (!received) await reply(env, toPhone, `Open Blawby to continue: ${platformLoginUrl(env)}`)
     return
   }
 

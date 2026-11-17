@@ -204,7 +204,7 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
       stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'member-paid' },
     } })
     const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
-    // Ana and Bo can be emailed; Dee left only a phone and has no KrabiClaw account, so the inbox shows her no composer.
+    // Ana and Bo can be emailed; Dee left only a phone and has no Blawby account, so the inbox shows her no composer.
     const ana = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'ana', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Ana', guest_email: 'ana@example.test', guest_phone: '+61491570150', total_minor: 30_000 })
     const bo = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'bo', check_in_date: day(6), check_out_date: day(8), adults: 1, guest_name: 'Bo', guest_email: 'bo@example.test', guest_phone: '+61491570152', total_minor: 30_000 })
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(12), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 30_000 })
@@ -261,7 +261,7 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     assert.deepEqual(await replies(ana), ['See you at 4'])
 
     // Dee can only be reached by phone: quoting her alert says why the reply cannot go, and writes nothing.
-    assert.deepEqual(await write('Hello Dee', 'meta-alert-dee'), ['Reply not sent: This guest has no email or KrabiClaw account to reply to.'])
+    assert.deepEqual(await write('Hello Dee', 'meta-alert-dee'), ['Reply not sent: This guest has no email or Blawby account to reply to.'])
     assert.deepEqual(await replies(dee), [])
 
     // Dee's own WhatsApp message is hers in her stay's conversation, on the WhatsApp channel, once however often Meta delivers it.

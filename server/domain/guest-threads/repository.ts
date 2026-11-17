@@ -248,7 +248,7 @@ function presentConversationList(rows: ListRow[], opts: ListGuestThreadsOptions,
         id: row.id, ...opts.includeSortKey && { last_message_at: row.last_message_at }, kind: 'team', title, avatar_initial: initial(title), channel: 'direct',
         home: row.record_unit === 'nights' ? row.record_title : row.location_title, when,
         preview: message ? messagePreview(message.text, message.photos) : '',
-        preview_from: message ? message.actorUserId === opts.userId ? 'You' : message.actorName ? firstName(message.actorName) : 'KrabiClaw' : null,
+        preview_from: message ? message.actorUserId === opts.userId ? 'You' : message.actorName ? firstName(message.actorName) : 'Blawby' : null,
         time, unread: row.unread === 1,
       } satisfies InboxRow
     }
@@ -291,7 +291,7 @@ function previewFrom(message: LatestMessage, context: { guestName: string; viewe
     if (!message.actorName) throw new Error('A team reply has no author name')
     return firstName(message.actorName)
   }
-  return message.authorKind === 'krabiclaw' ? 'KrabiClaw' : 'You'
+  return message.authorKind === 'krabiclaw' ? 'Blawby' : 'You'
 }
 
 /**

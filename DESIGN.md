@@ -80,7 +80,7 @@ is resolved here and in the shared implementation together.
 ## The organization's workspace
 
 `docs/design/airbnb-navigation-map.md` is the captured Airbnb host map. It is
-evidence; the decisions below are KrabiClaw's. `O` is `/dashboard/:orgSlug`.
+evidence; the decisions below are Blawby's. `O` is `/dashboard/:orgSlug`.
 
 **Primary navigation** is the same five destinations, in this order, for every
 theme:
@@ -105,7 +105,7 @@ to the open transcript. Conversation history is retained.
 
 **Menu is a launcher, not a parent.** It lists the Earnings and Insights cards,
 then Website, Locations, Team, Connections, Plan and billing (owners and
-admins), Platform accounts (Better Auth admins, inside KrabiClaw's own
+admins), Platform accounts (Better Auth admins, inside Blawby's own
 organization only), Account settings,
 Switch to Personal and Log out. Each row opens a destination of its own; none
 is nested under Menu. The desktop slideover and the narrow Menu page render the
@@ -226,7 +226,7 @@ that booked provider.
 
 ### Verticals and Domain Focus
 
-KrabiClaw serves four explicit, concrete business verticals:
+Blawby serves four explicit, concrete business verticals:
 1. **Restaurant**: menus, dishes, sections, table reservations.
 2. **Experience**: classes, workshops, dated ticketed sessions.
 3. **Lodging**: homes, stays, nights, check-ins, check-outs, turnovers.
@@ -362,7 +362,7 @@ editor or writer, and it never grants or hides an authorization.
 
 ### Airbnb, mapped
 
-| Airbnb | KrabiClaw |
+| Airbnb | Blawby |
 | --- | --- |
 | Listings holds homes, experiences and services behind kind pills | Catalog's pills are Menu, Experiences, Services and Places to stay; each is a view of the same Products |
 | Homes and experiences have different editors | One Product editor at `O/products/:productId` for every kind: kind changes wording and rows, not the route or the editor |
@@ -489,7 +489,7 @@ The captured host tools distinguish focused decisions from indexes:
 | Amenities | a searchable selection list, with filters that narrow the choices |
 | Pricing | one value row, one toggle, one link |
 | Hours by day | an index: one row per weekday previewing its hours; the day leaf is one switch and two time pickers |
-| Repeating start times (KrabiClaw) | an index of saved weekly rules, reached from Availability; the day leaf edits that weekday's times |
+| Repeating start times (Blawby) | an index of saved weekly rules, reached from Availability; the day leaf edits that weekday's times |
 
 **Independent concerns belong behind their own saved summaries.** Airbnb's
 Description screen is not a form with five textareas; it is five rows —
@@ -582,7 +582,7 @@ Airbnb host editor's restraint: amenities have recognizable pictograms;
 ordinary listing fields, house rules and safety switches stay text and their
 controls. Meaningful property choices use the same pictogram language. A title,
 description, URL or price does not need a glyph.
-KrabiClaw extends this language to its own destinations — Website, Locations,
+Blawby extends this language to its own destinations — Website, Locations,
 Team, content sections, bookings and Account settings — across every catalog
 kind. A heading or a scalar field is not a destination merely because it has a
 route.
@@ -1169,7 +1169,7 @@ selected. Switching to All bookings clears that virtual Online scope.
 Airbnb's [Experience calendar guide](https://www.airbnb.com/help/article/2645)
 describes Calendar → Add availability and optional daily or weekly repetition.
 The live account has only an in-progress Experience, so its published calendar
-has not been visually verified. KrabiClaw's continuing weekday rules have no
+has not been visually verified. Blawby's continuing weekday rules have no
 bounded series or repeat-until date; do not present controls or “this and
 following” changes that those canonical operations cannot honor.
 
@@ -1264,7 +1264,7 @@ you get paid* rows + *Add payout method* + *Need help?*. When Airbnb has no
 equivalent, say so in a comment and keep the screen to the smallest honest
 thing — never invent a section to fill the space.
 
-KrabiClaw's personal Payments opens its payment and refund history directly;
+Blawby's personal Payments opens its payment and refund history directly;
 there is no second concern requiring a settings index. Organization payouts
 remain in the organization's Earnings. Profile & availability opens the
 explicit organization member: public name, photo and bio can be saved before
@@ -1310,7 +1310,7 @@ needs a new visual device needs a reason written beside it.
 Airbnb has no equivalent, so these are additions rather than parity, and each
 one says so where it lives:
 
-- **Plan and billing.** What the organization pays KrabiClaw: its plan, the
+- **Plan and billing.** What the organization pays Blawby: its plan, the
   one-step Upgrade to Business, the services sold beside it with their
   requirements as met or open rows, and Stripe's billing portal for the card,
   invoices and cancelling. Owners change it, admins read it, members have no row. Airbnb

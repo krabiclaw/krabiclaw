@@ -171,7 +171,7 @@ export async function announceContentReport(env: ContentReportEnv, db: DbClient,
   })))
   const failures = results.flatMap(result => result.status === 'sent' ? [] : [result.error])
   if (failures.length) {
-    throw new HTTPError({ statusCode: 502, statusMessage: `The report was saved, but KrabiClaw could not be told: ${failures.join('; ')}. Retry with the same request.`,
+    throw new HTTPError({ statusCode: 502, statusMessage: `The report was saved, but Blawby could not be told: ${failures.join('; ')}. Retry with the same request.`,
       data: { code: 'CONTENT_REPORT_EMAIL_FAILED', field: 'email', committed: true, report_id: report.id } })
   }
   return report

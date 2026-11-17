@@ -12,7 +12,7 @@ This note exists so future sessions do not collapse three different systems into
 
 - A member answers a guest from their alert. Replying to the alert email, or quoting the WhatsApp alert, runs the inbox's own reply operation as that member. It sends at once, with no confirmation, menu or follow-up prompt. The member must still belong to the business and pass the inbox's reply permission check. The member is told the outcome: sent, or not sent with the reason. An owner WhatsApp message that quotes no alert gets one line saying to reply to the guest's message.
 - Direct guest replies use email. A mapped Airbnb conversation uses Channex's Messages API, including inquiries whose guest contact is withheld.
-- A direct stay whose guest has no email is reached in their KrabiClaw account inbox when the stay is theirs (a stay they bought), and emailed too when that account has a verified email. A guest with neither cannot be written to: the conversation shows no composer and a reply is refused with `GUEST_UNREACHABLE`.
+- A direct stay whose guest has no email is reached in their Blawby account inbox when the stay is theirs (a stay they bought), and emailed too when that account has a verified email. A guest with neither cannot be written to: the conversation shows no composer and a reply is refused with `GUEST_UNREACHABLE`.
 - Guest replies can be ingested back into the thread ledger from email, and from WhatsApp only when an inbound message can already be matched to an authorized guest thread by phone.
 - The dashboard inbox is the canonical thread UI for guest work. It renders the opening source submission with persisted message, operation, assignment, and resolution entries from one append-only history.
 
@@ -52,7 +52,7 @@ records these addresses.
 
 The HMAC signs `guest:<entry id>` or `member:<entry id>:<user id>` with
 `EMAIL_REPLY_SECRET`. Building, parsing and verifying an address throw on a bad
-address or a missing secret. An address on another domain, or one KrabiClaw never
+address or a missing secret. An address on another domain, or one Blawby never
 issued, is refused at the email handler and stored data is untouched.
 
 A guest's reply is appended to the conversation as the guest. Its Message-ID keys
