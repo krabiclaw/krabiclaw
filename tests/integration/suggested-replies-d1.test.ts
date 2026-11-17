@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import { recordSuggestionAccepted, suggestedDraft, suggestGuestReplies } from '../../server/domain/suggested-reply.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { requestInsertQueries } from '../../server/domain/requests.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { applySchema } from './support/schema.ts'
 
 // Suggested replies are charged for, so the usage ledger records each
 // generation the model completed and, once, a reply sent from one of its drafts.
@@ -24,7 +23,7 @@ test('suggested replies meter each generation and one acceptance per generation,
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await applySchema(db)
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Cabin Co', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', ?, 'America/Denver')`).bind(ORG, NOW).run()
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner Person', 'owner@example.test', 1, 0, 0)").bind(OWNER).run()

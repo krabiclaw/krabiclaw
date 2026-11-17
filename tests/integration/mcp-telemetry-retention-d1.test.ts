@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import { RETENTION_HUB, retentionWakeAt, runDueBusinessWork } from '../../server/domain/due-business-work.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { logMcpToolCallEvent, prepareMcpToolCallEvent } from '../../server/utils/mcp-telemetry.ts'
+import { applySchema } from './support/schema.ts'
 
 // Privacy Policy: MCP tool-call telemetry is deleted 180 days after creation.
 test('MCP telemetry stores only operational facts and the retention wake deletes records older than 180 days', { timeout: 60_000 }, async () => {
@@ -16,8 +15,7 @@ test('MCP telemetry stores only operational facts and the retention wake deletes
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-    await db.batch(statements.map(statement => db.prepare(statement)))
+    await applySchema(db)
     const privateText = 'Customer Alice customer@example.com token-private';
     await logMcpToolCallEvent(db, prepareMcpToolCallEvent({
       env: { BETTER_AUTH_SECRET: 'telemetry-test-hash-key' },

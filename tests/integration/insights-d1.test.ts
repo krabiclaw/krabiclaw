@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { H3Event } from 'h3'
-import * as schema from '../../server/db/schema.ts'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { recordTenantPageview } from '../../server/utils/pageview-tracking.ts'
 import { createProductBooking } from '../../server/domain/product-bookings.ts'
@@ -20,6 +18,7 @@ import { buyStay } from './support/stay-checkout.ts'
 import { captureEvents } from './support/events.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import type { InsightsPage } from '../../shared/insights.ts'
+import { applySchema } from './support/schema.ts'
 
 const TZ = 'Asia/Bangkok'
 
@@ -31,8 +30,7 @@ async function openDb(name: string) {
     env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: name, exportName: 'Hub' } },
   } }] })
   const db = await runtime.getD1Database('DB')
-  const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-  await db.batch(statements.map(statement => db.prepare(statement)))
+  await applySchema(db)
   const queue = captureEvents()
   const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db, EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://insights.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
     NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://insights.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv

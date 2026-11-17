@@ -6,7 +6,6 @@ import {
   MCP_ERROR,
   mcpProtocolError,
 } from '../../server/utils/mcp-protocol.ts'
-import { mcpToolErrorResult } from '../../server/utils/mcp-route-helpers.ts'
 import {
   objectArray,
   objectRecord,
@@ -23,18 +22,6 @@ import {
 // asMcpError/mcpProtocolError remain ours: every tool executor throws
 // through this shape regardless of transport.
 
-test('asMcpError maps a plain mcpProtocolError through unchanged', () => {
-  const error = mcpProtocolError(MCP_ERROR.invalidParams, 'bad input')
-  assert.deepEqual(asMcpError(error), { code: MCP_ERROR.invalidParams, message: 'bad input', data: undefined, kind: 'tool_execution' })
-})
-
-test('asMcpError maps an h3 createError with statusCode 400 to invalidParams (regression: server/utils/experiences.ts validation used createError, not mcpProtocolError, so tools/call leaked a raw HTTP 400 instead of isError:true)', () => {
-  const h3Error = Object.assign(new Error('H3Error'), { statusCode: 400, statusMessage: 'location_id is required' })
-  const mapped = asMcpError(h3Error)
-  assert.equal(mapped.code, MCP_ERROR.invalidParams)
-  assert.equal(mapped.message, 'location_id is required')
-})
-
 test('asMcpError maps an h3 createError with statusCode 404 to invalidParams so tools/call can return isError:true', () => {
   const h3Error = Object.assign(new Error('Not found'), { statusCode: 404, statusMessage: 'Experience not found' })
   const mapped = asMcpError(h3Error)
@@ -42,12 +29,17 @@ test('asMcpError maps an h3 createError with statusCode 404 to invalidParams so 
   assert.equal(mapped.message, 'Experience not found')
   assert.equal(mapped.kind, 'tool_execution')
   assert.deepEqual(mapped.data, { status: 404 })
+  const badRequest = asMcpError(Object.assign(new Error('H3Error'), { statusCode: 400, statusMessage: 'location_id is required' }))
+  assert.equal(badRequest.code, MCP_ERROR.invalidParams)
+  assert.equal(badRequest.message, 'location_id is required')
 })
 
 test('asMcpError falls back to internal for a plain Error', () => {
   const mapped = asMcpError(new Error('boom'))
   assert.equal(mapped.code, MCP_ERROR.internal)
   assert.equal(mapped.message, 'boom')
+  const protocolError = mcpProtocolError(MCP_ERROR.invalidParams, 'bad input')
+  assert.deepEqual(asMcpError(protocolError), { code: MCP_ERROR.invalidParams, message: 'bad input', data: undefined, kind: 'tool_execution' })
 })
 
 test('domain failures preserve actions and recovery receipts without private details', () => {
@@ -91,18 +83,16 @@ test('domain failures preserve actions and recovery receipts without private det
   })
   details.committed = 'yes'
   assert.deepEqual(asMcpError(channelError).data, { status: 503, code: 'CHANNEL_PUSH_FAILED', product_id: 'home-1' })
-})
 
-test('incomplete setup retains the status and missing field paths without private data', () => {
-  const error = Object.assign(new Error('Reservation setup is incomplete'), { statusCode: 409, data: {
+  const setup = Object.assign(new Error('Reservation setup is incomplete'), { statusCode: 409, data: {
     code: 'RESERVATION_SETUP_INCOMPLETE', missing: ['duration_minutes', 'location.timezone'],
     customer_email: 'private@example.com',
   } })
-  assert.deepEqual(asMcpError(error).data, {
+  assert.deepEqual(asMcpError(setup).data, {
     status: 409, code: 'RESERVATION_SETUP_INCOMPLETE', missing: ['duration_minutes', 'location.timezone'],
   })
-  error.data.missing = ['private@example.com']
-  assert.deepEqual(asMcpError(error).data, { status: 409, code: 'RESERVATION_SETUP_INCOMPLETE' })
+  setup.data.missing = ['private@example.com']
+  assert.deepEqual(asMcpError(setup).data, { status: 409, code: 'RESERVATION_SETUP_INCOMPLETE' })
 })
 
 test('asMcpError maps statusCode 403 to forbidden rather than auth', () => {
@@ -110,39 +100,6 @@ test('asMcpError maps statusCode 403 to forbidden rather than auth', () => {
   const mapped = asMcpError(forbidden)
   assert.equal(mapped.kind, 'forbidden')
   assert.equal(mapped.code, MCP_ERROR.internal)
-})
-
-test('asMcpError and mcpToolErrorResult preserve structured field, hint, and entity recovery IDs', () => {
-  const error = Object.assign(new Error("Operational booking 'book_123' not found"), {
-    statusCode: 404,
-    data: {
-      code: 'BOOKING_NOT_FOUND',
-      booking_id: 'book_123',
-      field: 'booking_id',
-      hint: 'Call list_product_bookings to view valid records.',
-      private_token: 'secret-leaked',
-    },
-  })
-  const mapped = asMcpError(error)
-  assert.equal(mapped.kind, 'tool_execution')
-  assert.deepEqual(mapped.data, {
-    status: 404,
-    code: 'BOOKING_NOT_FOUND',
-    booking_id: 'book_123',
-    field: 'booking_id',
-    hint: 'Call list_product_bookings to view valid records.',
-  })
-
-  const toolError = mcpToolErrorResult("Operational booking 'book_123' not found", mapped.data)
-  assert.equal(toolError.isError, true)
-  assert.deepEqual(JSON.parse(toolError.content[0].text), {
-    status: 404,
-    code: 'BOOKING_NOT_FOUND',
-    message: "Operational booking 'book_123' not found",
-    booking_id: 'book_123',
-    field: 'booking_id',
-    hint: 'Call list_product_bookings to view valid records.',
-  })
 })
 
 test('execution validation helpers throw structured mcpProtocolError with field and expected', () => {

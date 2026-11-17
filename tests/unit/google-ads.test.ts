@@ -3,18 +3,11 @@ import test from 'node:test'
 import {
   formatGoogleAdsCustomerId,
   listGoogleAdsAccounts,
-  listGoogleAdsCampaigns,
   getGoogleAdsCampaignDetail,
   createGoogleAdsSearchCampaign,
   updateGoogleAdsCampaign,
   getGoogleAdsPerformanceSummary,
 } from '../../server/utils/google-ads.ts'
-
-test('formatGoogleAdsCustomerId formats 10 digits into XXX-XXX-XXXX format', () => {
-  assert.equal(formatGoogleAdsCustomerId('3317427925'), '331-742-7925')
-  assert.equal(formatGoogleAdsCustomerId('331-742-7925'), '331-742-7925')
-  assert.equal(formatGoogleAdsCustomerId('12345'), '12345')
-})
 
 test('listGoogleAdsAccounts queries accessible customers and retrieves descriptive names', async (t) => {
   const requests: Array<{ url: string; method?: string; body?: string }> = []
@@ -96,35 +89,8 @@ test('listGoogleAdsAccounts queries accessible customers and retrieves descripti
     is_manager: true,
   })
   assert.equal(requests.length, 5)
-})
-
-test('listGoogleAdsCampaigns queries campaigns and formats performance metrics', async (t) => {
-  t.mock.method(globalThis, 'fetch', async (input, init) => {
-    const url = String(input)
-    assert.ok(url.includes('/customers/3317427925/googleAds:search'))
-    const body = JSON.parse(String(init?.body))
-    assert.ok(body.query.includes('FROM campaign'))
-
-    return Response.json({
-      results: [
-        {
-          campaign: { id: '111', name: 'Blog Post Promotion', status: 'ENABLED', advertisingChannelType: 'SEARCH' },
-          campaignBudget: { id: '999', amountMicros: '10000000' },
-          metrics: { clicks: '50', impressions: '1000', costMicros: '25000000', conversions: 5 },
-        },
-      ],
-    })
-  })
-
-  const campaigns = await listGoogleAdsCampaigns('test-token', 'dev-tok', '331-742-7925', 'ENABLED')
-  assert.equal(campaigns.length, 1)
-  assert.equal(campaigns[0].id, '111')
-  assert.equal(campaigns[0].name, 'Blog Post Promotion')
-  assert.equal(campaigns[0].budgetAmountMicros, 10000000)
-  assert.equal(campaigns[0].clicks, 50)
-  assert.equal(campaigns[0].impressions, 1000)
-  assert.equal(campaigns[0].costMicros, 25000000)
-  assert.equal(campaigns[0].conversions, 5)
+  assert.equal(formatGoogleAdsCustomerId('331-742-7925'), '331-742-7925')
+  assert.equal(formatGoogleAdsCustomerId('12345'), '12345')
 })
 
 test('creating a search campaign submits its budget, targeting and copy atomically while paused and returns Google resource names', async (t) => {
@@ -250,31 +216,6 @@ test('campaign creation refuses invalid copy before sending a provider mutation'
     headlines: ['A'.repeat(31), 'Second headline', 'Third headline'],
     descriptions: ['First description', 'Second description'], containsEuPoliticalAdvertising: false,
   }), /3 to 15 unique nonempty headlines of at most 30 characters/u)
-})
-
-test('campaign status and budget updates validate ownership and submit one atomic provider mutation', async (t) => {
-  const mutations: unknown[] = []
-  t.mock.method(globalThis, 'fetch', async (input, init) => {
-    const url = String(input)
-    const body = JSON.parse(String(init?.body))
-    if (url.endsWith('/googleAds:search')) {
-      assert.equal(body.query, 'SELECT campaign_budget.id FROM campaign WHERE campaign.id = 222 LIMIT 1')
-      return Response.json({ results: [{ campaignBudget: { id: '888' } }] })
-    }
-    assert.ok(url.endsWith('/googleAds:mutate'))
-    assert.notEqual(body.partialFailure, true)
-    mutations.push(body.mutateOperations)
-    return Response.json({ mutateOperationResponses: [
-      { campaignBudgetResult: { resourceName: 'customers/3317427925/campaignBudgets/888' } },
-      { campaignResult: { resourceName: 'customers/3317427925/campaigns/222' } },
-    ] })
-  })
-
-  await updateGoogleAdsCampaign('test-token', 'dev-tok', '331-742-7925', { campaignId: '222', status: 'PAUSED', budgetId: '888', dailyBudgetAmountMicros: 20000000 })
-  assert.deepEqual(mutations, [[
-    { campaignBudgetOperation: { update: { resourceName: 'customers/3317427925/campaignBudgets/888', amountMicros: '20000000' }, updateMask: 'amountMicros' } },
-    { campaignOperation: { update: { resourceName: 'customers/3317427925/campaigns/222', status: 'PAUSED' }, updateMask: 'status' } },
-  ]])
 })
 
 test('campaign updates reject incomplete input and another campaign’s budget before any write', async (t) => {

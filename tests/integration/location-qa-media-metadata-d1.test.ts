@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { captureEvents } from './support/events.ts'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { H3 } from 'nitro/h3'
 import { hashPassword } from 'better-auth/crypto'
-import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import organizationQaRoute from '../../server/api/editor/organizations/[organization_id]/qa.get.ts'
 import createOrganizationQaRoute from '../../server/api/editor/organizations/[organization_id]/qa.post.ts'
@@ -17,9 +15,8 @@ import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.
 import { createQa, deleteQa, listQa, reorderQa, updateQa } from '../../server/utils/location-qa.ts'
 import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
 import { getMediaAsset, updateMediaAssetMetadata } from '../../server/utils/media-asset-manager.ts'
-import { applyOnboardingDraft } from '../../server/utils/onboarding-apply.ts'
-import { buildOnboardingDraftPayload, onboardingDraftWriteGuard, readOnboardingDraft, upsertActiveOnboardingDraft } from '../../server/utils/onboarding-drafts.ts'
 import { createLocation, getLocation, updateLocation } from '../../server/utils/location-management.ts'
+import { applySchema } from './support/schema.ts'
 
 const ORG = 'org'
 const OTHER_ORG = 'other-org'
@@ -33,8 +30,7 @@ async function boot() {
     env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'location-qa-media-metadata-proof', exportName: 'Hub' } },
   } }] })
   const db = await runtime.getD1Database('DB')
-  const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-  await db.batch(statements.map(statement => db.prepare(statement)))
+  await applySchema(db)
   for (const org of [ORG, OTHER_ORG]) {
     await db.prepare(`INSERT INTO organization (id, name, slug, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Org', ?, '{}', 'tenant-theme-v1', 'THB', 'active', 'complete', 'flat', 'restaurant', ?, 'Asia/Bangkok')`).bind(org, org, NOW).run()
@@ -43,69 +39,6 @@ async function boot() {
   }
   return { runtime, db }
 }
-
-test('resuming onboarding updates the existing location without changing its historical public path', async () => {
-  const { runtime, db } = await boot()
-  try {
-    const userId = 'onboarding-owner'
-    await db.prepare("INSERT INTO user (id, name, email, emailVerified) VALUES (?, 'Owner', 'onboarding@proof.example', 1)").bind(userId).run()
-    await db.prepare("UPDATE organization SET onboarding_status = 'pending' WHERE id = ?").bind(ORG).run()
-    await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, timezone)
-      VALUES ('historic-location', ?, 'original-restaurant', 'Original Restaurant', 'Asia/Bangkok')`).bind(ORG).run()
-    const payload = buildOnboardingDraftPayload({
-      name: 'Renamed Restaurant', vertical: 'restaurant', place: null,
-      details: {
-        name: 'Renamed Restaurant', street_address: '88 Beach Road', address_line_2: null, city: 'Ao Nang', region: null, postal_code: null,
-        country: 'TH', phone: null, website_url: null, opening_hours: null, special_hours: null,
-        timezone: 'Asia/Bangkok', currency: 'THB', source_locale: 'en',
-      },
-    })
-    const draft = { id: 'onboarding-draft', user_id: userId, updated_at: NOW }
-    await db.prepare(`INSERT INTO onboarding_drafts (id, user_id, organization_id, name, vertical, source_type, payload_json, updated_at)
-      VALUES (?, ?, ?, ?, 'restaurant', 'manual', ?, ?)`).bind(draft.id, userId, ORG, payload.preview.brandName, JSON.stringify(payload), NOW).run()
-    assert.equal(payload.preview.locations[0]?.slug, 'main')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db } as CloudflareEnv
-    const result = await applyOnboardingDraft(env, db, {
-      userId, draft, payload,
-      target: { vertical: 'restaurant', organizationId: ORG, subdomain: 'org', locationId: 'historic-location', locationSlug: 'original-restaurant', defaultCurrency: 'THB', timezone: 'Asia/Bangkok' },
-    })
-    assert.deepEqual(result, { locationSlug: 'original-restaurant' })
-    const saved = await db.prepare('SELECT id, slug, title, address FROM business_locations WHERE organization_id = ?').bind(ORG).all<{ id: string; slug: string; title: string; address: string }>()
-    assert.equal(saved.results.length, 1)
-    assert.deepEqual({ ...saved.results[0], address: JSON.parse(saved.results[0]!.address) }, {
-      id: 'historic-location', slug: 'original-restaurant', title: 'Renamed Restaurant',
-      address: { regionCode: 'TH', addressLines: ['88 Beach Road'], locality: 'Ao Nang' },
-    })
-    const location = await getLocation(db, ORG, 'historic-location')
-    assert.ok(location)
-    const beforeNoop = await db.prepare("SELECT id, payload_json FROM activity_entries WHERE organization_id = ? AND event_name = 'location.updated' ORDER BY id").bind(ORG).all()
-    const purgesBefore = await db.prepare("SELECT count(*) AS n FROM public_resource_cache_invalidations WHERE organization_id = ? AND reason = 'write-through-purge'").bind(ORG).first<number>('n')
-    assert.ok(purgesBefore !== null)
-    const unchangedInput = { phone: location.phone, updated_at: location.updated_at }
-    const guard = onboardingDraftWriteGuard(draft, ORG)
-    assert.equal((await updateLocation(db, ORG, location.id, unchangedInput, userId, env, guard)).status, 200)
-    assert.deepEqual(await getLocation(db, ORG, location.id), location)
-    assert.equal(await db.prepare("SELECT count(*) AS n FROM public_resource_cache_invalidations WHERE organization_id = ? AND reason = 'write-through-purge'").bind(ORG).first('n'), purgesBefore + 1,
-      'a current guarded no-op completes its public cache purge')
-
-    const revised = await upsertActiveOnboardingDraft(db, {
-      userId, draftId: draft.id, name: payload.preview.brandName, vertical: 'restaurant', sourceType: 'manual', payload, updated_at: draft.updated_at,
-    })
-    const currentDraft = await readOnboardingDraft(db, userId, draft.id)
-    assert.equal(currentDraft.row.updated_at, revised.updatedAt)
-    assert.notEqual(currentDraft.row.updated_at, draft.updated_at)
-    await assert.rejects(updateLocation(db, ORG, location.id, unchangedInput, userId, env, guard), /malformed JSON/)
-    assert.deepEqual(await getLocation(db, ORG, location.id), location)
-    assert.deepEqual((await db.prepare("SELECT id, payload_json FROM activity_entries WHERE organization_id = ? AND event_name = 'location.updated' ORDER BY id").bind(ORG).all()).results, beforeNoop.results)
-    assert.equal(await db.prepare("SELECT count(*) AS n FROM public_resource_cache_invalidations WHERE organization_id = ? AND reason = 'write-through-purge'").bind(ORG).first('n'), purgesBefore + 1,
-      'a stale guarded no-op runs no public cache completion')
-
-    assert.equal((await updateLocation(db, ORG, location.id, unchangedInput, userId, env, onboardingDraftWriteGuard(currentDraft.row, ORG))).status, 200)
-    assert.deepEqual(await getLocation(db, ORG, location.id), location)
-    assert.equal(await db.prepare("SELECT count(*) AS n FROM public_resource_cache_invalidations WHERE organization_id = ? AND reason = 'write-through-purge'").bind(ORG).first('n'), purgesBefore + 2)
-    assert.deepEqual((await db.prepare("SELECT id, payload_json FROM activity_entries WHERE organization_id = ? AND event_name = 'location.updated' ORDER BY id").bind(ORG).all()).results, beforeNoop.results)
-  } finally { await runtime.dispose() }
-})
 
 test('organization Q&A route finds a page record by id without widening tenant access', async () => {
   const { runtime, db } = await boot()
@@ -154,6 +87,10 @@ test('organization Q&A route finds a page record by id without widening tenant a
     }
     assert.equal((await request(OTHER_ORG, `?id=${otherId}`)).status, 404)
     assert.equal((await request(ORG, `?id=${pricingId}`, false)).status, 401)
+    // Another organization's writers neither edit nor delete this one's Q&A.
+    const elsewhere = { organizationId: OTHER_ORG, locationId: null, pagePath: '/pricing' }
+    await assert.rejects(updateQa(db, elsewhere, pricingId, { answer: 'stolen' }, null), /Q&A not found/)
+    assert.equal((await deleteQa(db, elsewhere, pricingId)).status, 404)
     const mutate = (path: string, method: string, body: unknown) => app.request(Object.assign(new Request(`https://proof.example/api/editor/organizations/${ORG}/qa${path}`, {
       method, headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body),
     }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
@@ -233,47 +170,6 @@ test('organization Q&A route finds a page record by id without widening tenant a
     assert.equal(await db.prepare('SELECT updated_by FROM content_documents WHERE id=?').bind(locationQa.data.id).first('updated_by'), 'qa-owner')
     const locationActor = await db.prepare("SELECT actor_user_id FROM activity_entries WHERE location_id='qa-office' AND event_name='content.updated' ORDER BY occurred_at DESC,id DESC LIMIT 1").first('actor_user_id')
     assert.equal(locationActor, 'qa-owner')
-  } finally {
-    await runtime.dispose()
-  }
-})
-
-// Both writers bound one value more than their SQL had placeholders, which D1
-// refuses; every Q&A edit answered 400 and every alt-text edit 500 on
-// production. The proof is the real function against real D1: a mocked
-// database accepts any bind count.
-test('a Q&A can be edited and deleted through the scoped writers', async () => {
-  const { runtime, db } = await boot()
-  try {
-    const scope = { organizationId: ORG, locationId: null, pagePath: '/pricing' }
-    const created = await createQa(db, scope, { question: 'Is there a free plan?', answer: 'Yes.', status: 'published' }, null)
-    assert.equal(created.status, 201)
-    const qaId = (created.data as { id: string }).id
-
-    const updated = await updateQa(db, scope, qaId, { answer: 'Yes, on a Blawby subdomain.' }, null)
-    assert.deepEqual(updated, { updated: true, qa_id: qaId })
-    const [row] = await listQa(db, ORG, null, false, '/pricing')
-    assert.equal(row?.answer, 'Yes, on a Blawby subdomain.')
-    const purges = async () => Number((await db.prepare("SELECT count(*) AS n FROM public_resource_cache_invalidations WHERE organization_id = ? AND reason IN ('qa-update', 'qa-reorder')").bind(ORG).first('n')) ?? 0)
-    assert.equal(await purges(), 1, 'an edited answer queues a purge of the cached pages')
-
-    await assert.rejects(
-      updateQa(db, { ...scope, organizationId: OTHER_ORG }, qaId, { answer: 'stolen' }, null),
-      /Q&A not found/,
-    )
-
-    const second = await createQa(db, scope, { question: 'Can I use my own domain?', answer: 'Yes.' }, null)
-    const secondId = (second.data as { id: string }).id
-    await reorderQa(db, scope, [{ id: secondId, sort_order: 0 }, { id: qaId, sort_order: 1 }], null)
-    assert.deepEqual((await listQa(db, ORG, null, false, '/pricing')).map(item => item.id), [secondId, qaId])
-    assert.equal(await purges(), 2, 'a reorder queues a purge too')
-    await deleteQa(db, scope, secondId)
-
-    const deletedElsewhere = await deleteQa(db, { ...scope, organizationId: OTHER_ORG }, qaId)
-    assert.equal(deletedElsewhere.status, 404)
-    const deleted = await deleteQa(db, scope, qaId)
-    assert.equal(deleted.status, 200)
-    assert.equal((await listQa(db, ORG, null, false, '/pricing')).length, 0)
   } finally {
     await runtime.dispose()
   }

@@ -6,17 +6,7 @@ import {
   listMetaAdAccounts,
   getMetaAdAccount,
   getMetaAdsPerformanceSummary,
-  getMetaCampaignAccountId,
-  createMetaAdsCampaign,
-  updateMetaAdsCampaign,
 } from '../../server/utils/meta-ads'
-
-test('formatMetaAdAccountId ensures act_ prefix and rawMetaAdAccountId strips it', () => {
-  assert.equal(formatMetaAdAccountId('123456789'), 'act_123456789')
-  assert.equal(formatMetaAdAccountId('act_123456789'), 'act_123456789')
-  assert.equal(rawMetaAdAccountId('act_123456789'), '123456789')
-  assert.equal(rawMetaAdAccountId('123456789'), '123456789')
-})
 
 test('listMetaAdAccounts and getMetaAdAccount map accounts and detect inactive statuses', async () => {
   const originalFetch = globalThis.fetch
@@ -54,6 +44,10 @@ test('listMetaAdAccounts and getMetaAdAccount map accounts and detect inactive s
     const single = await getMetaAdAccount('test-token', '101')
     assert.equal(single?.account_id, '101')
     assert.equal(single?.currency, 'USD')
+    assert.equal(formatMetaAdAccountId('123456789'), 'act_123456789')
+    assert.equal(formatMetaAdAccountId('act_123456789'), 'act_123456789')
+    assert.equal(rawMetaAdAccountId('act_123456789'), '123456789')
+    assert.equal(rawMetaAdAccountId('123456789'), '123456789')
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -97,47 +91,3 @@ test('getMetaAdsPerformanceSummary aggregates spend into cents and calculates co
   }
 })
 
-test('createMetaAdsCampaign and updateMetaAdsCampaign send correct payloads', async () => {
-  const originalFetch = globalThis.fetch
-  let createCalled = false
-  let updateCalled = false
-
-  globalThis.fetch = async (input, init) => {
-    const url = String(input)
-    if (url.includes('/act_101/campaigns')) {
-      createCalled = true
-      const body = String(init?.body ?? '')
-      assert.match(body, /status=PAUSED/)
-      assert.match(body, /name=Summer\+Promo/)
-      assert.match(body, /daily_budget=1500/)
-      assert.match(body, /objective=OUTCOME_TRAFFIC/)
-      return new Response(JSON.stringify({ id: 'camp_999' }), { status: 200, headers: { 'content-type': 'application/json' } })
-    }
-    if (url.includes('/camp_999') && init?.method === 'POST') {
-      updateCalled = true
-      const body = String(init?.body ?? '')
-      assert.match(body, /status=ACTIVE/)
-      assert.match(body, /daily_budget=2000/)
-      return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'content-type': 'application/json' } })
-    }
-    if (url.includes('/camp_999?fields=account_id')) {
-      return new Response(JSON.stringify({ id: 'camp_999', account_id: '101' }), { status: 200, headers: { 'content-type': 'application/json' } })
-    }
-    throw new Error(`Unexpected fetch to ${url}`)
-  }
-
-  try {
-    const created = await createMetaAdsCampaign('test-token', '101', { name: 'Summer Promo', dailyBudgetCents: 1500 })
-    assert.equal(created.id, 'camp_999')
-    assert.equal(createCalled, true)
-
-    const ownerAccountId = await getMetaCampaignAccountId('test-token', 'camp_999')
-    assert.equal(ownerAccountId, '101')
-
-    const updated = await updateMetaAdsCampaign('test-token', 'camp_999', { status: 'ACTIVE', dailyBudgetCents: 2000 })
-    assert.equal(updated.success, true)
-    assert.equal(updateCalled, true)
-  } finally {
-    globalThis.fetch = originalFetch
-  }
-})

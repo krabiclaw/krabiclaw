@@ -1,11 +1,10 @@
 import { HTTPError } from 'nitro'
-import { publishEvent } from '~/server/events'
+import { publishAirbnbSync, type AirbnbSyncMessage } from '~/server/events'
 import { scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
 import { execute, executeBatch, MAX_D1_BATCH_STATEMENTS, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { countActiveHomes, homeAllowance, homesQuote, homeLimit, liveHomeSql, reportBillingUsage } from '~/server/utils/billing'
 import { AirbnbConnection, type ImportStage } from './airbnb-connection'
-import { ChannexError } from './client'
 import { assertRoleAllows, resolveOrganizationMembership } from '~/server/utils/member-access'
 
 /**
@@ -13,10 +12,30 @@ import { assertRoleAllows, resolveOrganizationMembership } from '~/server/utils/
  * app posts the change once: listings to sync (imported as homes if they are
  * not yet, then made live) and homes to stop syncing (back to free drafts).
  * The plan is checked for the whole change before anything is queued. Each
- * listing is one row of airbnb_sync_jobs. EVENTS advances it through the
- * AirbnbConnection steps recorded in the mapping's import_stage. The job's
- * terminal result stays visible until a new request names the listing.
+ * listing is one row of airbnb_sync_jobs. The AIRBNB_SYNC queue advances it
+ * through the AirbnbConnection steps recorded in the mapping's import_stage.
+ * The job's terminal result stays visible until a new request names the listing.
+ *
+ * AIRBNB_SYNC runs one delivery at a time (max_concurrency = 1 in wrangler.toml),
+ * and nothing else calls a step that creates a Channex resource: a duplicate
+ * delivery reads the stage the earlier one saved, so it never sends the same
+ * create again. Disconnecting runs on the same queue, between steps.
  */
+
+/** One delivery from the AIRBNB_SYNC queue. */
+export async function consumeAirbnbSync(env: CloudflareEnv, message: AirbnbSyncMessage): Promise<void> {
+  if (message.type === 'airbnb.sync_step') return advanceAirbnbSyncJob(env, message.organization_id, message.job_id)
+  const connection = new AirbnbConnection(env.DB, env, message.organization_id, message.user_id)
+  let disconnected: boolean
+  try {
+    disconnected = await connection.disconnectStep(message.channel_id)
+  } catch (error) {
+    // The owner reads the reason with the connection and asks again; Cloudflare does not repeat it.
+    await connection.disconnectFailed(message.channel_id, error instanceof Error ? error.message : String(error))
+    return
+  }
+  if (!disconnected) await publishAirbnbSync(env, message)
+}
 
 export interface AirbnbSyncListing {
   listing_id: string
@@ -42,7 +61,6 @@ interface JobRow {
   updated_at: string
 }
 
-const STEP_TIMEOUT_MS = 100_000
 /** Channex prescribes a one-minute pause before another attempt for a waiting property. */
 const PROVIDER_SETTLE_SECONDS = 60
 
@@ -148,12 +166,12 @@ async function queueJobs(db: DbClient, env: CloudflareEnv, organizationId: strin
         product_id = COALESCE(excluded.product_id, airbnb_sync_jobs.product_id), last_error_code = NULL, last_error = NULL,
         completed_at = NULL, updated_at = excluded.updated_at`,
     params: [job.id, organizationId, job.listing, job.product, job.action, job.details, requestedBy, at, at] })), { operation: 'Queue an Airbnb sync change' })
-  for (const job of pending) await publishEvent(env, { type: 'airbnb.sync', organization_id: organizationId, job_id: job.id })
+  for (const job of pending) await publishAirbnbSync(env, { type: 'airbnb.sync_step', organization_id: organizationId, job_id: job.id })
 }
 
 /**
  * Stop syncing these homes with Airbnb because the organization's paid plan
- * ended: queued as a stop no one asked for, which the EVENTS consumer runs as
+ * ended: queued as a stop no one asked for, which the AIRBNB_SYNC consumer runs as
  * it runs any other. Each must be a home imported from the connected account.
  */
 export async function stopAirbnbSyncForPlanEnd(db: DbClient, env: CloudflareEnv, organizationId: string, productIds: string[]): Promise<void> {
@@ -189,7 +207,7 @@ export async function readAirbnbSync(db: DbClient, organizationId: string): Prom
 type Step = 'done' | 'continue' | 'later'
 
 /** One step of a job: what the listing needs next to reach what was asked, as one AirbnbConnection call. */
-async function step(env: CloudflareEnv, db: DbClient, job: JobRow, signal: AbortSignal): Promise<Step> {
+async function step(env: CloudflareEnv, db: DbClient, job: JobRow): Promise<Step> {
   // A sync acts for the person who asked; a stop writes nothing of theirs, so one Blawby asked for, or whose requester left, still runs.
   if (job.action === 'sync') {
     if (!job.requested_by) fail(409, 'REQUESTER_REMOVED', 'The person who asked for this sync is no longer a member; ask again')
@@ -197,7 +215,7 @@ async function step(env: CloudflareEnv, db: DbClient, job: JobRow, signal: Abort
     if (!membership) fail(409, 'REQUESTER_REMOVED', 'The person who asked for this sync is no longer a member; ask again')
     await assertRoleAllows({ organizationId: membership.organizationId, role: membership.role, permissions: { integrations: ['update'] }, message: 'The person who asked for this sync no longer has permission to manage Airbnb; ask again' })
   }
-  const connection = new AirbnbConnection(db, env, job.organization_id, job.requested_by ?? 'system', signal)
+  const connection = new AirbnbConnection(db, env, job.organization_id, job.requested_by ?? 'system')
   const mapping = await queryFirst<{ product_id: string; import_stage: ImportStage; enabled: number; channel_id: string; connected_channel_id: string | null }>(db,
     `SELECT m.product_id, m.import_stage, m.enabled, m.channel_id, c.channel_id AS connected_channel_id FROM product_channel_mappings m
       LEFT JOIN channex_connections c ON c.organization_id = m.organization_id
@@ -255,7 +273,7 @@ async function resumeWaitingSyncs(env: CloudflareEnv, organizationId: string): P
     WHERE j.organization_id = ? AND j.action = 'sync' AND j.state = 'pending'
       AND NOT EXISTS (SELECT 1 FROM airbnb_sync_jobs stop WHERE stop.organization_id = j.organization_id AND stop.action = 'stop' AND stop.state = 'pending')
     ORDER BY j.created_at, j.id`, [organizationId])
-  for (const row of waiting) await publishEvent(env, { type: 'airbnb.sync', organization_id: organizationId, job_id: row.id })
+  for (const row of waiting) await publishAirbnbSync(env, { type: 'airbnb.sync_step', organization_id: organizationId, job_id: row.id })
 }
 
 /** Process one persisted listing change and send its continuation only when it has one. */
@@ -270,20 +288,13 @@ export async function advanceAirbnbSyncJob(env: CloudflareEnv, organizationId: s
     return
   }
   if (job.action === 'sync' && job.waiting_for_stop) return
-  const event = { type: 'airbnb.sync' as const, organization_id: organizationId, job_id: jobId }
-  const signal = AbortSignal.timeout(STEP_TIMEOUT_MS)
+  const message = { type: 'airbnb.sync_step' as const, organization_id: organizationId, job_id: jobId }
   let outcome: Step
   try {
-    outcome = await step({ ...env, requestSignal: signal }, db, job, signal)
+    outcome = await step(env, db, job)
   } catch (error) {
-    // H3 retains constructor details in cause, including the original provider cause.
-    const failure = error instanceof HTTPError && error.data?.code === 'POST_WRITE_COMPLETION_FAILED' && error.data?.field === 'billing_usage' && error.data?.committed === true ? (error.cause as { cause: unknown }).cause : error
-    const data = failure instanceof HTTPError || failure instanceof ChannexError ? failure.data as { code?: unknown } | undefined : undefined
-    const code = typeof data?.code === 'string' ? data.code : signal.aborted ? 'SYNC_SLICE_ENDED' : 'SYNC_STEP_FAILED'
-    if (code === 'CONNECTION_BUSY') {
-      await publishEvent(env, event, { delaySeconds: PROVIDER_SETTLE_SECONDS })
-      return
-    }
+    const data = error instanceof HTTPError ? error.data as { code?: unknown } | undefined : undefined
+    const code = typeof data?.code === 'string' ? data.code : 'SYNC_STEP_FAILED'
     const message = error instanceof Error ? error.message : String(error)
     await execute(db, "UPDATE airbnb_sync_jobs SET state = 'failed', last_error_code = ?, last_error = ?, updated_at = ? WHERE id = ? AND state = 'pending'",
       [code, message, now(), job.id])
@@ -298,5 +309,5 @@ export async function advanceAirbnbSyncJob(env: CloudflareEnv, organizationId: s
     return
   }
   await execute(db, 'UPDATE airbnb_sync_jobs SET updated_at = ? WHERE id = ? AND state = ?', [now(), job.id, 'pending'])
-  await publishEvent(env, event, outcome === 'later' ? { delaySeconds: PROVIDER_SETTLE_SECONDS } : undefined)
+  await publishAirbnbSync(env, message, outcome === 'later' ? { delaySeconds: PROVIDER_SETTLE_SECONDS } : undefined)
 }

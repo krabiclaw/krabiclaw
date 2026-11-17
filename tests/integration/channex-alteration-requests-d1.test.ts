@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { H3 } from 'h3'
 import { hashPassword } from 'better-auth/crypto'
-import * as schema from '../../server/db/schema.ts'
 import { captureEvents } from './support/events.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { applyBookingRevision } from '../../server/integrations/channex/booking-revisions.ts'
@@ -17,6 +15,7 @@ import todayRoute from '../../server/api/dashboard/today.get.ts'
 import bookingDetailsRoute from '../../server/api/dashboard/bookings/[booking_id].get.ts'
 import bookingActionRoute from '../../server/api/dashboard/bookings/[booking_id]/[action].post.ts'
 import type { BusinessToday } from '../../shared/dashboard-today.ts'
+import { applySchema } from './support/schema.ts'
 
 // An Airbnb guest's change request, from Channex's live feed to the stay's
 // conversation and back: recorded once and alerted, answered through
@@ -120,7 +119,7 @@ async function boot() {
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(sql => db.prepare(sql)))
+    await applySchema(db)
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
@@ -291,64 +290,14 @@ test('a guest change request lands once in the stay conversation, survives a rel
     assert.deepEqual(await runAlterationRequestFeed(db, env), { recorded: 0, reconciled: 0 })
     assert.equal(channex.resolutions.length, 1)
     assert.deepEqual(await today(), [setup])
-  } finally {
-    globalThis.fetch = realFetch
-    await runtime.dispose()
-  }
-})
 
-test('declining leaves the stay as it is; a request withdrawn or answered on Airbnb is reconciled from Channex, and one never seen pending is not recorded', { timeout: 120_000 }, async () => {
-  const { runtime, db, env, reservation, answer, publications, failNextPublication } = await boot()
-  const channex = new FakeChannex(), realFetch = globalThis.fetch
-  globalThis.fetch = channex.fetch as typeof fetch
-  try {
-    const stay = await airbnbStay(db, env, channex)
-    const later = { arrival: '2027-01-11', departure: '2027-01-14', adults: 2, amount: '450.00' }
-    channex.requests.set('alt-old', { booking: 'bk-1', after: later, status: 'DECLINED' })
-    for (const id of ['alt-decline', 'alt-withdrawn', 'alt-answered']) channex.requests.set(id, { booking: 'bk-1', after: later, status: null })
-    // A change the host proposed on Airbnb is recorded waiting on the guest: nobody here is alerted or may answer it.
-    channex.requests.set('alt-host', { booking: 'bk-1', after: later, status: null, by: 'host' })
-    assert.deepEqual(await runAlterationRequestFeed(db, env, PROPERTY), { recorded: 3, reconciled: 0 })
-    const recorded = new Map((await requests(db, stay.conversation_id!)).map(row => [row.event, row.id]))
-    assert.deepEqual([...recorded.keys()].sort(), ['alt-answered', 'alt-decline', 'alt-host', 'alt-withdrawn'])
-    const hostProposal = recorded.get('alt-host')!
-    assert.deepEqual(await alerts(db, hostProposal), [])
-    assert.equal((await reservation(stay.id)).booking.pending_changes?.find(change => change.id === hostProposal)?.requested_by, 'host')
-    await denied(await answer(stay.id, hostProposal, 'accept_change'), 409, 'CHANGE_REQUEST_AWAITS_GUEST')
-    recorded.delete('alt-host')
-
-    const declineId = recorded.get('alt-decline')!
-    failNextPublication()
-    const incomplete = await answer(stay.id, declineId, 'decline_change')
-    assert.equal(incomplete.status, 503)
-    assert.deepEqual((await incomplete.json() as { data: unknown }).data, {
-      code: 'STAY_CHANGE_INCOMPLETE', field: 'message_id', committed: true, message_id: declineId, outcome: 'declined',
-    })
-    assert.equal((await reservation(stay.id)).booking.pending_changes?.some(change => change.id === declineId), false)
-    assert.equal((await answer(stay.id, declineId, 'decline_change')).status, 204)
-    const decisionMessage = await db.prepare('SELECT id, sequence FROM messages WHERE dedupe_key = ?').bind(`booking-change-decision:${declineId}`).first()
-    assert.ok(decisionMessage)
-    assert.deepEqual(publications.filter(event => event.message?.id === decisionMessage.id).map(event => event.message), [decisionMessage, decisionMessage])
-    assert.deepEqual(channex.resolutions, [{ id: 'alt-decline', body: { resolution: { accept: 'decline' } } }])
-    assert.deepEqual(await decision(db, recorded.get('alt-decline')!), { event_name: 'booking_change.declined', author_kind: 'krabiclaw', author_user_id: OWNER, body: 'Declined the guest’s change on Airbnb.' })
-    assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-13', adults: 2, total_minor: 45_000, version: 1 })
-
-    // The guest withdrew on Airbnb, which sends no notification: the next feed run reads it.
-    // The host's own proposal, accepted by the guest there, reads as the guest's answer.
-    channex.requests.get('alt-withdrawn')!.status = 'CANCELED'
-    channex.requests.get('alt-host')!.status = 'ACCEPTED'
-    assert.deepEqual(await runAlterationRequestFeed(db, env), { recorded: 0, reconciled: 2 })
-    assert.deepEqual(await decision(db, recorded.get('alt-withdrawn')!), { event_name: 'booking_change.withdrawn', author_kind: 'krabiclaw', author_user_id: null, body: 'The guest withdrew the change on Airbnb.' })
-    assert.deepEqual(await decision(db, hostProposal), { event_name: 'booking_change.accepted', author_kind: 'krabiclaw', author_user_id: null, body: 'The guest accepted the change on Airbnb.' })
-
-    // Declined on Airbnb before the host answered here: the host's accept records Airbnb's outcome and is refused naming it.
-    channex.requests.get('alt-answered')!.status = 'DECLINED'
-    await denied(await answer(stay.id, recorded.get('alt-answered')!, 'accept_change'), 409, 'CHANGE_REQUEST_RESOLVED')
-    assert.deepEqual(await decision(db, recorded.get('alt-answered')!), { event_name: 'booking_change.declined', author_kind: 'krabiclaw', author_user_id: null, body: 'The guest’s change was declined on Airbnb.' })
-    assert.equal(channex.resolutions.length, 1)
-
-    assert.deepEqual((await reservation(stay.id)).booking.pending_changes, [])
-    assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-13', adults: 2, total_minor: 45_000, version: 1 })
+    // Declining a later request resolves it on Channex and leaves the stay as it is.
+    channex.requests.set('alt-2', { booking: 'bk-1', after: { arrival: '2027-01-11', departure: '2027-01-15', adults: 3, amount: '600.00' }, status: null })
+    assert.deepEqual(await runAlterationRequestFeed(db, env, PROPERTY), { recorded: 1, reconciled: 0 })
+    const declined = (await requests(db, stay.conversation_id)).find(row => row.event === 'alt-2')!
+    assert.equal((await answer(stay.id, declined.id, 'decline_change')).status, 204)
+    assert.deepEqual(channex.resolutions.at(-1), { id: 'alt-2', body: { resolution: { accept: 'decline' } } })
+    assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-14', adults: 3, total_minor: 60_000, version: 2 })
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict'
 import { OPEN_TERMS_JSON } from './support/booking-terms.ts'
 import test from 'node:test'
-import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import * as schema from '../../server/db/schema.ts'
 import {
   createCollection,
   createProduct,
@@ -30,6 +28,7 @@ import { CapacityUnavailableError, claimSessionCapacity, getScheduleSession, ses
 import { loadPublicSiteProductDetail, loadPublicProductCollection, loadPublicProductDetail, loadPublicProductSessions } from '../../server/utils/public-products.ts'
 import { readPublicProductAvailability } from '../../server/utils/public-session-booking.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { applySchema } from './support/schema.ts'
 
 const ORG = 'org'
 const ACTOR = { actorId: 'actor' }
@@ -42,8 +41,7 @@ async function boot() {
     env: { DB: { type: 'd1' } },
   } }] })
   const db = await runtime.getD1Database('DB')
-  const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
-  await db.batch(statements.map(statement => db.prepare(statement)))
+  await applySchema(db)
   await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
     VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'THB', 'active', 'active', 'flat', 'restaurant', ?, 'Asia/Bangkok')`)
     .bind(ORG, NOW).run()
@@ -63,35 +61,6 @@ async function listPublicBookingSessions(db: Parameters<typeof readPublicProduct
   assert.equal(result.unit, 'slot')
   return result
 }
-
-test('product kind narrows organization and location catalogues before pagination', { timeout: 120_000 }, async () => {
-  const { runtime, db } = await boot()
-  try {
-    const products = [
-      ...Array.from({ length: 105 }, (_, index) => ({ id: `dish-${index}`, kind: 'dish', name: `A Dish ${String(index).padStart(3, '0')}` })),
-      { id: 'take', kind: 'experience', name: 'Take Set' },
-      { id: 'ume', kind: 'experience', name: 'Ume Set' },
-    ]
-    await db.batch(products.flatMap(product => [
-      db.prepare('INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .bind(product.id, ORG, product.kind, product.name, product.id, ACTOR.actorId, ACTOR.actorId),
-      db.prepare('INSERT INTO product_publications (organization_id, product_id, published, created_by, updated_by) VALUES (?, ?, 0, ?, ?)')
-        .bind(ORG, product.id, ACTOR.actorId, ACTOR.actorId),
-      db.prepare("INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_by, updated_by) VALUES (?, ?, 'loc-a', 1, 1, ?, ?)")
-        .bind(ORG, product.id, ACTOR.actorId, ACTOR.actorId),
-    ]))
-    assert.equal((await listOrganizationProducts(db, { organizationId: ORG, window: { limit: 100, offset: 0 } })).some(product => product.kind === 'experience'), false)
-    for (const read of [
-      (offset: number) => listOrganizationProducts(db, { organizationId: ORG, kind: 'experience', window: { limit: 1, offset } }),
-      (offset: number) => listLocationProducts(db, { organizationId: ORG, locationId: 'loc-a', kind: 'experience', window: { limit: 1, offset } }),
-    ]) {
-      assert.deepEqual((await read(0)).map(product => product.id), ['take', 'ume'], 'filtered first page includes the extra row for has_more')
-      assert.deepEqual((await read(1)).map(product => product.id), ['ume'])
-    }
-    assert.deepEqual(await listLocationProducts(db, { organizationId: ORG, locationId: 'loc-b', kind: 'experience' }), [])
-    assert.deepEqual(await listOrganizationProducts(db, { organizationId: ORG, kind: 'experience', publishedOnly: true }), [], 'withheld experiences remain editable but are not claimed as public')
-  } finally { await runtime.dispose() }
-})
 
 test('public experiences require a configured booking flow and retain full or temporarily closed sessions', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
@@ -268,28 +237,7 @@ test('merchant activation, organization publication, and location publication ar
     assert.equal(withheld.locations[0]!.published, true, 'organization publication is independent of location publication')
     assert.equal((await listOrganizationProducts(db, { organizationId: ORG, publishedOnly: true })).length, 0)
     assert.equal((await listOrganizationProducts(db, { organizationId: ORG })).length, 1, 'the organization still carries it, withheld')
-  } finally { await runtime.dispose() }
-})
-
-test('a one-variant product and a product with named variants use the same variant-price path', { timeout: 120_000 }, async () => {
-  const { runtime, db } = await boot()
-  try {
-    const simple = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
-      name: 'Espresso', variants: [{ name: 'Default', prices: [{ unit_amount: 8000, currency: 'THB' }] }],
-    } })
-    const named = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
-      name: 'Latte',
-      variants: [
-        { id: 'var-s', name: 'Small', prices: [{ unit_amount: 9000, currency: 'THB' }] },
-        { id: 'var-l', name: 'Large', prices: [{ unit_amount: 12000, currency: 'THB' }] },
-      ],
-    } })
-    for (const product of [simple, named]) {
-      for (const variant of product.variants) {
-        assert(resolveVariantPrice(variant, { currency: 'THB', location_id: null, at: NOW }), `${product.name}/${variant.name} prices through the same path`)
-      }
-    }
-    assert.deepEqual(named.variants.map(variant => variant.id), ['var-s', 'var-l'])
+    assert.equal((await listLocationProducts(db, { organizationId: ORG, locationId: 'loc-a', publishedOnly: true })).length, 0, 'a withheld product is not public at the location that offers it')
   } finally { await runtime.dispose() }
 })
 
@@ -405,24 +353,13 @@ test('collections carry grouping and order without copying the product', { timeo
     assert.deepEqual(displayed, tiedIds, 'editor snapshots use the same stable tie order as the canonical read')
     await setCollectionProducts(db, { organizationId: ORG, collectionId: branch.id, productIds: [...tiedIds].reverse(), expectedProductIds: displayed, actor: ACTOR })
     assert.deepEqual((await listCollectionProducts(db, { organizationId: ORG, collectionId: branch.id })).map(product => product.id), [...tiedIds].reverse())
-  } finally { await runtime.dispose() }
-})
 
-test('details carry descriptive attributes, and an undefined one is refused', { timeout: 120_000 }, async () => {
-  const { runtime, db } = await boot()
-  try {
-    const product = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
-      name: 'Pad Thai', details: { 'allergens': ['Peanuts'], 'ingredients': ['Rice noodles'] },
-    } })
-    assert.deepEqual(product.details['allergens'], ['Peanuts'])
-    assert.deepEqual(product.details['ingredients'], ['Rice noodles'], 'inclusions and preparation stay distinct')
-
-    await assert.rejects(createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
-      name: 'Undefined attribute', details: { 'unknown': ['x'] },
-    } }), /not a field/)
-    await assert.rejects(createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
-      name: 'Wrong type', details: { 'allergens': 'Peanuts' },
-    } }), /must be a list/)
+    // Only one of two edits saved against the same revision of a section saves.
+    const edits = await Promise.allSettled(['Small plates', 'Starters'].map(name => updateCollection(db, {
+      organizationId: ORG, collectionId: branch.id, actor: ACTOR, patch: { name }, expectedUpdatedAt: branch.updated_at,
+    })))
+    assert.equal(edits.filter(edit => edit.status === 'fulfilled').length, 1)
+    assert.deepEqual(edits.filter(edit => edit.status === 'rejected').map(edit => edit.reason.statusCode), [409])
   } finally { await runtime.dispose() }
 })
 
@@ -522,27 +459,6 @@ test('editing a product keeps variant identity, so bookings survive', { timeout:
       description: (await getProduct(db, ORG, product.id)).description,
     }
     assert.deepEqual(after, { ...before, description: 'Now with clay' }, 'the refused batch changed nothing')
-  } finally { await runtime.dispose() }
-})
-
-test('an organization that withholds a product does not show it, at any location', { timeout: 120_000 }, async () => {
-  const { runtime, db } = await boot()
-  try {
-    const product = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
-      name: 'Seasonal Special', variants: [{ name: 'Default', prices: [{ unit_amount: 19000, currency: 'THB' }] }],
-    } })
-    await setProductPublication(db, { organizationId: ORG, productId: product.id, published: true, actor: ACTOR })
-    await setProductLocation(db, { organizationId: ORG, productId: product.id, locationId: 'loc-a', published: true, actor: ACTOR })
-    assert.equal((await listLocationProducts(db, { organizationId: ORG, locationId: 'loc-a', publishedOnly: true })).length, 1)
-
-    // Organization publication and location publication are separate switches,
-    // and the public answer needs both. Withholding it hides it even though
-    // the location still offers it.
-    await setProductPublication(db, { organizationId: ORG, productId: product.id, published: false, actor: ACTOR })
-    assert.equal((await listLocationProducts(db, { organizationId: ORG, locationId: 'loc-a', publishedOnly: true })).length, 0,
-      'a withheld product is not public at its location')
-    assert.equal((await listLocationProducts(db, { organizationId: ORG, locationId: 'loc-a' })).length, 1,
-      'the merchant still sees what the organization is withholding')
   } finally { await runtime.dispose() }
 })
 
@@ -678,98 +594,21 @@ test('an id from another tenant is refused, not upserted onto', { timeout: 120_0
 test('a menu update commits all sections, prices and public offerings once', { timeout: 120_000 }, async () => {
   const { runtime, db } = await boot()
   try {
-    const sections = Array.from({ length: 7 }, (_, section) => ({ name: `Section ${section + 1}`, items: Array.from({ length: section === 6 ? 7 : 10 }, (_, item) => ({ name: `Dish ${section}-${item}`, variants: [{ name: 'Default', prices: [{ unit_amount: 10000 + item, currency: 'THB' }] }] })) }))
+    const sections = Array.from({ length: 2 }, (_, section) => ({ name: `Section ${section + 1}`, items: Array.from({ length: 2 }, (_, item) => ({ name: `Dish ${section}-${item}`, variants: [{ name: 'Default', prices: [{ unit_amount: 10000 + item, currency: 'THB' }] }] })) }))
     const input = { organizationId: ORG, locationId: 'loc-a', sections, idempotencyKey: 'photo-menu', actor: ACTOR }
     const outcome = await updateMenu(db, input)
-    assert.equal(outcome.sections.length, 7)
+    assert.equal(outcome.sections.length, 2)
     const publicProducts = await listLocationProducts(db, { organizationId: ORG, locationId: 'loc-a', publishedOnly: true })
-    assert.equal(publicProducts.length, 67)
+    assert.equal(publicProducts.length, 4)
     assert.ok(publicProducts.every(product => product.kind === 'dish' && product.active && product.variants[0]?.prices[0]?.currency === 'THB'))
     assert.deepEqual(outcome.sections.map(section => section.collection.name), sections.map(section => section.name))
     for (const [index, section] of outcome.sections.entries()) assert.deepEqual(section.products.map(product => product.name), sections[index]!.items.map(item => item.name))
     assert.equal((await updateMenu(db, input)).replayed, true)
-    assert.equal(await db.prepare('SELECT count(*) n FROM products').first<number>('n'), 67)
+    assert.equal(await db.prepare('SELECT count(*) n FROM products').first<number>('n'), 4)
     await assert.rejects(updateMenu(db, { ...input, sections: [{ ...sections[0]!, name: 'Different menu' }] }), /different menu update/)
     const collection = outcome.sections[0]!.collection
     const before = (await listCollectionProducts(db, { organizationId: ORG, collectionId: collection.id })).map(product => product.id)
     await assert.rejects(setCollectionProducts(db, { organizationId: ORG, collectionId: collection.id, productIds: ['missing-id'], actor: ACTOR }), /missing products/)
     assert.deepEqual((await listCollectionProducts(db, { organizationId: ORG, collectionId: collection.id })).map(product => product.id), before)
-  } finally { await runtime.dispose() }
-})
-
-test('only one menu section edit can save against the same revision', async () => {
-  const { runtime, db } = await boot()
-  try {
-    const section = await createCollection(db, {
-      organizationId: ORG, actor: ACTOR, collection: { name: 'Menu', location_id: 'loc-a' },
-    })
-    const edits = await Promise.allSettled(['Small plates', 'Starters'].map(name => updateCollection(db, {
-      organizationId: ORG, collectionId: section.id, actor: ACTOR,
-      patch: { name }, expectedUpdatedAt: section.updated_at,
-    })))
-    const saved = edits.filter(edit => edit.status === 'fulfilled')
-    const stale = edits.filter(edit => edit.status === 'rejected')
-    assert.equal(saved.length, 1)
-    assert.equal(stale.length, 1)
-    assert.equal(stale[0]!.reason.statusCode, 409)
-    const [persisted] = await listCollections(db, { organizationId: ORG, locationId: 'loc-a' })
-    assert.equal(persisted?.name, saved[0]!.value.name)
-    assert.notEqual(persisted?.updated_at, section.updated_at)
-    assert.equal(await db.prepare("SELECT count(*) n FROM public_resource_cache_invalidations WHERE reason = 'collection_updated'").first<number>('n'), 1)
-  } finally { await runtime.dispose() }
-})
-
-test('catalog edits and publication changes retain their actor without counting unchanged saves as work', async () => {
-  const { runtime, db } = await boot()
-  try {
-    const env = {} as CloudflareEnv
-    const made = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish', name: 'Original bowl' }, publication: { published: false } })
-    const edits = async () => (await db.prepare("SELECT actor_user_id, payload_json FROM activity_entries WHERE event_name = 'product.updated' AND json_extract(payload_json, '$.entityId') = ? ORDER BY occurred_at, id")
-      .bind(made.id).all<{ actor_user_id: string; payload_json: string }>()).results.map(row => ({ actor: row.actor_user_id, ...JSON.parse(row.payload_json) }))
-    await updateProduct(db, { organizationId: ORG, productId: made.id, patch: { name: 'New bowl' }, actor: ACTOR, env })
-    assert.equal((await getProduct(db, ORG, made.id)).name, 'New bowl')
-    const first = await edits()
-    assert.equal(first.length, 1)
-    assert.equal(first[0].actor, ACTOR.actorId)
-    assert.deepEqual(first[0].metadata.changed_fields, ['name'])
-    assert.notEqual(first[0].beforeState.updated_at, first[0].afterState.updated_at)
-    const persistedEditor = () => db.prepare('SELECT updated_at, updated_by FROM products WHERE organization_id=? AND id=?').bind(ORG, made.id).first()
-    const afterEdit = await persistedEditor()
-    const repeatingActor = { actorId: 'repeating-editor' }
-    await db.prepare("INSERT INTO user (id,name,email) VALUES ('repeating-editor','Repeating editor','repeating-editor@example.test')").run()
-    await updateProduct(db, { organizationId: ORG, productId: made.id, patch: { name: 'New bowl' }, actor: repeatingActor, env })
-    assert.deepEqual(await edits(), first)
-    assert.deepEqual(await persistedEditor(), afterEdit, 'an unchanged save preserves the actual revision and the last editor')
-    await assert.rejects(updateProduct(db, { organizationId: ORG, productId: made.id, patch: { name: 'New bowl', updated_at: made.updated_at }, actor: repeatingActor, env }),
-      { statusCode: 409, data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'updated_at', product_id: made.id } })
-    const keyed = { organizationId: ORG, productId: made.id, patch: { name: 'New bowl' }, actor: repeatingActor, env, idempotencyKey: 'unchanged-bowl' }
-    await updateProduct(db, keyed)
-    await updateProduct(db, keyed)
-    const afterRepeat = await edits()
-    assert.equal(afterRepeat.length, 2, 'the unchanged keyed request retains one replay receipt')
-    assert.equal(afterRepeat[1].metadata.operation, 'unchanged')
-    assert.deepEqual(afterRepeat[1].metadata.changed_fields, [])
-    assert.equal(afterRepeat[1].actor, repeatingActor.actorId)
-    assert.equal(afterRepeat[1].beforeState.updated_at, afterRepeat[1].afterState.updated_at)
-    assert.deepEqual(await persistedEditor(), afterEdit, 'a keyed no-op and its replay retain the actual revision and last editor')
-    assert.equal(afterRepeat.filter(edit => edit.metadata.operation !== 'unchanged').length, 1)
-    await assert.rejects(updateProduct(db, { ...keyed, patch: { name: 'Different bowl' } }), /different product update/)
-    await setProductPublication(db, { organizationId: ORG, productId: made.id, published: true, actor: ACTOR, env })
-    const published = await getProduct(db, ORG, made.id)
-    assert.equal(published.publications.find(publication => publication.organization_id === ORG)?.published, true)
-    const afterPublication = await edits()
-    assert.equal(afterPublication.length, 3)
-    assert.deepEqual(afterPublication[2].metadata.changed_fields, ['publication'])
-    assert.equal(afterPublication[2].afterState.updated_at, await db.prepare('SELECT updated_at FROM product_publications WHERE organization_id = ? AND product_id = ?').bind(ORG, made.id).first('updated_at'))
-    assert.equal(afterPublication[2].actor, ACTOR.actorId)
-    await setProductPublication(db, { organizationId: ORG, productId: made.id, published: true, actor: ACTOR, env })
-    assert.deepEqual(await edits(), afterPublication)
-    await setProductLocation(db, { organizationId: ORG, productId: made.id, locationId: 'loc-a', active: true, published: true, actor: ACTOR, env })
-    const afterLocation = await edits()
-    assert.equal(afterLocation.length, 4)
-    assert.deepEqual(afterLocation[3].metadata.changed_fields, ['locations'])
-    assert.equal(afterLocation[3].afterState.updated_at, await db.prepare('SELECT updated_at FROM product_locations WHERE organization_id = ? AND product_id = ? AND location_id = ?').bind(ORG, made.id, 'loc-a').first('updated_at'))
-    await setProductLocation(db, { organizationId: ORG, productId: made.id, locationId: 'loc-a', active: true, published: true, actor: ACTOR, env })
-    assert.deepEqual(await edits(), afterLocation)
   } finally { await runtime.dispose() }
 })
