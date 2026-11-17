@@ -19,14 +19,14 @@ type ActivityRow = {
  starts_at:string; ends_at:string; timezone:string; created_at:string; location_id:string|null;
  location_title:string|null; product_id:string|null; party_size:number
 }
-type BuyerPaymentRow = {id:string;organization_id:string;organization_name:string|null;organization_slug:string|null;currency:string;captured_amount:number;refunded_amount:number;subject_type:string;subject_id:string;price_snapshot_json:string;created_at:string;order_id:string|null;hold_conversation_id:string|null;hold_starts_at:string|null;hold_ends_at:string|null;hold_timezone:string|null}
+type BuyerPaymentRow = {id:string;organization_id:string;organization_name:string|null;organization_slug:string|null;currency:string;captured_amount:number;refunded_amount:number;subject_type:string;subject_id:string;price_snapshot_json:string;created_at:string;order_id:string|null;order_product_id:string|null;hold_conversation_id:string|null;hold_starts_at:string|null;hold_ends_at:string|null;hold_timezone:string|null}
 async function buyerActivityRows(db:DbClient,userId:string) {
  // Every booking the account made on a business's site, one row each: a stay's ends are its stored instants, or its days where its home had no time.
  const [visits,payments]=await Promise.all([
   queryAll<ActivityRow>(db,`SELECT CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END kind,COALESCE(r.id,b.id) id,r.id conversation_id,b.id booking_id,b.organization_id,o.name organization_name,o.slug organization_slug,p.name title,b.status,b.starts_at,b.ends_at,b.timezone,b.created_at,b.location_id,l.title location_title,b.product_id,b.party_size
    FROM bookings b LEFT JOIN conversations r ON r.booking_id=b.id AND r.kind='booking' JOIN organization o ON o.id=b.organization_id JOIN products p ON p.id=b.product_id AND p.organization_id=b.organization_id LEFT JOIN business_locations l ON l.id=b.location_id AND l.organization_id=b.organization_id
    WHERE b.user_id=? AND b.owner='app' AND (r.id IS NULL OR (r.organization_id=b.organization_id AND r.kind='booking' AND r.user_id=? AND ${CURRENT_GUEST_SQL('r')}))`,[userId,userId]),
-  queryAll<BuyerPaymentRow>(db,`SELECT p.id,p.organization_id,o.name organization_name,o.slug organization_slug,p.currency,p.captured_amount,p.refunded_amount,p.subject_type,p.subject_id,p.price_snapshot_json,p.created_at,po.id order_id,r.id hold_conversation_id,h.starts_at hold_starts_at,h.ends_at hold_ends_at,COALESCE(s.timezone,CASE WHEN h.session_id IS NOT NULL THEN h.timezone END) hold_timezone FROM payments p LEFT JOIN organization o ON o.id=p.organization_id LEFT JOIN payment_orders po ON po.payment_id=p.id AND po.buyer_user_id=p.buyer_user_id AND po.organization_id=p.organization_id LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id AND h.buyer_user_id=p.buyer_user_id LEFT JOIN conversations r ON r.id=h.conversation_id AND r.organization_id=p.organization_id AND r.user_id=p.buyer_user_id AND ${CURRENT_GUEST_SQL('r')} LEFT JOIN product_sessions s ON s.id=h.session_id AND s.organization_id=p.organization_id WHERE p.buyer_user_id=? ORDER BY p.created_at DESC`,[userId]),
+  queryAll<BuyerPaymentRow>(db,`SELECT p.id,p.organization_id,o.name organization_name,o.slug organization_slug,p.currency,p.captured_amount,p.refunded_amount,p.subject_type,p.subject_id,p.price_snapshot_json,p.created_at,po.id order_id,(SELECT l.product_id FROM payment_order_lines l JOIN payment_orders lo ON lo.id=l.order_id WHERE lo.payment_id=p.id ORDER BY l.rowid LIMIT 1) order_product_id,r.id hold_conversation_id,h.starts_at hold_starts_at,h.ends_at hold_ends_at,COALESCE(s.timezone,CASE WHEN h.session_id IS NOT NULL THEN h.timezone END) hold_timezone FROM payments p LEFT JOIN organization o ON o.id=p.organization_id LEFT JOIN payment_orders po ON po.payment_id=p.id AND po.buyer_user_id=p.buyer_user_id AND po.organization_id=p.organization_id LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id AND h.buyer_user_id=p.buyer_user_id LEFT JOIN conversations r ON r.id=h.conversation_id AND r.organization_id=p.organization_id AND r.user_id=p.buyer_user_id AND ${CURRENT_GUEST_SQL('r')} LEFT JOIN product_sessions s ON s.id=h.session_id AND s.organization_id=p.organization_id WHERE p.buyer_user_id=? ORDER BY p.created_at DESC`,[userId]),
  ])
  return {visits,payments}
 }
@@ -68,18 +68,30 @@ export async function buyerActivities(db:DbClient,userId:string):Promise<Account
 }
 /** The account’s payments and completed refunds, newest first. */
 export async function buyerPayments(db:DbClient,userId:string):Promise<{entries:BuyerPaymentEntry[]}> {
- const rows=await buyerActivityRows(db,userId)
- const refunds=rows.payments.length?await queryAll<{id:string;payment_id:string;amount:number;created_at:string}>(db,`SELECT id,payment_id,amount,created_at FROM payment_refunds WHERE status='succeeded' AND payment_id IN (SELECT value FROM json_each(?))`,[JSON.stringify(rows.payments.map(row=>row.id))]):[]
- const entries:BuyerPaymentEntry[]=[]
- for(const payment of rows.payments){
-  if(payment.captured_amount<=0)continue
+ // Three reads in parallel, then one picture read per business and kind of owner, also in parallel.
+ const [rows,refunds]=await Promise.all([
+  buyerActivityRows(db,userId),
+  queryAll<{id:string;payment_id:string;amount:number;created_at:string}>(db,`SELECT f.id,f.payment_id,f.amount,f.created_at FROM payment_refunds f JOIN payments p ON p.id=f.payment_id WHERE f.status='succeeded' AND p.buyer_user_id=?`,[userId]),
+ ])
+ const lines=rows.payments.filter(payment=>payment.captured_amount>0).map(payment=>{
   const item=resolvePaymentActivity(rows,payment),snapshot:unknown=JSON.parse(payment.price_snapshot_json)
   if(!snapshot||typeof snapshot!=='object'||!('title' in snapshot)||typeof snapshot.title!=='string'||!snapshot.title.trim())throw new Error('Owned payment has no immutable title')
-  const to=accountActivityPath(item.kind,item.id)
   const visit=rows.visits.find(row=>row.kind===item.kind&&row.id===item.id)
-  const ownerType=visit?.product_id?'product':'business_location',ownerId=visit?(visit.product_id??visit.location_id):(await queryFirst<{product_id:string|null}>(db,'SELECT l.product_id FROM payment_order_lines l JOIN payment_orders o ON o.id=l.order_id WHERE o.payment_id=? ORDER BY l.rowid LIMIT 1',[payment.id]))?.product_id??null
-  const image_url=ownerId?(await loadOwnerPictures(db,payment.organization_id,visit?ownerType:'product',[ownerId])).get(ownerId)?.imageUrl??null:null
-  const line={title:visit?visit.title:snapshot.title,organization_name:payment.organization_name,currency:payment.currency,to,image_url,starts_at:visit?.starts_at??null,ends_at:visit?.ends_at??null,timezone:visit?.timezone??null}
+  const ownerType:'product'|'business_location'=visit&&!visit.product_id?'business_location':'product'
+  const ownerId=visit?(visit.product_id??visit.location_id):payment.order_product_id
+  return {payment,visit,title:snapshot.title,to:accountActivityPath(item.kind,item.id),owner:ownerId?{key:`${payment.organization_id}\u0000${ownerType}`,organizationId:payment.organization_id,ownerType,ownerId}:null}
+ })
+ const owners=new Map<string,{organizationId:string;ownerType:'product'|'business_location';ids:string[]}>()
+ for(const {owner} of lines)if(owner){
+  const group=owners.get(owner.key)??{organizationId:owner.organizationId,ownerType:owner.ownerType,ids:[]}
+  group.ids.push(owner.ownerId)
+  owners.set(owner.key,group)
+ }
+ const pictures=new Map(await Promise.all([...owners].map(async([key,group])=>[key,await loadOwnerPictures(db,group.organizationId,group.ownerType,group.ids)] as const)))
+ const entries:BuyerPaymentEntry[]=[]
+ for(const {payment,visit,title,to,owner} of lines){
+  const image_url=owner?pictures.get(owner.key)?.get(owner.ownerId)?.imageUrl??null:null
+  const line={title:visit?visit.title:title,organization_name:payment.organization_name,currency:payment.currency,to,image_url,starts_at:visit?.starts_at??null,ends_at:visit?.ends_at??null,timezone:visit?.timezone??null}
   entries.push({id:`paid:${payment.id}`,kind:'paid',created_at:payment.created_at,amount:payment.captured_amount,...line})
   for(const refund of refunds.filter(row=>row.payment_id===payment.id))entries.push({id:`refund:${refund.id}`,kind:'refunded',created_at:refund.created_at,amount:-refund.amount,...line})
  }
