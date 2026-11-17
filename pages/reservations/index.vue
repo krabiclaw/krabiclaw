@@ -54,7 +54,7 @@
             <p v-if="loc.short_description" class="mt-3 max-w-md text-sm leading-relaxed text-muted">{{ loc.short_description }}</p>
 
             <div class="mt-6 flex flex-wrap items-center gap-3">
-              <TenantButton v-if="tableAt(loc)" control-id="reservation-booking-toggle" @click="openBookingModal(loc)">{{ resCopy.reservationRequestButton }}</TenantButton>
+              <TenantButton v-if="tableAt(loc)" :disabled="!bookingReady" @click="openBookingModal(loc)">{{ resCopy.reservationRequestButton }}</TenantButton>
               <TenantButton v-if="loc.phone" :href="`tel:${loc.phone}`" variant="outline">
                 {{ formatPhone(loc.phone) }}
               </TenantButton>
@@ -140,6 +140,8 @@ useHeroLcpPreload(computed(() => {
 }))
 
 const selectedLocationId = ref<string | null>(null)
+const bookingReady = ref(false)
+onMounted(() => { bookingReady.value = true })
 const selectedLocation = computed(() => locations.value.find(location => location.id === selectedLocationId.value) ?? null)
 const selectedTable = computed(() => selectedLocation.value ? tableAt(selectedLocation.value) : null)
 /** The table the booking form is for: the chosen location's, before any is chosen the first. */
@@ -174,6 +176,7 @@ provideMediaPreviews(bookingOpen)
 async function openBookingModal(location: ApiRecord) {
   selectedLocationId.value = String(location.id)
   await nextTick()
+  bookingOpen.value = true
   await openBooking()
 }
 

@@ -183,8 +183,8 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const unlock = await acquireTenantMutationLock(testInfo, restaurant.organizationId)
     try {
       await openTenantPage(page, `${baseURL}/reservations`, seededSiteHeaders('restaurant'))
-      await waitForNuxtHydration(page)
       await page.locator('article').filter({ has: page.getByRole('heading', { name: brooklyn.title, exact: true }) }).getByRole('button', { name: 'Request Reservation', exact: true }).click()
+      await expect(page.getByRole('dialog', { name: brooklyn.title })).toBeVisible()
       await chooseFirstAvailableTime(page)
       await page.getByLabel('Full name').fill('Restaurant Journey Test')
       await page.getByLabel('Email address').fill(email)
