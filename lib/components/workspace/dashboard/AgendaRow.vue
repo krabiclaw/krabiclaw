@@ -1,6 +1,6 @@
 <template>
   <!-- One row of a day: the Today card's shape, smaller — who, with the place as a badge, what, and when. -->
-  <NuxtLink :to="item.to" :data-session-id="item.kind === 'session' ? item.id : undefined" class="group flex items-center gap-4 py-3" :class="cancelled ? 'text-muted' : 'text-highlighted'">
+  <component :is="item.to ? NuxtLink : 'div'" :to="item.to ?? undefined" :data-session-id="item.kind === 'session' ? item.id : undefined" class="group flex items-center gap-4 py-3" :class="cancelled ? 'text-muted' : 'text-highlighted'">
     <div class="relative size-12 shrink-0" aria-hidden="true">
       <UAvatar
         :src="item.guest_image_url || undefined"
@@ -22,8 +22,8 @@
       {{ formattedTime }}
       <span v-if="item.show_time_zone" class="block text-xs font-normal text-muted">{{ item.timezone }}</span>
     </div>
-    <UIcon name="i-lucide-chevron-right" class="size-4 shrink-0 text-dimmed group-hover:text-highlighted" />
-  </NuxtLink>
+    <UIcon v-if="item.to" name="i-lucide-chevron-right" class="size-4 shrink-0 text-dimmed group-hover:text-highlighted" />
+  </component>
 </template>
 
 <script lang="ts">
@@ -37,6 +37,7 @@ export type CalendarRowItem = Pick<AgendaItem, 'id' | 'starts_at' | 'timezone' |
 import { formatTimestamp } from '~/utils/timezone'
 
 const props = defineProps<{ item: CalendarRowItem }>()
+const NuxtLink = resolveComponent('NuxtLink')
 const cancelled = computed(() => props.item.status === 'cancelled')
 const formattedTime = computed(() => formatTimestamp(props.item.starts_at, 'en', props.item.timezone, { hour: 'numeric', minute: '2-digit' }))
 const details = computed(() => [cancelled.value ? 'Cancelled' : null, !cancelled.value || props.item.kind === 'session' ? props.item.subtitle : null, props.item.location_title].filter(Boolean).join(' · '))

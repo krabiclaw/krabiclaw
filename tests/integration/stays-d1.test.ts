@@ -31,6 +31,7 @@ import paymentReturnRoute from '../../server/api/public/payments/[payment_id]/re
 import { updateLocation } from '../../server/utils/location-management.ts'
 import { listOrganizationNotificationMembers, memberAccessPrincipal, resolveMembership, resolveOrganizationMembership } from '../../server/utils/member-access.ts'
 import { assertConversationAccess } from '../../server/domain/conversations.ts'
+import { setListingAccess } from '../../server/domain/conversation-participants.ts'
 import { listScheduledGuestMessages, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
 import { handleStaysTools, STAYS_TOOLS } from '../../server/utils/mcp-tools/stays.ts'
 import { BOOKINGS_TOOLS, handleBookingsTools } from '../../server/utils/mcp-tools/bookings.ts'
@@ -472,6 +473,17 @@ test('a member assigned to a home reads its guest conversation and the turnover 
     const today = (membership: typeof ownerMembership) => listTodayAgenda(db, { organizationId: ORG }, { principal: { env, membership }, organizationSlug: 'org' }, new Date('2026-11-01T18:00:00.000Z'))
     assert.deepEqual((await today(cleanerMembership)).items.map(item => [item.booking_id, item.title]), [[stay.id, 'Ana']])
     assert.deepEqual((await today(ownerMembership)).items.map(item => [item.booking_id, item.title]), [[stay.id, 'Ana Silva']])
+    const calendarMembership = await resolveOrganizationMembership(env, { organizationId: ORG, userId: OUTSIDER })
+    assert(calendarMembership)
+    const calendar = () => listAgenda(db, { organizationId: ORG }, { ...window, principal: { env, membership: calendarMembership }, organizationSlug: 'org' })
+    assert.deepEqual((await calendar()).items, [])
+    await setListingAccess(db, env, ownerPrincipal, { listingId: cabin.id, memberId: calendarMembership.memberId, access: 'calendar' })
+    const reservedDays = (await calendar()).items.map(({ booking_id, title, conversation_id, guest_first_name, stay_moment, to }) => (
+      { booking_id, title, conversation_id, guest_first_name, stay_moment, to }
+    ))
+    assert.deepEqual(reservedDays, ['arrival', 'departure'].map(stay_moment => ({
+      booking_id: stay.id, title: 'Cabin', conversation_id: null, guest_first_name: null, stay_moment, to: null,
+    })))
 
     // MCP returns the same projection, and each tool's output schema admits both views.
     const ajv = new Ajv({ strict: false })

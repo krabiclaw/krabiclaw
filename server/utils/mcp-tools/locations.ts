@@ -24,7 +24,7 @@ const agendaItem = { type: 'object', properties: {
   starts_at: text, ends_at: nullableText, day_key: text, timezone: text, show_time_zone: { type: 'boolean' },
   title: text, subtitle: nullableText, status: text, organization_id: text,
   location_id: nullableText, location_title: nullableText, guest_image_url: nullableText,
-  resource_image_url: nullableText, name: nullableText, party_size: { type: ['integer', 'null'] }, to: text,
+  resource_image_url: nullableText, name: nullableText, party_size: { type: ['integer', 'null'] }, to: nullableText,
 }, required: ['id', 'kind', 'conversation_id', 'booking_id', 'product_id', 'stay_channel', 'stay_moment', 'starts_at', 'ends_at', 'day_key', 'timezone', 'title', 'status', 'organization_id', 'location_id', 'party_size'] }
 const locationMutation = { ...locationMutationSummaryObject, properties: { ...locationMutationSummaryObject.properties, saved_fields: { ...locationObject, required: [], description: 'Persisted values of the fields named in changed_fields.' } }, required: [...locationMutationSummaryObject.required, 'saved_fields'] }
 const calendarMutation = { ...locationMutation, properties: { ...locationMutation.properties, affected_commitments: { type: 'array', items: agendaItem } }, required: [...locationMutation.required, 'affected_commitments'] }

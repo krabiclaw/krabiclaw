@@ -31,7 +31,17 @@ export async function loadOwnerPictures(
   if (!ids.length) return new Map()
   const includeOrganizationFallback = options.organizationFallback !== false
   const { query, params } = mediaPlacementsQuery({ organizationId, ownerType, owners: ids, includeOrganizationFallback })
-  const rows = await queryAll<{ owner_type: MediaPlacementOwnerType }>(db, query, params)
+  return ownerPicturesFromRows(organizationId, ownerType, ids, await queryAll(db, query, params), includeOrganizationFallback)
+}
+
+export function ownerPicturesFromRows(
+  organizationId: string,
+  ownerType: MediaPlacementOwnerType,
+  ids: string[],
+  results: unknown[],
+  includeOrganizationFallback = true,
+): Map<string, HeroImage | null> {
+  const rows = results as Array<{ owner_type: MediaPlacementOwnerType }>
   const ownerPlacements = groupMediaPlacements(rows.filter(row => row.owner_type === ownerType), ids)
   const organizationMedia = includeOrganizationFallback
     ? groupMediaPlacements(rows.filter(row => row.owner_type === 'organization')).get(organizationId) ?? []

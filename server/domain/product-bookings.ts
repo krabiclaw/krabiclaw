@@ -708,6 +708,7 @@ export interface BookedRecordInRange {
   conversation_id: string | null
   /** 1 when the viewer sits in the booking's guest conversation and so can open it. */
   viewer_seated: number
+  viewer_can_read_details: number
 }
 
 /**
@@ -721,7 +722,11 @@ export interface BookedRecordInRange {
  * their account shows them. Today, the Agenda, the host Calendar and the
  * bookings list read it.
  */
-export function bookedRecordsInRange(viewer: ViewerTerms, range: { from: string; to: string; pending?: boolean; cancelled?: boolean; guest?: boolean; includeAssignedStays?: boolean; includeCalendarGrants?: boolean; includePayments?: boolean }): BatchQuery {
+export function bookedRecordsInRange(viewer: ViewerTerms, range: {
+  from: string; to: string; pending?: boolean; cancelled?: boolean; guest?: boolean;
+  includeAssignedStays?: boolean; includeCalendarGrants?: boolean; includePayments?: boolean;
+  organizationId?: string; timedLocationId?: string; assignedMemberId?: string;
+}): BatchQuery {
   const wideFrom = `${addLocalDays(range.from, -1)}T00:00:00.000Z`, wideTo = `${addLocalDays(range.to, 1)}T23:59:59.999Z`
   const assigned = `(${range.includeAssignedStays ? '1' : 'b.product_session_id IS NOT NULL'}
     AND ${assignedMemberSql('c', viewer.user)}${viewer.role ? ` AND ${roleMatchesSql(viewer.role, assignedOperationsRoles)}` : ''})`
@@ -744,7 +749,7 @@ export function bookedRecordsInRange(viewer: ViewerTerms, range: { from: string;
         ${paid} AS paid_minor,
         c.assigned_member_id, (SELECT ${MEMBER_NAME_SQL} FROM member m JOIN user u ON u.id = m.userId LEFT JOIN member_scheduling ms ON ms.member_id = m.id AND ms.organization_id = m.organizationId
           WHERE m.id = c.assigned_member_id AND m.organizationId = b.organization_id) AS assigned_member_name, r.id AS conversation_id,
-        ${conversationMemberSql('r', viewer.user)} AS viewer_seated
+        ${conversationMemberSql('r', viewer.user)} AS viewer_seated, ${range.guest ? '1' : known} AS viewer_can_read_details
       FROM bookings b
       JOIN organization org ON org.id = b.organization_id
       JOIN products p ON p.organization_id = b.organization_id AND p.id = b.product_id
@@ -754,7 +759,11 @@ export function bookedRecordsInRange(viewer: ViewerTerms, range: { from: string;
       LEFT JOIN conversations r ON r.organization_id = b.organization_id AND r.booking_id = b.id AND r.kind = 'booking'
      WHERE ${whose} ${range.cancelled ? '' : "AND b.status <> 'cancelled'"}
        AND ((b.starts_at <= ? AND b.ends_at >= ?)${range.pending ? " OR (b.status = 'pending' AND b.ends_at >= ?)" : ''})
+       ${range.organizationId ? 'AND b.organization_id = ?' : ''}
+       ${range.timedLocationId ? 'AND (b.product_session_id IS NULL OR b.location_id = ?)' : ''}
+       ${range.assignedMemberId ? 'AND b.product_session_id IS NOT NULL AND c.assigned_member_id = ?' : ''}
      ORDER BY b.starts_at, b.id`,
-    params: [wideTo, wideFrom, ...(range.pending ? [wideFrom] : [])],
+    params: [wideTo, wideFrom, ...(range.pending ? [wideFrom] : []),
+      ...[range.organizationId, range.timedLocationId, range.assignedMemberId].filter(Boolean)],
   }
 }

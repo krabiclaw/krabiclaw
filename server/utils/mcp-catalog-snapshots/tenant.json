@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:fbff4bcc8585a84281b14ce2b94275ec770e51b92fddc186bbdf969e4e6232e8",
-  "documentationFingerprint": "sha256:08d286978f4efa1eb8f996790a853bd1ebb430a1aa19f5cd22672cd88ae0bdd8",
+  "fingerprint": "sha256:695a25ba83ac8d4edb98716fffa5698087ee4a0d4d1e273a7ee71849b60e81e9",
+  "documentationFingerprint": "sha256:4a785e77df7e0242b5e4e9b2c4525bfcc9408758751effdf21ee40da59233cd8",
   "tools": [
     {
       "name": "add_organization_language",
@@ -12197,7 +12197,10 @@
                   "type": "string"
                 },
                 "to": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
               "required": [
@@ -46825,7 +46828,10 @@
                   "type": "string"
                 },
                 "to": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
               "required": [
@@ -70815,7 +70821,10 @@
                   "type": "string"
                 },
                 "to": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
               "required": [
