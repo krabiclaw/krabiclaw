@@ -224,7 +224,7 @@ test('publishing a platform guide indexes its public pages and preserves another
 })
 
 test('cache invalidation drain enforces the durable work lifecycle', async (t) => {
-  const { db, kv } = await migratedCacheD1(t)
+  const { db, kv, hubs } = await migratedCacheD1(t)
   await t.test('validates its domain before taking work and purges both cache contracts', async () => {
     await insertInvalidation(db, {
       id: 'pending', status: 'pending', createdAt: '2026-01-01T00:00:00.000Z',
@@ -249,7 +249,17 @@ test('cache invalidation drain enforces the durable work lifecycle', async (t) =
 
     await kv.put('public~org~v4~page', 'public resource')
     await kv.put('html:org.krabiclaw.com:/', 'html')
-    assert.equal(await drainPublicResourceCacheInvalidations(db, kv, searchEnv, change), 1)
+    const queue = captureEvents()
+    const env = { ...searchEnv, DB: db, ORGANIZATION_CACHE: kv, GUEST_INBOX_HUBS: hubs, EVENTS: queue.binding } as CloudflareEnv
+    await queue.binding.send({ type: 'deployment.adopt_pending_work' })
+    await queue.runNext(env, 'deployment.adopt_pending_work')
+    assert.deepEqual(queue.pending.map(({ body }) => body).filter(body => body.type === 'site.cache_changed'), [
+      { type: 'site.cache_changed', organization_id: 'org', invalidation_id: null },
+    ])
+    await queue.runNext(env, 'site.cache_changed')
+    await queue.binding.send({ type: 'deployment.adopt_pending_work' })
+    await queue.runNext(env, 'deployment.adopt_pending_work')
+    assert.equal(queue.take('site.cache_changed'), undefined, 'another deploy finds the cache work processed')
     assert.equal(await kv.get('public~org~v4~page'), null)
     assert.equal(await kv.get('html:org.krabiclaw.com:/'), null)
     const processed = await db.prepare(`

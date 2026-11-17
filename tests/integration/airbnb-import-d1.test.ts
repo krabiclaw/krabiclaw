@@ -1155,6 +1155,12 @@ test('a sync request is checked against the plan once, then Blawby imports, acti
     const nextSyncs = () => queue.pending.filter(item => item.body.type === 'airbnb.sync').map(({ body, delaySeconds }) => ({ body, delaySeconds }))
     const step = { body: { type: 'airbnb.sync', organization_id: ORG, job_id: queuedId }, delaySeconds: 0 }
     assert.deepEqual(nextSyncs(), [step])
+    assert.ok(queue.take('airbnb.sync'), 'the deploy recovery has to recover the undelivered job')
+    const providerCallsBeforeRecovery = channex.seen.length
+    await queue.binding.send({ type: 'deployment.adopt_pending_work' })
+    await queue.runNext(env, 'deployment.adopt_pending_work')
+    assert.deepEqual(nextSyncs(), [step], 'deployment recovery publishes the existing job')
+    assert.equal(channex.seen.length, providerCallsBeforeRecovery)
     await queue.runNext(env, 'airbnb.sync')
     assert.deepEqual(await db.prepare('SELECT state, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), yielded)
     assert.equal(await db.prepare('SELECT import_stage FROM product_channel_mappings').first('import_stage'), 'property')
