@@ -5142,7 +5142,7 @@ test('a host selects nights across homes on the multi-calendar and edits them in
     return (await made.json() as { home: { product_id: string } }).home.product_id
   }
   const bay = await makeHome('Bay House', '1 Bay Road', 'Krabi', 1, 320_000)
-  const sea = await makeHome('Sea Loft', '9 Sea Road', 'Ao Nang', 21, 200_000)
+  const sea = await makeHome('Sea Loft', '9 Sea Road, Unit 21', 'Ao Nang', 21, 200_000)
   const stayIds: string[] = []
   for (const [checkIn, checkOut] of [[2, 4], [7, 9]] as const) {
     const made = await request.post(api('bookings'), { headers, data: { product_id: productId, check_in_date: localDay(checkIn), check_out_date: localDay(checkOut), adults: 1,
@@ -5175,6 +5175,7 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(gridPath)
   await expect(grid.locator(`[data-home="${bay}"] span`)).toHaveText(['Bay House', '1 Bay Road, Krabi'])
+  await expect(grid.locator(`[data-home="${sea}"]`).getByText('9 Sea Road, Unit 21, Ao Nang')).toBeVisible()
   // A bar leads with its channel's mark and counts adults and children as guests.
   await expect(grid.locator(`[data-stay="${stayIds[0]}"]`)).toHaveText('Grid Guest · 1 guest')
   await expect(grid.locator(`[data-stay="${stayIds[0]}"]`)).toHaveAttribute('data-channel', 'direct')
@@ -5332,6 +5333,11 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   expect(unchecked.every(entry => entry.source === null)).toBe(true)
   await expect(night(bay, 12).getByText(gridPrice(288_000), { exact: true })).toBeVisible()
   await expect(night(sea, 12).getByText(gridPrice(180_000), { exact: true })).toBeVisible()
+  await grid.getByRole('checkbox', { name: 'Include Sea Loft', exact: true }).click()
+  await expect(inspector.getByRole('button', { name: /^Nightly price for selected dates/ })).toContainText('2,880')
+  await expect(inspector.getByText(/^Default nightly price:/)).toContainText('3,200')
+  await expect(inspector.getByRole('link', { name: 'Edit default price', exact: true })).toHaveAttribute('href', `/dashboard/${slug}/products/${bay}/price`)
+  await expect(inspector.getByRole('link', { name: 'Edit internal name', exact: true })).toHaveAttribute('href', `/dashboard/${slug}/products/${bay}/internal-name`)
 
   // A gap no arrival can fill says so, as Airbnb's calendar blocker does: three free nights under a week's minimum.
   await page.goto(gridPath)

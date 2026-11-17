@@ -57,7 +57,7 @@
                 <UCheckbox v-if="selection" :model-value="selectedRow(row.id)" :aria-label="`Include ${row.name}`" :disabled="editor.busy.value" @update:model-value="includeRow(row.id, Boolean($event))" />
                 <NuxtLink :to="row.to" class="flex min-w-0 flex-col hover:underline" :data-home="row.home?.product_id" :data-place="row.place ? `${row.place.kind}:${row.place.id}` : undefined">
                   <span class="line-clamp-2 text-sm font-medium text-highlighted">{{ row.name }}</span>
-                  <span class="hidden truncate text-xs text-muted sm:block">{{ row.detail }}</span>
+                  <span class="text-xs text-muted" :class="row.home ? 'line-clamp-2 break-words' : 'hidden truncate sm:block'" :title="row.detail">{{ row.detail }}</span>
                 </NuxtLink>
               </div>
               <div class="relative grid border-b border-default" :data-row-index="rowIndex" :style="{ gridColumn: `2 / span ${dates.length}`, gridTemplateColumns: `repeat(${dates.length}, 4rem)` }">
@@ -69,7 +69,7 @@
                   :aria-selected="inSelection(rowIndex, index)"
                   :aria-label="cell.title"
                   :tabindex="cursor.row === rowIndex && cursor.day === index ? 0 : -1"
-                  class="relative flex h-16 flex-col justify-end border-r border-default px-1.5 py-1 text-left text-xs leading-4 tabular-nums sm:h-18 outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inverted"
+                  class="relative flex min-h-16 flex-col justify-end border-r border-default px-1.5 py-1 text-left text-xs leading-4 tabular-nums sm:min-h-18 outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inverted"
                   :class="[cell.open ? 'bg-default text-highlighted' : 'bg-elevated/60 text-muted', inSelection(rowIndex, index) && !chosenWeekday(cell.date) ? 'text-dimmed' : '']"
                   :style="{ gridRow: 1, gridColumn: index + 1 }"
                   :title="cell.title"
@@ -541,17 +541,21 @@ async function fixBlocker() {
   await nextTick()
   editor.edit('minimum')
 }
-const inspectorProps = computed(() => ({
-  blocker: blocker.value?.text ?? null,
-  blockerAction: blocker.value?.action ?? null,
-  ...editor.inspector.value,
-  stayTo,
-  dateLabel: selectionLabel.value,
-  selectDates: homesView,
-  scope: scopeLabel.value,
-  calendarTo: selectedRows.value.length === 1 && span.value ? selectedRows.value[0]!.home ? homeTo(selectedRows.value[0]!.home!.product_id, dates.value[span.value.start]) : placeTo(selectedRows.value[0]!.place!, dates.value[span.value.start]!) : undefined,
-  addStayTo: addStayTo.value,
-}))
+const inspectorProps = computed(() => {
+  const row = selectedRows.value.length === 1 ? selectedRows.value[0] : undefined
+  return {
+    blocker: blocker.value?.text ?? null,
+    blockerAction: blocker.value?.action ?? null,
+    ...editor.inspector.value,
+    stayTo,
+    dateLabel: selectionLabel.value,
+    selectDates: homesView,
+    scope: scopeLabel.value,
+    calendarTo: row && span.value ? row.home ? homeTo(row.home.product_id, dates.value[span.value.start]) : placeTo(row.place!, dates.value[span.value.start]!) : undefined,
+    homeEditorTo: row?.home && windowData.value?.manage ? `/dashboard/${orgSlug}/products/${encodeURIComponent(row.home.product_id)}` : undefined,
+    addStayTo: addStayTo.value,
+  }
+})
 /** One home's selected nights as a stay to record: the creation page, with the home, check-in and checkout filled in. A stay is every night in the span, so a weekday narrowing or a held night in it offers none. */
 const addStayTo = computed(() => {
   const row = selectedRows.value.length === 1 && span.value && !weekdays.value && data.value?.manage ? selectedRows.value[0]! : undefined

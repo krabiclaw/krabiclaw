@@ -309,9 +309,17 @@ const editor = useStayNightEditor({
   },
 })
 const { busy, error: writeError } = editor
-const inspectorProps = computed(() => ({ ...editor.inspector.value, stayTo, dateLabel: dateLabel.value, scope: data.value ? `${data.value.home.timezone} · ${data.value.home.currency}` : '', selectDates: true }))
+const productPath = computed(() => `/dashboard/${orgSlug}/products/${encodeURIComponent(props.productId)}`)
+const inspectorProps = computed(() => ({
+  ...editor.inspector.value,
+  stayTo,
+  dateLabel: dateLabel.value,
+  scope: data.value ? `${data.value.home.timezone} · ${data.value.home.currency}` : '',
+  selectDates: true,
+  homeEditorTo: props.manage ? productPath.value : undefined,
+}))
 const overviewGroups = computed(() => [{ id: 'home', items: [
-  { id: 'price', label: 'Pricing', summary: data.value?.home.base_price_minor == null ? 'No base nightly price set' : `${money(data.value.home.base_price_minor)} per night`, to: `/dashboard/${String(route.params.org_slug)}/products/${props.productId}/price` },
+  { id: 'price', label: 'Pricing', summary: data.value?.home.base_price_minor == null ? 'No base nightly price set' : `${money(data.value.home.base_price_minor)} per night`, to: `${productPath.value}/price` },
   { id: 'availability', label: 'Availability', summary: data.value ? `${data.value.home.min_nights} night minimum` : 'Loading availability…', to: `/dashboard/${String(route.params.org_slug)}/products/${props.productId}/availability` },
   { id: 'cancellation', label: 'Cancellations', summary: [data.value?.home.cancellation_policy ? STAY_CANCELLATION_POLICIES[data.value.home.cancellation_policy].label : 'Short-term policy not set', data.value?.home.long_term_cancellation_policy ? STAY_LONG_TERM_CANCELLATION_POLICIES[data.value.home.long_term_cancellation_policy].label : 'Long-term policy not set'].join(' · '), to: `/dashboard/${String(route.params.org_slug)}/products/${props.productId}/cancellation` },
 ] }])
