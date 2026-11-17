@@ -1,4 +1,9 @@
 import englishManifest from '../i18n/locales/en'
+import germanMessages from '../i18n/catalogs/de.json' with { type: 'json' }
+import spanishMessages from '../i18n/catalogs/es.json' with { type: 'json' }
+import frenchMessages from '../i18n/catalogs/fr.json' with { type: 'json' }
+import italianMessages from '../i18n/catalogs/it.json' with { type: 'json' }
+import koreanMessages from '../i18n/catalogs/ko.json' with { type: 'json' }
 import japaneseMessages from '../i18n/catalogs/ja.json' with { type: 'json' }
 import thaiMessages from '../i18n/catalogs/th.json' with { type: 'json' }
 import vietnameseMessages from '../i18n/catalogs/vi.json' with { type: 'json' }
@@ -14,7 +19,16 @@ export interface PlatformLocale {
 // A language is supported when its complete catalog is listed here; nothing
 // else in the application enumerates languages. The label is the language's
 // own name for itself.
-const CATALOGS: Record<string, unknown> = { ja: japaneseMessages, th: thaiMessages, vi: vietnameseMessages }
+const CATALOGS: Record<string, unknown> = {
+  de: germanMessages,
+  es: spanishMessages,
+  fr: frenchMessages,
+  it: italianMessages,
+  ja: japaneseMessages,
+  ko: koreanMessages,
+  th: thaiMessages,
+  vi: vietnameseMessages,
+}
 
 const englishMessages = Object.freeze(flattenLocaleManifest(englishManifest))
 

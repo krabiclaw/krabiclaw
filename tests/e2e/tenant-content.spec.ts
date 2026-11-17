@@ -30,6 +30,23 @@ test('unknown sites render an unbranded 404 while resolved tenant errors retain 
   expect(errors).toEqual([])
 })
 
+test('the platform publishes its localized homepage and includes its canonical URL in the sitemap', async ({ page, request, baseURL }) => {
+  const response = await page.goto('/ja/')
+  expect(response?.status()).toBe(200)
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ja')
+  await expect(page.getByRole('heading', { level: 1, name: 'ウェブサイトを数分で公開' })).toBeVisible()
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', new URL('/ja', baseURL).href)
+  await expect(page.locator('link[rel="alternate"][hreflang="en"]')).toHaveAttribute('href', new URL('/', baseURL).href)
+
+  const sitemap = await request.get('/sitemap.xml')
+  expect(sitemap.status()).toBe(200)
+  const xml = await sitemap.text()
+  expect(xml).toContain(`<loc>${new URL('/ja', baseURL).href}</loc>`)
+  expect(xml).not.toContain(`<loc>${new URL('/zz', baseURL).href}</loc>`)
+  const unknown = await request.get('/zz/')
+  expect(unknown.status()).toBe(404)
+})
+
 // Saya and Blawby pages, and a Blawby contact page edited by the platform
 // administrator while impersonating the practice's owner.
 for (const site of [
