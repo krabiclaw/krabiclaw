@@ -59,7 +59,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   const management = { sql: `CASE WHEN ${roleMatchesSql(BATCH_VIEWER.role!, workspaceManagementRoles)} THEN ${org} END` }
   const [viewerResult, recordResult, workResult, productResult, locationResult, welcomeResult, factResult, unpricedResult, assigneeResult, listingResult] = await executeBatch(db, [
     membership,
-    withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, { from, to, pending: range === 'today' })),
+    withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, { from, to, pending: range === 'today', includePayments: true })),
     withViewer(membership, openWorkQuery(BATCH_VIEWER, to)),
     withViewer(membership, mediaPlacementsQuery({ organizationId: { sql: org }, ownerType: 'product', owners: {
       sql: `SELECT product_id FROM bookings WHERE organization_id = ${org} AND status <> 'cancelled' AND ${window}
