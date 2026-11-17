@@ -60,9 +60,11 @@ intervals, not personal event titles or descriptions. Failed or stale selected
 calendar reads block new availability rather than treating unknown time as free.
 
 The CMS selects the primary personal calendar and offers **Google Calendar
-sync** (Business). The business connection creates or reuses its **KrabiClaw**
-calendar automatically. Neither flow requires a calendar picker. Bookings are
-changed in Blawby; their events follow. See
+sync** (Business). The business connection creates a **Blawby** calendar or
+reuses the existing booking calendar. If it still has the original KrabiClaw
+name and description, Blawby updates both in Google on connection or the next
+booking sync. Custom names are kept. Neither flow requires a calendar picker.
+Bookings change in Blawby and their events follow. See
 [Google Calendar](integrations/google-calendar.md) for projection and cleanup.
 
 ## Auth Model

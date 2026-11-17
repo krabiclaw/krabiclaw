@@ -1545,7 +1545,7 @@ export async function verifyStayCalendarOccupancy(db: DbClient, env: ChannexEnv,
   const mismatches = checked.filter(value => actualByDate.get(value)?.availability !== 0 || localByDate.get(value)?.available !== false)
   return {
     state: mismatches.length || unverified.length ? 'needs_attention' : 'verified', checked_dates: checked, unverified_dates: unverified, mismatches,
-    detail: mismatches.length ? 'Some occupied or blocked nights are still available in KrabiClaw or Airbnb.' : unverified.length ? `Airbnb read-back covers ${from} through ${addDays(to, -1)}. The other dates have not been verified.` : null,
+    detail: mismatches.length ? 'Some occupied or blocked nights are still available in Blawby or Airbnb.' : unverified.length ? `Airbnb read-back covers ${from} through ${addDays(to, -1)}. The other dates have not been verified.` : null,
   }
 }
 

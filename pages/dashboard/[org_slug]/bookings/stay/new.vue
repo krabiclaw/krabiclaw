@@ -32,7 +32,7 @@
         <UFormField label="Private note" name="private_notes" help="Only your team sees this."><UTextarea v-model="draft.private_notes" :maxlength="2000" class="w-full" /></UFormField>
         <USwitch v-model="draft.record_payment" label="Record a payment already received" />
         <template v-if="draft.record_payment">
-          <p class="text-sm text-muted">Record money you received outside KrabiClaw. This does not charge your guest.</p>
+          <p class="text-sm text-muted">Record money you received outside Blawby. This does not charge your guest.</p>
           <UFormField :label="`Amount received (${home.currency})`" name="payment_amount" required><UInput v-model="draft.payment_amount" inputmode="decimal" class="w-full" /></UFormField>
           <UFormField label="Method" name="payment_method" required><USelect v-model="draft.payment_method" :items="paymentMethods" placeholder="Choose a method" class="w-full" /></UFormField>
           <UFormField label="Date received" name="payment_date" required><UInput v-model="draft.payment_date" type="date" class="w-full" /></UFormField>

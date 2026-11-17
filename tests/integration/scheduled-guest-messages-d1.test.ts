@@ -106,10 +106,10 @@ test('the business outbox sends due messages, leaves future ones pending and rec
     assert.deepEqual(await db.prepare('SELECT e.conversation_id, e.author_kind, e.author_user_id, e.event_name, e.body, d.channel, d.purpose, d.status FROM messages e JOIN guest_thread_deliveries d ON d.message_id = e.id WHERE e.id = ?').bind(sent.message_id).first(), {
       conversation_id: ana.conversation_id, author_kind: 'krabiclaw', author_user_id: null, event_name: 'thread.scheduled_message', body: 'Thanks for booking the cabin.', channel: 'email', purpose: 'scheduled_message', status: 'sent',
     })
-    // Phone alone, with no email and no KrabiClaw account, is nowhere to send: the failure is recorded with its own facts.
+    // Phone alone, with no email and no Blawby account, is nowhere to send: the failure is recorded with its own facts.
     const failed = (await planned(dee.id, welcome.id))!
     assert.deepEqual([failed.status, failed.error_code, failed.error_field, failed.reason, failed.message_id, failed.sent_at],
-      ['failed', 'GUEST_UNREACHABLE', 'conversation_id', 'This guest has no email or KrabiClaw account to reply to.', null, null])
+      ['failed', 'GUEST_UNREACHABLE', 'conversation_id', 'This guest has no email or Blawby account to reply to.', null, null])
     const review = (await planned(cy.id, welcome.id))!
     assert.deepEqual([review.status, review.error_code, review.error_field, review.sent_at], ['needs_review', 'IDEMPOTENCY_CONFLICT', 'idempotencyKey', null])
     assert.ok(review.reason)

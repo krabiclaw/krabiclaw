@@ -139,7 +139,7 @@ class FakeChannex {
     const resource = (type: string, attributes: Record<string, unknown> = {}) => json({ data: { id: `${type}-${++this.ids}`, type, attributes } })
     if (method === 'POST' && path === '/groups') return json({ data: { id: 'grp-1', type: 'group', attributes: {} } })
     if (method === 'POST' && path === '/properties') {
-      if (body!.property.title === 'KrabiClaw connection setup') return json({ data: { id: 'setup-1', type: 'property', attributes: {} } })
+      if (body!.property.title === 'Blawby connection setup') return json({ data: { id: 'setup-1', type: 'property', attributes: {} } })
       const id = `prop-${++this.ids}`
       const property = { ...body!.property, id }
       this.properties.push(property)

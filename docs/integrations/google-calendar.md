@@ -2,8 +2,10 @@
 
 Google Calendar sync is a Business plan feature (`calendar_sync` in
 `server/utils/billing-entitlements.ts`). Blawby owns scheduling and capacity.
-Connect Google Calendar to create or reuse one **KrabiClaw** calendar for the
-business. All upcoming pending and confirmed Bookings and Reservations are
+Connect Google Calendar to create one **Blawby** calendar or reuse the
+existing calendar for the business. Blawby updates the original default name
+on reconnect, a manual sync request, or a booking sync. A custom name stays
+in place. All upcoming pending and confirmed Bookings and Reservations are
 included automatically. Calendar-group allocation rules govern booking
 availability, not which bookings appear in Google. Cancelled records and
 payment holds are excluded.

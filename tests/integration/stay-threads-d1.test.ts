@@ -89,7 +89,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(30), check_out_date: day(31), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 15_000 })
     assert.deepEqual(JSON.parse((await thread(dee.conversation_id))!.payload_json).guest, { name: 'Dee', email: null, phone: '+61491570151' })
     assert.deepEqual(await sendGuestThreadReply(db, { threadId: dee.conversation_id, organizationId: ORG, body: 'Hi', actorUserId: OWNER, idempotencyKey: 'dee-reply', env }),
-      { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: 'This guest has no email or KrabiClaw account to reply to.' })
+      { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: 'This guest has no email or Blawby account to reply to.' })
 
     // With neither an email nor a phone the guest still has their conversation, by name; contact added later is its contact.
     const bo = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'bo', check_in_date: day(10), check_out_date: day(12), adults: 1, guest_name: 'Bo', total_minor: 30_000 })
