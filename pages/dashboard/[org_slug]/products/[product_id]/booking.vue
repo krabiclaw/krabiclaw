@@ -38,7 +38,7 @@ const groups = computed<EditorNavigationGroup[]>(() => {
     row('capacity', legal.value ? 'Client limit' : 'Guest limit', config.default_capacity === null ? `No ${copy.guestLabel} limit` : config.default_capacity === 1 ? `One ${copy.guestLabel} per ${occurrence}` : config.default_capacity === 0 ? `Closed to new ${copy.guestsLabelPlural}` : `Up to ${config.default_capacity} ${copy.guestsLabelPlural} per ${occurrence}`),
     row('party', 'Party size', config.party_size_min === null && config.party_size_max === null ? 'Any party the times have room for'
       : config.party_size_max === null ? `${config.party_size_min} or more` : `${config.party_size_min ?? 1} to ${config.party_size_max}`, 'i-lucide-users'),
-    row('guest-terms', 'Guest requirements', [config.minimum_guest_age ? `Ages ${config.minimum_guest_age}+` : null, config.accessibility_contact_required ? 'Access support by contact' : null].filter(Boolean).join(' · ') || 'None', 'i-lucide-shield-check'),
+    row('guest-terms', legal.value ? 'Client requirements' : 'Guest requirements', [config.minimum_guest_age ? `Ages ${config.minimum_guest_age}+` : null, config.accessibility_contact_required ? 'Access support by contact' : null].filter(Boolean).join(' · ') || 'None', 'i-lucide-shield-check'),
     ...(p.managesCatalog.value ? [row('assignment', copy.assigneeLabel, p.assignmentSummary.value, 'i-lucide-user-round')] : []),
     row('confirmation', 'Confirmation', config.confirmation_mode === 'instant' ? 'Confirm automatically' : 'Review each request'),
     row('notice', 'Advance notice', noticeSummary(config.advance_notice_minutes), 'i-lucide-alarm-clock'),
