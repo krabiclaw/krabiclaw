@@ -4,7 +4,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import { H3Event } from 'h3'
 import * as schema from '../../server/db/schema.ts'
-import { guestThreadMessagingContext, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
+import { guestThreadMessagingContext, listMessageOfferings, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { sendDueOutbox } from '../../server/domain/scheduled-guest-messages.ts'
 import { createProductBooking, quoteTimedBooking } from '../../server/domain/product-bookings.ts'
@@ -91,6 +91,10 @@ test('consultations, classes and table bookings are sent their automatic message
     const tables = await createTables(db, env, { organizationId: bistro.organizationId, locationId: 'bistro-place', actorId: OWNER, memberId: `${bistro.organizationId}-owner`, name: 'Bistro tables',
       durationMinutes: 120, seats: 10, open: '17:00', lastSeating: '21:00' })
 
+    // The editor offers each business exactly its own bookable offerings.
+    assert.deepEqual((await listMessageOfferings(db, law)).offerings.map(offering => offering.id), [consultation])
+    assert.deepEqual((await listMessageOfferings(db, studio)).offerings.map(offering => offering.id), [wheel])
+    assert.deepEqual((await listMessageOfferings(db, bistro)).offerings.map(offering => offering.id), [tables.id])
     // Saved before anything is booked: what each business sends, in its own words.
     const received = await saveMessageTemplate(db, env, law, null, { title: 'Request received', body: 'We have your consultation request.',
       schedule: { trigger: 'booking_received', delay_minutes: 5, product_ids: [consultation] } })

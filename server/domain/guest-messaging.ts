@@ -100,7 +100,7 @@ export async function listMessageOfferings(db: DbClient, access: StayAccess) {
       JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       LEFT JOIN product_stay_configs home ON home.organization_id = c.organization_id AND home.product_id = c.product_id
       LEFT JOIN business_locations l ON l.organization_id = home.organization_id AND l.id = home.location_id WHERE c.organization_id = ?
-    ORDER BY name, id`, [access.organizationId])
+    ORDER BY name, p.id`, [access.organizationId])
   for (const offering of offerings) {
     if (!offering.name?.trim()) messagingError(500, 'INVALID_MESSAGE_OFFERING', `Offering ${offering.id} has no name`, 'offerings')
     if (!['stay', 'experience', 'service', 'table'].includes(offering.kind)) messagingError(500, 'INVALID_MESSAGE_OFFERING', `Offering ${offering.id} is a ${offering.kind}, which takes no bookings`, 'offerings')
