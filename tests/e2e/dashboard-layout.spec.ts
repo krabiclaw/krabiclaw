@@ -6,6 +6,7 @@ import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { isAccountActivityResponse, isBuyerPaymentEntry, type BuyerPaymentEntry } from '../../shared/account-activity'
 import { paymentMoney } from '../../shared/payment-display'
+import { isEarningsPerformance } from '../../shared/earnings-display'
 import { isAccountNightBooking, isBookingDetailsResponse } from '../../composables/useDashboardBooking'
 import type { DashboardArticleCategory } from '../../composables/useArticleCategories'
 import type { NotificationPreferenceMap } from '../../composables/useNotificationPreferences'
@@ -1713,6 +1714,33 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page).toHaveURL(`${services}/products`)
     await expect(mobileNav.getByRole('link', { name: 'Catalog', exact: true })).toHaveAttribute('aria-current', 'page')
     await expect(page.locator('#dashboard-panel-catalog [data-testid="dashboard-navbar-back"]')).toHaveCount(0)
+  })
+
+  test('earnings performance explains when the requested month is missing', async ({ page }) => {
+    const selectedMonth = '2025-01'
+    await open(page, `${ORG}/earnings/performance?month=2026-01`)
+    await expect(page.getByRole('heading', { name: 'January 2026', exact: true }).first()).toBeVisible()
+
+    const requests: Array<{ year: string | null; month: string | null }> = []
+    page.on('request', (request) => {
+      const { pathname, searchParams } = new URL(request.url())
+      if (pathname === '/api/dashboard/payments' && searchParams.get('view') === 'performance') {
+        requests.push({ year: searchParams.get('year'), month: searchParams.get('month') })
+      }
+    })
+    await page.route(url => url.pathname === '/api/dashboard/payments' && url.searchParams.get('month') === selectedMonth, async (route) => {
+      const response = await route.fetch()
+      const performance: unknown = await response.json()
+      expect(response.status()).toBe(200)
+      if (!isEarningsPerformance(performance)) throw new Error('Expected a valid earnings performance response')
+      expect(performance.months.some(row => row.month === selectedMonth)).toBe(true)
+      const months = performance.months.map(row => row.month === selectedMonth ? { ...row, month: '2024-01' } : row)
+      await route.fulfill({ response, json: { ...performance, months } })
+    })
+    await page.getByRole('button', { name: 'Previous year' }).click()
+    await expect(page.getByText('Performance could not be loaded', { exact: true })).toBeVisible()
+    await expect(page.getByText(`Earnings are missing for ${selectedMonth}`, { exact: true })).toBeVisible()
+    expect(requests).toEqual([{ year: '2025', month: selectedMonth }])
   })
 
   test('personal navigation keeps owned activity and Notifications in its own context', async ({ page, baseURL }) => {

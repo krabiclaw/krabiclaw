@@ -8,6 +8,7 @@ import { BASIC_HOMES, BUSINESS_PLAN_ID, homePrice, nextHomePrice, PAYMENTS_FEE, 
 import { PRICING_COMPARISON, comparisonValue } from '~/shared/pricing-comparison'
 import { getPublishedTenantPage } from '~/server/utils/content/pages'
 import { renderContentBlocksForLlm, resolvePublicOrigin } from '~/server/utils/platform-llm'
+import { PLATFORM_CONTACT_EMAIL } from '~/utils/site-routing'
 
 export function renderPlansMarkdown(plans: Plan[], origin: string): string {
   const betaSpotsLeft = plans.find(plan => plan.beta_spots_left !== undefined)?.beta_spots_left ?? 0
@@ -68,7 +69,7 @@ export function renderPlansMarkdown(plans: Plan[], origin: string): string {
   }
   lines.push('')
   lines.push('---')
-  lines.push(`For questions, documentation, or custom enterprise requirements, visit ${origin}/docs or contact hello@krabiclaw.com.`)
+  lines.push(`For questions, documentation, or custom enterprise requirements, visit ${origin}/docs or contact ${PLATFORM_CONTACT_EMAIL}.`)
   lines.push('')
 
   return lines.join('\n')
