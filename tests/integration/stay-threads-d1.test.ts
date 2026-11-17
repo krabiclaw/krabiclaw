@@ -3,7 +3,7 @@ import test from 'node:test'
 import { Miniflare } from 'miniflare'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { acceptConversationGuestInvite, createConversationGuestInvite, removeConversationGuest, setListingMessagingAccess } from '../../server/domain/conversation-participants.ts'
+import { acceptConversationGuestInvite, createConversationGuestInvite, removeConversationGuest, setListingAccess } from '../../server/domain/conversation-participants.ts'
 import { readGuestConversation, resolveConversationAccess  } from '../../server/domain/conversations.ts'
 import { createStay, updateStay, type StayAccess } from '../../server/domain/stays.ts'
 import { getConversationDetails } from '../../server/domain/guest-threads/inbox.ts'
@@ -154,14 +154,14 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     const host = principal(OWNER, 'owner')
     const cohost = principal(CLEANER, 'member')
     const grant = { listingId: cabin.id, memberId: `m-${CLEANER}` }
-    await assert.rejects(setListingMessagingAccess(db, env, cohost, { ...grant, allowed: true }), { statusCode: 403 })
-    await setListingMessagingAccess(db, env, host, { ...grant, allowed: true })
+    await assert.rejects(setListingAccess(db, env, cohost, { ...grant, access: 'messaging' }), { statusCode: 403 })
+    await setListingAccess(db, env, host, { ...grant, access: 'messaging' })
     assert.deepEqual((await listConversations(db, ORG, { userId: CLEANER })).map(row => row.id).sort(), stays.sort())
     const newReservation = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cohost-future', check_in_date: day(51), check_out_date: day(52), adults: 1,
       guest_name: 'Leah', guest_email: 'leah@example.test', total_minor: 15_000 })
     assert.deepEqual(await db.prepare(`SELECT role, host_listing_id FROM conversation_participants WHERE conversation_id = ? AND user_id = ?`).bind(newReservation.conversation_id, CLEANER).first(),
       { role: 'member', host_listing_id: cabin.id })
-    await setListingMessagingAccess(db, env, host, { ...grant, allowed: false })
+    await setListingAccess(db, env, host, { ...grant, access: null })
     assert.deepEqual((await listConversations(db, ORG, { userId: CLEANER })).map(row => row.id).sort(), [...stays, newReservation.conversation_id].sort(), 'revoking the separate grant leaves the active assignment, which covers every stay at the home')
     assert.deepEqual(await db.prepare('SELECT role, host_listing_id FROM conversation_participants WHERE conversation_id = ? AND user_id = ?').bind(newReservation.conversation_id, CLEANER).first(),
       { role: null, host_listing_id: null })

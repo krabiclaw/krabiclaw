@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "718f174c-7c7f-4712-9bc6-ee827d385ee7",
+  "id": "04486f2a-9f16-4530-899e-437e56d4937e",
   "prevId": "bff0c586-3b4b-449f-aca2-65e751ac02e1",
   "tables": {
     "account": {
@@ -2509,13 +2509,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "disconnect_error": {
-          "name": "disconnect_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -4963,6 +4956,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "listing_access": {
+          "name": "listing_access",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -5118,6 +5118,14 @@
           "notNull": true,
           "autoincrement": false
         },
+        "access": {
+          "name": "access",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'messaging'"
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -5141,14 +5149,14 @@
         "listing_message_members_listing_fk": {
           "name": "listing_message_members_listing_fk",
           "tableFrom": "listing_message_members",
-          "tableTo": "product_stay_configs",
+          "tableTo": "products",
           "columnsFrom": [
             "organization_id",
             "listing_id"
           ],
           "columnsTo": [
             "organization_id",
-            "product_id"
+            "id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -15459,6 +15467,13 @@
         },
         "assigned_member_id": {
           "name": "assigned_member_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "claim_role": {
+          "name": "claim_role",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

@@ -25,9 +25,14 @@ test('the email link returns through normal sign-in and only the invited account
     await expect(team.getByRole('heading', { name: 'Pending invitations', exact: true })).toBeVisible()
     await team.getByRole('link', { name: 'Invite a team member' }).click()
     await team.getByLabel('Email address').fill(invitee.email)
-    await team.getByRole('combobox', { name: 'Role', exact: true }).click()
-    await expect(team.getByRole('option')).toHaveText(['Member', 'Admin', 'Owner'])
-    await team.getByRole('option', { name: 'Member', exact: true }).click()
+    await expect(team.getByRole('radio', { name: /^General Staff/ })).toBeChecked()
+    await expect(team.getByRole('radio', { name: /^Restaurant Manager/ })).toBeVisible()
+    await expect(team.getByRole('radio', { name: /^Cleaner/ })).toHaveCount(0)
+    await team.getByRole('radio', { name: /^Kitchen/ }).check()
+    const table = Object.values(restaurant.products).find(product => product.kind === 'table')
+    if (!table) throw new Error('No restaurant table in the fixture')
+    await team.getByRole('combobox', { name: table.name, exact: true }).click()
+    await team.getByRole('option', { name: 'Tasks', exact: true }).click()
     await team.getByRole('button', { name: 'Send invite', exact: true }).click()
     const pending = team.getByRole('listitem').filter({ hasText: invitee.email })
     await expect(pending).toContainText('Email: recorded locally')
@@ -36,7 +41,7 @@ test('the email link returns through normal sign-in and only the invited account
     const list = await request.get('/api/auth/organization/list-invitations', { params: { organizationId: restaurant.organizationId } })
     expect(list.status()).toBe(200)
     const sent = (await list.json() as Array<{ email: string; id: string; status: string; role: string }>).find(invitation => invitation.email === invitee.email)
-    expect(sent).toMatchObject({ status: 'pending', role: 'member' })
+    expect(sent).toMatchObject({ status: 'pending', role: 'kitchen' })
     if (!sent) throw new Error('Better Auth did not return the invitation sent by Team')
     invitationId = sent.id
     const teamRefresh = team.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/members')
@@ -83,7 +88,7 @@ test('the email link returns through normal sign-in and only the invited account
   const organizations = await page.request.get('/api/account/organizations')
   expect(organizations.status()).toBe(200)
   expect(await organizations.json()).toMatchObject({ organizations: expect.arrayContaining([
-    expect.objectContaining({ id: restaurant.organizationId, role: 'member' }),
+    expect.objectContaining({ id: restaurant.organizationId, role: 'kitchen' }),
   ]) })
   const team = await page.request.get('/api/dashboard/members', { params: { org: restaurant.slug } })
   expect(team.status()).toBe(200)

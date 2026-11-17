@@ -10,7 +10,7 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import type { DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { requestInsertQueries } from '../../server/domain/requests.ts'
 import { appendMessage } from '../../server/domain/conversations.ts'
-import { setListingMessagingAccess } from '../../server/domain/conversation-participants.ts'
+import { setListingAccess } from '../../server/domain/conversation-participants.ts'
 import { applyResendEmailEvent, createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { sendGuestThreadReply, operationDedupeKey } from '../../server/domain/guest-threads/operations.ts'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
@@ -128,7 +128,7 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     // Send later: the owner schedules a reply in Ana's conversation; only the owner sees it.
     const owner = memberAccessPrincipal((await resolveMembership(env, { organizationId: ORG, userId: OWNER }))!, { env })
     const admin = memberAccessPrincipal((await resolveMembership(env, { organizationId: ORG, userId: ADMIN }))!, { env })
-    await setListingMessagingAccess(db, env, owner, { listingId: cabin.id, memberId: admin.memberId, allowed: true })
+    await setListingAccess(db, env, owner, { listingId: cabin.id, memberId: admin.memberId, access: 'messaging' })
     const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName(ORG))
     const publications = async () => await (await hub.fetch('https://hub/observed')).json() as DashboardInvalidation[]
     await assert.rejects(scheduleGuestReply(db, owner, ana.conversation_id!, { body: 'Too late', due_at: minutes(-1) }), { data: { code: 'SEND_LATER_IN_PAST', field: 'due_at' } })

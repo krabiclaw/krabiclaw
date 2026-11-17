@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:90f006e23244dd6d1ef42153bd82798e9f181794c9ccdfb2d5b3eb4986467926",
-  "documentationFingerprint": "sha256:05f7e91dfc7531a147caca282b79b5f7fd1f6cc5531d9aee8ae6d40a0564e336",
+  "fingerprint": "sha256:c13f61421f83f0ba24bc57080378b8b7ba49e7e40e5c7a623b0f78d9c3e27ccd",
+  "documentationFingerprint": "sha256:f5e198c8200dd4f82b27c5ad7a114c43eeda7a282e7d591c0d2708be4d13db6b",
   "tools": [
     {
       "name": "add_organization_language",
@@ -29038,7 +29038,7 @@
         }
       ],
       "domain": "bookings",
-      "minimumRole": "admin",
+      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -37079,6 +37079,10 @@
               "null"
             ]
           },
+          "claim_role": {
+            "description": "Offer custom work to this role on the selected product_id.",
+            "type": "string"
+          },
           "due_at": {
             "description": "An instant with Z or a numeric offset.",
             "format": "date-time",
@@ -37424,7 +37428,7 @@
         }
       ],
       "domain": "tasks",
-      "minimumRole": "admin",
+      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -64772,7 +64776,15 @@
             "enum": [
               "member",
               "owner",
-              "admin"
+              "admin",
+              "property_manager",
+              "cleaner",
+              "maintenance",
+              "restaurant_manager",
+              "kitchen",
+              "host",
+              "attorney",
+              "paralegal"
             ],
             "type": "string"
           }
@@ -110181,7 +110193,15 @@
             "enum": [
               "member",
               "owner",
-              "admin"
+              "admin",
+              "property_manager",
+              "cleaner",
+              "maintenance",
+              "restaurant_manager",
+              "kitchen",
+              "host",
+              "attorney",
+              "paralegal"
             ],
             "type": "string"
           }
@@ -125029,6 +125049,10 @@
               "null"
             ]
           },
+          "claim": {
+            "description": "Claim available work as yourself. Send only task_id and version with this action.",
+            "type": "boolean"
+          },
           "due_at": {
             "format": "date-time",
             "type": [
@@ -125376,7 +125400,7 @@
         }
       ],
       "domain": "tasks",
-      "minimumRole": "admin",
+      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
