@@ -72,6 +72,7 @@ const RATE_WINDOW_MS = 60_000
 const CALLS_PER_WINDOW = 10
 /** A night changed while a delivery had it in flight: that delivery sent the old value, so the night stays pending for the next. */
 const CHANGED_DURING_DELIVERY = 'This change was saved while a delivery was under way; the next delivery sends it'
+const DEFAULTS_PENDING = 'Channex rate plan defaults are pending.'
 
 export interface ChannexMapping { property_id: string; room_type_id: string; rate_plan_id: string }
 type Mapping = ChannexMapping
@@ -93,7 +94,9 @@ interface OutboxRow { date: string; state: 'pending' | 'pushed' | 'needs_review'
 type Outcome = { state: 'pending' | 'needs_review'; detail: string }
 
 /** Reads a home's nights over [from, to) as they are now. */
-type AriHome = Pick<StayHome, 'product_id' | 'timezone' | 'currency'>
+type AriHome = Pick<StayHome, 'product_id' | 'timezone' | 'currency' | 'min_nights' | 'calendar_rules' | 'base_price_minor'>
+type NightDelivery = { next: number | null; failure?: HTTPError }
+export type NightQueue = 'dates' | 'defaults' | 'saved'
 
 export type StayNightReader = (from: string, to: string) => Promise<StayNight[]>
 
@@ -101,8 +104,8 @@ function rate(minor: number, currency: CurrencyCode): string {
   return (minor / 10 ** currencyFractionDigits(currency)).toFixed(currencyFractionDigits(currency))
 }
 
-function today(timezone: string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+function today(timezone: string, now = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now)
 }
 
 function nextDay(date: string): string {
@@ -220,7 +223,7 @@ export function calendarMinimumDefaults(home: Pick<StayHome, 'min_nights' | 'cal
 }
 
 /** The mapped rate plan's defaults govern each new date Channex adds to its rolling calendar. */
-export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping?: ChannexMapping): Promise<void> {
+export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organizationId: string, home: AriHome, mapping?: ChannexMapping): Promise<void> {
   try {
     const target = mapping ?? await connectedMapping(db, env, organizationId, home.product_id)
     if (!target) return
@@ -238,7 +241,9 @@ export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organ
       if (channel.id !== channelId || channel.attributes.channel !== 'AirBNB') throw new ChannexDataError('Channex returned a different Airbnb channel for this home')
       if (!Array.isArray(channel.attributes.rate_plans)) throw new ChannexDataError('The Airbnb channel has no listing mappings')
       const mapped = channel.attributes.rate_plans.map(value => object(value, 'Mapping')).some(value => value.rate_plan_id === target.rate_plan_id && object(value.settings, 'Mapping settings').listing_id === linked.listing_id)
-      if (linked.enabled === 1 && ['reservations', 'messages', 'complete'].includes(linked.import_stage) && !mapped) throw new ChannexDataError('Channex has no Airbnb mapping for this connected home')
+      if (linked.enabled === 1 && ['reservations', 'messages', 'complete'].includes(linked.import_stage) && !mapped) {
+        throw new ChannexError('Channex has no Airbnb mapping for this connected home', 404, { code: 'CHANNEL_MAPPING_NOT_FOUND', field: 'rate_plan_id' })
+      }
       const channelSettings = object(channel.attributes.settings, 'channel.settings')
       if (channelSettings.min_stay_type !== 'Arrival') await channexRequest(env, channelPath, 'PUT', { channel: { channel: 'AirBNB', settings: { ...channelSettings, min_stay_type: 'Arrival' } } })
     }
@@ -294,10 +299,10 @@ export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organ
  * take past dates. The outcome is these nights' state after delivery: pending
  * while Channex's rate limit or an unconfirmed call holds them.
  */
-export async function pushStayNights(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, organizationId: string, home: AriHome, dates: readonly string[], read: StayNightReader): Promise<ChannelPush | null> {
+export async function pushStayNights(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, organizationId: string, home: AriHome, dates: readonly string[], read: StayNightReader, queue: NightQueue = 'dates'): Promise<ChannelPush | null> {
   const mapping = await connectedMapping(db, env, organizationId, home.product_id)
   if (!mapping) return null
-  return queueAndDeliver(db, env, organizationId, home, mapping, dates, read)
+  return queueAndDeliver(db, env, organizationId, home, mapping, dates, read, queue)
 }
 
 /**
@@ -309,7 +314,7 @@ export async function pushStayNights(db: DbClient, env: ChannexEnv & GuestInboxP
  */
 export async function pushStayCalendar(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, organizationId: string, home: AriHome, mapping: ChannexMapping, read: StayNightReader): Promise<ChannelPush> {
   const from = today(home.timezone)
-  const outcome = await queueAndDeliver(db, env, organizationId, home, mapping, Array.from({ length: STAY_CALENDAR_DAYS }, (_, offset) => addDays(from, offset)), read)
+  const outcome = await queueAndDeliver(db, env, organizationId, home, mapping, calendarDates(from), read)
   if (!outcome) throw new Error(`The calendar of ${home.product_id} has no night from ${from} to send`)
   return outcome
 }
@@ -323,27 +328,50 @@ function addDays(date: string, count: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + count * 86_400_000).toISOString().slice(0, 10)
 }
 
+function calendarDates(from: string): string[] {
+  return Array.from({ length: STAY_CALENDAR_DAYS }, (_, offset) => addDays(from, offset))
+}
+
 export function pendingChannelNightsQuery(
-  organizationId: string, productId: string, dates: readonly string[], updatedAt: string, guard?: BatchQuery,
+  organizationId: string, productId: string, dates: readonly string[] | BatchQuery, updatedAt: string, guard?: BatchQuery, detail: string | null = null,
 ): BatchQuery {
+  const source = 'query' in dates ? dates : { query: 'SELECT value AS date FROM json_each(?)', params: [JSON.stringify(dates)] }
   // Move the revision even if the night is pending, so an older delivery cannot clear it.
   return {
     query: `INSERT INTO channel_night_pushes (organization_id, product_id, provider, date, state, detail, updated_at)
-      SELECT ?, ?, 'channex', value, 'pending', NULL, ? FROM json_each(?) WHERE ${guard?.query ?? 'true'}
-      ON CONFLICT (product_id, provider, date) DO UPDATE SET state = 'pending', updated_at = excluded.updated_at,
-        detail = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.detail ELSE NULL END`,
-    params: [organizationId, productId, updatedAt, JSON.stringify(dates), ...(guard?.params ?? [])],
+      SELECT ?, ?, 'channex', dates.date, 'pending', ?, ? FROM (${source.query}) dates WHERE ${guard?.query ?? 'true'}
+      ON CONFLICT (product_id, provider, date) DO UPDATE SET state = 'pending',
+        updated_at = CASE WHEN excluded.updated_at > channel_night_pushes.updated_at THEN excluded.updated_at
+          ELSE strftime('%Y-%m-%dT%H:%M:%fZ', channel_night_pushes.updated_at, '+0.001 seconds') END,
+        detail = COALESCE(excluded.detail, CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.detail END)`,
+    params: [organizationId, productId, detail, updatedAt, ...(source.params ?? []), ...(guard?.params ?? [])],
   }
 }
 
-async function queueAndDeliver(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, organizationId: string, home: AriHome, mapping: Mapping, dates: readonly string[], read: StayNightReader): Promise<ChannelPush | null> {
+/** Put the delivery in the save's own batch and schedule recovery if immediate delivery did not finish. */
+export function pendingConnectedChannelNightsQuery(organizationId: string, productId: string, dates: readonly string[] | BatchQuery, updatedAt: string, detail: string | null = null): BatchQuery {
+  const pending = pendingChannelNightsQuery(organizationId, productId, dates, updatedAt, {
+    query: "EXISTS (SELECT 1 FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = 1)",
+    params: [organizationId, productId],
+  }, detail)
+  return { ...pending, event: { type: 'business.wake', organization_id: organizationId, kind: 'channex_ari', due_at: Date.parse(updatedAt) + RATE_WINDOW_MS } }
+}
+
+export function pendingConnectedChannelCalendarQuery(organizationId: string, productId: string, timezone: string, updatedAt: string): BatchQuery {
+  return pendingConnectedChannelNightsQuery(organizationId, productId, calendarDates(today(timezone, new Date(updatedAt))), updatedAt, DEFAULTS_PENDING)
+}
+
+async function queueAndDeliver(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, organizationId: string, home: AriHome, mapping: Mapping, dates: readonly string[], read: StayNightReader, queue: NightQueue = 'dates'): Promise<ChannelPush | null> {
   const from = today(home.timezone)
   const queued = [...new Set(dates.filter(date => date >= from))].sort()
   if (!queued.length) return null
-  const pending = pendingChannelNightsQuery(organizationId, home.product_id, queued, new Date().toISOString())
-  await execute(db, pending.query, pending.params)
-  const next = await deliver(db, env, organizationId, home, mapping, read)
+  if (queue !== 'saved') {
+    const pending = pendingChannelNightsQuery(organizationId, home.product_id, queued, new Date().toISOString(), undefined, queue === 'defaults' ? DEFAULTS_PENDING : null)
+    await execute(db, pending.query, pending.params)
+  }
+  const { next, failure } = await deliver(db, env, organizationId, home, mapping, read)
   if (next !== null) await scheduleBusinessWake(env, organizationId, 'channex_ari', next)
+  if (failure) throw failure
   const rows = await queryAll<{ state: OutboxRow['state']; detail: string | null }>(db, `SELECT state, detail FROM channel_night_pushes
     WHERE product_id = ? AND provider = 'channex' AND date IN (SELECT value FROM json_each(?)) ORDER BY state = 'needs_review' DESC, state = 'pending' DESC, date`,
   [home.product_id, JSON.stringify(queued)])
@@ -353,9 +381,14 @@ async function queueAndDeliver(db: DbClient, env: ChannexEnv & GuestInboxPublica
 }
 
 /** Deliver one home's pending nights now. A home with no enabled mapping has nothing to deliver. */
-export async function deliverStayNights(db: DbClient, env: ChannexEnv, organizationId: string, home: AriHome, read: StayNightReader): Promise<number | null> {
+export async function deliverStayNights(db: DbClient, env: ChannexEnv, organizationId: string, home: AriHome, read: StayNightReader, newDates: readonly string[]): Promise<number | null> {
   const mapping = await connectedMapping(db, env, organizationId, home.product_id)
-  return mapping ? deliver(db, env, organizationId, home, mapping, read) : null
+  if (!mapping) return null
+  if (newDates.length) {
+    const pending = pendingChannelNightsQuery(organizationId, home.product_id, newDates, new Date().toISOString())
+    await execute(db, pending.query, pending.params)
+  }
+  return (await deliver(db, env, organizationId, home, mapping, read)).next
 }
 
 /**
@@ -364,14 +397,36 @@ export async function deliverStayNights(db: DbClient, env: ChannexEnv, organizat
  * A night changed again since this delivery read it stays pending for the
  * next; two deliveries of the same home send the same absolute values.
  */
-async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, home: AriHome, mapping: Mapping, read: StayNightReader): Promise<number | null> {
+async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, home: AriHome, mapping: Mapping, read: StayNightReader): Promise<NightDelivery> {
   const due = await queryAll<OutboxRow>(db, `SELECT date, state, detail, sent_json, updated_at FROM channel_night_pushes
     WHERE product_id = ? AND provider = 'channex' AND state = 'pending' ORDER BY date`, [home.product_id])
-  if (!due.length) return null
-  const outcomes = new Map<string, Outcome>()
+  if (!due.length) return { next: null }
   const from = today(home.timezone)
-  for (const row of due) if (row.date < from) outcomes.set(row.date, { state: 'needs_review', detail: `${row.date} passed before Channex confirmed it; Channex does not take past dates` })
   const current = due.filter(row => row.date >= from)
+  const defaults = current.filter(row => row.detail?.startsWith(DEFAULTS_PENDING))
+  let defaultsFailure: { error: ChannexError; retryAt: number } | null = null
+  if (defaults.length) {
+    try {
+      await configureStayCalendar(db, env, organizationId, home, mapping)
+    } catch (cause) {
+      if (!(cause instanceof ChannexError) && !(cause instanceof HTTPError && cause.data?.code === 'PRICE_REQUIRED')) throw cause
+      const retry = cause instanceof ChannexError && (cause.providerStatus === 429 || cause.providerStatus >= 500)
+      if (retry && cause.data.code === 'CHANNEX_REQUEST_FAILED') {
+        // A temporary settings outage cannot stop booking occupancy from reaching the mapped room.
+        defaultsFailure = { error: cause, retryAt: Date.now() + RATE_WINDOW_MS }
+      } else {
+        await execute(db, `UPDATE channel_night_pushes SET state = ?, detail = ?
+          FROM json_each(?) WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND state = 'pending'
+            AND date = json_extract(value, '$.date') AND updated_at = json_extract(value, '$.updated_at')`,
+        [retry ? 'pending' : 'needs_review', retry ? `${DEFAULTS_PENDING} ${cause.message}` : cause.message,
+          JSON.stringify(due.map(({ date, updated_at }) => ({ date, updated_at }))), organizationId, home.product_id])
+        return { next: retry ? Date.now() + RATE_WINDOW_MS : null, failure: cause }
+      }
+    }
+    if (!defaultsFailure) for (const row of defaults) row.detail = null
+  }
+  const outcomes = new Map<string, Outcome>()
+  for (const row of due) if (row.date < from) outcomes.set(row.date, { state: 'needs_review', detail: `${row.date} passed before Channex confirmed it; Channex does not take past dates` })
   const nights = current.length ? new Map((await read(current[0]!.date, nextDay(current.at(-1)!.date))).map(night => [night.date, night])) : new Map<string, StayNight>()
 
   const sent = new Map(current.map(row => [row.date, sentValues(row)]))
@@ -391,7 +446,7 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
     WHERE provider = 'channex' AND direction = 'outbound' AND external_id = ? AND created_at > ? GROUP BY kind`,
   [mapping.property_id, new Date(Date.now() - RATE_WINDOW_MS).toISOString()])
   const confirmed = new Map(current.map(row => [row.date, { ...sent.get(row.date)! }]))
-  let next = Infinity
+  let next = defaultsFailure?.retryAt ?? Infinity
   // A night still to be sent stays pending, even with a part Channex refused: its next delivery sends what differs again.
   const wait = (rows: ReadonlyArray<{ row: OutboxRow }>, at: number, detail?: string) => {
     next = Math.min(next, at)
@@ -410,7 +465,7 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
     (change: typeof changes[number]) => { confirmed.get(change.row.date)!.availability = change.values.availability }],
   ] as const
   for (const [kind, batch, send, take] of requests) {
-    if (!batch.length) continue
+    if (!batch.length || (defaultsFailure && kind === 'restrictions')) continue
     const window = recent.find(entry => entry.kind === kind)
     if (window) {
       const rateLimit = window.calls >= CALLS_PER_WINDOW ? Date.parse(window.first) + RATE_WINDOW_MS : 0
@@ -446,23 +501,36 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
     }
   }
 
-  await execute(db, `UPDATE channel_night_pushes SET sent_json = json_extract(value, '$[1]')
+  if (defaultsFailure) {
+    for (const row of current) {
+      const availabilityDetail = outcomes.get(row.date)?.detail
+      const detail = `${DEFAULTS_PENDING} ${defaultsFailure.error.message}`
+      outcomes.set(row.date, { state: 'pending', detail: availabilityDetail && !availabilityDetail.startsWith(DEFAULTS_PENDING) ? `${detail} ${availabilityDetail}` : detail })
+    }
+  }
+
+  // A night changed since this delivery read it may have had its availability changed by Channex itself
+  // (a channel booking): the availability this delivery read is not recorded as confirmed, so the next one sends it.
+  const readAt = new Map(current.map(row => [row.date, row.updated_at]))
+  await execute(db, `UPDATE channel_night_pushes SET sent_json = CASE WHEN channel_night_pushes.updated_at = json_extract(value, '$[2]')
+      THEN json_extract(value, '$[1]') ELSE json_remove(json_extract(value, '$[1]'), '$.availability') END
     FROM json_each(?) WHERE product_id = ? AND provider = 'channex' AND date = json_extract(value, '$[0]')`,
-  [JSON.stringify([...confirmed].map(([date, values]) => [date, JSON.stringify(values)])), home.product_id])
+  [JSON.stringify([...confirmed].map(([date, values]) => [date, JSON.stringify(values), readAt.get(date)])), home.product_id])
   // What Channex last received is kept whatever the night's state. A night changed since this delivery read it was sent
   // its old value, so it stays pending with that reason and the next delivery sends what differs.
   const finalized = await queryAll<{ date: string; state: OutboxRow['state'] }>(db, `UPDATE channel_night_pushes SET
       state = CASE WHEN channel_night_pushes.updated_at = json_extract(value, '$.updated_at') THEN json_extract(value, '$.state') ELSE 'pending' END,
-      detail = CASE WHEN channel_night_pushes.updated_at = json_extract(value, '$.updated_at') THEN json_extract(value, '$.detail') ELSE ? END,
+      detail = CASE WHEN channel_night_pushes.updated_at = json_extract(value, '$.updated_at') THEN json_extract(value, '$.detail')
+        WHEN instr(channel_night_pushes.detail, ?) = 1 THEN channel_night_pushes.detail ELSE ? END,
       updated_at = ?
     FROM json_each(?) WHERE product_id = ? AND provider = 'channex' AND date = json_extract(value, '$.date')
     RETURNING date, state`,
-  [CHANGED_DURING_DELIVERY, new Date().toISOString(), JSON.stringify(due.map((row) => {
+  [DEFAULTS_PENDING, CHANGED_DURING_DELIVERY, new Date().toISOString(), JSON.stringify(due.map((row) => {
     const outcome = outcomes.get(row.date)
     return { date: row.date, updated_at: row.updated_at, state: outcome?.state ?? 'pushed', detail: outcome?.detail ?? null }
   })), home.product_id])
   if (finalized.some(row => row.state === 'pending' && outcomes.get(row.date)?.state !== 'pending')) next = Math.min(next, Date.now())
-  return Number.isFinite(next) ? next : null
+  return { next: Number.isFinite(next) ? next : null, ...(defaultsFailure ? { failure: defaultsFailure.error } : {}) }
 }
 
 export async function activeAirbnbMapping(db: DbClient, organizationId: string, productId: string) {

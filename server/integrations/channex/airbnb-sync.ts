@@ -111,7 +111,7 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
   const connection = new ChannexConnection(db, env, organizationId, userId)
   // Starting a sync is Business; stopping one never needs a plan.
   if (sync.length) await connection.requireChannelSync()
-  const listings = await connection.listings()
+  const listings = sync.length ? (await connection.listings()).listings : []
   const unknownListing = sync.find(id => !listings.some(listing => listing.id === id))
   if (unknownListing) fail(404, 'LISTING_NOT_FOUND', 'This listing is not on your connected Airbnb account', { listing_id: unknownListing })
   // A listing's details may only hold the fields its listing details report missing, as the review asked for them.
@@ -121,18 +121,16 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
     const extra = Object.keys(item.details).find(key => !missing.includes(key))
     if (extra) fail(422, 'ONLY_MISSING_DETAILS', 'Only the listing details Airbnb left out may be supplied', { listing_id: item.listing_id, field: `details.${extra}` })
   }
-  const stopped = stop.map((productId) => {
-    const listing = listings.find(row => row.import.status === 'imported' && row.import.product_id === productId)
-    if (!listing) fail(404, 'IMPORT_NOT_FOUND', 'This home is not imported from your connected Airbnb account', { product_id: productId })
-    return listing
-  })
-  const both = stopped.find(listing => sync.includes(listing.id))
-  if (both) fail(422, 'VALIDATION_ERROR', 'A listing cannot be synced and stopped at once', { listing_id: both.id })
+  const stopped = await connectedAirbnbMappings(db, organizationId, stop)
+  const missing = stop.find(productId => !stopped.some(row => row.product_id === productId))
+  if (missing) fail(404, 'IMPORT_NOT_FOUND', 'This home is not imported from your connected Airbnb account', { product_id: missing })
+  const both = stopped.find(mapping => sync.includes(mapping.listing_id))
+  if (both) fail(422, 'VALIDATION_ERROR', 'A listing cannot be synced and stopped at once', { listing_id: both.listing_id })
 
   // The live homes the change leaves: a synced listing is live; a stopped home stays live only while published on the site.
-  const homes = await queryAll<{ product_id: string; live: number; published: number }>(db, `SELECT p.id AS product_id, ${liveHomeSql('p')} AS live,
+  const homes = sync.length ? await queryAll<{ product_id: string; live: number; published: number }>(db, `SELECT p.id AS product_id, ${liveHomeSql('p')} AS live,
       EXISTS (SELECT 1 FROM product_publications pp WHERE pp.organization_id = p.organization_id AND pp.product_id = p.id AND pp.published = 1) AS published
-    FROM products p JOIN product_channel_mappings m ON m.organization_id = p.organization_id AND m.product_id = p.id AND m.provider = 'channex' WHERE p.organization_id = ?`, [organizationId])
+    FROM products p JOIN product_channel_mappings m ON m.organization_id = p.organization_id AND m.product_id = p.id AND m.provider = 'channex' WHERE p.organization_id = ?`, [organizationId]) : []
   const home = (productId: string | undefined) => homes.find(row => row.product_id === productId)
   const productOf = (listingId: string) => {
     const listing = listings.find(row => row.id === listingId)!
@@ -146,10 +144,19 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
   }
 
   const queued = [...items.map(item => ({ listing: item.listing_id, product: productOf(item.listing_id) ?? null, action: 'sync' as const, details: item.details ? JSON.stringify(item.details) : null })),
-    ...stopped.map(listing => ({ listing: listing.id, product: productOf(listing.id) ?? null, action: 'stop' as const, details: null }))]
+    ...stopped.map(mapping => ({ listing: mapping.listing_id, product: mapping.product_id, action: 'stop' as const, details: null }))]
   await queueJobs(db, env, organizationId, userId, queued)
   const named = new Set(queued.map(job => job.listing))
   return (await readAirbnbSync(db, organizationId)).filter(listing => named.has(listing.listing_id))
+}
+
+/** A stop addresses an imported home on this connected account even if Airbnb removed its listing. */
+async function connectedAirbnbMappings(db: DbClient, organizationId: string, productIds: string[]) {
+  if (!productIds.length) return []
+  return queryAll<{ product_id: string; listing_id: string }>(db, `SELECT m.product_id, m.listing_id FROM product_channel_mappings m
+    JOIN channex_connections c ON c.organization_id = m.organization_id AND c.channel_id = m.channel_id AND c.status = 'connected'
+    WHERE m.organization_id = ? AND m.provider = 'channex' AND m.listing_id IS NOT NULL
+      AND m.product_id IN (SELECT value FROM json_each(?))`, [organizationId, JSON.stringify(productIds)])
 }
 
 /**
@@ -175,10 +182,7 @@ async function queueJobs(db: DbClient, env: CloudflareEnv, organizationId: strin
  * it runs any other. Each must be a home imported from the connected account.
  */
 export async function stopAirbnbSyncForPlanEnd(db: DbClient, env: CloudflareEnv, organizationId: string, productIds: string[]): Promise<void> {
-  if (!productIds.length) return
-  const mappings = await queryAll<{ product_id: string; listing_id: string }>(db, `SELECT m.product_id, m.listing_id FROM product_channel_mappings m
-    JOIN channex_connections c ON c.organization_id = m.organization_id AND c.channel_id = m.channel_id
-    WHERE m.organization_id = ? AND m.provider = 'channex' AND m.product_id IN (SELECT value FROM json_each(?))`, [organizationId, JSON.stringify(productIds)])
+  const mappings = await connectedAirbnbMappings(db, organizationId, productIds)
   const missing = productIds.find(id => !mappings.some(row => row.product_id === id))
   if (missing) throw new Error(`Home ${missing} is not imported from the organization's connected Airbnb account`)
   // One batch holds at most D1's statements per batch; an organization past Basic may have more homes than that.
@@ -218,13 +222,13 @@ async function step(env: CloudflareEnv, db: DbClient, job: JobRow): Promise<Step
   const connection = new ChannexConnection(db, env, job.organization_id, job.requested_by ?? 'system')
   const mapping = await queryFirst<{ product_id: string; import_stage: ImportStage; enabled: number; channel_id: string; connected_channel_id: string | null }>(db,
     `SELECT m.product_id, m.import_stage, m.enabled, m.channel_id, c.channel_id AS connected_channel_id FROM product_channel_mappings m
-      LEFT JOIN channex_connections c ON c.organization_id = m.organization_id
+      LEFT JOIN channex_connections c ON c.organization_id = m.organization_id AND c.status = 'connected'
       WHERE m.organization_id = ? AND m.provider = 'channex' AND m.listing_id = ?`, [job.organization_id, job.listing_id])
-  if (mapping && mapping.product_id !== job.product_id) {
-    await execute(db, 'UPDATE airbnb_sync_jobs SET product_id = ? WHERE id = ?', [mapping.product_id, job.id])
-    job.product_id = mapping.product_id
-  }
   if (job.action === 'sync') {
+    if (mapping && mapping.product_id !== job.product_id) {
+      await execute(db, 'UPDATE airbnb_sync_jobs SET product_id = ? WHERE id = ?', [mapping.product_id, job.id])
+      job.product_id = mapping.product_id
+    }
     if (!mapping || mapping.channel_id !== mapping.connected_channel_id) {
       // The fields Airbnb leaves out come from the request's details, contact details from the organization; anything still missing fails this listing with its field.
       const prepared = await connection.prepare(job.listing_id, { missingDetails: job.details ? JSON.parse(job.details) as Record<string, string> : {} })
@@ -250,7 +254,10 @@ async function step(env: CloudflareEnv, db: DbClient, job: JobRow): Promise<Step
     }
     return advanced(progressed)
   }
-  if (!mapping || mapping.import_stage === 'draft') {
+  if (!mapping || mapping.product_id !== job.product_id || mapping.channel_id !== mapping.connected_channel_id) {
+    fail(404, 'IMPORT_NOT_FOUND', 'This home is not imported from your connected Airbnb account', { product_id: job.product_id })
+  }
+  if (mapping.import_stage === 'draft') {
     await reportBillingUsage(env, db, job.organization_id)
     return 'done'
   }

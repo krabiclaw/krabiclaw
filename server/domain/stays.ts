@@ -36,7 +36,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { currencyFractionDigits, isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { activeAirbnbMapping, completeChannelPush, configureStayCalendar, deliverStayNights, pendingChannelNightsQuery, pushAirbnbBookingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type ChannelPushCompletion, type ChannexMapping } from '~/server/integrations/channex/ari'
+import { activeAirbnbMapping, completeChannelPush, deliverStayNights, pendingChannelNightsQuery, pendingConnectedChannelNightsQuery, pushAirbnbBookingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type ChannelPushCompletion, type ChannexMapping, type NightQueue } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { bookingContactQuery, bookingConversationQueries, bookingDay, isBookingDay, nightsBoundary, noStayRequestPaymentInFlightSql, requestInsertQueries, stayRequestPayBySql, stayRequestProgress, stayRequestRespondBySql, threadPayloadForGuest, validateGuestRequest } from '~/server/domain/requests'
 import { bookingPolicy, parseBookingPolicy, type BookingPolicy } from '~/server/utils/booking-policy-summary'
@@ -923,7 +923,8 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
     if (stayImport && (!results[importWrittenIndex] || results[importWrittenIndex].meta.changes !== 1)) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.', undefined, { committed: true, product_id: productId })
   }
   const product = pushes || settings !== null ? await getProduct(db, access.organizationId, productId) : null
-  const channelPush = product ? await pushStayHomeChannel(db, env, access, product, { nights: pushes, settings }) : null
+  const alreadyQueued = (patch.variants !== undefined || settings?.availability === true) && (zone === null || zone === home.timezone)
+  const channelPush = product ? await pushStayHomeChannel(db, env, access, product, { nights: pushes, settings }, alreadyQueued) : null
   return completeChannelPush(channelPush, { product_id: productId, ...(product ? { updated_at: product.updated_at } : {}) }, async () => {
     const updated = await readStayHome(db, access, productId)
     if (zone !== null && zone !== home.timezone) await planHomeMessages(db, access.organizationId, home.location_id)
@@ -1530,11 +1531,11 @@ function nightDates(ranges: ReadonlyArray<readonly [string, string]>): string[] 
  * retry wait holds them. The outcome is part of the write's result; a night
  * the channel did not take reads needs_review on the calendar.
  */
-async function pushNights(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, access: StayAccess, productId: string, ranges: ReadonlyArray<readonly [string, string]>): Promise<ChannelPushCompletion> {
+async function pushNights(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, access: StayAccess, productId: string, ranges: ReadonlyArray<readonly [string, string]>, queue: NightQueue = 'dates'): Promise<ChannelPushCompletion> {
   try {
     const [home] = await stayHomeRows(db, access.organizationId, productId, { sql: '1 = 1', params: [] })
     if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
-    return await pushStayNights(db, env, access.organizationId, home, nightDates(ranges), (from, to) => homeNights(db, access.organizationId, home, from, to))
+    return await pushStayNights(db, env, access.organizationId, home, nightDates(ranges), (from, to) => homeNights(db, access.organizationId, home, from, to), queue)
   } catch (cause) {
     return cause instanceof Error ? cause : new Error(String(cause))
   }
@@ -1617,11 +1618,8 @@ export async function deliverPendingChannelNights(env: CloudflareEnv, organizati
     }
     if (!added.length && !row.due) continue
     const read = (start: string, end: string) => homeNights(db, organizationId, home, start, end)
-    if (added.length) await pushStayNights(db, env, organizationId, home, added, read)
-    else {
-      const retryAt = await deliverStayNights(db, env, organizationId, home, read)
-      if (retryAt !== null) next = Math.min(next, retryAt)
-    }
+    const retryAt = await deliverStayNights(db, env, organizationId, home, read, added)
+    if (retryAt !== null) next = Math.min(next, retryAt)
     await publishStayInvalidation(env, { type: 'nights.changed', organization_id: organizationId, location_id: home.location_id, product_id: home.product_id, booking_id: null }, { updated_at: new Date().toISOString() })
   }
   return Number.isFinite(next) ? next : null
@@ -1728,7 +1726,7 @@ function airbnbCancellationSettings(home: AirbnbHomeSettings): Record<string, un
  * value of their own use the home's base price and minimum stay). A home that
  * is not connected has nothing to push and returns null.
  */
-export async function pushStayHomeChannel(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, access: StayAccess, product: Pick<Product, 'id' | 'updated_at'>, changes: { nights: boolean; settings: AirbnbSettingSections | null }): Promise<ChannelPushCompletion> {
+export async function pushStayHomeChannel(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, access: StayAccess, product: Pick<Product, 'id' | 'updated_at'>, changes: { nights: boolean; settings: AirbnbSettingSections | null }, alreadyQueued = false): Promise<ChannelPushCompletion> {
   try {
     const home = await readStayHome(db, access, product.id)
     if (home.channel?.status !== 'connected') return null
@@ -1740,10 +1738,9 @@ export async function pushStayHomeChannel(db: DbClient, env: ChannexEnv & GuestI
       if (pushed?.state === 'needs_review' || !changes.nights) return pushed
     }
     if (!changes.nights) return null
-    await configureStayCalendar(db, env, access.organizationId, home)
     if (home.calendar_rules?.weekend_price_minor !== undefined) await scheduleBusinessWake(env, access.organizationId, 'channex_ari', Date.now())
     const today = homeToday(home.timezone)
-    return await pushNights(db, env, access, product.id, [[today, addDays(today, STAY_CALENDAR_DAYS)]])
+    return await pushNights(db, env, access, product.id, [[today, addDays(today, STAY_CALENDAR_DAYS)]], alreadyQueued ? 'saved' : 'defaults')
   } catch (cause) {
     return cause instanceof Error ? cause : new Error(String(cause))
   }
@@ -2555,6 +2552,7 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, inputAcc
   }
   await requireChannelPush(db, env, access.organizationId, home.product_id)
   const now = new Date().toISOString()
+  const channelToday = homeToday(home.timezone, new Date(now))
   const columns = Object.keys(patch)
   const nights = JSON.stringify(dates.map(date => ({
     id: crypto.randomUUID(), date, price_minor: percent === null ? price ?? null : listing.get(date) ?? null,
@@ -2599,6 +2597,7 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, inputAcc
         },
     ...prices,
     audit.after,
+    pendingConnectedChannelNightsQuery(access.organizationId, home.product_id, dates.filter(day => day >= channelToday), now),
   ], { operation: 'Set stay nights' }).catch(async (cause: unknown) => {
     if (percent !== null && String(cause).includes('Night price too large')) fail(422, 'INVALID_AMOUNT', 'A night’s price would be too large', 'price_change_percent')
     if ((await readStayHome(db, access, home.product_id)).updated_at !== home.updated_at) {
@@ -2613,7 +2612,7 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, inputAcc
     if (last?.[1] === night) last[1] = addDays(night, 1)
     else ranges.push([night, addDays(night, 1)])
   }
-  const channelPush = await pushNights(db, env, access, home.product_id, ranges)
+  const channelPush = await pushNights(db, env, access, home.product_id, ranges, 'saved')
   return completeChannelPush(channelPush, { product_id: home.product_id, updated_at: now, ranges }, async () => {
     await publishStayInvalidation(env, { type: 'nights.changed', organization_id: access.organizationId, location_id: home.location_id, product_id: home.product_id, booking_id: null }, { updated_at: now })
     // The home's calendar as the host Calendar reads it, after the write.
@@ -2781,6 +2780,9 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
       json_extract(payload_json, '$.metadata.location_id') AS location_id,
       json_extract(payload_json, '$.metadata.previous_product_id') AS previous_product_id,
       json_extract(payload_json, '$.metadata.previous_location_id') AS previous_location_id,
+      json_extract(payload_json, '$.metadata.previous_terms.check_in_date') AS previous_check_in_date,
+      json_extract(payload_json, '$.metadata.previous_terms.check_out_date') AS previous_check_out_date,
+      json_type(payload_json, '$.metadata.previous_terms') AS previous_terms_type,
       json_type(payload_json, '$.metadata.previous_product_id') AS previous_product_type,
       json_type(payload_json, '$.metadata.previous_location_id') AS previous_location_type
       FROM activity_entries WHERE organization_id = ? AND dedupe_key = ?`, [organizationId, revisionKey])
@@ -2801,7 +2803,15 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     } else if (currentRevisionId === booking.revision_id) {
       throw new HTTPError({ statusCode: 503, message: 'The saved channel revision has no audit identifying its affected homes', data: { code: 'CHANNEL_REVISION_AUDIT_REQUIRED', field: 'revision_id', committed: true, revision_id: booking.revision_id, booking_id: stored.id, product_id: stored.product_id, version: stored.version } })
     }
-    await publishStayChange(env, organizationId, stored, [], true, taskIds, booking.imported === true, undefined, priorHomes)
+    // Channex closes a night its booking takes and never reopens it: a cancelled or moved booking's nights
+    // open again only when their availability is sent (docs.channex.io, availability auto-update on
+    // cancellation and modification is off). So the nights the revision holds and the ones it left are sent.
+    const replaced = receipt?.previous_terms_type === 'object'
+    if (replaced && (typeof receipt.previous_check_in_date !== 'string' || typeof receipt.previous_check_out_date !== 'string')) {
+      throw new HTTPError({ statusCode: 500, message: 'The channel revision audit records the stay it replaced without its dates', data: { code: 'CHANNEL_REVISION_AUDIT_INVALID', field: 'previous_terms', revision_id: booking.revision_id, booking_id: stored.id } })
+    }
+    const left = replaced ? [[receipt.previous_check_in_date as string, receipt.previous_check_out_date as string] as const] : []
+    await publishStayChange(env, organizationId, stored, [[stored.check_in_date, stored.check_out_date], ...left], true, taskIds, booking.imported === true, undefined, priorHomes)
   }
   if (existing && existing.provider_updated_at !== null && existing.provider_updated_at >= booking.provider_updated_at) {
     const stored = await storedStay(db, organizationId, existing.id)
@@ -2881,6 +2891,27 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   bookChannelConversationGuest(organizationId, id, version),
   ...bookingConversationQueries({ organizationId, bookingId: id, requestId: crypto.randomUUID(), locationId: home.location_id, userId: guestUserId, now,
     guest: { name: guestName, email: booking.guest_email, phone: booking.guest_phone }, ...(guestName === null ? { participant: { kind: 'channel' as const, title: reservation } } : {}) }),
+  {
+    // Airbnb's calendar reports a reserved night unavailable, so the import closed it. A reservation Channex
+    // loads from before the import is what held those nights: once its booking is here they are no longer a
+    // block, and free if it cancels. A booking made later never lands on a block, and a loaded cancellation
+    // held nothing at import, so neither opens any.
+    query: `UPDATE product_nights SET closed = 0, updated_at = ? WHERE organization_id = ? AND product_id = ? AND source = 'import' AND closed = 1
+      AND date >= ? AND date < ? AND ? = 1 AND EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND version = ?)`,
+    params: [now, organizationId, landing, booking.check_in_date, booking.check_out_date, booking.imported === true && !booking.cancelled ? 1 : 0, organizationId, id, version],
+  },
+  {
+    // Channex changed these nights' availability itself when it took the booking, so what it last confirmed
+    // to us no longer holds: forgetting it makes the next delivery send the value, whatever it was.
+    // The night's revision moves too, so a delivery already under way cannot record the value it read as confirmed.
+    query: `UPDATE channel_night_pushes SET sent_json = json_remove(sent_json, '$.availability'),
+        updated_at = CASE WHEN ? > updated_at THEN ? ELSE strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0.001 seconds') END
+      WHERE organization_id = ? AND provider = 'channex'
+      AND ((product_id = ? AND date >= ? AND date < ?) OR (product_id = ? AND date >= ? AND date < ?))
+      AND EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND version = ?)`,
+    params: [now, now, organizationId, landing, booking.check_in_date, booking.check_out_date,
+      previous?.product_id ?? null, previous?.check_in_date ?? null, previous?.check_out_date ?? null, organizationId, id, version],
+  },
   publicResourceCacheInvalidationQuery(organizationId, 'guest-thread-create'),
   bookingContactQuery({ organizationId, bookingId: id, version, updatedAt: now, locationId: home.location_id, guest: { name: guestName, email: booking.guest_email, phone: booking.guest_phone } }),
   ...reconcileGuestListingParticipants(organizationId, { query: 'c.booking_id = ?', params: [id] }),
@@ -2940,9 +2971,15 @@ export async function reactToStayChange(env: CloudflareEnv, event: Extract<Domai
   } else {
     await planSourceMessages(db, organization_id, booking_id)
   }
-  const outcome = push_ranges.length
-    ? await pushNights(db, env, { organizationId: organization_id, actorId: 'system', manage: true }, product_id, push_ranges)
-    : null
+  // A stay that moved homes frees the same nights at the home it left; the outcome reported is the worst of them.
+  const severity = (pushed: ChannelPushCompletion) => pushed instanceof Error ? 3 : pushed?.state === 'needs_review' ? 2 : pushed?.state === 'pending' ? 1 : 0
+  let outcome: ChannelPushCompletion = null
+  if (push_ranges.length) {
+    for (const home of [product_id, ...(event.prior_homes ?? []).map(prior => prior.product_id)]) {
+      const pushed = await pushNights(db, env, { organizationId: organization_id, actorId: 'system', manage: true }, home, push_ranges)
+      if (outcome === null || severity(pushed) > severity(outcome)) outcome = pushed
+    }
+  }
   await completeChannelPush(outcome, { product_id, booking_id, version, ranges: push_ranges }, async () => {
     for (const home of event.prior_homes ?? []) {
       const affected = { organization_id, booking_id, ...home }

@@ -46,9 +46,11 @@ class FakeChannex {
   sent: Array<{ path: string; values: Value[] }> = []
   minimums = new Map(['1', '2', '3'].map(id => [`listing-${id}`, 2]))
   channelSettings: Record<string, unknown> = { min_stay_type: 'Arrival' }
+  missingMapping: string | null = null
+  ratePlanReads: string[] = []
   properties = new Map(['1', '2', '3'].map(id => [`prop-${id}`, { settings: { min_stay_type: 'arrival' } }]))
   ratePlans = new Map<string, Record<string, unknown>>(['1', '2', '3'].map(id => [`rate-${id}`, { min_stay_arrival: 2, options: [{ occupancy: 4, is_primary: true, rate: id === '1' ? '150.00' : id === '2' ? '0.00' : '90.00' }] }]))
-  ratePlanAnswer?: () => Response
+  ratePlanAnswer?: (method: 'GET' | 'PUT') => Response | undefined
   answer: Partial<Record<'/restrictions' | '/availability', () => Response>> = {}
   /** Runs while a call is in flight, before Channex answers it. */
   during?: () => Promise<unknown>
@@ -69,7 +71,7 @@ class FakeChannex {
       }) } } })
     }
     if ((init.method ?? 'GET') === 'GET' && (path as string) === '/channels/chan-1') {
-      return Response.json({ data: { id: 'chan-1', type: 'channel', attributes: { channel: 'AirBNB', settings: this.channelSettings, rate_plans: ['1', '2', '3'].map(listing => ({ id: `map-${listing}`, rate_plan_id: `rate-${listing}`, settings: { listing_id: `listing-${listing}` } })) } } })
+      return Response.json({ data: { id: 'chan-1', type: 'channel', attributes: { channel: 'AirBNB', settings: this.channelSettings, rate_plans: ['1', '2', '3'].filter(listing => listing !== this.missingMapping).map(listing => ({ id: `map-${listing}`, rate_plan_id: `rate-${listing}`, settings: { listing_id: `listing-${listing}` } })) } } })
     }
     if ((init.method ?? 'GET') === 'GET' && /^\/properties\/prop-\d$/.test(path)) {
       const id = path.split('/').at(-1)!
@@ -78,10 +80,11 @@ class FakeChannex {
     if (/^\/rate_plans\/rate-\d$/.test(path)) {
       const id = path.split('/').at(-1)!
       const plan = this.ratePlans.get(id)!
+      const response = this.ratePlanAnswer?.(init.method === 'PUT' ? 'PUT' : 'GET')
+      if (response) return response
       if (init.method === 'PUT') {
-        if (this.ratePlanAnswer) return this.ratePlanAnswer()
         Object.assign(plan, (JSON.parse(init.body as string) as { rate_plan: { min_stay_arrival: number } }).rate_plan)
-      }
+      } else this.ratePlanReads.push(id)
       return Response.json({ data: { id, type: 'rate_plan', attributes: plan } })
     }
     // Airbnb's own instant-booking setting, guest controls and guest expectations, which every booking-settings update restates.
@@ -385,8 +388,8 @@ test('night changes on a connected home reach Channex, and what it took is on ea
   }
 })
 
-test('catalog price and minimum-stay writes use the same channel completion and preflight the whole batch', async () => {
-  const { runtime, db, env, connected, unpriced, local } = await boot()
+test('catalog and dated rules persist channel work and recover the planned minimum after a failure', async () => {
+  const { runtime, db, env, queue, connected, unpriced, local } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
@@ -452,13 +455,66 @@ test('catalog price and minimum-stay writes use the same channel completion and 
     const calendar = await readHomeCalendar(db, manager, { productId: connected, from: day(0), to: day(1) })
     assert.deepEqual(calendar.nights[0]!.channel, { state: 'pushed', detail: null })
 
+    // A rate-plan error before the dated send leaves the saved default queued.
+    channex.ratePlanAnswer = method => method === 'PUT' ? Response.json({ errors: { detail: 'Rate plan unavailable' } }, { status: 503 }) : undefined
+    await assert.rejects(updateStayHome(env, db, manager, connected, { min_nights: 21 }),
+      (error: { status?: number; data?: Record<string, unknown> }) => error.status === 503 && error.data?.code === 'CHANNEL_PUSH_FAILED' && error.data.committed === true)
+    assert.equal((await getProduct(db, ORG, connected)).stay!.min_nights, 21)
+    assert.equal(channex.ratePlans.get('rate-1')!.min_stay_arrival, 3)
+    assert.deepEqual(channex.take(), [])
+    const pendingDefault = await readHomeCalendar(db, manager, { productId: connected, from: day(0), to: day(1) })
+    assert.deepEqual([pendingDefault.nights[0]!.min_stay_arrival, pendingDefault.nights[0]!.channel?.state], [21, 'pending'])
+    assert.match(pendingDefault.nights[0]!.channel!.detail!, /Rate plan unavailable/)
+    assert((await deliverPendingChannelNights(env, ORG, Date.now()))! > Date.now(), 'a transient failure still has a recovery deadline')
+
+    // A booking still closes its mapped room while the rate plan cannot be read.
+    channex.ratePlanAnswer = method => method === 'GET' ? Response.json({ errors: { detail: 'Rate plan read unavailable' } }, { status: 503 }) : undefined
+    const booked = await createStay(db, env, manager, { product_id: connected, idempotency_key: 'stay-during-rate-outage', check_in_date: day(10), check_out_date: day(12), adults: 2, guest_name: 'Ana', total_minor: 360_00 })
+    await assert.rejects(queue.runNext(env, 'stay.changed'), /Rate plan read unavailable/)
+    assert.deepEqual(channex.take(), [{ path: '/availability', values: [
+      { property_id: 'prop-1', room_type_id: 'room-1', date_from: day(10), date_to: day(11), availability: 0 },
+    ] }])
+    const held = await readHomeCalendar(db, manager, { productId: connected, from: day(10), to: day(12) })
+    assert.deepEqual(held.nights.map(night => [night.booking_id, night.available, night.channel?.state]), Array(2).fill([booked.id, false, 'pending']))
+    assert.deepEqual(await db.prepare(`SELECT json_extract(sent_json, '$.availability') AS availability,
+      json_extract(sent_json, '$.min_stay_arrival') AS min_stay_arrival FROM channel_night_pushes WHERE product_id = ? AND date = ?`).bind(connected, day(10)).first(),
+    { availability: 0, min_stay_arrival: 3 })
+
+    channex.ratePlanAnswer = undefined
+    assert.equal(await deliverPendingChannelNights(env, ORG, Date.now()), null)
+    assert.equal(channex.ratePlans.get('rate-1')!.min_stay_arrival, 21)
+    const recovered = channex.take()
+    assert.deepEqual(recovered, [{ path: '/restrictions', values: [
+      { property_id: 'prop-1', rate_plan_id: 'rate-1', date_from: day(0), date_to: day(499), min_stay_arrival: 21 },
+    ] }])
+    await queue.drain(env, 'stay.changed')
+    assert.deepEqual(channex.take(), [], 'booking redelivery keeps the confirmed room occupancy')
+
+    // An event failure before the provider call cannot leave the date saved without work.
+    bindDatabaseEvents(db, { EVENTS: { send: async () => { throw new Error('Wake unavailable') } } })
+    try {
+      await assert.rejects(setStayNights(db, env, manager, { product_id: connected, from: day(1), to: day(2), min_stay_arrival: 30 }),
+        /Set stay nights committed, but its events could not be published/)
+    } finally { bindDatabaseEvents(db, env) }
+    const pending = await readHomeCalendar(db, manager, { productId: connected, from: day(0), to: day(2) })
+    assert.deepEqual(pending.nights.map(night => [night.min_stay_arrival, night.channel?.state]), [[21, 'pushed'], [30, 'pending']])
+    assert.deepEqual(channex.take(), [])
+
+    assert.equal(await deliverPendingChannelNights(env, ORG, Date.now()), null)
+    assert.equal(channex.ratePlans.get('rate-1')!.min_stay_arrival, 21)
+    assert.deepEqual(channex.take(), [{ path: '/restrictions', values: [
+      { property_id: 'prop-1', rate_plan_id: 'rate-1', date_from: day(1), date_to: day(1), min_stay_arrival: 30 },
+    ] }])
+    const delivered = await readHomeCalendar(db, manager, { productId: connected, from: day(0), to: day(2) })
+    assert.deepEqual(delivered.nights.map(night => [night.min_stay_arrival, night.channel?.state]), [[21, 'pushed'], [30, 'pushed']])
+
     // Every affected home is preflighted before any row in the atomic catalog changes.
     await assert.rejects(reconcileProducts(db, { env: unavailable, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'unavailable-batch', products: [
       { product_id: local, kind: 'stay', name: 'Must remain Barn' },
       { product_id: connected, kind: 'stay', name: 'Must remain Cabin', stay: { ...stayInput, min_nights: 4 } },
     ] }), (error: { status?: number; data?: Record<string, unknown> }) => error.status === 503 && error.data?.code === 'CHANNEL_CONFIGURATION_REQUIRED' && !Object.hasOwn(error.data, 'committed'))
     assert.equal((await getProduct(db, ORG, local)).name, 'Barn')
-    assert.equal((await getProduct(db, ORG, connected)).stay!.min_nights, 3)
+    assert.equal((await getProduct(db, ORG, connected)).stay!.min_nights, 21)
     assert.deepEqual(channex.take(), [])
 
     // A warning that names no dates refuses every night of its call.
@@ -504,6 +560,29 @@ test('catalog price and minimum-stay writes use the same channel completion and 
     } })
     assert.equal(disconnected.channel_push, null)
     assert.deepEqual(channex.take(), [])
+
+    // A saved change for a listing whose provider mapping is gone cannot block another home's dated rules.
+    await updateStayHome(env, db, manager, unpriced, { base_price_minor: 125_00 })
+    channex.take()
+    const healthyNight = day(5)
+    bindDatabaseEvents(db, { EVENTS: { send: async () => { throw new Error('Wake unavailable') } } })
+    try {
+      await assert.rejects(updateStayHome(env, db, manager, connected, { min_nights: 100 }), /Update product committed, but its events could not be published/)
+      await assert.rejects(setStayNights(db, env, manager, { product_id: unpriced, from: healthyNight, to: day(6), min_stay_arrival: 30 }),
+        /Set stay nights committed, but its events could not be published/)
+    } finally { bindDatabaseEvents(db, env) }
+    channex.missingMapping = '1'
+    channex.ratePlanReads.length = 0
+    assert.equal(await deliverPendingChannelNights(env, ORG, Date.now()), null)
+    assert.deepEqual(channex.ratePlanReads, [], 'ordinary dated delivery does not read defaults')
+    const unavailableHome = await readHomeCalendar(db, manager, { productId: connected, from: newToday, to: day(6) })
+    assert.deepEqual(unavailableHome.nights[0]!.channel,
+      { state: 'needs_review', detail: 'Channex has no Airbnb mapping for this connected home' })
+    assert.deepEqual(channex.take(), [{ path: '/restrictions', values: [
+      { property_id: 'prop-2', rate_plan_id: 'rate-2', date_from: healthyNight, date_to: healthyNight, min_stay_arrival: 30 },
+    ] }])
+    const healthyHome = await readHomeCalendar(db, manager, { productId: unpriced, from: healthyNight, to: day(6) })
+    assert.deepEqual([healthyHome.nights[0]!.min_stay_arrival, healthyHome.nights[0]!.channel?.state], [30, 'pushed'])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

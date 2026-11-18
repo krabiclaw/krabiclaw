@@ -30,11 +30,13 @@ export async function publishPaymentNotification(env: CloudflareEnv, payment: Pi
 export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, env: CloudflareEnv, payment: Payment, input: PaymentFinancialEvent) {
   const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [payment.organization_id])
   if (!organization && !await queryFirst(db, 'SELECT organization_id FROM payment_servicing_tenants WHERE organization_id=? AND stripe_account_id=? AND livemode=?', [payment.organization_id, payment.stripe_account_id, payment.livemode])) throw new Error('Payments notification has no tenant or retained servicing identity')
-  // A booking or stay paid on the site is confirmed to its guest by
-  // the confirmation email, which states what they paid. A failure is told here:
-  // a bank or pay-later method can fail after the guest has left the pay page.
+  // A booking or stay paid on the site is alerted to its owner and
+  // confirmed to its guest by the visit notification, which states what was
+  // paid. A failure is told here: a bank or pay-later method can fail after the
+  // guest has left the pay page.
   const checkout = payment.subject_type === 'booking'
   const guestKind = (input.kind.startsWith('refund_') || input.kind === 'payment_failed' || (!checkout && input.kind.startsWith('payment_'))) ? input.kind as GuestPaymentNotificationKind : null
+  const ownerAlert = !checkout || input.kind !== 'payment_captured'
   // A deleted merchant and an unclaimed contact have no application audience.
   // The verified return can still claim the purchase and then notify its buyer.
   if (!organization && (!payment.buyer_user_id || !guestKind)) return
@@ -96,7 +98,9 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
     : payment.receipt_url?{url:payment.receipt_url,label:'View receipt'}:null
   await notifyFinancialNotification(env, db, {
     organizationId: organization ? payment.organization_id : null,
-    eventKey, ownerMessage, deepLink,
+    eventKey,
+    ownerMessage: ownerAlert ? ownerMessage : undefined,
+    deepLink,
     // The payment's message in its booking's conversation; otherwise the audit row of the payment event.
     source: threadId && sourceEntryId ? { conversationId: threadId, messageId: sourceEntryId } : null,
     entity: { type: 'payment', id: payment.id },

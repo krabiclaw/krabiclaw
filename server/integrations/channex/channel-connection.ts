@@ -25,7 +25,7 @@ import { PHOTO_WIDTH, minorUnits, listingCalendar, listingContent, listingDetail
 import { DETAIL_FIELDS, IMPORT_STAGES, type DetailField, type ImportStage } from '~/shared/airbnb-import'
 export type { ImportStage } from '~/shared/airbnb-import'
 import { installChannexMessages, uninstallChannexMessages } from './messages'
-import { calendarMinimumDefaults, configureStayCalendar, forgetConfirmedNights, type ChannexMapping } from './ari'
+import { calendarMinimumDefaults, configureStayCalendar, forgetConfirmedNights, pendingConnectedChannelNightsQuery, type ChannexMapping } from './ari'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
 import { publishBusinessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
@@ -369,14 +369,27 @@ export class ChannexConnection {
     })
   }
 
-  /** The listings on the connected Airbnb account, and how far each one's import got. */
-  async listings(): Promise<AirbnbListing[]> {
+  /** The account's listings and imported homes still enabled after their listing disappeared from Airbnb. */
+  async listings(): Promise<{ listings: AirbnbListing[]; missing_listings: Array<{ listing_id: string; product_id: string; internal_name: string }> }> {
     const row = await this.connected()
-    const [listings, mappings] = await Promise.all([this.accountListings(row), this.mappings()])
-    return listings.map((listing) => {
-      const mapping = mappings.find(candidate => candidate.listing_id === listing.id && candidate.channel_id === row.channel_id)
+    const [account, mappings] = await Promise.all([this.accountListings(row), this.mappings()])
+    const imported = new Map(mappings.filter(mapping => mapping.channel_id === row.channel_id).map(mapping => [mapping.listing_id, mapping]))
+    const listings: AirbnbListing[] = account.map((listing) => {
+      const mapping = imported.get(listing.id)
+      imported.delete(listing.id)
       return { ...listing, import: mapping ? { status: 'imported', product_id: mapping.product_id, stage: mapping.import_stage, syncing: mapping.enabled === 1 && ['reservations', 'messages', 'complete'].includes(mapping.import_stage), content: mapping.import_stage === 'content' ? null : contentReport(mapping) } : { status: 'not_imported' } }
     })
+    const missing = [...imported.values()].filter(mapping => mapping.enabled === 1 && mapping.import_stage === 'complete')
+    const homes = missing.length ? await queryAll<{ product_id: string; internal_name: string | null }>(this.db, `
+      SELECT product_id, internal_name FROM product_stay_configs
+      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`,
+    [this.organizationId, d1JsonStringSet(missing.map(mapping => mapping.product_id))]) : []
+    const missing_listings = missing.map((mapping) => {
+      const internal_name = homes.find(home => home.product_id === mapping.product_id)?.internal_name
+      if (!internal_name?.trim()) throw new Error(`Home ${mapping.product_id} has no internal name`)
+      return { listing_id: mapping.listing_id, product_id: mapping.product_id, internal_name }
+    })
+    return { listings, missing_listings }
   }
 
   private async requireListing(row: ConnectionRow & { channel_id: string }, listingId: string): Promise<void> {
@@ -846,10 +859,18 @@ export class ChannexConnection {
     const imported = `FROM json_each(?) d JOIN product_nights n ON n.organization_id = ? AND n.product_id = ? AND n.date = json_extract(d.value, '$.date')
       WHERE n.source = 'import'`
     const dates = [received, this.organizationId, mapping.product_id]
-    await executeBatch(this.db, [{
-      query: `UPDATE product_nights SET min_stay_arrival = json_extract(value, '$.min_stay_arrival')
-        FROM json_each(?) WHERE organization_id = ? AND product_id = ? AND source = 'import' AND date = json_extract(value, '$.date') AND min_stay_arrival IS NOT NULL`,
-      params: dates,
+    const refreshAt = now()
+    await executeBatch(this.db, [pendingConnectedChannelNightsQuery(this.organizationId, mapping.product_id, {
+      query: `SELECT n.date ${imported} AND (
+        (n.min_stay_arrival IS NOT NULL AND n.min_stay_arrival IS NOT json_extract(d.value, '$.min_stay_arrival'))
+        OR EXISTS (SELECT 1 FROM prices p WHERE p.organization_id = n.organization_id AND p.product_variant_id = ?
+          AND p.stay_date = n.date AND p.unit_amount IS NOT json_extract(d.value, '$.price_minor'))
+      )`, params: [...dates, home.variant_id],
+    }, refreshAt), {
+      query: `UPDATE product_nights SET min_stay_arrival = json_extract(value, '$.min_stay_arrival'), updated_at = ?, updated_by = ?
+        FROM json_each(?) WHERE organization_id = ? AND product_id = ? AND source = 'import' AND date = json_extract(value, '$.date')
+          AND min_stay_arrival IS NOT NULL AND min_stay_arrival IS NOT json_extract(value, '$.min_stay_arrival')`,
+      params: [refreshAt, this.userId, ...dates],
     }, {
       query: `DELETE FROM prices WHERE organization_id = ? AND product_variant_id = ? AND stay_date IN
         (SELECT n.date ${imported} AND json_extract(d.value, '$.price_minor') IS NULL)`,
@@ -858,7 +879,7 @@ export class ChannexConnection {
       query: `UPDATE prices SET unit_amount = imported.amount, updated_at = ?, updated_by = ? FROM
         (SELECT n.date, json_extract(d.value, '$.price_minor') AS amount ${imported}) imported
         WHERE prices.organization_id = ? AND prices.product_variant_id = ? AND prices.stay_date = imported.date AND imported.amount IS NOT NULL`,
-      params: [new Date().toISOString(), this.userId, ...dates, this.organizationId, home.variant_id],
+      params: [refreshAt, this.userId, ...dates, this.organizationId, home.variant_id],
     }, publicResourceCacheInvalidationQuery(this.organizationId, 'airbnb-calendar-content')], { operation: 'Refresh imported Airbnb calendar' })
     const homeWrite = await unedited(body)
     const detailsWrite = await unedited(details)
@@ -1336,7 +1357,7 @@ function importedNight(night: ListingNight, currency: string, source: Pick<Listi
   const defaults = resolveStayNightPolicy({ min_nights: source.minimum_nights, base_price_minor: minorUnits(source.nightly_rate, currency), calendar_rules: source.calendar_rules }, night.date)
   const price = minorUnits(night.rate, currency)
   return {
-    date: night.date, available: night.availability === 1, price_minor: price === defaults.price_minor ? null : price,
+    date: night.date, available: !night.blocked, price_minor: price === defaults.price_minor ? null : price,
     min_stay_arrival: night.minStay === defaults.min_stay_arrival ? null : night.minStay,
 
     max_stay: night.maxStay === 0 ? null : night.maxStay, closed_to_arrival: night.closedToArrival, closed_to_departure: night.closedToDeparture,
