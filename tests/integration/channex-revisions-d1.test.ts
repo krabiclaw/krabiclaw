@@ -114,9 +114,12 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
   globalThis.fetch = channex.fetch as typeof fetch
   try {
     const booking: Booking = { id: 'bk-1', property_id: 'prop-1', status: 'new', arrival: '2027-01-10', departure: '2027-01-13', amount: '450.50', revision: '' }
+    // The import closed a night Airbnb held for this reservation; the booking landing opens it.
+    await db.prepare("INSERT INTO product_nights (organization_id, product_id, date, closed, source, updated_by) VALUES (?, ?, '2027-01-11', 1, 'import', ?)").bind(ORG, productId, OWNER).run()
     channex.revise('rev-1', booking, '2026-10-15T01:00:00Z')
     const landed = await applyBookingRevision(db, env, 'rev-1')
     assert.equal(landed.status, 'acknowledged')
+    assert.deepEqual(await db.prepare("SELECT closed FROM product_nights WHERE product_id = ? AND date = '2027-01-11'").bind(productId).first(), { closed: 0 })
     const stayId = (landed as { booking_id: string }).booking_id
     const stored = await db.prepare(`SELECT b.channel, b.owner, b.status, b.overbooked, b.total_minor, b.currency, json_extract(r.payload_json, '$.guest.name') AS guest_name, b.adults, b.children, b.version, b.provider_updated_at
       FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking' WHERE b.id = ?`).bind(stayId).first()
@@ -163,7 +166,17 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
     // Channex does not reopen a cancelled booking's nights itself: the cancellation sends them open.
     channex.availability = []
     await queue.drain(env, 'stay.changed')
-    assert.deepEqual(channex.availability.map(entry => [entry.date_from, entry.date_to, entry.availability]), [['2027-02-03', '2027-02-03', 0], ['2027-01-10', '2027-01-13', 1]])
+    assert.deepEqual(channex.availability.map(entry => [entry.date_from, entry.date_to, entry.availability]), [['2027-02-02', '2027-02-03', 0], ['2027-01-10', '2027-01-13', 1]])
+    // A booking cancelled before either revision's nights were sent: Channex closed them and holds them closed,
+    // while the last value it confirmed to us is open. They are still sent open.
+    const brief: Booking = { ...booking, id: 'bk-brief', arrival: '2027-01-10', departure: '2027-01-12' }
+    channex.revise('rev-brief', brief, '2026-10-15T03:10:00Z')
+    await applyBookingRevision(db, env, 'rev-brief')
+    channex.revise('rev-brief-cancel', { ...brief, status: 'cancelled' }, '2026-10-15T03:20:00Z')
+    await applyBookingRevision(db, env, 'rev-brief-cancel')
+    channex.availability = []
+    await queue.drain(env, 'stay.changed')
+    assert.deepEqual(channex.availability.map(entry => [entry.date_from, entry.date_to, entry.availability]), [['2027-01-10', '2027-01-11', 1]])
 
     // The same reservation code arriving under a new Channex booking id updates its stay rather than making a second one.
     const coded: Booking = { ...booking, id: 'bk-code', code: 'HMCODE', arrival: '2027-03-10', departure: '2027-03-12' }

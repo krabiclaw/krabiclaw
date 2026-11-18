@@ -2887,6 +2887,22 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   bookChannelConversationGuest(organizationId, id, version),
   ...bookingConversationQueries({ organizationId, bookingId: id, requestId: crypto.randomUUID(), locationId: home.location_id, userId: guestUserId, now,
     guest: { name: guestName, email: booking.guest_email, phone: booking.guest_phone }, ...(guestName === null ? { participant: { kind: 'channel' as const, title: reservation } } : {}) }),
+  {
+    // Airbnb's calendar reports a reserved night unavailable, so the import closed it. The reservation is what
+    // held it: once its booking is here the night is no longer a block, and frees if the booking cancels.
+    query: `UPDATE product_nights SET closed = 0, updated_at = ? WHERE organization_id = ? AND product_id = ? AND source = 'import' AND closed = 1
+      AND date >= ? AND date < ? AND EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND version = ?)`,
+    params: [now, organizationId, landing, booking.check_in_date, booking.check_out_date, organizationId, id, version],
+  },
+  {
+    // Channex changed these nights' availability itself when it took the booking, so what it last confirmed
+    // to us no longer holds: forgetting it makes the next delivery send the value, whatever it was.
+    query: `UPDATE channel_night_pushes SET sent_json = json_remove(sent_json, '$.availability') WHERE organization_id = ? AND provider = 'channex'
+      AND ((product_id = ? AND date >= ? AND date < ?) OR (product_id = ? AND date >= ? AND date < ?))
+      AND EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND version = ?)`,
+    params: [organizationId, landing, booking.check_in_date, booking.check_out_date,
+      previous?.product_id ?? null, previous?.check_in_date ?? null, previous?.check_out_date ?? null, organizationId, id, version],
+  },
   publicResourceCacheInvalidationQuery(organizationId, 'guest-thread-create'),
   bookingContactQuery({ organizationId, bookingId: id, version, updatedAt: now, locationId: home.location_id, guest: { name: guestName, email: booking.guest_email, phone: booking.guest_phone } }),
   ...reconcileGuestListingParticipants(organizationId, { query: 'c.booking_id = ?', params: [id] }),
@@ -2946,9 +2962,15 @@ export async function reactToStayChange(env: CloudflareEnv, event: Extract<Domai
   } else {
     await planSourceMessages(db, organization_id, booking_id)
   }
-  const outcome = push_ranges.length
-    ? await pushNights(db, env, { organizationId: organization_id, actorId: 'system', manage: true }, product_id, push_ranges)
-    : null
+  // A stay that moved homes frees the same nights at the home it left; the outcome reported is the worst of them.
+  const severity = (pushed: ChannelPushCompletion) => pushed instanceof Error ? 3 : pushed?.state === 'needs_review' ? 2 : pushed?.state === 'pending' ? 1 : 0
+  let outcome: ChannelPushCompletion = null
+  if (push_ranges.length) {
+    for (const home of [product_id, ...(event.prior_homes ?? []).map(prior => prior.product_id)]) {
+      const pushed = await pushNights(db, env, { organizationId: organization_id, actorId: 'system', manage: true }, home, push_ranges)
+      if (outcome === null || severity(pushed) > severity(outcome)) outcome = pushed
+    }
+  }
   await completeChannelPush(outcome, { product_id, booking_id, version, ranges: push_ranges }, async () => {
     for (const home of event.prior_homes ?? []) {
       const affected = { organization_id, booking_id, ...home }

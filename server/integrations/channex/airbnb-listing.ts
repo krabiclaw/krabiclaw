@@ -76,8 +76,12 @@ export interface ListingNight {
   maxStay: number
   closedToArrival: boolean
   closedToDeparture: boolean
-  /** Airbnb holds the night for its own reservation (availability_type 'reservation', read live 2026-11-18): not a host block. */
-  reserved: boolean
+  /**
+   * The night is closed in the imported calendar. Airbnb also reports a night unavailable while a listing
+   * rule such as its booking window excludes it (availability_type 'rule', read live 2026-11-18); Airbnb
+   * lifts that itself as the window moves, so it is not a block.
+   */
+  blocked: boolean
 }
 
 function fail(statusCode: number, code: string, message: string): never {
@@ -428,7 +432,7 @@ export async function listingCalendar(env: ChannexEnv, channelId: string, listin
           date, availability: day.availability === 'available' ? 1 : 0, rate: amount(day.daily_price, 'Nightly price'),
           minStay: integer(day.min_nights, 'Minimum nights', 1), maxStay: integer(day.max_nights, 'Maximum nights'),
           closedToArrival: day.closed_to_arrival, closedToDeparture: day.closed_to_departure,
-          reserved: day.availability_type === 'reservation',
+          blocked: day.availability === 'unavailable' && day.availability_type !== 'rule',
         }
       } catch (error) {
         if (error instanceof ChannexDataError) throw new ChannexDataError(`${error.message} (night ${date})`)
