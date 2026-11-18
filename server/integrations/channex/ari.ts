@@ -509,9 +509,13 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
     }
   }
 
-  await execute(db, `UPDATE channel_night_pushes SET sent_json = json_extract(value, '$[1]')
+  // A night changed since this delivery read it may have had its availability changed by Channex itself
+  // (a channel booking): the availability this delivery read is not recorded as confirmed, so the next one sends it.
+  const readAt = new Map(current.map(row => [row.date, row.updated_at]))
+  await execute(db, `UPDATE channel_night_pushes SET sent_json = CASE WHEN channel_night_pushes.updated_at = json_extract(value, '$[2]')
+      THEN json_extract(value, '$[1]') ELSE json_remove(json_extract(value, '$[1]'), '$.availability') END
     FROM json_each(?) WHERE product_id = ? AND provider = 'channex' AND date = json_extract(value, '$[0]')`,
-  [JSON.stringify([...confirmed].map(([date, values]) => [date, JSON.stringify(values)])), home.product_id])
+  [JSON.stringify([...confirmed].map(([date, values]) => [date, JSON.stringify(values), readAt.get(date)])), home.product_id])
   // What Channex last received is kept whatever the night's state. A night changed since this delivery read it was sent
   // its old value, so it stays pending with that reason and the next delivery sends what differs.
   const finalized = await queryAll<{ date: string; state: OutboxRow['state'] }>(db, `UPDATE channel_night_pushes SET

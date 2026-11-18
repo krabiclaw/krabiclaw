@@ -183,7 +183,7 @@ class FakeChannex {
     }
     if (method === 'GET' && path === '/channels/chan-1/action/get_listing_calendar') {
       const from = url.searchParams.get('date_from')!
-      const days = Array.from({ length: 500 }, (_, i) => ({ date: addDays(from, i), availability: i === 3 ? 'unavailable' : 'available', daily_price: Number(this.restrictions[addDays(from, i)]?.rate ?? (i === 0 ? 210 : 189.5)), min_nights: this.restrictions[addDays(from, i)]?.min_stay_arrival ?? 2, max_nights: 30, closed_to_arrival: false, closed_to_departure: i === 5 }))
+      const days = Array.from({ length: 500 }, (_, i) => ({ date: addDays(from, i), availability: i === 3 || i === 7 || i >= 400 ? 'unavailable' : 'available', availability_type: i === 3 ? 'busy' : i === 7 ? 'reservation' : i >= 400 ? 'rule' : 'available', daily_price: Number(this.restrictions[addDays(from, i)]?.rate ?? (i === 0 ? 210 : 189.5)), min_nights: this.restrictions[addDays(from, i)]?.min_stay_arrival ?? 2, max_nights: 30, closed_to_arrival: false, closed_to_departure: i === 5 }))
       return json({ data: { calendar: { listing_id: url.searchParams.get('listing_id'), start_date: from, end_date: url.searchParams.get('date_to'), days } } })
     }
     // The room type and rate plan the inventory reads are about are the last ones created.
@@ -349,7 +349,8 @@ test('a listing imports through every stage into a home Channex and Blawby agree
     // Check-in and checkout are Airbnb's window, not anything the client sent.
     assert.deepEqual(home, { kind: 'stay', name: 'Cliff Cabin', check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 4, min_nights: 5, location: 'Cliff Cabin', timezone: TZ, email: 'Stay@Example.test', unit_amount: 18_950, currency: 'USD' })
     const nights = await db.prepare("SELECT COUNT(*) AS total, SUM(n.closed) AS closed, SUM(n.closed_to_departure) AS ctd, MAX(pr.unit_amount) AS top FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? AND n.source = 'import'").bind(productId).first()
-    assert.deepEqual(nights, { total: 500, closed: 1, ctd: 1, top: 21_000 })
+    // The blocked night and the reserved night are closed; the nights past Airbnb's booking window are not.
+    assert.deepEqual(nights, { total: 500, closed: 2, ctd: 1, top: 21_000 })
     const first = await db.prepare('SELECT n.date, pr.unit_amount AS price_minor, n.min_stay_arrival, n.max_stay FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? ORDER BY n.date LIMIT 1').bind(productId).first()
     assert.deepEqual(first, { date: today(), price_minor: 21_000, min_stay_arrival: 2, max_stay: 30 })
 

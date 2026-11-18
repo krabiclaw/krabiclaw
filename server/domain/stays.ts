@@ -2780,6 +2780,9 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
       json_extract(payload_json, '$.metadata.location_id') AS location_id,
       json_extract(payload_json, '$.metadata.previous_product_id') AS previous_product_id,
       json_extract(payload_json, '$.metadata.previous_location_id') AS previous_location_id,
+      json_extract(payload_json, '$.metadata.previous_terms.check_in_date') AS previous_check_in_date,
+      json_extract(payload_json, '$.metadata.previous_terms.check_out_date') AS previous_check_out_date,
+      json_type(payload_json, '$.metadata.previous_terms') AS previous_terms_type,
       json_type(payload_json, '$.metadata.previous_product_id') AS previous_product_type,
       json_type(payload_json, '$.metadata.previous_location_id') AS previous_location_type
       FROM activity_entries WHERE organization_id = ? AND dedupe_key = ?`, [organizationId, revisionKey])
@@ -2800,7 +2803,15 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     } else if (currentRevisionId === booking.revision_id) {
       throw new HTTPError({ statusCode: 503, message: 'The saved channel revision has no audit identifying its affected homes', data: { code: 'CHANNEL_REVISION_AUDIT_REQUIRED', field: 'revision_id', committed: true, revision_id: booking.revision_id, booking_id: stored.id, product_id: stored.product_id, version: stored.version } })
     }
-    await publishStayChange(env, organizationId, stored, [], true, taskIds, booking.imported === true, undefined, priorHomes)
+    // Channex closes a night its booking takes and never reopens it: a cancelled or moved booking's nights
+    // open again only when their availability is sent (docs.channex.io, availability auto-update on
+    // cancellation and modification is off). So the nights the revision holds and the ones it left are sent.
+    const replaced = receipt?.previous_terms_type === 'object'
+    if (replaced && (typeof receipt.previous_check_in_date !== 'string' || typeof receipt.previous_check_out_date !== 'string')) {
+      throw new HTTPError({ statusCode: 500, message: 'The channel revision audit records the stay it replaced without its dates', data: { code: 'CHANNEL_REVISION_AUDIT_INVALID', field: 'previous_terms', revision_id: booking.revision_id, booking_id: stored.id } })
+    }
+    const left = replaced ? [[receipt.previous_check_in_date as string, receipt.previous_check_out_date as string] as const] : []
+    await publishStayChange(env, organizationId, stored, [[stored.check_in_date, stored.check_out_date], ...left], true, taskIds, booking.imported === true, undefined, priorHomes)
   }
   if (existing && existing.provider_updated_at !== null && existing.provider_updated_at >= booking.provider_updated_at) {
     const stored = await storedStay(db, organizationId, existing.id)
@@ -2880,6 +2891,27 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   bookChannelConversationGuest(organizationId, id, version),
   ...bookingConversationQueries({ organizationId, bookingId: id, requestId: crypto.randomUUID(), locationId: home.location_id, userId: guestUserId, now,
     guest: { name: guestName, email: booking.guest_email, phone: booking.guest_phone }, ...(guestName === null ? { participant: { kind: 'channel' as const, title: reservation } } : {}) }),
+  {
+    // Airbnb's calendar reports a reserved night unavailable, so the import closed it. A reservation Channex
+    // loads from before the import is what held those nights: once its booking is here they are no longer a
+    // block, and free if it cancels. A booking made later never lands on a block, and a loaded cancellation
+    // held nothing at import, so neither opens any.
+    query: `UPDATE product_nights SET closed = 0, updated_at = ? WHERE organization_id = ? AND product_id = ? AND source = 'import' AND closed = 1
+      AND date >= ? AND date < ? AND ? = 1 AND EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND version = ?)`,
+    params: [now, organizationId, landing, booking.check_in_date, booking.check_out_date, booking.imported === true && !booking.cancelled ? 1 : 0, organizationId, id, version],
+  },
+  {
+    // Channex changed these nights' availability itself when it took the booking, so what it last confirmed
+    // to us no longer holds: forgetting it makes the next delivery send the value, whatever it was.
+    // The night's revision moves too, so a delivery already under way cannot record the value it read as confirmed.
+    query: `UPDATE channel_night_pushes SET sent_json = json_remove(sent_json, '$.availability'),
+        updated_at = CASE WHEN ? > updated_at THEN ? ELSE strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0.001 seconds') END
+      WHERE organization_id = ? AND provider = 'channex'
+      AND ((product_id = ? AND date >= ? AND date < ?) OR (product_id = ? AND date >= ? AND date < ?))
+      AND EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND version = ?)`,
+    params: [now, now, organizationId, landing, booking.check_in_date, booking.check_out_date,
+      previous?.product_id ?? null, previous?.check_in_date ?? null, previous?.check_out_date ?? null, organizationId, id, version],
+  },
   publicResourceCacheInvalidationQuery(organizationId, 'guest-thread-create'),
   bookingContactQuery({ organizationId, bookingId: id, version, updatedAt: now, locationId: home.location_id, guest: { name: guestName, email: booking.guest_email, phone: booking.guest_phone } }),
   ...reconcileGuestListingParticipants(organizationId, { query: 'c.booking_id = ?', params: [id] }),
@@ -2939,9 +2971,15 @@ export async function reactToStayChange(env: CloudflareEnv, event: Extract<Domai
   } else {
     await planSourceMessages(db, organization_id, booking_id)
   }
-  const outcome = push_ranges.length
-    ? await pushNights(db, env, { organizationId: organization_id, actorId: 'system', manage: true }, product_id, push_ranges)
-    : null
+  // A stay that moved homes frees the same nights at the home it left; the outcome reported is the worst of them.
+  const severity = (pushed: ChannelPushCompletion) => pushed instanceof Error ? 3 : pushed?.state === 'needs_review' ? 2 : pushed?.state === 'pending' ? 1 : 0
+  let outcome: ChannelPushCompletion = null
+  if (push_ranges.length) {
+    for (const home of [product_id, ...(event.prior_homes ?? []).map(prior => prior.product_id)]) {
+      const pushed = await pushNights(db, env, { organizationId: organization_id, actorId: 'system', manage: true }, home, push_ranges)
+      if (outcome === null || severity(pushed) > severity(outcome)) outcome = pushed
+    }
+  }
   await completeChannelPush(outcome, { product_id, booking_id, version, ranges: push_ranges }, async () => {
     for (const home of event.prior_homes ?? []) {
       const affected = { organization_id, booking_id, ...home }
