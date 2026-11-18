@@ -166,14 +166,14 @@ export async function listAgenda(
   const assignedRequests = staff ? assignedGuestThreadScope('rq', staff.userId) : null
 
   const wants = (kind: AgendaKind) => !query.kinds?.length || query.kinds.includes(kind)
-  const scopeSql = scope.buyerUserId
-    ? `IN (SELECT r.organization_id FROM conversations r WHERE r.user_id = ? AND ${CURRENT_GUEST_SQL('r')})`
-    : '= ?'
-  const scopeParam = scope.buyerUserId ?? scope.organizationId
   const queries: BatchQuery[] = [
-    { query: `SELECT 1 AS present FROM product_booking_configs WHERE organization_id ${scopeSql}
-        UNION ALL SELECT 1 AS present FROM bookings WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam, scopeParam] },
-    { query: `SELECT 1 AS present FROM product_stay_configs WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam] },
+    { query: `WITH agenda_organizations(organization_id) AS MATERIALIZED (
+        ${scope.buyerUserId ? `SELECT DISTINCT r.organization_id FROM conversations r WHERE r.user_id = ? AND ${CURRENT_GUEST_SQL('r')}` : 'SELECT ?'}
+      ) SELECT
+        EXISTS (SELECT 1 FROM product_booking_configs WHERE organization_id IN agenda_organizations)
+          OR EXISTS (SELECT 1 FROM bookings WHERE organization_id IN agenda_organizations) AS booking,
+        EXISTS (SELECT 1 FROM product_stay_configs WHERE organization_id IN agenda_organizations) AS stay`,
+      params: [scope.buyerUserId ?? scope.organizationId] },
   ]
   const locationIndex = scope.organizationId ? queries.push({
     query: `SELECT l.id, l.organization_id, l.title FROM business_locations l WHERE l.organization_id = ?
@@ -211,10 +211,10 @@ export async function listAgenda(
       `${addLocalDays(query.from, -2)}T00:00:00.000Z`, `${addLocalDays(query.to, 2)}T23:59:59.999Z`],
   }) - 1 : -1
   const results = await executeBatch(db, queries, { operation: 'Read the agenda' })
-  const [bookableResult, hostingResult] = results
+  const available = results[0]!.results[0] as { booking: number; stay: number }
   const locations = (results[locationIndex]?.results ?? []) as LocationRow[]
   const availableKinds = AGENDA_KINDS.filter(kind => ({
-    booking: Boolean(bookableResult?.results.length), stay: Boolean(hostingResult?.results.length), post: showPosts,
+    booking: Boolean(available.booking), stay: Boolean(available.stay), post: showPosts,
   })[kind])
   const requestedKinds = new Set(availableKinds.filter(wants))
   if (!requestedKinds.size) return { items: [], available_kinds: availableKinds, locations: [] }
