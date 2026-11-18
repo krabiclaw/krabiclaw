@@ -21,7 +21,7 @@ import { TURNOVER_HOME_FROM } from '~/server/domain/tasks'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { stayRequestConfirmationKey } from '~/server/domain/requests'
-import { checkoutStayChangedEvent, isStayNightConflict, stayFromCheckoutQueries, stayHoldPredicate, type CheckoutHome } from '~/server/domain/stays'
+import { checkoutStayChangedEvent, isStayNightConflict, stayFromCheckoutQueries, type CheckoutHome } from '~/server/domain/stays'
 
 export interface CheckoutHold {
   id:string; organization_id:string; product_id:string|null; variant_id:string|null; session_id:string|null; location_id:string|null
@@ -265,9 +265,7 @@ async function saveCheckoutBooking(db: DbClient, env: CloudflareEnv, payment: Pa
    const { variants, ...clocks } = hold.home
    if (variants.length !== 1) throw new Error(`Home ${purchase.product_id} has ${variants.length} variants; a home has exactly one`)
    const home = { ...clocks, name: snapshot.title, variant_id: variants[0]! }
-   const bookable = await stayHoldPredicate(db, { organizationId: payment.organization_id, productId: purchase.product_id, checkIn: purchase.check_in_date, checkOut: purchase.check_out_date })
-   const availability = { query: `${activeCheckout.query} AND ${bookable.query} AND ?>?`,
-     params: [...activeCheckout.params, ...bookable.params ?? [], payment.checkout_expires_at, now] }
+   const availability = { query: `${activeCheckout.query} AND ?>?`, params: [...activeCheckout.params, payment.checkout_expires_at, now] }
    claim = stayFromCheckoutQueries({ organizationId: payment.organization_id, stayId: bookingId, paymentId: payment.id, buyerUserId, now, stay: { quote: purchase, guest: purchase.guest },
     home, policy, availability, websiteSource: await checkoutWebsiteSource(db, payment, hold.conversation_id) })
   }

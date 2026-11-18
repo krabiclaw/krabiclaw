@@ -631,20 +631,19 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
   const answers = questions ? validateFormAnswers(questions, { answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false }) : []
   const guest = { name, email, phone, notes, answers }
   // The quote's refusals name the rule a guest's choice breaks; they come before rate limits and payment setup.
-  let priced: Awaited<ReturnType<typeof quoteStayAvailability>> | null = null
+  let quote: ReturnType<typeof quoteStayAvailability> | null = null
   let buyerUserId: string | undefined
   try {
-    if (!retrying) priced = quoteStayAvailability(organizationId, home, request, nights, quoteOptions)
+    if (!retrying) quote = quoteStayAvailability(home, request, nights, quoteOptions)
     const limited = !retrying && await bookingRateLimit(db, env, await hashClientIp(getClientIp(event)))
     if (limited) stayBookingError(429, 'RATE_LIMITED', limited, 'guest_email')
     if (policy?.confirmation_mode === 'review') {
-      if (!priced?.channelAvailability) throw new Error('A new stay request needs its availability quote')
-      const { quote, channelAvailability } = priced
+      if (!quote) throw new Error('A new stay request needs its quote')
       await requireStripeCheckoutAcceptance(db, env, organizationId)
       buyerUserId = (await ensureInteractionUser(event, env)).id
       const stay = await createStayRequest(db, env, {
         organizationId, buyerUserId, key: idempotencyKey, fingerprint,
-        home, quote, policy: stayCheckoutPolicy(home.guestTerms, quote), channelAvailability, guest, locale, ipHash: await hashClientIp(getClientIp(event)),
+        home, quote, policy: stayCheckoutPolicy(home.guestTerms, quote), guest, locale, ipHash: await hashClientIp(getClientIp(event)),
         websiteSource: await readWebsiteSource(db, organizationId, event.req, readPageEventId(body.page_event_id)),
       })
       return requestResult(stay.id, stay.conversation_id, false, false)
@@ -656,13 +655,13 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
     }
     throw error
   }
-  const stay = priced?.quote ?? { product_id: home.product_id, check_in_date: String(request.check_in_date), check_out_date: String(request.check_out_date), adults: Number(request.adults), children: Number(request.children), infants: Number(request.infants) }
+  const stay = quote ?? { product_id: home.product_id, check_in_date: String(request.check_in_date), check_out_date: String(request.check_out_date), adults: Number(request.adults), children: Number(request.children), infants: Number(request.infants) }
   const buyer = await ensureInteractionUser(event, env)
   const checkout = await createPaymentCheckout(db, env, {
     unit: 'nights', organizationId, buyerUserId: buyer.id, buyer, requestId: null, requestFingerprint: fingerprint,
     quantity: stay.adults + stay.children, idempotencyKey, previous: retrying, following: () => [],
     origin: { request: event.req, pageEventId: readPageEventId(body.page_event_id) },
-    stay, guest, ...(priced ? { terms: { ...priced, policy: stayCheckoutPolicy(home.guestTerms, priced.quote), taxCode: home.tax_code } } : {}),
+    stay, guest, ...(quote ? { terms: { quote, policy: stayCheckoutPolicy(home.guestTerms, quote), taxCode: home.tax_code } } : {}),
   })
   return { body: { success: true, status: 'checkout', replayed: Boolean(retrying), ...checkout }, status: retrying ? 200 : 201 }
 }

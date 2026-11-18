@@ -316,7 +316,7 @@ export async function confirmPayment(db: DbClient, env: CloudflareEnv, organizat
     const started = new Date().toISOString()
     const expiresAt = confirmationHoldUntil(started)
     if (!stay || !hold?.conversation_id || !hold.buyer_user_id) throw new Error('Approved stay payment has no stay or guest conversation')
-    const bookable = await approvedStayPaymentPredicate(db, {
+    const bookable = approvedStayPaymentPredicate({
       ...approval, organizationId, productId: stay.product_id, checkIn: stay.check_in_date, checkOut: stay.check_out_date,
       conversationId: hold.conversation_id, buyerUserId: hold.buyer_user_id, through: started,
     })

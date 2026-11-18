@@ -17,6 +17,7 @@ import guestStayRoute from '../../server/api/public/guest-stays/[activity_id].ge
 import accountCancelRoute from '../../server/api/account/bookings/[booking_id]/cancel.post.ts'
 import accountStayRoute from '../../server/api/account/bookings/[booking_id].get.ts'
 import accountPayRoute from '../../server/api/account/bookings/[booking_id]/pay.post.ts'
+import dashboardBookingCreateRoute from '../../server/api/dashboard/bookings/index.post.ts'
 import dashboardBookingPatchRoute from '../../server/api/dashboard/bookings/[booking_id].patch.ts'
 import paymentHandoffRoute from '../../server/api/public/payments/[payment_id].get.ts'
 import paymentConfirmRoute from '../../server/api/public/payments/[payment_id]/confirm.post.ts'
@@ -1127,12 +1128,44 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
       guest_name: null, guest_surname: null, guest_email: null, guest_phone: null, total_minor: 20_000, currency: 'USD',
     })
     assert.equal(channel.overbooked, true)
+    assert.equal(await claims(channel.id), 2)
     assert.equal(channel.ends_at.slice(0, 10), date(24))
     assert.equal((await decide(collision, 'confirm')).ok, false)
     assert.equal((await getStay(db, manager, collision.id)).request_status, 'awaiting_approval')
     assert.equal((await decide(collision, 'reject')).ok, true)
     assert.equal(await claims(collision.id), 0)
+    assert.equal(await claims(channel.id), 2)
     await assert.rejects(submit('stay-ota-refused', 24), code('STAY_NIGHTS_UNAVAILABLE'))
+    const hostStay = await createStay(db, env, manager, {
+      product_id: cabin.id, idempotency_key: 'host-stay-to-move', check_in_date: date(28), check_out_date: date(29),
+      adults: 2, guest_name: 'Host guest', guest_email: 'host-guest@example.test', total_minor: 20_000,
+    })
+    const password = 'LocalHostBookingProof123!'
+    await db.prepare("INSERT INTO account(id,accountId,providerId,userId,password) VALUES(?,?,'credential',?,?)").bind(OWNER, OWNER, OWNER, await hashPassword(password)).run()
+    const login = await createAuth(env).api.signInEmail({ body: { email: `${OWNER}@example.test`, password }, asResponse: true })
+    assert.equal(login.status, 200)
+    const token = login.headers.get('set-auth-token')
+    assert.ok(token)
+    const dashboard = new H3()
+    dashboard.post('/api/dashboard/bookings', dashboardBookingCreateRoute)
+    dashboard.patch('/api/dashboard/bookings/:booking_id', dashboardBookingPatchRoute)
+    const hostWrite = (method: 'POST' | 'PATCH', path: string, body: object) => dashboard.request(Object.assign(new Request(`https://proof.example${path}?org=org`, {
+      method, headers: { authorization: `Bearer ${token}`, origin: 'https://proof.example', 'content-type': 'application/json' }, body: JSON.stringify(body),
+    }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    const [created, edited] = await Promise.all([
+      hostWrite('POST', '/api/dashboard/bookings', {
+        product_id: cabin.id, idempotency_key: 'host-stay-on-channel-night', check_in_date: date(24), check_out_date: date(25),
+        adults: 2, guest_name: 'Another guest', guest_email: 'another-guest@example.test', total_minor: 20_000,
+      }),
+      hostWrite('PATCH', `/api/dashboard/bookings/${hostStay.id}`, { version: hostStay.version, check_in_date: date(23), check_out_date: date(24) }),
+    ])
+    for (const result of [created, edited]) {
+      assert.equal(result.status, 409, await result.clone().text())
+      assert.equal((await result.json()).data?.code, 'STAY_OVERLAP')
+    }
+    assert.equal(await db.prepare("SELECT id FROM bookings WHERE organization_id=? AND idempotency_key='host-stay-on-channel-night'").bind(ORG).first('id'), null)
+    const unchangedStay = await getStay(db, manager, hostStay.id)
+    assert.deepEqual([unchangedStay.check_in_date, unchangedStay.version], [date(28), hostStay.version])
     const adjacent = await submit('stay-ota-adjacent', 25)
     assert.equal((await decide(adjacent, 'confirm')).ok, true)
     assert.equal((await getStay(db, manager, adjacent.id)).request_status, 'awaiting_payment')
