@@ -147,7 +147,8 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
     assert.deepEqual(await nights(db, host.id), ['2027-02-01', '2027-02-02'])
     assert.deepEqual(channex.availability, [])
     await queue.drain(env, 'stay.changed')
-    assert.deepEqual(channex.availability.map(entry => [entry.date_from, entry.date_to, entry.availability]), [['2027-02-01', '2027-02-02', 0]])
+    // The channel booking's nights are sent too: its first three, the fourth its modification added, then the host stay's.
+    assert.deepEqual(channex.availability.map(entry => [entry.date_from, entry.date_to, entry.availability]), [['2027-01-10', '2027-01-12', 0], ['2027-01-13', '2027-01-13', 0], ['2027-02-01', '2027-02-02', 0]])
     channex.revise('rev-2', { ...booking, id: 'bk-2', arrival: '2027-02-02', departure: '2027-02-04' }, '2026-10-15T02:00:00Z')
     const overlap = await applyBookingRevision(db, env, 'rev-2')
     assert.deepEqual([overlap.status, (overlap as { overbooked: boolean }).overbooked], ['acknowledged', true])
@@ -159,6 +160,10 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
     assert.deepEqual(await db.prepare('SELECT status, version FROM bookings WHERE id = ?').bind(stayId).first(), { status: 'cancelled', version: 3 })
     assert.deepEqual(await nights(db, stayId), [])
     assert.ok((await db.prepare('SELECT cancelled_at FROM bookings WHERE id = ?').bind(stayId).first<{ cancelled_at: string | null }>())!.cancelled_at)
+    // Channex does not reopen a cancelled booking's nights itself: the cancellation sends them open.
+    channex.availability = []
+    await queue.drain(env, 'stay.changed')
+    assert.deepEqual(channex.availability.map(entry => [entry.date_from, entry.date_to, entry.availability]), [['2027-02-03', '2027-02-03', 0], ['2027-01-10', '2027-01-13', 1]])
 
     // The same reservation code arriving under a new Channex booking id updates its stay rather than making a second one.
     const coded: Booking = { ...booking, id: 'bk-code', code: 'HMCODE', arrival: '2027-03-10', departure: '2027-03-12' }
@@ -225,7 +230,7 @@ test('Vrbo hosts open only the selected mapped property and bookings use the sha
       check_out_date: '2027-02-03', adults: 1, guest_name: 'Host guest', total_minor: 10_000,
     })
     await queue.drain(env, 'stay.changed')
-    assert.deepEqual(channex.availability.map(value => [value.date_from, value.date_to, value.availability]), [['2027-02-01', '2027-02-02', 0]])
+    assert.deepEqual(channex.availability.map(value => [value.date_from, value.date_to, value.availability]), [['2027-01-10', '2027-01-12', 0], ['2027-02-01', '2027-02-02', 0]])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

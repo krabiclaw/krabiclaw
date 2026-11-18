@@ -1357,7 +1357,7 @@ function importedNight(night: ListingNight, currency: string, source: Pick<Listi
   const defaults = resolveStayNightPolicy({ min_nights: source.minimum_nights, base_price_minor: minorUnits(source.nightly_rate, currency), calendar_rules: source.calendar_rules }, night.date)
   const price = minorUnits(night.rate, currency)
   return {
-    date: night.date, available: night.availability === 1, price_minor: price === defaults.price_minor ? null : price,
+    date: night.date, available: night.availability === 1 || night.reserved, price_minor: price === defaults.price_minor ? null : price,
     min_stay_arrival: night.minStay === defaults.min_stay_arrival ? null : night.minStay,
 
     max_stay: night.maxStay === 0 ? null : night.maxStay, closed_to_arrival: night.closedToArrival, closed_to_departure: night.closedToDeparture,
