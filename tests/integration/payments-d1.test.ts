@@ -38,6 +38,7 @@ import { createReplayableReservationCancelToken, hashReservationCancelToken } fr
 import { getStripe } from '../../server/utils/billing.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { approveRefundAuthorization, requirePayment } from '../../server/domain/payments/index.ts'
+import { paymentTransactionDestination } from '../../server/domain/payments/earnings.ts'
 import { completePaymentReturn, reviewPayment, confirmPayment, paymentHandoff, requireClaimedPayment } from '../../server/domain/payments/intent.ts'
 import { reconcilePaymentIntent, processPaymentEvent } from '../../server/domain/payments/events.ts'
 import { mcpFinancialApprovalErrorResult } from '../../server/utils/mcp-financial-handoff.ts'
@@ -517,6 +518,7 @@ test('Checkout proof attaches ownership without exposing merchant financial data
   assert.deepEqual(await db.prepare("SELECT * FROM payment_checkout_holds WHERE payment_id='claim'").first(),originalHold)
   assert.deepEqual((await buyerActivities(db,'verified')).activities.map(({kind,id})=>({kind,id})),[{kind:'payment',id:'claim'}])
   assert.equal(await buyerPaymentActivityPath(db,'verified','claim'),'/dashboard/account/activity/payment/claim')
+  assert.deepEqual(await paymentTransactionDestination(db, ORG, 'payments', 'claim'), { to: '/dashboard/payments/bookings/payment/claim' })
   const owned=await loadBuyerBookingDetails(db, env,'verified','payment','claim')
   assert.equal(owned.type,'payment')
   assert.equal(owned.name,'Consultation')
@@ -586,6 +588,8 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   const visits=(await buyerActivities(db,'verified')).activities
   assert.deepEqual(visits.map(({kind,id,conversation_id,booking_id})=>({kind,id,conversation_id,booking_id})),[{kind:'booking',id:opening.id,conversation_id:opening.id,booking_id:booking.bookingId}])
   assert.equal(await buyerPaymentActivityPath(db,'verified','visit-payment'),`/dashboard/account/activity/booking/${opening.id}`)
+  assert.deepEqual(await paymentTransactionDestination(db, ORG, 'payments', 'visit-payment'), { to: `/dashboard/payments/bookings/${booking.bookingId}` })
+  await assert.rejects(() => paymentTransactionDestination(db, 'platform', 'platform', 'visit-payment'), { statusCode: 404 })
   // The team's private note on the booking is never the buyer's to read.
   await db.prepare("UPDATE bookings SET private_notes='Team-only note' WHERE id=?").bind(booking.bookingId).run()
   const detail=await loadBuyerBookingDetails(db, env,'verified','booking',opening.id)

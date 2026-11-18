@@ -3,7 +3,7 @@ import {getQuery} from 'nitro/h3'
 import {getDashboardContext} from '~/server/utils/dashboard-context'
 import {jsonResponse} from '~/server/utils/api-response'
 import {listPayments,paymentSummary,readPaymentDetails,authorizePayments} from '~/server/domain/payments'
-import {paymentPayoutDetail,paymentPayouts,paymentPerformance,paymentTransactions} from '~/server/domain/payments/earnings'
+import {paymentPayoutDetail,paymentPayouts,paymentPerformance,paymentTransactionDestination,paymentTransactions} from '~/server/domain/payments/earnings'
 import {queryAll,queryFirst} from '~/server/db'
 export default defineHandler(async event=>{
  const {db,env,organization,userId}=await getDashboardContext(event,{})
@@ -13,6 +13,7 @@ export default defineHandler(async event=>{
  if(query.after!==undefined&&(typeof query.after!=='string'||!query.after))throw new HTTPError({statusCode:400,statusMessage:'Valid page cursor is required'})
  const after=typeof query.after==='string'?query.after:undefined
  if(typeof query.payment_id==='string'){
+  if(query.view==='destination')return jsonResponse(await paymentTransactionDestination(db,organization.id,organization.slug,query.payment_id))
   return jsonResponse(await readPaymentDetails(db,env,organization.id,query.payment_id))
  }
  if(query.view==='payouts')return jsonResponse(await paymentPayouts(db,env,principal,after,query.with_items==='1'))
