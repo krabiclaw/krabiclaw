@@ -7,6 +7,7 @@ import { seededSiteHeaders } from './test-env'
 import { seededTenant } from './seed/manifest'
 import type { Product } from '../../server/types/products'
 import type { BusinessToday } from '../../shared/dashboard-today'
+import type { TaskSection } from '../../server/domain/tasks'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
 const SLUG = 'harbor-legal-aid'
@@ -34,13 +35,19 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
   let roleChanged = false
   const failures: unknown[] = []
   try {
-  await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
+  const ownerId = 'user-e2e-ncls-owner'
+  const signedIn = await loginAs(page.request, baseURL!, ownerId)
+  const token = signedIn.headers()['set-auth-token']
+  expect(token, 'Better Auth issues the bearer token used by native Today').toBeTruthy()
   await loginAs(memberContext.request, baseURL!, ACTOR)
   const members = await body<{ members: Array<{ id: string; userId: string; role: string }> }>(
     await page.request.get('/api/dashboard/members', { params: { org: SLUG } }), 200)
   const actor = members.members.find(member => member.userId === ACTOR)
   expect(actor, 'The canonical actor fixture already belongs to Harbor Legal Aid').toBeTruthy()
   if (!actor) throw new Error('The assigned-staff actor fixture is missing')
+  const owner = members.members.find(member => member.userId === ownerId)
+  if (!owner) throw new Error('The owner attorney fixture is missing')
+  let responsibleMemberId = actor.id
   const schedulePath = `/api/organizations/${ORGANIZATION}/members/${actor.id}/scheduling`
   type Schedule = { timezone: string; weekly: Array<{ weekday: number; start: string; end: string }>; time_off: Array<{ start: string; end: string }>; public_name: string | null; public_photo_url: string | null; public_bio: string | null; public_approved: number; updated_at: string }
   const previousSchedule = (await body<{ scheduling: Schedule | null }>(await page.request.get(schedulePath), 200)).scheduling
@@ -223,6 +230,24 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     expect(await body(await missingRead, 404)).not.toHaveProperty('booking')
     await expect(memberPage.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
     await expect(change).toHaveCount(0)
+
+    // Upcoming in Today shows the same open follow-up under the responsible attorney.
+    const followUps = async (assignee: string) => (await body<{ tasks: TaskSection[] }>(
+      await request.get('/api/dashboard/today', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { org: SLUG, range: 'upcoming', kind: 'consultation_follow_up', assignee },
+      }), 200)).tasks.flatMap(section => section.tasks).filter(task => task.booking_id === bookingId)
+    await expect.poll(async () => (await followUps(actor.id)).map(task => task.assignee?.id)).toEqual([actor.id])
+    const [followUp] = await followUps(actor.id)
+    await body(await page.request.put(`${EDITOR}/products/${product.id}/booking`, { data: { assigned_member_id: owner.id } }), 200)
+    responsibleMemberId = owner.id
+    const reassigned = await body<{ booking: DashboardBookingDetails }>(
+      await page.request.get(`/api/dashboard/bookings/${bookingId}`, { params: { org: SLUG } }), 200)
+    expect(reassigned.booking.assigned_member_id).toBe(owner.id)
+    expect(await followUps(actor.id), 'The previous attorney’s filter no longer includes the follow-up').toEqual([])
+    expect(await followUps(owner.id)).toMatchObject([{
+      id: followUp!.id, status: 'open', version: followUp!.version + 1, due_at: followUp!.due_at, assignee: { id: owner.id },
+    }])
   } finally {
     try {
       if (requestId) {
@@ -237,10 +262,10 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
           // Archive the authored consultation with its attorney configuration and booked history.
           await body(await page.request.patch(`${EDITOR}/products/${product.id}`, { data: { active: false } }), 200)
           const archived = await body<{ product: Product }>(await page.request.get(`${EDITOR}/products/${product.id}`), 200)
-          expect(archived.product).toMatchObject({ active: false, booking: { held_online: true, scheduling_mode: 'provider', assigned_member_id: actor.id } })
+          expect(archived.product).toMatchObject({ active: false, booking: { held_online: true, scheduling_mode: 'provider', assigned_member_id: responsibleMemberId } })
           expect(archived.product.publications).toContainEqual({ organization_id: ORGANIZATION, published: false })
           const history = await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/${bookingId}`, { params: { org: SLUG } }), 200)
-          expect(history.booking).toMatchObject({ conversation_id: requestId, status: 'cancelled', assigned_member_id: actor.id })
+          expect(history.booking).toMatchObject({ conversation_id: requestId, status: 'cancelled', assigned_member_id: responsibleMemberId })
         } else await body(await page.request.delete(`${EDITOR}/products/${product.id}`), 200)
       }
     } catch (error) { failures.push(error) }

@@ -50,6 +50,7 @@ export async function loginAs(request: APIRequestContext, baseURL: string, userI
   const session = await request.get(`${baseURL}/api/auth/get-session`)
   expect(session.status(), await session.text()).toBe(200)
   await expect(session.json()).resolves.toMatchObject({ user: fixture ? { id: fixture.id } : { email } })
+  return res
 }
 
 export async function sendOrganizationInvitation(request: APIRequestContext, baseURL: string, organizationId: string, email: string, role: 'member' | 'admin') {
