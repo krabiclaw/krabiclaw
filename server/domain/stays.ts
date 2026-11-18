@@ -1624,10 +1624,10 @@ export async function deliverPendingChannelNights(env: CloudflareEnv, organizati
       // Channex answers Success for a night past the end of its own calendar and keeps nothing (read 2026-11-18:
       // 2028-03-30..04-01 accepted, none stored), so a night sent the day it entered may not be there. Each day a
       // night enters, the last week of the calendar is sent whole again, until each night is well inside Channex's.
-      const edge = Array.from({ length: CHANNEL_EDGE_NIGHTS }, (_, offset) => addDays(row.to, offset - CHANNEL_EDGE_NIGHTS))
-      await execute(db, "UPDATE channel_night_pushes SET sent_json = NULL WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND date >= ? AND date < ?",
-        [organizationId, row.product_id, edge[0], row.to])
-      for (const night of edge) if (!added.includes(night)) added.push(night)
+      // One statement: the nights are pending until a delivery confirms them, so a failure before then leaves them due.
+      await execute(db, `UPDATE channel_night_pushes SET sent_json = NULL, state = 'pending', detail = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND date >= ? AND date < ?`,
+      [organizationId, row.product_id, addDays(row.to, -CHANNEL_EDGE_NIGHTS), row.to])
     }
     const home = await readStayHome(db, { organizationId, actorId: 'system', manage: true }, row.product_id)
     const read = (start: string, end: string) => homeNights(db, organizationId, home, start, end)
