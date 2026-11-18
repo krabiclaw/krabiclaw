@@ -1,10 +1,10 @@
 import { staffListingsQuery } from '~/server/domain/listing-access'
 import { organizationRoleCards, rolesAllowing, rolesForVertical, roleMatchesSql, workspaceManagementRoles } from '~/utils/organization-access'
-import { HTTPError } from 'nitro'
+import { HTTPError, type H3Event } from 'nitro'
 import { executeBatch, type DbClient } from '~/server/db'
-import { assertRoleAllows, BATCH_VIEWER, membershipBySlugQuery, withViewer } from '~/server/utils/member-access'
+import { assertRoleAllows, BATCH_VIEWER, joinedMemberPrincipal, membershipBySlugQuery, withViewer } from '~/server/utils/member-access'
 import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
-import { openWorkQuery, taskUpdatePath, taskAssignees, taskAssigneesQuery, type OpenWorkRow } from '~/server/domain/tasks'
+import { listTasks, openWorkQuery, taskUpdatePath, taskAssignees, taskAssigneesQuery, taskViewer, type OpenWorkRow, type TaskListQuery } from '~/server/domain/tasks'
 import { bookingWelcomesQuery, bookingWelcomeViews, setupQueries, setupViews } from '~/server/domain/opportunities'
 import { bookingDay } from '~/server/domain/requests'
 import { groupMediaPlacements, mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
@@ -16,6 +16,10 @@ import { currencyFractionDigits } from '~/shared/currencies'
 import { formatMinorAmount } from '~/shared/prices'
 import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
+import type { CloudflareEnv } from '~/server/utils/auth'
+import { organizationPublicUrl } from '~/server/utils/domains'
+import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS, previewSecretOf, PUBLIC_WEBSITE_QUERY } from '~/server/utils/preview-token'
+import { isDemoOrganization } from '~/shared/demo'
 
 /*
   Today and Upcoming for the person looking: the bookings they host in the
@@ -46,8 +50,9 @@ type Noun = keyof typeof NOUNS
 /** A card as it is built: what it counts as, where it sorts, the bookings it stands for and the local day it is on. */
 interface Card extends TodayItem { noun: Noun; order: [number, string]; bookings: string[]; day: string }
 
-export async function readToday(db: DbClient, input: { slug: string; userId: string; range: Range; now: Date; staffAccessWrites?: boolean }): Promise<BusinessToday> {
-  const { range, now, staffAccessWrites = true } = input
+export async function readToday(db: DbClient, input: { slug: string; userId: string; range: Range; now: Date; staffAccessWrites?: boolean;
+  native?: { env: CloudflareEnv; event: H3Event; query: TaskListQuery } }) {
+  const { range, now, staffAccessWrites = true, native } = input
   const utcDay = now.toISOString().slice(0, 10)
   const from = utcDay, to = range === 'today' ? utcDay : addLocalDays(utcDay, UPCOMING_RESERVATION_DAYS + 1)
   const wideFrom = `${addLocalDays(from, -1)}T00:00:00.000Z`, wideTo = `${addLocalDays(to, 1)}T23:59:59.999Z`
@@ -72,7 +77,8 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     withViewer(membership, taskAssigneesQuery(managed)),
     ...(staffAccessWrites ? [withViewer(membership, staffListingsQuery(managed.sql, '(SELECT vertical FROM viewer)'))] : []),
   ], { operation: 'Read Today' })
-  const viewer = viewerResult!.results[0] as { organization_id: string; slug: string; vertical: string | null; role: string; organization_wide: number } | undefined
+  const viewer = viewerResult!.results[0] as { organization_id: string; member_id: string; slug: string; vertical: string | null; role: string;
+    organization_wide: number; status: string; onboarding_status: string; subdomain: string | null } | undefined
   if (!viewer) throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
   await assertRoleAllows({ organizationId: viewer.organization_id, role: viewer.role, permissions: { task: ['read'] } })
   const manage = viewer.organization_wide === 1
@@ -250,13 +256,14 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   }
 
   // The business's unfinished setup, after the day's cards: each opens the editor or settings that finishes it.
-  for (const [index, step] of (setupViews(factResult!.results, unpricedResult!.results)?.opportunities ?? []).entries()) {
+  const opportunities = setupViews(factResult!.results, unpricedResult!.results)?.opportunities ?? []
+  for (const [index, step] of opportunities.entries()) {
     add({ id: step.id, noun: 'setup', order: [2, String(index).padStart(4, '0')], bookings: [], day: '', when: null, image_url: null, icon: step.icon,
       headline: step.title, line: null, action: { title: step.detail.replace(/\.$/, ''), detail: step.status_line }, to: step.path, draft: null })
   }
 
   cards.sort((a, b) => a.order[0] - b.order[0] || a.order[1].localeCompare(b.order[1]) || a.id.localeCompare(b.id))
-  return {
+  const response: BusinessToday = {
     title: heading(cards, range), cards: cards.map(({ noun: _noun, order: _order, bookings: _bookings, day: _day, ...card }) => card),
     ...(manage && staffAccessWrites ? { claim_options: {
       roles: rolesForVertical(viewer.vertical)
@@ -266,6 +273,32 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     } } : {}),
     assignees: taskAssignees(assigneeResult!.results, input.userId), resolved_at: now.toISOString(),
   }
+  if (!native) return response
+
+  // The installed TodayWork client needs these fields even when it has nothing to show.
+  const principal = joinedMemberPrincipal({ userId: input.userId, organizationId: viewer.organization_id,
+    memberId: viewer.member_id, role: viewer.role }, native)
+  const { sections } = await listTasks(db, await taskViewer(principal), native.query, now)
+  const privateSite = viewer.status === 'inactive'
+  const hasOpenWork = cards.some(card => card.bookings.length > 0) || sections.some(section => section.id === 'open')
+  let website = null
+  if (range === 'today' && !native.query.kind && !native.query.location_id && administration && viewer.onboarding_status === 'active'
+    && (privateSite || viewer.status === 'active' && !hasOpenWork) && !isDemoOrganization(viewer)) {
+    const address = await organizationPublicUrl(native.env, native.env.DB, viewer.organization_id)
+    if (address) {
+      const preview = new URL(address)
+      const secret = previewSecretOf(native.env)
+      if (!secret) throw new Error('Website preview signing is unavailable')
+      preview.searchParams.set(PREVIEW_TOKEN_QUERY, await createPreviewToken(secret, viewer.organization_id, now.getTime() + PREVIEW_TOKEN_TTL_MS))
+      website = {
+        address, preview_url: preview.toString(), preview_label: 'Website preview', status_label: privateSite ? 'Private' : 'Live',
+        action: privateSite
+          ? { label: 'Publish website', to: `/dashboard/${encodeURIComponent(viewer.slug)}/website?publish=1`, type: 'publish' }
+          : { label: 'View website', to: address + PUBLIC_WEBSITE_QUERY, type: 'visit' },
+      }
+    }
+  }
+  return { ...response, website, tasks: sections, opportunities: privateSite ? opportunities.slice(0, 3) : opportunities, opportunity_issues: [] }
 }
 
 /**
