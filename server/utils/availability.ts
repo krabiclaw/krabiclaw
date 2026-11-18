@@ -341,15 +341,17 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   // its sessions and publication. An INSERT ... SELECT that selects no row
   // would instead let those other writes commit.
   return { config, queries: [
-    // A home's open cleaning jobs are its assignee's: a new assignee takes them over, and
-    // an offering's follow-ups that have nobody become theirs; with nobody named they are the
-    // owner's (a job is never left with nobody). Read against the assignee this write replaces.
+    // A new assignee takes over the home's open cleanings and the offering's open
+    // follow-ups held by its previous assignee or left unassigned. A follow-up
+    // already given to someone else stays with that person.
     ...(reassigned ? [{
       query: `UPDATE tasks SET assigned_member_id = ${jobAssigneeSql('tasks.organization_id', '?')}, version = version + 1, updated_at = ?
         WHERE organization_id = ? AND product_id = ? AND status = 'open'
-          AND (kind = 'turnover' OR (kind = 'consultation_follow_up' AND assigned_member_id IS NULL))
+          AND (kind = 'turnover' OR (kind = 'consultation_follow_up'
+            AND (assigned_member_id IS NULL OR assigned_member_id IS ${jobAssigneeSql('tasks.organization_id', '?')})))
           AND EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id = ? AND c.product_id = ? AND c.assigned_member_id IS ?) RETURNING id AS changed_task_id`,
-      params: [config.assigned_member_id, now, input.organizationId, input.productId, input.organizationId, input.productId, current!.assigned_member_id],
+      params: [config.assigned_member_id, now, input.organizationId, input.productId, current!.assigned_member_id,
+        input.organizationId, input.productId, current!.assigned_member_id],
     }] : []), {
     query: `INSERT INTO product_booking_configs (product_id, organization_id, unit, ${fields.join(', ')}, questions, created_at, updated_at, created_by, updated_by)
       VALUES (?, ?, ?, ${fields.map(() => '?').join(', ')}, ?, ?, CASE WHEN (${unchanged.query})
