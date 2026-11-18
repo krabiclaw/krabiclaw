@@ -54,6 +54,7 @@ export interface OrganizationEvent {
   beforeStateQuery?: BatchQuery
   /** Read the saved state inside the write's transaction. */
   afterStateQuery?: BatchQuery
+  metadataQuery?: BatchQuery
   /**
    * Record the event only when the statement just before it in the batch
    * changed exactly one row. A compare-and-set write that lost its guard
@@ -85,7 +86,8 @@ export function organizationEventQuery(event: OrganizationEvent): BatchQuery {
   const actorKind = actorType === 'cloudflare' ? 'cloudflare' : actorId ? 'member' : 'system'
   const now = new Date().toISOString()
   const before = event.beforeStateQuery ? `json_set(?, '$.beforeState', json((${event.beforeStateQuery.query})))` : '?'
-  const payload = event.afterStateQuery ? `json_set(${before}, '$.afterState', json((${event.afterStateQuery.query})))` : before
+  const after = event.afterStateQuery ? `json_set(${before}, '$.afterState', json((${event.afterStateQuery.query})))` : before
+  const payload = event.metadataQuery ? `json_set(${after}, '$.metadata', json((${event.metadataQuery.query})))` : after
   return {
     query: `
       INSERT INTO activity_entries
@@ -101,6 +103,7 @@ export function organizationEventQuery(event: OrganizationEvent): BatchQuery {
         ...(event.context ? { context: event.context } : {}) }),
       ...(event.beforeStateQuery?.params ?? []),
       ...(event.afterStateQuery?.params ?? []),
+      ...(event.metadataQuery?.params ?? []),
       now, now, event.dedupeKey ?? 'audit:' + id],
   }
 }

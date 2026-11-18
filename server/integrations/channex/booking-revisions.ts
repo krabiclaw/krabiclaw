@@ -137,8 +137,10 @@ export async function landBookingRevision(db: DbClient, env: ChannexEnv & GuestI
     }
     const booking = revisedBooking(revision, propertyId)
     const stay = await applyChannelBooking(db, env, mapping.organization_id, mapping.product_id, booking)
-    // Queue the host's notification before acknowledging the revision. Imports and superseded revisions have no announcement.
-    if (stay.change && !booking.imported) {
+    if (stay.change && stay.change.terms.overbooked && !stay.change.previous?.overbooked) {
+      const { notifyChannelStay } = await import('~/server/utils/notifications')
+      await notifyChannelStay(env, db, mapping.organization_id, { stayId: stay.id, revisionId, ...stay.change })
+    } else if (stay.change && !booking.imported) {
       await publishEvent(env, { type: 'stay.channel_revision', organization_id: mapping.organization_id, booking_id: stay.id, revision_id: revisionId, ...stay.change })
     }
     // The outcome is recorded before the acknowledgement: once Channex drops the

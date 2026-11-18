@@ -28,6 +28,7 @@ class FakeChannex {
   /** Each revision as Channex serves it: the booking as the channel sent it, at that revision's time. */
   revisions = new Map<string, Record<string, unknown>>()
   acked: string[] = []
+  beforeAck?: (revisionId: string) => Promise<void>
   /** Channex's revision reads (by id and the feed) answer 503. */
   failRevisions = false
   availability: Array<{ date_from: string; date_to: string; availability: number }> = []
@@ -45,7 +46,11 @@ class FakeChannex {
       return json({ data: [{ id: crypto.randomUUID(), type: 'task' }], meta: { message: 'Success', warnings: [] } })
     }
     let match = path.match(/^\/booking_revisions\/([^/]+)\/ack$/)
-    if (method === 'POST' && match) { this.acked.push(match[1]!); return json({ meta: { message: 'Success' } }) }
+    if (method === 'POST' && match) {
+      await this.beforeAck?.(match[1]!)
+      this.acked.push(match[1]!)
+      return json({ meta: { message: 'Success' } })
+    }
     if (method === 'GET' && path === '/booking_revisions/feed') {
       if (this.failRevisions) return new Response('upstream', { status: 503 })
       const property = url.searchParams.get('filter[property_id]')
@@ -152,7 +157,7 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
     const savedGuest = () => db.prepare("SELECT json_extract(payload_json, '$.guest.name') AS name, json_extract(payload_json, '$.guest.email') AS email FROM conversations WHERE organization_id = ? AND booking_id = ?").bind(ORG, stayId).first()
     assert.deepEqual(await savedGuest(), { name: 'Lee Park', email: 'lee@example.test' })
 
-    // A host stay holds 2027-02-01..03; a channel booking over it still lands, flagged and holding nothing.
+    // A host stay holds 2027-02-01..03; a channel booking over it keeps every night it sold, including the shared one.
     const host = await createStay(db, env, { organizationId: ORG, actorId: OWNER, manage: true }, { product_id: productId, idempotency_key: 'host-1', check_in_date: '2027-02-01', check_out_date: '2027-02-03', adults: 1, guest_name: 'Host guest', guest_email: 'host-guest@example.test', total_minor: 10_000 })
     assert.deepEqual(await nights(db, host.id), ['2027-02-01', '2027-02-02'])
     assert.deepEqual(channex.availability, [])
@@ -160,9 +165,18 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
     // The channel booking's nights are sent too: its first three, the fourth its modification added, then the host stay's.
     assert.deepEqual(channex.availability.map(entry => [entry.date_from, entry.date_to, entry.availability]), [['2027-01-10', '2027-01-12', 0], ['2027-01-13', '2027-01-13', 0], ['2027-02-01', '2027-02-02', 0]])
     channex.revise('rev-2', { ...booking, id: 'bk-2', arrival: '2027-02-02', departure: '2027-02-04' }, '2026-10-15T02:00:00Z')
+    channex.beforeAck = async revisionId => {
+      if (revisionId !== 'rev-2') return
+      assert.deepEqual((await db.prepare(`SELECT d.status FROM guest_thread_deliveries d
+        JOIN activity_entries a ON a.id = d.activity_entry_id
+        WHERE a.organization_id = ? AND a.dedupe_key LIKE '%:rev-2'
+          AND json_extract(a.payload_json, '$.metadata.template') = 'channel_stay.overlap'
+          AND d.channel = 'email'`).bind(ORG).all()).results, [{ status: 'sent' }])
+    }
     const overlap = await applyBookingRevision(db, env, 'rev-2')
     assert.deepEqual([overlap.status, (overlap as { overbooked: boolean }).overbooked], ['acknowledged', true])
-    assert.deepEqual(await nights(db, (overlap as { booking_id: string }).booking_id), [])
+    assert.deepEqual(await nights(db, (overlap as { booking_id: string }).booking_id), ['2027-02-02', '2027-02-03'])
+    await applyBookingRevision(db, env, 'rev-2')
 
     // Cancelling the first booking frees its nights; the stay is kept, cancelled.
     channex.revise('rev-3', { ...booking, status: 'cancelled', departure: '2027-01-14', customer: { mail: 'lee-corrected@example.test' } }, '2026-10-15T03:00:00Z')

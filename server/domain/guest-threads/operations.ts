@@ -181,15 +181,15 @@ async function operationEntryQueries(
 ): Promise<BatchQuery[]> {
   const record = context.record!
   const stay = record.unit === 'nights' ? await import('~/server/domain/stays') : null
-  const channel = stay && plan.payBy ? await stay.stayChannelAvailability(db, {
-    organizationId: record.organization_id, productId: record.product_id,
+  const inventory = stay && plan.payBy ? stay.stayInventoryAvailable({
+    organizationId: record.organization_id, productId: record.product_id, exceptBookingId: record.id,
     checkIn: bookingDay(record.starts_at, record.timezone), checkOut: bookingDay(record.ends_at, record.timezone),
   }) : null
   const sourceGuard = stay
     ? `src.product_session_id IS NULL AND src.owner='app' AND src.channel='direct' AND ${stayRequestRespondBySql('src')} IS NOT NULL
       AND ${noStayRequestPaymentInFlightSql('c.id')}
       ${plan.action !== 'cancel' ? `AND ${stayRequestRespondBySql('src')} > strftime('%Y-%m-%dT%H:%M:%fZ','now') AND ${stayRequestPayBySql('c.id')} IS NULL` : ''}
-      ${channel ? `AND ${channel.query}` : ''}`
+      ${inventory ? `AND ${inventory.query}` : ''}`
     : `src.product_session_id IS NOT NULL AND src.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')`
   return messageQueries({
     id: entryId, conversationId: context.thread.id, authorKind: 'krabiclaw', authorUserId: input.actorUserId,
@@ -216,7 +216,7 @@ async function operationEntryQueries(
                        AND src.version = ?
                        AND json_array(src.id,src.party_size,src.product_id,src.starts_at,src.ends_at,src.timezone,src.location_id,src.party_size_is_minimum)=json_array(?,CAST(? AS INTEGER),?,?,?,?,?,CAST(? AS INTEGER)))
         AND (${financialGuard?.query ?? '1=1'})`,
-      params: [context.thread.organization_id, plan.kind, context.thread.last_message_at, plan.beforeStatus, ...(stay ? [now] : []), ...(channel?.params ?? []), record.version,
+      params: [context.thread.organization_id, plan.kind, context.thread.last_message_at, plan.beforeStatus, ...(stay ? [now] : []), ...(inventory?.params ?? []), record.version,
         record.id, record.party_size, record.product_id, record.starts_at, record.ends_at, record.timezone, record.location_id, Number(record.party_size_is_minimum),
         ...(financialGuard?.params ?? [])],
     },
@@ -451,8 +451,7 @@ async function executeSourceMutation(
     }) : { queries: [], guard: null }
   const stay = nightly ? await import('~/server/domain/stays') : null
   const nightRelease = stay && plan.afterStatus === 'cancelled'
-    ? stay.stayNightReleaseQueries({ ...context.record, check_in_date: bookingDay(context.record.starts_at, context.record.timezone),
-      check_out_date: bookingDay(context.record.ends_at, context.record.timezone) }, input.organizationId, now)
+    ? stay.stayNightReleaseQueries(context.record, input.organizationId, now)
     : []
   const queries = [
     ...await operationEntryQueries(db, context, plan, input, entryId, dedupeKey, now, refundPlan.guard),
