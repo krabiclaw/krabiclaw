@@ -401,26 +401,32 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
   const due = await queryAll<OutboxRow>(db, `SELECT date, state, detail, sent_json, updated_at FROM channel_night_pushes
     WHERE product_id = ? AND provider = 'channex' AND state = 'pending' ORDER BY date`, [home.product_id])
   if (!due.length) return { next: null }
-  const defaults = due.filter(row => row.detail?.startsWith(DEFAULTS_PENDING))
+  const from = today(home.timezone)
+  const current = due.filter(row => row.date >= from)
+  const defaults = current.filter(row => row.detail?.startsWith(DEFAULTS_PENDING))
+  let defaultsFailure: { error: ChannexError; retryAt: number } | null = null
   if (defaults.length) {
     try {
       await configureStayCalendar(db, env, organizationId, home, mapping)
     } catch (cause) {
       if (!(cause instanceof ChannexError) && !(cause instanceof HTTPError && cause.data?.code === 'PRICE_REQUIRED')) throw cause
       const retry = cause instanceof ChannexError && (cause.providerStatus === 429 || cause.providerStatus >= 500)
-      await execute(db, `UPDATE channel_night_pushes SET state = ?, detail = ?
-        FROM json_each(?) WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND state = 'pending'
-          AND date = json_extract(value, '$.date') AND updated_at = json_extract(value, '$.updated_at')`,
-      [retry ? 'pending' : 'needs_review', retry ? `${DEFAULTS_PENDING} ${cause.message}` : cause.message,
-        JSON.stringify(due.map(({ date, updated_at }) => ({ date, updated_at }))), organizationId, home.product_id])
-      return { next: retry ? Date.now() + RATE_WINDOW_MS : null, failure: cause }
+      if (retry && cause.data.code === 'CHANNEX_REQUEST_FAILED') {
+        // A temporary settings outage cannot stop booking occupancy from reaching the mapped room.
+        defaultsFailure = { error: cause, retryAt: Date.now() + RATE_WINDOW_MS }
+      } else {
+        await execute(db, `UPDATE channel_night_pushes SET state = ?, detail = ?
+          FROM json_each(?) WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND state = 'pending'
+            AND date = json_extract(value, '$.date') AND updated_at = json_extract(value, '$.updated_at')`,
+        [retry ? 'pending' : 'needs_review', retry ? `${DEFAULTS_PENDING} ${cause.message}` : cause.message,
+          JSON.stringify(due.map(({ date, updated_at }) => ({ date, updated_at }))), organizationId, home.product_id])
+        return { next: retry ? Date.now() + RATE_WINDOW_MS : null, failure: cause }
+      }
     }
-    for (const row of defaults) row.detail = null
+    if (!defaultsFailure) for (const row of defaults) row.detail = null
   }
   const outcomes = new Map<string, Outcome>()
-  const from = today(home.timezone)
   for (const row of due) if (row.date < from) outcomes.set(row.date, { state: 'needs_review', detail: `${row.date} passed before Channex confirmed it; Channex does not take past dates` })
-  const current = due.filter(row => row.date >= from)
   const nights = current.length ? new Map((await read(current[0]!.date, nextDay(current.at(-1)!.date))).map(night => [night.date, night])) : new Map<string, StayNight>()
 
   const sent = new Map(current.map(row => [row.date, sentValues(row)]))
@@ -440,7 +446,7 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
     WHERE provider = 'channex' AND direction = 'outbound' AND external_id = ? AND created_at > ? GROUP BY kind`,
   [mapping.property_id, new Date(Date.now() - RATE_WINDOW_MS).toISOString()])
   const confirmed = new Map(current.map(row => [row.date, { ...sent.get(row.date)! }]))
-  let next = Infinity
+  let next = defaultsFailure?.retryAt ?? Infinity
   // A night still to be sent stays pending, even with a part Channex refused: its next delivery sends what differs again.
   const wait = (rows: ReadonlyArray<{ row: OutboxRow }>, at: number, detail?: string) => {
     next = Math.min(next, at)
@@ -459,7 +465,7 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
     (change: typeof changes[number]) => { confirmed.get(change.row.date)!.availability = change.values.availability }],
   ] as const
   for (const [kind, batch, send, take] of requests) {
-    if (!batch.length) continue
+    if (!batch.length || (defaultsFailure && kind === 'restrictions')) continue
     const window = recent.find(entry => entry.kind === kind)
     if (window) {
       const rateLimit = window.calls >= CALLS_PER_WINDOW ? Date.parse(window.first) + RATE_WINDOW_MS : 0
@@ -495,6 +501,14 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
     }
   }
 
+  if (defaultsFailure) {
+    for (const row of current) {
+      const availabilityDetail = outcomes.get(row.date)?.detail
+      const detail = `${DEFAULTS_PENDING} ${defaultsFailure.error.message}`
+      outcomes.set(row.date, { state: 'pending', detail: availabilityDetail && !availabilityDetail.startsWith(DEFAULTS_PENDING) ? `${detail} ${availabilityDetail}` : detail })
+    }
+  }
+
   await execute(db, `UPDATE channel_night_pushes SET sent_json = json_extract(value, '$[1]')
     FROM json_each(?) WHERE product_id = ? AND provider = 'channex' AND date = json_extract(value, '$[0]')`,
   [JSON.stringify([...confirmed].map(([date, values]) => [date, JSON.stringify(values)])), home.product_id])
@@ -502,16 +516,17 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
   // its old value, so it stays pending with that reason and the next delivery sends what differs.
   const finalized = await queryAll<{ date: string; state: OutboxRow['state'] }>(db, `UPDATE channel_night_pushes SET
       state = CASE WHEN channel_night_pushes.updated_at = json_extract(value, '$.updated_at') THEN json_extract(value, '$.state') ELSE 'pending' END,
-      detail = CASE WHEN channel_night_pushes.updated_at = json_extract(value, '$.updated_at') THEN json_extract(value, '$.detail') ELSE ? END,
+      detail = CASE WHEN channel_night_pushes.updated_at = json_extract(value, '$.updated_at') THEN json_extract(value, '$.detail')
+        WHEN instr(channel_night_pushes.detail, ?) = 1 THEN channel_night_pushes.detail ELSE ? END,
       updated_at = ?
     FROM json_each(?) WHERE product_id = ? AND provider = 'channex' AND date = json_extract(value, '$.date')
     RETURNING date, state`,
-  [CHANGED_DURING_DELIVERY, new Date().toISOString(), JSON.stringify(due.map((row) => {
+  [DEFAULTS_PENDING, CHANGED_DURING_DELIVERY, new Date().toISOString(), JSON.stringify(due.map((row) => {
     const outcome = outcomes.get(row.date)
     return { date: row.date, updated_at: row.updated_at, state: outcome?.state ?? 'pushed', detail: outcome?.detail ?? null }
   })), home.product_id])
   if (finalized.some(row => row.state === 'pending' && outcomes.get(row.date)?.state !== 'pending')) next = Math.min(next, Date.now())
-  return { next: Number.isFinite(next) ? next : null }
+  return { next: Number.isFinite(next) ? next : null, ...(defaultsFailure ? { failure: defaultsFailure.error } : {}) }
 }
 
 export async function activeAirbnbMapping(db: DbClient, organizationId: string, productId: string) {
