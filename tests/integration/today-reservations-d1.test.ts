@@ -31,7 +31,12 @@ const ZONE = 'America/Los_Angeles'
 const PASSWORD = 'TodayReservationsProof123!'
 const ORGS = { law: 'service', studio: 'experience', inn: 'lodging', bistro: 'restaurant' } as const
 type Org = keyof typeof ORGS
-type Today = BusinessToday
+type Today = BusinessToday & {
+  website?: { address: string; preview_url: string; action: { type: string; to: string } } | null
+  tasks?: { id: string; tasks: { id: string; kind: string; status: string }[] }[]
+  opportunities?: OpportunityView[]
+  opportunity_issues?: string[]
+}
 
 async function boot() {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -63,11 +68,16 @@ async function boot() {
   const auth = createAuth(env)
   const signed = await auth.api.signInEmail({ body: { email: 'owner@proof.example', password: PASSWORD }, asResponse: true })
   assert.equal(signed.status, 200)
+  const token = signed.headers.get('set-auth-token')
+  assert.ok(token)
   const cookie = [...new Map(signed.headers.getSetCookie().map(value => { const pair = value.split(';')[0]!; return [pair.slice(0, pair.indexOf('=')), pair] })).values()].join('; ')
   const app = new H3()
   app.get('/api/dashboard/today', todayRoute)
-  const today = async (org: Org, range: 'today' | 'upcoming'): Promise<Today> => {
-    const response = await app.request(Object.assign(new Request(`https://proof.example/api/dashboard/today?org=${org}&range=${range}`, { headers: { cookie, origin: 'https://proof.example' } }),
+  const today = async (org: Org, range: 'today' | 'upcoming', native = false): Promise<Today> => {
+    const headers = new Headers({ origin: 'https://proof.example' })
+    if (native) headers.set('authorization', `Bearer ${token}`)
+    else headers.set('cookie', cookie)
+    const response = await app.request(Object.assign(new Request(`https://proof.example/api/dashboard/today?org=${org}&range=${range}`, { headers }),
       { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     assert.equal(response.status, 200, await response.clone().text())
     return await response.json() as Today
@@ -99,6 +109,20 @@ const operator = (key: string) => ({ userId: OWNER, idempotencyKey: key, source:
 test('Today shows every booking type as one card for its own business, with the welcome as its action only where it applies', { timeout: 180_000 }, async () => {
   const { runtime, db, env, events, event, today } = await boot()
   try {
+    const nativeToday = await today('bistro', 'today', true)
+    assert.ok(nativeToday.website)
+    assert.equal(nativeToday.website.address, 'https://bistro.proof.example/')
+    assert.equal(nativeToday.website.action.type, 'visit')
+    assert.equal(nativeToday.website.action.to, 'https://bistro.proof.example/?view=public')
+    assert.ok(new URL(nativeToday.website.preview_url).searchParams.get('preview_token'))
+    assert.deepEqual(nativeToday.opportunities?.map(step => step.title), ['Set up payments', 'Add your first dish'])
+    assert.deepEqual(nativeToday.opportunity_issues, [])
+    const nativeUpcoming = await today('bistro', 'upcoming', true)
+    assert.equal(nativeUpcoming.website, null)
+    assert.deepEqual(nativeUpcoming.tasks, [])
+    assert.deepEqual(nativeUpcoming.opportunities, [])
+    assert.equal((await today('bistro', 'today')).website, undefined)
+
     const localToday = localDateAt(new Date(), ZONE)
     const inTwoDays = addLocalDays(localToday, 2), inThreeDays = addLocalDays(localToday, 3)
 
@@ -162,6 +186,11 @@ test('Today shows every booking type as one card for its own business, with the 
     assert.equal(studio.title, 'You have 1 upcoming class')
     // The owner looks after the home, so the clean after Diana's stay is theirs too, on its own day.
     const turnover = String(await db.prepare("SELECT id FROM tasks WHERE kind = 'turnover' AND subject_id = ?").bind(stay.id).first('id'))
+    const nativeInn = await today('inn', 'upcoming', true)
+    const nativeTurnover = nativeInn.tasks?.flatMap(section => section.tasks).find(task => task.id === turnover)
+    assert.ok(nativeTurnover)
+    assert.equal(nativeTurnover.kind, 'turnover')
+    assert.equal(nativeTurnover.status, 'open')
     assert.deepEqual(inn.cards.map(shape), [
       { id: `booking:${stay.id}`, headline: 'Diana’s group of 2', line: 'Seaview Cottage', action: { title: 'Share info about your place', detail: 'Help Diana get ready' }, to: `/dashboard/inn/messages/${stay.conversation_id}` },
       // The owner's own clean opens the job's conversation, where its Done is.
