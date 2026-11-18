@@ -400,7 +400,8 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     const availability = channex.take().flatMap(call => call.path === '/availability' ? call.values : [])
     assert.deepEqual(availability.map(value => [value.date_from, value.date_to, value.availability]),
       [[day(50), day(51), 1], [day(53), day(54), 0]])
-    // Two days on, the calendar has gained a night Channex was never sent: the wake sends it, and has Channex
+    // Two days on, the calendar has gained a night Channex was never sent: the wake sends it with the rest of the
+    // calendar's last week, which Channex may not have kept when it was first sent, and has Channex
     // send the listing's whole calendar to Airbnb, which is what puts back a night changed on Airbnb itself.
     await db.prepare("UPDATE channel_sync_log SET created_at = '2000-01-01T00:00:00.000Z' WHERE direction = 'outbound'").run()
     channex.take()
@@ -414,7 +415,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
       t.mock.timers.reset()
     }
     assert.deepEqual(channex.take().map(request => [request.path, request.values.filter(value => value.property_id === 'prop-1').map(value => [value.date_from, value.date_to])]).filter(([, nights]) => nights!.length),
-      [['/restrictions', [[day(501), day(501)]]], ['/availability', [[day(501), day(501)]]]])
+      [['/restrictions', [[day(495), day(501)]]], ['/availability', [[day(495), day(501)]]]])
     assert.deepEqual(channex.fullSyncs, ['listing-1'])
     assert.deepEqual((await states(unpriced, day(5), day(6)))[0], { state: 'needs_review', detail: 'Channex has no Airbnb mapping for this connected home' })
   } finally {
