@@ -11,7 +11,7 @@ import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevision, parseStoredFormQuestions, type FormAnswerSnapshot, type FormQuestion } from '~/shared/form-questions'
 import { validateFormAnswers } from '~/server/domain/form-questions'
 import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, STAY_DIRECT_DISCOUNTS, stayChannelCalendarRules, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
-import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assignedOperationsRoles, roleMatchesSql } from '~/utils/organization-access'
 import { assertResponsibleMember, assertRoleAllows, assignedMemberSql, BATCH_VIEWER, bookingOperationsScope, roleAllows, withViewer, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
@@ -1583,6 +1583,9 @@ export async function verifyStayCalendarOccupancy(db: DbClient, env: ChannexEnv,
   }
 }
 
+/** The nights at the end of a home's calendar that are sent again each day a night enters it. */
+const CHANNEL_EDGE_NIGHTS = 7
+
 /**
  * Deliver pending nights and keep each connected home's calendar whole: every
  * night within reach that Channex was never sent is sent, and on the day a
@@ -1617,6 +1620,15 @@ export async function deliverPendingChannelNights(env: CloudflareEnv, organizati
       }
     }
     if (!added.length && !row.due) continue
+    if (added.length) {
+      // Channex answers Success for a night past the end of its own calendar and keeps nothing (read 2026-11-18:
+      // 2028-03-30..04-01 accepted, none stored), so a night sent the day it entered may not be there. Each day a
+      // night enters, the last week of the calendar is sent whole again, until each night is well inside Channex's.
+      const edge = Array.from({ length: CHANNEL_EDGE_NIGHTS }, (_, offset) => addDays(row.to, offset - CHANNEL_EDGE_NIGHTS))
+      await execute(db, "UPDATE channel_night_pushes SET sent_json = NULL WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND date >= ? AND date < ?",
+        [organizationId, row.product_id, edge[0], row.to])
+      for (const night of edge) if (!added.includes(night)) added.push(night)
+    }
     const home = await readStayHome(db, { organizationId, actorId: 'system', manage: true }, row.product_id)
     const read = (start: string, end: string) => homeNights(db, organizationId, home, start, end)
     // Before the new nights are queued: a sync Channex did not take leaves them unsent, so the wake's retry asks again.
