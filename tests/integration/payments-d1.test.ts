@@ -30,10 +30,11 @@ import { hashPassword } from 'better-auth/crypto'
 import { H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
 import paymentCancelRoute from '../../server/api/public/payments/[payment_id]/cancel.post.ts'
+import paymentConfirmRoute from '../../server/api/public/payments/[payment_id]/confirm.post.ts'
 import paymentHandoffRoute from '../../server/api/public/payments/[payment_id].get.ts'
 import { readHomeCalendar } from '../../server/domain/stays.ts'
 import bookingReceiptRoute from '../../server/api/public/booking-requests/[conversation_id].get.ts'
-import { hashReservationCancelToken } from '../../server/utils/reservation-cancel-token.ts'
+import { createReplayableReservationCancelToken, hashReservationCancelToken } from '../../server/utils/reservation-cancel-token.ts'
 import { getStripe } from '../../server/utils/billing.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { approveRefundAuthorization, requirePayment } from '../../server/domain/payments/index.ts'
@@ -1117,12 +1118,16 @@ test('a business registered for Stripe Tax has tax calculated by Stripe from the
   }
 })
 
+const CHECKOUT_REPLY_SECRET = 'local-proof-reply'
 async function confirmable(db: D1Database, id: string, holdExpires: string, checkoutExpires = '2099-09-30T00:00:00.000Z') {
  await payable(db, id, checkoutExpires)
  const claim = crypto.randomUUID() + crypto.randomUUID()
  // A site checkout's conversation, as createProductBooking writes it. Its booking is attached at settlement.
  const provenance = { source: 'website', external_reference: null, actor_user_id: null, idempotency_key: `checkout-${id}`, fingerprint: `fingerprint-${id}`, guest_acknowledgement: true, creation_kind: 'checkout' as const, creation_status: 'pending' as const, followups_completed: false }
- const opening = { id: `request-${id}`, kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: { ...threadPayloadForGuest({ name: 'Guest', email: 'buyer@krabiclaw-proof.com' }), provenance }, created_at: NOW }
+ const threadId = `request-${id}`
+ const cancellation = await createReplayableReservationCancelToken(CHECKOUT_REPLY_SECRET, threadId)
+ const opening = { id: threadId, kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: { ...threadPayloadForGuest({ name: 'Guest', email: 'buyer@krabiclaw-proof.com' }), provenance,
+  cancellation: { token_hash: await hashReservationCancelToken(cancellation.token), expires_at: cancellation.expiresAt, used_at: null } }, created_at: NOW }
  await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
  await db.prepare("UPDATE payments SET return_token_hash=?,return_expires_at='2099-01-01T00:00:00.000Z',review_json=? WHERE id=?").bind(await tokenHash(claim), JSON.stringify({ payment_method_id: 'pm_proof', subtotal: 10000, tax: 0, tax_included: 0, surcharge: 0, total: 10000, reviewed_at: NOW }), id).run()
  await db.prepare('UPDATE payment_checkout_holds SET expires_at=?,conversation_id=? WHERE payment_id=?').bind(holdExpires, opening.id, id).run()
@@ -1171,7 +1176,7 @@ function fakeStripe(t: TestContext, handle: (url: URL, init: RequestInit | undef
 }
 const inMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
 const holdOf = (db: D1Database, id: string) => db.prepare('SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id=?').bind(id).first<{ status: string; expires_at: string }>()
-const stripeEnv = (env: CloudflareEnv) => ({ ...env, STRIPE_SECRET_KEY: 'sk_test_local_boundary', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', EMAIL_REPLY_SECRET: 'local-proof-reply' } as CloudflareEnv)
+const stripeEnv = (env: CloudflareEnv) => ({ ...env, STRIPE_SECRET_KEY: 'sk_test_local_boundary', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', EMAIL_REPLY_SECRET: CHECKOUT_REPLY_SECRET } as CloudflareEnv)
 /** Email goes to Resend, as in production. */
 const resendEnv = (env: CloudflareEnv) => ({ ...env, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 're_test_local', EMAIL_FROM: 'Blawby <proof@example.com>' } as CloudflareEnv)
 /** Resend's API: every email it is asked to send, as the request body sent it, and each one read back as sent. */
@@ -1255,6 +1260,68 @@ test('a card is authorized, booked, then captured, and an expired payment window
   await events.drain(env, 'payment.captured')
   assert.deepEqual(calls.billed, ['krabiclaw_captured_volume:10000', 'krabiclaw_captured_volume:10000'], 'each capture is billed on the business’s meter')
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 2)
+ } finally { await runtime.dispose() }
+})
+
+test('a redirect that Stripe captures returns to the guest site and settles one booking, or refunds if its seat is gone', { timeout: 120_000 }, async t => {
+ const { db, runtime, env: bootEnv } = await boot()
+ try {
+  const env = stripeEnv(bootEnv)
+  await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
+  const claim = await confirmable(db, 'redirect', inMinutes(15))
+  const statuses = { redirect: 'requires_confirmation', taken: 'succeeded' }
+  const origin = 'http://payments.localhost:3273'
+  let returnUrl: string | null = null
+  const calls = fakeStripe(t, (url, init) => {
+   if (url.pathname === '/v1/payment_intents/pi_redirect/confirm') {
+    returnUrl = new URLSearchParams(String(init?.body)).get('return_url')
+    statuses.redirect = 'requires_action'
+   }
+   return null
+  }, statuses)
+  const app = new H3()
+  app.use(event => {
+   event.context.organizationId = ORG
+   event.context.tenantType = 'tenant'
+   event.context.tenantHost = 'payments.localhost'
+  })
+  app.post('/api/public/payments/:payment_id/confirm', paymentConfirmRoute)
+  app.get('/api/public/booking-requests/:conversation_id', bookingReceiptRoute)
+  const request = (path: string, init?: RequestInit) => app.request(Object.assign(new Request(origin + path, init), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+  const confirmed = await request('/api/public/payments/redirect/confirm', {
+   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ claim, payment_method_id: 'pm_proof', total: 10000 }),
+  })
+  assert.equal(confirmed.status, 200)
+  assert.equal((await confirmed.json() as { requires_action: boolean }).requires_action, true)
+  assert.equal(returnUrl, `${origin}/pay/redirect?claim=${claim}`)
+  assert.equal((await requirePayment(db, ORG, 'redirect')).subject_id, null)
+
+  // Stripe sends the guest back before the success webhook arrives.
+  statuses.redirect = 'succeeded'
+  const receipt = await completePaymentReturn(db, env, ORG, 'redirect', claim, async () => 'guest')
+  assert.equal(receipt.state, 'paid')
+  if (receipt.state !== 'paid' || receipt.kind !== 'booking') throw new Error('Expected a booking receipt')
+  const response = await request('/api/public/booking-requests/' + receipt.conversation_id, { headers: { authorization: `Bearer ${receipt.cancellation_token}` } })
+  assert.equal(response.status, 200)
+  const { booking } = await response.json() as { booking: { status: string } }
+  assert.equal(booking.status, 'confirmed')
+  const stripe = getStripe(env)
+  const deliver = (id: string, event = `evt_${id}`) => processPaymentEvent(db, stripe, { id: event, type: 'payment_intent.succeeded', account: 'acct_seller', livemode: false,
+   data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as unknown as Stripe.Event, env)
+  await deliver('redirect')
+  assert.deepEqual(await completePaymentReturn(db, env, ORG, 'redirect', claim, async () => 'guest'), receipt)
+  const booked = await requirePayment(db, ORG, 'redirect')
+  assert.ok(booked.subject_id)
+  assert.equal(booked.captured_amount, 10000)
+
+  await confirmable(db, 'taken', inMinutes(15))
+  await deliver('taken')
+  await deliver('taken', 'evt_taken_repeat')
+  const refunded = await requirePayment(db, ORG, 'taken')
+  assert.deepEqual([refunded.subject_id, refunded.captured_amount, refunded.refunded_amount], [null, 10000, 10000])
+  assert.equal((await holdOf(db, 'taken'))?.status, 'released')
+  assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
+  assert.deepEqual([calls.capture, calls.cancel, calls.refund], [[], [], ['pi_taken']])
  } finally { await runtime.dispose() }
 })
 
