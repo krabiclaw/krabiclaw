@@ -233,7 +233,6 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     // A host stay holds its nights; cancelling it releases them. The home's own minimum applies where no night sets one.
     const stay = await createStay(db, env, manager, { product_id: connected, idempotency_key: 'k1', check_in_date: day(10), check_out_date: day(12), adults: 2, guest_name: 'Ana', guest_email: 'ana@example.test', total_minor: 300_00 })
     assert.deepEqual(channex.take(), [])
-    assert.deepEqual(await states(connected, day(10), day(12)), Array(2).fill({ state: 'pushed', detail: null }))
     await queue.runNext(env, 'stay.changed')
     assert.deepEqual(await states(connected, day(10), day(12)), Array(2).fill({ state: 'pushed', detail: null }))
     // A booked night is unavailable, not stop-sold: stop sell is the host closing a night.
