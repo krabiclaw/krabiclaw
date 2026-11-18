@@ -12,7 +12,6 @@ import { getMediaUploadReplay, replaceR2ImageFile, uploadResolvedMediaToAssetSto
 import { getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { imagePixelSize, MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
 import { getProduct, updateProduct } from '~/server/utils/product-management'
-import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import type { ProductDetailKey } from '~/shared/product-details'
 import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
@@ -25,7 +24,7 @@ import { PHOTO_WIDTH, minorUnits, listingCalendar, listingContent, listingDetail
 import { DETAIL_FIELDS, IMPORT_STAGES, type DetailField, type ImportStage } from '~/shared/airbnb-import'
 export type { ImportStage } from '~/shared/airbnb-import'
 import { installChannexMessages, uninstallChannexMessages } from './messages'
-import { calendarMinimumDefaults, configureStayCalendar, forgetConfirmedNights, pendingConnectedChannelNightsQuery, type ChannexMapping } from './ari'
+import { calendarMinimumDefaults, configureStayCalendar, forgetConfirmedNights, type ChannexMapping } from './ari'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
 import { publishBusinessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
@@ -726,8 +725,6 @@ export class ChannexConnection {
     const access = this.manager()
     const home = await readStayHome(this.db, access, mapping.product_id)
     if (content.currency !== home.currency) fail(422, 'CURRENCY_MISMATCH', 'The Airbnb listing currency differs from the canonical home currency.')
-    const calendar = await listingCalendar(this.env, mapping.channel_id, mapping.listing_id, home.timezone)
-    const inherited = provided(() => calendar.map(night => importedNight(night, home.currency, content)))
 
     // What an earlier run stored, before anything is fetched: the room left for new photos is the home's limit less the host's other photos.
     const stored = new Map<string, string>()
@@ -853,34 +850,6 @@ export class ChannexConnection {
       }
       return kept
     }
-    // NULL inherits the canonical home, even after a global host edit leaves this row source='import'.
-    // Airbnb's calendar echoes our resolved ARI values; importing those would freeze inheritance.
-    const received = JSON.stringify(inherited)
-    const imported = `FROM json_each(?) d JOIN product_nights n ON n.organization_id = ? AND n.product_id = ? AND n.date = json_extract(d.value, '$.date')
-      WHERE n.source = 'import'`
-    const dates = [received, this.organizationId, mapping.product_id]
-    const refreshAt = now()
-    await executeBatch(this.db, [pendingConnectedChannelNightsQuery(this.organizationId, mapping.product_id, {
-      query: `SELECT n.date ${imported} AND (
-        (n.min_stay_arrival IS NOT NULL AND n.min_stay_arrival IS NOT json_extract(d.value, '$.min_stay_arrival'))
-        OR EXISTS (SELECT 1 FROM prices p WHERE p.organization_id = n.organization_id AND p.product_variant_id = ?
-          AND p.stay_date = n.date AND p.unit_amount IS NOT json_extract(d.value, '$.price_minor'))
-      )`, params: [...dates, home.variant_id],
-    }, refreshAt), {
-      query: `UPDATE product_nights SET min_stay_arrival = json_extract(value, '$.min_stay_arrival'), updated_at = ?, updated_by = ?
-        FROM json_each(?) WHERE organization_id = ? AND product_id = ? AND source = 'import' AND date = json_extract(value, '$.date')
-          AND min_stay_arrival IS NOT NULL AND min_stay_arrival IS NOT json_extract(value, '$.min_stay_arrival')`,
-      params: [refreshAt, this.userId, ...dates],
-    }, {
-      query: `DELETE FROM prices WHERE organization_id = ? AND product_variant_id = ? AND stay_date IN
-        (SELECT n.date ${imported} AND json_extract(d.value, '$.price_minor') IS NULL)`,
-      params: [this.organizationId, home.variant_id, ...dates],
-    }, {
-      query: `UPDATE prices SET unit_amount = imported.amount, updated_at = ?, updated_by = ? FROM
-        (SELECT n.date, json_extract(d.value, '$.price_minor') AS amount ${imported}) imported
-        WHERE prices.organization_id = ? AND prices.product_variant_id = ? AND prices.stay_date = imported.date AND imported.amount IS NOT NULL`,
-      params: [refreshAt, this.userId, ...dates, this.organizationId, home.variant_id],
-    }, publicResourceCacheInvalidationQuery(this.organizationId, 'airbnb-calendar-content')], { operation: 'Refresh imported Airbnb calendar' })
     const homeWrite = await unedited(body)
     const detailsWrite = await unedited(details)
     const stayImport = { channelId, listingId: mapping.listing_id, written }

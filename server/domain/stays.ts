@@ -36,7 +36,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { currencyFractionDigits, isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { activeAirbnbMapping, completeChannelPush, deliverStayNights, pendingChannelNightsQuery, pendingConnectedChannelNightsQuery, pushAirbnbBookingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type ChannelPushCompletion, type ChannexMapping, type NightQueue } from '~/server/integrations/channex/ari'
+import { activeAirbnbMapping, completeChannelPush, deliverStayNights, pendingChannelNightsQuery, pendingConnectedChannelNightsQuery, pushAirbnbBookingSettings, pushStayCalendar, pushStayNights, requireChannelPush, syncAirbnbListing, type ChannelPushCompletion, type ChannexMapping, type NightQueue } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { bookingContactQuery, bookingConversationQueries, bookingDay, isBookingDay, nightsBoundary, noStayRequestPaymentInFlightSql, requestInsertQueries, stayRequestPayBySql, stayRequestProgress, stayRequestRespondBySql, threadPayloadForGuest, validateGuestRequest } from '~/server/domain/requests'
 import { bookingPolicy, parseBookingPolicy, type BookingPolicy } from '~/server/utils/booking-policy-summary'
@@ -1584,40 +1584,43 @@ export async function verifyStayCalendarOccupancy(db: DbClient, env: ChannexEnv,
 }
 
 /**
- * Deliver pending nights and extend dated delivery as the booking window rolls.
- * Native rate-plan defaults cover weekday minimums and base prices.
- * Only a differing weekend price needs dated delivery as new dates open.
+ * Deliver pending nights and keep each connected home's calendar whole: every
+ * night within reach that Channex was never sent is sent, and on the day a
+ * home's calendar gains a night Channex sends the listing's whole calendar to
+ * Airbnb, so a night changed on Airbnb itself is put back to the home's.
  */
 export async function deliverPendingChannelNights(env: CloudflareEnv, organizationId: string, now: number): Promise<number | null> {
   const db = env.DB
-  const homes = await queryAll<{ product_id: string; due: number }>(db, `SELECT m.product_id, due FROM (
-      SELECT m.product_id, ${stayWeekendPriceSql('m')} AS weekend_price_minor,
-        EXISTS (SELECT 1 FROM channel_night_pushes p WHERE p.organization_id = m.organization_id AND p.product_id = m.product_id
-          AND p.provider = 'channex' AND p.state = 'pending') AS due
-        FROM product_channel_mappings m WHERE m.organization_id = ? AND m.provider = 'channex' AND m.enabled = 1) m
-     WHERE due = 1 OR m.weekend_price_minor IS NOT NULL`, [organizationId])
+  const homes = (await queryAll<{ product_id: string; timezone: string; due: number }>(db, `SELECT m.product_id, l.timezone,
+      EXISTS (SELECT 1 FROM channel_night_pushes p WHERE p.organization_id = m.organization_id AND p.product_id = m.product_id
+        AND p.provider = 'channex' AND p.state = 'pending') AS due
+    FROM product_channel_mappings m
+    JOIN product_stay_configs c ON c.organization_id = m.organization_id AND c.product_id = m.product_id
+    JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
+    WHERE m.organization_id = ? AND m.provider = 'channex' AND m.enabled = 1`, [organizationId]))
+    .map((row) => { const from = localDateAt(new Date(now), row.timezone); return { ...row, from, to: addDays(from, STAY_CALENDAR_DAYS) } })
+  const sent = new Map((await queryAll<{ product_id: string; nights: number }>(db, `SELECT json_extract(home.value, '$.product_id') AS product_id, COUNT(p.date) AS nights
+    FROM json_each(?) home LEFT JOIN channel_night_pushes p ON p.organization_id = ? AND p.provider = 'channex'
+      AND p.product_id = json_extract(home.value, '$.product_id') AND p.date >= json_extract(home.value, '$.from') AND p.date < json_extract(home.value, '$.to')
+    GROUP BY 1`, [JSON.stringify(homes.map(({ product_id, from, to }) => ({ product_id, from, to }))), organizationId])).map(row => [row.product_id, row.nights]))
   let next = Infinity
   for (const row of homes) {
-    const home = await readStayHome(db, { organizationId, actorId: 'system', manage: true }, row.product_id)
-    const from = localDateAt(new Date(now), home.timezone)
-    const to = addDays(from, STAY_CALENDAR_DAYS)
-    const weekendPrice = home.calendar_rules?.weekend_price_minor
+    // A home's calendar gains its next night at its own midnight.
+    next = Math.min(next, localDateTimeToInstant(addDays(row.from, 1), '00:00', row.timezone, 'compatible').getTime())
     const added: string[] = []
-    if (weekendPrice !== undefined && weekendPrice !== home.base_price_minor) {
-      const known = await queryAll<{ date: string }>(db, "SELECT date FROM channel_night_pushes WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND date >= ? AND date < ?", [organizationId, row.product_id, from, to])
-      const queued = new Set(known.map(night => night.date))
-      const hasWeekendPrice = (night: string) => resolveStayNightPolicy(home, night).price_minor !== home.base_price_minor
+    if (sent.get(row.product_id) !== STAY_CALENDAR_DAYS) {
+      const known = new Set((await queryAll<{ date: string }>(db, "SELECT date FROM channel_night_pushes WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND date >= ? AND date < ?",
+        [organizationId, row.product_id, row.from, row.to])).map(night => night.date))
       for (let offset = 0; offset < STAY_CALENDAR_DAYS; offset++) {
-        const night = addDays(from, offset)
-        if (!queued.has(night) && hasWeekendPrice(night)) added.push(night)
+        const night = addDays(row.from, offset)
+        if (!known.has(night)) added.push(night)
       }
-      // Once the horizon is full, only the next Friday/Saturday calls for a dated price.
-      let entersIn = 1
-      while (!hasWeekendPrice(addDays(to, entersIn - 1))) entersIn++
-      next = Math.min(next, localDateTimeToInstant(addDays(from, entersIn), '00:00', home.timezone, 'compatible').getTime())
     }
     if (!added.length && !row.due) continue
+    const home = await readStayHome(db, { organizationId, actorId: 'system', manage: true }, row.product_id)
     const read = (start: string, end: string) => homeNights(db, organizationId, home, start, end)
+    // Before the new nights are queued: a sync Channex did not take leaves them unsent, so the wake's retry asks again.
+    if (added.length) await syncAirbnbListing(db, env, organizationId, home.product_id)
     const retryAt = await deliverStayNights(db, env, organizationId, home, read, added)
     if (retryAt !== null) next = Math.min(next, retryAt)
     await publishStayInvalidation(env, { type: 'nights.changed', organization_id: organizationId, location_id: home.location_id, product_id: home.product_id, booking_id: null }, { updated_at: new Date().toISOString() })
