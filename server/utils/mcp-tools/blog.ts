@@ -3,7 +3,7 @@ import { articleCategoryObject, blogPostMutationResultObject, blogPostObject, bl
 import { PUBLICATION_CONTENT_BLOCK_TYPES, contentBlockDataSchema } from '~/shared/content-registries'
 import type { McpExecutorContext } from './execution'
 import { BLOG_UPDATE_MUTATION_FIELDS, createBlogPost, deleteBlogPost, getBlogPost, listBlogPosts, reorderArticles, updateBlogLifecycle, updateBlogPost } from '~/server/utils/content/publishing'
-import { renderStructuredResponse } from '~/server/utils/mcp-render'
+import { renderStructuredResponse, withMcpLink } from '~/server/utils/mcp-render'
 import { isArticleCollection, type ArticleCollection } from '~/utils/article-collections'
 import { mcpProtocolError, MCP_ERROR } from '~/server/utils/mcp-protocol'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
@@ -421,10 +421,13 @@ export async function handleBlogTools(ctx: McpExecutorContext): Promise<unknown>
         { organization_id: organization.organizationId, },
         organization.env,
       );
+      const post = projectBlogPostForMcp(result.post, organization)
       return renderStructuredResponse(
-        { post: projectBlogPostForMcp(result.post, organization) },
-        `Created draft blog article "${result.post.title ?? result.post.id}". It is not public until publish_blog_post.`,
-      );
+        { post },
+        post.status === 'published'
+          ? withMcpLink(`Blog article "${post.title}" is already published.`, 'View article', post.public_url)
+          : withMcpLink(`Saved draft blog article "${post.title}".`, 'Preview article', post.preview_url),
+      )
     }
     case "update_blog_post": {
       requireAtLeastOneField(args, BLOG_UPDATE_MUTATION_FIELDS, "At least one blog mutation field is required.")
@@ -436,10 +439,14 @@ export async function handleBlogTools(ctx: McpExecutorContext): Promise<unknown>
         organization.userId,
         organization.env,
       );
+      const post = projectBlogPostForMcp(result.post, organization)
+      const message = result.changed ? `Saved changes to blog article "${post.title}".` : `Blog article "${post.title}" is unchanged.`
       return renderStructuredResponse(
-        { post: projectBlogPostForMcp(result.post, organization), changed: result.changed },
-        result.changed ? `Saved changes to blog article "${result.post.title ?? result.post.id}".` : `Blog article "${result.post.title ?? result.post.id}" is unchanged.`,
-      );
+        { post, changed: result.changed },
+        post.public_url
+          ? withMcpLink(message, 'View article', post.public_url)
+          : withMcpLink(message, 'Preview article', post.preview_url),
+      )
     }
     case "publish_blog_post": {
       const postId = requiredString(args, "post_id")
@@ -448,9 +455,10 @@ export async function handleBlogTools(ctx: McpExecutorContext): Promise<unknown>
       }, organization.organizationId, organization.userId)
       const result = await getBlogPost(organization.db, postId, organization.organizationId, organization.env)
       const summary = toBlogPostSummary(result, organization)
+      const message = lifecycle.changed ? `Published blog article "${summary.title}".` : `Blog article "${summary.title}" was already published.`
       return renderStructuredResponse(
         { post: Object.fromEntries(publicationFields.map(field => [field, summary[field]])), changed: lifecycle.changed },
-        lifecycle.changed ? `Published blog article "${result.title}".` : `Blog article "${result.title}" was already published; nothing changed.`,
+        withMcpLink(message, 'View article', summary.public_url),
       )
     }
     case "reorder_blog_posts": {

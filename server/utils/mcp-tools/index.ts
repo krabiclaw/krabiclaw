@@ -345,8 +345,12 @@ export async function executeMcpToolCall(
   ) {
     throw new HTTPError({
       statusCode: 403,
-      statusMessage: `${humanizeEntitlement(tool.requiredEntitlement)} is not enabled for this organization.`,
-      data: { code: 'ENTITLEMENT_REQUIRED' },
+      statusMessage: `This organization's plan does not include ${humanizeEntitlement(tool.requiredEntitlement)}. Ask an organization owner to review Plan and billing.`,
+      data: {
+        code: 'ENTITLEMENT_REQUIRED',
+        organization_id: organization.organizationId,
+        ...(organization.organizationSlug ? { dashboard_url: `/dashboard/${encodeURIComponent(organization.organizationSlug)}/billing` } : {}),
+      },
     });
   }
 

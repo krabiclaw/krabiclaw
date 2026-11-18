@@ -214,7 +214,12 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
     const structuredContent = JSON.parse(structuredJson);
     const modelText = isRender && result.modelText ? result.modelText : structuredJson;
     const response = {
-      isError: failed, ...(failed ? {} : { structuredContent }), content: [{ type: "text" as const, text: failed ? structuredJson : modelText }],
+      isError: failed,
+      ...(failed ? {} : { structuredContent }),
+      content: [
+        { type: "text" as const, text: failed ? structuredJson : modelText },
+        ...(failed && modelText !== structuredJson ? [{ type: "text" as const, text: modelText }] : []),
+      ],
       ...(isRender && result.privateMeta ? { _meta: result.privateMeta } : {}),
     };
     return response;

@@ -12,7 +12,7 @@ import { DiscordError } from '~/server/utils/discord-bot'
 import { listChannelPosts, getChannelPost, deleteChannelPost, parseChannelTarget } from '~/server/utils/social-channel-posts'
 import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
 import { findOrganizationById } from '~/server/utils/member-access'
-import { renderStructuredResponse } from '~/server/utils/mcp-render'
+import { renderStructuredResponse, withMcpLink } from '~/server/utils/mcp-render'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { absolutizeOrganizationUrl, attachViewUrlToRecord, NOT_HANDLED, mutationContextPayload, omit, optionalString, requiredString } from './execution'
 
@@ -272,9 +272,12 @@ export async function handlePostsTools(ctx: McpExecutorContext): Promise<unknown
     case 'create_post': {
       const { post, replayed } = await asMcpValidationError(() => createPost(organization.db, env, organization.organizationId,
         { post: omit(args, ['organization_id', 'idempotency_key']), idempotencyKey: requiredString(args, 'idempotency_key') }, organization.userId))
+      const message = replayed ? `Found the existing post ${post.id}.` : `Created draft post ${post.id}.`
       return renderStructuredResponse(
         { ok: true, post: forMcp(post, organization), replayed, context: await mutationContextPayload(organization, { locationId: post.location_id }) },
-        replayed ? `This idempotency_key already created the draft post ${post.id}.` : `Created draft post ${post.id}. It is not public until publish_post.`,
+        post.status === 'published'
+          ? withMcpLink(message, 'View post', post.canonical_url)
+          : withMcpLink(message, 'Preview post', absolutizeOrganizationUrl(organization, post.preview_url)),
       )
     }
     case 'update_post': {
@@ -288,9 +291,12 @@ export async function handlePostsTools(ctx: McpExecutorContext): Promise<unknown
           data: { code: 'POST_NOT_FOUND', post_id: postId, hint: 'Call list_posts to inspect valid posts.' },
         })
       }
+      const message = `Updated post ${post.id}.`
       return renderStructuredResponse(
         { ok: true, post: forMcp(post, organization), context: await mutationContextPayload(organization, { locationId: post.location_id }) },
-        `Updated post ${post.id}.`,
+        post.status === 'published'
+          ? withMcpLink(message, 'View post', post.canonical_url)
+          : withMcpLink(message, 'Preview post', absolutizeOrganizationUrl(organization, post.preview_url)),
       )
     }
     case 'publish_post': {
@@ -301,13 +307,19 @@ export async function handlePostsTools(ctx: McpExecutorContext): Promise<unknown
       }
       const result = await publishPost(env, organization.organizationId, requiredString(args, 'post_id'),
         { expectedUpdatedAt: requiredString(args, 'updated_at'), targets }, organization.userId)
-      const summary = result.outcomes.map(outcome => `${outcome.channel}: ${outcome.status}${outcome.code ? ` (${outcome.code})` : ''}`).join('; ')
-      return renderStructuredResponse(result as unknown as Record<string, unknown>, `${result.ok ? 'Published' : 'Not every target is published'} — ${summary}.`, undefined, !result.ok)
+      const labels = { organization: 'Website', facebook: 'Facebook', instagram: 'Instagram', discord: 'Discord' }
+      const summary = result.outcomes.map(outcome => {
+        const destination = labels[outcome.channel]
+        const status = outcome.status === 'already_published' ? 'already published' : outcome.status
+        const line = `- ${destination} ${status}${outcome.code ? ` (${outcome.code})` : ''}.`
+        return withMcpLink(line, `View on ${destination}`, outcome.public_url)
+      }).join('\n')
+      return renderStructuredResponse(result, `${result.ok ? 'Publication complete.' : 'Publication incomplete.'}\n\n${summary}`, undefined, !result.ok)
     }
     case 'reconcile_post_publication': {
       const result = await reconcilePostPublication(env, organization.organizationId, requiredString(args, 'publication_id'), optionalString(args, 'provider_post_id') ?? null)
       if (result.state !== 'published') throw new HTTPError({ statusCode: 409, statusMessage: ('message' in result ? result.message : undefined) ?? result.publication.message ?? `Publication is ${result.state}`, data: { code: 'POST_PUBLICATION_INCOMPLETE' } })
-      return result
+      return renderStructuredResponse(result, withMcpLink('Publication confirmed.', 'View post', result.publication.public_url))
     }
     case 'list_channel_posts':
     case 'get_channel_post':
