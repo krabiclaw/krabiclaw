@@ -369,14 +369,27 @@ export class ChannexConnection {
     })
   }
 
-  /** The listings on the connected Airbnb account, and how far each one's import got. */
-  async listings(): Promise<AirbnbListing[]> {
+  /** The account's listings and imported homes still enabled after their listing disappeared from Airbnb. */
+  async listings(): Promise<{ listings: AirbnbListing[]; missing_listings: Array<{ listing_id: string; product_id: string; internal_name: string }> }> {
     const row = await this.connected()
-    const [listings, mappings] = await Promise.all([this.accountListings(row), this.mappings()])
-    return listings.map((listing) => {
-      const mapping = mappings.find(candidate => candidate.listing_id === listing.id && candidate.channel_id === row.channel_id)
+    const [account, mappings] = await Promise.all([this.accountListings(row), this.mappings()])
+    const imported = new Map(mappings.filter(mapping => mapping.channel_id === row.channel_id).map(mapping => [mapping.listing_id, mapping]))
+    const listings: AirbnbListing[] = account.map((listing) => {
+      const mapping = imported.get(listing.id)
+      imported.delete(listing.id)
       return { ...listing, import: mapping ? { status: 'imported', product_id: mapping.product_id, stage: mapping.import_stage, syncing: mapping.enabled === 1 && ['reservations', 'messages', 'complete'].includes(mapping.import_stage), content: mapping.import_stage === 'content' ? null : contentReport(mapping) } : { status: 'not_imported' } }
     })
+    const missing = [...imported.values()].filter(mapping => mapping.enabled === 1 && mapping.import_stage === 'complete')
+    const homes = missing.length ? await queryAll<{ product_id: string; internal_name: string | null }>(this.db, `
+      SELECT product_id, internal_name FROM product_stay_configs
+      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`,
+    [this.organizationId, d1JsonStringSet(missing.map(mapping => mapping.product_id))]) : []
+    const missing_listings = missing.map((mapping) => {
+      const internal_name = homes.find(home => home.product_id === mapping.product_id)?.internal_name
+      if (!internal_name?.trim()) throw new Error(`Home ${mapping.product_id} has no internal name`)
+      return { listing_id: mapping.listing_id, product_id: mapping.product_id, internal_name }
+    })
+    return { listings, missing_listings }
   }
 
   private async requireListing(row: ConnectionRow & { channel_id: string }, listingId: string): Promise<void> {

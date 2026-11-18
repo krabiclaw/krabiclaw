@@ -17,6 +17,7 @@ import { publishedCatalogResponse } from './support/stripe-published-catalog.ts'
 import { returnExtrasToDraftsForPlanEnd } from '../../server/utils/billing-plan-end.ts'
 import syncPostRoute from '../../server/api/organizations/[organization_id]/integrations/airbnb/sync.post.ts'
 import syncGetRoute from '../../server/api/organizations/[organization_id]/integrations/airbnb/sync.get.ts'
+import listingsRoute from '../../server/api/organizations/[organization_id]/integrations/airbnb/listings.get.ts'
 import { captureEvents } from './support/events.ts'
 import type { AirbnbSyncMessage } from '../../server/events.ts'
 
@@ -69,7 +70,7 @@ class FakeChannex {
   rateProperties = new Map<string, string>()
   ratePlans = new Map<string, Record<string, unknown>>()
   availabilityRules: Record<string, unknown> = { ...AIRBNB_AVAILABILITY, default_min_nights: 5 }
-  channel = { title: '', active: false, settings: { min_stay_type: 'Arrival' } as Record<string, unknown>, properties: ['setup-1'], ratePlans: [] as Array<{ id: string; rate_plan_id: string; settings: { listing_id: string } }> }
+  channel = { title: '', active: false, settings: { min_stay_type: 'Arrival' } as Record<string, unknown>, properties: ['setup-1'], ratePlans: [] as Array<{ id: string; rate_plan_id: string; settings: { listing_id?: string } }> }
   availability: Record<string, number> = {}
   restrictions: Record<string, Record<string, unknown>> = {}
   token = ''
@@ -79,6 +80,7 @@ class FakeChannex {
   failMappingRemoval = false
   /** Airbnb failing behind Channex: Channex answers 422 carrying Airbnb's own 500, as it did on production 2026-10-23. */
   airbnbDown = false
+  listingPresent = true
   /** An Airbnb image id whose CDN fetch answers 503. */
   failPhoto: string | null = null
   /** Extra uncaptioned photos after PHOTOS, for a listing with more photos than a home holds. */
@@ -164,7 +166,7 @@ class FakeChannex {
     if (method === 'GET' && path === '/channels/chan-1/action/listings' && this.airbnbDown) {
       return new Response(JSON.stringify({ errors: { error_code: 500, error_message: 'Unfortunately, a server error prevented your request from being completed. Airbnb may be undergoing maintenance or your connection may have timed out. Please try again.', error_type: 'unknown_error' } }), { status: 422, headers: { 'content-type': 'application/json' } })
     }
-    if (method === 'GET' && path === '/channels/chan-1/action/listings') return json({ data: { listing_id_dictionary: { values: [LISTING].map(id => ({ id, title: 'Cliff Cabin', city: 'Moab', country_code: 'US' })) } } })
+    if (method === 'GET' && path === '/channels/chan-1/action/listings') return json({ data: { listing_id_dictionary: { values: this.listingPresent ? [{ id: LISTING, title: 'Cliff Cabin', city: 'Moab', country_code: 'US' }] : [] } } })
     if (method === 'GET' && path === '/channels/chan-1/action/listing_details') {
       const listingId = url.searchParams.get('listing_id')!
       const content = {
@@ -458,7 +460,7 @@ test('a listing imports through every stage into a home Channex and Blawby agree
     assert.equal(channex.restrictions[today()]!.min_stay_arrival, 2)
     assert.equal(await db.prepare('SELECT setup_property_id FROM channex_connections').first('setup_property_id'), null)
     const report = JSON.parse(String(mapping!.import_content)) as ImportContentReport
-    assert.deepEqual((await connection.listings())[0]!.import, { status: 'imported', product_id: productId, stage: 'complete', syncing: true, content: report })
+    assert.deepEqual((await connection.listings()).listings[0]!.import, { status: 'imported', product_id: productId, stage: 'complete', syncing: true, content: report })
 
     // Every syncing home names its Airbnb listing and that listing's editor.
     assert.deepEqual([filled.airbnb_listing_id, filled.airbnb_editor_url], [LISTING, `https://www.airbnb.com/hosting/listings/editor/${LISTING}/details`])
@@ -500,7 +502,7 @@ test('a listing imports through every stage into a home Channex and Blawby agree
     assert.deepEqual([drafted.live, drafted.photos.length, drafted.description, drafted.base_price_minor], [false, 3, 'Our own words.', filled.base_price_minor])
     // A draft is not syncing: an edit names nothing for Airbnb.
     assert.deepEqual((await updateStayHome(env, db, manager, productId, { description: 'Our own words, again.' })).airbnb_unsynced, [])
-    assert.deepEqual((await connection.listings())[0]!.import, { status: 'imported', product_id: productId, stage: 'draft', syncing: false, content: report })
+    assert.deepEqual((await connection.listings()).listings[0]!.import, { status: 'imported', product_id: productId, stage: 'draft', syncing: false, content: report })
     // Again on a draft: answered as it is.
     assert.deepEqual(await connection.deactivate(productId), { product_id: productId, stage: 'draft', waiting: false })
     // Draft edits become the canonical provider defaults once the actual mapping is recreated, before the home goes live.
@@ -591,13 +593,14 @@ test('a sync request is checked against the plan once, then Blawby imports, acti
     const app = new H3()
     app.post('/api/organizations/:organization_id/integrations/airbnb/sync', syncPostRoute)
     app.get('/api/organizations/:organization_id/integrations/airbnb/sync', syncGetRoute)
+    app.get('/api/organizations/:organization_id/integrations/airbnb/listings', listingsRoute)
     const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password: PASSWORD }, asResponse: true })
     const token = login.headers.get('set-auth-token')
     assert.ok(token, 'Better Auth answers a bearer token for the app')
     // The iPhone app uses a bearer session without a browser origin. The Worker
     // consumer advances the job after the request returns.
-    const call = async (method: string, body?: unknown) => {
-      const response = await app.request(Object.assign(new Request(`${BASE}/api/organizations/${ORG}/integrations/airbnb/sync`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }),
+    const call = async (method: string, body?: unknown, leaf = 'sync') => {
+      const response = await app.request(Object.assign(new Request(`${BASE}/api/organizations/${ORG}/integrations/airbnb/${leaf}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }),
         { runtime: { name: 'cloudflare', cloudflare: { env } } }))
       return { status: response.status, body: await response.json() as Record<string, unknown> }
     }
@@ -681,12 +684,29 @@ test('a sync request is checked against the plan once, then Blawby imports, acti
     assert.equal(await countActiveHomes(db, ORG), 3)
     assert.equal(channex.channel.ratePlans.length, 1)
 
-    // Unchecked: the job stops it, and it is a free draft again.
+    // Airbnb removes the listing while Channex still reports the rate row.
+    await updateStayHome(env, db, manager, productId, { published: true })
+    channex.listingPresent = false
+    channex.channel.ratePlans[0]!.settings = {}
+    assert.deepEqual(await call('GET', undefined, 'listings'), {
+      status: 200, body: { listings: [], missing_listings: [{ listing_id: LISTING, product_id: productId, internal_name: 'Cliff Cabin' }] },
+    })
+    const callsBeforeStop = channex.seen.length
+    const unknownHome = await call('POST', { stop: [productId, 'not-a-home'] })
+    assert.equal(unknownHome.status, 404)
+    assert.equal((await job())!.action, 'sync', 'an invalid home refuses the entire stop request')
+    assert.equal(syncs.pending.length, 0)
     const stopped = await call('POST', { stop: [productId] })
     assert.deepEqual([stopped.status, (stopped.body.listings as Array<Record<string, unknown>>)[0]!.action], [202, 'stop'])
+    assert.equal(channex.seen.length, callsBeforeStop, 'the stop addresses the saved mapping without asking Airbnb for the listing')
     await runSyncs()
     assert.deepEqual(await job(), { action: 'stop', state: 'done', product_id: productId, last_error_code: null })
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { import_stage: 'draft', enabled: 0 })
+    assert.deepEqual(await call('GET', undefined, 'listings'), { status: 200, body: { listings: [], missing_listings: [] } })
+    const preserved = await readStayHome(db, manager, productId)
+    assert.deepEqual([preserved.published, preserved.live, preserved.photos.length, channex.channel.active], [true, true, 11, true])
+    await updateStayHome(env, db, manager, productId, { published: false })
+    channex.listingPresent = true
     assert.deepEqual([channex.channel.ratePlans, await countActiveHomes(db, ORG)], [[], 2])
     // A home found partway through activation (as one interrupted at `messages`) is carried to complete. A provider
     // failure on the way fails the listing with Channex's answer; asking again carries on from the same stage.
