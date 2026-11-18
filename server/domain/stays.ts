@@ -1619,9 +1619,10 @@ export async function deliverPendingChannelNights(env: CloudflareEnv, organizati
     if (!added.length && !row.due) continue
     const home = await readStayHome(db, { organizationId, actorId: 'system', manage: true }, row.product_id)
     const read = (start: string, end: string) => homeNights(db, organizationId, home, start, end)
+    // Before the new nights are queued: a sync Channex did not take leaves them unsent, so the wake's retry asks again.
+    if (added.length) await syncAirbnbListing(db, env, organizationId, home.product_id)
     const retryAt = await deliverStayNights(db, env, organizationId, home, read, added)
     if (retryAt !== null) next = Math.min(next, retryAt)
-    if (added.length) await syncAirbnbListing(db, env, organizationId, home.product_id)
     await publishStayInvalidation(env, { type: 'nights.changed', organization_id: organizationId, location_id: home.location_id, product_id: home.product_id, booking_id: null }, { updated_at: new Date().toISOString() })
   }
   return Number.isFinite(next) ? next : null
