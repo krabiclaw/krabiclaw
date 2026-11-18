@@ -15,7 +15,7 @@ import { createDeliveryReceipt, getDeliveryById, isDeliverySent, isVisibleDelive
 import { appendMessage, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { createStay } from '../../server/domain/stays.ts'
+import { createStay, updateStay } from '../../server/domain/stays.ts'
 import { whatsAppServiceWindowOpen } from '../../server/utils/mcp-context.ts'
 import { conversationPageFor } from './support/conversation-page.ts'
 import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
@@ -206,7 +206,8 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     // Ana and Bo can be emailed; Dee left only a phone and has no Blawby account, so the inbox shows her no composer.
     const ana = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'ana', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Ana', guest_email: 'ana@example.test', guest_phone: '+61491570150', total_minor: 30_000 })
     const bo = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'bo', check_in_date: day(6), check_out_date: day(8), adults: 1, guest_name: 'Bo', guest_email: 'bo@example.test', guest_phone: '+61491570152', total_minor: 30_000 })
-    const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(12), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 30_000 })
+    const deeCreated = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(12), adults: 1, guest_name: 'Dee', guest_email: 'dee@example.test', guest_phone: '+61491570151', total_minor: 30_000 })
+    const dee = await updateStay(db, env, manager, deeCreated.id, { version: deeCreated.version, guest_email: null })
     // Each guest wrote, and the owner was alerted on WhatsApp about each.
     for (const [stay, name] of [[ana, 'ana'], [bo, 'bo'], [dee, 'dee']] as const) {
       const entry = await appendMessage(db, { conversationId: stay.conversation_id, authorKind: 'guest', authorUserId: null, channel: 'email', body: `Hi from ${name}`, dedupeKey: `guest-${name}` })

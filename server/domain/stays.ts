@@ -1948,7 +1948,10 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
     const earlier = await replay()
     if (earlier) return publish(earlier)
   }
-  if (!imported) assertStayCheckoutHorizon(fields.check_out_date, homeToday(home.timezone))
+  if (!imported) {
+    if (fields.guest_email === null) fail(422, 'GUEST_EMAIL_REQUIRED', 'Enter the guest’s email address.', 'guest_email')
+    assertStayCheckoutHorizon(fields.check_out_date, homeToday(home.timezone))
+  }
   // A stay the host takes asks the home's questions as its direct booking does; the host's words are in the site's own language.
   const questions = parseStoredFormQuestions(home.questions)
   const answers = imported ? [] : validateFormAnswers({ questions, questions_revision: formQuestionsRevision(questions) }, {
@@ -2913,7 +2916,8 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
       previous?.product_id ?? null, previous?.check_in_date ?? null, previous?.check_out_date ?? null, organizationId, id, version],
   },
   publicResourceCacheInvalidationQuery(organizationId, 'guest-thread-create'),
-  bookingContactQuery({ organizationId, bookingId: id, version, updatedAt: now, locationId: home.location_id, guest: { name: guestName, email: booking.guest_email, phone: booking.guest_phone } }),
+  bookingContactQuery({ organizationId, bookingId: id, version, updatedAt: now, locationId: home.location_id,
+    guest: { name: guestName ?? undefined, email: booking.guest_email ?? undefined, phone: booking.guest_phone ?? undefined } }),
   ...reconcileGuestListingParticipants(organizationId, { query: 'c.booking_id = ?', params: [id] }),
   ...turnovers.queries,
   ]
