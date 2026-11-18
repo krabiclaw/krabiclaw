@@ -21,6 +21,7 @@ interface PaymentPicture {
 }
 
 type PaymentSubject = Omit<PaymentPicture, 'title' | 'image_url'> & { id: string; product_id: string | null }
+const paymentBookingJoin = "LEFT JOIN bookings b ON p.subject_type = 'booking' AND b.id = p.subject_id AND b.organization_id = p.organization_id"
 
 /** The payment's immutable title, its subject's picture and dates, and the buyer when the list presents them: named by what they typed, never an anonymous account's "Anonymous". */
 async function paymentPictures(db: DbClient, organizationId: string, payments: readonly Pick<Payment, 'id' | 'location_id' | 'price_snapshot_json'>[], includeBuyer = false): Promise<Map<string, PaymentPicture>> {
@@ -29,7 +30,7 @@ async function paymentPictures(db: DbClient, organizationId: string, payments: r
     SELECT p.id, b.id AS booking_id, b.product_id, pr.name, b.starts_at, b.ends_at, b.timezone,
       ${includeBuyer ? `COALESCE(json_extract(r.payload_json, '$.guest.name'), json_extract(bc.payload_json, '$.guest.name'), CASE WHEN COALESCE(u."isAnonymous", 0) = 0 THEN u.name END)` : 'NULL'} AS buyer_name
       FROM payments p
-      LEFT JOIN bookings b ON p.subject_type = 'booking' AND b.id = p.subject_id AND b.organization_id = p.organization_id
+      ${paymentBookingJoin}
       LEFT JOIN products pr ON pr.id = b.product_id AND pr.organization_id = b.organization_id
       ${includeBuyer ? `LEFT JOIN user u ON u.id = p.buyer_user_id
       LEFT JOIN payment_checkout_holds h ON h.payment_id = p.id
@@ -159,20 +160,31 @@ export function payoutStatusLabel(status: string): string {
   return status === 'paid' ? 'Sent' : status === 'failed' ? 'Failed' : status === 'canceled' ? 'Cancelled' : status === 'in_transit' ? 'On its way' : 'Expected'
 }
 
+function paymentTransactionPath(organizationSlug: string, paymentId: string, bookingId: string | null) {
+  const base = `/dashboard/${encodeURIComponent(organizationSlug)}/bookings`
+  return bookingId ? `${base}/${encodeURIComponent(bookingId)}` : `${base}/payment/${encodeURIComponent(paymentId)}`
+}
+
+/** Links from payout and refund detail only need the record the transaction paid. */
+export async function paymentTransactionDestination(db: DbClient, organizationId: string, organizationSlug: string, paymentId: string) {
+  const row = await queryFirst<{ booking_id: string | null }>(db, `SELECT b.id AS booking_id FROM payments p
+    ${paymentBookingJoin} WHERE p.organization_id = ? AND p.id = ?`, [organizationId, paymentId])
+  if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
+  return { to: paymentTransactionPath(organizationSlug, paymentId, row.booking_id) }
+}
+
 /** The month's transactions as Airbnb's list reads them: the picture, the buyer, and the record each opens. */
 export async function paymentTransactions(db: DbClient, principal: FinancialPrincipal, organizationSlug: string, page: { payments: VisiblePayment[]; next_cursor: string | null }) {
   const pictures = await paymentPictures(db, principal.organizationId, page.payments, true)
-  const base = `/dashboard/${encodeURIComponent(organizationSlug)}/bookings`
   return {
     next_cursor: page.next_cursor,
     payments: page.payments.map((payment) => {
       const picture = pictures.get(payment.id)!
-      // A booking opens at /bookings/<id>, a payment with no booking at /bookings/payment/<id>, as the bookings page routes them.
-      const to = picture.booking_id ? `${base}/${encodeURIComponent(picture.booking_id)}` : `${base}/payment/${encodeURIComponent(payment.id)}`
       return {
         id: payment.id, created_at: payment.created_at, currency: payment.currency, amount: payment.amount, captured_amount: payment.captured_amount, refunded_amount: payment.refunded_amount,
         title: picture.title, image_url: picture.image_url, buyer_name: picture.buyer_name,
-        starts_at: picture.starts_at, ends_at: picture.ends_at, timezone: picture.timezone, to,
+        starts_at: picture.starts_at, ends_at: picture.ends_at, timezone: picture.timezone,
+        to: paymentTransactionPath(organizationSlug, payment.id, picture.booking_id),
       }
     }),
   }
