@@ -310,8 +310,17 @@ test('publication: one result and one external post per target; a failure is the
     await run("UPDATE account SET accessToken = 'ig-token' WHERE id = 'ig-account'")
 
     // Website, Facebook photos and an Instagram carousel in one call.
-    const all = await publishPost(env, 'org-a', first.post.id, { expectedUpdatedAt: first.post.updated_at, targets: [targets.website, targets.facebook(), targets.instagram()] }, 'publisher')
+    const result = await handlePostsTools({
+      toolName: 'publish_post',
+      args: { post_id: first.post.id, updated_at: first.post.updated_at, targets: [targets.website, targets.facebook(), targets.instagram()] },
+      organization: { ...organization, env, userId: 'publisher' },
+    })
+    assert.ok(isMcpRenderResponse(result))
+    const all = result.structuredContent as Awaited<ReturnType<typeof publishPost>>
     assert.equal(all.ok, true, JSON.stringify(all.outcomes))
+    assert.match(result.modelText!, /\[View on Website\]\(<https:\/\/org-a\.krabiclaw\.test\/posts\/pizza-night-friday>\)/)
+    assert.ok(result.modelText?.includes(`[View on Facebook](<https://www.facebook.com/${PAGE}_3>)`))
+    assert.ok(result.modelText?.includes(`[View on Instagram](<https://www.instagram.com/p/${[...meta.igMedia.keys()][0]}/>)`))
     assert.deepEqual(all.outcomes.map(outcome => [outcome.channel, outcome.status]), [['organization', 'published'], ['facebook', 'published'], ['instagram', 'published']])
     // What Facebook received: two unpublished photos in order, then one published post attaching them with the caption and link line.
     const photos = meta.sent(request => request.path.endsWith(`${PAGE}/photos`))

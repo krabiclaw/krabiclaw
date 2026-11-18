@@ -4,6 +4,8 @@ import { HTTPError } from 'nitro'
 import { formQuestionsJsonSchema } from '~/shared/form-questions'
 import { currencyCodeSchema, pageInfoObject, paginationInputSchema, resolvedMediaAssetObject, organizationTool } from './shared'
 import { TENANT_PAGE_BLOCKS_SCHEMA, TENANT_PAGE_METADATA_SCHEMA } from './content'
+import { renderStructuredResponse, withMcpLink } from '~/server/utils/mcp-render'
+import { platformOrigin } from '~/server/utils/dashboard-notification-links'
 import { productEditorPath } from '~/server/utils/dashboard-links'
 import { PRODUCT_LIMITS } from '~/server/utils/product-validation'
 import { MAX_STAY_NIGHTS } from '~/shared/bookings'
@@ -133,8 +135,13 @@ const productLocationObject = {
 
 const productPublicationResult = {
   type: 'object',
-  properties: { product_id: { type: 'string' }, organization_id: { type: 'string' }, published: { type: 'boolean' } },
-  required: ['product_id', 'organization_id', 'published'],
+  properties: {
+    product_id: { type: 'string' }, organization_id: { type: 'string' }, published: { type: 'boolean' },
+    public_url: { type: ['string', 'null'], description: 'Public URL when the product has its own accessible route.' },
+    public_urls: { type: 'object', additionalProperties: { type: 'string' }, description: 'Additional public URLs keyed by the locations where the product is published.' },
+    admin_edit_url: { type: ['string', 'null'], description: 'Dashboard editor URL.' },
+  },
+  required: ['product_id', 'organization_id', 'published', 'public_url', 'public_urls', 'admin_edit_url'],
   additionalProperties: false,
 } as const
 
@@ -376,7 +383,7 @@ export const PRODUCTS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'create_product', description: 'Add food or drink, an experience or class, a practice area or consultation, a restaurant location\'s tables (kind table, one per location, booked like any offering), or a place to stay. An experience can start as a private draft without booking setup. To make it public, configure its booking flow or supply an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), keeps its public house rules in details, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. Repeat the same idempotency key on retry.' , domain: 'products', minimumRole: 'admin', inputSchema: { ...productWrite, booking: bookingSetup, stay: staySetup, page: { type: 'object', description: 'A source page created with this product and bound to it, in the same write. Omit for a product without a page of its own.', properties: { ...TENANT_PAGE_METADATA_SCHEMA, path: { type: 'string', description: "The page's public path. A practice area or consultation may omit it to get the first free /services/<slug>." }, blocks: TENANT_PAGE_BLOCKS_SCHEMA }, required: ['title', 'blocks'], additionalProperties: false }, idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'Repeat the same key with the same request to get the product it created instead of a second one.' } }, required: ['name', 'kind', 'idempotency_key'], outputSchema: productResult }),
   organizationTool({ name: 'update_product', description: 'Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied details replace their current values by default. Use details_mode merge for focused fact edits, preserving unmentioned facts and clearing named facts with null. Booking setup also creates sessions and publishes the offering. For a connected Airbnb home, changed arrival/departure windows, cancellation, pet/smoking/event rules and minimum stays update supported listing settings through Channex. Unsupported connected-listing settings are refused before saving. A failed channel completion reports the committed edit with CHANNEL_PUSH_FAILED; reload before retrying. Increasing the number of live homes requires the dashboard.', domain: 'products', minimumRole: 'member', inputSchema: { product_id: { type: 'string' }, ...productPatch, booking: bookingSetup, stay: stayPatch, idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'Required with booking setup. Repeat the same key with the same request for an identical retry.' } }, required: ['product_id'], outputSchema: productMutationResult }),
   organizationTool({ name: 'delete_product', description: 'Delete a product and its public page. Booking history prevents deletion; pause bookings or withhold publication to retain it.', domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' } }, required: ['product_id'], outputSchema: { type: 'object', properties: { deleted: { type: 'boolean' } }, required: ['deleted'] } }),
-  organizationTool({ name: 'set_product_publication', description: "Publish or withhold a product on the selected site and return its saved publication flag. Read get_product first. A home or offering booked on this site needs an assigned host with an approved public profile and nonblank public_name: find membership IDs in list_organization_members, read get_member_public_profile, and author or approve the profile through update_member_public_profile. Assignment alone does not publish a profile. Other publication prerequisites, including pricing and availability, still apply. This setting is independent of whether the product is available for sale and of visibility at individual locations. Increasing the number of live homes requires the dashboard.", domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' }, published: { type: 'boolean' } }, required: ['product_id', 'published'], outputSchema: productPublicationResult }),
+  organizationTool({ name: 'set_product_publication', description: "Publish or withhold a product on the selected site and return its saved publication flag and available public or editor URLs. Read get_product first. A home or offering booked on this site needs an assigned host with an approved public profile and nonblank public_name: find membership IDs in list_organization_members, read get_member_public_profile, and author or approve the profile through update_member_public_profile. Assignment alone does not publish a profile. Other publication prerequisites, including pricing and availability, still apply. This setting is independent of whether the product is available for sale and of visibility at individual locations. Increasing the number of live homes requires the dashboard.", domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' }, published: { type: 'boolean' } }, required: ['product_id', 'published'], outputSchema: productPublicationResult }),
   organizationTool({ name: 'set_product_location', description: "Set whether the selected location offers a product and shows it on that location’s website. A new location relationship defaults active and published to true; on an existing relationship, omitted flags retain their values. Returns the saved location flags. Existing prices do not establish a location offering; read get_product for the complete product.", domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' }, location_id: { type: 'string' }, active: { type: 'boolean' }, published: { type: 'boolean' } }, required: ['product_id', 'location_id'], outputSchema: productLocationResult }),
   organizationTool({ name: 'remove_product_location', description: 'Remove the selected product’s offering at one explicit location and return its product and location IDs with removed true. The catalog product, prices and other location offerings remain. Read get_product to review them.', domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' }, location_id: { type: 'string' } }, required: ['product_id', 'location_id'], outputSchema: { type: 'object', properties: { product_id: { type: 'string' }, location_id: { type: 'string' }, removed: { const: true } }, required: ['product_id', 'location_id', 'removed'], additionalProperties: false } }),
   organizationTool({ name: 'batch_create_products', description: "Create several products in the selected site’s catalog when the user supplies a new catalog batch. Validates every entry before writing; any invalid entry rejects the complete request. Creating a place to stay reports the business's current live-home count to its Stripe subscription; an unpublished home adds nothing to it. Publication and location offerings are assigned separately.", domain: 'products', minimumRole: 'admin', inputSchema: { idempotency_key: { type: 'string', minLength: 1, maxLength: 200 }, products: { type: 'array', minItems: 1, maxItems: PRODUCT_LIMITS.batchCreate, items: { type: 'object', properties: { ...productWrite, stay: staySetup }, required: ['name', 'kind'], additionalProperties: false } } }, required: ['products', 'idempotency_key'], outputSchema: { type: 'object', properties: { products: { type: 'array', items: productObject } }, required: ['products'] } }),
@@ -605,9 +612,23 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
       }
       if (typeof args.published !== 'boolean') throw mcpProtocolError(MCP_ERROR.invalidParams, 'published must be a boolean')
       await setProductPublication(organization.db, { ...scope, productId, published: args.published, actor, env: organization.env, allowHomeActivation: false })
-      const publication = (await getProduct(organization.db, organization.organizationId, productId)).publications.find(entry => entry.organization_id === organization.organizationId)
+      const product = await getProduct(organization.db, organization.organizationId, productId)
+      const publication = product.publications.find(entry => entry.organization_id === organization.organizationId)
       if (!publication) throw new HTTPError({ statusCode: 500, statusMessage: 'Saved product publication was not found' })
-      return { product_id: productId, organization_id: publication.organization_id, published: publication.published }
+      const { publicUrl, publicUrls } = publication.published
+        ? await productPublicPresentation(organization.db, organization.env, organization.organizationId, product)
+        : { publicUrl: null, publicUrls: {} }
+      const adminEditUrl = organization.organizationSlug
+        ? new URL(productEditorPath(organization.organizationSlug, productId), platformOrigin(organization.env)).href : null
+      const message = publication.published ? 'Product publication saved.' : 'Product withheld.'
+      const locationUrls = Object.values(publicUrls)
+      const confirmation = locationUrls.length
+        ? [withMcpLink(message, 'View product', publicUrl), ...locationUrls.map(url => withMcpLink('-', `View ${new URL(url).pathname}`, url))].join('\n\n')
+        : publicUrl ? withMcpLink(message, 'View product', publicUrl) : withMcpLink(message, 'Edit product', adminEditUrl)
+      return renderStructuredResponse({
+        product_id: productId, organization_id: publication.organization_id, published: publication.published,
+        public_url: publicUrl, public_urls: publicUrls, admin_edit_url: adminEditUrl,
+      }, confirmation)
     }
     case 'set_product_location': {
       const productId = requiredString(args, 'product_id')
