@@ -165,6 +165,95 @@ test('MCP post publication keeps the website link when a social destination is d
   expect(await publicPost.text()).toContain(body)
 })
 
+test('MCP site-page saves and product publication link to the guest page or the editor', async ({ request, playwright, baseURL }) => {
+  await loginAs(request, baseURL!, 'user-e2e-ncls-owner')
+  const tenant = seededTenant('legal')
+  const call = async (toolName: string, args: Record<string, unknown>) => {
+    const response = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName, args: { organization_id: tenant.organizationId, ...args },
+    })
+    expect(response.status()).toBe(200)
+    return response.json()
+  }
+  type SavedPage = { id: string; page_id: string; blocks: Array<{ id: string }>; path: string; page_type: string; recipe: string | null; sort_order: number; updated_at: string; admin_edit_url: string; public_url: string | null }
+  const suffix = crypto.randomUUID()
+  const title = `Education consultation ${suffix}`
+  const path = `/services/education-${suffix}`
+  const paragraphs = (markdown: string) => [{ type: 'markdown', data: { markdown, editor_mode: 'rich' } }]
+  const guest = await playwright.request.newContext({ baseURL: seededSiteURL('legal'), extraHTTPHeaders: seededSiteHeaders('legal') })
+  try {
+    const created = await call('create_site_page', {
+      path: `/office-information-${suffix}`, title: 'Office information',
+      blocks: paragraphs('The Raleigh office is open for consultations.'),
+    })
+    const { page: officePage } = mcpData<{ page: SavedPage }>(created)
+    expect(new URL(officePage.public_url!).pathname).toBe(officePage.path)
+    expect(created.result.content[0].text).toContain(`[View page](<${officePage.public_url}>)`)
+    const office = await guest.get(new URL(officePage.public_url!).pathname)
+    expect(office.status()).toBe(200)
+    expect(await office.text()).toContain('>The Raleigh office is open for consultations.</')
+
+    await call('add_organization_language', { locale: 'es' })
+    const translation = await call('create_site_page', {
+      page_id: officePage.page_id, locale: 'es', path: `/informacion-oficina-${suffix}`,
+      title: 'Información de la oficina', blocks: paragraphs('La oficina de Raleigh ofrece consultas.'),
+    })
+    const { page: translatedPage } = mcpData<{ page: SavedPage }>(translation)
+    expect(translatedPage.public_url).toBeNull()
+    const translationEditor = new URL(translatedPage.admin_edit_url, baseURL).href
+    expect(translation.result.content[0].text).toContain(`[Edit page](<${translationEditor}>)`)
+    expect((await request.get(translationEditor, { maxRedirects: 0 })).status()).toBe(200)
+    expect((await guest.get(`/es${translatedPage.path}`)).status()).toBe(404)
+
+    const { product } = mcpData<{ product: { id: string; page: { id: string } } }>(await call('create_product', {
+      idempotency_key: suffix, kind: 'service', name: title, active: true,
+      order_url: 'https://scheduler.example/harbor-legal-aid',
+      variants: [{ name: 'Consultation', prices: [{ unit_amount: 0, currency: 'USD' }] }],
+      page: { path, title, blocks: [] },
+    }))
+    const { page: draft } = mcpData<{ page: SavedPage }>(await call('get_site_page', { variant_id: product.page.id }))
+    const save = { variant_id: draft.id, path, title, page_type: draft.page_type, recipe: draft.recipe, sort_order: draft.sort_order }
+    const edited = await call('update_site_page', {
+      ...save, updated_at: draft.updated_at, blocks: paragraphs('Bring the school notices to your consultation.'),
+    })
+    const { page: saved } = mcpData<{ page: SavedPage }>(edited)
+    expect(saved.public_url).toBeNull()
+    const pageEditor = new URL(saved.admin_edit_url, baseURL).href
+    expect(edited.result.content[0].text).toContain(`[Edit page](<${pageEditor}>)`)
+    expect((await request.get(pageEditor, { maxRedirects: 0 })).status()).toBe(200)
+    expect((await guest.get(path)).status()).toBe(404)
+
+    const published = await call('set_product_publication', { product_id: product.id, published: true })
+    const live = mcpData<{ public_url: string; published: boolean }>(published)
+    expect(live.published).toBe(true)
+    expect(new URL(live.public_url).pathname).toBe(path)
+    expect(published.result.content[0].text).toContain(`[View product](<${live.public_url}>)`)
+    const publicPage = await guest.get(new URL(live.public_url).pathname)
+    expect(publicPage.status()).toBe(200)
+    expect(await publicPage.text()).toContain('>Bring the school notices to your consultation.</')
+
+    const editedLive = await call('update_site_page', {
+      ...save, updated_at: saved.updated_at, removed_block_ids: saved.blocks.map(block => block.id),
+      blocks: paragraphs('Bring the school notices and evaluations to your consultation.'),
+    })
+    const { page: updated } = mcpData<{ page: SavedPage }>(editedLive)
+    expect(updated.public_url).toBe(live.public_url)
+    expect(editedLive.result.content[0].text).toContain(`[View page](<${live.public_url}>)`)
+    const updatedPublicPage = await guest.get(new URL(updated.public_url!).pathname)
+    expect(updatedPublicPage.status()).toBe(200)
+    expect(await updatedPublicPage.text()).toContain('>Bring the school notices and evaluations to your consultation.</')
+
+    const withheld = await call('set_product_publication', { product_id: product.id, published: false })
+    const privateProduct = mcpData<{ admin_edit_url: string }>(withheld)
+    expect(privateProduct).toMatchObject({ published: false, public_url: null, public_urls: {} })
+    expect(withheld.result.content[0].text).toContain(`[Edit product](<${privateProduct.admin_edit_url}>)`)
+    expect((await request.get(privateProduct.admin_edit_url, { maxRedirects: 0 })).status()).toBe(200)
+    expect((await guest.get(path)).status()).toBe(404)
+  } finally {
+    await guest.dispose()
+  }
+})
+
 test('dashboard search opens the signed-in business’s record', async ({ page, baseURL }) => {
   const tenant = seededTenant('legal')
   await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')

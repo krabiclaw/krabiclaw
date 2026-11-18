@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:1be00e082423f22539cabe1dfb18b86219a795b05108a321b9317c12aa8f48ba",
-  "documentationFingerprint": "sha256:021c79a0f1f6dabb1f563df9d89f89cbe1cefa16134a93c065169e8e2c6204dd",
+  "fingerprint": "sha256:903059981b1c21008dfe7df02cc262336c0707a755d0ea659a3d073c5d9ec424",
+  "documentationFingerprint": "sha256:84208ba3f78715156397cec30984b5dff92b241ebbe90eb8f322f71d005f5dac",
   "tools": [
     {
       "name": "add_organization_language",
@@ -37014,6 +37014,13 @@
                   "null"
                 ]
               },
+              "public_url": {
+                "description": "The saved public URL for this variant, when publicly visible.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "recipe": {
                 "type": [
                   "string",
@@ -37052,7 +37059,8 @@
               "updated_at",
               "blocks",
               "document",
-              "admin_edit_url"
+              "admin_edit_url",
+              "public_url"
             ],
             "type": "object"
           }
@@ -63732,6 +63740,13 @@
                   "null"
                 ]
               },
+              "public_url": {
+                "description": "The saved public URL for this variant, when publicly visible.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "recipe": {
                 "type": [
                   "string",
@@ -63770,7 +63785,8 @@
               "updated_at",
               "blocks",
               "document",
-              "admin_edit_url"
+              "admin_edit_url",
+              "public_url"
             ],
             "type": "object"
           }
@@ -99572,7 +99588,7 @@
     {
       "name": "set_product_publication",
       "title": "Set product publication",
-      "description": "Publish or withhold a product on the selected site and return its saved publication flag. Read get_product first. A home or offering booked on this site needs an assigned host with an approved public profile and nonblank public_name: find membership IDs in list_organization_members, read get_member_public_profile, and author or approve the profile through update_member_public_profile. Assignment alone does not publish a profile. Other publication prerequisites, including pricing and availability, still apply. This setting is independent of whether the product is available for sale and of visibility at individual locations. Increasing the number of live homes requires the dashboard.",
+      "description": "Publish or withhold a product on the selected site and return its saved publication flag and available public or editor URLs. Read get_product first. A home or offering booked on this site needs an assigned host with an approved public profile and nonblank public_name: find membership IDs in list_organization_members, read get_member_public_profile, and author or approve the profile through update_member_public_profile. Assignment alone does not publish a profile. Other publication prerequisites, including pricing and availability, still apply. This setting is independent of whether the product is available for sale and of visibility at individual locations. Increasing the number of live homes requires the dashboard.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -99600,11 +99616,32 @@
         "additionalProperties": false,
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
+          "admin_edit_url": {
+            "description": "Dashboard editor URL.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "organization_id": {
             "type": "string"
           },
           "product_id": {
             "type": "string"
+          },
+          "public_url": {
+            "description": "Public URL when the product has its own accessible route.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "public_urls": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Additional public URLs keyed by the locations where the product is published.",
+            "type": "object"
           },
           "published": {
             "type": "boolean"
@@ -99613,7 +99650,10 @@
         "required": [
           "product_id",
           "organization_id",
-          "published"
+          "published",
+          "public_url",
+          "public_urls",
+          "admin_edit_url"
         ],
         "type": "object"
       },
@@ -124698,6 +124738,13 @@
                   "null"
                 ]
               },
+              "public_url": {
+                "description": "The saved public URL for this variant, when publicly visible.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "recipe": {
                 "type": [
                   "string",
@@ -124736,7 +124783,8 @@
               "updated_at",
               "blocks",
               "document",
-              "admin_edit_url"
+              "admin_edit_url",
+              "public_url"
             ],
             "type": "object"
           }
@@ -125574,14 +125622,14 @@
       },
       "toolContracts": {
         "attach_media": "sha256:170c6665556f77a7be9607052052581cfc9632f45d01b88cbbb5ff5683ff8f32",
-        "get_site_page": "sha256:9df20fb9cef3e8da6b2581f6ac0690ae093e0310a19e22e3dff805c095eef089",
+        "get_site_page": "sha256:482ebe0f69cd34d7e8178e56141c0ff05d1400f10dc03aa8e0a362a5445d4427",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "remove_media": "sha256:2d9f580ca9664c93e76640ab4144fea1fa9187ec88f70a42c4ced0a409a42f21",
         "reorder_media": "sha256:124ff79867ad14cb56b197e28383d915b24f88f2e74a076d305c4bac1fe55a63",
         "set_media": "sha256:832f5f23b3136722fcba0f7e7769b9bdf5b1ed11275a38c1e0692ca297266a26",
-        "update_site_page": "sha256:0eff4bad0233a5e62beeb0dfe544eebfe48f3f9355b618be84e31637f221b0d5"
+        "update_site_page": "sha256:467bad83026861320c7ed582236f5c4b5f2cec39cbf5e7f74a8e976d34c9a7c1"
       }
     },
     {
@@ -125597,7 +125645,7 @@
         "get_location": "sha256:eeb473e44df629a24ceb82a2db6873a6b1f108dd852c2fa923f605a637439f34",
         "get_post": "sha256:fd95e9d97a5f0624dda58886752832eee80a1fef08c9c7a64d8c2af4ff3481d1",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
-        "get_site_page": "sha256:9df20fb9cef3e8da6b2581f6ac0690ae093e0310a19e22e3dff805c095eef089",
+        "get_site_page": "sha256:482ebe0f69cd34d7e8178e56141c0ff05d1400f10dc03aa8e0a362a5445d4427",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
         "set_media": "sha256:832f5f23b3136722fcba0f7e7769b9bdf5b1ed11275a38c1e0692ca297266a26"
@@ -125614,7 +125662,7 @@
       "toolContracts": {
         "create_product": "sha256:8193c55ebac41ea1c0bd72472ac43585af9a384aaa0c704339c94172fd80364f",
         "get_organization": "sha256:be4891efa8ad393a88869138bf2dacb5a66a3af6005298cfbd261f378cb6c1aa",
-        "get_site_page": "sha256:9df20fb9cef3e8da6b2581f6ac0690ae093e0310a19e22e3dff805c095eef089",
+        "get_site_page": "sha256:482ebe0f69cd34d7e8178e56141c0ff05d1400f10dc03aa8e0a362a5445d4427",
         "get_website_draft": "sha256:c1444d21ed13337ab56e9d48764d8befe1e0016ba625bc70c8b7d6f29d179d24",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -125625,7 +125673,7 @@
         "save_website_draft": "sha256:cc23867aade1082cec3c33941dfe9bef31d4cfc6b7e1077bce1ec94f471f6439",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
         "update_organization_settings": "sha256:4f1a62735af2470e974d07b775594aa2a76f8526128c444ee7ad240783d50f13",
-        "update_site_page": "sha256:0eff4bad0233a5e62beeb0dfe544eebfe48f3f9355b618be84e31637f221b0d5"
+        "update_site_page": "sha256:467bad83026861320c7ed582236f5c4b5f2cec39cbf5e7f74a8e976d34c9a7c1"
       }
     },
     {
@@ -125658,14 +125706,14 @@
       },
       "toolContracts": {
         "attach_media": "sha256:170c6665556f77a7be9607052052581cfc9632f45d01b88cbbb5ff5683ff8f32",
-        "get_site_page": "sha256:9df20fb9cef3e8da6b2581f6ac0690ae093e0310a19e22e3dff805c095eef089",
+        "get_site_page": "sha256:482ebe0f69cd34d7e8178e56141c0ff05d1400f10dc03aa8e0a362a5445d4427",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:832f5f23b3136722fcba0f7e7769b9bdf5b1ed11275a38c1e0692ca297266a26",
         "update_product": "sha256:afed95fa490fdae7aed3b9d4e6f5db435e1ab4c8d3909b260fbe380a82f9d461",
-        "update_site_page": "sha256:0eff4bad0233a5e62beeb0dfe544eebfe48f3f9355b618be84e31637f221b0d5"
+        "update_site_page": "sha256:467bad83026861320c7ed582236f5c4b5f2cec39cbf5e7f74a8e976d34c9a7c1"
       }
     },
     {
