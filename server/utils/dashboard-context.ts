@@ -1,3 +1,4 @@
+import { timeRequestPhase } from '~/server/utils/request-metrics'
 import { HTTPError } from 'nitro'
 import { getQuery } from 'nitro/h3';
 
@@ -228,7 +229,7 @@ async function dashboardSessionContext(event: H3Event) {
     throw new HTTPError({ statusCode: 503, message: 'Database not available', data: { code: 'DATABASE_UNAVAILABLE', field: 'DB' } })
   }
 
-  const session = await getAuthSession(event, env)
+  const session = await timeRequestPhase(event, 'auth_session', () => getAuthSession(event, env))
   if (!session?.user?.id) {
     throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
   }

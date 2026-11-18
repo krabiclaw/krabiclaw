@@ -1162,11 +1162,28 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
     assert.equal(added.status, 201, await added.clone().text())
     const { booking: saved } = await added.json() as { booking: { booking_id: string } }
     assert.ok(writeRequest)
-    const { batchRoundTrips, singleStatementRoundTrips } = getRequestDataMetrics(writeRequest)
-    assert.deepEqual([batchRoundTrips, singleStatementRoundTrips], [2, 0])
+    const createMetrics = getRequestDataMetrics(writeRequest)
+    assert.deepEqual([createMetrics.batchRoundTrips, createMetrics.singleStatementRoundTrips], [2, 0])
+    assert.ok(Number.isFinite(createMetrics.phases.auth_session))
+    assert.ok(Number.isFinite(createMetrics.phases.stay_queue_send))
+    assert.ok(Number.isFinite(createMetrics.phases.cache_queue_send))
     const persisted = await getStay(db, manager, saved.booking_id)
     assert.deepEqual([persisted.status, persisted.check_in_date, persisted.check_out_date], ['confirmed', date(30), date(31)])
     assert.equal(await claims(saved.booking_id), 1)
+
+    const updated = await hostWrite('PATCH', `/api/dashboard/bookings/${saved.booking_id}`, {
+      version: persisted.version, check_in_date: date(31), check_out_date: date(33), guest_name: 'Edited guest',
+    })
+    assert.equal(updated.status, 200, await updated.clone().text())
+    assert.ok(writeRequest)
+    const editMetrics = getRequestDataMetrics(writeRequest)
+    assert.deepEqual([editMetrics.batchRoundTrips, editMetrics.singleStatementRoundTrips], [2, 0])
+    assert.ok(Number.isFinite(editMetrics.phases.auth_session))
+    assert.ok(Number.isFinite(editMetrics.phases.stay_queue_send))
+    const changed = await getStay(db, manager, saved.booking_id)
+    assert.deepEqual([changed.guest_name, changed.check_in_date, changed.check_out_date, changed.version],
+      ['Edited guest', date(31), date(33), persisted.version + 1])
+    assert.equal(await claims(saved.booking_id), 2)
 
     const [created, edited] = await Promise.all([
       hostWrite('POST', '/api/dashboard/bookings', {

@@ -79,9 +79,26 @@ export function safeRoute(event: H3Event): string {
   }
 }
 
-export function recordRequestPhase(event: HTTPEvent, phase: string, startedAt: number) {
-  const metrics = getRequestDataMetrics(event)
+function recordPhase(metrics: RequestDataMetrics, phase: string, startedAt: number) {
   metrics.phases[phase] = (metrics.phases[phase] ?? 0) + performance.now() - startedAt
+}
+
+export function recordRequestPhase(event: HTTPEvent, phase: string, startedAt: number) {
+  recordPhase(getRequestDataMetrics(event), phase, startedAt)
+}
+
+export async function timeRequestPhase<T>(event: HTTPEvent, name: string, run: () => Promise<T>): Promise<T> {
+  const startedAt = performance.now()
+  try {
+    return await run()
+  } finally {
+    recordRequestPhase(event, name, startedAt)
+  }
+}
+
+export function recordDatabaseRequestPhase(database: D1Database, phase: string, startedAt: number) {
+  const metrics = databaseTargets.get(database)?.metrics
+  if (metrics) recordPhase(metrics, phase, startedAt)
 }
 
 export function beginTranscriptMetrics(event: HTTPEvent) {
@@ -120,14 +137,7 @@ function startTranscriptPhase(event: HTTPEvent, name: string) {
 
 export function timeTranscriptPhase<T>(event: H3Event, name: string, run: () => Promise<T>): Promise<T> {
   const tracing = event.req.runtime?.cloudflare?.context?.tracing
-  const measure = async () => {
-    const startedAt = performance.now()
-    try {
-      return await run()
-    } finally {
-      recordRequestPhase(event, name, startedAt)
-    }
-  }
+  const measure = () => timeRequestPhase(event, name, run)
   return tracing ? tracing.enterSpan(`messages.${name}`, measure) : measure()
 }
 
@@ -386,15 +396,16 @@ function applyMetricHeaders(
   setHeader(event, 'x-d1-duration-ms', metrics.d1DurationMs.toFixed(2))
   setHeader(event, 'x-response-bytes', String(responseBytes))
   setHeader(event, 'x-total-duration-ms', totalDuration.toFixed(2))
-  const phaseTimings = Object.entries(metrics.phases).map(
-    ([name, duration]) => `${name};dur=${duration.toFixed(2)}`,
-  )
-  setHeader(event, 'server-timing', [
-    ...phaseTimings,
+  setHeader(event, 'server-timing', serverTiming(metrics, totalDuration))
+}
+
+function serverTiming(metrics: RequestDataMetrics, totalDuration: number) {
+  return [
+    ...Object.entries(metrics.phases).map(([name, duration]) => `${name};dur=${duration.toFixed(2)}`),
     ...(metrics.transcript?.firstAppD1Ms === undefined ? [] : [`first_app_d1;dur=${metrics.transcript.firstAppD1Ms.toFixed(2)}`]),
     `d1;dur=${metrics.d1DurationMs.toFixed(2)}`,
     `total;dur=${totalDuration.toFixed(2)}`,
-  ].join(', '))
+  ].join(', ')
 }
 
 export async function flushRequestMetrics(event: HTTPEvent, response: Response) {
@@ -432,6 +443,9 @@ export async function flushRequestMetrics(event: HTTPEvent, response: Response) 
       response.headers.set('x-d1-round-trip-count', String(metrics.batchRoundTrips + metrics.singleStatementRoundTrips))
       response.headers.set('x-d1-duration-ms', metrics.d1DurationMs.toFixed(2))
       response.headers.set('x-total-duration-ms', totalDuration.toFixed(2))
+      if (Object.keys(metrics.phases).length > 0 && !response.headers.has('server-timing')) {
+        response.headers.set('server-timing', serverTiming(metrics, totalDuration))
+      }
     } catch (error) {
       metricHeadersError = error instanceof Error ? error.message : String(error)
     }

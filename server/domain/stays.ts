@@ -1280,8 +1280,11 @@ export type StayView<A extends StayAccess> = A extends { manage: true } ? Stay :
 type StayDetailView<A extends StayAccess> = A extends { manage: true } ? StayDetail : StayTurnover
 
 function stayDetailQuery(access: StayAccess, stayId: string): BatchQuery {
-  const scope = visibleHomes(access)
-  const paymentColumns = access.manage ? `,
+  return stayDetailSelection({ query: '?', params: [access.organizationId] }, stayId, access.manage, visibleHomes(access))
+}
+
+function stayDetailSelection(organization: BatchQuery, stayId: string, manage: boolean, scope: ReturnType<typeof visibleHomes>): BatchQuery {
+  const paymentColumns = manage ? `,
     (SELECT json_group_array(json_object('id', id, 'booking_id', booking_id, 'amount_minor', amount_minor, 'currency', currency,
       'method', method, 'paid_on', paid_on, 'reference', reference, 'note', note, 'created_at', created_at, 'created_by', created_by))
       FROM (SELECT * FROM offline_payments WHERE organization_id = s.organization_id AND booking_id = s.id ORDER BY paid_on, created_at)
@@ -1293,8 +1296,8 @@ function stayDetailQuery(access: StayAccess, stayId: string): BatchQuery {
   return {
     query: `SELECT ${STAY_COLUMNS}, (SELECT u.image FROM user u WHERE u.id = s.user_id) AS guest_image_url ${paymentColumns}
       FROM ${STAY_FROM}
-     WHERE s.organization_id = ? AND s.id = ? AND s.product_session_id IS NULL AND ${scope.sql}`,
-    params: [access.organizationId, stayId, ...scope.params],
+     WHERE s.organization_id = ${organization.query} AND s.id = ? AND s.product_session_id IS NULL AND ${scope.sql}`,
+    params: [...organization.params ?? [], stayId, ...scope.params],
   }
 }
 
@@ -1985,14 +1988,14 @@ export function assertStayRequestEditable(stay: Pick<Stay, 'status' | 'respond_b
   if (stay.status === 'pending' && stay.respond_by) fail(409, 'STAY_REQUEST_PENDING', 'A stay request can be edited once the guest has paid.', 'booking_id')
 }
 
-function stayTurnoverHomeQuery(organizationId: string, stayId: string, checkIn: string | null): BatchQuery {
+function stayTurnoverHomeQuery(organization: BatchQuery, stayId: string, checkIn: string | null): BatchQuery {
   // The current stay's UTC day may be a day after its local arrival day.
   const anchor = "MIN(COALESCE(date(?), date(s.starts_at)), date(s.starts_at, '-1 day'))"
   return {
     query: `SELECT ${turnoverHomeColumns(anchor)}, b.default_capacity AS max_guests FROM ${TURNOVER_HOME_FROM}
       JOIN bookings s ON s.organization_id = c.organization_id AND s.product_id = c.product_id
-      WHERE s.organization_id = ? AND s.id = ? AND s.product_session_id IS NULL`,
-    params: [checkIn, organizationId, stayId],
+      WHERE s.organization_id = ${organization.query} AND s.id = ? AND s.product_session_id IS NULL`,
+    params: [checkIn, ...organization.params ?? [], stayId],
   }
 }
 
@@ -2001,19 +2004,28 @@ function versionChanged(results: unknown): boolean {
   return (results as Array<{ meta?: { changes?: number } }>)[0]?.meta?.changes === 1
 }
 
-export async function updateStay(db: DbClient, env: StayMutationEnv, inputAccess: StayAccess, stayId: string, input: Record<string, unknown> & { version: unknown }): Promise<StayDetail> {
+/** Dashboard edits load these tenant-scoped rows with booking access in one read batch. */
+export function dashboardStayEditQueries(organization: BatchQuery, stayId: string, checkIn: unknown): BatchQuery[] {
+  return [
+    stayDetailSelection(organization, stayId, true, { sql: '1 = 1', params: [] }),
+    stayTurnoverHomeQuery(organization, stayId, typeof checkIn === 'string' ? checkIn : null),
+  ]
+}
+
+export async function updateStay(db: DbClient, env: StayMutationEnv, inputAccess: StayAccess, stayId: string, input: Record<string, unknown> & { version: unknown }, prepared?: { current: unknown; home: unknown }): Promise<StayDetail> {
   const access = await stayOperationAccess(db, inputAccess, { bookingId: stayId })
-  const [currentResult, homeResult] = await executeBatch(db, [
+  const [currentResult, homeResult] = prepared ? [] : await executeBatch(db, [
     stayDetailQuery(access, stayId),
-    stayTurnoverHomeQuery(access.organizationId, stayId, typeof input.check_in_date === 'string' ? input.check_in_date : null),
+    stayTurnoverHomeQuery({ query: '?', params: [access.organizationId] }, stayId, typeof input.check_in_date === 'string' ? input.check_in_date : null),
   ], { operation: 'Read stay for edit' })
-  const current = stayDetailFrom(access, currentResult?.results[0])
+  const current = stayDetailFrom(access, prepared ? prepared.current : currentResult?.results[0])
+  if (current.id !== stayId || (access.listingId && current.product_id !== access.listingId)) fail(404, 'STAY_NOT_FOUND', 'That stay is not in this organization')
   if (isChannelManagedStay(current)) channelOwned(current, 'belongs to')
   if (current.status === 'cancelled') fail(409, 'STAY_NOT_EDITABLE', 'This stay is cancelled')
   assertStayRequestEditable(current)
   if (input.version !== current.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
-  const home = homeResult?.results[0] as (TurnoverHome & Pick<StayHome, 'max_guests'>) | undefined
-  if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
+  const home = (prepared ? prepared.home : homeResult?.results[0]) as (TurnoverHome & Pick<StayHome, 'max_guests'>) | undefined
+  if (!home || home.product_id !== current.product_id) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
   const before: StayFields = { check_in_date: current.check_in_date, check_out_date: current.check_out_date, arrival_time: recordedArrival(current, home), adults: current.adults, children: current.children, infants: current.infants,
     guest_name: current.guest_name ?? '', guest_email: current.guest_email, guest_phone: current.guest_phone, total_minor: current.total_minor, private_notes: current.private_notes }
   const fields = stayFields({ ...before, ...input }, home)
@@ -2109,7 +2121,7 @@ export async function cancelStay(db: DbClient, env: StayMutationEnv, inputAccess
   const [currentResult, paymentResult, homeResult] = await executeBatch(db, [
     stayDetailQuery(access, stayId),
     visitRefundPaymentQuery(access.organizationId, stayId),
-    stayTurnoverHomeQuery(access.organizationId, stayId, null),
+    stayTurnoverHomeQuery({ query: '?', params: [access.organizationId] }, stayId, null),
   ], { operation: 'Read stay for cancellation' })
   const current = stayDetailFrom(access, currentResult?.results[0])
   if (isChannelManagedStay(current)) channelOwned(current, 'belongs to')
