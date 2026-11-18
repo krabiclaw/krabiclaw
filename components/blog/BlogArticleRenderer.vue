@@ -4,6 +4,7 @@
       <!-- The category is the site's navigation, so the article does not repeat it. -->
       <textarea v-if="editable" :value="title" rows="1" class="field-sizing-content w-full resize-none overflow-hidden border-0 bg-transparent p-0 text-4xl font-bold leading-tight text-inherit outline-none sm:text-5xl" aria-label="Post title" placeholder="Post title" @input="$emit('update:title', ($event.target as HTMLTextAreaElement).value)" @keydown.enter.prevent />
       <h1 v-else class="text-4xl font-bold leading-tight sm:text-5xl">{{ title }}</h1>
+      <ContentVideoEmbed v-if="leadVideo" :url="leadVideo.data.url" :title="String(leadVideo.data.title || '')" class="mt-6 rounded-2xl" />
       <p v-if="excerpt" class="mt-5 text-xl leading-relaxed opacity-75">{{ excerpt }}</p>
       <!--
         Who wrote it, then one date and the read time, on one line. The date is
@@ -233,17 +234,15 @@ provideMediaPreviews(ref(false))
 const reducedMotion = usePreferredReducedMotion()
 const hasCover = computed(() => props.blocks[0]?.type === 'image')
 /**
- * A published article with a video leads with it: Google indexes a video only
- * on a watch page, one where the video is the main thing in the first screen.
- * The video takes the cover's place; the cover stays the share card and poster.
- * While editing, blocks stay in the order they are written.
+ * A published article with a video leads with it, under the title: Google
+ * indexes a video only on a watch page, one where the video is the main thing
+ * in the first screen. It takes the cover's place; the cover stays the share
+ * card. While editing, blocks stay in the order they are written.
  */
-const shownBlocks = computed(() => {
-  const all = props.blocks.map((block, index) => ({ block, index }))
-  const lead = props.editable ? -1 : props.blocks.findIndex(block => block.type === 'video')
-  if (lead < 0) return all
-  return [all[lead]!, ...all.filter(({ index }) => index !== lead && !(index === 0 && hasCover.value))]
-})
+const leadIndex = computed(() => props.editable || !props.showHeader ? -1 : props.blocks.findIndex(block => block.type === 'video'))
+const leadVideo = computed(() => props.blocks[leadIndex.value] ?? null)
+const shownBlocks = computed(() => props.blocks.map((block, index) => ({ block, index }))
+  .filter(({ index }) => leadIndex.value < 0 || (index !== leadIndex.value && !(index === 0 && hasCover.value))))
 const { t, locale } = useI18n()
 function formatDate(value: string) { return formatTimestamp(value, locale.value, 'UTC', { dateStyle: 'medium' }) }
 // At two hundred words a minute, from the words a reader reads.
