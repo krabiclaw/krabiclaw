@@ -22,6 +22,8 @@ export type GuestMessageSchedule = ({
   offset_hours: number
 }) & { product_ids: string[] }
 
+export const SCHEDULE_LIMITS = { offerings: 100, days: 7, hours: 72 } as const
+
 export function messagingError(statusCode: number, code: string, message: string, field: string): never {
   throw new HTTPError({ statusCode, message, data: { code, field } })
 }
@@ -45,7 +47,7 @@ export function parseGuestMessageSchedule(value: unknown, stored = false): Guest
   const schedule = value as Record<string, unknown>
   if (schedule.trigger !== 'booking_received' && schedule.trigger !== 'check_in' && schedule.trigger !== 'check_out') invalid('Choose booking_received, check_in, or check_out', 'schedule.trigger')
   const ids = schedule.product_ids as unknown[]
-  if (!Array.isArray(ids) || ids.length < 1 || ids.length > 100 || ids.some(id => typeof id !== 'string' || !id.trim() || id !== id.trim())) invalid('Select 1 to 100 offerings', 'schedule.product_ids')
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > SCHEDULE_LIMITS.offerings || ids.some(id => typeof id !== 'string' || !id.trim() || id !== id.trim())) invalid('Select 1 to 100 offerings', 'schedule.product_ids')
   if (new Set(ids).size !== ids.length) invalid('Select each offering only once', 'schedule.product_ids')
   const scope = { product_ids: ids as string[] }
   const only = (keys: string[]) => { if (Object.keys(schedule).some(key => ![...keys, 'trigger', 'product_ids'].includes(key))) invalid('The schedule contains unsupported fields', 'schedule') }
@@ -56,11 +58,11 @@ export function parseGuestMessageSchedule(value: unknown, stored = false): Guest
   }
   const trigger = schedule.trigger as 'check_in' | 'check_out'
   if ('offset_hours' in schedule) {
-    if (typeof schedule.offset_hours !== 'number' || !Number.isInteger(schedule.offset_hours) || schedule.offset_hours < -72 || schedule.offset_hours > 72) invalid('Choose from 72 hours before through 72 hours after', 'schedule.offset_hours')
+    if (typeof schedule.offset_hours !== 'number' || !Number.isInteger(schedule.offset_hours) || Math.abs(schedule.offset_hours) > SCHEDULE_LIMITS.hours) invalid('Choose from 72 hours before through 72 hours after', 'schedule.offset_hours')
     only(['offset_hours'])
     return { trigger, offset_hours: schedule.offset_hours as number, ...scope }
   }
-  if (typeof schedule.offset_days !== 'number' || !Number.isInteger(schedule.offset_days) || schedule.offset_days < -7 || schedule.offset_days > 7) invalid('Choose from 7 days before through 7 days after', 'schedule.offset_days')
+  if (typeof schedule.offset_days !== 'number' || !Number.isInteger(schedule.offset_days) || Math.abs(schedule.offset_days) > SCHEDULE_LIMITS.days) invalid('Choose from 7 days before through 7 days after', 'schedule.offset_days')
   if (typeof schedule.local_time !== 'string' || !MINUTE_TIME_PATTERN.test(schedule.local_time)) invalid('Provide a local 24-hour HH:mm time', 'schedule.local_time')
   only(['offset_days', 'local_time'])
   return { trigger, offset_days: schedule.offset_days as number, local_time: schedule.local_time as string, ...scope }
