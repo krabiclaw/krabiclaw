@@ -492,7 +492,6 @@ test('Checkout proof attaches ownership without exposing merchant financial data
    assert.equal(new Headers(init?.headers).get('stripe-account'),'acct_seller')
    if(url.pathname==='/v1/charges/ch:claim'||url.pathname==='/v1/charges/ch%3Aclaim')return Response.json({id:'ch:claim',object:'charge',amount:10000,amount_captured:10000,amount_refunded:1000,currency:'usd'})
    if(url.pathname==='/v1/refunds')return Response.json({object:'list',data:[{id:'re:claim',object:'refund',amount:1000,currency:'usd',status:'pending',payment_intent:'pi:claim'}],has_more:false,url:'/v1/refunds'})
-   if(url.pathname==='/v1/disputes')return Response.json({object:'list',data:[],has_more:false,url:'/v1/disputes'})
    throw new Error(`Unexpected Stripe request ${url.pathname}`)
   })
   await db.prepare("UPDATE payments SET captured_amount=10000,stripe_payment_intent_id='pi:claim',stripe_charge_id='ch:claim',receipt_url='https://example.com/receipt' WHERE id='claim'").run()
