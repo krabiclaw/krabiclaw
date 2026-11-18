@@ -2782,6 +2782,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
       json_extract(payload_json, '$.metadata.previous_location_id') AS previous_location_id,
       json_extract(payload_json, '$.metadata.previous_terms.check_in_date') AS previous_check_in_date,
       json_extract(payload_json, '$.metadata.previous_terms.check_out_date') AS previous_check_out_date,
+      json_type(payload_json, '$.metadata.previous_terms') AS previous_terms_type,
       json_type(payload_json, '$.metadata.previous_product_id') AS previous_product_type,
       json_type(payload_json, '$.metadata.previous_location_id') AS previous_location_type
       FROM activity_entries WHERE organization_id = ? AND dedupe_key = ?`, [organizationId, revisionKey])
@@ -2805,8 +2806,11 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     // Channex closes a night its booking takes and never reopens it: a cancelled or moved booking's nights
     // open again only when their availability is sent (docs.channex.io, availability auto-update on
     // cancellation and modification is off). So the nights the revision holds and the ones it left are sent.
-    const left = receipt && typeof receipt.previous_check_in_date === 'string' && typeof receipt.previous_check_out_date === 'string'
-      ? [[receipt.previous_check_in_date, receipt.previous_check_out_date] as const] : []
+    const replaced = receipt?.previous_terms_type === 'object'
+    if (replaced && (typeof receipt.previous_check_in_date !== 'string' || typeof receipt.previous_check_out_date !== 'string')) {
+      throw new HTTPError({ statusCode: 500, message: 'The channel revision audit records the stay it replaced without its dates', data: { code: 'CHANNEL_REVISION_AUDIT_INVALID', field: 'previous_terms', revision_id: booking.revision_id, booking_id: stored.id } })
+    }
+    const left = replaced ? [[receipt.previous_check_in_date as string, receipt.previous_check_out_date as string] as const] : []
     await publishStayChange(env, organizationId, stored, [[stored.check_in_date, stored.check_out_date], ...left], true, taskIds, booking.imported === true, undefined, priorHomes)
   }
   if (existing && existing.provider_updated_at !== null && existing.provider_updated_at >= booking.provider_updated_at) {
