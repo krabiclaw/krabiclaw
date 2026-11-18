@@ -10,7 +10,7 @@ const nativeError = z.object({
   event_id: z.uuid(),
   app_version: z.string().regex(/^\d{1,5}(?:\.\d{1,5}){0,2}$/),
   app_build: z.string().regex(/^\d{1,8}(?:\.\d{1,8}){0,2}$/),
-  operation: z.enum(['today', 'stay_homes', 'bookings_calendar', 'calendar_nights', 'bookings', 'airbnb_status', 'home_photo']),
+  operation: z.enum(['today', 'stay_homes', 'bookings_calendar', 'calendar_nights', 'bookings', 'airbnb_status', 'home_photo', 'app_store_update']),
   error_code: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/),
   field: z.string().max(120).regex(/^[A-Za-z_][A-Za-z0-9_]*(?:\[\])*(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\[\])*)*$/).optional(),
   http_status: z.number().int().min(100).max(599).optional(),

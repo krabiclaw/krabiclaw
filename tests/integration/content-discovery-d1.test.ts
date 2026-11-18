@@ -3,7 +3,7 @@ import test from 'node:test'
 import { Miniflare } from 'miniflare'
 import { HTTPError } from 'nitro'
 import { createContentDocumentWithBlocks, updateContentDocument } from '../../server/utils/content/documents.ts'
-import { buildPlatformKnowledgeDocuments, buildTenantBlogDocuments } from '../../server/utils/public-search.ts'
+import { searchPublicResources } from '../../server/utils/public-search.ts'
 import { listSocialCardOwners } from '../../server/utils/social-card.ts'
 import { getPublishedBlogPost, listPublishedArticles } from '../../server/utils/content/publishing.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -48,19 +48,18 @@ test('public discovery resolves translations through current publication owners'
       id, organizationId: 'tenant', kind: 'page', rowRole: 'root', locale: 'en', title: id, path,
       metadata: { page_type: 'custom' },
     }, [])
-    const { document: hidden } = await createContentDocumentWithBlocks(db, { id: 'hidden', organizationId: 'tenant',
+    await createContentDocumentWithBlocks(db, { id: 'hidden', organizationId: 'tenant',
       kind: 'article', rowRole: 'root', locale: 'en', title: 'Hidden', slug: 'hidden', status: 'published', publishedAt: '2026-01-01T00:00:00.000Z', visibility: 'unlisted' }, [])
     await createContentDocumentWithBlocks(db, { id: 'unpublished', organizationId: 'tenant', kind: 'article', rowRole: 'root',
       locale: 'en', title: 'Unpublished', slug: 'unpublished', status: 'draft', visibility: 'listed' }, [])
     await createContentDocumentWithBlocks(db, { id: 'story-th', organizationId: 'tenant', kind: 'article', rowRole: 'representation',
       rootId: 'tenant-story', locale: 'th', title: 'Translated story', slug: 'translated', path: '/blog/translated', summary: 'Translated summary' }, [])
-    const tenantRecords = await buildTenantBlogDocuments(db)
-    assert.deepEqual(tenantRecords.map(record => record.id).sort(), ['tenant-blog:other-story', 'tenant-blog:tenant-story'])
-    assert(tenantRecords.find(record => record.id === 'tenant-blog:tenant-story')?.body.includes('tenant story exact body'))
-    const platformRecords = await buildPlatformKnowledgeDocuments(db)
-    assert(platformRecords.find(record => record.id === 'doc:guide')?.body.includes('guide exact body'))
-    // The unlisted platform article stays out; the tenant's unpublished draft is absent from the tenant records above.
-    assert(!platformRecords.some(record => record.id.includes(hidden.id)))
+    assert.deepEqual((await searchPublicResources(db, 'exact body', { surface: 'tenant_blog', organizationId: 'tenant' })).map(result => result.path), ['/blog/tenant-story'])
+    assert.deepEqual((await searchPublicResources(db, 'other-story', { surface: 'tenant_blog', organizationId: 'tenant' })).map(result => result.path), [])
+    for (const query of ['hidden', 'unpublished']) {
+      assert.deepEqual(await searchPublicResources(db, query, { surface: 'tenant_blog', organizationId: 'tenant' }), [])
+    }
+    assert.equal((await searchPublicResources(db, 'guide exact body', { surface: 'help' }))[0]?.path, '/docs/guide')
     const cards = await listSocialCardOwners(db)
     assert(cards.some(owner => owner.owner_type === 'content_document' && owner.owner_id === 'guide'))
     assert(cards.some(owner => owner.owner_type === 'content_document' && owner.owner_id === 'about'))
@@ -208,7 +207,7 @@ test('public discovery resolves translations through current publication owners'
     assert(source)
     await updateContentDocument(db, 'tenant-story', { updated_at: source, changes: { visibility: 'unlisted' } })
     assert.deepEqual(await listPublishedArticles(db, env, 'tenant', 'blog', 'th'), [])
-    assert(!(await buildTenantBlogDocuments(db)).some(record => record.id === 'tenant-blog:tenant-story'))
+    assert.deepEqual(await searchPublicResources(db, 'tenant-story', { surface: 'tenant_blog', organizationId: 'tenant' }), [])
     await disableOrganizationLanguage(createDb(db), { organizationId: 'tenant', locale: 'th' })
     assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: '/th/locations/branch/experiences' }), null)
     assert.deepEqual((await db.prepare('PRAGMA foreign_key_check').all()).results, [])

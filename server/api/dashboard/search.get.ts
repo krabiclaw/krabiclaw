@@ -15,7 +15,7 @@ export default defineHandler(async (event) => {
   if (!context.organization) return jsonResponse({ error: 'Not found or access denied' }, { status: 404 })
   await assertOrganizationWideAccess(context.db, memberAccessPrincipal(context.organization, { env: context.env }))
 
-  const results = await searchPublicResources(context.env, q, { surface: 'dashboard', organizationId: context.organization.id, limit: 10 })
+  const results = await searchPublicResources(context.db, q, { surface: 'dashboard', organizationId: context.organization.id, limit: 10 })
   return jsonResponse({ query: q, results })
 })
 import { defineHandler } from 'nitro';
