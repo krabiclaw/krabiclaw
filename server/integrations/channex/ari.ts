@@ -73,6 +73,7 @@ const CALLS_PER_WINDOW = 10
 /** A night changed while a delivery had it in flight: that delivery sent the old value, so the night stays pending for the next. */
 const CHANGED_DURING_DELIVERY = 'This change was saved while a delivery was under way; the next delivery sends it'
 const DEFAULTS_PENDING = 'Channex rate plan defaults are pending.'
+const MAPPING_MISSING = 'Channex has no Airbnb mapping for this connected home'
 
 export interface ChannexMapping { property_id: string; room_type_id: string; rate_plan_id: string }
 type Mapping = ChannexMapping
@@ -242,7 +243,7 @@ export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organ
       if (!Array.isArray(channel.attributes.rate_plans)) throw new ChannexDataError('The Airbnb channel has no listing mappings')
       const mapped = channel.attributes.rate_plans.map(value => object(value, 'Mapping')).some(value => value.rate_plan_id === target.rate_plan_id && object(value.settings, 'Mapping settings').listing_id === linked.listing_id)
       if (linked.enabled === 1 && ['reservations', 'messages', 'complete'].includes(linked.import_stage) && !mapped) {
-        throw new ChannexError('Channex has no Airbnb mapping for this connected home', 404, { code: 'CHANNEL_MAPPING_NOT_FOUND', field: 'rate_plan_id' })
+        throw new ChannexError(MAPPING_MISSING, 404, { code: 'CHANNEL_MAPPING_NOT_FOUND', field: 'rate_plan_id' })
       }
       const channelSettings = object(channel.attributes.settings, 'channel.settings')
       if (channelSettings.min_stay_type !== 'Arrival') await channexRequest(env, channelPath, 'PUT', { channel: { channel: 'AirBNB', settings: { ...channelSettings, min_stay_type: 'Arrival' } } })
@@ -538,6 +539,24 @@ export async function activeAirbnbMapping(db: DbClient, organizationId: string, 
     FROM product_channel_mappings m JOIN channex_connections c ON c.organization_id = m.organization_id AND c.channel_id = m.channel_id
     WHERE m.organization_id = ? AND m.product_id = ? AND m.provider = 'channex' AND c.status = 'connected'
       AND m.enabled = 1 AND m.import_stage IN ('reservations', 'messages', 'complete')`, [organizationId, productId])
+}
+
+/**
+ * Have Channex send the listing's whole calendar to Airbnb. Channex sends Airbnb
+ * a night only when its value changes, so a night changed on Airbnb itself stays
+ * as Airbnb has it until this runs. A home with no Airbnb listing has nothing to
+ * send; a listing Channex no longer maps is the home's nights needing review.
+ */
+export async function syncAirbnbListing(db: DbClient, env: ChannexEnv, organizationId: string, productId: string): Promise<void> {
+  const mapping = await activeAirbnbMapping(db, organizationId, productId)
+  if (!mapping) return
+  try {
+    await channexRequest(env, `/meta/airbnb/${encodeURIComponent(mapping.channel_id)}/full_sync_listing`, 'POST', { listing_id: mapping.listing_id })
+  } catch (error) {
+    if (!(error instanceof ChannexError) || error.providerStatus !== 404) throw error
+    await execute(db, `UPDATE channel_night_pushes SET state = 'needs_review', detail = ? WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND date >= date('now', '-1 day')`,
+      [MAPPING_MISSING, organizationId, productId])
+  }
 }
 
 /**

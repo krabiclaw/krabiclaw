@@ -528,8 +528,14 @@ test('a listing imports through every stage into a home Channex and Blawby agree
     assert.equal((channex.ratePlans.get(channex.ratePlan)!.options as Array<{ rate: string }>)[0]!.rate, '250.00')
     assert.deepEqual([channex.channel.ratePlans.length, channex.messagesProperty, (await readStayHome(db, manager, productId)).live], [1, mapping!.property_id, true])
     // A content refresh keeps a field the host changed since Airbnb's value was last written.
+    // The home's nights are Blawby's: a night priced differently on Airbnb is not read back over the home's own price.
+    const nightPrice = () => db.prepare('SELECT pr.unit_amount FROM prices pr JOIN product_variants v ON v.id = pr.product_variant_id WHERE v.product_id = ? AND pr.stay_date = ?').bind(productId, today()).first('unit_amount')
+    const ownPrice = await nightPrice()
+    assert.equal(typeof ownPrice, 'number')
+    channex.restrictions[today()] = { ...channex.restrictions[today()]!, rate: '999.00' }
     const refreshed = await connection.refreshContent(productId)
     assert(refreshed.content.kept_host_edits.includes('description'))
+    assert.equal(await nightPrice(), ownPrice)
     assert.equal((await readStayHome(db, manager, productId)).description, 'Our own words, again.')
 
     // Disconnect: a mapping Airbnb fails to remove leaves its home syncing and the connection connected with the reason.
