@@ -13,19 +13,9 @@ import { RETENTION_HUB, runDueBusinessWork } from '../../server/domain/due-busin
 import { captureEvents } from './support/events.ts'
 import { applySchema } from './support/schema.ts'
 
-const searchEnv: OrganizationChangeDrainEnv = {
+const cacheEnv: OrganizationChangeDrainEnv = {
   NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://krabiclaw.com',
   NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.com',
-  AI_SEARCH_INSTANCE_ID: 'test-index',
-  AI_SEARCH: {
-    get: () => ({
-      items: {
-        list: async () => ({ result: [], result_info: { per_page: 50, total_count: 0 } }),
-        upload: async () => ({}),
-        delete: async () => ({}),
-      },
-    }),
-  } as unknown as NonNullable<OrganizationChangeDrainEnv['AI_SEARCH']>,
 }
 
 async function migratedCacheD1(context: TestContext) {
@@ -152,17 +142,9 @@ test('cache invalidation drain enforces the durable work lifecycle', async (t) =
       SELECT status FROM public_resource_cache_invalidations WHERE id = 'pending'
     `).first<{ status: string }>()
     assert.deepEqual(row, { status: 'pending' })
-    await assert.rejects(
-      drainPublicResourceCacheInvalidations(db, kv, { NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://krabiclaw.com' }, change),
-      /AI Search binding is required/,
-    )
-    assert.deepEqual(await db.prepare(`
-      SELECT status FROM public_resource_cache_invalidations WHERE id = 'pending'
-    `).first(), { status: 'pending' })
-
     await kv.put('public~org~v4~page', 'public resource')
     await kv.put('html:org.krabiclaw.com:/', 'html')
-    assert.equal(await drainPublicResourceCacheInvalidations(db, kv, searchEnv, change), 1)
+    assert.equal(await drainPublicResourceCacheInvalidations(db, kv, cacheEnv, change), 1)
     assert.equal(await kv.get('public~org~v4~page'), null)
     assert.equal(await kv.get('html:org.krabiclaw.com:/'), null)
     const processed = await db.prepare(`
@@ -170,7 +152,6 @@ test('cache invalidation drain enforces the durable work lifecycle', async (t) =
     `).first<{ status: string }>()
     assert.deepEqual(processed, { status: 'processed' })
 
-    // Outside production the same drain needs no AI Search.
     await insertInvalidation(db, { id: 'local-write', status: 'pending', createdAt: '2026-01-02T00:00:00.000Z' })
     await kv.put('public~org~v4~page', 'stale public resource')
     const local = { NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://krabiclaw.com', NUXT_PUBLIC_PLATFORM_DOMAIN: 'http://localhost:3107' }
@@ -194,7 +175,7 @@ test('cache invalidation drain enforces the durable work lifecycle', async (t) =
     }
 
     await assert.rejects(
-      drainPublicResourceCacheInvalidations(db, failingKv, searchEnv, { organizationId: 'org', invalidationId: 'changed', now }),
+      drainPublicResourceCacheInvalidations(db, failingKv, cacheEnv, { organizationId: 'org', invalidationId: 'changed', now }),
       /injected KV failure/,
     )
     assert.equal(await db.prepare('SELECT count(*) AS n FROM public_resource_cache_invalidations').first('n'), 3)
@@ -222,7 +203,7 @@ test('an organization write purges that organization despite an older invalidati
     await kv.put(`html:${organization}.krabiclaw.com:/`, 'cached HTML')
   }
   const queue = captureEvents()
-  const env = { ...searchEnv, DB: db, ORGANIZATION_CACHE: kv, GUEST_INBOX_HUBS: hubs, EVENTS: queue.binding } as CloudflareEnv
+  const env = { ...cacheEnv, DB: db, ORGANIZATION_CACHE: kv, GUEST_INBOX_HUBS: hubs, EVENTS: queue.binding } as CloudflareEnv
   bindDatabaseEvents(db, env)
   await purgePublicResourceCacheNow(env, 'changed')
   assert.equal(await kv.get('public~changed~v4~page'), null)

@@ -399,12 +399,6 @@ jobs:
           https://www.northcarolinalegalservices.org
           https://blawby.com
       - *adopt_outstanding_work
-      - name: Refresh production search index
-        env:
-          PLATFORM_SEARCH_REINDEX_SECRET: ${{ secrets.PLATFORM_SEARCH_REINDEX_SECRET }}
-          SEARCH_BASE_SHA: ${{ github.event.before }}
-          SEARCH_HEAD_SHA: ${{ github.sha }}
-        run: yarn ai-search:sync:prod --changed-since "$SEARCH_BASE_SHA" --changed-until "$SEARCH_HEAD_SHA"
       - name: Run read-only production tenant rendering
         env:
           CANARY_LOGIN_EMAIL: ${{ secrets.CANARY_LOGIN_EMAIL }}

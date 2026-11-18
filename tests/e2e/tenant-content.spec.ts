@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
-import { openTenantPage } from './helpers'
+import { openTenantPage, waitForNuxtHydration } from './helpers'
+import { loginAs } from './helpers/auth'
 import { seededTenant } from './seed/manifest'
 import { seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
 
@@ -51,4 +52,60 @@ test('the platform publishes its localized homepage and includes its canonical U
   expect(xml).not.toContain(`<loc>${new URL('/zz', baseURL).href}</loc>`)
   const unknown = await request.get('/zz/')
   expect(unknown.status()).toBe(404)
+})
+
+test('tenant blog search opens an article from its body and excludes another tenant', async ({ page, request }) => {
+  const articleTitle = 'Preparing for your legal consultation'
+  await openTenantPage(page, new URL('/blog', seededSiteURL('legal')).href, seededSiteHeaders('legal'))
+  await waitForNuxtHydration(page)
+  await page.getByRole('button', { name: /search/i }).filter({ visible: true }).first().click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('textbox').fill('relevant documents')
+  await dialog.getByRole('button', { name: new RegExp(articleTitle) }).click()
+  await expect(page).toHaveURL(/\/blog\/preparing-for-your-legal-consultation/)
+  await expect(page.getByRole('heading', { name: articleTitle, exact: true })).toBeVisible()
+
+  const otherSite = await request.get('/api/public/search', {
+    headers: seededSiteHeaders('restaurant'),
+    params: { surface: 'tenant_blog', q: 'relevant documents' },
+  })
+  expect(otherSite.status(), await otherSite.text()).toBe(200)
+  await expect(otherSite.json()).resolves.toMatchObject({ results: [] })
+})
+
+test('dashboard search opens the signed-in business’s record', async ({ page, baseURL }) => {
+  const tenant = seededTenant('legal')
+  await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
+  await page.goto(`/dashboard/${tenant.slug}/menu`)
+  await waitForNuxtHydration(page)
+  await page.getByTestId('dashboard-search').click()
+  const dialog = page.getByRole('dialog', { name: 'Search' })
+  await dialog.getByPlaceholder('Search…').fill('Preparing for your legal consultation')
+  const result = dialog.getByText('Preparing for your legal consultation', { exact: true })
+  await expect(result).toBeVisible()
+  await result.click()
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${tenant.slug}/website/blog/`))
+
+  const otherSite = await page.request.get('/api/dashboard/search', {
+    params: { org: seededTenant('restaurant').slug, q: 'seasonal dishes' },
+  })
+  expect(otherSite.status(), await otherSite.text()).toBe(404)
+})
+
+test('ChowBot uses Blawby’s domain setup guidance to answer a paraphrased question', async ({ page }) => {
+  test.slow()
+  await page.goto('/help')
+  await waitForNuxtHydration(page)
+  await page.getByPlaceholder('Ask ChowBot anything...').fill('What DNS records do I need to point my domain at my site?')
+  const response = page.waitForResponse(result => result.url().endsWith('/api/public/help/agent'))
+  await page.getByRole('button', { name: 'Send message' }).click()
+  const answer = await response
+  expect(answer.status(), await answer.text()).toBe(200)
+  const body = await answer.json()
+  expect(body.citations).toEqual(expect.arrayContaining([expect.objectContaining({
+    id: 'faq:custom-domain',
+    snippet: expect.stringContaining('add the DNS records Blawby provides'),
+  })]))
+  expect(body.reply).toMatch(/DNS/i)
+  await expect(page.locator('.prose').filter({ hasText: /DNS/i })).toBeVisible()
 })

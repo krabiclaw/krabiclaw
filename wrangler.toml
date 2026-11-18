@@ -70,8 +70,6 @@ MEDIA_BASE_URL = "https://media.krabiclaw.com"
 # Channex: production uses the Channex staging account (owner decision 2026-10-16) until
 # Channex certification. CHANNEX_API_KEY and CHANNEX_WEBHOOK_SECRET are secrets.
 CHANNEX_BASE_URL = "https://staging.channex.io/api/v1"
-AI_SEARCH_NAMESPACE = "default"
-AI_SEARCH_INSTANCE_ID = "krabiclaw-platform-knowledge"
 # Production is the only environment that should send real email/WhatsApp. Every environment
 # states EMAIL_DELIVERY_MODE explicitly: a missing or invalid value fails email delivery
 # (EMAIL_DELIVERY_MODE_REQUIRED / INVALID_EMAIL_DELIVERY_MODE), and WHATSAPP_DELIVERY_MODE
@@ -103,11 +101,6 @@ MCP_DIAGNOSTICS_ENABLED = "true"
 # secret on every run (see .github/workflows/ci.yml); production is set once manually and not
 # touched by CI:
 #   yarn wrangler secret put EMAIL_REPLY_SECRET
-# PLATFORM_SEARCH_REINDEX_SECRET protects POST /api/internal/search/reindex and is required for
-# yarn ai-search:sync. Production CI syncs it from the PLATFORM_SEARCH_REINDEX_SECRET repo
-# secret and rebuilds the production index. Non-production has no AI Search binding
-# automatically (see .github/workflows/ci.yml). To set it by hand:
-#   yarn wrangler secret put PLATFORM_SEARCH_REINDEX_SECRET
 
 [[d1_databases]]
 binding = "DB"
@@ -170,11 +163,6 @@ remote = true
 
 [images]
 binding = "IMAGES"
-
-[[ai_search_namespaces]]
-binding = "AI_SEARCH"
-namespace = "default"
-remote = true
 
 [observability]
 enabled = true
@@ -381,7 +369,6 @@ enabled = true
 
 # Built local Worker used by Playwright. It shares the local D1/KV identities
 # prepared by e2e:local:prepare and has its own in-process Durable Object.
-# Search remains production-only.
 [env.e2e]
 routes = []
 

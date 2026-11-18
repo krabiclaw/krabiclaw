@@ -1,8 +1,7 @@
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { purgeOrganizationKvCache } from '~/server/utils/edge-cache'
-import { syncOrganizationSearchIndex } from '~/server/utils/public-search'
-import { isNonProductionHost, normalizeHost, type TenantHostEnv } from '~/server/utils/tenant-hosts'
+import { normalizeHost, type TenantHostEnv } from '~/server/utils/tenant-hosts'
 import { PLATFORM_THEME_ID } from '~/utils/site-routing'
 import { publishBusinessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { publishEvent, type EventsEnv } from '~/server/events'
@@ -23,14 +22,11 @@ import { advanceOrganizationSocialCardRefresh, SOCIAL_CARD_REFRESH_LEASE_SECONDS
 // gap closed alongside this change — see those call sites for purgePublicResourceCacheNow).
 export const PUBLIC_RESOURCE_CACHE_TTL_SECONDS = 300
 
-const SEARCH_SYNC_CONTINUE = 'search-sync-continue'
 export const CACHE_INVALIDATION_TERMINAL_RETENTION_DAYS = 7
 
 /**
  * "This site changed." One row per write, in the write's own batch, so the
- * record is atomic with the change. The drainer turns each row into whatever
- * has to follow a change to the site: its caches are cleared and its slice of
- * the search index is brought up to date.
+ * record is atomic with the change. The drainer clears the site caches.
  */
 export function publicResourceCacheInvalidationQuery(
   organizationId: string,
@@ -47,7 +43,7 @@ export function publicResourceCacheInvalidationQuery(
   }
 }
 
-export type OrganizationChangeDrainEnv = SocialCardEnv & EventsEnv & Pick<CloudflareEnv, 'AI_SEARCH' | 'AI_SEARCH_INSTANCE_ID' | 'NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN' | 'NUXT_PUBLIC_PLATFORM_DOMAIN'>
+export type OrganizationChangeDrainEnv = SocialCardEnv & EventsEnv & Pick<CloudflareEnv, 'NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN' | 'NUXT_PUBLIC_PLATFORM_DOMAIN'>
 
 /**
  * Drain one site's committed changes. On redelivery include the failed row
@@ -61,9 +57,6 @@ export async function drainPublicResourceCacheInvalidations(
 ): Promise<number> {
   const freeOrganizationDomain = normalizeHost(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
   if (!freeOrganizationDomain) throw new Error('NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN is required')
-  const productionSearch = !import.meta.dev && !isNonProductionHost(normalizeHost(env.NUXT_PUBLIC_PLATFORM_DOMAIN))
-  if (productionSearch && !env.AI_SEARCH) throw new Error('Cloudflare AI Search binding is required to drain site changes')
-  if (productionSearch && !env.AI_SEARCH_INSTANCE_ID?.trim()) throw new Error('AI_SEARCH_INSTANCE_ID is required to drain site changes')
   const now = options.now ?? new Date()
   const nowIso = now.toISOString()
   const { organizationId, invalidationId } = options
@@ -83,18 +76,13 @@ export async function drainPublicResourceCacheInvalidations(
          WHERE ${eligible} AND rowid <= ?`,
       params: [status, nowIso, error, ...scope, work.latest],
     })
-    let more = false
     try {
       await purgeOrganizationCaches(db, kv, organizationId, env)
-      if (productionSearch) more = (await syncOrganizationSearchIndex(env as CloudflareEnv, db, organizationId)).pending > 0
     } catch (error) {
       await executeBatch(db, [finish('failed', (error instanceof Error ? error.message : String(error)).slice(0, 2000))])
       throw error
     }
-    const [finalized] = await executeBatch(db, [
-      finish('processed', null),
-      ...(more ? [publicResourceCacheInvalidationQuery(organizationId, SEARCH_SYNC_CONTINUE)] : []),
-    ], { operation: 'Finish public site changes' })
+    const [finalized] = await executeBatch(db, [finish('processed', null)], { operation: 'Finish public site changes' })
     processed = Number(finalized?.meta.changes ?? 0)
   }
   if (work?.social_card_id) {
