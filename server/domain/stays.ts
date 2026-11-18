@@ -36,7 +36,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { currencyFractionDigits, isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { activeAirbnbMapping, completeChannelPush, configureStayCalendar, deliverStayNights, pendingChannelNightsQuery, pendingConnectedChannelNightsQuery, pushAirbnbBookingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type ChannelPushCompletion, type ChannexMapping } from '~/server/integrations/channex/ari'
+import { activeAirbnbMapping, completeChannelPush, deliverStayNights, pendingChannelNightsQuery, pendingConnectedChannelNightsQuery, pushAirbnbBookingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type ChannelPushCompletion, type ChannexMapping, type NightQueue } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { bookingContactQuery, bookingConversationQueries, bookingDay, isBookingDay, nightsBoundary, noStayRequestPaymentInFlightSql, requestInsertQueries, stayRequestPayBySql, stayRequestProgress, stayRequestRespondBySql, threadPayloadForGuest, validateGuestRequest } from '~/server/domain/requests'
 import { bookingPolicy, parseBookingPolicy, type BookingPolicy } from '~/server/utils/booking-policy-summary'
@@ -1531,11 +1531,11 @@ function nightDates(ranges: ReadonlyArray<readonly [string, string]>): string[] 
  * retry wait holds them. The outcome is part of the write's result; a night
  * the channel did not take reads needs_review on the calendar.
  */
-async function pushNights(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, access: StayAccess, productId: string, ranges: ReadonlyArray<readonly [string, string]>, alreadyQueued = false): Promise<ChannelPushCompletion> {
+async function pushNights(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, access: StayAccess, productId: string, ranges: ReadonlyArray<readonly [string, string]>, queue: NightQueue = 'dates'): Promise<ChannelPushCompletion> {
   try {
     const [home] = await stayHomeRows(db, access.organizationId, productId, { sql: '1 = 1', params: [] })
     if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
-    return await pushStayNights(db, env, access.organizationId, home, nightDates(ranges), (from, to) => homeNights(db, access.organizationId, home, from, to), alreadyQueued)
+    return await pushStayNights(db, env, access.organizationId, home, nightDates(ranges), (from, to) => homeNights(db, access.organizationId, home, from, to), queue)
   } catch (cause) {
     return cause instanceof Error ? cause : new Error(String(cause))
   }
@@ -1617,13 +1617,9 @@ export async function deliverPendingChannelNights(env: CloudflareEnv, organizati
       next = Math.min(next, localDateTimeToInstant(addDays(from, entersIn), '00:00', home.timezone, 'compatible').getTime())
     }
     if (!added.length && !row.due) continue
-    if (row.due && home.base_price_minor !== null) await configureStayCalendar(db, env, organizationId, home)
     const read = (start: string, end: string) => homeNights(db, organizationId, home, start, end)
-    if (added.length) await pushStayNights(db, env, organizationId, home, added, read)
-    else {
-      const retryAt = await deliverStayNights(db, env, organizationId, home, read)
-      if (retryAt !== null) next = Math.min(next, retryAt)
-    }
+    const retryAt = await deliverStayNights(db, env, organizationId, home, read, added)
+    if (retryAt !== null) next = Math.min(next, retryAt)
     await publishStayInvalidation(env, { type: 'nights.changed', organization_id: organizationId, location_id: home.location_id, product_id: home.product_id, booking_id: null }, { updated_at: new Date().toISOString() })
   }
   return Number.isFinite(next) ? next : null
@@ -1742,10 +1738,9 @@ export async function pushStayHomeChannel(db: DbClient, env: ChannexEnv & GuestI
       if (pushed?.state === 'needs_review' || !changes.nights) return pushed
     }
     if (!changes.nights) return null
-    await configureStayCalendar(db, env, access.organizationId, home)
     if (home.calendar_rules?.weekend_price_minor !== undefined) await scheduleBusinessWake(env, access.organizationId, 'channex_ari', Date.now())
     const today = homeToday(home.timezone)
-    return await pushNights(db, env, access, product.id, [[today, addDays(today, STAY_CALENDAR_DAYS)]], alreadyQueued)
+    return await pushNights(db, env, access, product.id, [[today, addDays(today, STAY_CALENDAR_DAYS)]], alreadyQueued ? 'saved' : 'defaults')
   } catch (cause) {
     return cause instanceof Error ? cause : new Error(String(cause))
   }
@@ -2617,7 +2612,7 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, inputAcc
     if (last?.[1] === night) last[1] = addDays(night, 1)
     else ranges.push([night, addDays(night, 1)])
   }
-  const channelPush = await pushNights(db, env, access, home.product_id, ranges, true)
+  const channelPush = await pushNights(db, env, access, home.product_id, ranges, 'saved')
   return completeChannelPush(channelPush, { product_id: home.product_id, updated_at: now, ranges }, async () => {
     await publishStayInvalidation(env, { type: 'nights.changed', organization_id: access.organizationId, location_id: home.location_id, product_id: home.product_id, booking_id: null }, { updated_at: now })
     // The home's calendar as the host Calendar reads it, after the write.
