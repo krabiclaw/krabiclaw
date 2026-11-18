@@ -19,7 +19,7 @@ import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organiz
 import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, resolvePublishedTenantPageIdentity, type TenantPageEditorInput } from '~/server/utils/content/pages'
 import { loadOrganizationSite } from '~/server/utils/content/publishing'
 import { publishAccessInvalidation, publishBusinessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
-import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
+import { completeChannelPush, pendingConnectedChannelCalendarQuery, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
 import type { AirbnbSettingSections, pushStayHomeChannel } from '~/server/domain/stays'
 import { executeWithinCapacity, liveHomeSql, reportBillingUsage } from '~/server/utils/billing'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
@@ -1785,6 +1785,11 @@ async function planProductUpdate(db: DbClient, input: {
     }] : []),
     ...input.cacheInvalidations,
   )
+  if (planned.stay && (writesPrices || airbnbSettings?.availability)) {
+    const location = await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM business_locations WHERE organization_id = ? AND id = ?', [organizationId, planned.stay.location_id])
+    if (!location) throw new Error(`Home ${productId} has no booking location`)
+    writes.push(pendingConnectedChannelCalendarQuery(organizationId, productId, location.timezone, now))
+  }
   return { writes, keptVariants, product: planned, airbnbSettings, changedFields, updatedAt: changedFields.length ? now : current.updated_at }
 }
 
@@ -1899,7 +1904,7 @@ export async function updateProduct(db: DbClient, input: {
   const { pushStayHomeChannel } = await import('~/server/domain/stays')
   let reprice = false
   let settings: AirbnbSettingSections | null = null
-  const complete = async (product: Product): Promise<ProductMutation> => {
+  const complete = async (product: Product, alreadyQueued = false): Promise<ProductMutation> => {
     if ((product.kind === 'stay' && input.patch.stay?.assigned_member_id !== undefined)
       || input.booking?.data.assigned_member_id !== undefined) {
       await publishAccessInvalidation(env, { organizationId: input.organizationId })
@@ -1908,7 +1913,7 @@ export async function updateProduct(db: DbClient, input: {
     let channelPush: ChannelPushCompletion = null
     if (product.kind === 'stay' && (reprice || settings !== null) && !input.deferStayNightPush) {
       if (!env) throw new HTTPError({ statusCode: 503, message: 'The saved home requires its organization environment to update the channel', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true, product_id: product.id, updated_at: product.updated_at } })
-      channelPush = await pushStayHomeChannel(db, env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product, { nights: reprice, settings })
+      channelPush = await pushStayHomeChannel(db, env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product, { nights: reprice, settings }, alreadyQueued)
     }
     return completeChannelPush(channelPush, { product_id: product.id, updated_at: product.updated_at }, async () => {
       if (photoPlan) await photoPlan.complete()
@@ -2104,7 +2109,7 @@ export async function updateProduct(db: DbClient, input: {
   })
   if (input.stayImport && (!results || !results[importWrittenIndex] || results[importWrittenIndex].meta.changes !== 1)) throw new HTTPError({ statusCode: 409, statusMessage: 'The import changed. Refresh and try again.', data: { code: 'IMPORT_CHANGED', committed: true, product_id: input.productId } })
   if (results) await publishChangedJobs(env, input.organizationId, changedTaskIds(results))
-  return complete(await getProduct(db, input.organizationId, input.productId))
+  return complete(await getProduct(db, input.organizationId, input.productId), Boolean(results))
 }
 
 export async function deleteProduct(db: DbClient, input: {
@@ -2795,7 +2800,7 @@ export async function reconcileProducts(db: DbClient, input: {
       let channelPush: ChannelPushCompletion = null
       if (completion && (completion.nights || completion.settings !== null)) {
         if (!input.env) channelPush = new Error('The saved home requires its organization environment to update the channel')
-        else channelPush = await pushStayHomeChannel(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product, completion)
+        else channelPush = await pushStayHomeChannel(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product, completion, !replay)
       }
       results.push({ product, channelPush })
     }

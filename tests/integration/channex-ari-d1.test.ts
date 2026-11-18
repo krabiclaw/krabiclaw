@@ -385,7 +385,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
   }
 })
 
-test('catalog price and minimum-stay writes use the same channel completion and preflight the whole batch', async () => {
+test('catalog and dated rules persist channel work and recover the planned minimum after a failure', async () => {
   const { runtime, db, env, connected, unpriced, local } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
@@ -452,13 +452,49 @@ test('catalog price and minimum-stay writes use the same channel completion and 
     const calendar = await readHomeCalendar(db, manager, { productId: connected, from: day(0), to: day(1) })
     assert.deepEqual(calendar.nights[0]!.channel, { state: 'pushed', detail: null })
 
+    // A rate-plan error before the dated send leaves the saved default queued.
+    channex.ratePlanAnswer = () => Response.json({ errors: { detail: 'Rate plan unavailable' } }, { status: 503 })
+    await assert.rejects(updateStayHome(env, db, manager, connected, { min_nights: 21 }),
+      (error: { status?: number; data?: Record<string, unknown> }) => error.status === 503 && error.data?.code === 'CHANNEL_PUSH_FAILED' && error.data.committed === true)
+    assert.equal((await getProduct(db, ORG, connected)).stay!.min_nights, 21)
+    assert.equal(channex.ratePlans.get('rate-1')!.min_stay_arrival, 3)
+    assert.deepEqual(channex.take(), [])
+    const pendingDefault = await readHomeCalendar(db, manager, { productId: connected, from: day(0), to: day(1) })
+    assert.deepEqual([pendingDefault.nights[0]!.min_stay_arrival, pendingDefault.nights[0]!.channel?.state], [21, 'pending'])
+
+    channex.ratePlanAnswer = undefined
+    assert.equal(await deliverPendingChannelNights(env, ORG, Date.now()), null)
+    assert.equal(channex.ratePlans.get('rate-1')!.min_stay_arrival, 21)
+    const recovered = channex.take()
+    assert.deepEqual(recovered, [{ path: '/restrictions', values: [
+      { property_id: 'prop-1', rate_plan_id: 'rate-1', date_from: day(0), date_to: day(499), min_stay_arrival: 21 },
+    ] }])
+
+    // An event failure before the provider call cannot leave the date saved without work.
+    bindDatabaseEvents(db, { EVENTS: { send: async () => { throw new Error('Wake unavailable') } } })
+    try {
+      await assert.rejects(setStayNights(db, env, manager, { product_id: connected, from: day(1), to: day(2), min_stay_arrival: 30 }),
+        /Set stay nights committed, but its events could not be published/)
+    } finally { bindDatabaseEvents(db, env) }
+    const pending = await readHomeCalendar(db, manager, { productId: connected, from: day(0), to: day(2) })
+    assert.deepEqual(pending.nights.map(night => [night.min_stay_arrival, night.channel?.state]), [[21, 'pushed'], [30, 'pending']])
+    assert.deepEqual(channex.take(), [])
+
+    assert.equal(await deliverPendingChannelNights(env, ORG, Date.now()), null)
+    assert.equal(channex.ratePlans.get('rate-1')!.min_stay_arrival, 21)
+    assert.deepEqual(channex.take(), [{ path: '/restrictions', values: [
+      { property_id: 'prop-1', rate_plan_id: 'rate-1', date_from: day(1), date_to: day(1), min_stay_arrival: 30 },
+    ] }])
+    const delivered = await readHomeCalendar(db, manager, { productId: connected, from: day(0), to: day(2) })
+    assert.deepEqual(delivered.nights.map(night => [night.min_stay_arrival, night.channel?.state]), [[21, 'pushed'], [30, 'pushed']])
+
     // Every affected home is preflighted before any row in the atomic catalog changes.
     await assert.rejects(reconcileProducts(db, { env: unavailable, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'unavailable-batch', products: [
       { product_id: local, kind: 'stay', name: 'Must remain Barn' },
       { product_id: connected, kind: 'stay', name: 'Must remain Cabin', stay: { ...stayInput, min_nights: 4 } },
     ] }), (error: { status?: number; data?: Record<string, unknown> }) => error.status === 503 && error.data?.code === 'CHANNEL_CONFIGURATION_REQUIRED' && !Object.hasOwn(error.data, 'committed'))
     assert.equal((await getProduct(db, ORG, local)).name, 'Barn')
-    assert.equal((await getProduct(db, ORG, connected)).stay!.min_nights, 3)
+    assert.equal((await getProduct(db, ORG, connected)).stay!.min_nights, 21)
     assert.deepEqual(channex.take(), [])
 
     // A warning that names no dates refuses every night of its call.
