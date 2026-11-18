@@ -6,6 +6,10 @@ import { createProduct } from '../../server/utils/product-management.ts'
 import { createStay, updateStay, type StayAccess } from '../../server/domain/stays.ts'
 import { cancelScheduledGuestMessage, deleteMessageTemplate, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
 import { sendDueOutbox } from '../../server/domain/scheduled-guest-messages.ts'
+import { readToday } from '../../server/domain/today.ts'
+import { listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
+import { joinedMemberPrincipal } from '../../server/utils/member-access.ts'
+import { guestConversationPath } from '../../shared/messages-contract.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import type { DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
@@ -110,6 +114,14 @@ test('the business outbox sends due messages, leaves future ones pending and rec
     const failed = (await planned(dee.id, welcome.id))!
     assert.deepEqual([failed.status, failed.error_code, failed.error_field, failed.reason, failed.message_id, failed.sent_at],
       ['failed', 'GUEST_UNREACHABLE', 'conversation_id', 'This guest has no email or Blawby account to reply to.', null, null])
+    const today = await readToday(db, { slug: 'org', userId: OWNER, range: 'today', now: new Date(later) })
+    const delivery = today.cards.find(card => card.headline === 'Welcome to Dee didn’t send')
+    assert.deepEqual(delivery?.action, { title: 'Open conversation', detail: 'This guest has no email or Blawby account to reply to.' })
+    assert.equal(delivery?.to, guestConversationPath('org', dee.conversation_id))
+    const viewer = await taskViewer(joinedMemberPrincipal({ organizationId: ORG, memberId: 'm-owner', userId: OWNER, role: 'owner' }, { env }))
+    const { sections } = await listTasks(db, viewer, parseTaskListQuery({ kind: 'message_delivery' }), new Date(later))
+    const deliveryTask = sections.flatMap(section => section.tasks).find(task => task.booking_id === dee.id)
+    assert.equal(deliveryTask?.detail, 'This guest has no email or Blawby account to reply to.')
     const review = (await planned(cy.id, welcome.id))!
     assert.deepEqual([review.status, review.error_code, review.error_field, review.sent_at], ['needs_review', 'IDEMPOTENCY_CONFLICT', 'idempotencyKey', null])
     assert.ok(review.reason)

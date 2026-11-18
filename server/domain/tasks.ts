@@ -436,6 +436,7 @@ function stayFacts(row: StayRow): StayFacts {
   return { ...row, check_in_date: bookingDay(row.starts_at, row.timezone), check_out_date: bookingDay(row.ends_at, row.timezone) }
 }
 type BookedRow = { id: string; conversation_id: string | null; starts_at: string; ends_at: string; timezone: string; product_kind: ProductKind; unit: 'slot' | 'nights' }
+type DeliveryTaskMessage = { id: string; template_title: string; status: string; unreachable_reason: string | null; conversation_id: string | null; booking_id: string }
 
 interface Context {
   slug: string
@@ -449,7 +450,7 @@ interface Context {
   stay: (id: string) => StayFacts | null
   arrival: (stay: StayFacts) => StayFacts | null
   requests: Map<string, { guest_name: string | null; participant: string | null }>
-  messages: Map<string, { title: string; status: string; conversation_id: string | null; booking_id: string }>
+  messages: Map<string, DeliveryTaskMessage>
   /** A booking's conversation, when it is and what was booked. */
   records: Map<string, BookedRow>
   outcomes: Map<string, { note: string | null; photos: TaskPhoto[] }>
@@ -489,7 +490,8 @@ function taskContextQueries(organizationId: string, listed: { sql: string; param
     query(`SELECT m.id, m.userId, u.name FROM member m JOIN user u ON u.id = m.userId WHERE m.organizationId = ${org}
       AND (m.id IN (SELECT assigned_member_id FROM listed) OR m.userId IN (SELECT closed_by_user_id FROM listed))`),
     query(`SELECT id, title FROM business_locations WHERE organization_id = ${org} AND id IN (SELECT location_id FROM listed WHERE kind <> 'turnover')`),
-    query(`SELECT m.id, m.template_title, m.status, (SELECT c.id FROM conversations c WHERE c.organization_id = m.organization_id AND c.booking_id = m.booking_id AND c.kind = 'booking') AS conversation_id, m.booking_id
+    query(`SELECT m.id, m.template_title, m.status, CASE WHEN m.error_code = 'GUEST_UNREACHABLE' THEN m.reason END AS unreachable_reason,
+      (SELECT c.id FROM conversations c WHERE c.organization_id = m.organization_id AND c.booking_id = m.booking_id AND c.kind = 'booking') AS conversation_id, m.booking_id
       FROM scheduled_guest_messages m WHERE m.organization_id = ${org} AND m.id IN ${subjects('scheduled_guest_message')}`),
     query(`SELECT candidate.id, ${consultationBookingSql('candidate.id', 'candidate.organization_id')} AS booking_id FROM product_sessions candidate
       WHERE candidate.organization_id = ${org} AND candidate.id IN ${subjects('product_session')}`),
@@ -512,7 +514,7 @@ function taskContext(organizationId: string, rows: TaskRow[], results: Array<{ r
   const [organizations, members, locations, messages, privateConsultations, booked, stayRows, requests, products, pictures, closureRows]
     = results.map(result => result.results) as [
       Array<{ slug: string; vertical: string }>, Array<{ id: string; userId: string; name: string }>, Array<{ id: string; title: string }>,
-      Array<{ id: string; template_title: string; status: string; conversation_id: string | null; booking_id: string }>,
+      DeliveryTaskMessage[],
       Array<{ id: string; booking_id: string | null }>, BookedRow[], StayRow[], Array<{ id: string; guest_name: string | null; participant: string | null }>,
       Array<{ id: string; name: string | null; kind: ProductKind }>, unknown[],
       Array<{ task_id: string; message_id: string; body: string | null } & (MessagePhotoRow | { owner_id: null })>,
@@ -552,7 +554,7 @@ function taskContext(organizationId: string, rows: TaskRow[], results: Array<{ r
       return next ? stayFacts(next) : null
     },
     requests: new Map(requests.map(request => [request.id, request])),
-    messages: new Map(messages.map(message => [message.id, { title: message.template_title, status: message.status, conversation_id: message.conversation_id, booking_id: message.booking_id }])),
+    messages: new Map(messages.map(message => [message.id, message])),
     records: new Map(records.map(record => [record.id, record])),
     outcomes: new Map(closureRows.map(row => [row.task_id, { note: row.body, photos: (photos.get(row.message_id) ?? [])
       .map(photo => ({ id: photo.id, url: photo.url, thumbnail_url: photo.thumbnailUrl })) }])),
@@ -626,8 +628,8 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       conversation_id = message.conversation_id
       booking_id = message.booking_id
       // Only what our own record knows: the message, and that it did not send.
-      error = `${message.title} didn’t send`
-      detail = message.status === 'needs_review' ? 'Its send was already used for a different message. Check the conversation before sending it again.' : 'You can send it yourself from the conversation.'
+      error = `${message.template_title} didn’t send`
+      detail = message.unreachable_reason ?? (message.status === 'needs_review' ? 'Its send was already used for a different message. Check the conversation before sending it again.' : 'You can send it yourself from the conversation.')
       const stay = context.stay(message.booking_id)
       if (stay) {
         const home = context.product(stay.product_id)?.name ?? null
@@ -905,6 +907,7 @@ export interface OpenWorkRow {
   team_conversation_id: string | null
   /** A failed message's template title. */
   message_title: string | null
+  unreachable_reason: string | null
 }
 
 /**
@@ -936,10 +939,11 @@ export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
           (SELECT u.name FROM member am JOIN user u ON u.id = am.userId WHERE am.id = t.assigned_member_id AND am.organizationId = t.organization_id) AS assignee_name,
           t.assigned_member_id IS NOT NULL AND t.assigned_member_id = ${viewer.member} AS assigned_to_viewer,
           (SELECT u.name FROM user u WHERE u.id = t.created_by_user_id) AS creator_name, COALESCE(t.created_by_user_id = ${viewer.user}, 0) AS created_by_viewer,
-          CASE t.kind WHEN 'message_delivery' THEN (SELECT g.booking_id FROM scheduled_guest_messages g WHERE g.organization_id = t.organization_id AND g.id = t.subject_id)
+          CASE t.kind WHEN 'message_delivery' THEN g.booking_id
             WHEN 'booking_change' THEN t.subject_id ELSE ${jobBookingIdSql('t')} END AS booking_id,
-          CASE t.kind WHEN 'message_delivery' THEN (SELECT g.template_title FROM scheduled_guest_messages g WHERE g.organization_id = t.organization_id AND g.id = t.subject_id) END AS message_title
+          g.template_title AS message_title, CASE WHEN g.error_code = 'GUEST_UNREACHABLE' THEN g.reason END AS unreachable_reason
         FROM tasks t
+        LEFT JOIN scheduled_guest_messages g ON t.kind = 'message_delivery' AND g.organization_id = t.organization_id AND g.id = t.subject_id
         WHERE t.organization_id = ${viewer.organization} AND t.status = 'open'
           AND t.kind IN ('turnover', 'consultation_follow_up', 'consultation_prep', 'message_delivery', 'booking_change', 'custom')
           AND ${taskScopeSql('t', () => viewer)}) x

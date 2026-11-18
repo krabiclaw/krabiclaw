@@ -213,7 +213,9 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
       if (work.kind === 'message_delivery') {
         if (!work.message_title) throw new Error(`Delivery task ${work.id} has no scheduled message`)
         add({ id: `task:${work.id}`, noun: 'message', order: [1, work.booking_starts_at], bookings: [], day: today(work.timezone), when: bookedWhen, image_url: image, icon: iconOf(work.product_kind), line: place, to, draft: null,
-          headline: `${work.message_title} to ${guest ?? 'the guest'} didn’t send`, action: { title: 'Send it yourself', detail: opens ? `Open ${guest ?? 'the guest'}’s conversation` : 'Open the reservation' } })
+          headline: `${work.message_title} to ${guest ?? 'the guest'} didn’t send`, action: work.unreachable_reason
+            ? { title: opens ? 'Open conversation' : 'Open booking', detail: work.unreachable_reason }
+            : { title: 'Send it yourself', detail: opens ? `Open ${guest ?? 'the guest'}’s conversation` : 'Open the reservation' } })
       } else {
         const Group = group.charAt(0).toUpperCase() + group.slice(1)
         add({ id: `task:${work.id}`, noun: 'change', order: [1, work.booking_starts_at], bookings: [], day: today(work.timezone), when: bookedWhen, image_url: image, icon: iconOf(work.product_kind), line: place, to, draft: null,
