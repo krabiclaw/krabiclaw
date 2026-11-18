@@ -5,14 +5,14 @@ import { HTTPError } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 import { executeBatch, queryFirst } from '~/server/db'
 import { dashboardMemberQuery, dashboardOrgQueryParam, getDashboardMemberContext } from '~/server/utils/dashboard-context'
-import { cloudflareEnv } from '~/server/utils/api-response'
+import { cloudflareEnv, readRequiredBody } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { assignedMemberSql, BATCH_VIEWER, joinedMemberPrincipal, memberAccessPrincipal, membershipBySlugQuery, withViewer } from '~/server/utils/member-access'
 import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
 import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
-import { calendarStays, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, readStayReservationHome, type StayHome, type StayNight, type StayReservationHome } from '~/server/domain/stays'
+import { calendarStays, dashboardStayEditQueries, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, readStayReservationHome, type StayHome, type StayNight, type StayReservationHome } from '~/server/domain/stays'
 import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
 import { loadStaffBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
@@ -40,11 +40,21 @@ async function dashboardBookingsContext(event: H3Event) {
   return { ...context, principal, access }
 }
 
-export async function dashboardBookingContext(event: H3Event, action: 'read' | 'update' = 'read') {
+function bookingPatchChangesStay(body: Record<string, unknown>) {
+  return Object.keys(body).some(field => field !== 'version' && field !== 'private_notes')
+}
+
+export async function dashboardBookingContext(event: H3Event, action: 'read' | 'update' = 'read', readPatch?: true) {
   const { env, db, session, userId, membership, organizationFrom } = await dashboardMemberQuery(event)
   const bookingId = getRouterParam(event, 'booking_id')
   if (!bookingId) throw new HTTPError({ statusCode: 400, message: 'Booking ID is required' })
-  const [memberResult, bookingResult] = await executeBatch(db, [membership, withViewer(membership, {
+  const patch = readPatch ? await readRequiredBody<Record<string, unknown>>(event).then(
+    body => ({ body }), (error: unknown) => ({ error }),
+  ) : null
+  const patchBody = patch && 'body' in patch ? patch.body : undefined
+  const changesStay = patchBody ? bookingPatchChangesStay(patchBody) : false
+  const stayQueries = changesStay ? dashboardStayEditQueries({ query: BATCH_VIEWER.organization }, bookingId, patchBody?.check_in_date) : []
+  const [memberResult, bookingResult, stayResult, homeResult] = await executeBatch(db, [membership, withViewer(membership, {
     query: `SELECT b.unit, c.id AS conversation_id, b.status, b.respond_by, b.product_id,
         (${roleMatchesSql(BATCH_VIEWER.role!, assignedOperationsRoles)} AND ${assignedMemberSql('b', BATCH_VIEWER.user)}) AS assigned,
         ${listingGrantSql('b.organization_id', 'b.product_id', BATCH_VIEWER.member, 'details', BATCH_VIEWER.role)} AS granted,
@@ -53,7 +63,7 @@ export async function dashboardBookingContext(event: H3Event, action: 'read' | '
       JOIN conversations c ON c.booking_id=b.id AND c.organization_id=b.organization_id AND c.kind='booking'
       WHERE b.organization_id = ${BATCH_VIEWER.organization} AND b.id = ?`,
     params: [bookingId],
-  })], { operation: 'Read dashboard booking access' })
+  }), ...stayQueries.map(query => withViewer(membership, query))], { operation: 'Read dashboard booking access' })
   const organization = organizationFrom(memberResult?.results[0])
   const principal = memberAccessPrincipal(organization, { env, event })
   const workspace = await stayAccessFor(principal)
@@ -65,7 +75,9 @@ export async function dashboardBookingContext(event: H3Event, action: 'read' | '
   const access = !workspace.manage && booking.operates
     ? { ...workspace, manage: true as const, listingId: booking.product_id, operationalOnly: true }
     : workspace
-  return { db, env, session, userId, organization, principal, access, bookingId, booking }
+  if (patch && 'error' in patch) throw patch.error
+  const stayEdit = changesStay ? { current: stayResult?.results[0], home: homeResult?.results[0] } : undefined
+  return { db, env, session, userId, organization, principal, access, bookingId, booking, patchBody, stayEdit }
 }
 
 export async function dashboardBookingDetails(event: H3Event) {

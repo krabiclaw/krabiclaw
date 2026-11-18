@@ -17,7 +17,7 @@ const databaseEvents = new WeakMap<D1Database, EventsEnv>()
 
 /** A request or Worker event owns this database binding's post-commit publications. */
 export function bindDatabaseEvents(db: D1Database | undefined, env: EventsEnv): void {
-  if (db) databaseEvents.set(db, { EVENTS: env.EVENTS })
+  if (db) databaseEvents.set(db, { DB: db, EVENTS: env.EVENTS })
 }
 
 export function createDb(client: D1Database): AppDb {
