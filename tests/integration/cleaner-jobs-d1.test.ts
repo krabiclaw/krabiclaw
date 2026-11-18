@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
+import { H3 } from 'nitro/h3'
+import { hashPassword } from 'better-auth/crypto'
+import sharp from 'sharp'
 import type { DbClient } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { type MemberAccessPrincipal, memberAccessPrincipal } from '../../server/utils/member-access.ts'
@@ -8,14 +11,16 @@ import { cancelStay, createStay, updateStayHome, type StayAccess } from '../../s
 import { conversationPageFor } from './support/conversation-page.ts'
 import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
 import { createTeamThread } from '../../server/domain/team-messages.ts'
-import { closeTask, jobKey, reopenTask, taskViewer, updateTask, type TaskRow } from '../../server/domain/tasks.ts'
+import { closeTask, getTask, jobKey, reopenTask, taskViewer, updateTask, type TaskRow, type TaskView } from '../../server/domain/tasks.ts'
 import { listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { markConversationRead, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { captureEvents } from './support/events.ts'
 import { sendDueOutbox } from '../../server/domain/scheduled-guest-messages.ts'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { localDateTimeToInstant } from '../../utils/timezone.ts'
-import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
+import completeTaskRoute from '../../server/api/organizations/[organization_id]/tasks/[task_id]/complete.post.ts'
+import readTaskRoute from '../../server/api/organizations/[organization_id]/tasks/[task_id]/read.post.ts'
 import { applySchema } from './support/schema.ts'
 
 // A cleaner's job is a team conversation: the job is posted there when it is
@@ -159,9 +164,35 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.deepEqual(cookThreads[0]!.participants.map(person => person.id).sort(), ['admin', 'cook', 'owner'])
     assert.ok((await automatic(cookThreads[0]!.id)).some(message => message.key === jobKey(turnover)), 'the job is posted to the cook')
 
-    // Done, in one tap: "Done" is the cook's own message in the conversation, and nobody is alerted.
-    const closed = await closeTask(db, await taskViewer(principal('cook', 'member')), turnover.id, { status: 'done', env })
+    // The installed iPhone reads the sheet and closes it using its bearer session.
+    const password = 'cook-task-fixture-password'
+    await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('cook-account', 'cook', 'credential', 'cook', ?, 0, 0)").bind(await hashPassword(password)).run()
+    const signed = await createAuth(env).api.signInEmail({ body: { email: 'cook@example.test', password }, asResponse: true })
+    const token = signed.headers.get('set-auth-token')
+    assert.ok(token)
+    const app = new H3()
+    const taskRoute = '/api/organizations/:organization_id/tasks/:task_id'
+    app.post(`${taskRoute}/read`, readTaskRoute)
+    app.post(`${taskRoute}/complete`, completeTaskRoute)
+    const native = async (action: string, body: Record<string, unknown> | FormData): Promise<TaskView> => {
+      const headers = new Headers({ authorization: `Bearer ${token}` })
+      if (!(body instanceof FormData)) headers.set('content-type', 'application/json')
+      const response = await app.request(Object.assign(new Request(`https://proof.example/api/organizations/${ORG}/tasks/${turnover.id}/${action}`, {
+        method: 'POST', headers, body: body instanceof FormData ? body : JSON.stringify(body),
+      }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      assert.equal(response.status, 200, await response.clone().text())
+      return (await response.json() as { task: TaskView }).task
+    }
+    const open = await native('read', {})
+    assert.deepEqual([open.face, open.tag, open.avatar, open.note, open.outcome], ['photo', 'Turnover', null, null, null])
+    assert.deepEqual([open.sheet.checkout, open.sheet.checkin], [
+      { label: 'Checkout', time: '10:00 AM', guest: 'Dee' },
+      { label: 'Check-in', time: '3:00 PM', guest: 'Lee · 1 guest' },
+    ])
+    // Done without a note is the cook's own message in the conversation, without alerts.
+    const closed = await native('complete', { note: null })
     assert.equal(closed.status, 'done')
+    assert.deepEqual(closed.outcome, { note: null, photos: [], closed_at: (await taskRow(`turnover:${dee.id}`))!.closed_at, closed_by: 'You' })
     const cookMessages = (await conversationPageFor(db, cook, cookThreads[0]!.id)).entries.filter(entry => entry.type === 'message').reverse()
     assert.deepEqual([cookMessages[0]!.author_user_id, cookMessages[0]!.automatic, cookMessages[0]!.body, cookMessages[0]!.deliveries], ['cook', false, 'Done', []])
     assert.equal((await taskRow(`turnover:${dee.id}`))!.status, 'done')
@@ -173,6 +204,20 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.deepEqual((await automatic(cookThreads[0]!.id)).map(message => message.key), [jobKey(turnover)])
     await runOrganizationJobs(queue, env, db, ORG, at(day(3), '14:00'))
     assert.equal((await automatic(cookThreads[0]!.id)).length, 1, 'a job a person closed is not told about again')
+
+    const cookViewer = await taskViewer(cook)
+    await reopenTask(db, cookViewer, turnover.id, { version: closed.version })
+    const outcome = new FormData()
+    outcome.set('note', 'Fresh towels are by the door.')
+    const pixels = Uint8Array.from(await sharp({ create: { width: 4, height: 3, channels: 3, background: '#16a34a' } }).avif().toBuffer())
+    outcome.append('photos', new File([pixels], 'towels.avif', { type: 'image/avif' }))
+    const reported = await native('complete', outcome)
+    assert.equal(reported.note, '“Fresh towels are by the door.”')
+    assert.equal(reported.outcome?.photos.length, 1)
+    assert.deepEqual((await getTask(db, cookViewer, turnover.id)).outcome, reported.outcome)
+    const report = (await conversationPageFor(db, cook, cookThreads[0]!.id)).entries.find(entry => entry.type === 'message' && entry.body === reported.outcome?.note)
+    assert(report?.type === 'message')
+    assert.equal(report.photos[0]?.id, reported.outcome?.photos[0]?.id)
 
     // A cancelled stay cancels its job in the conversation at once.
     const may = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'may', check_in_date: day(6), check_out_date: day(8), adults: 1, guest_name: 'May', total_minor: 30_000 })
