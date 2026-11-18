@@ -2892,19 +2892,23 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   ...bookingConversationQueries({ organizationId, bookingId: id, requestId: crypto.randomUUID(), locationId: home.location_id, userId: guestUserId, now,
     guest: { name: guestName, email: booking.guest_email, phone: booking.guest_phone }, ...(guestName === null ? { participant: { kind: 'channel' as const, title: reservation } } : {}) }),
   {
-    // Airbnb's calendar reports a reserved night unavailable, so the import closed it. The reservation is what
-    // held it: once its booking is here the night is no longer a block, and frees if the booking cancels.
+    // Airbnb's calendar reports a reserved night unavailable, so the import closed it. A reservation Channex
+    // loads from before the import is what held those nights: once its booking is here they are no longer a
+    // block, and free if it cancels. A booking made later never lands on a block, so it opens none.
     query: `UPDATE product_nights SET closed = 0, updated_at = ? WHERE organization_id = ? AND product_id = ? AND source = 'import' AND closed = 1
-      AND date >= ? AND date < ? AND EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND version = ?)`,
-    params: [now, organizationId, landing, booking.check_in_date, booking.check_out_date, organizationId, id, version],
+      AND date >= ? AND date < ? AND ? = 1 AND EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND version = ?)`,
+    params: [now, organizationId, landing, booking.check_in_date, booking.check_out_date, booking.imported === true ? 1 : 0, organizationId, id, version],
   },
   {
     // Channex changed these nights' availability itself when it took the booking, so what it last confirmed
     // to us no longer holds: forgetting it makes the next delivery send the value, whatever it was.
-    query: `UPDATE channel_night_pushes SET sent_json = json_remove(sent_json, '$.availability') WHERE organization_id = ? AND provider = 'channex'
+    // The night's revision moves too, so a delivery already under way cannot record the value it read as confirmed.
+    query: `UPDATE channel_night_pushes SET sent_json = json_remove(sent_json, '$.availability'),
+        updated_at = CASE WHEN ? > updated_at THEN ? ELSE strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0.001 seconds') END
+      WHERE organization_id = ? AND provider = 'channex'
       AND ((product_id = ? AND date >= ? AND date < ?) OR (product_id = ? AND date >= ? AND date < ?))
       AND EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND version = ?)`,
-    params: [organizationId, landing, booking.check_in_date, booking.check_out_date,
+    params: [now, now, organizationId, landing, booking.check_in_date, booking.check_out_date,
       previous?.product_id ?? null, previous?.check_in_date ?? null, previous?.check_out_date ?? null, organizationId, id, version],
   },
   publicResourceCacheInvalidationQuery(organizationId, 'guest-thread-create'),
