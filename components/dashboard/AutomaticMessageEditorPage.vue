@@ -15,10 +15,10 @@
 </template>
 <script lang="ts">
 import type { InjectionKey, Ref, ComputedRef } from 'vue'
-import type { MessageTemplate, GuestMessageSchedule, MessageOffering } from '~/lib/components/workspace/messages/guest-messaging-client'
+import type { MessageTemplate, GuestMessageSchedule, MessageOfferingOptions } from '~/lib/components/workspace/messages/guest-messaging-client'
 export interface AutomaticMessageEditor {
   draft: Ref<{ title: string; body: string; schedule: GuestMessageSchedule }>
-  offerings: ComputedRef<MessageOffering[]>
+  options: ComputedRef<MessageOfferingOptions | null>
   offeringsError: ComputedRef<string>
   vertical: ComputedRef<string>
   manage: ComputedRef<boolean>
@@ -37,8 +37,6 @@ export const automaticMessageEditorKey = Symbol('automatic-message-editor') as I
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import AutomaticMessageFields from '~/components/dashboard/AutomaticMessageFields.vue'
 import { isNavigationFailure } from 'vue-router'
-import { authClient } from '~/lib/auth-client'
-import type { organizationRoles } from '~/utils/organization-access'
 import { isMessageOfferings, isMessageTemplateResponse, isMessageTemplatePage, messageScheduleLabel } from '~/lib/components/workspace/messages/guest-messaging-client'
 import { isRecord } from '~/utils/api-clients'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
@@ -51,8 +49,6 @@ const api = useDashboardApi()
 const templateId = computed(() => String(route.params.template_id))
 const isNew = computed(() => templateId.value === 'new')
 const createLabels = newRecordLabels('automatic message')
-const role = computed(() => dashboard.organization.value?.role as keyof typeof organizationRoles | undefined)
-const manage = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['update'] } })))
 const key = `automatic-message:${dashboard.organizationId.value}:${templateId.value}`
 const { data, error: readError, refresh } = await useAsyncData(key, () => isNew.value ? Promise.resolve(null) : api(`/api/dashboard/message-templates/${encodeURIComponent(templateId.value)}`, { validate: isMessageTemplateResponse }))
 watchEffect(() => { if (isNotFoundError(readError.value)) showError(createError({ statusCode: 404, statusMessage: 'Automatic message not found' })) })
@@ -68,7 +64,8 @@ const deleteOpen = ref(false)
 const loadError = computed(() => readError.value ? getErrorMessage(readError.value, 'The automatic message could not be loaded') : '')
 const error = computed(() => loadError.value || actionError.value)
 const { data: offeringsData, error: offeringsReadError } = await useAsyncData(`automatic-message-offerings:${dashboard.organizationId.value}`, () => api('/api/dashboard/message-templates/offerings', { validate: isMessageOfferings }))
-const offerings = computed(() => offeringsData.value?.offerings ?? [])
+const options = computed(() => offeringsData.value ?? null)
+const manage = computed(() => options.value?.can_manage === true)
 const offeringsError = computed(() => offeringsReadError.value ? getErrorMessage(offeringsReadError.value, 'Offerings could not be loaded') : '')
 const vertical = computed(() => dashboard.organization.value?.vertical ?? '')
 const counterparty = computed(() => vertical.value === 'service' ? resolveBookingPresentation('service', 'service').counterpartyNoun : 'guest')
@@ -76,9 +73,11 @@ watchEffect(() => { if (level.child.value && (isNew.value || !['content', 'sched
 const valid = computed(() => {
   if (!draft.value.title.trim() || !draft.value.body.trim()) return false
   const schedule = draft.value.schedule
-  return (!offeringsError.value && schedule.product_ids.length > 0 && schedule.product_ids.length <= 100 && schedule.product_ids.every(id => offerings.value.some(offering => offering.id === id))
-    && (schedule.trigger === 'booking_received' || ('offset_hours' in schedule ? Number.isInteger(schedule.offset_hours) && Math.abs(schedule.offset_hours) <= 72
-      : Number.isInteger(schedule.offset_days) && schedule.offset_days >= -7 && schedule.offset_days <= 7 && /^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.local_time))))
+  const editor = options.value
+  return (editor && !offeringsError.value && schedule.product_ids.length > 0 && schedule.product_ids.length <= editor.max_offerings
+    && schedule.product_ids.every(id => editor.offerings.some(offering => offering.id === id))
+    && (schedule.trigger === 'booking_received' || ('offset_hours' in schedule ? editor.offset_hours.some(offset => offset.value === schedule.offset_hours)
+      : editor.offset_days.some(offset => offset.value === schedule.offset_days) && /^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.local_time)))) === true
 })
 const dirty = computed(() => !saved.value || JSON.stringify(draft.value) !== JSON.stringify(clone(saved.value)))
 const saveLabel = computed(() => isNew.value ? createLabels.action : undefined)
@@ -140,5 +139,5 @@ async function remove() {
   } catch (cause) { actionError.value = getErrorMessage(cause, 'The automatic message could not be deleted') }
   finally { saving.value = false }
 }
-provide(automaticMessageEditorKey, { draft, offerings, offeringsError, vertical, manage, saving, error, disabled, saveLabel, save: commit, revert, recoveryLabel, recover })
+provide(automaticMessageEditorKey, { draft, options, offeringsError, vertical, manage, saving, error, disabled, saveLabel, save: commit, revert, recoveryLabel, recover })
 </script>

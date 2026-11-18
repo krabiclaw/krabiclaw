@@ -76,9 +76,11 @@ export function messageTemplate(row: MessageTemplateRow): MessageTemplate {
   return { ...template, schedule: templateSchedule(row)! }
 }
 
-export async function listMessageTemplates(db: DbClient, access: StayAccess, query: MessageListQuery) {
-  const rows = await queryAll<MessageTemplateRow>(db, 'SELECT * FROM message_templates WHERE organization_id = ? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?',
-    [access.organizationId, query.limit + 1, query.offset])
+export async function listMessageTemplates(db: DbClient, access: StayAccess, query: MessageListQuery, productId?: string) {
+  const rows = await queryAll<MessageTemplateRow>(db, `SELECT * FROM message_templates WHERE organization_id = ?
+    ${productId === undefined ? '' : "AND EXISTS (SELECT 1 FROM json_each(schedule_json, '$.product_ids') WHERE value = ?)"}
+    ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`,
+    [access.organizationId, ...(productId === undefined ? [] : [productId]), query.limit + 1, query.offset])
   const page = messageListPage(rows.map(messageTemplate), query)
   return { templates: page.items, pagination: page.pagination }
 }
