@@ -63,3 +63,32 @@ test('Growth Google Ads writes explain the plan requirement and link to tenant b
     })
   }
 })
+
+test('Google Ads diagnostics are read-only tools for the selected Growth tenant', async ({ request, baseURL }) => {
+  await loginAs(request, baseURL!, 'user-e2e-ncls-owner')
+  const tenant = seededTenant('legal')
+  const toolNames = [
+    'query_google_ads_change_history',
+    'get_campaign_delivery_diagnostics',
+    'get_campaign_bidding_settings',
+    'list_conversion_actions',
+    'get_conversion_tracking_health',
+  ]
+  const catalog = await mcpRequest(request, baseURL!, { method: 'tools/list', organizationId: tenant.organizationId })
+  expect(catalog.status()).toBe(200)
+  const { result } = await catalog.json()
+  const diagnostics = result.tools.filter((tool: { name: string }) => toolNames.includes(tool.name))
+  expect(diagnostics.map((tool: { name: string }) => tool.name).sort()).toEqual(toolNames.sort())
+  for (const tool of diagnostics) expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false })
+
+  const response = await mcpRequest(request, baseURL!, {
+    method: 'tools/call', toolName: 'list_conversion_actions', args: { organization_id: tenant.organizationId },
+  })
+  expect(response.status()).toBe(200)
+  const { result: disconnected } = await response.json()
+  expect(disconnected.isError).toBe(true)
+  expect(JSON.parse(disconnected.content[0].text)).toMatchObject({
+    status: 400,
+    message: expect.stringContaining('Google Ads is not connected for this organization'),
+  })
+})

@@ -600,16 +600,29 @@ async function googleAdsFailure(label: string, response: Response): Promise<Erro
   return new Error(`${label} (${response.status}): ${googleAdsError(response.status, await response.text()).reason}`)
 }
 
+export type GoogleAdsConnection = {
+  accessToken: string
+  developerToken: string | undefined
+  customerId: string
+}
+
+export async function searchGoogleAdsRows<T>(connection: GoogleAdsConnection, query: string, label: string): Promise<T[]> {
+  const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cleanCustomerId(connection.customerId)}/googleAds:search`, {
+    method: 'POST',
+    headers: googleAdsHeaders(connection.accessToken, connection.developerToken),
+    body: JSON.stringify({ query }),
+  })
+  if (!response.ok) throw await googleAdsFailure(label, response)
+  const data = await response.json() as { results?: T[] }
+  return data.results ?? []
+}
+
 export async function getGoogleAdsCustomer(accessToken: string, developerToken: string | undefined, customerId: string): Promise<{ descriptiveName: string; currencyCode: string; timeZone: string; is_manager: boolean }> {
   const cid = cleanCustomerId(customerId)
-  const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:search`, {
-    method: 'POST',
-    headers: googleAdsHeaders(accessToken, developerToken),
-    body: JSON.stringify({ query: 'SELECT customer.descriptive_name, customer.currency_code, customer.time_zone, customer.manager FROM customer LIMIT 1' }),
-  })
-  if (!response.ok) throw await googleAdsFailure('Google Ads API error', response)
-  const data = (await response.json()) as { results?: Array<{ customer?: { descriptiveName?: string; currencyCode?: string; timeZone?: string; manager?: boolean } }> }
-  const customer = data.results?.[0]?.customer
+  const [row] = await searchGoogleAdsRows<{
+    customer?: { descriptiveName?: string; currencyCode?: string; timeZone?: string; manager?: boolean }
+  }>({ accessToken, developerToken, customerId }, 'SELECT customer.descriptive_name, customer.currency_code, customer.time_zone, customer.manager FROM customer LIMIT 1', 'Google Ads API error')
+  const customer = row?.customer
   if (!customer?.currencyCode) throw new Error(`Google Ads did not describe customer ${cid}`)
   if (!isValidTimezone(customer.timeZone)) throw new Error(`Google Ads did not provide a valid reporting timezone for customer ${cid}`)
   return { descriptiveName: customer.descriptiveName ?? '', currencyCode: customer.currencyCode, timeZone: customer.timeZone, is_manager: customer.manager === true }
