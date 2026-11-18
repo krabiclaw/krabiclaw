@@ -106,7 +106,7 @@ class FakeChannex {
     }
     if (init.method === 'POST' && (path as string) === '/meta/airbnb/chan-1/full_sync_listing') {
       const listing = (JSON.parse(init.body as string) as { listing_id: string }).listing_id
-      if (listing === this.missingMapping) return Response.json({ errors: { code: 'resource_not_found', title: 'Resource Not Found' } }, { status: 404 })
+      if (listing === `listing-${this.missingMapping}`) return Response.json({ errors: { code: 'resource_not_found', title: 'Resource Not Found' } }, { status: 404 })
       this.fullSyncs.push(listing)
       return Response.json({ meta: { message: 'Success' } })
     }
@@ -402,11 +402,13 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.deepEqual(availability.map(value => [value.date_from, value.date_to, value.availability]),
       [[day(50), day(51), 1], [day(53), day(54), 0]])
     // Two days on, the calendar has gained a night Channex was never sent: the wake sends it, and has Channex
-    // send each listing's whole calendar to Airbnb, which is what puts back a night changed on Airbnb itself.
+    // send the listing's whole calendar to Airbnb, which is what puts back a night changed on Airbnb itself.
     await db.prepare("UPDATE channel_sync_log SET created_at = '2000-01-01T00:00:00.000Z' WHERE direction = 'outbound'").run()
     channex.take()
     channex.fullSyncs.length = 0
-    t.mock.timers.enable({ apis: ['Date'], now: Date.now() + 2 * 86_400_000 })
+    // Channex no longer maps the second listing: its full sync is refused, and that home's nights say why.
+    channex.missingMapping = '2'
+    t.mock.timers.enable({ apis: ['Date'], now: localDateTimeToInstant(day(2), '12:00', TZ, 'compatible').getTime() })
     try {
       await deliver()
     } finally {
@@ -414,7 +416,8 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     }
     assert.deepEqual(channex.take().map(request => [request.path, request.values.filter(value => value.property_id === 'prop-1').map(value => [value.date_from, value.date_to])]).filter(([, nights]) => nights!.length),
       [['/restrictions', [[day(501), day(501)]]], ['/availability', [[day(501), day(501)]]]])
-    assert.deepEqual([...channex.fullSyncs].sort(), ['listing-1', 'listing-2'])
+    assert.deepEqual(channex.fullSyncs, ['listing-1'])
+    assert.deepEqual((await states(unpriced, day(5), day(6)))[0], { state: 'needs_review', detail: 'Channex has no Airbnb mapping for this connected home' })
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
