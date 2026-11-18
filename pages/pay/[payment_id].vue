@@ -187,7 +187,7 @@ const isReturn = (value: unknown): value is PaymentReturn => isRecord(value) && 
   (value.kind === 'stay' && typeof value.activity_id === 'string' && typeof value.receipt_token === 'string')
   || (value.kind === 'booking' && typeof value.conversation_id === 'string' && typeof value.cancellation_token === 'string'))))
 
-const { data: handoff, status, error } = await useAsyncData(`payment-handoff:${paymentId}`, () => publicApiRequest<Handoff>(`/api/public/payments/${encodeURIComponent(paymentId)}`, { query: { claim: claim.value }, validate: isHandoff }), { server: false, immediate: Boolean(claim.value) })
+const { data: handoff, status, error, execute: loadHandoff } = await useAsyncData(`payment-handoff:${paymentId}`, () => publicApiRequest<Handoff>(`/api/public/payments/${encodeURIComponent(paymentId)}`, { query: { claim: claim.value }, validate: isHandoff }), { server: false, immediate: Boolean(claim.value) && !returned })
 // The fragment never reaches the server, so a missing claim is known only once mounted.
 const mounted = useMounted()
 const loadError = computed(() => !claim.value ? t('payment.unavailable') : error.value ? getErrorMessage(error.value, t('payment.unavailable')) : '')
@@ -266,9 +266,16 @@ const priceLines = computed(() => {
   return [{ label: t('payment.unit_line', { price: money(value.unit_amount), count: guests.value || value.quantity }), amount: money(value.subtotal) }]
 })
 
-// A paid purchase, or one Stripe sent back here, goes on to its receipt.
+// After a provider redirect, settle first. The payment form is only needed if
+// the return does not open the receipt.
+onMounted(async () => {
+  if (!returned || !claim.value || await complete()) return
+  await loadHandoff()
+  if (outcome.value === 'processing' && handoff.value?.state === 'paid') await complete()
+})
+
 watch(handoff, (value) => {
-  if (value && !import.meta.server && (value.state === 'paid' || value.state === 'processing' || (returned && value.state === 'open'))) void complete()
+  if (!returned && value && !import.meta.server && (value.state === 'paid' || value.state === 'processing')) void complete()
 }, { immediate: true })
 
 // Stripe's Payment Element on the business's own account, in deferred mode: the
@@ -388,9 +395,13 @@ async function complete() {
   actionError.value = ''
   try {
     const done = await publicApiMutation<PaymentReturn>(`/api/public/payments/${encodeURIComponent(paymentId)}/return`, { method: 'POST', body: { claim: claim.value }, validate: isReturn })
-    if (done.state !== 'paid') outcome.value = done.state
-    else if (done.kind === 'stay') await navigateTo({ path: localePath('/bookings/stay'), query: { id: done.activity_id }, hash: `#${done.receipt_token}` }, { replace: true })
+    if (done.state !== 'paid') {
+      outcome.value = done.state
+      return
+    }
+    if (done.kind === 'stay') await navigateTo({ path: localePath('/bookings/stay'), query: { id: done.activity_id }, hash: `#${done.receipt_token}` }, { replace: true })
     else await navigateTo({ path: localePath('/bookings/confirmed'), query: { id: done.conversation_id }, hash: `#${done.cancellation_token}` }, { replace: true })
+    return true
   } catch (cause) {
     actionError.value = getErrorMessage(cause, t('payment.unavailable'))
   } finally {
