@@ -179,9 +179,6 @@ export interface CloudflareEnv {
   STRIPE_TEST_PAYMENTS_WEBHOOK_SECRET?: string
   GA4_API_SECRET?: string
   GOOGLE_ADS_DEVELOPER_TOKEN?: string
-  AI_SEARCH?: AiSearchNamespace
-  AI_SEARCH_INSTANCE_ID?: string
-  PLATFORM_SEARCH_REINDEX_SECRET?: string
   APPLE_TEAM_ID?: string
   APPLE_KEY_ID?: string
   APPLE_PRIVATE_KEY?: string

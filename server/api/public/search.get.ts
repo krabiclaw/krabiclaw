@@ -23,10 +23,6 @@ export default defineHandler(async (event) => {
   if (!validSurfaces.has(surface)) {
     return jsonResponse({ error: 'surface must be one of public, docs, blog, help, chowbot, tenant_blog' }, { status: 400 })
   }
-  // tenant_blog is a single shared corpus across every tenant, scoped by
-  // organization_id at query time — without a resolved tenant site there is no safe
-  // organization_id to scope by, and returning unscoped results would leak every
-  // other tenant's blog posts.
   if (surface === 'tenant_blog' && !isTenantRequest) {
     return jsonResponse({ error: 'tenant_blog surface requires a tenant site' }, { status: 400 })
   }
@@ -46,7 +42,7 @@ export default defineHandler(async (event) => {
       }
     }
 
-    const results = await searchPublicResources(env, q, {
+    const results = await searchPublicResources(db, q, {
       type: type as PublicSearchTypeFilter, surface: surface as 'public' | 'docs' | 'blog' | 'help' | 'chowbot' | 'tenant_blog', limit: 10,
       organizationId: isTenantRequest && surface === 'tenant_blog' ? String(event.context.organizationId) : null, })
     return jsonResponse({ query: q, surface, results })

@@ -81,8 +81,8 @@ export default defineHandler(async (event) => {
     }
 
     const lowIntentOpening = isLowIntentOpening(message)
-    const results = await searchPublicResources(env, `${topic ? `${topic} ` : ''}${message}`, {
-      limit: 6, surface: 'help', organizationId: event.context.tenantType === 'tenant' ? String(event.context.organizationId || '') : null, })
+    const results = lowIntentOpening ? [] : await searchPublicResources(db, `${topic ? `${topic} ` : ''}${message}`, {
+      limit: 6, surface: 'help', })
     const promptResults = formatPublicSearchResultsForPrompt(results)
     let parsed = {
       escalate: false, topic: topic || null, summary: null as string | null, answer: lowIntentOpening ? buildClarifyingReply() : null, }
