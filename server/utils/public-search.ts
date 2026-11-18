@@ -395,7 +395,7 @@ async function buildPlatformKnowledgeDocuments(db: DbClient): Promise<PlatformKn
       section: (typeof doc.category === 'string' && doc.category.trim()) || 'Docs',
       icon: 'book',
       body,
-      surfaces: ['public', 'docs', 'blog', 'help', 'chowbot', 'dashboard'],
+      surfaces: ['public', 'docs', 'blog', 'help', 'dashboard'],
     }]
   })
 
@@ -419,7 +419,7 @@ async function buildPlatformKnowledgeDocuments(db: DbClient): Promise<PlatformKn
       section: post.category ?? 'Blog',
       icon: 'newspaper',
       body,
-      surfaces: ['public', 'docs', 'blog', 'help', 'chowbot', 'dashboard'],
+      surfaces: ['public', 'docs', 'blog', 'help', 'dashboard'],
     }]
   })
 
@@ -432,7 +432,7 @@ async function buildPlatformKnowledgeDocuments(db: DbClient): Promise<PlatformKn
     section: 'Support',
     icon: 'circle-help',
     body: `${faq.answer}\n\nKeywords: ${faq.keywords.join(', ')}`,
-    surfaces: ['public', 'help', 'chowbot', 'dashboard'],
+    surfaces: ['public', 'help', 'dashboard'],
   }))
 
   const routeRecords: PlatformKnowledgeDocument[] = PLATFORM_KNOWLEDGE_ROUTE_ENTRIES.map((route) => ({
@@ -601,7 +601,7 @@ export async function searchPublicResources(
     const titleMatches = matched.filter(term => title.includes(term)).length
     const score = (phrase ? 1 : 0) + (matched.length + titleMatches) / Math.max(terms.length, 1)
       + computeLexicalBoost(normalized, result)
-    const snippet = surface === 'help' || surface === 'chowbot'
+    const snippet = surface === 'help'
       ? helpSearchExcerpt(body, matched, result.snippet)
       : result.snippet
     candidates.push({ ...result, surface, score, snippet })

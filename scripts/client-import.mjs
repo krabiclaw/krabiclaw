@@ -1129,7 +1129,7 @@ function buildGeneratedCopyInventory(places, mediaManifest) {
     value: null,
     provenance: "missing",
     source_inputs: [],
-    note: "Not available from Places API — write manually or via ChowBot",
+    note: "Not available from Places API — write in the dashboard or through MCP",
   });
 
   // Media alt_text — this pipeline has no source for it. Alt text describes
