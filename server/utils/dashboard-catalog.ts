@@ -1,10 +1,10 @@
 import { listingGrantSql } from '~/server/domain/listing-access'
-import { queryAll } from '~/server/db'
+import { d1JsonArray, queryAll } from '~/server/db'
 import { HTTPError, type H3Event } from 'nitro'
 import { getQuery } from 'nitro/h3'
 import { getDashboardMemberContext, listDashboardLocations } from '~/server/utils/dashboard-context'
 import { roleAllows, assertRoleAllows, isOrganizationWideRole } from '~/server/utils/member-access'
-import { listCollections, listOrganizationProducts } from '~/server/utils/product-management'
+import { listCollections, listOrganizationProducts, PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
 import { readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { groupProductsByCollection } from '~/utils/product-presentation'
 import { formatProductPriceRange, summarizeProductPrices } from '~/utils/product-money'
@@ -30,11 +30,17 @@ export async function loadDashboardCatalog(event: H3Event) {
     const locations = new Set(allowed.map(row => row.location_id))
     const selected = getQuery(event).location_id
     if (selected !== undefined && (typeof selected !== 'string' || !locations.has(selected))) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
-    const dishes = locations.size ? await listOrganizationProducts(db, { organizationId: organization.id, kind: 'dish', publishedOnly: true }) : []
+    const dishes = locations.size ? await queryAll<{ id: string; name: string; description: string }>(db, `
+      SELECT p.id, p.name, p.description FROM products p
+      JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
+      WHERE p.organization_id = ? AND p.kind = 'dish' AND ${PUBLIC_PRODUCT_SQL}
+        AND (NOT EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id)
+          OR EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id
+            AND pl.location_id IN (SELECT value FROM json_each(?))))
+      ORDER BY p.name, p.id`, [organization.id, d1JsonArray(selected === undefined ? [...locations] : [selected])]) : []
     return {
       title: 'Menu', fields: [], empty_title: 'No dishes',
-      rows: dishes.filter(dish => !dish.locations.length || dish.locations.some(binding => selected ? binding.location_id === selected : locations.has(binding.location_id)))
-        .map(dish => ({ id: dish.id, label: dish.name, summary: dish.description || undefined })),
+      rows: dishes.map(dish => ({ id: dish.id, label: dish.name, summary: dish.description || undefined })),
     } satisfies CatalogScreen
   }
   const manages = await roleAllows({ ...organization, permissions: { products: ['read'] } })
