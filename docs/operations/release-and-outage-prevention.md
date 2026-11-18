@@ -44,15 +44,17 @@ additively and use this sequence for a release that affects the native app.
    App Store build, the current TestFlight candidate, and each newer shipped
    build with a different API contract. Record the app versions, build numbers,
    source SHAs and screen outcomes in the existing release PR. Fix failures
-   before promoting the server.
+   before promoting the server. When distributing a candidate to an existing
+   external TestFlight group, select **Automatically notify testers**.
 2. **Production server.** Deploy the compatible server first. Repeat the
    affected read-only journeys in the installed App Store build against
-   production while the candidate is in review. If the installed build already
-   has the update banner, verify the candidate does not trigger it during review.
+   production.
 3. **App Store.** Once the iOS release is authorized, select **Automatically
-   release this version** for the App Store submission. For an existing external
-   TestFlight group, select **Automatically notify testers**. Verify the exact
-   release version is downloadable from the [Blawby App Store listing](https://apps.apple.com/us/app/blawby/id6823834381)
+   release this version** before submitting to App Review. During review,
+   confirm the installed App Store build still completes the affected journeys
+   in production. If that build has the update banner, verify the candidate
+   does not trigger it during review. After release, verify the exact version
+   is downloadable from the [Blawby App Store listing](https://apps.apple.com/us/app/blawby/id6823834381)
    in the storefront being checked. [Apple's release options](https://developer.apple.com/help/app-store-connect/manage-your-apps-availability/select-an-app-store-version-release-option)
 4. **Installed app.** With the previous banner-capable App Store version still
    installed, confirm **Update available** appears and **Update** opens the
