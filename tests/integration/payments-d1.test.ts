@@ -45,6 +45,7 @@ import { mcpFinancialApprovalErrorResult } from '../../server/utils/mcp-financia
 import { handlePaymentsTools } from '../../server/utils/mcp-tools/payments.ts'
 import { NOT_HANDLED } from '../../server/utils/mcp-tools/execution.ts'
 import { resolveOrganizationMembership } from '../../server/utils/member-access.ts'
+import { getRequestDataMetrics, instrumentD1 } from '../../server/utils/request-metrics.ts'
 import type { McpOrganizationContext } from '../../server/utils/mcp-auth.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { applySchema } from './support/schema.ts'
@@ -1267,7 +1268,7 @@ test('a card is authorized, booked, then captured, and an expired payment window
 })
 
 test('a redirect that Stripe captures returns to the guest site and settles one booking, or refunds if its seat is gone', { timeout: 120_000 }, async t => {
- const { db, runtime, env: bootEnv } = await boot()
+ const { db, runtime, env: bootEnv, events } = await boot()
  try {
   const env = stripeEnv(bootEnv)
   await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
@@ -1316,6 +1317,18 @@ test('a redirect that Stripe captures returns to the guest site and settles one 
   const booked = await requirePayment(db, ORG, 'redirect')
   assert.ok(booked.subject_id)
   assert.equal(booked.captured_amount, 10000)
+
+  const capture = events.take('payment.captured')
+  assert.ok(capture, 'a settled redirect queues the captured payment')
+  for (const delivery of ['first', 'redelivery']) {
+   const trace = new H3Event(new Request(origin + '/queue/payment-captured'))
+   const deliveryEnv = { ...env, DB: instrumentD1(trace, db, db) }
+   await events.deliver(deliveryEnv, capture)
+   assert.equal(await db.prepare("SELECT count(*) FROM messages WHERE conversation_id=? AND event_name='payment.payment_captured'")
+    .bind(receipt.conversation_id).first('count(*)'), 1)
+   const { batchRoundTrips, singleStatementRoundTrips, statementCount, rowsRead, rowsWritten } = getRequestDataMetrics(trace)
+   t.diagnostic(JSON.stringify({ delivery, batchRoundTrips, singleStatementRoundTrips, statementCount, rowsRead, rowsWritten }))
+  }
 
   await confirmable(db, 'taken', inMinutes(15))
   await deliver('taken')
