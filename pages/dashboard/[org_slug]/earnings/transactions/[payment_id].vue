@@ -9,16 +9,15 @@ definePageMeta({ layout: 'dashboard' })
 const route = useRoute()
 const api = useDashboardApi()
 const paymentId = String(route.params.payment_id || '')
-const base = `/dashboard/${route.params.org_slug}/bookings`
 // Raised, not thrown: a nested page's setup throw leaves a blank screen (DESIGN.md).
 if (!paymentId) showError(createError({ statusCode: 404, statusMessage: 'Transaction not found' }))
 else {
   try {
-    const detail = await api<{ visit: { kind: 'booking'; conversation_id: string } | null }>('/api/dashboard/payments', {
-      query: { payment_id: paymentId },
-      validate: (value: unknown): value is { visit: { kind: 'booking'; conversation_id: string } | null } => isRecord(value) && (value.visit === null || isRecord(value.visit) && (value.visit.kind === 'booking' || value.visit.kind === 'reservation') && typeof value.visit.conversation_id === 'string'),
+    const destination = await api<{ to: string }>('/api/dashboard/payments', {
+      query: { view: 'destination', payment_id: paymentId },
+      validate: (value: unknown): value is { to: string } => isRecord(value) && typeof value.to === 'string',
     })
-    await navigateTo(detail.visit ? `${base}/${detail.visit.kind}/${encodeURIComponent(detail.visit.conversation_id)}` : `${base}/payment/${encodeURIComponent(paymentId)}`, { replace: true })
+    await navigateTo(destination.to, { replace: true })
   } catch (cause) {
     const status = isRecord(cause) && typeof cause.statusCode === 'number' ? cause.statusCode : 500
     showError(createError({ statusCode: status, statusMessage: getErrorMessage(cause, 'Transaction could not be loaded') }))

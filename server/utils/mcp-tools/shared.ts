@@ -903,6 +903,11 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   list_google_ads_campaigns: R,
   get_google_ads_campaign: R,
   query_google_ads_report: R,
+  query_google_ads_change_history: R,
+  get_campaign_delivery_diagnostics: R,
+  get_campaign_bidding_settings: R,
+  list_conversion_actions: R,
+  get_conversion_tracking_health: R,
   // Ad copy sent to the provider's ad review cannot be recalled.
   create_google_ads_search_campaign: { ...D, openWorldHint: true },
   update_google_ads_campaign: { ...D, openWorldHint: true },

@@ -95,3 +95,54 @@ test('standalone Channex homes migration preserves calendar delivery and channel
     database.close()
   }
 })
+
+test('the stay-night migration and database transfer preserve both bookings when a channel sells an occupied night', async () => {
+  const { writePayload } = await import('../../scripts/transfer-database-export.mjs')
+  const migration = '0020_record_every_confirmed_stay_night'
+  const { entries } = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+  const schema = entries.map(({ tag }) => readFileSync(`migrations/${tag}.sql`, 'utf8'))
+  const database = new Database(':memory:')
+  const directory = mkdtempSync(join(tmpdir(), 'blawby-stay-nights-transfer-'))
+  try {
+    const index = entries.findIndex(({ tag }) => tag === migration)
+    database.exec(schema.slice(0, index).join('\n'))
+    database.pragma('foreign_keys = ON')
+    database.exec(`
+      INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org', 'Tenant', 'tenant', 'USD', 'America/Denver');
+      INSERT INTO products (id, organization_id, kind, slug, name, created_by, updated_by)
+        VALUES ('cabin', 'org', 'stay', 'cabin', 'Cabin', 'host', 'host');
+      INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by)
+        VALUES ('variant', 'org', 'cabin', 'Cabin', 'host', 'host');
+      INSERT INTO bookings (id, organization_id, product_id, product_variant_id, starts_at, ends_at, timezone, party_size, policy_json, total_minor, currency, owner, channel, provider, external_booking_id) VALUES
+        ('host', 'org', 'cabin', 'variant', '2027-02-01', '2027-02-02', 'America/Denver', 1, '{}', 100, 'USD', 'app', 'direct', NULL, NULL),
+        ('channel', 'org', 'cabin', 'variant', '2027-02-02', '2027-02-03', 'America/Denver', 1, '{}', 100, 'USD', 'channel', 'airbnb', 'channex', 'external'),
+        ('another', 'org', 'cabin', 'variant', '2027-02-01', '2027-02-02', 'America/Denver', 1, '{}', 100, 'USD', 'app', 'direct', NULL, NULL);
+      INSERT INTO stay_nights (organization_id, product_id, date, booking_id) VALUES
+        ('org', 'cabin', '2027-02-01', 'host'), ('org', 'cabin', '2027-02-02', 'channel');
+    `)
+    database.transaction(() => database.exec(schema[index]!))()
+    const hold = database.prepare("INSERT INTO stay_nights (organization_id, product_id, date, booking_id) VALUES ('org', 'cabin', '2027-02-01', ?)")
+    assert.throws(() => hold.run('another'), /STAY_NIGHT_OCCUPIED/)
+    database.prepare("UPDATE bookings SET starts_at = '2027-02-01', overbooked = 1 WHERE id = 'channel'").run()
+    hold.run('channel')
+    database.prepare("UPDATE stay_nights SET rowid = -1 WHERE booking_id = 'channel' AND date = '2027-02-01'").run()
+    const snapshot = join(directory, 'snapshot.sql')
+    writePayload(database, snapshot, schema.join('\n'))
+    const destination = new Database(':memory:')
+    try {
+      destination.exec(schema.join('\n'))
+      destination.exec(readFileSync(snapshot, 'utf8'))
+      const occupants = destination.prepare("SELECT booking_id FROM occupied_stay_nights WHERE date = '2027-02-01' ORDER BY booking_id")
+      assert.deepEqual(occupants.all(), [{ booking_id: 'channel' }, { booking_id: 'host' }])
+      destination.prepare("DELETE FROM stay_nights WHERE booking_id = 'host'").run()
+      assert.deepEqual(occupants.all(), [{ booking_id: 'channel' }])
+      assert.throws(() => destination.prepare(hold.source).run('another'), /STAY_NIGHT_OCCUPIED/)
+      assert.deepEqual(destination.pragma('foreign_key_check'), [])
+    } finally {
+      destination.close()
+    }
+  } finally {
+    database.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

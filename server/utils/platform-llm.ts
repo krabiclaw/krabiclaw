@@ -2,7 +2,7 @@ import { instantDate } from '~/utils/timezone'
 import { useRuntimeConfig } from 'nitro/runtime-config'
 import { HTTPError } from 'nitro';
 import type { H3Event } from 'nitro';
-import {  getRequestHost } from 'nitro/h3';
+import { getRequestHost, getRequestProtocol } from 'nitro/h3';
 import { queryAll, queryFirst, type DbClient } from '../db/index.ts'
 import { getContentBlocksForDocument } from './content/documents.ts'
 import { findAuthUsersByIds, type CloudflareEnv } from './auth.ts'
@@ -619,6 +619,7 @@ export function buildNamedBlogJsonFeed(origin: string, posts: PlatformLlmLinkEnt
 
 export function resolvePublicOrigin(event: H3Event) {
   if (event.context.tenantType === 'tenant') {
+    const request = new URL(event.req.url)
     const tenantHost = String(
       event.context.tenantHost
       || getRequestHost(event, { xForwardedHost: true })
@@ -628,10 +629,13 @@ export function resolvePublicOrigin(event: H3Event) {
     if (!tenantHost) {
       throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant host not resolved' })
     }
-    const forwardedProto = (event.req.headers.get('x-forwarded-proto'))
-    const protocol = forwardedProto?.split(',')[0]?.trim()
-      || (tenantHost.endsWith('.localhost') || tenantHost === 'localhost' ? 'http' : 'https')
-    return `${protocol}://${tenantHost}`
+    const isLocal = tenantHost.endsWith('.localhost') || tenantHost === 'localhost'
+    const protocol = isLocal || event.req.headers.has('x-forwarded-proto')
+      ? getRequestProtocol(event, { xForwardedProto: true })
+      : 'https'
+    const origin = new URL(`${protocol}://${tenantHost}`)
+    if (request.hostname === origin.hostname) origin.port = request.port
+    return origin.origin
   }
 
   const runtimeConfig = useRuntimeConfig()

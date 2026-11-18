@@ -6,6 +6,11 @@ export interface McpStructuredResponse {
   isError?: boolean
 }
 
+export function withMcpLink(message: string, label: string, url: string | null | undefined): string {
+  if (!url || !/^https?:\/\//i.test(url) || !URL.canParse(url)) return message
+  return `${message} [${label}](<${new URL(url).href}>)`
+}
+
 export function renderStructuredResponse(
   structuredContent: unknown,
   modelText?: string,

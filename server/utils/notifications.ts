@@ -1337,13 +1337,13 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
     organizationId, organizationName: studio, locationId: home.location_id, template, title: message.title,
     payload: { booking_id: stay.id, revision_id: input.revisionId, deep_link: audience.stayUrl },
     message, idempotencyKey: `notification:${eventKey}`, entity: { type: 'booking', id: stay.id }, deliveryEventKey: eventKey, bookingConversationId: stay.conversation_id,
-    memberIds: audience.memberIds, memberAlert: { message: memberMessage, stayId: stay.id }, whatsappTemplate,
+    memberIds: audience.memberIds, memberAlert: { message: memberMessage, stayId: stay.id }, whatsappTemplate, surfaceDeliveryFailures: overlap,
   })
   if (cancelled) {
     const cancellation = { ...base, refund: null }
     return send('channel_stay.cancelled', stayCancelledMessage(cancellation), stayCancelledMessage(stayTurnoverAlert(cancellation, audience.stayUrl, memberName)))
   }
-  if (booked || !changed) {
+  if (overlap || booked || !changed) {
     const booking = { ...base, total: money(terms.total_minor), paid: null, balance: null, overlap, notes: null }
     return send(overlap ? 'channel_stay.overlap' : 'channel_stay.booked', stayBookedMessage(booking), stayBookedMessage(stayTurnoverAlert(booking, audience.stayUrl, memberName)))
   }
@@ -1356,7 +1356,6 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
     counterpartyLabel: 'Guest', partyLabel: 'Guests',
     current: side(before, previousHome.name), requested: side(terms, home.name),
     differences: [
-      ...(overlap ? [{ text: 'The new nights overlap another stay: resolve the double booking' }] : []),
       ...(previousHome.product_id !== home.product_id ? [{ text: `Moves to ${home.name}` }] : []),
       ...stayChangeDifferences(counts(before), counts(terms), money),
     ],

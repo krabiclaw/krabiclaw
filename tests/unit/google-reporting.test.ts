@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import Ajv from 'ajv'
+import { GOOGLE_ADS_TOOLS } from '../../server/utils/mcp-tools/google-ads.ts'
+import { getCampaignBiddingSettings, getCampaignDeliveryDiagnostics, getConversionTrackingHealth, listConversionActions, queryGoogleAdsChangeHistory } from '../../server/utils/google-ads-diagnostics.ts'
 import { getGoogleAdsReport } from '../../server/utils/google-ads.ts'
 import { runGa4Report } from '../../server/utils/google-analytics.ts'
 import { querySearchAnalytics } from '../../server/utils/google-search-console.ts'
@@ -77,4 +80,118 @@ test('Search Console analytics name each key by its dimension and keep Google\'s
     startDate: '2025-10-01', endDate: '2025-10-29', dimensions: [], filters: [], searchType: 'web', dataState: 'final', aggregationType: 'auto', rowLimit: 1, startRow: 0,
   })
   assert.deepEqual(total.rows, [{ keys: {}, clicks: 310, impressions: 9200, ctr: 0.0337, position: 11.2 }])
+})
+
+
+const adsConnection = { accessToken: 'test-access', developerToken: 'test-developer', customerId: '1234567890' }
+const october = { start_date: '2026-10-01', end_date: '2026-10-31' }
+
+function assertAdsToolOutput(toolName: string, value: unknown) {
+  const tool = GOOGLE_ADS_TOOLS.find(tool => tool.name === toolName)
+  assert.ok(tool)
+  const ajv = new Ajv({ strict: false })
+  assert.equal(ajv.validate(tool.outputSchema, value), true, ajv.errorsText())
+  assert.equal(tool.annotations?.readOnlyHint, true)
+}
+
+test('Google Ads change history preserves actor and changed values and refuses dates outside retention', async (t) => {
+  const queries: string[] = []
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    assert.equal(String(input), 'https://googleads.googleapis.com/v25/customers/1234567890/googleAds:search')
+    assert.equal(init?.method, 'POST')
+    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer test-access')
+    const { query } = JSON.parse(String(init?.body))
+    queries.push(query)
+    if (query.includes('FROM customer')) return Response.json({ results: [{ customer: { timeZone: 'America/New_York' } }] })
+    const event = { resourceName: 'customers/1234567890/changeEvents/1~0~0', changeDateTime: '2026-10-30 08:01:59.000001',
+      userEmail: 'editor@example.test', clientType: 'GOOGLE_ADS_WEB_CLIENT', changedFields: 'primaryForGoal,includeInConversionsMetric',
+      oldResource: { conversionAction: { primaryForGoal: true } }, newResource: { conversionAction: { primaryForGoal: false } } }
+    return Response.json({ results: [{ changeEvent: event }, { changeEvent: event }] })
+  })
+  const now = new Date('2026-11-18T03:00:00Z')
+  await assert.rejects(queryGoogleAdsChangeHistory(adsConnection, october, 10, now), /available from 2026-10-19 through 2026-11-17.*Google Ads console/)
+  assert.equal(queries.length, 1)
+  const result = await queryGoogleAdsChangeHistory(adsConnection, { start_date: '2026-10-30', end_date: '2026-10-30' }, 1, now)
+  assert.match(queries.at(-1)!, /change_event\.change_date_time < '2026-10-31 00:00:00'/)
+  assert.match(queries.at(-1)!, /LIMIT 2/)
+  assert.deepEqual(result.changes.map(row => [row.actor_email, row.changed_fields, row.new_resource]), [
+    ['editor@example.test', ['primaryForGoal', 'includeInConversionsMetric'], { conversionAction: { primaryForGoal: false } }],
+  ])
+  assert.equal(result.has_more, true)
+  assertAdsToolOutput('query_google_ads_change_history', result)
+})
+
+test('delivery and bidding diagnostics keep shared budgets, rank losses, and portfolio targets visible', async (t) => {
+  t.mock.method(globalThis, 'fetch', async (_input, init) => {
+    const { query } = JSON.parse(String(init?.body))
+    if (query.includes('FROM accessible_bidding_strategy')) return Response.json({ results: [{
+      accessibleBiddingStrategy: { name: 'Shared Leads', ownerCustomerId: '1234567890', maximizeConversions: { targetCpaMicros: '75000000' } },
+    }] })
+    assert.match(query, /campaign\.id = 11/)
+    if (query.includes('campaign.bidding_strategy_type')) return Response.json({ results: [{
+      campaign: { name: 'Leads', biddingStrategyType: 'MAXIMIZE_CONVERSIONS', biddingStrategy: 'customers/1234567890/biddingStrategies/42',
+        accessibleBiddingStrategy: 'customers/1234567890/accessibleBiddingStrategies/42' }, customer: { currencyCode: 'USD' },
+    }] })
+    if (query.includes('campaign.primary_status')) return Response.json({ results: [{
+      campaign: { name: 'Leads', primaryStatus: 'LIMITED', primaryStatusReasons: ['HAS_ADS_DISAPPROVED'] },
+      campaignBudget: { id: '123', amountMicros: '329000000', explicitlyShared: true, referenceCount: '3' },
+      customer: { status: 'ENABLED', currencyCode: 'USD', timeZone: 'America/New_York' },
+    }] })
+    if (query.includes('metrics.search_impression_share')) return Response.json({ results: [{
+      metrics: { impressions: '5403', clicks: '352', searchRankLostImpressionShare: 0.9001, searchBudgetLostImpressionShare: 0.0038 },
+    }] })
+    if (query.includes('FROM campaign_criterion')) return Response.json({ results: [{
+      campaignCriterion: { criterionId: '3', type: 'LOCATION', status: 'ENABLED', location: { geoTargetConstant: 'geoTargetConstants/21137' } },
+    }] })
+    if (query.includes('FROM ad_group_criterion')) return Response.json({ results: [{
+      adGroup: { id: '9' }, adGroupCriterion: { criterionId: '7', type: 'USER_LIST', negative: true, userList: { userList: 'customers/1234567890/userLists/7' } },
+    }] })
+    assert.match(query, /FROM ad_group_ad/)
+    return Response.json({ results: [{ adGroup: { id: '9' }, adGroupAd: { ad: { id: '2' }, policySummary: {
+      approvalStatus: 'DISAPPROVED', policyTopicEntries: [{ topic: 'DESTINATION_NOT_WORKING' }],
+    } } }] })
+  })
+  const bidding = await getCampaignBiddingSettings(adsConnection, '11')
+  assert.equal(bidding.target_cpa_micros, 75_000_000)
+  assert.equal(bidding.portfolio_name, 'Shared Leads')
+  assertAdsToolOutput('get_campaign_bidding_settings', bidding)
+  const delivery = await getCampaignDeliveryDiagnostics(adsConnection, '11', october)
+  assert.deepEqual([delivery.shared_budget, delivery.budget_reference_count], [true, 3])
+  assert.deepEqual([delivery.metrics?.search_rank_lost_impression_share, delivery.metrics?.search_budget_lost_impression_share], [0.9001, 0.0038])
+  assert.equal(delivery.ads[0]?.policy_topics[0], 'DESTINATION_NOT_WORKING')
+  assert.equal(delivery.campaign_criteria[0]?.resource, 'geoTargetConstants/21137')
+  assert.deepEqual(delivery.ad_group_criteria.map(row => [row.ad_group_id, row.negative, row.resource]), [['9', true, 'customers/1234567890/userLists/7']])
+  assertAdsToolOutput('get_campaign_delivery_diagnostics', delivery)
+  await assert.rejects(getCampaignDeliveryDiagnostics(adsConnection, '11 OR 1=1', october), /numeric Google Ads campaign_id/)
+})
+
+test('conversion diagnostics separate Ads goal settings from recorded activity and surface provider failures', async (t) => {
+  let denied = false
+  t.mock.method(globalThis, 'fetch', async (_input, init) => {
+    const { query } = JSON.parse(String(init?.body))
+    if (denied) return Response.json({ error: { message: 'Access to the connected customer was denied' } }, { status: 403 })
+    if (query.includes('FROM conversion_action')) return Response.json({ results: [{ conversionAction: {
+      id: '5', resourceName: 'customers/1234567890/conversionActions/5', name: 'Generate lead', status: 'ENABLED',
+      primaryForGoal: true, googleAnalytics4Settings: { propertyId: '100', eventName: 'generate_lead' },
+    } }] })
+    if (query.includes('FROM customer_conversion_goal')) return Response.json({ results: [{ customerConversionGoal: { category: 'SUBMIT_LEAD_FORM', origin: 'WEBSITE', biddable: true } }] })
+    if (query.includes('segments.conversion_action')) return Response.json({ results: [{
+      segments: { conversionAction: 'customers/1234567890/conversionActions/6', conversionActionName: 'CTA click' }, metrics: { allConversions: 12 },
+    }] })
+    return Response.json({ results: [{ customer: { autoTaggingEnabled: true, timeZone: 'America/New_York', conversionTrackingSetting: {
+      conversionTrackingStatus: 'CONVERSION_TRACKING_MANAGED_BY_SELF', googleAdsConversionCustomer: 'customers/1234567890',
+    } } }] })
+  })
+  const actions = await listConversionActions(adsConnection)
+  assert.equal(actions.actions[0]?.ga4_event_name, 'generate_lead')
+  assert.equal(actions.actions[0]?.primary_for_goal, true)
+  assert.equal(actions.actions[0]?.include_in_conversions_metric, null)
+  assertAdsToolOutput('list_conversion_actions', actions)
+  const health = await getConversionTrackingHealth(adsConnection, october)
+  assert.equal(health.auto_tagging_enabled, true)
+  assert.equal(health.account_goals[0]?.category, 'SUBMIT_LEAD_FORM')
+  assert.deepEqual(health.activity.map(row => [row.name, row.conversions, row.all_conversions]), [['CTA click', 0, 12]])
+  assertAdsToolOutput('get_conversion_tracking_health', health)
+  denied = true
+  await assert.rejects(getConversionTrackingHealth(adsConnection, october), /\(403\): Access to the connected customer was denied/)
 })

@@ -71,7 +71,7 @@ useSocialMetadata(() => post.value && ({
   discoverability: post.value.status === 'draft' ? 'private' : post.value.visibility,
   // A post that shows a video is that video's watch page.
   schemaNodes: [post.value.media.find(item => item.kind === 'video')].flatMap(video => video
-    ? [videoObjectSchema({ url: video.public_url, thumbnailUrl: video.thumbnail_url, name: seoTitle.value, description: seoDescription.value, uploadDate: post.value!.published_at?.slice(0, 10) }, `${post.value!.url ?? post.value!.path}#video-1`)].filter(node => node !== null)
+    ? [videoObjectSchema({ url: video.public_url, thumbnailUrl: video.thumbnail_url, name: seoTitle.value, description: seoDescription.value, uploadDate: post.value!.published_at }, `${post.value!.url ?? post.value!.path}#video-1`)].filter(node => node !== null)
     : []),
   breadcrumbs: [
     { name: seoTitle.value, url: post.value.path },

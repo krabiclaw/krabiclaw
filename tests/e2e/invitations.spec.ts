@@ -98,6 +98,17 @@ test('the email link returns through normal sign-in and only the invited account
   expect(await organizations.json()).toMatchObject({ organizations: expect.arrayContaining([
     expect.objectContaining({ id: restaurant.organizationId, role: 'kitchen' }),
   ]) })
+  const catalog = await page.request.get('/api/dashboard/catalog', { params: { org: restaurant.slug, location_id: restaurant.locations.brooklyn!.id } })
+  expect(catalog.status(), await catalog.text()).toBe(200)
+  expect(await catalog.json()).toMatchObject({
+    title: 'Menu',
+    rows: [{ label: 'Brooklyn Clam Pie' }, { label: 'Burrata' }, { label: 'Garlic Knots' },
+      { label: 'Margherita' }, { label: 'Pepperoni' }, { label: 'Wild Mushroom' }],
+  })
+  const foreignMenu = await page.request.get('/api/dashboard/catalog', {
+    params: { org: restaurant.slug, location_id: Object.values(seededTenant('experience').locations)[0]!.id },
+  })
+  expect(foreignMenu.status()).toBe(404)
   const team = await page.request.get('/api/dashboard/members', { params: { org: restaurant.slug } })
   expect(team.status()).toBe(200)
   const teamData = await team.json() as { inviteRoles: unknown[]; invitations: unknown[]; members: Array<{ canRemove: boolean; roleChoices: unknown[] }> }

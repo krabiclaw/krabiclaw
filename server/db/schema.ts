@@ -4,7 +4,7 @@ import type { MediaCategory } from '~/shared/media-placement-contract'
 import { sql } from "drizzle-orm"
 import { PRODUCT_KINDS } from "../../shared/product-details"
 import { REVIEW_CATEGORY_KEYS, type ReviewCategory } from "../../shared/review-questions"
-import { sqliteTable, integer, text, real, unique, uniqueIndex, index, check, foreignKey, primaryKey } from "drizzle-orm/sqlite-core"
+import { sqliteTable, sqliteView, integer, text, real, unique, uniqueIndex, index, check, foreignKey, primaryKey } from "drizzle-orm/sqlite-core"
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 import type { CONTENT_DOCUMENT_KINDS } from "../../shared/content-registries"
 import { NOTIFICATION_CATEGORIES, type NotificationCategory } from "../../shared/notification-categories"
@@ -1017,8 +1017,7 @@ export const product_sessions = sqliteTable("product_sessions", {
 //   booking says so (a stay's party is adults + children; infants are extra).
 // Channel fields apply to every kind: `owner` 'channel' bookings arrive from a
 //   connected channel and change only through its revision feed. `overbooked`
-//   is a channel booking the channel had already confirmed over nights another
-//   booking holds: stored, holding no nights, flagged until a person cancels one.
+//   records that the channel confirmed a reservation over dates held by another booking.
 // booked_product_id: the listing a channel reservation was booked on when the
 //   host moved the guest to another home; NULL when they use what they booked.
 // Money: total_minor in `currency` is what a nights booking costs (its quoted
@@ -1331,20 +1330,35 @@ export const product_nights = sqliteTable("product_nights", {
 	check("product_nights_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
 
-// A booking's claim to one night. The primary key allows only one booking
-// to claim each home and date. Claims change in the same batch as the booking.
-// Cancelled and overbooked bookings have no claims.
+// Each night occupied by a reservation. Multiple records for the same home and
+// date can only come from a channel confirmation. Blawby booking writes refuse
+// occupied nights, and cancellations remove that booking's rows.
 export const stay_nights = sqliteTable("stay_nights", {
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text().notNull(),
 	date: text().notNull(),
 	booking_id: text().notNull(),
 }, (table) => [
-	primaryKey({ columns: [table.product_id, table.date], name: "stay_nights_pk" }),
+	primaryKey({ columns: [table.booking_id, table.date], name: "stay_nights_pk" }),
 	foreignKey({ columns: [table.organization_id, table.product_id, table.booking_id], foreignColumns: [bookings.organization_id, bookings.product_id, bookings.id], name: "stay_nights_booking_scope_fk" }).onDelete("cascade"),
-	index("stay_nights_booking_idx").on(table.booking_id),
+	index("stay_nights_home_date_idx").on(table.product_id, table.date),
 	check("stay_nights_date_check", sql`date(date, '+0 days') IS date`),
 ]);
+
+// A moved channel reservation also keeps its original listing unavailable.
+export const occupied_stay_nights = sqliteView('occupied_stay_nights', {
+  organization_id: text().notNull(),
+  product_id: text().notNull(),
+  date: text().notNull(),
+  booking_id: text().notNull(),
+}).as(sql`
+  SELECT n.organization_id, n.product_id, n.date, n.booking_id FROM stay_nights n
+  UNION ALL
+  SELECT n.organization_id, b.booked_product_id, n.date, n.booking_id FROM bookings b
+  JOIN stay_nights n ON n.organization_id = b.organization_id AND n.booking_id = b.id
+  WHERE b.status = 'confirmed' AND b.booked_product_id IS NOT NULL AND b.booked_product_id <> n.product_id
+`)
+
 
 // Row meaning: the host recorded receiving (or, negative, refunding) this
 //   amount for a booking outside Stripe: cash, a bank transfer, a card taken

@@ -316,7 +316,7 @@ export async function confirmPayment(db: DbClient, env: CloudflareEnv, organizat
     const started = new Date().toISOString()
     const expiresAt = confirmationHoldUntil(started)
     if (!stay || !hold?.conversation_id || !hold.buyer_user_id) throw new Error('Approved stay payment has no stay or guest conversation')
-    const bookable = await approvedStayPaymentPredicate(db, {
+    const bookable = approvedStayPaymentPredicate({
       ...approval, organizationId, productId: stay.product_id, checkIn: stay.check_in_date, checkOut: stay.check_out_date,
       conversationId: hold.conversation_id, buyerUserId: hold.buyer_user_id, through: started,
     })
@@ -395,21 +395,26 @@ async function paymentReceipt(env: CloudflareEnv, payment: Payment, receipt: Che
   return { state: 'paid', kind: 'booking', conversation_id: conversationId, cancellation_token: cancellation.token }
 }
 
-/** Read the receipt after confirm or the Stripe webhook has saved and captured the booking. */
+/** Read the receipt, settling a successful payment if the provider redirect beat the webhook. */
 export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, buyer: () => Promise<string>): Promise<PaymentReturn> {
   const now = new Date().toISOString()
-  const payment = await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
+  let payment = await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
   // Reconciliation writes captured_amount only after it verifies Stripe's succeeded intent.
   if (payment.captured_amount <= 0) {
-    const { intent, state } = await readCheckoutIntent(paymentsStripe(env, Boolean(payment.livemode)), payment, now)
+    const stripe = paymentsStripe(env, Boolean(payment.livemode))
+    const { intent, state } = await readCheckoutIntent(stripe, payment, now)
     if (intent.livemode !== Boolean(payment.livemode) || intent.metadata.krabiclaw_payment_id !== payment.id) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
     if (state === 'taken') return { state: 'taken' }
     if (state === 'failed' || state === 'expired') return { state: 'expired' }
     if (intent.status === 'requires_payment_method' && intent.last_payment_error) {
       throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe declined this payment', data: { code: 'payment_declined' } })
     }
-    if (state === 'processing' || state === 'verifying') return { state: 'processing' }
-    throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
+    if (intent.status !== 'succeeded') {
+      if (state === 'processing' || state === 'verifying') return { state: 'processing' }
+      throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
+    }
+    await reconcilePaymentIntent(db, stripe, payment, intent, env, payment.checkout_hold ? JSON.parse(payment.checkout_hold) as CheckoutHold : null)
+    payment = await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
   }
   // The approval checkout began in the buyer's account; the business's site may have a different browser session.
   const snapshot = snapshotOf(payment)

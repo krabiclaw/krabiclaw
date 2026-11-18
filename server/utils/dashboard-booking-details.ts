@@ -2,7 +2,6 @@ import { MEMBER_NAME_SQL, RESERVATION_HOST_SQL, type PublicProvider } from '~/sh
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { getGuestRequest, getThreadOperationalRecord, requestActions } from '~/server/domain/requests'
 import { CURRENT_GUEST_SQL, GUEST_NOTE_EVENT, type MessageRow } from '~/server/domain/conversations'
-import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
@@ -22,11 +21,11 @@ import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 import { calculateMapUrl, coordinatesFailure } from '~/utils/location-map'
 import { pendingBookingChangeView } from '~/server/domain/guest-threads/booking-changes'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
-import { readBookingPaymentReceipts, readPaymentDetails } from '~/server/domain/payments'
+import { readPaymentReceipts } from '~/server/domain/payments'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { canRetryGuestVisitRefund } from '~/server/domain/payments/visit-refund'
 import { historicalNoShowAtSql } from '~/server/utils/review-requests'
-import {paymentStateLabel,paymentDisplay,paymentRefundsDisplay,type PaymentDisplay,type PaymentRefundDisplay} from '~/shared/payment-display'
+import { paymentStateLabel, type PaymentDisplay, type PaymentRefundDisplay } from '~/shared/payment-display'
 
 export type DashboardBookingType = 'booking'
 /** What the record screen can show: a visit, or a payment whose visit is gone. */
@@ -332,7 +331,7 @@ async function composeBookingDetails(
   const now = new Date().toISOString()
   const complete = isBookingComplete({ status: row.status as BookingStatus, ends_at: row.ends_at }, now)
   const payments = reader.buyerUserId || reader.canReadPayments
-    ? await readBookingPaymentReceipts(db, reader.env, row.organization_id, row.booking_id, reader.buyerUserId)
+    ? await readPaymentReceipts(db, reader.env, row.organization_id, { bookingId: row.booking_id }, reader.buyerUserId)
     : null
   const guestCanRetryCancellation = Boolean(reader.buyerUserId && row.status === 'cancelled' && row.cancellation_used_at
     && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, bookingId: row.booking_id, requestId: row.conversation_id, buyerUserId: reader.buyerUserId }))
@@ -437,8 +436,9 @@ export function isDashboardRecordType(value: string | undefined): value is Dashb
  * what remains is what was bought, when, from whom, and the money.
  */
 async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: BookingScope, paymentId: string): Promise<DashboardBookingDetails> {
-  const payment = await queryFirst<{ organization_id: string; buyer_user_id: string | null; location_id: string | null; created_at: string; updated_at: string; organization_name: string; vertical: string; contact_phone: string | null; buyer_name: string | null; buyer_email: string | null; buyer_image: string | null; location_slug: string | null; location_title: string | null }>(db, `
-    SELECT p.organization_id, p.buyer_user_id, p.location_id, p.created_at, p.updated_at, s.name AS organization_name, s.vertical, s.contact_phone,
+  const payment = await queryFirst<{ organization_id: string; location_id: string | null; created_at: string; updated_at: string; price_snapshot_json: string; organization_name: string; vertical: string; contact_phone: string | null; buyer_name: string | null; buyer_email: string | null; buyer_image: string | null; location_slug: string | null; location_title: string | null }>(db, `
+    SELECT p.organization_id, p.location_id, p.created_at, p.updated_at, p.price_snapshot_json, s.name AS organization_name, s.vertical,
+           CASE WHEN p.location_id IS NULL THEN s.contact_phone WHEN l.status = 'active' THEN l.phone END AS contact_phone,
            u.name AS buyer_name, u.email AS buyer_email, u.image AS buyer_image, l.slug AS location_slug, l.title AS location_title
     FROM payments p
     JOIN organization s ON s.id = p.organization_id
@@ -446,13 +446,13 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     LEFT JOIN business_locations l ON l.id = p.location_id AND l.organization_id = p.organization_id
     WHERE p.id = ? AND ${scope.buyerUserId ? 'p.buyer_user_id = ?' : 'p.organization_id = ?'}`, [paymentId, scope.buyerUserId ?? scope.organizationId])
   if (!payment) throw new HTTPError({ statusCode: 404, message: 'Purchase not found' })
-  const detail = await readPaymentDetails(db, env, payment.organization_id, paymentId)
-  const snapshot: unknown = JSON.parse(detail.payment.price_snapshot_json)
+  const [receipt] = await readPaymentReceipts(db, env, payment.organization_id, { paymentId }, scope.buyerUserId)
+  if (!receipt) throw new HTTPError({ statusCode: 404, message: 'Purchase not found' })
+  const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
   // A purchase keeps the photo of the place it was sold.
   const resourceImageUrl = (payment.location_id ? (await loadOwnerPictures(db, payment.organization_id, 'business_location', [payment.location_id], { organizationFallback: false })).get(payment.location_id)?.imageUrl : null)
     ?? null
   if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error('Purchase has no immutable title')
-  const contact = payment.location_id ? await resolveLocationContact(db, payment.organization_id, payment.location_id) : { contactPhone: payment.contact_phone }
   return {
     assigned_member_id: null, assigned_member_name: null, host: null,
     // A purchase asks no questions.
@@ -487,7 +487,7 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     starts_at: null,
     ends_at: null,
     timezone: 'UTC',
-    status: paymentStateLabel(detail.payment),
+    status: paymentStateLabel(receipt.payment),
     complete: true,
     notes: null,
     product_id: null,
@@ -500,11 +500,11 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     no_show_at: null,
     pending_change: null,
     locations: [],
-    payments: [{ payment: paymentDisplay(detail.payment), refunds: paymentRefundsDisplay(detail.refunds) }],
+    payments: [receipt],
     guest_can_cancel: false,
     guest_can_retry_cancellation: false,
     guest_cancel_refunds: false,
     review_invitation: null,
-    contact_phone: contact?.contactPhone ?? null,
+    contact_phone: payment.contact_phone,
   }
 }

@@ -1,4 +1,8 @@
 import { CONTENT_BLOCK_TYPES } from '~/shared/content-registries'
+import { platformOrigin } from '~/server/utils/dashboard-notification-links'
+import { listPublicLocaleRepresentations, resolvePublicDocumentSourcePath } from '~/server/utils/public-locale-representations'
+import { loadExactPublicLocalizations, resolveLocalizedRouteResourceId } from '~/server/utils/public-localization'
+import { publicLocationSql } from '~/server/utils/public-locations'
 import { pageEditorPath } from '~/server/utils/dashboard-links'
 import type { McpToolDefinition } from './shared'
 import { contentBlockDataInputSchema, contentBlockMediaInputRef, contentBlockObject, contentBlockTypeBranches, contentBlockUpdatedAtInput, pageInfoObject, paginationInputSchema, organizationTool } from './shared'
@@ -9,6 +13,8 @@ import {
   deleteTenantPage,
   getTenantPageById,
   listTenantPages,
+  resolvePublishedTenantPageIdentity,
+  type TenantPageDto,
   updateTenantPage,
 } from '~/server/utils/content/pages'
 import {
@@ -26,7 +32,7 @@ import { executeBatch, queryFirst } from '~/server/db'
 import { hasPublicLocationPages, isPublicLocationPath, resolvePublicSite } from '~/utils/site-routing'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { refreshSocialCard } from '~/server/utils/social-card'
-import { renderStructuredResponse } from '~/server/utils/mcp-render'
+import { renderStructuredResponse, withMcpLink } from '~/server/utils/mcp-render'
 import { paginateMcpCollection } from '~/server/utils/mcp-pagination'
 import { NOT_HANDLED, optionalString, requiredString, rethrowAsInvalidParams } from './execution'
 
@@ -115,8 +121,9 @@ const TENANT_PAGE_LIFECYCLE_OUTPUT = {
         blocks: { type: 'array', items: contentBlockObject },
         document: { type: 'object', properties: { id: { type: 'string', minLength: 1 }, updated_at: { type: 'string', minLength: 1 } }, required: ['id', 'updated_at'] },
         admin_edit_url: { type: ['string', 'null'] },
+        public_url: { type: ['string', 'null'], description: 'The saved public URL for this variant, when publicly visible.' },
       },
-      required: ['id', 'page_id', 'organization_id', 'product_id', 'locale', 'path', 'title', 'summary', 'page_type', 'recipe', 'sort_order', 'updated_at', 'blocks', 'document', 'admin_edit_url'],
+      required: ['id', 'page_id', 'organization_id', 'product_id', 'locale', 'path', 'title', 'summary', 'page_type', 'recipe', 'sort_order', 'updated_at', 'blocks', 'document', 'admin_edit_url', 'public_url'],
     },
   },
   required: ['page'],
@@ -302,13 +309,38 @@ function pageEditUrl(organizationSlug: string | undefined, page: { id: string; p
   return organizationSlug ? pageEditorPath(organizationSlug, { id: page.id }) : null
 }
 
-function tenantPageLifecycleResponse(action: string, result: unknown, organizationSlug?: string) {
-  const page = result && typeof result === 'object' && 'page' in result && result.page && typeof result.page === 'object' && Array.isArray((result.page as { blocks?: unknown }).blocks)
-    ? { ...result, page: { ...(result.page as object), admin_edit_url: pageEditUrl(organizationSlug, result.page as { id: string; product_id?: string | null }), blocks: ((result.page as { blocks: Array<{ position?: number }> }).blocks).map(withoutPosition) } }
-    : result && typeof result === 'object' && Array.isArray((result as { blocks?: unknown }).blocks)
-      ? { ...result, blocks: ((result as { blocks: Array<{ position?: number }> }).blocks).map(withoutPosition) }
-      : result
-  return renderStructuredResponse(page, `${action} tenant page.`, { tenant_page: page })
+async function tenantPageLifecycleResponse(action: 'Read' | 'Created' | 'Updated', page: TenantPageDto, organization: McpExecutorContext['organization']) {
+  const { db, env, organizationId, organizationSlug, publicUrl } = organization
+  const identity = publicUrl ? await resolvePublishedTenantPageIdentity(db, organizationId, page.path, page.locale) : null
+  let routePath: string | null = null
+  if (identity?.id === page.id) {
+    if (page.id === page.page_id) routePath = identity.path
+    else {
+      const sourcePath = await resolvePublicDocumentSourcePath(db, organizationId, page.page_id)
+      const routes = await listPublicLocaleRepresentations(env, db, { organizationId, sourcePath, documentId: page.page_id })
+      routePath = routes.find(route => route.locale === page.locale)?.route_path ?? null
+    }
+  }
+  const locationSlug = /^\/locations\/([^/]+)$/u.exec(page.path)?.[1]
+  if (routePath && locationSlug) {
+    const isSource = page.id === page.page_id
+    const locationId = isSource ? null : resolveLocalizedRouteResourceId(
+      await loadExactPublicLocalizations(env, db, organizationId, page.locale), 'business_location', routePath,
+    )
+    const location = isSource || locationId ? await queryFirst(db, `
+      SELECT bl.id FROM business_locations bl WHERE bl.organization_id = ?
+        AND bl.${isSource ? 'slug' : 'id'} = ? AND ${publicLocationSql('bl')} LIMIT 1
+    `, [organizationId, locationId ?? locationSlug]) : null
+    if (!location) routePath = null
+  }
+  const public_url = publicUrl && routePath ? new URL(routePath, publicUrl).href : null
+  const admin_edit_url = pageEditUrl(organizationSlug, page)
+  const payload = { page: { ...page, admin_edit_url, public_url, blocks: page.blocks.map(withoutPosition) } }
+  const message = `${action} tenant page.`
+  const linkText = public_url
+    ? withMcpLink(message, 'View page', public_url)
+    : withMcpLink(message, 'Edit page', admin_edit_url ? new URL(admin_edit_url, platformOrigin(env)).href : null)
+  return renderStructuredResponse(payload, linkText, { tenant_page: payload })
 }
 
 function assertTenantPageRemovedBlockIds(
@@ -413,9 +445,7 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
         const page = await getTenantPageById(organization.db, requiredString(args, "variant_id"), {
           organizationId: organization.organizationId,
         })
-        return tenantPageLifecycleResponse("Read", {
-          page,
-        }, organization.organizationSlug);
+        return await tenantPageLifecycleResponse("Read", page, organization);
       } catch (error) {
         return rethrowAsInvalidParams(error);
       }
@@ -441,7 +471,7 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
           },
           env: organization.env,
         });
-        return tenantPageLifecycleResponse("Created", created, organization.organizationSlug);
+        return await tenantPageLifecycleResponse("Created", created.page, organization);
       } catch (error) {
         return rethrowAsInvalidParams(error);
       }
@@ -468,7 +498,7 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
           },
           env: organization.env,
         });
-        return tenantPageLifecycleResponse("Updated", updated, organization.organizationSlug);
+        return await tenantPageLifecycleResponse("Updated", updated.page, organization);
       } catch (error) {
         return rethrowAsInvalidParams(error);
       }
@@ -479,7 +509,7 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
           expectedUpdatedAt: requiredString(args, "updated_at"),
           env: organization.env,
         });
-        return tenantPageLifecycleResponse("Deleted", deleted, organization.organizationSlug);
+        return renderStructuredResponse(deleted, "Deleted tenant page.", { tenant_page: deleted });
       } catch (error) {
         return rethrowAsInvalidParams(error);
       }

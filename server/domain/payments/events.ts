@@ -10,7 +10,7 @@ import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/for
 import { assertBookingBatchWrite, bookingBatchWriteRefused, CapacityUnavailableError, sessionClaimQuery } from '~/server/utils/availability'
 import { processStripeWebhookEvent } from '~/server/utils/stripe-webhook-events'
 import { paymentsStripe, platformLivemode } from '~/server/utils/stripe-connect'
-import { approvedStayBooking, reconcileRefundState, requirePayment, assertMinorAmount, type Payment } from './index'
+import { approvedStayBooking, executeRefund, reconcileRefundState, requirePayment, assertMinorAmount, type Payment } from './index'
 import { notifyPaymentFinancialEvent, publishPaymentNotification, reconcilePayoutEvent } from './notifications'
 import { checkoutWebsiteSource, recordPaymentPaid } from '~/server/domain/booking-analytics'
 import { notifyStayBooked, raiseSettledFailures } from '~/server/utils/notifications'
@@ -21,7 +21,7 @@ import { TURNOVER_HOME_FROM } from '~/server/domain/tasks'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { stayRequestConfirmationKey } from '~/server/domain/requests'
-import { checkoutStayChangedEvent, isStayNightConflict, stayFromCheckoutQueries, stayHoldPredicate, type CheckoutHome } from '~/server/domain/stays'
+import { checkoutStayChangedEvent, isStayNightConflict, stayFromCheckoutQueries, type CheckoutHome } from '~/server/domain/stays'
 
 export interface CheckoutHold {
   id:string; organization_id:string; product_id:string|null; variant_id:string|null; session_id:string|null; location_id:string|null
@@ -34,6 +34,8 @@ export interface CheckoutHold {
   receipt_conversation_id: string | null
   receipt_cancellation_hash: string | null
 }
+
+type CapturedPayment = Payment & { retained_without_organization: number }
 
 /** The checkout record for the payment aliased as p, including its converted receipt if present. */
 export const checkoutHoldSql = `SELECT json_object(
@@ -98,7 +100,7 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
       }
     } else {
       try {
-        const bookingId = await saveCheckoutBooking(db, env, payment, hold, snapshot, now)
+        const { bookingId } = await saveCheckoutBooking(db, env, payment, hold, snapshot, now)
         hold = { ...hold, status: 'converted', converted_booking_id: bookingId }
       } catch (error) {
         if (!isStayNightConflict(error) && !bookingBatchWriteRefused(error) && !(error instanceof CapacityUnavailableError)) throw error
@@ -132,8 +134,7 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
   }
   if (intent.status !== 'succeeded') return intent
 
-  const bookingId = hold?.status === 'converted' ? hold.converted_booking_id : null
-  const keepPaymentOnly = hold && !hold.organization_exists && (hold.session_id === null || (hold.retained_for_servicing && bookingId))
+  let bookingId = hold?.status === 'converted' ? hold.converted_booking_id : null
   if (intent.application_fee_amount) throw new Error('Direct charges carry no application fee')
   const charge = intent.latest_charge
   if (!charge || typeof charge === 'string' || charge.livemode !== Boolean(payment.livemode) || charge.payment_intent !== intent.id || charge.amount !== intent.amount_received) throw new Error('Captured charge financial scope mismatch')
@@ -162,13 +163,33 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
       }, { query: 'SELECT 1 WHERE changes()=1', params: [] })] : []),
     )
   }
-  const [write] = captureQueries.length ? await executeBatch(db, captureQueries, { operation: 'Record payment capture' }) : []
+  let conversion: Awaited<ReturnType<typeof saveCheckoutBooking>> | undefined
+  if (hold?.status === 'active' && hold.organization_exists && payment.refunded_amount === 0) {
+    // Redirect methods can succeed without a separate authorization. Claim what was
+    // purchased and record the verified charge together.
+    try {
+      conversion = await saveCheckoutBooking(db, env, payment, hold, snapshot, new Date(charge.created * 1000).toISOString(), captureQueries)
+      bookingId = conversion.bookingId
+    } catch (error) {
+      if (!isStayNightConflict(error) && !bookingBatchWriteRefused(error) && !(error instanceof CapacityUnavailableError)) throw error
+      await execute(db, "UPDATE payment_checkout_holds SET status='released' WHERE id=? AND organization_id=? AND status='active'", [hold.id, payment.organization_id])
+      hold = await readCheckoutHold(db, payment)
+      if (hold?.status !== 'converted' && hold?.status !== 'released') throw error
+      bookingId = hold.converted_booking_id
+    }
+  }
+  const [write] = !conversion && captureQueries.length ? await executeBatch(db, captureQueries, { operation: 'Record payment capture' }) : []
+  const capture = conversion?.capture ?? write?.results[0] as CapturedPayment | undefined
   // Confirm and the Stripe webhook may observe the same capture.
-  const capture = write?.results[0] as (Payment & { retained_without_organization: number }) | undefined
   const recorded = capture ?? (captureQueries.length ? await requirePayment(db, payment.organization_id, payment.id) : payment)
   if (!matchesCapture(recorded)) throw new Error('Stored capture does not match Stripe')
-  // Record a confirmed charge for servicing even when the booking is missing.
-  if (payment.subject_type === 'booking' && !keepPaymentOnly && !bookingId) throw new Error('Captured payment has no saved booking')
+  const keepPaymentOnly = hold && !hold.organization_exists && (hold.session_id === null || (hold.retained_for_servicing && bookingId))
+  if (payment.subject_type === 'booking' && !keepPaymentOnly && !bookingId) {
+    if (hold?.status !== 'released' || !hold.organization_exists) throw new Error('Captured payment has no saved booking')
+    if (recorded.refunded_amount < recorded.captured_amount) {
+      await executeRefund(db, stripe, recorded, null, `unfulfillable:${intent.id}`, 'requested_by_customer', null, env)
+    }
+  }
   const notice = { kind: 'payment_captured' as const, nativeId: intent.id, status: intent.status, amount: intent.amount_received, email: charge.billing_details.email ?? null }
   const finish = async (booking: Extract<DomainEvent, { type: 'payment.captured' }>['booking'] = null) => {
     await publishEvent(env, {
@@ -223,7 +244,7 @@ function frozenAnswers(snapshot: Record<string, unknown>): FormAnswerSnapshot[] 
 }
 
 /** Save the booking, claim inventory and attach the payment in one transaction. */
-async function saveCheckoutBooking(db: DbClient, env: CloudflareEnv, payment: Payment, hold: CheckoutHold, snapshot: Record<string, unknown>, now: string) {
+async function saveCheckoutBooking(db: DbClient, env: CloudflareEnv, payment: Payment, hold: CheckoutHold, snapshot: Record<string, unknown>, now: string, captureQueries: BatchQuery[] = []) {
  if (!hold.product_id || !isRecord(snapshot.policy)) throw new Error('Booking payment has no offering or frozen policy')
  const approval = approvedStayBooking(snapshot)
  const bookingId = approval?.bookingId ?? crypto.randomUUID()
@@ -265,9 +286,7 @@ async function saveCheckoutBooking(db: DbClient, env: CloudflareEnv, payment: Pa
    const { variants, ...clocks } = hold.home
    if (variants.length !== 1) throw new Error(`Home ${purchase.product_id} has ${variants.length} variants; a home has exactly one`)
    const home = { ...clocks, name: snapshot.title, variant_id: variants[0]! }
-   const bookable = await stayHoldPredicate(db, { organizationId: payment.organization_id, productId: purchase.product_id, checkIn: purchase.check_in_date, checkOut: purchase.check_out_date })
-   const availability = { query: `${activeCheckout.query} AND ${bookable.query} AND ?>?`,
-     params: [...activeCheckout.params, ...bookable.params ?? [], payment.checkout_expires_at, now] }
+   const availability = { query: `${activeCheckout.query} AND ?>?`, params: [...activeCheckout.params, payment.checkout_expires_at, now] }
    claim = stayFromCheckoutQueries({ organizationId: payment.organization_id, stayId: bookingId, paymentId: payment.id, buyerUserId, now, stay: { quote: purchase, guest: purchase.guest },
     home, policy, availability, websiteSource: await checkoutWebsiteSource(db, payment, hold.conversation_id) })
   }
@@ -280,9 +299,11 @@ async function saveCheckoutBooking(db: DbClient, env: CloudflareEnv, payment: Pa
      params: [bookingId, now, payment.id, payment.organization_id] },
    assertBookingBatchWrite({ query: `changes()=1 AND EXISTS (SELECT 1 FROM conversations WHERE organization_id=? AND booking_id=? AND kind='booking'
      AND (? IS NULL OR id=?))`, params: [payment.organization_id, bookingId, hold.conversation_id, hold.conversation_id] }),
+   ...captureQueries,
  ], { operation: 'Save checkout booking' })
  await publishChangedJobs(env, payment.organization_id, changedTaskIds(writes))
- return bookingId
+ const capture = captureQueries.length ? writes.at(-captureQueries.length)?.results[0] as CapturedPayment | undefined : undefined
+ return { bookingId, capture }
 }
 
 const CONFIRMATION_HOLD_MS=60*60*1000

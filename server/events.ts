@@ -1,3 +1,4 @@
+import { recordDatabaseRequestPhase } from '~/server/utils/request-metrics'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import type { ChannelStayTerms } from '~/server/domain/stays'
 import type { PaymentFinancialEvent } from '~/server/domain/payments/notifications'
@@ -56,7 +57,7 @@ export type DomainEvent =
     }
 
 type EventDeliveryOptions = { delaySeconds: number }
-export interface EventsEnv { EVENTS?: { send(_event: DomainEvent, _options?: EventDeliveryOptions): Promise<void> } }
+export interface EventsEnv { DB?: D1Database; EVENTS?: { send(_event: DomainEvent, _options?: EventDeliveryOptions): Promise<void> } }
 
 /**
  * What the AIRBNB_SYNC queue carries, consumed one delivery at a time
@@ -81,7 +82,13 @@ export async function publishAirbnbSync(env: AirbnbSyncEnv, message: AirbnbSyncM
 /** Announce what a write did. The write's own batch has already committed; this is one queue send, no database work. */
 export async function publishEvent(env: EventsEnv, event: DomainEvent, options?: EventDeliveryOptions): Promise<void> {
   if (!env.EVENTS) throw new Error('The EVENTS queue is not bound: a write could not announce what it did')
-  await env.EVENTS.send(event, options)
+  const startedAt = performance.now()
+  try {
+    await env.EVENTS.send(event, options)
+  } finally {
+    if (env.DB && event.type === 'stay.changed') recordDatabaseRequestPhase(env.DB, 'stay_queue_send', startedAt)
+    if (env.DB && event.type === 'site.cache_changed') recordDatabaseRequestPhase(env.DB, 'cache_queue_send', startedAt)
+  }
 }
 
 /** Task mutations return their IDs in the same batch that writes them. */

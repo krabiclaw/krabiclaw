@@ -21,7 +21,7 @@ import { executeBatch } from '../../server/db/index.ts'
 import { requestInsertQueries } from '../../server/domain/requests.ts'
 import { appendMessage, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { archiveConversation } from '../../server/domain/guest-threads/repository.ts'
-import { stayCheckoutPolicy, stayFromCheckoutQueries, stayHoldPredicate } from '../../server/domain/stays.ts'
+import { stayCheckoutPolicy, stayFromCheckoutQueries } from '../../server/domain/stays.ts'
 import { bookingPolicy } from '../../server/utils/booking-policy-summary.ts'
 import { requireBookingConfig } from '../../server/utils/availability.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -179,7 +179,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
       VALUES ('site-pay', ?, 'site-guest', 'acct_contract', 0, 'booking', NULL, 'location', 'USD', 45000, 45000, 'pi_site', ?, ?, ?)`).bind(ORG, JSON.stringify({ stay: purchase }), NOW, NOW).run()
     const variant = (await db.prepare('SELECT id FROM product_variants WHERE product_id = ?').bind(home.id).first<{ id: string }>())!
     await executeBatch(db, stayFromCheckoutQueries({ organizationId: ORG, stayId: 'site-stay', paymentId: 'site-pay', buyerUserId: 'site-guest', now: NOW, websiteSource: 'Direct',
-      availability: await stayHoldPredicate(db, { organizationId: ORG, productId: home.id, checkIn: purchase.check_in_date, checkOut: purchase.check_out_date }),
+      availability: { query: '1', params: [] },
       stay: { quote: purchase, guest: purchase.guest }, policy: JSON.stringify(stayCheckoutPolicy(bookingPolicy(await requireBookingConfig(db, ORG, purchase.product_id), null), { ...purchase, tax_behavior: 'unspecified' })),
       home: { name: home.name, location_id: 'location', timezone: 'America/Denver', check_in_time: '16:00', check_out_time: '10:00', variant_id: variant.id } }))
     const siteThreadId = (await db.prepare("SELECT id FROM conversations WHERE booking_id = 'site-stay' AND kind = 'booking'").first<{ id: string }>())!.id
