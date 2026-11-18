@@ -2894,10 +2894,11 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   {
     // Airbnb's calendar reports a reserved night unavailable, so the import closed it. A reservation Channex
     // loads from before the import is what held those nights: once its booking is here they are no longer a
-    // block, and free if it cancels. A booking made later never lands on a block, so it opens none.
+    // block, and free if it cancels. A booking made later never lands on a block, and a loaded cancellation
+    // held nothing at import, so neither opens any.
     query: `UPDATE product_nights SET closed = 0, updated_at = ? WHERE organization_id = ? AND product_id = ? AND source = 'import' AND closed = 1
       AND date >= ? AND date < ? AND ? = 1 AND EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND version = ?)`,
-    params: [now, organizationId, landing, booking.check_in_date, booking.check_out_date, booking.imported === true ? 1 : 0, organizationId, id, version],
+    params: [now, organizationId, landing, booking.check_in_date, booking.check_out_date, booking.imported === true && !booking.cancelled ? 1 : 0, organizationId, id, version],
   },
   {
     // Channex changed these nights' availability itself when it took the booking, so what it last confirmed
