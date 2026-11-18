@@ -17,7 +17,7 @@
       <fieldset class="space-y-5">
         <legend class="mb-5 text-lg font-semibold text-highlighted">Guest</legend>
         <UFormField label="Name" name="guest_name" required><UInput v-model="draft.guest_name" :maxlength="200" autocomplete="name" class="w-full" /></UFormField>
-        <UFormField label="Email" name="guest_email"><UInput v-model="draft.guest_email" type="email" :maxlength="254" autocomplete="email" class="w-full" /></UFormField>
+        <UFormField label="Email" name="guest_email" required><UInput v-model="draft.guest_email" type="email" :maxlength="254" autocomplete="email" class="w-full" /></UFormField>
         <UFormField label="Phone" name="guest_phone"><UInput v-model="draft.guest_phone" type="tel" placeholder="+66812345678" :maxlength="40" autocomplete="tel" class="w-full" /></UFormField>
         <div class="grid gap-5 sm:grid-cols-3">
           <UFormField label="Adults" name="adults" required><UInputNumber v-model="draft.adults" :min="1" :max="home?.max_guests ?? 99" class="w-full" /></UFormField>
@@ -107,7 +107,7 @@ const validation = computed<{ home: string | null; dates: string | null; guest: 
   const guest = !value.guest_name.trim() ? 'Enter the guest’s first name.'
     : !validCount(value.adults, 1) || !validCount(value.children, 0) || !validCount(value.infants, 0) ? 'Enter whole guest counts with at least one adult.'
     : home.value && value.adults! + value.children! > home.value.max_guests ? `This home sleeps at most ${home.value.max_guests} guests.`
-    : value.guest_email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.guest_email.trim()) ? 'Enter a valid email address.'
+    : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.guest_email.trim()) ? 'Enter a valid email address.'
     : value.guest_phone.trim() && !toE164(value.guest_phone.trim()) ? 'Use an international phone number with its country calling code.' : null
   let total: string | null = null
   try {
@@ -133,7 +133,7 @@ async function commit() {
     draft.value.attempt ??= {
       product_id: draft.value.product_id, check_in_date: draft.value.check_in_date, check_out_date: draft.value.check_out_date, arrival_time: draft.value.arrival_time || null,
       adults: draft.value.adults, children: draft.value.children, infants: draft.value.infants, guest_name: draft.value.guest_name.trim(),
-      guest_email: draft.value.guest_email.trim() || null, guest_phone: draft.value.guest_phone.trim() || null, total_minor: amount(draft.value.total), private_notes: draft.value.private_notes.trim() || null, idempotency_key: draft.value.key,
+      guest_email: draft.value.guest_email.trim(), guest_phone: draft.value.guest_phone.trim() || null, total_minor: amount(draft.value.total), private_notes: draft.value.private_notes.trim() || null, idempotency_key: draft.value.key,
       ...(draft.value.record_payment ? { payment: { amount_minor: amount(draft.value.payment_amount), method: draft.value.payment_method, paid_on: draft.value.payment_date, reference: draft.value.payment_reference.trim() || null } } : {}),
     }
     const result = await api('/api/dashboard/bookings', { method: 'POST', body: draft.value.attempt, signal: mutation.signal, validate: (value): value is { booking: { booking_id: string } } => isRecord(value) && isRecord(value.booking) && typeof value.booking.booking_id === 'string' && Boolean(value.booking.booking_id) })

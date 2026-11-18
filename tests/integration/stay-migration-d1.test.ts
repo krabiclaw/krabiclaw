@@ -66,7 +66,7 @@ test('migration preview rejects missing financial facts, duplicate sources and o
     assert.equal(archived.rows[0]!.state, 'skipped'); assert.deepEqual(archived.source_listings, [])
     await assert.rejects(previewStayMigration(db, access, { ...source, overrides: { '67459976': { notes: '"'.repeat(600_000) } } }), (error: { data?: { code?: string } }) => error.data?.code === 'MIGRATION_EVIDENCE_TOO_LARGE')
 
-    await createStay(db, env, access, { product_id: home.id, idempotency_key: 'existing-live-booking', guest_name: 'Adam', adults: 1, total_minor: 10_000, check_in_date: '2026-11-06', check_out_date: '2026-11-13' })
+    await createStay(db, env, access, { product_id: home.id, idempotency_key: 'existing-live-booking', guest_name: 'Adam', guest_email: 'adam@example.test', adults: 1, total_minor: 10_000, check_in_date: '2026-11-06', check_out_date: '2026-11-13' })
     const conflict = await previewStayMigration(db, access, source)
     assert.equal(conflict.can_import, false); assert.match(conflict.rows[0]!.issues.join(' '), /Overlaps existing stay/)
     await assert.rejects(importStayMigration(db, env, access, { ...source, fingerprint: conflict.fingerprint }), (error: { data?: { code?: string } }) => error.data?.code === 'MIGRATION_NEEDS_ATTENTION')

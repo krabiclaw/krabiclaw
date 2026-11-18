@@ -97,8 +97,8 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
       WHERE c.organization_id = ? AND c.kind = 'team' AND seat.user_id = ? ORDER BY c.last_message_at DESC, c.id DESC`).bind(ORG, access.userId).all<{ id: string }>()).results.map(row => readTeamThread(db, access, row.id)))
 
     // Dee leaves in three days; Lee arrives the same afternoon. The turnover is the cleaner's.
-    const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(1), check_out_date: day(3), adults: 2, guest_name: 'Dee', total_minor: 30_000 })
-    const lee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'lee', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Lee', total_minor: 30_000 })
+    const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(1), check_out_date: day(3), adults: 2, guest_name: 'Dee', guest_email: 'dee@example.test', total_minor: 30_000 })
+    const lee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'lee', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Lee', guest_email: 'lee@example.test', total_minor: 30_000 })
     const turnover = (await taskRow(`turnover:${dee.id}`))!
     assert.equal(turnover.assigned_member_id, 'm-cleaner')
     const checkout = at(day(3), '10:00')
@@ -220,7 +220,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.equal(report.photos[0]?.id, reported.outcome?.photos[0]?.id)
 
     // A cancelled stay cancels its job in the conversation at once.
-    const may = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'may', check_in_date: day(6), check_out_date: day(8), adults: 1, guest_name: 'May', total_minor: 30_000 })
+    const may = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'may', check_in_date: day(6), check_out_date: day(8), adults: 1, guest_name: 'May', guest_email: 'may@example.test', total_minor: 30_000 })
     await runOrganizationJobs(queue, env, db, ORG, at(day(3), '14:00'))
     const mayThread = (await teamThreads(cook)).find(item => item.booking_id === may.id)!
     assert.equal((await automatic(mayThread.id)).length, 1)

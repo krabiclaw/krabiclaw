@@ -3,7 +3,7 @@ import { appendMessage } from '../../server/domain/conversations.ts'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { createStay, type StayAccess } from '../../server/domain/stays.ts'
+import { createStay, updateStay, type StayAccess } from '../../server/domain/stays.ts'
 import { cancelScheduledGuestMessage, deleteMessageTemplate, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
 import { sendDueOutbox } from '../../server/domain/scheduled-guest-messages.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -58,7 +58,8 @@ test('the business outbox sends due messages, leaves future ones pending and rec
     const welcome = await saveMessageTemplate(db, env, manager, null, { title: 'Welcome', body: 'Thanks for booking the cabin.', schedule: { trigger: 'booking_received', delay_minutes: 5, product_ids: [cabin.id] } })
     const arrival = await saveMessageTemplate(db, env, manager, null, { title: 'Arrival', body: 'See you today.', schedule: { trigger: 'check_in', offset_days: 0, local_time: '12:00', product_ids: [cabin.id] } })
     const ana = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'ana', check_in_date: day(3), check_out_date: day(5), adults: 2, guest_name: 'Ana', guest_email: 'ana@example.test', total_minor: 30_000 })
-    const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(11), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 15_000 })
+    const deeCreated = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(11), adults: 1, guest_name: 'Dee', guest_email: 'dee@example.test', guest_phone: '+61491570151', total_minor: 15_000 })
+    const dee = await updateStay(db, env, manager, deeCreated.id, { version: deeCreated.version, guest_email: null })
     const cy = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cy', check_in_date: day(20), check_out_date: day(21), adults: 1, guest_name: 'Cy', guest_email: 'cy@example.test', total_minor: 15_000 })
     const eve = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'eve', check_in_date: day(30), check_out_date: day(31), adults: 1, guest_name: 'Eve', guest_email: 'eve@example.test', total_minor: 15_000 })
     await queue.drain(env, 'stay.changed')
