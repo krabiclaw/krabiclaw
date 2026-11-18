@@ -39,6 +39,22 @@
         <UButton icon="i-simple-icons-airbnb" size="xl" block :loading="starting" @click="startConnection">Connect Airbnb</UButton>
         <p class="text-center text-xs text-dimmed">You can also connect and sync directly within the Blawby app on iOS.</p>
       </div>
+      <template #connected>
+        <section v-if="missingListings.length" class="space-y-3">
+          <div>
+            <h2 class="text-sm font-semibold text-muted">Missing from Airbnb</h2>
+            <p class="mt-1 text-sm text-muted">Airbnb no longer lists these homes on this account. Stopping Airbnb sync keeps the home and its reservations in Blawby.</p>
+          </div>
+          <div v-for="listing in missingListings" :key="listing.listing_id" class="flex items-center justify-between gap-3">
+            <NuxtLink :to="`/dashboard/${String(route.params.org_slug)}/products/${listing.product_id}`" class="font-medium text-highlighted underline">
+              {{ listing.internal_name }}
+            </NuxtLink>
+            <UButton v-if="canManage" color="neutral" variant="outline" :disabled="applying || pending || disconnecting" @click="submitChanges({ stop: [listing.product_id] })">
+              Stop Airbnb sync
+            </UButton>
+          </div>
+        </section>
+      </template>
     </IntegrationLeaf>
   </DashboardLeafPanel>
 </template>
@@ -77,6 +93,8 @@ interface AirbnbStatus {
 
 type ListingImport = { status: 'not_imported' } | { status: 'imported'; product_id: string; stage: ImportStage; syncing: boolean }
 interface AirbnbListing { id: string; title: string; city: string; country_code: string; import: ListingImport }
+interface MissingAirbnbListing { listing_id: string; product_id: string; internal_name: string }
+interface SyncRequest { sync?: Array<{ listing_id: string; details?: Record<string, string> }>; stop: string[] }
 
 interface SyncChange {
   listing_id: string
@@ -107,7 +125,10 @@ const isStatus = (value: unknown): value is AirbnbStatus =>
 const isListing = (value: unknown): value is AirbnbListing =>
   isRecord(value) && typeof value.id === 'string' && typeof value.title === 'string' && isRecord(value.import)
   && (value.import.status === 'not_imported' || (value.import.status === 'imported' && typeof value.import.product_id === 'string' && isStage(value.import.stage) && typeof value.import.syncing === 'boolean'))
-const isListings = (value: unknown): value is { listings: AirbnbListing[] } => isRecord(value) && Array.isArray(value.listings) && value.listings.every(isListing)
+const isListings = (value: unknown): value is { listings: AirbnbListing[]; missing_listings: MissingAirbnbListing[] } =>
+  isRecord(value) && Array.isArray(value.listings) && value.listings.every(isListing)
+  && Array.isArray(value.missing_listings) && value.missing_listings.every(listing => isRecord(listing)
+    && typeof listing.listing_id === 'string' && typeof listing.product_id === 'string' && typeof listing.internal_name === 'string')
 const isChange = (value: unknown): value is SyncChange =>
   isRecord(value) && typeof value.listing_id === 'string' && (value.action === 'sync' || value.action === 'stop')
   && ['queued', 'running', 'done', 'failed'].includes(String(value.status)) && (value.stage === null || isStage(value.stage))
@@ -132,6 +153,7 @@ const { data: listingsData, error: listingsError, pending: listingsPending, refr
   { immediate: connected.value, watch: [connected] },
 )
 const listings = computed(() => connected.value ? listingsData.value?.listings ?? [] : [])
+const missingListings = computed(() => connected.value ? listingsData.value?.missing_listings ?? [] : [])
 
 const { data: changes, error: changesError, refresh: refreshChanges } = await useAsyncData(
   () => `integration-airbnb-sync:${integrations.organizationId}`,
@@ -312,21 +334,21 @@ async function actOnListing(id: string) {
 }
 
 /** Hands the change to Blawby, then follows its progress until nothing is waiting. */
-async function apply() {
-  if (!applyLabel.value || applying.value) return
+function apply() {
+  if (!applyLabel.value) return
+  return submitChanges({
+    sync: toSync.value.map(listing => ({ listing_id: listing.id, ...(entered.value[listing.id] ? { details: entered.value[listing.id] } : {}) })),
+    stop: toStop.value.map(listing => (listing.import as { product_id: string }).product_id),
+  })
+}
+
+async function submitChanges(body: SyncRequest) {
+  if (applying.value || pending.value || disconnecting.value) return
   applying.value = true
   failure.value = ''
   try {
-    await dashboardApi(`${api}/sync`, {
-      method: 'POST',
-      body: {
-        sync: toSync.value.map(listing => ({ listing_id: listing.id, ...(entered.value[listing.id] ? { details: entered.value[listing.id] } : {}) })),
-        stop: toStop.value.map(listing => (listing.import as { product_id: string }).product_id),
-      },
-      validate: isChanges,
-    })
-    await refreshChanges()
-    follow()
+    await dashboardApi(`${api}/sync`, { method: 'POST', body, validate: isChanges })
+    await refreshSync()
   } catch (cause) {
     failure.value = getErrorMessage(cause, 'The change could not be started.')
   } finally {
@@ -376,8 +398,7 @@ async function retryFailed() {
       },
       validate: isChanges,
     })
-    await refreshChanges()
-    follow()
+    await refreshSync()
   } catch (cause) {
     failure.value = getErrorMessage(cause, 'The change could not be started again.')
   } finally {
@@ -387,23 +408,26 @@ async function retryFailed() {
 
 // The work continues on the server whether or not this page is open; while it runs, the checklist reads what syncs now every few seconds.
 let timer: ReturnType<typeof setTimeout> | null = null
+async function refreshSync() {
+  await refreshChanges()
+  if (changesError.value) throw changesError.value
+  if (pending.value) return follow()
+  // The first listing to sync activates the channel, which the account line reads from status.
+  await Promise.all([refreshStatus(), refreshListings(), integrations.refresh()])
+  // What a listing now syncing was given is spent; a listing still waiting keeps what the host typed.
+  entered.value = Object.fromEntries(Object.entries(entered.value).filter(([id]) => !listings.value.some(listing => listing.id === id && syncing(listing))))
+}
+
 function follow() {
   if (timer) clearTimeout(timer)
   if (!pending.value) return
   timer = setTimeout(async () => {
     timer = null
     try {
-      await refreshChanges()
-      if (changesError.value) throw changesError.value
+      await refreshSync()
     } catch (cause) {
       failure.value = getErrorMessage(cause, 'Could not read the sync’s progress.')
-      return
     }
-    if (pending.value) return follow()
-    // The first listing to sync activates the channel, which the account line reads from status.
-    await Promise.all([refreshStatus(), refreshListings(), integrations.refresh()])
-    // What a listing now syncing was given is spent; a listing still waiting keeps what the host typed.
-    entered.value = Object.fromEntries(Object.entries(entered.value).filter(([id]) => !listings.value.some(listing => listing.id === id && syncing(listing))))
   }, 3000)
 }
 onMounted(follow)
