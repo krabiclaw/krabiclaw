@@ -3227,11 +3227,11 @@ export function stayRequestDeadline(now: string, startsAt: string, timezone: str
 }
 
 type StayAvailability = { organizationId: string; productId: string; checkIn: string; checkOut: string; exceptBookingId?: string }
-export function stayInventoryAvailable({ organizationId, productId, checkIn, checkOut, exceptBookingId = null }: StayAvailability) {
+export function stayInventoryAvailable({ organizationId, productId, checkIn, checkOut, exceptBookingId }: StayAvailability) {
   return {
     query: `NOT EXISTS (SELECT 1 FROM occupied_stay_nights n
       WHERE n.organization_id = ? AND n.product_id = ? AND n.date >= ? AND n.date < ? AND n.booking_id IS NOT ?)`,
-    params: [organizationId, productId, checkIn, checkOut, exceptBookingId],
+    params: [organizationId, productId, checkIn, checkOut, exceptBookingId ?? null],
   }
 }
 

@@ -280,6 +280,15 @@ function primaryKey(db, table) {
   return db.prepare(`PRAGMA table_info(${qi(table)})`).all().filter(column => column.pk > 0).sort((a, b) => a.pk - b.pk).map(column => column.name)
 }
 
+// Restore local claims before channel claims. A channel may have sold a night
+// that was already occupied by a local booking.
+function transferRows(db, table, projection = '*') {
+  const order = table === 'stay_nights'
+    ? " ORDER BY (SELECT owner FROM bookings WHERE id = stay_nights.booking_id) = 'channel'"
+    : ''
+  return db.prepare(`SELECT ${projection} FROM ${qi(table)}${order}`).all()
+}
+
 /**
  * The full replacement, or with `deltaFrom` only the rows the earlier target
  * did not hold. A delta never deletes or updates: it is applied to a live
@@ -297,7 +306,7 @@ export function writePayload(target, payloadPath, schemaSql, { withoutJwks = fal
     let chunkedText = false
     for (const table of [...order].reverse()) {
       const names = columns(target, table)
-      let rows = target.prepare(`SELECT * FROM ${qi(table)}`).all()
+      let rows = transferRows(target, table)
       if (earlier) {
         const key = primaryKey(target, table)
         assert(key.length > 0, `${table} has no primary key, so its new rows cannot be told apart`)
@@ -311,7 +320,7 @@ export function writePayload(target, payloadPath, schemaSql, { withoutJwks = fal
         const current = new Map(target.prepare(`SELECT * FROM ${qi(table)}`).all().map(row => [JSON.stringify(key.map(name => row[name])), JSON.stringify(names.map(name => row[name]))]))
         const changed = []
         const deleted = []
-        for (const row of earlier.prepare(`SELECT * FROM ${qi(table)}`).all()) {
+        for (const row of transferRows(earlier, table)) {
           const id = JSON.stringify(key.map(name => row[name]))
           if (!current.has(id)) deleted.push(id)
           else if (current.get(id) !== JSON.stringify(names.map(name => row[name]))) changed.push(id)
@@ -360,7 +369,7 @@ export function writePayload(target, payloadPath, schemaSql, { withoutJwks = fal
         for (const table of tables) {
           const names = columns(earlier, table)
           const insert = replay.prepare(`INSERT INTO ${qi(table)} (${names.map(qi).join(', ')}) VALUES (${names.map(() => '?').join(', ')})`)
-          for (const row of earlier.prepare(`SELECT * FROM ${qi(table)}`).all()) insert.run(...names.map(name => row[name]))
+          for (const row of transferRows(earlier, table)) insert.run(...names.map(name => row[name]))
         }
         replay.pragma('foreign_keys = ON')
         replay.exec(readFileSync(payloadPath, 'utf8'))
@@ -441,7 +450,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     for (const table of sourceTables) {
       const tableColumns = columns(stage, table)
       assert(JSON.stringify(columns(source, table)) === JSON.stringify(tableColumns), `${table}: source columns differ from the schema being copied`)
-      const rows = source.prepare(`SELECT * FROM ${qi(table)}`).all()
+      const rows = transferRows(source, table)
       const insert = stage.prepare(`INSERT INTO ${qi(table)} (${tableColumns.map(qi).join(',')}) VALUES (${tableColumns.map(() => '?').join(',')})`)
       for (const row of rows) insert.run(...tableColumns.map(name => row[name]))
       assert(digest(rows, tableColumns) === digest(stage.prepare(`SELECT * FROM ${qi(table)}`).all(), tableColumns), `${table}: copy differs`)
@@ -456,7 +465,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     target.transaction(() => {
       for (const table of names) {
         const targetColumns = columns(target, table)
-        const rows = stage.prepare(`SELECT ${targetColumns.map(qi).join(',')} FROM ${qi(table)}`).all()
+        const rows = transferRows(stage, table, targetColumns.map(qi).join(','))
         const insert = target.prepare(`INSERT INTO ${qi(table)} (${targetColumns.map(qi).join(',')}) VALUES (${targetColumns.map(() => '?').join(',')})`)
         for (const row of rows) insert.run(...targetColumns.map(name => row[name]))
         assert(digest(rows, targetColumns) === digest(target.prepare(`SELECT * FROM ${qi(table)}`).all(), targetColumns), `${table}: target copy differs`)

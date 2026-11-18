@@ -4,7 +4,7 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { Miniflare } from 'miniflare'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { applyChannelBooking, createStay, setStayNights } from '../../server/domain/stays.ts'
+import { applyChannelBooking, cancelStay, createStay, setStayNights } from '../../server/domain/stays.ts'
 import { applyBookingRevision } from '../../server/integrations/channex/booking-revisions.ts'
 import { ChannexConnection } from '../../server/integrations/channex/channel-connection.ts'
 import { startVrboSetup, vrboHomes } from '../../server/integrations/channex/hosted-channel.ts'
@@ -224,6 +224,12 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
     channex.revise('rev-code-moved', { ...coded, id: 'bk-code-moved' }, '2026-10-15T05:00:00Z')
     assert.deepEqual(await applyBookingRevision(db, env, 'rev-code-moved'), { status: 'acknowledged', booking_id: first.booking_id, overbooked: false })
     assert.deepEqual((await db.prepare("SELECT id, external_booking_id FROM bookings WHERE channel_booking_id = 'HMCODE'").all()).results, [{ id: first.booking_id, external_booking_id: 'bk-code-moved' }])
+
+    await queue.drain(env, 'stay.changed')
+    channex.availability = []
+    await cancelStay(db, env, { organizationId: ORG, actorId: OWNER, manage: true }, host.id, { version: host.version, actorRole: 'owner' })
+    await queue.drain(env, 'stay.changed')
+    assert.deepEqual(channex.availability.map(entry => [entry.date_from, entry.date_to, entry.availability]), [['2027-02-01', '2027-02-01', 1]])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
