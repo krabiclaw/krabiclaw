@@ -36,6 +36,22 @@ For every iOS App Store submission, select **Automatically release this
 version**. For an existing external TestFlight group, select **Automatically
 notify testers**.
 
+## iOS API compatibility
+
+Keep the routes and response fields used by supported iOS builds working while
+those builds are installed, including during App Review. Ship API changes
+additively, deploy the compatible server first, and then release the iOS build.
+Remove an old route or field once supported builds no longer use it.
+
+Before promoting a native API change, run the affected authenticated requests
+in the existing deployed verification suite. Open the affected screens against
+the deployed staging API with the demo workspace, using Debug builds from the
+exact source revisions of the oldest supported iOS build and current TestFlight
+candidate. Include any newer shipped App Store build whose API contract differs.
+If a supported build cannot complete the journey, fix the server before
+promotion. After deploy, repeat the affected read-only journeys in the actual
+distribution builds against production.
+
 ## Queue and webhook cutover
 
 A release that adds a Cloudflare queue creates it, and its dead-letter queue,
