@@ -1860,9 +1860,10 @@ export async function resumeImportedStay(db: DbClient, env: StayMutationEnv, acc
   return publishBookingNights(env, access.organizationId, stay, [], true)
 }
 
-type StayCreationHome = TurnoverHome & Pick<StayHome, 'max_guests' | 'cancellation_policy' | 'long_term_cancellation_policy'>
+export type StayCreationHome = TurnoverHome & Pick<StayHome, 'max_guests' | 'cancellation_policy' | 'long_term_cancellation_policy'>
   & Omit<Parameters<typeof bookingPolicy>[0], 'accessibility_contact_required' | 'online_payment_required'>
   & {
+    organization_id: string
     variant_ids: string
     currency: string
     questions: string
@@ -1871,18 +1872,9 @@ type StayCreationHome = TurnoverHome & Pick<StayHome, 'max_guests' | 'cancellati
     replay: number
   }
 
-export async function createStay(db: DbClient, env: StayMutationEnv & CloudflareEnv, inputAccess: StayAccess, input: Record<string, unknown> & { product_id: string; idempotency_key: string }, options?: { imported: HostawayStaySource }): Promise<StayDetail> {
-  const access = await stayOperationAccess(db, inputAccess, { listingId: input.product_id })
-  const key = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
-  if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
-  const imported = options?.imported
-  if (imported && (imported.source !== 'hostaway' || !imported.source_id || key !== `hostaway:${imported.source_id}` || !imported.fingerprint)) fail(422, 'INVALID_STAY_FIELD', 'An imported stay needs its source reservation, fingerprint and matching idempotency key', 'imported')
-  const channel = imported?.channel ?? 'direct'
-  const channelBookingId = imported?.channel_booking_id ?? null
-  if (!STAY_CHANNELS.includes(channel) || (channel !== 'direct' && !channelBookingId)) fail(422, 'INVALID_STAY_FIELD', 'An imported channel booking needs its actual channel confirmation reference', 'channel_booking_id')
-  const publish = (stay: StayDetail, taskIds: string[] = []) => publishBookingNights(env, access.organizationId, stay, taskIds, imported !== undefined)
-  const home = await queryFirst<StayCreationHome>(db, `
-    SELECT ${turnoverHomeColumns('?')}, o.default_currency AS currency, b.default_capacity AS max_guests,
+export function stayCreationHomeQuery(organization: BatchQuery, product: BatchQuery, checkIn: unknown, key: string): BatchQuery {
+  return { query: `
+    SELECT ${turnoverHomeColumns('?')}, c.organization_id, o.default_currency AS currency, b.default_capacity AS max_guests,
            b.cancellation_policy, b.long_term_cancellation_policy, b.questions, b.advance_notice_minutes,
            b.party_size_min, b.party_size_max, b.minimum_guest_age, b.accessibility_contact_required,
            b.online_payment_required, b.payment_basis, b.payment_min_party_size,
@@ -1890,9 +1882,26 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
            EXISTS (SELECT 1 FROM bookings s WHERE s.organization_id = c.organization_id AND s.idempotency_key = ?) AS replay
       FROM ${TURNOVER_HOME_FROM}
       JOIN organization o ON o.id = c.organization_id
-     WHERE c.organization_id = ? AND c.product_id = ?
-  `, [typeof input.check_in_date === 'string' ? input.check_in_date : null, key, access.organizationId, input.product_id])
-  if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
+     WHERE c.organization_id = ${organization.query} AND c.product_id = ${product.query} AND b.unit = 'nights'
+  `,
+    params: [typeof checkIn === 'string' ? checkIn : null, key.trim(), ...organization.params ?? [], ...product.params ?? []] }
+}
+
+export async function createStay(db: DbClient, env: StayMutationEnv & CloudflareEnv, inputAccess: StayAccess, input: Record<string, unknown> & { product_id: string; idempotency_key: string }, options?: { imported: HostawayStaySource } | { home: StayCreationHome | undefined }): Promise<StayDetail> {
+  const access = await stayOperationAccess(db, inputAccess, { listingId: input.product_id })
+  const key = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
+  if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
+  const imported = options && 'imported' in options ? options.imported : undefined
+  if (imported && (imported.source !== 'hostaway' || !imported.source_id || key !== `hostaway:${imported.source_id}` || !imported.fingerprint)) fail(422, 'INVALID_STAY_FIELD', 'An imported stay needs its source reservation, fingerprint and matching idempotency key', 'imported')
+  const channel = imported?.channel ?? 'direct'
+  const channelBookingId = imported?.channel_booking_id ?? null
+  if (!STAY_CHANNELS.includes(channel) || (channel !== 'direct' && !channelBookingId)) fail(422, 'INVALID_STAY_FIELD', 'An imported channel booking needs its actual channel confirmation reference', 'channel_booking_id')
+  const publish = (stay: StayDetail, taskIds: string[] = []) => publishBookingNights(env, access.organizationId, stay, taskIds, imported !== undefined)
+  const homeQuery = stayCreationHomeQuery({ query: '?', params: [access.organizationId] }, { query: '?', params: [input.product_id] }, input.check_in_date, key)
+  const home = options && 'home' in options ? options.home : await queryFirst<StayCreationHome>(db, homeQuery.query, homeQuery.params)
+  if (!home || home.organization_id !== access.organizationId || home.product_id !== input.product_id) {
+    fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
+  }
   const variants = JSON.parse(home.variant_ids) as string[]
   if (variants.length !== 1) throw new Error(`Home ${home.product_id} has ${variants.length} variants; a home has exactly one`)
   if (!isCurrencyCode(home.currency)) throw new Error(`The organization of home ${home.product_id} has an unsupported default currency`)

@@ -33,7 +33,7 @@ import { checkoutAttemptQuery, createPaymentCheckout, type CheckoutAttempt } fro
 import { paidOnline } from '~/server/domain/payments'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { isRecord } from '~/server/utils/type-guards'
-import { createStay, createStayRequest, publicStayHomeFrom, publicStayHomeQueries, publishStayRequest, quoteStayAvailability, stayAccessFor, stayCheckoutPolicy, stayQuoteNightQueries } from '~/server/domain/stays'
+import { createStay, createStayRequest, publicStayHomeFrom, publicStayHomeQueries, publishStayRequest, quoteStayAvailability, stayAccessFor, stayCheckoutPolicy, stayCreationHomeQuery, stayQuoteNightQueries, type StayCreationHome } from '~/server/domain/stays'
 import { LODGING_BOOKING_POLICY_COLUMNS, lodgingBookingPolicy } from '~/server/utils/lodging-booking-policy'
 import { requireStripeCheckoutAcceptance } from '~/server/utils/stripe-connect'
 import { accountActivityPath } from '~/shared/account-activity'
@@ -246,7 +246,7 @@ type BookingOrganization = { id: string; slug: string; default_currency: string;
 
 async function readBookingCreation(db: DbClient, organization: BatchQuery, input: {
   slug?: string; productId?: string; body: Record<string, unknown>; idempotencyKey: string
-}, membership: BatchQuery | null) {
+}, membership: BatchQuery | null, includeStayHome: boolean) {
   const offeringQuery = bookingOfferingQuery(organization, input)
   const organizationQuery: BatchQuery = { query: `
     SELECT o.id, o.slug, o.default_currency, o.vertical, source.locale AS source_locale, source.status AS locale_status,
@@ -258,13 +258,16 @@ async function readBookingCreation(db: DbClient, organization: BatchQuery, input
     ? { query: `(SELECT id FROM (${offeringQuery.query}))`, params: offeringQuery.params }
     : bookingParameter(input.productId)
   const reads = [organizationQuery, offeringQuery]
+  if (includeStayHome) reads.push(stayCreationHomeQuery(organization, product, input.body.check_in_date, input.idempotencyKey))
   if (!selection.failure) reads.push(checkoutAttemptQuery(organization, input.idempotencyKey), ...timedBookingQueries(organization, product, selection))
   const results = await executeBatch(db, membership ? [membership, ...reads.map(read => withViewer(membership, read))] : reads,
     { operation: 'Read booking creation facts' })
   const member = membership ? results.shift()!.results[0] : undefined
-  const [orgRows, offeringRows, attempts, ...timed] = results
+  const [orgRows, offeringRows] = results.splice(0, 2)
+  const home = includeStayHome ? results.shift()!.results[0] as StayCreationHome | undefined : undefined
+  const [attempts, ...timed] = results
   return {
-    member, organization: orgRows!.results[0] as BookingOrganization | undefined, offering: offeringRows!.results[0] as BookingOffering | undefined,
+    member, home, organization: orgRows!.results[0] as BookingOrganization | undefined, offering: offeringRows!.results[0] as BookingOffering | undefined,
     checkoutAttempt: attempts?.results[0] as CheckoutAttempt | undefined, timed: selection.failure ? null : timedBookingFrom(timed),
   }
 }
@@ -278,7 +281,7 @@ export async function createMemberBooking(event: H3Event, input: {
   const env = input.dashboard ? input.dashboard.env : input.principal.env
   const db = env.DB
   const facts = await readBookingCreation(db, input.dashboard ? { query: BATCH_VIEWER.organization } : bookingParameter(input.principal.organizationId),
-    { ...input, idempotencyKey: operator.idempotencyKey }, input.dashboard?.membership ?? null)
+    { ...input, idempotencyKey: operator.idempotencyKey }, input.dashboard?.membership ?? null, true)
   const principal = input.dashboard ? memberAccessPrincipal(input.dashboard.organizationFrom(facts.member), { env, event }) : input.principal
   const { organizationId, userId } = principal
   const product = facts.offering
@@ -286,7 +289,7 @@ export async function createMemberBooking(event: H3Event, input: {
   const productId = product.id
   if (product.unit === 'nights') {
     const access = await stayAccessFor(principal)
-    const stay = await createStay(db, env, access, { ...body, product_id: productId, idempotency_key: operator.idempotencyKey })
+    const stay = await createStay(db, env, access, { ...body, product_id: productId, idempotency_key: operator.idempotencyKey }, { home: facts.home })
     return { kind: 'stay' as const, stay, status: 201 as const }
   }
   await assertCanOperateBookingProduct(db, principal, productId)
@@ -307,7 +310,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   if (!db) return creationResult({ error: 'Database not available' }, { status: 500 })
 
   const idempotencyKey = context.operator?.idempotencyKey ?? (typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : '')
-  const facts = await readBookingCreation(db, bookingParameter(organizationId), { ...context, idempotencyKey }, null)
+  const facts = await readBookingCreation(db, bookingParameter(organizationId), { ...context, idempotencyKey }, null, false)
   return createBookingFrom(event, env, context, facts)
 }
 
