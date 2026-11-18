@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:695a25ba83ac8d4edb98716fffa5698087ee4a0d4d1e273a7ee71849b60e81e9",
-  "documentationFingerprint": "sha256:4a785e77df7e0242b5e4e9b2c4525bfcc9408758751effdf21ee40da59233cd8",
+  "fingerprint": "sha256:1be00e082423f22539cabe1dfb18b86219a795b05108a321b9317c12aa8f48ba",
+  "documentationFingerprint": "sha256:021c79a0f1f6dabb1f563df9d89f89cbe1cefa16134a93c065169e8e2c6204dd",
   "tools": [
     {
       "name": "add_organization_language",
@@ -28750,7 +28750,6 @@
             "required": [
               "product_session_id",
               "party_size",
-              "guest_email",
               "source",
               "guest_acknowledgement"
             ]
@@ -28840,10 +28839,10 @@
             "type": "boolean"
           },
           "guest_email": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "description": "Email address for the guest on this booking.",
+            "format": "email",
+            "maxLength": 254,
+            "type": "string"
           },
           "guest_name": {
             "description": "The guest's full name.",
@@ -28927,6 +28926,7 @@
         "required": [
           "product_slug",
           "guest_name",
+          "guest_email",
           "idempotency_key"
         ],
         "type": "object"

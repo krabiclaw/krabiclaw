@@ -68,16 +68,17 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
   ] }, domain: 'bookings', minimumRole: 'member', description: 'Book a guest in a timed offering or record a direct stay. Use an available session ID for a table, experience or legal consultation; for a stay give the arrival and departure dates, guests and amount due to the host. Reuse the same key for the same request. Timed bookings that require online payment need an approved dashboard checkout.',
     inputSchema: {
       ...nightBookingFields,
+      guest_email: { type: 'string', format: 'email', maxLength: 254, description: 'Email address for the guest on this booking.' },
       product_slug: { type: 'string', description: 'Offering slug from list_products or get_product.' }, product_session_id: { type: 'string', description: 'Available time from list_product_booking_sessions.' }, product_variant_id: text,
       party_size: { type: 'integer', minimum: 1, maximum: 99 }, notes: { type: 'string', maxLength: 1000 },
       answers: answersInput, questions_revision: questionsRevision, locale: { type: 'string', description: 'Guest confirmation language code; defaults to the website language.' },
       idempotency_key: key, source: { type: 'string', minLength: 1, maxLength: 100, description: 'Provenance for timed bookings, such as operator or external scheduler.' },
       external_reference: { type: 'string', maxLength: 200 }, guest_acknowledgement: { type: 'boolean', description: 'Explicit choice to send the timed booking confirmation.' },
       oneOf: [
-        { required: ['product_session_id', 'party_size', 'guest_email', 'source', 'guest_acknowledgement'], not: { required: ['check_in_date'] } },
+        { required: ['product_session_id', 'party_size', 'source', 'guest_acknowledgement'], not: { required: ['check_in_date'] } },
         { required: ['check_in_date', 'check_out_date', 'adults', 'total_minor'], not: { required: ['product_session_id'] } },
       ],
-    }, required: ['product_slug', 'guest_name', 'idempotency_key'],
+    }, required: ['product_slug', 'guest_name', 'guest_email', 'idempotency_key'],
   }),
   organizationTool({ name: 'get_product_booking', outputSchema: { type: 'object', anyOf: [
     { type: 'object', properties: { booking_id: text, unit: { const: 'slot' }, conversation_id: text, version, updated_at: text, guest, answers: formAnswerSnapshotsJsonSchema(), provenance: booking.properties.provenance, record }, required: ['booking_id', 'unit', 'conversation_id', 'version', 'updated_at', 'guest', 'answers', 'provenance', 'record'] },

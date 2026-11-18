@@ -360,12 +360,14 @@ export function bookingConversationQueries(input: {
  * race left neither, so its contact changes nothing (the version alone is the
  * winner's too). A channel's conversation keeps its participant title as history.
  */
-export function bookingContactQuery(input: { organizationId: string; bookingId: string; version: number; updatedAt: string; locationId: string | null; guest: { name: string | null; email: string | null; phone: string | null } }): BatchQuery {
+export function bookingContactQuery(input: { organizationId: string; bookingId: string; version: number; updatedAt: string; locationId: string | null; guest: { name?: string; email?: string | null; phone?: string | null } }): BatchQuery {
+  const fields = (['name', 'email', 'phone'] as const).filter(field => input.guest[field] !== undefined)
+  const contact = fields.length === 0 ? 'payload_json' : `json_set(payload_json, ${fields.map(field => `'$.guest.${field}', ?`).join(', ')})`
   return {
-    query: `UPDATE conversations SET location_id = ?, payload_json = json_set(payload_json, '$.guest.name', ?, '$.guest.email', ?, '$.guest.phone', ?)
-      WHERE kind = 'booking' AND (json_type(payload_json, '$.participant') IS 'object' OR ? IS NOT NULL)
+    query: `UPDATE conversations SET location_id = ?, payload_json = ${contact}
+      WHERE kind = 'booking'
         AND booking_id = (SELECT id FROM bookings WHERE organization_id = ? AND id = ? AND version = ? AND updated_at = ?)`,
-    params: [input.locationId, input.guest.name, input.guest.email, input.guest.phone, input.guest.name, input.organizationId, input.bookingId, input.version, input.updatedAt],
+    params: [input.locationId, ...fields.map(field => input.guest[field]), input.organizationId, input.bookingId, input.version, input.updatedAt],
   }
 }
 

@@ -125,7 +125,7 @@ function code(expected: string) {
   return (error: unknown) => (error as { data?: { code?: string } }).data?.code === expected
 }
 
-const guest = { adults: 2, guest_name: 'Ana', total_minor: 45_000 }
+const guest = { adults: 2, guest_name: 'Ana', guest_email: 'ana@example.test', total_minor: 45_000 }
 
 test('a place to stay is a Product at exactly one location, priced per night', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
@@ -433,7 +433,7 @@ test('a member assigned to a home reads its guest conversation and the turnover 
     assert.deepEqual([whole.guest_name, whole.guest_email, whole.private_notes, whole.total_minor, whole.paid_minor, whole.payments.length, whole.conversation_id], ['Ana Silva', 'ana@example.test', 'Door code 4411', 45_000, 20_000, 1, stay.conversation_id])
     assert.equal((await readStayCalendar(db, manager, window)).stays[0]!.guest_name, 'Ana Silva')
     // A site checkout saves the guest's whole name in guest_name; the member still reads the first name.
-    const wholeName = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'whole-name', check_in_date: '2026-11-05', check_out_date: '2026-11-07', adults: 1, guest_name: '  Bo   Lee ', total_minor: 30_000 })
+    const wholeName = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'whole-name', check_in_date: '2026-11-05', check_out_date: '2026-11-07', adults: 1, guest_name: '  Bo   Lee ', guest_email: 'bo-lee@example.test', total_minor: 30_000 })
     assert.equal((await getStay(db, cleaner, wholeName.id)).guest_name, 'Bo')
     assert.equal((await getStay(db, manager, wholeName.id)).guest_name, 'Bo   Lee')
     // A member with no responsibility for the home reads nothing of it.

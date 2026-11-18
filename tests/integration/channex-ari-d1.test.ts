@@ -212,7 +212,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     await db.prepare("UPDATE channel_sync_log SET created_at = '2000-01-01T00:00:00.000Z' WHERE direction = 'outbound'").run()
 
     // A host stay holds its nights; cancelling it releases them. The home's own minimum applies where no night sets one.
-    const stay = await createStay(db, env, manager, { product_id: connected, idempotency_key: 'k1', check_in_date: day(10), check_out_date: day(12), adults: 2, guest_name: 'Ana', total_minor: 300_00 })
+    const stay = await createStay(db, env, manager, { product_id: connected, idempotency_key: 'k1', check_in_date: day(10), check_out_date: day(12), adults: 2, guest_name: 'Ana', guest_email: 'ana@example.test', total_minor: 300_00 })
     assert.deepEqual(channex.take(), [])
     assert.deepEqual(await states(connected, day(10), day(12)), [null, null])
     await queue.runNext(env, 'stay.changed')
@@ -366,7 +366,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     // A refused event send still leaves the committed inventory in the delivery outbox.
     await db.prepare("UPDATE channel_sync_log SET created_at = '2000-01-01T00:00:00.000Z' WHERE direction = 'outbound'").run()
     const original = await createStay(db, env, manager, { product_id: connected, idempotency_key: 'edit-without-event',
-      check_in_date: day(50), check_out_date: day(52), adults: 2, guest_name: 'Dana', total_minor: 300_00 })
+      check_in_date: day(50), check_out_date: day(52), adults: 2, guest_name: 'Dana', guest_email: 'dana@example.test', total_minor: 300_00 })
     await queue.drain(env, 'stay.changed')
     channex.take()
     const after = Date.now()
@@ -469,7 +469,7 @@ test('catalog and dated rules persist channel work and recover the planned minim
 
     // A booking still closes its mapped room while the rate plan cannot be read.
     channex.ratePlanAnswer = method => method === 'GET' ? Response.json({ errors: { detail: 'Rate plan read unavailable' } }, { status: 503 }) : undefined
-    const booked = await createStay(db, env, manager, { product_id: connected, idempotency_key: 'stay-during-rate-outage', check_in_date: day(10), check_out_date: day(12), adults: 2, guest_name: 'Ana', total_minor: 360_00 })
+    const booked = await createStay(db, env, manager, { product_id: connected, idempotency_key: 'stay-during-rate-outage', check_in_date: day(10), check_out_date: day(12), adults: 2, guest_name: 'Ana', guest_email: 'ana@example.test', total_minor: 360_00 })
     await assert.rejects(queue.runNext(env, 'stay.changed'), /Rate plan read unavailable/)
     assert.deepEqual(channex.take(), [{ path: '/availability', values: [
       { property_id: 'prop-1', room_type_id: 'room-1', date_from: day(10), date_to: day(11), availability: 0 },
@@ -598,7 +598,7 @@ test('migration verification reads Airbnb availability and refuses missing chann
     const dates = [day(2), day(3)]
     assert.equal((await verifyStayCalendarOccupancy(db, env, manager, connected, dates)).state, 'not_connected')
     await db.prepare("INSERT INTO channex_connections (organization_id,status,group_id,channel_id,connected_at) VALUES (?, 'connected', 'group-1','chan-1', ?)").bind(ORG, new Date().toISOString()).run()
-    await createStay(db, env, manager, { product_id: connected, idempotency_key: 'migration-verification-stay', check_in_date: day(2), check_out_date: day(4), guest_name: 'Imported guest', adults: 1, total_minor: 30_000 })
+    await createStay(db, env, manager, { product_id: connected, idempotency_key: 'migration-verification-stay', check_in_date: day(2), check_out_date: day(4), guest_name: 'Imported guest', guest_email: 'imported-guest@example.test', adults: 1, total_minor: 30_000 })
     const mismatch = await verifyStayCalendarOccupancy(db, env, manager, connected, dates)
     assert.equal(mismatch.state, 'needs_attention')
     assert.deepEqual(mismatch.mismatches, dates)
