@@ -22,6 +22,90 @@ import {
   type UpdateGoogleAdsCampaignInput,
 } from '~/server/utils/google-ads'
 
+import { getCampaignBiddingSettings, getCampaignDeliveryDiagnostics, getConversionTrackingHealth, listConversionActions, queryGoogleAdsChangeHistory } from '~/server/utils/google-ads-diagnostics'
+import { calendarDateSchema } from '~/utils/timezone'
+
+const string = { type: 'string' }
+const nullableString = { type: ['string', 'null'] }
+const nullableNumber = { type: ['number', 'null'] }
+const number = { type: 'number' }
+const boolean = { type: 'boolean' }
+const nullableBoolean = { type: ['boolean', 'null'] }
+const array = (items: Record<string, unknown>) => ({ type: 'array', items })
+const object = (properties: Record<string, unknown>) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false })
+const reportedDateRange = { start_date: calendarDateSchema, end_date: calendarDateSchema }
+const campaignIdInput = { type: 'string', pattern: '^\\d+$', description: 'Numeric campaign ID from list_google_ads_campaigns.' }
+const reportIdentity = { customer_id: string, start_date: string, end_date: string, time_zone: nullableString }
+const campaignIdentity = { customer_id: string, campaign_id: string, campaign_name: nullableString }
+const targetingCriterion = { criterion_id: nullableString, type: nullableString, status: nullableString, negative: boolean, resource: nullableString }
+const targetingRestrictions = array(object({ dimension: nullableString, observation_only: boolean }))
+const searchShare = { ...nullableNumber, description: 'Google’s reported fraction. Below-10% and above-90% values may be reported as the provider’s bounds, and absent metrics are null.' }
+const deliveryMetrics = object({
+  impressions: number, clicks: number, cost_micros: number, conversions: number, search_impression_share: searchShare,
+  search_rank_lost_impression_share: searchShare, search_budget_lost_impression_share: searchShare,
+})
+
+const googleAdsDiagnosticsTools = [
+  organizationTool({
+    name: 'query_google_ads_change_history', domain: 'google_ads', minimumRole: 'admin',
+    description: 'Read recent Google Ads change events with actor, client, resources and before/after fields. Google’s API covers only the most recent 30 account calendar days and does not include every event shown in the Google Ads console. Use the console for older changes.',
+    inputSchema: { ...reportedDateRange, limit: { type: 'integer', minimum: 1, maximum: 500, default: 100 } },
+    required: ['start_date', 'end_date'],
+    outputSchema: object({ ...reportIdentity, has_more: boolean, changes: array(object({
+      resource_name: string, changed_at: { type: 'string', description: 'Google’s local timestamp in the returned account time_zone.' },
+      actor_email: nullableString, client_type: nullableString, resource_type: nullableString, changed_resource: nullableString,
+      operation: nullableString, campaign: nullableString, ad_group: nullableString, changed_fields: array(string),
+      old_resource: { type: ['object', 'null'], additionalProperties: true }, new_resource: { type: ['object', 'null'], additionalProperties: true },
+    })) }),
+  }),
+  organizationTool({
+    name: 'get_campaign_delivery_diagnostics', domain: 'google_ads', minimumRole: 'admin',
+    description: 'Read one Google Ads campaign’s current eligibility, shared budget, targeting and ad policy status alongside impression-share losses and traffic for the requested dates. Current settings and ad status are not historical snapshots.',
+    inputSchema: { campaign_id: campaignIdInput, ...reportedDateRange },
+    required: ['campaign_id', 'start_date', 'end_date'],
+    outputSchema: object({ ...campaignIdentity, ...reportIdentity, currency: nullableString, account_status: nullableString,
+      status: nullableString, primary_status: nullableString, primary_status_reasons: array(string),
+      keyword_match_type: nullableString, ai_max_enabled: nullableBoolean, broad_match_migration_date_time: nullableString,
+      budget_id: nullableString, daily_budget_micros: nullableNumber, shared_budget: nullableBoolean, budget_reference_count: nullableNumber,
+      positive_geo_target_type: nullableString, negative_geo_target_type: nullableString, targeting_restrictions: targetingRestrictions,
+      metrics: { ...deliveryMetrics, type: ['object', 'null'] },
+      campaign_criteria: array(object({ ...targetingCriterion, radius: nullableNumber, radius_units: nullableString })),
+      ad_group_criteria: array(object({ ...targetingCriterion, ad_group_id: nullableString })), more_criteria: boolean,
+      ads: array(object({ ad_group_id: nullableString, ad_id: nullableString, status: nullableString, approval_status: nullableString,
+        review_status: nullableString, policy_topics: array(string), targeting_restrictions: targetingRestrictions })),
+      more_ads: boolean,
+    }),
+  }),
+  organizationTool({
+    name: 'get_campaign_bidding_settings', domain: 'google_ads', minimumRole: 'admin',
+    description: 'Read a Google Ads campaign’s current bidding strategy and system status, including accessible shared portfolio settings, CPA or ROAS targets and bid ceilings when Google reports them.',
+    inputSchema: { campaign_id: campaignIdInput }, required: ['campaign_id'],
+    outputSchema: object({ ...campaignIdentity, currency: nullableString, strategy_type: nullableString, system_status: nullableString,
+      portfolio_strategy: nullableString, portfolio_name: nullableString, portfolio_owner_customer_id: nullableString,
+      target_cpa_micros: nullableNumber, target_roas: nullableNumber, cpc_bid_ceiling_micros: nullableNumber,
+      impression_share_target_micros: nullableNumber, impression_share_location: nullableString,
+    }),
+  }),
+  organizationTool({
+    name: 'list_conversion_actions', domain: 'google_ads', minimumRole: 'admin',
+    description: 'Read Google Ads conversion action settings for the connected customer, including the linked GA4 event, configuration status, and primary and included-in-Conversions flags. For dated activity and account tracking settings, call get_conversion_tracking_health.',
+    outputSchema: object({ customer_id: string, has_more: boolean, actions: array(object({
+      id: string, resource_name: string, name: nullableString, status: nullableString, type: nullableString, category: nullableString,
+      origin: nullableString, primary_for_goal: nullableBoolean, include_in_conversions_metric: nullableBoolean,
+      ga4_event_name: nullableString, ga4_property_id: nullableString,
+    })) }),
+  }),
+  organizationTool({
+    name: 'get_conversion_tracking_health', domain: 'google_ads', minimumRole: 'admin',
+    description: 'Read the connected customer’s Google Ads conversion tracking owner, auto-tagging, account-default biddable goals, and dated conversion counts by action. Counts describe Ads reports and cannot prove a website tag fires or that an event is a qualified lead.',
+    inputSchema: reportedDateRange, required: ['start_date', 'end_date'],
+    outputSchema: object({ ...reportIdentity, auto_tagging_enabled: nullableBoolean, tracking_status: nullableString, conversion_customer: nullableString,
+      account_goals: array(object({ category: nullableString, origin: nullableString, biddable: boolean })),
+      activity: array(object({ conversion_action: nullableString, name: nullableString, conversions: number, all_conversions: number })), more_activity: boolean,
+    }),
+  }),
+]
+
 async function resolveGoogleAdsCredentials(ctx: McpExecutorContext) {
   const integration = await readIntegration(ctx.organization.db, ctx.organization.organizationId, 'google_ads')
   if (!integration || !integration.account_id || !integration.target_id) {
@@ -51,6 +135,7 @@ function reportRange(args: Record<string, unknown>, required: boolean): { startD
 }
 
 export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
+  ...googleAdsDiagnosticsTools,
   organizationTool({
     name: 'list_google_ads_campaigns',
     description: 'List up to 100 campaigns in the connected Google Ads account, most spend first, with status, daily budget, spend, impressions, clicks and conversions. With start_date and end_date the metrics cover those days in the account time zone and include campaigns removed since; without them they are all-time for campaigns not removed. Reading is free with the connection.',
@@ -347,6 +432,16 @@ export async function handleGoogleAdsTools(ctx: McpExecutorContext): Promise<unk
     const campaignId = requiredString(args, 'campaign_id')
     const [campaign, account] = await Promise.all([getGoogleAdsCampaignDetail(accessToken, developerToken, customerId, campaignId), getGoogleAdsCustomer(accessToken, developerToken, customerId)])
     return { ...campaign, currency: account.currencyCode }
+  }
+
+  if (googleAdsDiagnosticsTools.some(tool => tool.name === toolName)) {
+    const connection = await resolveGoogleAdsCredentials(ctx)
+    if (toolName === 'list_conversion_actions') return listConversionActions(connection)
+    if (toolName === 'get_campaign_bidding_settings') return getCampaignBiddingSettings(connection, requiredString(args, 'campaign_id'))
+    const range = { start_date: requiredString(args, 'start_date'), end_date: requiredString(args, 'end_date') }
+    if (toolName === 'query_google_ads_change_history') return queryGoogleAdsChangeHistory(connection, range, Number(args.limit ?? 100))
+    if (toolName === 'get_campaign_delivery_diagnostics') return getCampaignDeliveryDiagnostics(connection, requiredString(args, 'campaign_id'), range)
+    return getConversionTrackingHealth(connection, range)
   }
 
   if (toolName === 'create_google_ads_search_campaign' || toolName === 'update_google_ads_campaign') {
