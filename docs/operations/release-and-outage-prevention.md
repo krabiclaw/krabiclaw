@@ -32,25 +32,39 @@ it. Record the impact, the waived checks and the post-deploy verification in the
 promotion pull request. An override never waives a known reproducible failure,
 migration safeguards or production data protections.
 
-For every iOS App Store submission, select **Automatically release this
-version**. For an existing external TestFlight group, select **Automatically
-notify testers**.
-
 ## iOS API compatibility
 
-Keep the routes and response fields used by supported iOS builds working while
-those builds are installed, including during App Review. Ship API changes
-additively, deploy the compatible server first, and then release the iOS build.
-Remove an old route or field once supported builds no longer use it.
+Keep routes and response fields used by supported iOS builds working while
+those builds are installed, including during App Review. Ship server changes
+additively and use this sequence for a release that affects the native app.
 
-Before promoting a native API change, run the affected authenticated requests
-in the existing deployed verification suite. Open the affected screens against
-the deployed staging API with the demo workspace, using Debug builds from the
-exact source revisions of the oldest supported iOS build and current TestFlight
-candidate. Include any newer shipped App Store build whose API contract differs.
-If a supported build cannot complete the journey, fix the server before
-promotion. After deploy, repeat the affected read-only journeys in the actual
-distribution builds against production.
+1. **Staging.** Run the affected authenticated checks in the existing deployed
+   verification suite. Open each affected screen in the staging demo workspace
+   using Debug builds from the exact source revisions of the oldest supported
+   App Store build, the current TestFlight candidate, and each newer shipped
+   build with a different API contract. Record the app versions, build numbers,
+   source SHAs and screen outcomes in the existing release PR. Fix failures
+   before promoting the server.
+2. **Production server.** Deploy the compatible server first. Repeat the
+   affected read-only journeys in the installed App Store build against
+   production while the candidate is in review. If the installed build already
+   has the update banner, verify the candidate does not trigger it during review.
+3. **App Store.** Once the iOS release is authorized, select **Automatically
+   release this version** for the App Store submission. For an existing external
+   TestFlight group, select **Automatically notify testers**. Verify the exact
+   release version is downloadable from the [Blawby App Store listing](https://apps.apple.com/us/app/blawby/id6823834381)
+   in the storefront being checked. [Apple's release options](https://developer.apple.com/help/app-store-connect/manage-your-apps-availability/select-an-app-store-version-release-option)
+4. **Installed app.** With the previous banner-capable App Store version still
+   installed, confirm **Update available** appears and **Update** opens the
+   listing with an available update. Dismiss the banner and reopen the app to
+   confirm it stays dismissed for that version. Install the update from the
+   listing, confirm the banner is gone, and repeat the affected production
+   journeys in the new release. The first release that includes the banner
+   establishes the installed build for this check when the next version ships.
+   iOS manages automatic updates on each device, and customers can manually
+   update during a phased release. [Apple's update settings](https://support.apple.com/en-us/102629) · [Phased releases](https://developer.apple.com/help/app-store-connect/update-your-app/release-a-version-update-in-phases)
+
+Retire an old route or field once supported builds no longer use it.
 
 ## Queue and webhook cutover
 
