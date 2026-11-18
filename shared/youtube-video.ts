@@ -32,13 +32,49 @@ export const youTubeEmbedUrl = (id: string) => `https://www.youtube-nocookie.com
 export const youTubeWatchUrl = (id: string) => `https://www.youtube.com/watch?v=${id}`
 export const youTubeThumbnailUrl = (id: string) => `https://i.ytimg.com/vi/${id}/hqdefault.jpg`
 
-const UPLOAD_DATE = /^\d{4}-\d{2}-\d{2}$/
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
+const DATE_TIME_WITH_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)$/i
+const DATE_TIME_NO_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/i
 
-/** A calendar date (YYYY-MM-DD) that exists, or null. */
+/**
+ * An ISO 8601 date-time string with explicit timezone (e.g. YYYY-MM-DDTHH:mm:ssZ), or null.
+ *
+ * Google's VideoObject schema requires `uploadDate` in ISO 8601 format with an
+ * explicit timezone offset. A bare date (YYYY-MM-DD) or a timestamp lacking a
+ * timezone causes Search Console to flag "missing a timezone" and "Invalid datetime value".
+ */
 export function videoUploadDate(value: unknown): string | null {
-  if (typeof value !== 'string' || !UPLOAD_DATE.test(value)) return null
-  const parsed = new Date(`${value}T00:00:00Z`)
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value ? value : null
+  if (value instanceof Date) {
+    return !Number.isNaN(value.getTime()) ? value.toISOString() : null
+  }
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+
+  if (DATE_ONLY.test(trimmed)) {
+    const parsed = new Date(`${trimmed}T00:00:00Z`)
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === trimmed
+      ? `${trimmed}T00:00:00Z`
+      : null
+  }
+
+  if (DATE_TIME_WITH_TZ.test(trimmed)) {
+    const datePart = trimmed.slice(0, 10)
+    const calendarCheck = new Date(`${datePart}T00:00:00Z`)
+    if (Number.isNaN(calendarCheck.getTime()) || calendarCheck.toISOString().slice(0, 10) !== datePart) return null
+    const parsed = new Date(trimmed)
+    return !Number.isNaN(parsed.getTime()) ? trimmed : null
+  }
+
+  if (DATE_TIME_NO_TZ.test(trimmed)) {
+    const datePart = trimmed.slice(0, 10)
+    const calendarCheck = new Date(`${datePart}T00:00:00Z`)
+    if (Number.isNaN(calendarCheck.getTime()) || calendarCheck.toISOString().slice(0, 10) !== datePart) return null
+    const parsed = new Date(`${trimmed}Z`)
+    return !Number.isNaN(parsed.getTime()) ? `${trimmed}Z` : null
+  }
+
+  return null
 }
 
 export interface VideoSchemaInput {
