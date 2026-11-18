@@ -11,11 +11,11 @@ export default definePlugin((nitroApp) => {
     // Mirrors the same >=500 threshold already used in server/api/auth/[...].ts.
     const chain = errorChainForTelemetry(error)
     const statusCode = chain[0]?.status
-    const browserError = tags?.includes('browser') ? event?.req.context?.browserError : undefined
+    const clientError = tags?.some(tag => tag === 'browser' || tag === 'native') ? event?.req.context?.clientError : undefined
     const url = event ? new URL(event.req.url) : undefined
-    const log = !browserError && statusCode && statusCode < 500 ? console.warn : console.error
-    log(browserError ? '[CLIENT_ERROR]' : '[NITRO_SERVER_ERROR]', JSON.stringify({
-      ...(browserError ? browserError : {}),
+    const log = !clientError && statusCode && statusCode < 500 ? console.warn : console.error
+    log(clientError ? '[CLIENT_ERROR]' : '[NITRO_SERVER_ERROR]', JSON.stringify({
+      ...(clientError ?? {}),
       host: url?.host ?? null,
       path: url?.pathname ?? null,
       request_id: event ? getRequestDataMetrics(event).requestId : null,

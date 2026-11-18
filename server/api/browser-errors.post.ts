@@ -34,7 +34,7 @@ export default defineHandler(async (event) => {
   for (const entry of report.error_chain.toReversed()) {
     error = Object.assign(new Error(entry.message, error ? { cause: error } : undefined), entry, { stack: entry.stack })
   }
-  event.context.browserError = {
+  event.context.clientError = {
     event_id: report.event_id,
     source: report.source,
     page_path: redactErrorText(report.page_path, BROWSER_ERROR_LIMITS.pagePath),
