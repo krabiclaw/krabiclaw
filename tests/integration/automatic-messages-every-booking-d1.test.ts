@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
-import { H3Event } from 'h3'
+import { H3, H3Event } from 'h3'
+import { hashPassword } from 'better-auth/crypto'
+import listTemplatesRoute from '../../server/api/dashboard/message-templates/index.get.ts'
+import listOfferingsRoute from '../../server/api/dashboard/message-templates/offerings.get.ts'
 import { guestThreadMessagingContext, listMessageOfferings, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { sendDueOutbox } from '../../server/domain/scheduled-guest-messages.ts'
@@ -15,7 +18,7 @@ import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createTables } from './support/table-product.ts'
 import type { GuestThreadRow } from '../../server/domain/guest-threads/types.ts'
 import type { StayAccess } from '../../server/domain/stays.ts'
-import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
 import { applySchema } from './support/schema.ts'
 
@@ -103,6 +106,41 @@ test('consultations, classes and table bookings are sent their automatic message
       schedule: { trigger: 'check_in', offset_days: -1, local_time: '09:00', product_ids: [wheel] } })
     const thanks = await saveMessageTemplate(db, env, bistro, null, { title: 'Thank you', body: 'Thank you for dining with us.',
       schedule: { trigger: 'check_out', offset_hours: 2, product_ids: [tables.id] } })
+    const password = 'local-automatic-message-proof'
+    await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('owner-account', ?, 'credential', ?, ?, 0, 0)")
+      .bind(OWNER, OWNER, await hashPassword(password)).run()
+    const signed = await createAuth(env).api.signInEmail({ body: { email: 'owner@proof.example', password }, asResponse: true })
+    assert.equal(signed.status, 200)
+    const token = signed.headers.get('set-auth-token')
+    assert.ok(token)
+    const app = new H3()
+    app.get('/api/dashboard/message-templates', listTemplatesRoute)
+    app.get('/api/dashboard/message-templates/offerings', listOfferingsRoute)
+    const read = async (path: string) => {
+      const response = await app.request(Object.assign(new Request(`https://proof.example/api/dashboard/message-templates${path}`, {
+        headers: { authorization: `Bearer ${token}` },
+      }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      assert.equal(response.status, 200, await response.clone().text())
+      return response.json()
+    }
+    const options = await read(`/offerings?org=${law.organizationId}`)
+    assert.deepEqual(options.offerings, [{ id: consultation, kind: 'service', name: 'Initial consultation', timezone: null }])
+    assert.deepEqual(options.triggers.map((trigger: { label: string }) => trigger.label), [
+      '5 minutes after a new consultation', 'Around the start of the consultation', 'Around the end of the consultation',
+    ])
+    assert.deepEqual(options.offset_hours.find((offset: { value: number }) => offset.value === -2), { value: -2, label: '2 hours before' })
+    for (const [org, productId, template, label] of [
+      [law, consultation, prepare, '2 hours before the consultation starts'],
+      [studio, wheel, reminder, '1 day before the booking starts at 09:00 · booking’s time zone'],
+      [bistro, tables.id, thanks, '2 hours after the reservation ends'],
+    ] as const) {
+      const page = await read(`?org=${org.organizationId}&limit=100&offset=0&product_id=${productId}`)
+      assert.equal(page.can_manage, true)
+      assert.deepEqual(page.templates.find((row: { id: string }) => row.id === template.id), { ...template, schedule_label: label })
+    }
+    const otherWorkspace = await read(`?org=${law.organizationId}&limit=100&offset=0&product_id=${wheel}`)
+    assert.deepEqual(otherWorkspace.templates, [])
+
     // A restaurant's tables are named by their product; nothing outside the workspace is accepted.
     await assert.rejects(saveMessageTemplate(db, env, law, null, { title: 'Wrong', body: 'x', schedule: { trigger: 'booking_received', delay_minutes: 5, product_ids: [wheel] } }),
       { statusCode: 404, data: { code: 'MESSAGE_OFFERING_NOT_FOUND', field: 'schedule.product_ids' } })

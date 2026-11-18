@@ -5,10 +5,14 @@ import { authClient } from '~/lib/auth-client'
 import { isValidInstant, isValidTimezone } from '~/utils/timezone'
 import type { GuestMessageSchedule } from '~/server/domain/guest-message-schedule'
 import type { MessageTemplate, listMessageOfferings, listMessageTemplates, listScheduledGuestMessages, scheduledGuestMessage } from '~/server/domain/guest-messaging'
-import { resolveAggregateBookingPresentation } from '~/utils/booking-presentation'
+export { messageScheduleLabel, scheduleVocabulary } from '~/utils/message-schedule-presentation'
 
 export type { MessageTemplate, GuestMessageSchedule }
-export type MessageTemplatePage = Awaited<ReturnType<typeof listMessageTemplates>>
+export type MessageTemplatePage = {
+  templates: Array<MessageTemplate & { schedule_label: string }>
+  pagination: Awaited<ReturnType<typeof listMessageTemplates>>['pagination']
+  can_manage: boolean
+}
 export type ScheduledMessage = ReturnType<typeof scheduledGuestMessage>
 export type ScheduledMessagePage = Awaited<ReturnType<typeof listScheduledGuestMessages>>
 
@@ -32,7 +36,8 @@ function isPagination(value: unknown): boolean {
     && (value.has_more ? value.next_offset === Number(value.offset) + Number(value.limit) : value.next_offset === null)
 }
 export function isMessageTemplatePage(value: unknown): value is MessageTemplatePage {
-  return isRecord(value) && isPagination(value.pagination) && Array.isArray(value.templates) && value.templates.every(isMessageTemplate)
+  return isRecord(value) && isPagination(value.pagination) && Array.isArray(value.templates) && typeof value.can_manage === 'boolean'
+    && value.templates.every(template => isRecord(template) && typeof template.schedule_label === 'string' && isMessageTemplate(template))
 }
 /** An outbox row: an automatic message about a booking, or a member's own send-later reply in a conversation. */
 export function isScheduledMessage(value: unknown): value is ScheduledMessage {
@@ -52,32 +57,27 @@ export function isScheduledMessagePage(value: unknown): value is ScheduledMessag
   return isRecord(value) && isPagination(value.pagination) && Array.isArray(value.messages) && value.messages.every(isScheduledMessage)
 }
 export type MessageOffering = Awaited<ReturnType<typeof listMessageOfferings>>['offerings'][number]
-export function isMessageOfferings(value: unknown): value is { offerings: MessageOffering[] } {
+export type MessageTrigger = { id: GuestMessageSchedule['trigger']; label: string }
+export type MessageOffset = { value: number; label: string }
+export interface MessageOfferingOptions {
+  offerings: MessageOffering[]
+  triggers: MessageTrigger[]
+  offset_days: MessageOffset[]
+  offset_hours: MessageOffset[]
+  max_offerings: number
+  can_manage: boolean
+}
+
+export function isMessageOfferings(value: unknown): value is MessageOfferingOptions {
   return isRecord(value) && Array.isArray(value.offerings) && value.offerings.every(offering => isRecord(offering)
     && ['stay', 'experience', 'service', 'table'].includes(String(offering.kind)) && typeof offering.id === 'string' && Boolean(offering.id)
     && typeof offering.name === 'string' && Boolean(offering.name) && (offering.timezone === null || (typeof offering.timezone === 'string' && isValidTimezone(offering.timezone))))
-}
-
-/**
- * The words a schedule is described with. A place to stay checks in and out
- * in its home's time zone; anything else is the booking's own noun
- * (consultation, reservation, booking) starting and ending: a restaurant's
- * bookings are mostly its tables, so it says reservation.
- */
-export function scheduleVocabulary(vertical: string) {
-  if (vertical === 'lodging') return { received: 'a new direct reservation', check_in: 'check-in', check_out: 'checkout', aroundCheckIn: 'Around check-in', aroundCheckOut: 'Around checkout', checkInDay: 'On check-in day', checkOutDay: 'On checkout day', zone: 'home’s time zone' }
-  const { noun } = resolveAggregateBookingPresentation([{ kind: vertical === 'restaurant' ? 'table' : 'experience', vertical }])
-  return { received: `a new ${noun}`, check_in: `the ${noun} starts`, check_out: `the ${noun} ends`, aroundCheckIn: `Around the start of the ${noun}`, aroundCheckOut: `Around the end of the ${noun}`,
-    checkInDay: `On the day the ${noun} starts`, checkOutDay: `On the day the ${noun} ends`, zone: `${noun}’s time zone` }
-}
-
-export function messageScheduleLabel(schedule: GuestMessageSchedule, vertical: string): string {
-  const words = scheduleVocabulary(vertical)
-  if (schedule.trigger === 'booking_received') return `5 minutes after ${words.received}`
-  const event = words[schedule.trigger]
-  const count = (amount: number, unit: string) => `${Math.abs(amount)} ${unit}${Math.abs(amount) === 1 ? '' : 's'} ${amount < 0 ? 'before' : 'after'} ${event}`
-  if ('offset_hours' in schedule) return schedule.offset_hours ? count(schedule.offset_hours, 'hour') : `When ${event}`
-  return `${schedule.offset_days ? count(schedule.offset_days, 'day') : schedule.trigger === 'check_in' ? words.checkInDay : words.checkOutDay} at ${schedule.local_time} · ${words.zone}`
+    && Array.isArray(value.triggers) && value.triggers.length === 3
+    && value.triggers.every(trigger => isRecord(trigger) && ['booking_received', 'check_in', 'check_out'].includes(String(trigger.id)) && typeof trigger.label === 'string' && Boolean(trigger.label.trim()))
+    && new Set(value.triggers.map(trigger => trigger.id)).size === 3
+    && typeof value.can_manage === 'boolean' && Number.isSafeInteger(value.max_offerings) && Number(value.max_offerings) > 0
+    && [value.offset_days, value.offset_hours].every(offsets => Array.isArray(offsets) && offsets.length > 0
+      && offsets.every(offset => isRecord(offset) && Number.isInteger(offset.value) && typeof offset.label === 'string' && Boolean(offset.label.trim())))
 }
 
 export function isScheduledMessageResponse(value: unknown): value is { message: ScheduledMessage } { return isRecord(value) && isScheduledMessage(value.message) }
