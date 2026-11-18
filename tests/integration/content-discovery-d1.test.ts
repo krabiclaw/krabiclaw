@@ -48,7 +48,7 @@ test('public discovery resolves translations through current publication owners'
       id, organizationId: 'tenant', kind: 'page', rowRole: 'root', locale: 'en', title: id, path,
       metadata: { page_type: 'custom' },
     }, [])
-    const { document: hidden } = await createContentDocumentWithBlocks(db, { id: 'hidden', organizationId: 'tenant',
+    await createContentDocumentWithBlocks(db, { id: 'hidden', organizationId: 'tenant',
       kind: 'article', rowRole: 'root', locale: 'en', title: 'Hidden', slug: 'hidden', status: 'published', publishedAt: '2026-01-01T00:00:00.000Z', visibility: 'unlisted' }, [])
     await createContentDocumentWithBlocks(db, { id: 'unpublished', organizationId: 'tenant', kind: 'article', rowRole: 'root',
       locale: 'en', title: 'Unpublished', slug: 'unpublished', status: 'draft', visibility: 'listed' }, [])
@@ -56,7 +56,9 @@ test('public discovery resolves translations through current publication owners'
       rootId: 'tenant-story', locale: 'th', title: 'Translated story', slug: 'translated', path: '/blog/translated', summary: 'Translated summary' }, [])
     assert.deepEqual((await searchPublicResources(db, 'exact body', { surface: 'tenant_blog', organizationId: 'tenant' })).map(result => result.path), ['/blog/tenant-story'])
     assert.deepEqual((await searchPublicResources(db, 'other-story', { surface: 'tenant_blog', organizationId: 'tenant' })).map(result => result.path), [])
-    assert.deepEqual((await searchPublicResources(db, 'hidden unpublished', { surface: 'tenant_blog', organizationId: 'tenant' })).map(result => result.path), [])
+    for (const query of ['hidden', 'unpublished']) {
+      assert.deepEqual(await searchPublicResources(db, query, { surface: 'tenant_blog', organizationId: 'tenant' }), [])
+    }
     assert.equal((await searchPublicResources(db, 'guide exact body', { surface: 'help' }))[0]?.path, '/docs/guide')
     const cards = await listSocialCardOwners(db)
     assert(cards.some(owner => owner.owner_type === 'content_document' && owner.owner_id === 'guide'))
