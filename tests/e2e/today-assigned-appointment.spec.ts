@@ -165,9 +165,17 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     expect((await memberPage.goto(new URL(`${productPath}/description?editMode=preview&previewViewport=desktop`, baseURL!).toString()))?.status()).toBe(200)
     await expect(memberPage.getByRole('dialog', { name: 'Legal Services preview', exact: true }).getByText('Your role does not have access to website previews.', { exact: true })).toBeVisible()
     await expect(memberPage.getByTestId('content-preview-frame')).toHaveCount(0)
+    const dayReads: string[] = []
+    const watchDayRead = (request: import('@playwright/test').Request) => {
+      const url = new URL(request.url())
+      if (url.pathname === '/api/dashboard/agenda' && url.searchParams.get('from') === day && url.searchParams.get('to') === day) dayReads.push(url.pathname)
+    }
+    memberPage.on('request', watchDayRead)
     await memberPage.goto(`${DASHBOARD}/calendar/${day}`)
     await waitForNuxtHydration(memberPage)
     await memberPage.locator(`#dashboard-panel-calendar-day a[href="${conversationPath}"]`).click()
+    expect(dayReads).toEqual([])
+    memberPage.off('request', watchDayRead)
     await expect(memberPage).toHaveURL(new URL(reservationPath, baseURL!).toString())
     const thread = memberPage.locator('#dashboard-panel-organization-messages-thread')
     const detail = memberPage.locator('#dashboard-panel-booking-details')
@@ -221,6 +229,23 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     const persisted = await body<{ booking: { status: string; assigned_member_id: string } }>(
       await page.request.get(`/api/dashboard/bookings/${bookingId}`, { params: { org: SLUG } }), 200)
     expect(persisted.booking).toMatchObject({ status: 'confirmed', assigned_member_id: actor.id })
+
+    await page.reload()
+    await waitForNuxtHydration(page)
+    const privateNote = 'Share the consultation checklist with the attorney'
+    const privateNoteLink = ownerDetail.getByRole('link', { name: /Private note/ })
+    await privateNoteLink.click()
+    const noteEditor = page.locator('#dashboard-panel-booking-private-note')
+    await noteEditor.getByRole('textbox', { name: 'Private note' }).fill(privateNote)
+    const saved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/dashboard/bookings/${bookingId}`)
+    await noteEditor.getByRole('button', { name: 'Save', exact: true }).click()
+    const noteResponse = await saved
+    expect(noteResponse.status()).toBe(200)
+    expect(await noteResponse.json()).toEqual({ booking: { booking_id: bookingId, private_notes: privateNote, version: expect.any(Number) } })
+    await expect(privateNoteLink.getByText(privateNote, { exact: true })).toBeVisible()
+    expect(await body(await page.request.get(`/api/dashboard/bookings/${bookingId}`, { params: { org: SLUG } }), 200)).toMatchObject({
+      booking: { booking_id: bookingId, private_notes: privateNote, status: 'confirmed' },
+    })
     // Confirming the consultation answers the request: nothing is left on Today, and the consultation is the member's Upcoming.
     const after = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
     expect([after.title, after.cards]).toEqual(['Nothing needs you today', []])

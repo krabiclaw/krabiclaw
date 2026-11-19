@@ -35,7 +35,7 @@
         </div>
         <p v-else-if="windowData && !rows.length" class="py-10 text-center text-sm text-muted">{{ search ? words.noMatch : words.none }}</p>
         <!-- The grid is its own scroller on both axes: the day header pins to its top and the home column to its left, the corner over both. -->
-        <div v-else-if="windowData" class="min-h-0 overflow-auto rounded-xl shadow-sm ring ring-default" :aria-busy="status === 'pending'" :data-testid="`${words.testId}-grid`">
+        <div v-else-if="windowData" class="min-h-0 overflow-auto rounded-xl shadow-sm ring ring-default" :aria-busy="status === 'pending'" :inert="!hasRequestedWindow" :data-testid="`${words.testId}-grid`">
           <div
             ref="gridElement"
             class="grid w-max select-none [--home-column:8rem] sm:[--home-column:14rem]"
@@ -229,7 +229,7 @@ const windowDays = computed(() => {
   return days > STAY_CALENDAR_DAYS ? WINDOW_DAYS : Math.max(WINDOW_DAYS, days)
 })
 const to = computed(() => addLocalDays(from.value, windowDays.value))
-const dates = computed(() => Array.from({ length: windowDays.value }, (_, index) => addLocalDays(from.value, index)))
+const requestedDates = computed(() => Array.from({ length: windowDays.value }, (_, index) => addLocalDays(from.value, index)))
 const weekdays = computed<number[] | null>(() => {
   const value = route.query.weekdays
   if (value === undefined) return null
@@ -254,39 +254,48 @@ const isPlace = (value: unknown): value is Place => isRecord(value) && (value.ki
 const isWindow = (value: unknown): value is Record<string, unknown> & { manage: boolean } => isRecord(value) && value.from === from.value && value.to === to.value && typeof value.manage === 'boolean'
 const isHomesPayload = (value: unknown): value is HomesPayload => isWindow(value) && Array.isArray(value.homes) && Array.isArray(value.bookings)
   && value.homes.every(entry => isRecord(entry) && isHome(entry.home) && Array.isArray(entry.nights) && entry.nights.length === windowDays.value
-    && entry.nights.every((night, index) => isStayNight(night) && night.date === dates.value[index]))
+    && entry.nights.every((night, index) => isStayNight(night) && night.date === requestedDates.value[index]))
   && value.bookings.every(stay => isRecord(stay) && stay.unit === 'nights' && typeof stay.booking_id === 'string' && isText(stay.conversation_id) && typeof stay.product_id === 'string' && isText(stay.guest_name) && isCount(stay.adults) && isCount(stay.children)
     && (value.manage ? Object.hasOwn(STAY_CHANNEL_LABELS, String(stay.channel)) : !('channel' in stay)) && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date))
 const isPlacesPayload = (value: unknown): value is PlacesPayload => isWindow(value) && Array.isArray(value.places)
-  && value.places.every(entry => isRecord(entry) && isPlace(entry.place) && Array.isArray(entry.days) && entry.days.length === windowDays.value && entry.days.every((day, index) => isPlaceDay(day) && day.date === dates.value[index]))
+  && value.places.every(entry => isRecord(entry) && isPlace(entry.place) && Array.isArray(entry.days) && entry.days.length === windowDays.value && entry.days.every((day, index) => isPlaceDay(day) && day.date === requestedDates.value[index]))
 
-const cacheKey = () => `${words.testId}-grid:${orgSlug}:${from.value}:${to.value}`
-// Whether this visit read the window itself; a window shown from an earlier visit is read again once it is on screen.
-let readNow = false
-const { data, error, status, refresh } = await useAsyncData<HomesPayload | PlacesPayload>(
+const realtime = useDashboardInvalidations()
+const cacheKey = () => `calendar:${words.testId}:${orgSlug}:${from.value}:${to.value}`
+const { data, error, status, refresh, clear } = await useAsyncData<HomesPayload | PlacesPayload>(
   cacheKey,
-  (_nuxtApp, { signal }) => {
-    readNow = true
-    return homesView
-      ? api('/api/dashboard/bookings/calendar', { query: { unit: 'nights', from: from.value, to: to.value }, validate: isHomesPayload, signal })
-      : api('/api/dashboard/bookings/calendar', { query: { unit: 'slot', from: from.value, to: to.value }, validate: isPlacesPayload, signal })
+  async (_nuxtApp, { signal }) => {
+    const reading = realtime.held.begin(cacheKey(), event => event.type === 'access.changed'
+      || event.type === 'stay.changed' || event.type === 'nights.changed' || event.type === 'business.changed')
+    const query = { from: from.value, to: to.value }
+    const payload = homesView
+      ? await api('/api/dashboard/bookings/calendar', { query: { ...query, unit: 'nights' }, validate: isHomesPayload, signal })
+      : await api('/api/dashboard/bookings/calendar', { query: { ...query, unit: 'slot' }, validate: isPlacesPayload, signal })
+    realtime.held.hold(reading, payload, Date.now() + 30_000, 3)
+    return payload
   },
   {
-    getCachedData(key, nuxtApp, ctx) {
-      if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-      return nuxtApp.payload.data[key] as HomesPayload | PlacesPayload | undefined
+    getCachedData(key, _nuxtApp, ctx) {
+      if (ctx.cause !== 'initial') return undefined
+      const held = realtime.held.get(key)
+      return isHomesPayload(held) || isPlacesPayload(held) ? held : undefined
     },
   },
 )
-const windowData = computed(() => data.value?.from === from.value && data.value.to === to.value ? data.value : null)
+const hasRequestedWindow = computed(() => data.value?.from === from.value && data.value.to === to.value)
+const windowData = shallowRef<HomesPayload | PlacesPayload | null>(null)
+watchEffect(() => {
+  if (error.value) windowData.value = null
+  else if (hasRequestedWindow.value) windowData.value = data.value ?? null
+})
+const dates = computed(() => {
+  const visible = windowData.value
+  if (!visible || hasRequestedWindow.value) return requestedDates.value
+  const days = parseDate(visible.to).compare(parseDate(visible.from))
+  return Array.from({ length: days }, (_, index) => addLocalDays(visible.from, index))
+})
 const homesData = computed(() => homesView ? windowData.value as HomesPayload | null : null)
 const placesData = computed(() => !homesView ? windowData.value as PlacesPayload | null : null)
-
-if (import.meta.client) {
-  onMounted(() => {
-    if (!readNow) void refresh()
-  })
-}
 
 const guestName = (stay: GridStay) => stay.guest_name || 'Guest name not provided'
 // Adults and children count as guests; infants do not, as Airbnb counts them.
@@ -363,7 +372,7 @@ function unbookableGaps(nights: StayNight[]) {
   return gaps
 }
 
-const windowLabel = computed(() => `${formatCalendarDate(from.value, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(dates.value.at(-1)!, 'en', { month: 'short', day: 'numeric', year: 'numeric' })}`)
+const windowLabel = computed(() => `${formatCalendarDate(dates.value[0]!, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(dates.value.at(-1)!, 'en', { month: 'short', day: 'numeric', year: 'numeric' })}`)
 /** A night the channel has not confirmed: still queued for it, or refused and needing review. */
 const channelState = (night: StayNight) => night.channel?.state === 'pending' || night.channel?.state === 'needs_review' ? night.channel.state : null
 function nightTitle(home: Home, night: StayNight, gap?: string) {
@@ -402,7 +411,7 @@ const selectedRow = (id: string) => Boolean(selection.value?.rows.includes(id))
 const span = computed(() => {
   const value = selection.value
   // A selection outside the window on screen (a link kept past its dates) selects nothing here.
-  if (!value || value.to <= from.value || value.from >= to.value) return null
+  if (!hasRequestedWindow.value || !value || value.to <= from.value || value.from >= to.value) return null
   const start = value.from < from.value ? 0 : dates.value.indexOf(value.from)
   const end = value.to >= to.value ? windowDays.value : dates.value.indexOf(value.to)
   return end > start ? { start, end } : null
@@ -609,10 +618,9 @@ watch([search, () => editor.busy.value], ([value, busy]) => { if (!busy) applied
 watch(() => route.query[words.rows] === undefined ? null : `${String(route.query[words.rows])}|${String(route.query[words.span])}`, () => editor.edit('summary'))
 
 const reservationRead = useDashboardReservationPrefetch()
-const realtime = useDashboardInvalidations()
 watch(realtime.savedReservation, saved => {
   const payload = homesData.value
-  if (!saved || !payload?.manage) return
+  if (!hasRequestedWindow.value || !saved || !payload?.manage) return
   if (!payload.homes.some(({ home }) => home.product_id === saved.product_id)) return
   const entry = payload.bookings.find(booking => booking.booking_id === saved.booking_id)
   if (entry) data.value = {
@@ -625,7 +633,13 @@ watch(realtime.savedReservation, saved => {
   if (entry || (saved.check_in_date < payload.to && saved.check_out_date > payload.from)) void refresh({ dedupe: 'defer' })
 })
 watch(realtime.event, event => {
-  if (homesView && (event?.type === 'stay.changed' || event?.type === 'nights.changed') && !editor.busy.value) void refresh({ dedupe: 'defer' })
-})
+  if (event?.type === 'access.changed') {
+    clear()
+    windowData.value = null
+    void refresh()
+  } else if ((event?.type === 'stay.changed' || event?.type === 'nights.changed' || event?.type === 'business.changed') && !editor.busy.value) {
+    void refresh({ dedupe: 'defer' })
+  }
+}, { flush: 'sync' })
 watch(realtime.reconnectEpoch, epoch => { if (epoch > 0 && !editor.busy.value) void refresh() })
 </script>

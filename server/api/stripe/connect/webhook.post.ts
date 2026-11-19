@@ -26,7 +26,7 @@ export default defineHandler(async (event) => {
   const signature = event.req.headers.get('stripe-signature')
   if (!signature) throw new HTTPError({ statusCode: 400, statusMessage: 'Stripe signature is required' })
 
-  const stripe = createStripeClient(keys.secretKey, 'payments')
+  const stripe = createStripeClient(keys.secretKey, 'payments', env.DB)
   let notification
   try {
     notification = await stripe.parseEventNotificationAsync(payload, signature, keys.connectWebhookSecret)

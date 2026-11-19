@@ -1,11 +1,10 @@
 import { execute, queryAll, queryFirst } from '~/server/db'
 import { PLATFORM_THEME_ID } from '~/utils/site-routing'
-import type { DomainEnv } from '~/server/utils/domains'
+import { customHostnameZone, type DomainEnv } from '~/server/utils/domains'
 import { NATIVE_PAGEVIEW_ZARAZ_EVENT, ZARAZ_ANALYTICS_PURPOSE, ZARAZ_ANALYTICS_PURPOSE_ID, ZARAZ_CONSENT_COOKIE_NAME, zarazConsentModalIntroHtml } from '~/utils/zaraz-consent'
 
 export interface ZarazEnv extends DomainEnv {
   CLOUDFLARE_API_TOKEN?: string
-  CF_PLATFORM_ZARAZ_ZONE_ID?: string
   NUXT_PUBLIC_PLATFORM_DOMAIN?: string
   /**
    * `absent` declares that this environment has no Zaraz zone of its own.
@@ -92,7 +91,7 @@ function requireZarazEnv(env: ZarazEnv): ZarazPresence {
     if (env.ZARAZ_ANALYTICS !== 'absent') {
       throw new Error(`ZARAZ_ANALYTICS must be 'absent' or unset, not '${env.ZARAZ_ANALYTICS}'`)
     }
-    if (env.CF_ZONE_ID || env.CF_PLATFORM_ZARAZ_ZONE_ID) {
+    if (env.CF_ZONE_ID || env.CF_PLATFORM_ZONE_ID) {
       throw new Error('ZARAZ_ANALYTICS=absent cannot be used with a Zaraz zone binding')
     }
     return 'absent'
@@ -319,6 +318,8 @@ interface ActiveTenantAnalyticsRow {
   theme_id: string
   ga4_measurement_id: string
   domain: string
+  type: string
+  dns_target: string | null
 }
 
 export interface ZarazAnalyticsConfigChanges {
@@ -400,7 +401,7 @@ export async function reconcileZarazAnalytics(
     SELECT o.id AS organization_id,
            o.theme_id,
            analytics.measurement_id AS ga4_measurement_id,
-           domain.domain
+           domain.domain, domain.type, domain.dns_target
       FROM organization o
       JOIN organization_integrations analytics
         ON analytics.organization_id = o.id AND analytics.provider = 'google_analytics'
@@ -432,7 +433,7 @@ export async function reconcileZarazAnalytics(
   if (platformUrl.protocol !== 'https:') throw new Error('Zaraz requires an HTTPS platform origin')
   const saasZone = env.CF_ZONE_ID!
   const token = env.CLOUDFLARE_API_TOKEN!
-  const platformZone = env.CF_PLATFORM_ZARAZ_ZONE_ID
+  const platformZone = env.CF_PLATFORM_ZONE_ID
   const zones = [{ id: saasZone, tenants: [...tenants].map(([organizationId, tenant]) => ({
     organizationId,
     measurementId: tenant.measurementId,
@@ -444,8 +445,12 @@ export async function reconcileZarazAnalytics(
     const tenantHosts = zones[0]!.tenants
     let platformTenants = tenantHosts
     if (separateZones) {
+      const managedPlatformHostnames = new Set(rows.filter(row =>
+        row.type === 'custom' && customHostnameZone(env, row.dns_target) === platformZone,
+      ).map(row => row.domain.toLowerCase()))
       const hostedByPlatformZone = (hostname: string) =>
         hostname === platformUrl.hostname || hostname.endsWith(`.${platformUrl.hostname}`)
+        || managedPlatformHostnames.has(hostname)
       const selectHosts = (matches: (hostname: string) => boolean) => tenantHosts
         .map(tenant => ({ ...tenant, hostnames: tenant.hostnames.filter(matches) }))
         .filter(tenant => tenant.hostnames.length > 0)

@@ -135,7 +135,13 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
       ja: { title: 'エンバー＆スライス', subtitle: 'ブルックリンの薪窯ピザ。', cta_label: 'テーブルを予約', secondary_label: 'メニューを見る' },
       th: { title: 'เอมเบอร์ แอนด์ สไลซ์', subtitle: 'พิซซ่าเตาฟืนในบรูคลิน', cta_label: 'จองโต๊ะ', secondary_label: 'ดูเมนู' },
     }
-    for (const [locale, copy] of Object.entries(translations)) {
+    const menuTranslations = {
+      ja: { collection: 'ピザ', product: 'マルゲリータ' },
+      th: { collection: 'พิซซ่า', product: 'มาร์เกอริต้า' },
+    }
+    for (const locale of ['ja', 'th'] as const) {
+      const copy = translations[locale]
+      const menu = menuTranslations[locale]
       await tool('add_organization_language', { locale })
       await tool('create_site_page', {
         page_id: home.page_id, locale, path: '/', title: copy.title,
@@ -143,6 +149,9 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
       })
       // Its location carries the language too, so its pages (reservations among them) exist in it.
       await tool('put_resource_localization', { resource_type: 'business_location', resource_id: brooklyn.id, locale, values: { title: brooklyn.title } })
+      await tool('put_resource_localization', { resource_type: 'organization', resource_id: tenant.organizationId, locale, values: { name: copy.title } })
+      await tool('put_resource_localization', { resource_type: 'collection', resource_id: tenant.collections.pizzas!.id, locale, values: { name: menu.collection } })
+      await tool('put_resource_localization', { resource_type: 'product', resource_id: pies[0]!.id, locale, values: { name: menu.product } })
       await tool('publish_organization_language', { locale })
     }
 

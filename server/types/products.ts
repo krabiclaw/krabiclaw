@@ -316,3 +316,17 @@ export type PublicProduct<T extends Product = Product> = Omit<T, 'booking' | 'st
   booking: Omit<ProductBookingConfig, StaffAssignment> | null
   stay: Omit<ProductStayConfig, StaffAssignment | 'live' | 'internal_name'> | null
 }
+
+/** Fields a menu card uses from the published product and its applicable prices. */
+export type MenuPrice = Pick<Price, 'id' | 'active' | 'currency' | 'location_id' | 'type'
+  | 'recurring_interval' | 'recurring_interval_count' | 'valid_from_at' | 'valid_until_at'
+  | 'unit_amount' | 'compare_at_unit_amount'>
+
+export type PublicMenuProduct = Pick<PublicProduct, 'id' | 'name' | 'slug' | 'description' | 'active'
+  | 'details' | 'locations' | 'collections' | 'image' | 'order_url' | 'updated_at'> & {
+  kind: 'dish'
+  booking: Pick<ProductBookingConfig, 'held_online' | 'duration_minutes' | 'default_capacity'> | null
+  page: Pick<NonNullable<Product['page']>, 'path'> | null
+  stay: null
+  variants: Array<Pick<ProductVariant, 'id' | 'name' | 'active'> & { prices: MenuPrice[] }>
+}

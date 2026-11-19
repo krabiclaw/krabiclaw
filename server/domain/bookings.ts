@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { isRecord } from '~/server/utils/type-guards'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import type { Payment } from '~/server/domain/payments'
@@ -83,15 +83,18 @@ export async function cancelFailedCheckoutBooking(db: DbClient, env: CloudflareE
 }
 
 /** Replace the team's private note only while the booking still matches the version the team read. */
-export async function setBookingNote(db: DbClient, scope: BookingScope, body: unknown): Promise<void> {
+export async function setBookingNote(db: DbClient, scope: BookingScope, body: unknown) {
   if (!isRecord(body)) throw new HTTPError({ statusCode: 400, message: 'private_notes and version are required' })
   if (typeof body.private_notes !== 'string') throw new HTTPError({ statusCode: 400, message: 'private_notes must be text' })
   const note = body.private_notes.trim()
   if (note.length > 2000) throw new HTTPError({ statusCode: 400, message: 'Note must be at most 2000 characters' })
   if (typeof body.version !== 'number' || !Number.isSafeInteger(body.version) || body.version < 1) throw new HTTPError({ statusCode: 400, message: 'Booking version is required' })
-  const written = await execute(db, `UPDATE bookings SET private_notes = ?, version = version + 1, updated_at = ?
-    WHERE organization_id = ? AND id = ? AND version = ?`, [note || null, new Date().toISOString(), scope.organizationId, scope.bookingId, body.version])
-  if (written.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'This booking changed since you opened it. Reload and try again.' })
+  const saved = await queryFirst<{ booking_id: string; private_notes: string | null; version: number }>(db, `
+    UPDATE bookings SET private_notes = ?, version = version + 1, updated_at = ?
+    WHERE organization_id = ? AND id = ? AND version = ?
+    RETURNING id AS booking_id, private_notes, version`, [note || null, new Date().toISOString(), scope.organizationId, scope.bookingId, body.version])
+  if (!saved) throw new HTTPError({ statusCode: 409, message: 'This booking changed since you opened it. Reload and try again.' })
+  return saved
 }
 
 export function timedBookingPricesQuery(organization: BatchQuery, variants: BatchQuery): BatchQuery {

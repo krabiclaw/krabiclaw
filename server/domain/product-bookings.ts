@@ -188,18 +188,19 @@ export async function quoteTimedBooking(db: DbClient, env: CloudflareEnv, input:
 
 /** Creation delivery is shared by ordinary claims and authenticated Checkout conversion. */
 export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClient, organizationId: string, requestId: string) {
-  const [request, record, organization] = await Promise.all([
-    getGuestRequest(db, requestId, organizationId, 'booking'),
-    getThreadOperationalRecord(db, requestId),
-    queryFirst<{ name: string | null; vertical: string | null; public_url: string | null }>(db, `SELECT name, vertical, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url FROM organization WHERE id = ?`, [organizationId]),
-  ])
-  if (!request || request.kind !== 'booking' || !record || record.organization_id !== organizationId || !organization) throw new Error('Booking creation delivery requires its canonical tenant, request and offering')
-  const { name: guestName, email: guestEmail } = request.payload.guest
-  if (guestName === null || guestEmail === null) throw new Error('A booking made on the site or by its operator has its guest\'s name and email')
-  // The status the booking was created in, recorded on its conversation in the batch that claimed it.
+  const request = await getGuestRequest(db, requestId, organizationId, 'booking')
+  if (!request || request.kind !== 'booking') throw new Error('Booking creation delivery requires its canonical request')
+  // A completed delivery only needs the creation outcome already recorded on the conversation.
   const creation = { status: request.payload.provenance?.creation_status }
   if (creation.status !== 'pending' && creation.status !== 'confirmed') throw new Error('Booking creation status is missing or invalid')
   if (request.payload.provenance?.followups_completed === true) return creation.status
+  const { name: guestName, email: guestEmail } = request.payload.guest
+  if (guestName === null || guestEmail === null) throw new Error('A booking made on the site or by its operator has its guest\'s name and email')
+  const [record, organization] = await Promise.all([
+    getThreadOperationalRecord(db, requestId, request),
+    queryFirst<{ name: string | null; vertical: string | null; public_url: string | null }>(db, `SELECT name, vertical, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url FROM organization WHERE id = ?`, [organizationId]),
+  ])
+  if (!record || record.organization_id !== organizationId || !organization) throw new Error('Booking creation delivery requires its canonical tenant and offering')
   const sourceLocale = await getSourceLocale(db, organizationId)
   const locale = request.payload.guest.locale ?? sourceLocale
   // The guest's note is their message in the conversation.

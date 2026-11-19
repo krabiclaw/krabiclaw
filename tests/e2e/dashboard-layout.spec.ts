@@ -48,8 +48,20 @@ test.describe('dashboard pane hierarchy', () => {
     let pageId: string | null = null
     const failures: unknown[] = []
     try {
-      await open(page, `${services}/products`)
+      const initialReads: string[] = []
+      const watchInitialRead = (request: import('@playwright/test').Request) => {
+        const path = new URL(request.url()).pathname
+        if (path === '/api/dashboard/context' || path === '/api/dashboard/catalog') initialReads.push(path)
+      }
+      page.on('request', watchInitialRead)
+      const document = await page.goto(`${services}/products`)
+      expect(document?.status()).toBe(200)
+      expect(document?.headers()['cache-control']).toContain('no-store')
+      expect(await document?.text()).toContain('id="dashboard-panel-catalog"')
+      await waitForNuxtHydration(page)
       await expectPanes(page, ['catalog'])
+      expect(initialReads).toEqual([])
+      page.off('request', watchInitialRead)
       await page.locator('#dashboard-panel-catalog').getByTestId('catalog-add').click()
       await expect(page).toHaveURL(`${services}/products/new`)
       const kind = page.locator('#dashboard-panel-product')

@@ -146,13 +146,21 @@ export async function readPaymentReceipts(db: DbClient, env: CloudflareEnv, orga
 
 /** Full merchant detail; callers must authorize before reading or projecting it. */
 export async function readPaymentDetails(db:DbClient,env:CloudflareEnv,organizationId:string,paymentId:string){
- const recorded=await requirePayment(db,organizationId,paymentId)
- const [refundRows,disputeRows,booking,stripeFacts]=await Promise.all([
-  queryAll<RecordedRefund>(db,'SELECT * FROM payment_refunds WHERE payment_id=?',[recorded.id]),
-  queryAll<{id:string;stripe_dispute_id:string;amount:number;currency:string;reason:string;status:string;evidence_due_at:string|null;updated_at:string}>(db,'SELECT * FROM payment_disputes WHERE payment_id=?',[recorded.id]),
-  recorded.subject_type==='booking'?queryFirst<{conversation_id:string|null}>(db,`SELECT (SELECT c.id FROM conversations c WHERE c.booking_id=b.id AND c.kind='booking') AS conversation_id FROM bookings b WHERE b.id=? AND b.organization_id=?`,[recorded.subject_id,organizationId]):Promise.resolve(null),
-  stripePaymentFacts(env,recorded,true),
- ])
+ const scope=[organizationId,paymentId]
+ const [recordedResult,refundResult,disputeResult,bookingResult]=await executeBatch(db,[
+  {query:'SELECT * FROM payments WHERE organization_id=? AND id=?',params:scope},
+  {query:'SELECT r.* FROM payments p JOIN payment_refunds r ON r.payment_id=p.id WHERE p.organization_id=? AND p.id=?',params:scope},
+  {query:'SELECT d.* FROM payments p JOIN payment_disputes d ON d.payment_id=p.id WHERE p.organization_id=? AND p.id=?',params:scope},
+  {query:`SELECT (SELECT c.id FROM conversations c WHERE c.booking_id=b.id AND c.kind='booking') AS conversation_id
+      FROM payments p JOIN bookings b ON p.subject_type='booking' AND b.id=p.subject_id AND b.organization_id=p.organization_id
+      WHERE p.organization_id=? AND p.id=?`,params:scope},
+ ],{operation:'Read merchant payment detail'})
+ const recorded=recordedResult!.results[0] as Payment|undefined
+ if(!recorded)throw new HTTPError({statusCode:404,statusMessage:'Payment not found'})
+ const refundRows=refundResult!.results as RecordedRefund[]
+ const disputeRows=disputeResult!.results as Array<{id:string;stripe_dispute_id:string;amount:number;currency:string;reason:string;status:string;evidence_due_at:string|null;updated_at:string}>
+ const booking=bookingResult!.results[0] as {conversation_id:string|null}|undefined
+ const stripeFacts=await stripePaymentFacts(env,recorded,true)
  const payment=visiblePayment({...recorded,...stripeFacts?.amounts})
  const refunds=mergeRefunds(refundRows,stripeFacts?.refunds)
  return {payment,refunds,disputes:stripeFacts?stripeFacts.disputes.map(dispute=>{const row=disputeRows.find(item=>item.stripe_dispute_id===dispute.id);return {id:row?.id??dispute.id,stripe_dispute_id:dispute.id,amount:dispute.amount,currency:dispute.currency.toUpperCase(),reason:dispute.reason,status:dispute.status,evidence_due_at:dispute.evidence_details?.due_by?new Date(dispute.evidence_details.due_by*1000).toISOString():null,updated_at:row?.updated_at??new Date(dispute.created*1000).toISOString()}}):disputeRows,visit:booking?.conversation_id?{kind:payment.subject_type,conversation_id:booking.conversation_id}:null}

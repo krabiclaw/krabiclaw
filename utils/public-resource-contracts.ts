@@ -1,6 +1,6 @@
 import { PRODUCT_KINDS, type ProductKind } from '~/shared/product-details'
 import type { FormattedBookingPolicySummary } from '~/server/utils/booking-policy-summary'
-import type { Collection, Product } from '~/server/types/products'
+import type { Collection, Product, PublicMenuProduct } from '~/server/types/products'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { SocialImageSource } from '~/utils/social-metadata'
 import type { PublicLocationArea } from '~/types/public-location'
@@ -105,7 +105,7 @@ export const isPublicShellPayload = (value: unknown): value is PublicShellPayloa
   return sectionFlags(value.sections, PUBLIC_SITE_SECTIONS)
 }
 
-export interface PublicPagePayload {
+export interface PublicPagePayload<T = Product> {
   kind: string
   shell: PublicShellPayload
   content: ApiRecord[]
@@ -120,7 +120,7 @@ export interface PublicPagePayload {
   blog_post: ApiRecord | null
   /** Each table product's terms in the page's language, by product id: what the reservations page states before booking. */
   table_policy_summaries: Record<string, FormattedBookingPolicySummary>
-  products: Product[]
+  products: T[]
   collections: Collection[]
   locale_representations: PublicLocaleRepresentation[]
 }
@@ -140,11 +140,9 @@ export interface PublicLocaleRepresentation {
  * than every field, so a payload missing one of them fails here instead of
  * rendering a product with no offer.
  */
-export function isPublicProduct(value: unknown): value is Product {
+function hasPublicProductCard(value: unknown): value is Record<string, unknown> {
   return isRecord(value)
     && typeof value.id === 'string'
-    && typeof value.organization_id === 'string'
-    && PRODUCT_KINDS.includes(value.kind as ProductKind)
     && typeof value.name === 'string'
     && typeof value.slug === 'string'
     && typeof value.description === 'string'
@@ -165,7 +163,11 @@ export function isPublicProduct(value: unknown): value is Product {
       && typeof entry.collection_id === 'string'
       && Number.isInteger(entry.sort_order))
     && (value.image === null || isRecord(value.image))
-    && Array.isArray(value.gallery)
+}
+
+export function isPublicProduct(value: unknown): value is Product {
+  return hasPublicProductCard(value) && typeof value.organization_id === 'string'
+    && PRODUCT_KINDS.includes(value.kind as ProductKind) && Array.isArray(value.gallery)
     && (value.kind !== 'stay' || (isRecord(value.stay)
       && Array.isArray(value.stay.photo_rooms)
       && value.stay.photo_rooms.every(isStayPhotoRoom)))
@@ -180,11 +182,18 @@ export function isPublicCollection(value: unknown): value is Collection {
     && Number.isInteger(value.sort_order)
 }
 
-export const isPublicPagePayload = (
-  value: unknown,
-  expectedKind?: string | null,
-): value is PublicPagePayload =>
-  isRecord(value)
+export function isPublicMenuProduct(value: unknown): value is PublicMenuProduct {
+  return hasPublicProductCard(value) && value.kind === 'dish' && typeof value.updated_at === 'string'
+    && (value.order_url === null || typeof value.order_url === 'string')
+    && (value.page === null || (isRecord(value.page) && typeof value.page.path === 'string'))
+    && (value.booking === null || (isRecord(value.booking) && typeof value.booking.held_online === 'boolean'))
+    && value.stay === null
+}
+
+export function isPublicPagePayload(value: unknown, expectedKind?: string | null): value is PublicPagePayload
+export function isPublicPagePayload<T>(value: unknown, expectedKind: string | null, validProduct: (value: unknown) => value is T): value is PublicPagePayload<T>
+export function isPublicPagePayload<T>(value: unknown, expectedKind?: string | null, validProduct: (value: unknown) => boolean = isPublicProduct): value is PublicPagePayload<T> {
+  return isRecord(value)
   && typeof value.kind === 'string'
   && isPublicShellPayload(value.shell)
   && (!expectedKind || value.kind === expectedKind)
@@ -207,7 +216,7 @@ export const isPublicPagePayload = (
   && isRecord(value.table_policy_summaries)
   && Object.values(value.table_policy_summaries).every(item => isRecord(item) && typeof item.heading === 'string' && Array.isArray(item.items))
   && Array.isArray(value.products)
-  && value.products.every(isPublicProduct)
+  && value.products.every(validProduct)
   && Array.isArray(value.collections)
   && value.collections.every(isPublicCollection)
   && Array.isArray(value.locale_representations)
@@ -216,6 +225,7 @@ export const isPublicPagePayload = (
     && typeof item.label === 'string'
     && typeof item.route_path === 'string'
     && (item.source === 'source' || item.source === 'localized'))
+}
 
 export type PublicSocialPost = import('~/server/utils/post-management').PublicSocialPost
 

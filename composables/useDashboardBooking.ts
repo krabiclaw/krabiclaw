@@ -76,13 +76,17 @@ export function isAccountNightBooking(value: unknown): value is AccountNightBook
 }
 
 
+const RESERVATION_HOLD_MS = 30_000
+
 function useDashboardReservationReads(scope: DashboardRequestScope) {
   const session = authClient.useSession()
   const realtime = useDashboardInvalidations()
   const reader = () => session.value.data?.user.id
   const key = (bookingId: string) => `reservation:${reader()}:${scope.orgSlug}:${bookingId}`
 
-  const get = (bookingId: string) => reader() ? realtime.held.get(key(bookingId)) : undefined
+  const get = (bookingId: string, opened = false) => reader()
+    ? realtime.held.get(key(bookingId), opened ? Date.now() + RESERVATION_HOLD_MS : undefined)
+    : undefined
 
   async function read(bookingId: string, signal?: AbortSignal): Promise<DashboardBooking> {
     const fetchBooking = () => dashboardFetch(dashboardBookingPath(bookingId), scope, { signal, validate: isDashboardBooking })
@@ -101,7 +105,7 @@ function useDashboardReservationReads(scope: DashboardRequestScope) {
       || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.scheduled))
     const request = fetchBooking().then(value => {
       if (!realtime.held.current(entry)) return undefined
-      realtime.held.hold(entry, value, Date.now() + 30_000, 5)
+      realtime.held.hold(entry, value, Date.now() + RESERVATION_HOLD_MS, 5)
       return value
     }).finally(() => { delete entry.pending })
     entry.pending = request
@@ -134,7 +138,7 @@ export function useDashboardReservation(scope: DashboardRequestScope, bookingId:
   const reads = import.meta.client ? useDashboardReservationReads(scope) : undefined
   return useAsyncData(dashboardBookingKey(scope.orgSlug, bookingId), async (_app, { signal }) => {
     if (import.meta.server) {
-      const provider = useRequestEvent()?.context.dashboardReservationProvider as {
+      const provider = useRequestEvent()?.context.dashboardDocumentProvider as {
         booking: (orgSlug: string, bookingId: string) => Promise<unknown>
       } | undefined
       const payload = await provider?.booking(scope.orgSlug, bookingId)
@@ -144,12 +148,12 @@ export function useDashboardReservation(scope: DashboardRequestScope, bookingId:
     return reads!.read(bookingId, signal)
   }, {
     getCachedData(key, app, ctx) {
-      if (app.isHydrating) {
+      if (import.meta.server || app.isHydrating) {
         const payload: unknown = app.payload.data[key]
         return isDashboardBooking(payload) ? payload : undefined
       }
       if (ctx.cause !== 'initial') return undefined
-      const held = reads?.get(bookingId)
+      const held = reads?.get(bookingId, true)
       return isDashboardBooking(held) ? held : undefined
     },
   })

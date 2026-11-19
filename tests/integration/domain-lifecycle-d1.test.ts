@@ -65,9 +65,14 @@ test('a stale domain result changes nothing and permanent subdomain reservations
         return Response.json({ success: true, result: { id, hostname: 'custom.example.net', status: providerStatus, ssl: { status: 'active' } } })
       }
       if (providerMode === 'activate') {
-        if (request.hostname === 'cloudflare-dns.com') return Response.json({ Status: 0, Answer: request.searchParams.get('type') === 'CNAME' ? [{ type: 5, data: 'target.example.test.' }] : [] })
+        if (request.hostname === 'cloudflare-dns.com') {
+          const target = request.searchParams.get('name') === 'www.pair.example.test' ? 'new-target.example.test.' : 'target.example.test.'
+          return Response.json({ Status: 0, Answer: request.searchParams.get('type') === 'CNAME' ? [{ type: 5, data: target }] : [] })
+        }
         const id = request.pathname.split('/').at(-1)!
         assert.ok(['apex-provider', 'www-provider'].includes(id))
+        const zone = id === 'apex-provider' ? 'zone' : 'new-zone'
+        assert.equal(request.pathname, `/client/v4/zones/${zone}/custom_hostnames/${id}`)
         if (init?.method === 'PATCH') {
           checkedHostnames.push(id)
           assert.equal(JSON.parse(String(init.body)).ssl.method, id === 'apex-provider' ? 'txt' : 'http')
@@ -205,15 +210,16 @@ test('a stale domain result changes nothing and permanent subdomain reservations
     // The deletion and its audit row commit together.
     assert.ok((await listDashboardEvents(db, 'audit', {})).events.some(event => event.event_name === 'domain_deleted'))
     assert.equal((await listDashboardEvents(db, 'other', {})).events.length, 0)
-    await db.prepare(`INSERT INTO organization_domains(id,organization_id,domain,type,role,status,cloudflare_hostname_id,validation_strategy)
-      VALUES ('apex','audit','pair.example.test','custom','secondary','verifying','apex-provider','txt_manual'),
-      ('www','audit','www.pair.example.test','custom','canonical','verifying','www-provider','http_auto')`).run()
+    await db.prepare(`INSERT INTO organization_domains(id,organization_id,domain,type,role,status,cloudflare_hostname_id,validation_strategy,dns_target)
+      VALUES ('apex','audit','pair.example.test','custom','secondary','verifying','apex-provider','txt_manual','target.example.test'),
+      ('www','audit','www.pair.example.test','custom','canonical','verifying','www-provider','http_auto','new-target.example.test')`).run()
+    const splitEnv = { ...dashboardEnv, CF_LEGACY_SAAS_CNAME_TARGET: 'target.example.test', CF_SAAS_CNAME_TARGET: 'new-target.example.test', CF_PLATFORM_ZONE_ID: 'new-zone' }
     const www = (await getOrganizationDomains(db, 'audit')).find(row => row.id === 'www')
     assert.ok(www)
     providerMode = 'activate'
-    await checkDashboardDomainGroup(dashboardEnv, db, actor, www)
+    await checkDashboardDomainGroup(splitEnv, db, actor, www)
     assert.deepEqual(checkedHostnames, [])
-    await events.runNext(dashboardEnv, 'domain.check_requested')
+    await events.runNext(splitEnv, 'domain.check_requested')
     assert.deepEqual(checkedHostnames.sort(), ['apex-provider', 'www-provider'])
     const [group] = groupCustomDomains(await getOrganizationDomains(db, 'audit'))
     assert.equal(group?.status, 'active')

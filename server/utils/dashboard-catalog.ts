@@ -20,8 +20,8 @@ const kinds = [
   { value: 'table', label: 'Tables' },
 ]
 
-export async function loadDashboardCatalog(event: H3Event) {
-  const { db, organization } = await getDashboardMemberContext(event)
+export async function loadDashboardCatalog(event: H3Event, organizationSlug?: string) {
+  const { db, organization } = await getDashboardMemberContext(event, { organizationSlug })
   if (await roleAllows({ ...organization, permissions: { menu: ['read'] } })) {
     const allowed = await queryAll<{ location_id: string }>(db, `
       SELECT DISTINCT pl.location_id FROM product_locations pl JOIN products p ON p.organization_id = pl.organization_id AND p.id = pl.product_id

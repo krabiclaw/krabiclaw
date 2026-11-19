@@ -10,9 +10,11 @@ import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 export interface DomainEnv {
   CF_ZONE_ID?: string
+  CF_PLATFORM_ZONE_ID?: string
   CF_CUSTOM_HOSTNAMES_API_TOKEN?: string
   CLOUDFLARE_API_TOKEN?: string
   CF_SAAS_CNAME_TARGET?: string
+  CF_LEGACY_SAAS_CNAME_TARGET?: string
   CF_ACCOUNT_ID?: string
   NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN?: string
   NUXT_PUBLIC_PLATFORM_DOMAIN?: string
@@ -273,6 +275,24 @@ export async function createSystemSubdomain(
   return (await queryFirst<DomainRecord>(db, `SELECT * FROM organization_domains WHERE id = ?`, [id])) as DomainRecord
 }
 
+export function customHostnameZone(env: DomainEnv, target: string | null | undefined = env.CF_SAAS_CNAME_TARGET) {
+  const legacyTarget = env.CF_LEGACY_SAAS_CNAME_TARGET
+  if (!legacyTarget || target === legacyTarget || target === null) return env.CF_ZONE_ID
+  if (target !== env.CF_SAAS_CNAME_TARGET || target === undefined) {
+    throw new Error(`Unexpected Cloudflare SaaS CNAME target: ${target}`)
+  }
+  if (!env.CF_PLATFORM_ZONE_ID) throw new Error('CF_PLATFORM_ZONE_ID is required for the Blawby SaaS zone')
+  return env.CF_PLATFORM_ZONE_ID
+}
+
+function customHostnameEnv(env: DomainEnv, target: string | null | undefined = env.CF_SAAS_CNAME_TARGET): DomainEnv {
+  return {
+    ...env,
+    CF_ZONE_ID: customHostnameZone(env, target),
+    CF_SAAS_CNAME_TARGET: target ?? env.CF_LEGACY_SAAS_CNAME_TARGET ?? env.CF_SAAS_CNAME_TARGET,
+  }
+}
+
 function requireCloudflareConfig(env: DomainEnv) {
   if (!env.CF_ZONE_ID) throw new Error('CF_ZONE_ID is required')
   if (!env.CF_CUSTOM_HOSTNAMES_API_TOKEN) throw new Error('CF_CUSTOM_HOSTNAMES_API_TOKEN is required')
@@ -470,7 +490,7 @@ async function persistCloudflareState(
 
   const sslValidation = firstSslValidation(hostname)
   const sslValidation2 = secondSslValidation(hostname)
-  const dnsTarget = env.CF_SAAS_CNAME_TARGET || null
+  const dnsTarget = before.dns_target ?? env.CF_LEGACY_SAAS_CNAME_TARGET ?? env.CF_SAAS_CNAME_TARGET ?? null
   const dnsStatus = options.dnsInspection.points_to_saas === true ? 'valid' : options.dnsInspection.resolves_elsewhere ? 'invalid' : 'pending'
   const status = mapCloudflareStatus(hostname.status, hostname.ssl?.status, dnsStatus)
   const now = new Date().toISOString()
@@ -640,6 +660,7 @@ export async function createCustomDomainPair(
     domain,
     role: (domain === canonical ? 'canonical' : 'secondary') as DomainRole
   }))
+  const providerEnv = customHostnameEnv(env)
   const cloudflareByDomainId = new Map<string, CloudflareCustomHostname>()
   const createdHostnameIds: string[] = []
   const insertedDomainIds: string[] = []
@@ -648,7 +669,7 @@ export async function createCustomDomainPair(
   try {
     // External side-effect first: provision both hostnames before DB commit.
     for (const entry of entries) {
-      const hostname = await createCloudflareHostname(env, entry.domain)
+      const hostname = await createCloudflareHostname(providerEnv, entry.domain)
       cloudflareByDomainId.set(entry.id, hostname)
       if (hostname.id) createdHostnameIds.push(hostname.id)
     }
@@ -707,7 +728,7 @@ export async function createCustomDomainPair(
     const leftBehind: string[] = []
     for (const hostnameId of createdHostnameIds) {
       try {
-        await deleteCloudflareHostname(env, hostnameId)
+        await deleteCloudflareHostname(providerEnv, hostnameId)
       } catch (cleanupError) {
         leftBehind.push(`Cloudflare hostname ${hostnameId} (${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)})`)
       }
@@ -747,16 +768,17 @@ export async function syncDomainWithCloudflare(
   let hostname: CloudflareCustomHostname
   let dnsInspection: DomainResolutionInspection
   try {
-    dnsInspection = await inspectDomainResolution(env, domain.domain)
+    const providerEnv = customHostnameEnv(env, domain.dns_target ?? null)
+    dnsInspection = await inspectDomainResolution(providerEnv, domain.domain)
     const providerId = domain.cloudflare_hostname_id
     hostname = providerId
-      ? await getCloudflareHostname(env, providerId)
-      : await createCloudflareHostname(env, domain.domain)
+      ? await getCloudflareHostname(providerEnv, providerId)
+      : await createCloudflareHostname(providerEnv, domain.domain)
     if (!hostname.id || (providerId && hostname.id !== providerId) || hostname.hostname !== domain.domain) {
       throw new Error('The Cloudflare hostname does not match this domain')
     }
     if (providerId && actorId && (hostname.status !== 'active' || hostname.ssl?.status !== 'active')) {
-      hostname = await patchCloudflareHostname(env, providerId, domain.validation_strategy)
+      hostname = await patchCloudflareHostname(providerEnv, providerId, domain.validation_strategy)
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
@@ -788,7 +810,7 @@ export async function deleteCustomDomain(
   let cloudflareDeleteError: string | null = null
   if (domain.cloudflare_hostname_id) {
     try {
-      await deleteCloudflareHostname(env, domain.cloudflare_hostname_id)
+      await deleteCloudflareHostname(customHostnameEnv(env, domain.dns_target ?? null), domain.cloudflare_hostname_id)
     } catch (error) {
       const normalizedError = error instanceof Error ? error : new Error('Cloudflare hostname deletion failed')
       cloudflareDeleteError = normalizedError.message || 'Cloudflare hostname deletion failed'
