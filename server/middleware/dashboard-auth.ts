@@ -1,7 +1,7 @@
 import { defineHandler } from 'nitro'
 import { redirect } from 'nitro/h3'
 import { cloudflareEnv } from '~/server/utils/api-response'
-import { getAuthSession } from '~/server/utils/auth'
+import { getDashboardSession } from '~/server/utils/dashboard-context'
 import { buildLoginUrl } from '~/shared/auth/return-target'
 import { BLAWBY_FREE_SITE_HOST, isNonProductionHost, LEGACY_FREE_SITE_HOST, normalizeHost } from '~/server/utils/tenant-hosts'
 
@@ -27,7 +27,7 @@ export default defineHandler(async (event) => {
 
   if (method !== 'GET' || !dashboard) return
 
-  const session = await getAuthSession(event, cloudflareEnv(event))
+  const session = await getDashboardSession(event, cloudflareEnv(event))
   if (session?.user?.id) return
 
   return redirect(buildLoginUrl({
