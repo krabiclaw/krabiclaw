@@ -738,13 +738,13 @@ test('a sync request is checked against the plan once, then Blawby imports, acti
     channex.failMessages = true
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
     await failSync()
-    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: productId, last_error_code: 'CHANNEX_REQUEST_FAILED' })
+    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: null, last_error_code: 'CHANNEX_REQUEST_FAILED' })
     const failedAtMessages = ((await call('GET')).body.listings as Array<Record<string, unknown>>)[0]!
     assert.deepEqual([failedAtMessages.status, failedAtMessages.stage, (failedAtMessages.error as { code: string }).code], ['failed', 'messages', 'CHANNEX_REQUEST_FAILED'])
     channex.failMessages = false
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
     await runSyncs()
-    assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: productId, last_error_code: null })
+    assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: null, last_error_code: null })
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_airbnb_listings WHERE product_id = ?').bind(productId).first(), { import_stage: 'complete', enabled: 1 })
 
     // Growth ends: Stripe deletes the subscription and Better Auth marks it canceled. On Basic, the newest live homes
@@ -774,14 +774,14 @@ test('a sync request is checked against the plan once, then Blawby imports, acti
     await db.prepare("UPDATE member SET role = 'member' WHERE userId = ? AND organizationId = ?").bind(OWNER, ORG).run()
     const refusedAccessStart = channex.seen.length
     await failSync()
-    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: productId, last_error_code: 'FORBIDDEN' })
+    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: null, last_error_code: 'FORBIDDEN' })
     assert.deepEqual(channex.seen.slice(refusedAccessStart), [])
     await db.prepare("UPDATE member SET role = 'owner' WHERE userId = ? AND organizationId = ?").bind(OWNER, ORG).run()
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
     await db.prepare('DELETE FROM member WHERE userId = ? AND organizationId = ?').bind(OWNER, ORG).run()
     const removedAccessStart = channex.seen.length
     await failSync()
-    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: productId, last_error_code: 'REQUESTER_REMOVED' })
+    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: null, last_error_code: 'REQUESTER_REMOVED' })
     assert.deepEqual(channex.seen.slice(removedAccessStart), [])
 
     // Disconnecting while a sync is queued: the request writes nothing to Channex. It marks the connection
@@ -794,7 +794,7 @@ test('a sync request is checked against the plan once, then Blawby imports, acti
     assert.deepEqual(await new ChannexConnection(db, env, ORG, OWNER).disconnect('chan-1'), { disconnected: false })
     assert.deepEqual([channex.seen.slice(disconnectStart).filter(request => request.method !== 'GET'), await db.prepare('SELECT status FROM channex_connections').first('status')], [[], 'disconnecting'])
     await failSync()
-    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: productId, last_error_code: 'NOT_CONNECTED' })
+    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: null, last_error_code: 'NOT_CONNECTED' })
     assert.deepEqual(await db.prepare('SELECT status, channel_id FROM channex_connections').first(), null)
     assert.deepEqual(channex.seen.slice(disconnectStart).filter(request => request.method !== 'GET').map(request => `${request.method} ${request.path}`), ['POST /channels/chan-1/deactivate', 'DELETE /channels/chan-1'])
   } finally {
