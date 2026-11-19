@@ -21,6 +21,7 @@ import { mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
 import type { GuestThreadPayload } from '~/server/domain/requests'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '~/server/utils/reservation-cancel-token'
 import { prepareGuestBookingReceipt, type GuestBookingReceipt } from '~/server/utils/guest-booking-receipt'
+import type { AuthorizedPaymentReturnDocument } from '~/server/utils/payment-return-document'
 
 /**
  * The payment the buyer confirms on the site: Stripe's Payment Element collects
@@ -32,7 +33,7 @@ import { prepareGuestBookingReceipt, type GuestBookingReceipt } from '~/server/u
 type IntentWithSurcharge = Stripe.PaymentIntent & { amount_details?: { surcharge?: { status?: string; maximum_amount?: number; amount?: number } } }
 export type PaymentHandoffState = 'open' | 'processing' | 'verifying' | 'paid' | 'failed' | 'expired' | 'taken'
 
-type CheckoutPayment = Payment & {
+export type CheckoutPayment = Payment & {
   confirmation_in_flight: number; stripe_payment_intent_id: string; checkout_expires_at: string; return_expires_at: string
   surcharge_basis_points: number | null; checkout_hold: string | null; stripe_customer_id: string | null
   hold_starts_at: string | null; hold_ends_at: string | null; hold_timezone: string | null
@@ -425,14 +426,15 @@ async function paymentReceipt(env: CloudflareEnv, payment: Payment, receipt: Che
 /** Read the receipt, settling a successful payment if the provider redirect beat the webhook. */
 export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, buyer: () => Promise<string>,
   prepared?: { plan: Awaited<ReturnType<typeof preparePaymentReturn>>; row: unknown }, receiptLanguage?: () => Promise<{ locale: string; source: boolean }>,
-  sessionBuyer?: () => Promise<string | undefined>): Promise<PaymentReturn> {
+  sessionBuyer?: () => Promise<string | undefined>, document?: AuthorizedPaymentReturnDocument): Promise<PaymentReturn> {
   const now = new Date().toISOString()
-  const initial = prepared ? prepared.plan.read(prepared.row) : await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
+  const initial = document?.payment ?? (prepared ? prepared.plan.read(prepared.row) : await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement'))
+  const guard = document?.guard
   let payment: Payment = initial
   let hold = initial.checkout_hold ? JSON.parse(initial.checkout_hold) as CheckoutHold : null
-  let userId: string | undefined
+  let userId = document?.userId
   let committedReceipt: { id: string; token: string; booking: GuestBookingReceipt } | undefined
-  let language: Awaited<ReturnType<NonNullable<typeof receiptLanguage>>> | undefined
+  let language = document?.language
   async function visitReceipt(id: string, token: string) {
     if (!receiptLanguage) throw new Error('Guest receipt requires a website language')
     const selected = language ??= await receiptLanguage()
@@ -452,6 +454,7 @@ export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, or
     const stripe = paymentsStripe(env, Boolean(payment.livemode))
     const { intent, state } = await readCheckoutIntent(stripe, initial, now)
     if (intent.livemode !== Boolean(payment.livemode) || stripeMetadataId('payment', intent.metadata) !== payment.id) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
+    if (guard && intent.status !== 'succeeded') await executeBatch(db, [guard], { operation: 'Authorize checkout return status' })
     if (state === 'taken') return { state: 'taken' }
     if (state === 'failed' || state === 'expired') return { state: 'expired' }
     if (intent.status === 'requires_payment_method' && intent.last_payment_error) {
@@ -462,7 +465,7 @@ export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, or
       throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
     }
     const visitId = hold?.session_id && hold.status === 'active' ? hold.conversation_id : null
-    if (visitId && receiptLanguage && sessionBuyer) userId = await sessionBuyer()
+    if (!userId && visitId && receiptLanguage && sessionBuyer) userId = await sessionBuyer()
     const originalBuyer = visitId && userId && userId === payment.buyer_user_id
       ? originalCheckoutClaim(payment.id, userId, await tokenHash(claim), new Date().toISOString()) : null
     const cancellation = visitId && originalBuyer ? await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', visitId) : null
@@ -481,7 +484,7 @@ export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, or
         || Boolean(payment.livemode) !== intent.livemode) throw new Error('Stored capture does not match Stripe')
     } else {
       const { settlement } = await reconcilePaymentIntent(db, stripe, payment, intent, env, hold,
-        originalBuyer && visit ? [...originalBuyer.queries, ...visit.queries] : undefined)
+        originalBuyer && visit ? [...originalBuyer.queries, ...visit.queries] : undefined, guard)
       if (!settlement) throw new Error('Succeeded Stripe intent did not return a recorded settlement')
       payment = settlement.payment
       hold = settlement.hold
@@ -507,9 +510,9 @@ export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, or
       async read(rows) {
         receipt.booking = await visit.read(rows)
       },
-    })
+    }, guard)
   } else {
-    await claimCheckoutReturn(db, userId ?? await buyer(), claim, payment)
+    await claimCheckoutReturn(db, userId ?? await buyer(), claim, payment, undefined, guard)
   }
   return receipt
 }

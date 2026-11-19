@@ -161,7 +161,7 @@ export function originalCheckoutClaim(paymentId: string, userId: string, hash: s
 
 /** Hidden Checkout-return proof, accepted only after native Stripe verification. */
 export async function claimCheckoutReturn(db:DbClient,userId:string,token:string,payment?:Pick<Payment,'id'|'buyer_user_id'|'captured_amount'|'claimed_at'|'return_token_hash'|'return_expires_at'>,
- receipt?: { queries: BatchQuery[]; read: (rows: D1Result[]) => Promise<void> }) {
+ receipt?: { queries: BatchQuery[]; read: (rows: D1Result[]) => Promise<void> }, guard?: BatchQuery) {
  if(!/^[a-f0-9-]{72}$/u.test(token)) throw new HTTPError({statusCode:400,statusMessage:'Invalid Checkout return proof'})
  const hash=await tokenHash(token),now=new Date().toISOString()
  const unavailable=()=>new HTTPError({statusCode:404,statusMessage:'Purchase return proof expired or already used'})
@@ -172,16 +172,20 @@ export async function claimCheckoutReturn(db:DbClient,userId:string,token:string
   : await queryFirst<{payment_id:string;claimed_at:string|null;buyer_user_id:string|null}>(db,available,params)
  if(!claim) throw unavailable()
  const response={payment_id:claim.payment_id,claimed:true}
+ const leading = guard ? [guard] : []
  const readReceipt = async () => {
-  if(receipt) await receipt.read(await executeBatch(db,receipt.queries,{operation:'Read claimed guest receipt'}))
+  if(receipt || guard) {
+   const rows = await executeBatch(db,[...leading,...receipt?.queries ?? []],{operation:'Read claimed guest receipt'})
+   if(receipt) await receipt.read(rows.slice(leading.length))
+  }
   return response
  }
  if(claim.claimed_at)return readReceipt()
  // The original buyer already owns the booking, its conversation and the hold.
  if(claim.buyer_user_id===userId){
   const plan=originalCheckoutClaim(claim.payment_id,userId,hash,now)
-  const [marked, owner, ...rows]=await executeBatch(db,[...plan.queries,...receipt?.queries ?? []],
-    {operation:'Claim checkout and read guest receipt'})
+  const [marked, owner, ...rows]=(await executeBatch(db,[...leading,...plan.queries,...receipt?.queries ?? []],
+    {operation:'Claim checkout and read guest receipt'})).slice(leading.length)
   if(!plan.read([marked!,owner!]))throw unavailable()
   if(receipt)await receipt.read(rows)
   return response
@@ -189,6 +193,7 @@ export async function claimCheckoutReturn(db:DbClient,userId:string,token:string
  const conversationId="COALESCE((SELECT conversation_id FROM payment_checkout_holds WHERE payment_id=?),(SELECT c.id FROM conversations c JOIN payments p ON p.subject_id=c.booking_id AND p.subject_type='booking' AND p.organization_id=c.organization_id WHERE p.id=? AND c.kind='booking'))"
  const claimedConversation={query:`c.id=${conversationId} AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)`,params:[claim.payment_id,claim.payment_id,hash,userId,now]}
  const result=await executeBatch(db,[
+  ...leading,
   {query:'UPDATE payments SET claimed_at=?,claimed_user_id=?,buyer_user_id=? WHERE return_token_hash=? AND return_expires_at>? AND claimed_at IS NULL AND captured_amount>0 AND (buyer_user_id IS NULL OR buyer_user_id=? OR EXISTS(SELECT 1 FROM user u WHERE u.id=payments.buyer_user_id AND u.isAnonymous=1))',params:[now,userId,userId,hash,now,userId]},
   {query:'UPDATE payment_checkout_holds SET buyer_user_id=? WHERE payment_id=? AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)',params:[userId,claim.payment_id,hash,userId,now]},
   {query:"UPDATE bookings SET user_id=? WHERE id=(SELECT subject_id FROM payments WHERE id=? AND subject_type='booking') AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)",params:[userId,claim.payment_id,hash,userId,now]},
@@ -199,7 +204,7 @@ export async function claimCheckoutReturn(db:DbClient,userId:string,token:string
   ...receipt?.queries ?? [],
  ],{operation:'Attach verified Checkout purchase'})
  const receiptStart=result.length-(receipt?.queries.length??0)
- if(result[0]?.meta.changes!==1 && !(result[receiptStart-1]?.results[0] as { claimed_at?: string | null } | undefined)?.claimed_at)throw unavailable()
+ if(result[leading.length]?.meta.changes!==1 && !(result[receiptStart-1]?.results[0] as { claimed_at?: string | null } | undefined)?.claimed_at)throw unavailable()
  if(receipt)await receipt.read(result.slice(receiptStart))
  return response
 }

@@ -25,7 +25,7 @@ import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation, type Sit
 import { publicTenantPageSql } from '~/server/utils/content/pages'
 import { buildLoginUrl } from '~/shared/auth/return-target'
 import { BROWSER_ERROR_PATH } from '~/shared/error-telemetry'
-import type { DashboardAuthRead } from '~/server/utils/auth'
+import { getAuthSession, type DashboardAuthRead } from '~/server/utils/auth'
 import { dashboardOrganizationFrom, getDashboardSession, readDashboardMembership } from '~/server/utils/dashboard-context'
 import { prepareDashboardWorkspaceAccess, readDashboardWorkspaceAccess } from '~/server/utils/dashboard-context-service'
 import { membershipBySlugQuery, BATCH_VIEWER, withViewer } from '~/server/utils/member-access'
@@ -59,6 +59,7 @@ import { platformLocale } from '~/shared/platform-locales'
 import { publicLocalizationsQuery, type StoredPublicLocalizationRow } from '~/server/utils/public-localization'
 import { preparePublicShellRows, publicDocumentCollectionKind, type PublicDocumentShell } from '~/server/utils/public-shell-query'
 import { isRecord } from '~/server/utils/type-guards'
+import { openPaymentReturnDocument, paymentReturnDocumentGuard, sealPaymentReturnDocument, type AuthorizedPaymentReturnDocument } from '~/server/utils/payment-return-document'
 
 interface TenantRow extends Omit<PublicBase['organization'], 'theme_id' | 'name'>, Omit<PublicConfigRow, 'default_currency'> {
   id: string;
@@ -169,6 +170,18 @@ async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain:
         return tenant ?? null
       }
       if (returnPaymentId && typeof body.claim === 'string') {
+        if (typeof body.receipt_context === 'string') {
+          const env = cloudflareEnv(event)
+          const document = await openPaymentReturnDocument(env.BETTER_AUTH_SECRET, event.url.host, returnPaymentId, body.claim, body.receipt_context)
+          if (document && document.language.locale === body.locale) {
+            const session = await getAuthSession(event, env)
+            if (session?.user.id === document.payment.buyer_user_id) {
+              event.context.authorizedPaymentReturn = { ...document, userId: session.user.id,
+                guard: paymentReturnDocumentGuard(authorized, document) } satisfies AuthorizedPaymentReturnDocument
+              return null
+            }
+          }
+        }
         const plan = await preparePaymentReturn(tenantScope, returnPaymentId, body.claim)
         const [hostRows, paymentRows] = await executeBatch(db, [host, plan], { operation: 'Read public payment return' })
         const tenant = hostRows?.results[0] as TenantRow | undefined
@@ -243,8 +256,12 @@ async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain:
   const locale = { sql: `(SELECT locale FROM organization_locales WHERE organization_id = ${organization.sql} AND is_source = 1)` }
   const plan = preparePublicShellRows(organization, requestedLocale || locale, { collectionKind, includeReviews, previewMenu: false })
   const localizations = requestedLocale ? [publicLocalizationsQuery(organization, requestedLocale)] : []
+  const returningId = /^\/pay\/([a-f0-9-]+)$/.exec(sourcePath)?.[1]
+  const returnPlan = returningId && typeof claim === 'string' && /^[a-f0-9-]{72}$/u.test(claim)
+    ? await preparePaymentReturn(tenantScope, returningId, claim) : null
   const [hostRows, ...results] = await executeBatch(db, [
     host, ...[...plan.queries, ...localizations].map(query => withViewer(authorized, query)),
+    ...(returnPlan ? [returnPlan] : []),
   ], {
     operation: 'Read the public tenant document',
   })
@@ -259,6 +276,11 @@ async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain:
       if (requestedLocale) event.context.publicDocumentLocalizations = {
         organizationId: tenant.id, locale: requestedLocale,
         rows: results[plan.queries.length]!.results as StoredPublicLocalizationRow[],
+      }
+      if (returnPlan && typeof claim === 'string') {
+        const resolvedLocale = requestedLocale || source[0]!.locale
+        event.context.paymentReturnDocument = await sealPaymentReturnDocument(cloudflareEnv(event).BETTER_AUTH_SECRET,
+          event.url.host, claim, results.at(-1)?.results[0], { locale: resolvedLocale, source: resolvedLocale === source[0]!.locale })
       }
     }
   }
@@ -613,6 +635,9 @@ export default defineHandler(async (event) => {
       ? env.db && /^[a-z0-9-]+$/.test(requestedSlug) ? await resolveRegisteredSubdomainTenant(event, env.db, requestedSlug) : null
       : isPlatformRequest ? env.db ? await resolvePlatformTenant(env.db) : null : await resolveTenant(host, event)
 
+  // The return route carries the live host predicate into its settlement batch.
+  if (event.context.authorizedPaymentReturn) return
+
   if (tenant && isSpentSubdomainResolution(tenant)) {
     if (tenant.successorDomain) {
       const status = event.method === 'GET' || event.method === 'HEAD' ? 301 : 308
@@ -686,7 +711,7 @@ export async function resolveTenant(
       ON canonical.organization_id = o.id AND canonical.role = 'canonical' AND canonical.status = 'active'
     WHERE sd.domain = ? AND sd.type IN ('custom', 'subdomain') AND sd.status = 'active'
   `, [hostname])
-  if (tenant) return tenant
+  if (tenant || event.context.authorizedPaymentReturn) return tenant
 
   const spent = await queryFirst<{ successor_domain: string | null }>(
     db,

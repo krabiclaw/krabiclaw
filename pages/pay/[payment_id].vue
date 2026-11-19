@@ -162,7 +162,7 @@ import { cardBrandLabel } from '~/composables/usePaymentsSettings'
 import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
 import { stayNightlyGroups } from '~/shared/stay-listing'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
-import { isRecord, publicApiMutation, publicApiRequest } from '~/utils/api-clients'
+import { isRecord, normalizeApiError, publicApiMutation, publicApiRequest } from '~/utils/api-clients'
 import { usePaidBookingReceipt } from '~/composables/useBookingHandoff'
 import type { paymentHandoff, reviewPayment, confirmPayment, PaymentReturn } from '~/server/domain/payments/intent'
 
@@ -176,6 +176,8 @@ const paidReceipt = usePaidBookingReceipt()
 const paymentId = String(route.params.payment_id)
 // A method that left the site comes back here from Stripe, the claim in its return URL's query.
 const returned = typeof route.query.claim === 'string'
+const receiptContext = useState<string | null>(`payment-return-document:${paymentId}`, () =>
+  (useRequestEvent()?.context.paymentReturnDocument as string | undefined) ?? null)
 // Otherwise the claim the checkout handed this browser is in the fragment: no server, log or referrer sees it.
 const claim = computed(() => typeof route.query.claim === 'string' ? route.query.claim : route.hash.slice(1))
 
@@ -392,13 +394,16 @@ async function pay() {
  * The business's site confirms what was paid for, as it does an unpaid
  * booking: its own receipt page.
  */
-async function complete() {
+async function complete(): Promise<true | undefined> {
   if (completing.value) return
   completing.value = true
   actionError.value = ''
+  const context = receiptContext.value
+  receiptContext.value = null
+  let stale = false
   try {
     const done = await publicApiMutation<PaymentReturn>(`/api/public/payments/${encodeURIComponent(paymentId)}/return`, {
-      method: 'POST', body: { claim: claim.value, locale: locale.value }, validate: isReturn,
+      method: 'POST', body: { claim: claim.value, locale: locale.value, receipt_context: context }, validate: isReturn,
     })
     if (done.state !== 'paid') {
       outcome.value = done.state
@@ -418,10 +423,12 @@ async function complete() {
     }
     return true
   } catch (cause) {
-    actionError.value = getErrorMessage(cause, t('payment.unavailable'))
+    stale = Boolean(context && normalizeApiError(cause).code === 'PAYMENT_RETURN_DOCUMENT_STALE')
+    if (!stale) actionError.value = getErrorMessage(cause, t('payment.unavailable'))
   } finally {
     completing.value = false
   }
+  if (stale) return complete()
 }
 
 async function leave() {

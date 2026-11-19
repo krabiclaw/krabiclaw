@@ -39,13 +39,14 @@ import { getStripe } from '../../server/utils/billing.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { approveRefundAuthorization, requirePayment } from '../../server/domain/payments/index.ts'
 import { paymentTransactionDestination } from '../../server/domain/payments/earnings.ts'
-import { completePaymentReturn, reviewPayment, confirmPayment, paymentHandoff, requireClaimedPayment } from '../../server/domain/payments/intent.ts'
+import { completePaymentReturn, reviewPayment, confirmPayment, paymentHandoff, preparePaymentReturn, requireClaimedPayment } from '../../server/domain/payments/intent.ts'
 import { reconcilePaymentIntent, processPaymentEvent } from '../../server/domain/payments/events.ts'
 import { mcpFinancialApprovalErrorResult } from '../../server/utils/mcp-financial-handoff.ts'
 import { handlePaymentsTools } from '../../server/utils/mcp-tools/payments.ts'
 import { NOT_HANDLED } from '../../server/utils/mcp-tools/execution.ts'
 import { resolveOrganizationMembership } from '../../server/utils/member-access.ts'
 import { getRequestDataMetrics, instrumentD1 } from '../../server/utils/request-metrics.ts'
+import { openPaymentReturnDocument, paymentReturnDocumentGuard, sealPaymentReturnDocument } from '../../server/utils/payment-return-document.ts'
 import type { McpOrganizationContext } from '../../server/utils/mcp-auth.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { applySchema } from './support/schema.ts'
@@ -1357,6 +1358,18 @@ test('the checkout return reuses a booking the webhook saved while Stripe was re
   const env = stripeEnv(bootEnv)
   await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
   const claim = await confirmable(db, 'webhook-wins', inMinutes(15))
+  const host = 'payments.localhost'
+  const language = { locale: 'en', source: true }
+  const plan = await preparePaymentReturn({ query: '?', params: [ORG] }, 'webhook-wins', claim)
+  const row = await db.prepare(plan.query).bind(...plan.params).first()
+  const sealed = await sealPaymentReturnDocument(env.BETTER_AUTH_SECRET, host, claim, row, language)
+  assert.ok(sealed)
+  assert.equal(await openPaymentReturnDocument(env.BETTER_AUTH_SECRET, 'other.localhost', 'webhook-wins', claim, sealed), null)
+  const document = await openPaymentReturnDocument(env.BETTER_AUTH_SECRET, host, 'webhook-wins', claim, sealed)
+  assert.ok(document)
+  const tenant = { query: "SELECT id FROM organization WHERE subdomain=? AND status='active'", params: ['payments'] }
+  const unauthorized = paymentReturnDocumentGuard({ ...tenant, params: ['krabiclaw'] }, document)
+  await assert.rejects(db.batch([db.prepare(unauthorized.query).bind(...unauthorized.params ?? [])]), /PAYMENT_RETURN_DOCUMENT_STALE/)
   const trace = new H3Event(new Request('http://payments.localhost/api/public/payments/webhook-wins/return'))
   const requestDb = instrumentD1(trace, db.withSession('first-primary'), db)
   let webhook: Promise<void> | undefined
@@ -1370,7 +1383,8 @@ test('the checkout return reuses a booking the webhook saved while Stripe was re
   }, { 'webhook-wins': 'succeeded' })
   const stripe = getStripe(env)
   const receipt = await completePaymentReturn(requestDb, { ...env, DB: requestDb }, ORG, 'webhook-wins', claim,
-   async () => 'guest', undefined, async () => ({ locale: 'en', source: true }), async () => 'guest')
+   async () => 'guest', undefined, async () => language, async () => 'guest',
+   { ...document, userId: 'guest', guard: paymentReturnDocumentGuard(tenant, document) })
   assert.ok(webhook)
   await webhook
   assert.equal(receipt.state, 'paid')
@@ -1388,7 +1402,7 @@ test('the checkout return reuses a booking the webhook saved while Stripe was re
   assert.equal(events.take('payment.captured'), undefined)
   const { batchRoundTrips, singleStatementRoundTrips } = getRequestDataMetrics(trace)
   // This fixture reads the provider and legacy attribution while preparing the guarded batch.
-  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 1, singleStatementRoundTrips: 4 })
+  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 1, singleStatementRoundTrips: 3 })
  } finally { await runtime.dispose() }
 })
 
