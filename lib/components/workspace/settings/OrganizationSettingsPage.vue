@@ -224,6 +224,7 @@
       <!-- Booking Settings Card (Airbnb Parity) -->
       <div v-if="surface === 'settings'" class="mb-6">
         <NuxtLink
+        prefetch-on="interaction"
           :to="`${settingsPath}/booking`"
           class="block w-full text-left rounded-3xl p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           :class="{ 'ring-2 ring-highlighted': isBookingActive }"
@@ -426,7 +427,7 @@
   </UModal>
 
   <!-- Page Tasks Modal (Airbnb Parity) -->
-  <PageTasksModal v-model="pageTasksModalOpen" :tasks="pageTasks" @dismiss="dismissPageTask" />
+  <PageTasksModal v-if="pageTasksModalOpen" v-model="pageTasksModalOpen" :tasks="pageTasks" @dismiss="dismissPageTask" />
 
   <!-- Translating the brand is a row on the Brand list; this is the sheet it opens. -->
   <DashboardResourceLocalization
@@ -566,10 +567,11 @@ import { parseSitePalette } from '~/shared/site-palette'
 import { getErrorMessage } from '~/utils/errors'
 import { businessChanged } from '~/composables/useDashboardInvalidations'
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION } from '~/shared/media-placement-contract'
-import PageTasksModal from '~/components/dashboard/PageTasksModal.vue'
 import { isTenantPageListResponse, websiteSettingsKey, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
 import { getVerticalLabel } from '~/utils/vertical-copy'
 import { websitePreferencesRows } from '~/shared/organization-settings'
+
+const PageTasksModal = defineAsyncComponent(() => import('~/components/dashboard/PageTasksModal.vue'))
 
 const props = withDefaults(defineProps<{ surface?: 'brand' | 'settings' | 'preferences' }>(), { surface: 'settings' })
 const surface = computed(() => props.surface)

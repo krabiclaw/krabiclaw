@@ -1,16 +1,20 @@
-import { queryAll } from '~/server/db'
+import { GROWTH_PLAN_ID } from '~/shared/billing-model'
+import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
+import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
+import { roleAllows } from '~/server/utils/member-access'
+import { queryAll, type BatchQuery } from '~/server/db'
 import { rootDomainForPair } from '~/server/utils/domain-shared'
 import type { DomainRecord, DomainRole, DomainStatus } from '~/server/utils/domains'
 
-export async function getOrganizationDomains(db: D1Database, organizationId: string): Promise<DomainRecord[]> {
-  const domains = await queryAll<DomainRecord>(db, `
-    SELECT *
-    FROM organization_domains
-    WHERE organization_id = ? AND status != 'deleted'
-    ORDER BY type ASC, role ASC, created_at ASC
-  `, [organizationId])
+function organizationDomainsQuery(organizationId: string | { sql: string }): BatchQuery {
+  return { query: `SELECT * FROM organization_domains
+    WHERE organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND status != 'deleted'
+    ORDER BY type ASC, role ASC, created_at ASC`, params: typeof organizationId === 'string' ? [organizationId] : [] }
+}
 
-  return domains || []
+export async function getOrganizationDomains(db: D1Database, organizationId: string): Promise<DomainRecord[]> {
+  const query = organizationDomainsQuery(organizationId)
+  return await queryAll<DomainRecord>(db, query.query, query.params)
 }
 
 export interface DomainDnsRecord {
@@ -178,36 +182,57 @@ export function groupCustomDomains(domains: DomainRecord[]): DomainGroup[] {
   }).sort((a, b) => a.domain.localeCompare(b.domain))
 }
 
-export async function getDomainEvents(db: D1Database, domainId: string) {
-  const events = await queryAll(db, `
-    SELECT id, organization_id, event_name AS event_type, body AS message,
-           actor_user_id AS actor_id, payload_json ->> '$.actorType' AS actor_type,
-           payload_json ->> '$.entityId' AS domain_id,
-           payload_json ->> '$.beforeState' AS before_state,
-           payload_json ->> '$.afterState' AS after_state,
-           payload_json ->> '$.metadata' AS metadata, created_at
-    FROM activity_entries
-    WHERE payload_json ->> '$.entityType' = 'domain' AND payload_json ->> '$.entityId' = ?
-    ORDER BY created_at DESC
-    LIMIT 100
-  `, [domainId])
-
-  return events || []
+/** Domain status and each domain's latest events share the authorized screen read. */
+export function prepareOrganizationDomains(organizationId: string | { sql: string }) {
+  const domains = organizationDomainsQuery(organizationId)
+  const events: BatchQuery = {
+    query: `WITH domains AS (${domains.query}), events AS (
+      SELECT e.id, e.organization_id, e.event_name AS event_type, e.body AS message,
+        e.actor_user_id AS actor_id, e.payload_json ->> '$.actorType' AS actor_type,
+        d.id AS domain_id, e.payload_json ->> '$.beforeState' AS before_state,
+        e.payload_json ->> '$.afterState' AS after_state, e.payload_json ->> '$.metadata' AS metadata, e.created_at,
+        row_number() OVER (PARTITION BY d.id ORDER BY e.created_at DESC) AS event_rank
+      FROM domains d JOIN activity_entries e ON e.organization_id = d.organization_id
+        AND e.payload_json ->> '$.entityType' = 'domain' AND e.payload_json ->> '$.entityId' = d.id
+      WHERE d.type = 'custom'
+    ) SELECT id, organization_id, event_type, message, actor_id, actor_type, domain_id, before_state, after_state, metadata, created_at FROM events WHERE event_rank <= 100 ORDER BY created_at DESC`, params: domains.params,
+  }
+  return { queries: [domains, events], read([domainRows, eventRows]: D1Result[]) {
+    const domains = domainRows!.results as DomainRecord[]
+    const events = eventRows!.results as (Record<string, unknown> & { domain_id: string })[]
+    return { domains: domains.map(domain => ({ ...domain, instructions: domainInstructions(domain), events: events.filter(event => event.domain_id === domain.id) })), domain_groups: groupCustomDomains(domains) }
+  } }
 }
 
-export async function getOrganizationDomainsDashboardPayload(db: D1Database, organizationId: string) {
-  const domains = await getOrganizationDomains(db, organizationId)
-  const enriched = []
-  for (const domain of domains) {
-    enriched.push({
-      ...domain,
-      instructions: domainInstructions(domain),
-      events: domain.type === 'custom' ? await getDomainEvents(db, domain.id) : [],
-    })
-  }
+export async function organizationDomainsDashboardPayload(
+  payload: ReturnType<ReturnType<typeof prepareOrganizationDomains>['read']>,
+  organization: Pick<import('~/server/utils/dashboard-context').DashboardOrganizationRow, 'id' | 'slug' | 'subdomain' | 'status' | 'role'>,
+  env: import('~/server/utils/auth').CloudflareEnv,
+  plan: string,
+) {
+  const canConnect = getPlanEntitlements(plan).custom_domains === true
+  const canUpdateBilling = await roleAllows({ organizationId: organization.id, role: organization.role, permissions: { billing: ['update'] } })
+  const action = canConnect
+    ? { label: 'Connect domain', to: null }
+    : canUpdateBilling
+      ? { label: 'View plans', to: `/dashboard/${encodeURIComponent(organization.slug)}/billing/upgrade?plan=${GROWTH_PLAN_ID}` }
+      : null
+
+  const includedDomain = payload.domains.find(domain => domain.type === 'subdomain')
+  const url = includedDomain && tenantOrganizationOrigin({
+    platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
+    freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
+    subdomain: organization.subdomain ?? '',
+    canonicalDomain: includedDomain.domain,
+  })
+  const included_address = url ? {
+    host: new URL(url).host,
+    url: organization.status === 'active' ? url : null,
+    status: organization.status === 'active' ? 'Live' : organization.status === 'suspended' ? 'Suspended' : 'Private',
+  } : null
 
   return {
-    domains: enriched,
-    domain_groups: groupCustomDomains(domains),
+    success: true, ...payload, organization_id: organization.id, included_address, action,
+    empty_title: canConnect ? 'No custom domains' : 'Custom domains are included with Growth',
   }
 }

@@ -13,6 +13,7 @@
         v-for="card in cards"
         :key="card.testId"
         :as="NuxtLink"
+        prefetch-on="interaction"
         :to="card.to"
         variant="subtle"
         class="flex aspect-square flex-col transition-colors hover:bg-elevated"

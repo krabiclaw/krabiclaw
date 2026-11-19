@@ -26,7 +26,7 @@ export function rendersWebsiteDocument(panel: string, query: Record<string, unkn
   return Boolean(websitePageVariant(panel) || websiteBlogPost(panel) || websiteQuestion(panel)
     || (query.location_id === undefined && websiteSocialPost(panel))
     || /^\/website\/brand(?:\/|$)/.test(panel)
-    || /^\/website\/preferences\/(?:status|currency|booking|reviews)(?:\/|$)/.test(panel)) || /^\/website(?:\/(?:pages|reviews|brand|preferences|blog|posts|qa))?\/?$/.test(panel)
+    || /^\/website\/preferences\/(?:status|currency|booking|reviews|domains|localization)(?:\/|$)/.test(panel)) || /^\/website(?:\/(?:pages|reviews|brand|preferences|blog|posts|qa))?\/?$/.test(panel)
 }
 
 export function dashboardProductId(panel: string) {

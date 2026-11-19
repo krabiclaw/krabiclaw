@@ -98,6 +98,8 @@ export async function dashboardFetch<T>(
     || (/^\/api\/organizations\/[^/]+\/members\/scheduling$/.test(request) && options.query?.view === 'assignment')
     || /^\/api\/messages\/listings\/[^/]+\/participants$/.test(request)
     || (request === '/api/dashboard/locations' && /^\/dashboard\/[^/]+\/locations(?:\/|$)/.test(useRequestURL().pathname) && options.query?.status !== 'all')
+    || (/^\/api\/organizations\/[^/]+\/domains$/.test(request) && /\/website\/preferences\/domains\/?$/.test(useRequestURL().pathname))
+    || (/^\/api\/editor\/organizations\/[^/]+\/locales$/.test(request) && /\/website\/preferences\/localization\/?$/.test(useRequestURL().pathname))
     || request === '/api/dashboard/agenda' || request === '/api/dashboard/bookings/calendar'
     || (request === '/api/dashboard/stay-homes' && options.query?.view === 'calendar')
     || (request === '/api/dashboard/payments' && (options.query?.view === 'performance' || options.query?.view === 'payouts'))

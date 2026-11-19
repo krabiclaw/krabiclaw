@@ -344,7 +344,7 @@ export function prepareDashboardLocations(
         social_image: locationMedia.social_image,
       }
     })
-    const organizationLogo = groupMediaPlacements(logo?.results ?? []).get(id) ?? []
+    const organizationLogo = groupMediaPlacements(includeLogo ? logo!.results : []).get(id) ?? []
     const organizationMediaForDashboard = organizationLogo.map(({ asset_id, slot, public_url, thumbnail_url, kind, presentation }) => ({
       asset_id, slot, public_url, thumbnail_url, kind, presentation,
     }))

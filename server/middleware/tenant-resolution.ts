@@ -1,3 +1,5 @@
+import { prepareOrganizationLanguageSettings } from '~/server/utils/organization-languages'
+import { organizationDomainsDashboardPayload, prepareOrganizationDomains } from '~/server/utils/domain-read-model'
 import { prepareDashboardLocationOverview, prepareDashboardProductRead } from '~/server/utils/dashboard-editor-resources'
 import { PUBLIC_CACHE_REVISION_SQL, publicCacheRevision } from '~/server/utils/edge-cache'
 // Tenant resolution middleware: every host, Blawby's own included, resolves
@@ -396,6 +398,8 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
   }) : null
   if (product && query.location_id !== undefined && typeof query.location_id !== 'string') throw new HTTPError({ statusCode: 400, message: 'Invalid location scope' })
   const website = rendersWebsiteDocument(panel, query) ? prepareWebsiteSettings(managedOrg, env) : null
+  const locales = panel === '/website/preferences/localization' ? prepareOrganizationLanguageSettings(managedOrg, true) : null
+  const domains = panel === '/website/preferences/domains' ? prepareOrganizationDomains(managedOrg) : null
   const websitePanel = website ? panel.split('/')[2] : undefined
   const websiteList = prepareWebsitePanel(websitePanel === 'posts' ? { sql: BATCH_VIEWER.organization } : managedOrg, websitePanel, query, websiteQuestion(panel))
   const variantId = websitePageVariant(panel)
@@ -462,6 +466,8 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     ...(websiteEditor?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(article?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(categories ? [withViewer(membership, categories)] : []),
+    ...(locales?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(domains?.queries.map(query => withViewer(membership, query)) ?? []),
     ...[...(post?.queries ?? []), ...(postLocations?.queries ?? []), ...(postConnections?.queries ?? [])].map(query => withViewer(membership, query)),
   ]
   return { queries, present }
@@ -475,7 +481,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     const userId = session.user.id
     if (organization.userId !== userId) throw new Error('Dashboard membership does not match the Better Auth session')
     await readDashboardMembership(event, slug, async () => viewer)
-    await readDashboardWorkspaceAccess(event, { db, env, organization }, true, workspace.read(rest.slice(0, workspace.queries.length), organization.id))
+    const access = await readDashboardWorkspaceAccess(event, { db, env, organization }, true, workspace.read(rest.slice(0, workspace.queries.length), organization.id))
     const panelRows = rest.slice(workspace.queries.length)
     if (today) await readDashboardTodayDocument(event, slug, () => today.read([viewerResult!, ...panelRows]))
     if (connections && (viewer as { organization_wide: number }).organization_wide === 1) {
@@ -483,7 +489,9 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
       if (google) await readCalendarSettingsDocument(event, slug, calendarSettingsFromRows(panelRows.slice(connections.queries.length)))
     }
     if (catalog) await readDashboardCatalogDocument(event, slug, catalog.read(panelRows, organization.id))
-    if (locationList) event.context.dashboardLocations = { organization_id: organization.id, resource: { success: true, locations: locationList.read(panelRows, organization.id).locations } }
+    if (locales && (viewer as { organization_wide: number }).organization_wide === 1) event.context.dashboardLocales = { organization_id: organization.id, resource: locales.read(panelRows.slice(website?.queries.length ?? 0), organization.id, organization.slug) }
+    if (domains && (viewer as { organization_wide: number }).organization_wide === 1) event.context.dashboardDomains = { organization_id: organization.id, resource: await organizationDomainsDashboardPayload(domains.read(panelRows.slice(website?.queries.length ?? 0)), organization, env, access.effective_plan) }
+    if (locationList) event.context.dashboardLocations = { organization_id: organization.id, resource: { success: true, locations: locationList.read(panelRows.slice(0, locationList.queries.length), organization.id).locations } }
     if (location) event.context.dashboardLocation = { organization_id: organization.id, resource: location.read(panelRows.slice(locationList?.queries.length ?? 0), organization) }
     if (product && productId) {
       const locationId = typeof query.location_id === 'string' && query.location_id !== 'online' ? query.location_id : null

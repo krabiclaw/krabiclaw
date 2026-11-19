@@ -60,10 +60,23 @@ export default defineHandler(event => {
           case '/api/dashboard/integrations/google-calendar':
             return readCalendarSettingsDocument(event, orgSlug)
           default:
+            if (/^\/api\/organizations\/[^/]+\/domains$/.test(resource)) {
+              const { organization } = await getDashboardContext(event, { organizationSlug: orgSlug })
+              const domains = event.context.dashboardDomains as { organization_id: string; resource: unknown } | undefined
+              if (resource !== `/api/organizations/${organization.id}/domains` || domains?.organization_id !== organization.id) throw new HTTPError({ statusCode: 404, message: 'Domains were not read for this document' })
+              return domains.resource
+            }
             if (resource.startsWith('/api/editor/') || /^\/api\/organizations\/[^/]+\/members\/scheduling$/.test(resource)
               || /^\/api\/messages\/listings\/[^/]+\/participants$/.test(resource)) {
               const { organization } = await getDashboardMemberContext(event, { organizationSlug: orgSlug })
               const prefix = `/api/editor/organizations/${organization.id}/`
+              if (resource === `${prefix}locales` && query.view === 'progress') {
+                await getDashboardContext(event, { organizationSlug: orgSlug })
+                const locales = event.context.dashboardLocales as { organization_id: string; resource: unknown } | undefined
+                if (locales?.organization_id !== organization.id) throw new HTTPError({ statusCode: 404, message: 'Languages were not read for this document' })
+                return locales.resource
+              }
+
               const location = event.context.dashboardLocation as { organization_id: string; resource: { location: { location: { id: string } }; gallery?: unknown } } | undefined
               if (resource === `${prefix}media` && location?.organization_id === organization.id && query.owner_type === 'business_location'
                 && query.owner_id === location.resource.location.location.id && query.slot === 'gallery' && query.limit === '100' && location.resource.gallery) return location.resource.gallery
