@@ -1,6 +1,7 @@
 import { defineComponent, h, type PropType } from 'vue'
 import { EHtml, EHead, EBody, EPreview, EContainer, ESection, EText, ELink, EImg, EStyle } from '../vue-email'
 import { light, dark, font, layout, type } from '../tokens'
+import { appendEmailUtms } from '../utm'
 import { platformLocale } from '~/shared/platform-locales'
 
 /**
@@ -28,6 +29,7 @@ export default defineComponent({
     preferencesUrl: { type: String as PropType<string | null>, default: null },
     unsubscribeUrl: { type: String as PropType<string | null>, default: null },
     platformDomain: { type: String, required: true },
+    campaign: { type: String as PropType<string | null>, default: null },
   },
   setup(props, { slots }) {
     const locale = platformLocale(props.locale ?? 'en')
@@ -145,7 +147,7 @@ export default defineComponent({
                 h(EText, { class: 'email-footer', style: `margin:0 0 10px;${type.footer};color:${light.textDimmed}` }, () => props.emailReason),
                 h(EText, { class: 'email-footer', style: `margin:0;${type.footer};color:${light.textDimmed}` }, () => [
                   `© ${year} Blawby · `,
-                  h(ELink, { href: origin, style: `color:${light.textMuted};text-decoration:underline` }, () => new URL(origin).hostname),
+                  h(ELink, { href: appendEmailUtms(origin, { campaign: props.campaign ?? 'notification', content: 'footer' }), style: `color:${light.textMuted};text-decoration:underline` }, () => new URL(origin).hostname),
                 ]),
                 props.organizationName && !props.locale
                   ? h(EText, { class: 'email-footer', style: `margin:6px 0 0;${type.footer};color:${light.textDimmed}` }, () => `Sent by ${props.organizationName} via Blawby.`)

@@ -73,6 +73,8 @@ export async function sendReviewRequestForBooking(
       partyLabel: resolveBookingPresentation(context.product_kind, context.organization_vertical).partyLabel,
       reviewUrl,
       userId: request.user_id,
+      productKind: context.product_kind,
+      productTitle: context.product_title,
       // One invitation retains its link and receipt across retries. The
       // receipt is never sent twice once Resend accepted it.
       delivery: { conversationId: threadId, messageId: entry.id },
