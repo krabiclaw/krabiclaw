@@ -675,8 +675,19 @@ test('a website edit that lands after publish has read the draft fails the publi
     // A newer website edit can win after publish has already read the draft.
     const { post: draft } = await createPost(db, cardless, 'org-a', { post: { body: 'Draft for a website update' }, idempotencyKey: 'website-race' }, 'owner')
     let interleaved = false
+    const publishWrites = new WeakSet<D1PreparedStatement>()
     const editingDb = new Proxy(db, { get(target, key) {
+      if (key === 'prepare') return (sql: string) => {
+        const statement = target.prepare(sql)
+        if (!sql.startsWith("UPDATE content_documents SET status = 'published'")) return statement
+        return { bind(...params: unknown[]) {
+          const bound = statement.bind(...params)
+          publishWrites.add(bound)
+          return bound
+        } }
+      }
       if (key === 'batch') return async (statements: D1PreparedStatement[]) => {
+        if (!statements.some(statement => publishWrites.has(statement))) return target.batch(statements)
         assert.equal(interleaved, false)
         interleaved = true
         const edited = await updatePost(db, cardless, 'org-a', draft.id, { changes: { body: 'A concurrent website edit' }, expectedUpdatedAt: draft.updated_at }, 'owner')
