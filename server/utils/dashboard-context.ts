@@ -6,7 +6,7 @@ import { getQuery } from 'nitro/h3';
 import type { H3Event } from 'nitro'
 
 import { cloudflareEnv } from '~/server/utils/api-response'
-import { getAuthSession, type CloudflareEnv } from '~/server/utils/auth'
+import { getAuthSession } from '~/server/utils/auth'
 import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { assertOrganizationWideAccess, ASSIGNED_SERVICE_SQL, DASHBOARD_ORGANIZATION_COLUMNS, joinedMembership, memberAccessPrincipal, membershipByIdQuery, membershipBySlugQuery, resolveUserOrganization, type ResolvedMembership } from '~/server/utils/member-access'
 
