@@ -86,6 +86,17 @@
     <button v-if="items.length === 1 && photoGroups.length" type="button" class="absolute bottom-4 right-4 z-10 inline-flex items-center gap-2 rounded-lg border border-black/80 bg-white/95 px-3.5 py-1.5 text-xs font-semibold text-gray-900 shadow-sm" @click="openAllPhotos">
       <TenantIcon name="squares-2x2" class="size-3.5" />{{ t('site.photos.show_all', { count: items.length }) }}
     </button>
+    <!-- Crawlable image elements for all gallery items beyond the initial mosaic -->
+    <div v-if="items.length > 5" class="sr-only" aria-hidden="true">
+      <img
+        v-for="(item, index) in items.slice(5)"
+        :key="`${item.url}-${index}`"
+        :src="item.url"
+        :alt="item.alt || title"
+        loading="lazy"
+        decoding="async"
+      >
+    </div>
     <MediaLightbox v-model:open="lightboxOpen" v-model:index="lightboxIndex" v-model:overview="lightboxOverview" :items="items" :title="title" :photo-groups="photoGroups">
       <template v-if="$slots.caption" #caption="slotProps">
         <slot name="caption" v-bind="slotProps" />

@@ -17,7 +17,7 @@ import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
 import { resolvePublicSite } from '~/utils/site-routing'
 import { assertOrganizationLanguage } from '~/server/utils/localization'
-import { listOrganizationProducts } from '~/server/utils/product-management'
+import { hydrateProductMedia, listOrganizationProducts } from '~/server/utils/product-management'
 
 // A collection path that is a section is listed only when the section has something on it.
 const SECTION_PATHS: Record<string, PublicSiteSection> = {
@@ -25,9 +25,16 @@ const SECTION_PATHS: Record<string, PublicSiteSection> = {
   '/blog': 'blog', '/posts': 'posts', '/reviews': 'reviews', '/qa': 'qa', '/photos': 'photos',
 }
 
+interface SitemapImageEntry {
+  loc: string
+  title?: string
+  caption?: string
+}
+
 interface SitemapEntry {
   loc: string
   lastmod?: string
+  images?: SitemapImageEntry[]
 }
 
 async function listPublishedTenantSitemapPages(db: DbClient, organizationId: string) {
@@ -183,8 +190,34 @@ export default definePlugin((nitroApp) => {
 
     const site = resolvePublicSite({ themeId: organization.theme_id})
     const productPresentation = resolveProductPresentation(organization.vertical)
-    const publicProducts = await listOrganizationProducts(db, { organizationId, publishedOnly: true, env })
+    const rawProducts = await listOrganizationProducts(db, { organizationId, publishedOnly: true, env })
+    const publicProducts = await hydrateProductMedia(db, organizationId, rawProducts)
     const publicProductIds = JSON.stringify(publicProducts.map(product => product.id))
+
+    const productImagesById = new Map<string, SitemapImageEntry[]>()
+    for (const product of publicProducts) {
+      const images: SitemapImageEntry[] = []
+      const seen = new Set<string>()
+      if (product.image?.public_url) {
+        seen.add(product.image.public_url)
+        images.push({
+          loc: product.image.public_url,
+          title: product.name,
+          caption: product.image.alt_text || product.description || undefined,
+        })
+      }
+      for (const item of product.gallery ?? []) {
+        if (item.public_url && !seen.has(item.public_url)) {
+          seen.add(item.public_url)
+          images.push({
+            loc: item.public_url,
+            title: product.name,
+            caption: item.alt_text || undefined,
+          })
+        }
+      }
+      if (images.length > 0) productImagesById.set(product.id, images)
+    }
 
     for (const candidate of publishedLocales) {
       const resources = await queryAll<{ route_path: string; updated_at: string }>(db, `
@@ -198,8 +231,8 @@ export default definePlugin((nitroApp) => {
       // A Product's localized route is derived from the location it is offered
       // at, so a Product offered at two locations lists both.
       if (productPresentation) {
-        const localizedProducts = await queryAll<{ location_path: string | null; slug: string; updated_at: string; kind: ProductKind }>(db, `
-          SELECT ll.route_path AS location_path, p.slug, rl.updated_at,
+        const localizedProducts = await queryAll<{ id: string; location_path: string | null; slug: string; updated_at: string; kind: ProductKind }>(db, `
+          SELECT p.id, ll.route_path AS location_path, p.slug, rl.updated_at,
                  p.kind
             FROM ${RESOURCE_LOCALIZATIONS_SQL} rl
             JOIN products p ON p.id = rl.resource_id AND p.organization_id = rl.organization_id
@@ -216,7 +249,12 @@ export default definePlugin((nitroApp) => {
           const presentation = presentationForProduct(product)
           const locationSlug = product.location_path?.split('/').filter(Boolean).at(-1)
           if (product.kind !== 'experience' && product.kind !== 'stay' && !locationSlug) continue
-          entries.push({ loc: `/${candidate.locale}${presentation.productPath(locationSlug ?? '', product.slug)}`, lastmod: product.updated_at })
+          const images = productImagesById.get(product.id)
+          entries.push({
+            loc: `/${candidate.locale}${presentation.productPath(locationSlug ?? '', product.slug)}`,
+            lastmod: product.updated_at,
+            ...(images ? { images } : {}),
+          })
         }
       }
       // A collection's index and each category page are read in every published
@@ -288,11 +326,15 @@ export default definePlugin((nitroApp) => {
       ...(productPresentation
         ? products
             .filter(product => product.slug && (product.kind === 'experience' || product.kind === 'stay' || product.location_slug))
-            .map(product => ({
-              loc: presentationForProduct({ kind: product.kind as ProductKind })
-                .productPath(String(product.location_slug ?? ''), String(product.slug)),
-              lastmod: product.updated_at as string | undefined,
-            }))
+            .map(product => {
+              const images = productImagesById.get(String(product.id))
+              return {
+                loc: presentationForProduct({ kind: product.kind as ProductKind })
+                  .productPath(String(product.location_slug ?? ''), String(product.slug)),
+                lastmod: product.updated_at as string | undefined,
+                ...(images ? { images } : {}),
+              }
+            })
         : []),
       ...posts,
       ...tenantPages

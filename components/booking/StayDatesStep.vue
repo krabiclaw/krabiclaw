@@ -7,11 +7,11 @@
       </div>
       <button v-if="vertical" type="button" class="absolute right-6 top-5 text-sm font-semibold underline underline-offset-4" @click="clearDates">{{ t('stay.clear_dates') }}</button>
       <div v-if="!inline && desktop && calendar" class="grid w-80 shrink-0 grid-cols-2 overflow-hidden rounded-xl border border-default">
-        <label v-for="field in dateFields" :key="field.key" class="relative px-3 py-2 first:border-r first:border-default" :class="dateField === field.key ? 'ring-2 ring-inset ring-inverted rounded-xl' : undefined">
+        <label v-for="field in dateFields" :key="field.key" class="relative cursor-pointer px-3 py-2 transition-all first:border-r first:border-default" :class="dateField === field.key ? 'rounded-xl ring-2 ring-inset ring-default z-10' : undefined">
           <span class="block text-[10px] font-bold uppercase text-default">{{ field.label }}</span>
-          <input type="date" class="peer stay-date-input w-full bg-transparent pr-5 text-sm text-default outline-none" :class="field.value ? undefined : 'opacity-0 focus:opacity-100'" :aria-label="field.label" :value="field.value ?? ''" :min="field.key === 'checkIn' ? today : earliestCheckOut ?? undefined" :max="lastDate ?? undefined" :disabled="field.key === 'checkOut' && !checkIn" @focus="dateField = field.key" @change="field.key === 'checkIn' ? typeCheckIn($event) : typeCheckOut($event)">
+          <input type="date" class="peer stay-date-input w-full bg-transparent pr-5 text-sm font-medium text-default outline-none" :class="field.value ? undefined : 'opacity-0 focus:opacity-100'" :aria-label="field.label" :value="field.value ?? ''" :min="field.key === 'checkIn' ? today : earliestCheckOut ?? undefined" :max="lastDate ?? undefined" :disabled="field.key === 'checkOut' && !checkIn" @focus="dateField = field.key" @change="field.key === 'checkIn' ? typeCheckIn($event) : typeCheckOut($event)">
           <span v-if="!field.value" class="pointer-events-none absolute bottom-2 left-3 text-sm text-muted peer-focus:hidden">{{ t('stay.add_date') }}</span>
-          <button v-if="field.value" type="button" class="absolute right-2 bottom-2 flex size-5 items-center justify-center" :aria-label="t(field.key === 'checkIn' ? 'stay.clear_check_in' : 'stay.clear_check_out')" @click="field.key === 'checkIn' ? clearDates() : clearCheckOut()"><span aria-hidden="true">×</span></button>
+          <button v-if="field.value" type="button" class="absolute right-2 bottom-2 flex size-5 items-center justify-center rounded-full hover:bg-muted" :aria-label="t(field.key === 'checkIn' ? 'stay.clear_check_in' : 'stay.clear_check_out')" @click="field.key === 'checkIn' ? clearDates() : clearCheckOut()"><span aria-hidden="true">×</span></button>
         </label>
       </div>
     </div>
@@ -118,8 +118,15 @@
         <StayPriceSummary v-if="quotePending || quote" :controller="controller" />
         <span v-else>{{ t('stay.add_dates_for_prices') }}</span>
       </div>
-      <button v-else type="button" class="text-sm font-semibold underline underline-offset-4" @click="clearDates">{{ t('stay.clear_dates') }}</button>
-      <TenantButton class="shrink-0" :disabled="vertical && (!checkIn || !checkOut)" @click="$emit('done')">{{ t(vertical ? 'stay.save_dates' : 'stay.close_dates') }}</TenantButton>
+      <template v-else>
+        <button type="button" class="flex size-9 items-center justify-center rounded-lg text-muted hover:bg-muted hover:text-default" :aria-label="t('stay.select_dates')">
+          <UIcon name="i-lucide-keyboard" class="size-5" />
+        </button>
+        <div class="flex items-center gap-4">
+          <button type="button" class="text-sm font-semibold underline underline-offset-4 hover:text-default" @click="clearDates">{{ t('stay.clear_dates') }}</button>
+          <TenantButton class="shrink-0 font-medium" :disabled="vertical && (!checkIn || !checkOut)" @click="$emit('done')">{{ t('stay.close_dates') }}</TenantButton>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -237,7 +244,14 @@ function dayClasses(date: string): string[] {
   return !night(date)?.available ? ['cursor-default text-muted/50 line-through'] : ['cursor-default text-muted']
 }
 
-const minNights = computed(() => checkIn.value ? night(checkIn.value)?.min_stay_arrival : null)
+const defaultMinNights = computed(() => calendar.value?.home.min_nights ?? null)
+const minNights = computed(() => {
+  if (checkIn.value) {
+    const arrivalMin = night(checkIn.value)?.min_stay_arrival
+    if (arrivalMin !== undefined && arrivalMin !== null) return arrivalMin
+  }
+  return defaultMinNights.value
+})
 const heading = computed(() => {
   if (checkIn.value && checkOut.value) return props.inline && props.place
     ? t('stay.nights_in', { nights: nightsLabel(nightCount.value), place: props.place }) : nightsLabel(nightCount.value)
