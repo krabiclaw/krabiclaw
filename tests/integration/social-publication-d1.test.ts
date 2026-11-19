@@ -52,8 +52,8 @@ class FakeMeta {
   igMedia = new Map<string, { container: string }>()
   pagePosts: Array<Record<string, unknown>> = []
   igFeed: Array<Record<string, unknown>> = []
-  igResponses = new Map<string, unknown>([['me', { user_id: IG, username: 'krabiclaw' }]])
-  assignedPageResponses = new Map<string, unknown>([['', { data: [{ id: PAGE, name: 'Krabi Claw', access_token: 'page-token' }] }]])
+  igResponses = new Map<string, unknown>([['me', { user_id: IG, username: 'blawby' }]])
+  assignedPageResponses = new Map<string, unknown>([['', { data: [{ id: PAGE, name: 'Blawby', access_token: 'page-token' }] }]])
   instagramResponseGate: ((request: SeenRequest) => Promise<void>) | null = null
 
   fault(kind: Fault['kind'], match: Fault['match'], times = 1) { this.faults.push({ kind, match, times }) }
@@ -179,7 +179,7 @@ class FakeMeta {
       if (container.inProgressReads > 0) { container.inProgressReads -= 1; return json({ status_code: 'IN_PROGRESS' }) }
       return json({ status_code: container.status })
     }
-    if (this.igMedia.has(path)) return json({ id: path, permalink: `https://www.instagram.com/p/${path}/`, timestamp: '2026-09-28T10:00:00+0000', username: 'krabiclaw' })
+    if (this.igMedia.has(path)) return json({ id: path, permalink: `https://www.instagram.com/p/${path}/`, timestamp: '2026-09-28T10:00:00+0000', username: 'blawby' })
     if (method === 'GET' && path === `${IG}/insights`) return json({ data: Object.entries(this.igInsights).map(([name, value]) => ({ name, period: 'day', total_value: { value } })) })
     if (method === 'GET' && path.endsWith('/insights') && this.igMediaInsights.has(path.slice(0, -'/insights'.length))) {
       return json({ data: Object.entries(this.igMediaInsights.get(path.slice(0, -'/insights'.length))!).map(([name, value]) => ({ name, period: 'lifetime', values: [{ value }] })) })
@@ -230,8 +230,8 @@ async function setUp() {
   // One person's linked accounts, two businesses: each organization has its own Page and professional account.
   for (const organization of ['org-a', 'org-b']) {
     const own = organization === 'org-a'
-    await run(`INSERT INTO organization_integrations (id, organization_id, provider, account_id, target_id, target_name, revision, created_at, updated_at) VALUES ('fb-${organization}', '${organization}', 'facebook', 'fb-account', '${own ? PAGE : OTHER_PAGE}', 'Krabi Claw', 'fb-rev-${organization}', '2026-09-28T00:00:00.000Z', '2026-09-28T00:00:00.000Z'),
-      ('ig-${organization}', '${organization}', 'instagram', 'ig-account', '${own ? IG : OTHER_IG}', 'krabiclaw', 'ig-rev-${organization}', '2026-09-28T00:00:00.000Z', '2026-09-28T00:00:00.000Z')`)
+    await run(`INSERT INTO organization_integrations (id, organization_id, provider, account_id, target_id, target_name, revision, created_at, updated_at) VALUES ('fb-${organization}', '${organization}', 'facebook', 'fb-account', '${own ? PAGE : OTHER_PAGE}', 'Blawby', 'fb-rev-${organization}', '2026-09-28T00:00:00.000Z', '2026-09-28T00:00:00.000Z'),
+      ('ig-${organization}', '${organization}', 'instagram', 'ig-account', '${own ? IG : OTHER_IG}', 'blawby', 'ig-rev-${organization}', '2026-09-28T00:00:00.000Z', '2026-09-28T00:00:00.000Z')`)
   }
   const meta = new FakeMeta()
   const realFetch = globalThis.fetch
@@ -291,7 +291,7 @@ test('publication: one result and one external post per target; a failure is the
     assert.equal(first.replayed, false)
     assert.equal(first.post.status, 'draft')
     assert.equal(first.post.slug, 'pizza-night-friday')
-    assert.match(first.post.preview_url ?? '', /^https:\/\/org-a\.krabiclaw\.test\/posts\/pizza-night-friday\?preview_token=/)
+    assert.match(first.post.preview_url ?? '', /^https:\/\/org-a\.blawby\.test\/posts\/pizza-night-friday\?preview_token=/)
     assert.equal((await create('key-1', { body: 'Pizza night Friday', media: [{ asset_id: 'a1', slot: 'cover' }, { asset_id: 'a2', slot: 'gallery' }], call_to_action: { label: 'Book', url: 'https://example.test/book' } })).post.id, first.post.id)
     await assert.rejects(create('key-1', { title: 'x'.repeat(POST_TITLE_MAX + 1) }), (error: unknown) => error instanceof PostValidationError && error.statusCode === 400 && error.data === undefined)
     await assert.rejects(create('key-1', { body: 'Something else' }), (error: unknown) => HTTPError.isError(error) && error.status === 409 && /different post/.test(error.message) && !(error.data && typeof error.data === 'object' && 'mutation_applied' in error.data))
@@ -318,7 +318,7 @@ test('publication: one result and one external post per target; a failure is the
     assert.ok(isMcpRenderResponse(result))
     const all = result.structuredContent as Awaited<ReturnType<typeof publishPost>>
     assert.equal(all.ok, true, JSON.stringify(all.outcomes))
-    assert.match(result.modelText!, /\[View on Website\]\(<https:\/\/org-a\.krabiclaw\.test\/posts\/pizza-night-friday>\)/)
+    assert.match(result.modelText!, /\[View on Website\]\(<https:\/\/org-a\.blawby\.test\/posts\/pizza-night-friday>\)/)
     assert.ok(result.modelText?.includes(`[View on Facebook](<https://www.facebook.com/${PAGE}_3>)`))
     assert.ok(result.modelText?.includes(`[View on Instagram](<https://www.instagram.com/p/${[...meta.igMedia.keys()][0]}/>)`))
     assert.deepEqual(all.outcomes.map(outcome => [outcome.channel, outcome.status]), [['organization', 'published'], ['facebook', 'published'], ['instagram', 'published']])
@@ -365,7 +365,7 @@ test('publication: one result and one external post per target; a failure is the
       initiators.results.map(row => ({ initiating_activity_id: row.initiating_activity_id })), 'a receipt-only retry keeps the actual initiator')
     // The public projection carries only confirmed publications, with Meta's own links.
     const feedPage = await listPublicSocialPosts(env, db, 'org-a', { locale: 'en', window: { limit: 12, offset: 0 }, resource: 'r' })
-    assert.deepEqual(feedPage.posts[0]!.publications, [{ channel: 'facebook', url: `https://www.facebook.com/${PAGE}_3`, account_name: 'Krabi Claw' }, { channel: 'instagram', url: `https://www.instagram.com/p/${[...meta.igMedia.keys()][0]}/`, account_name: 'krabiclaw' }])
+    assert.deepEqual(feedPage.posts[0]!.publications, [{ channel: 'facebook', url: `https://www.facebook.com/${PAGE}_3`, account_name: 'Blawby' }, { channel: 'instagram', url: `https://www.instagram.com/p/${[...meta.igMedia.keys()][0]}/`, account_name: 'blawby' }])
     assert.deepEqual(feedPage.posts[0]!.media.map(item => item.asset_id), ['a1', 'a2'])
     // A post is published once per channel: another Page is a conflict.
     const elsewhere = await publishPost(env, 'org-a', first.post.id, { expectedUpdatedAt: published!.updated_at, targets: [{ channel: 'facebook', target_id: 'another-page', connection_revision: 'fb-rev-org-a' }] }, 'owner')
@@ -377,7 +377,7 @@ test('publication: one result and one external post per target; a failure is the
     const partial = await publishPost(env, 'org-a', second.post.id, { expectedUpdatedAt: second.post.updated_at, targets: [targets.website, targets.facebook()] }, 'owner')
     assert.deepEqual([partial.ok, partial.outcomes.map(outcome => `${outcome.status}:${outcome.code ?? ''}`)], [false, ['published:', 'skipped:not_connected']])
     assert.equal(await db.prepare('SELECT count(*) FROM post_publications WHERE post_id = ?').bind(second.post.id).first('count(*)'), 0)
-    await run(`INSERT INTO organization_integrations (id, organization_id, provider, account_id, target_id, target_name, revision, created_at, updated_at) VALUES ('fb-org-a', 'org-a', 'facebook', 'fb-account', '${PAGE}', 'Krabi Claw', 'fb-rev-org-a', '2026-09-28T00:00:00.000Z', '2026-09-28T00:00:00.000Z')`)
+    await run(`INSERT INTO organization_integrations (id, organization_id, provider, account_id, target_id, target_name, revision, created_at, updated_at) VALUES ('fb-org-a', 'org-a', 'facebook', 'fb-account', '${PAGE}', 'Blawby', 'fb-rev-org-a', '2026-09-28T00:00:00.000Z', '2026-09-28T00:00:00.000Z')`)
     // Instagram refuses a text-only post and a PNG before anything is sent; a changed connection is a conflict, not another account.
     const refused = await publishPost(env, 'org-a', second.post.id, { expectedUpdatedAt: (await getPost(db, env, 'org-a', second.post.id))!.updated_at, targets: [targets.instagram(), { ...targets.facebook(), connection_revision: 'old' } as PublishTarget] }, 'owner')
     assert.deepEqual(refused.outcomes.map(outcome => outcome.code), ['media_required', 'connection_changed'])
@@ -557,16 +557,16 @@ test('a provider resource belongs to one organization, and an organization has o
   try {
     // An agency's login also manages its client's Page; choosing it on the agency's own site is refused.
     const conflict = (error: unknown) => error instanceof HTTPError && error.status === 409 && /already connected to another Blawby site/.test(error.message)
-    await assert.rejects(storeIntegration(db, 'org-b', 'facebook', { account_id: 'fb-account', target_id: PAGE, target_name: 'Krabi Claw' }, { revision: 'fb-rev-org-b' }), conflict)
-    await assert.rejects(storeIntegration(db, 'org-b', 'instagram', { account_id: 'ig-account', target_id: IG, target_name: 'krabiclaw' }, { revision: 'ig-rev-org-b' }), conflict)
+    await assert.rejects(storeIntegration(db, 'org-b', 'facebook', { account_id: 'fb-account', target_id: PAGE, target_name: 'Blawby' }, { revision: 'fb-rev-org-b' }), conflict)
+    await assert.rejects(storeIntegration(db, 'org-b', 'instagram', { account_id: 'ig-account', target_id: IG, target_name: 'blawby' }, { revision: 'ig-rev-org-b' }), conflict)
     assert.equal((await readIntegration(db, 'org-b', 'facebook'))!.target_id, OTHER_PAGE)
     assert.equal((await readIntegration(db, 'org-b', 'instagram'))!.target_id, OTHER_IG)
 
     // The organization that has it can choose it again, a stale revision is a
     // revision conflict, and a second Facebook row for one organization cannot exist.
-    await storeIntegration(db, 'org-a', 'facebook', { account_id: 'fb-account', target_id: PAGE, target_name: 'Krabi Claw' }, { revision: 'fb-rev-org-a' })
+    await storeIntegration(db, 'org-a', 'facebook', { account_id: 'fb-account', target_id: PAGE, target_name: 'Blawby' }, { revision: 'fb-rev-org-a' })
     assert.notEqual((await readIntegration(db, 'org-a', 'facebook'))!.revision, 'fb-rev-org-a')
-    await assert.rejects(storeIntegration(db, 'org-a', 'facebook', { account_id: 'fb-account', target_id: PAGE, target_name: 'Krabi Claw' }, { revision: 'fb-rev-org-a' }), /The Facebook connection changed/)
+    await assert.rejects(storeIntegration(db, 'org-a', 'facebook', { account_id: 'fb-account', target_id: PAGE, target_name: 'Blawby' }, { revision: 'fb-rev-org-a' }), /The Facebook connection changed/)
     await assert.rejects(storeIntegration(db, 'org-a', 'facebook', { account_id: 'fb-account', target_id: 'third-page', target_name: 'Third' }, { revision: null }), /The Facebook connection changed/)
     await assert.rejects(db.prepare("INSERT INTO organization_integrations (id, organization_id, provider, account_id, target_id, target_name, revision) VALUES ('second', 'org-a', 'facebook', 'fb-account', 'third-page', 'Third', 'r')").run(), /UNIQUE constraint failed: organization_integrations.organization_id, organization_integrations.provider/)
     assert.equal(await db.prepare("SELECT count(*) AS n FROM organization_integrations WHERE organization_id = 'org-a' AND provider = 'facebook'").first('n'), 1)
@@ -575,11 +575,11 @@ test('a provider resource belongs to one organization, and an organization has o
     // selection read before the disconnect cannot bring the connection back.
     const beforeDisconnect = (await readIntegration(db, 'org-a', 'facebook'))!.revision
     assert.equal(await deleteIntegration(db, 'org-a', 'facebook'), true)
-    await assert.rejects(storeIntegration(db, 'org-a', 'facebook', { account_id: 'fb-account', target_id: PAGE, target_name: 'Krabi Claw' }, { revision: beforeDisconnect }), /The Facebook connection changed/)
+    await assert.rejects(storeIntegration(db, 'org-a', 'facebook', { account_id: 'fb-account', target_id: PAGE, target_name: 'Blawby' }, { revision: beforeDisconnect }), /The Facebook connection changed/)
     assert.equal(await readIntegration(db, 'org-a', 'facebook'), null)
     assert.equal(await deleteIntegration(db, 'org-a', 'instagram'), true)
-    await storeIntegration(db, 'org-b', 'facebook', { account_id: 'fb-account', target_id: PAGE, target_name: 'Krabi Claw' }, { revision: 'fb-rev-org-b' })
-    await storeIntegration(db, 'org-b', 'instagram', { account_id: 'ig-account', target_id: IG, target_name: 'krabiclaw' }, { revision: 'ig-rev-org-b' })
+    await storeIntegration(db, 'org-b', 'facebook', { account_id: 'fb-account', target_id: PAGE, target_name: 'Blawby' }, { revision: 'fb-rev-org-b' })
+    await storeIntegration(db, 'org-b', 'instagram', { account_id: 'ig-account', target_id: IG, target_name: 'blawby' }, { revision: 'ig-rev-org-b' })
     assert.deepEqual((await listIntegrations(db, 'org-b')).map(row => `${row.provider}:${row.target_id}`), [`facebook:${PAGE}`, `instagram:${IG}`])
     assert.deepEqual(await listIntegrations(db, 'org-a'), [])
   } finally {
@@ -605,7 +605,7 @@ test('channel inventory and deletion stay separate from authored website content
     const next = await listChannelPosts(env, 'org-a', channelTarget, { after: first.next_after, limit: 1 })
     assert.deepEqual(next.posts.map(post => post.body), ['Only on Facebook'])
     assert.equal(next.next_after, null)
-    meta.igFeed = [{ id: 'native-instagram', username: 'krabiclaw', caption: 'Only on Instagram', media_type: 'IMAGE', media_url: 'https://cdninstagram.com/native.jpg', timestamp: '2026-09-30T10:00:00+0000' }]
+    meta.igFeed = [{ id: 'native-instagram', username: 'blawby', caption: 'Only on Instagram', media_type: 'IMAGE', media_url: 'https://cdninstagram.com/native.jpg', timestamp: '2026-09-30T10:00:00+0000' }]
     const instagramTarget = { channel: 'instagram' as const, target_id: IG, connection_revision: 'ig-rev-org-a' }
     const instagramInventory = await listChannelPosts(env, 'org-a', instagramTarget, { after: null, limit: 25 })
     assert.deepEqual(instagramInventory.posts.map(post => post.provider_post_id), ['native-instagram'])
