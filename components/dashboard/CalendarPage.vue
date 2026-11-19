@@ -323,7 +323,7 @@ const apiBase = props.personalScope ? '/api/account' : '/api/dashboard'
 const realtime = props.personalScope ? null : useDashboardInvalidations()
 const { filters, signature: filterSignature, query: filterQuery } = useAgendaFilters()
 
-const timeZone = getLocalTimeZone()
+const timeZone = props.personalScope ? getLocalTimeZone() : (useDashboardOrganization().organization.value?.timezone ?? getLocalTimeZone())
 const todayDate = today(timeZone)
 const todayKey = todayDate.toString()
 
@@ -741,8 +741,23 @@ if (organizationId) provide(calendarSessionsKey, {
   },
 })
 
-// The period on screen is read before the level renders; others as they are shown.
-await ensureLoaded(neededKeys())
+// Carry the first scoped agenda into hydration before letting the grid and the
+// day panel mount. Subsequent date and filter changes use the same reader.
+const app = useNuxtApp()
+const initialKeys = neededKeys()
+if (initialKeys.length && (import.meta.server || app.isHydrating) && !props.personalScope) {
+  const { data: initial } = await useAsyncData(`calendar-agenda:${route.fullPath.split('#')[0]}`, async () => {
+    await ensureLoaded(initialKeys)
+    return { blocks: [...calendarData.value.values()], locations: locations.value, kinds: availableKinds.value }
+  })
+  if (initial.value) {
+    calendarData.value = new Map(initial.value.blocks.map(block => [block.key, block]))
+    locations.value = initial.value.locations
+    availableKinds.value = initial.value.kinds
+  }
+} else {
+  await ensureLoaded(initialKeys)
+}
 
 // The URL says which view and which month; the data follows the period.
 watch([view, monthKey, shownYear], () => {

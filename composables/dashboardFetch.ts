@@ -86,6 +86,21 @@ export async function dashboardFetch<T>(
   if (!scope.orgSlug) {
     throw createError({ statusCode: 400, statusMessage: 'Dashboard organization scope is required' })
   }
+  if (import.meta.server && (!options.method || options.method === 'GET') && (
+    request === '/api/dashboard/agenda' || request === '/api/dashboard/bookings/calendar'
+    || (request === '/api/dashboard/stay-homes' && options.query?.view === 'calendar')
+    || (request === '/api/dashboard/payments' && options.query?.view === 'performance')
+    || (request === '/api/dashboard/settings' && options.query?.connections === '1')
+    || request === '/api/dashboard/integrations/google-calendar'
+  )) {
+    const provider = useRequestEvent()?.context.dashboardDocumentProvider as {
+      read: (orgSlug: string, resource: string, query: Record<string, unknown>) => Promise<unknown>
+    } | undefined
+    if (!provider) throw createError({ statusCode: 502, statusMessage: 'Dashboard document reader is unavailable' })
+    const value = await provider.read(scope.orgSlug, request, (options.query as Record<string, unknown> | undefined) ?? {})
+    if (!options.validate(value)) throw createError({ statusCode: 502, statusMessage: 'Invalid dashboard document resource' })
+    return value
+  }
   // `request` is always a relative path. `ofetch` is imported directly here
   // (not Nuxt's magic `$fetch`), so it has no implicit notion of the current
   // origin. That's harmless in a real browser (relative fetches resolve

@@ -40,6 +40,7 @@
 </template>
 
 <script setup lang="ts">
+import { isPublicMenuProduct } from '~/utils/public-resource-contracts'
 import tenantCriticalCss from '~/assets/css/tenant-critical.css?raw'
 import '~/assets/css/tenant-entry.css'
 
@@ -60,7 +61,16 @@ const { fontPreset, paletteStyle } = usePublicSiteBrand()
 
 // ── Universal Shell State ─────────────────────────────────────
 const shell = useOrganizationShellState()
-if (import.meta.server) await shell.ready
+if (import.meta.server) {
+  const request = usePublicPageRequest().value
+  if (!request.location && request.page === 'menu') {
+    await Promise.all([shell.ready, usePublicPageData({ datasets: ['menu_cards'], validateProduct: isPublicMenuProduct })])
+  } else if (!request.location && request.page === 'reviews') {
+    await Promise.all([shell.ready, usePublicPageData()])
+  } else {
+    await shell.ready
+  }
+}
 const locations = computed(() => shell.locations.value)
 const bootstrapError = computed(() => shell.error.value)
 const shellOrganization = computed(() => shell.organization.value)

@@ -168,14 +168,17 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     const dayReads: string[] = []
     const watchDayRead = (request: import('@playwright/test').Request) => {
       const url = new URL(request.url())
-      if (url.pathname === '/api/dashboard/agenda' && url.searchParams.get('from') === day && url.searchParams.get('to') === day) dayReads.push(url.pathname)
+      if (url.pathname === '/api/dashboard/agenda') dayReads.push(url.pathname)
     }
     memberPage.on('request', watchDayRead)
-    await memberPage.goto(`${DASHBOARD}/calendar/${day}`)
+    const calendarDocument = await memberPage.goto(`${DASHBOARD}/calendar/${day}`)
+    expect(calendarDocument?.status()).toBe(200)
+    expect(calendarDocument?.headers()['cache-control']).toContain('no-store')
+    expect(await calendarDocument?.text()).toContain('id="dashboard-panel-calendar-day"')
     await waitForNuxtHydration(memberPage)
-    await memberPage.locator(`#dashboard-panel-calendar-day a[href="${conversationPath}"]`).click()
     expect(dayReads).toEqual([])
     memberPage.off('request', watchDayRead)
+    await memberPage.locator(`#dashboard-panel-calendar-day a[href="${conversationPath}"]`).click()
     await expect(memberPage).toHaveURL(new URL(reservationPath, baseURL!).toString())
     const thread = memberPage.locator('#dashboard-panel-organization-messages-thread')
     const detail = memberPage.locator('#dashboard-panel-booking-details')
