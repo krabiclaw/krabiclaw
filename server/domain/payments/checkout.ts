@@ -264,6 +264,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   }
   // A signed-in buyer's Customer at this business: the Payment Element offers, saves and removes their cards here only.
   const customer = input.buyerUserId ? await connectedBuyerCustomer(db, stripe, input.buyer ?? input.buyerUserId, connected.stripe_account_id, connected.livemode) : null
+  const stripeAccount = connected.stripe_account_id
   try {
     const intent = await createWithStripeMetadata(stripe, 'payment', id, Boolean(previous), metadata => stripe.paymentIntents.create({
       amount, currency: price.currency.toLowerCase(),
