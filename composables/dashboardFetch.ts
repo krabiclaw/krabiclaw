@@ -1,4 +1,4 @@
-import { websiteBlogPost } from '~/utils/dashboard-document'
+import { rendersWebsiteDocument, websiteBlogPost, websiteSocialPost } from '~/utils/dashboard-document'
 import type { FetchOptions } from 'ofetch'
 import type { MaybeRefOrGetter } from 'vue'
 import { $fetch } from 'ofetch'
@@ -87,6 +87,11 @@ export async function dashboardFetch<T>(
   if (!scope.orgSlug) {
     throw createError({ statusCode: 400, statusMessage: 'Dashboard organization scope is required' })
   }
+  const postDocument = import.meta.server && (() => {
+    const url = useRequestURL()
+    const panel = url.pathname.replace(/^\/dashboard\/[^/]+/, '')
+    return websiteSocialPost(panel) && rendersWebsiteDocument(panel, Object.fromEntries(url.searchParams))
+  })()
   if (import.meta.server && (!options.method || options.method === 'GET') && (
     request === '/api/dashboard/agenda' || request === '/api/dashboard/bookings/calendar'
     || (request === '/api/dashboard/stay-homes' && options.query?.view === 'calendar')
@@ -94,6 +99,8 @@ export async function dashboardFetch<T>(
     || (request === '/api/dashboard/settings' && (options.query?.connections === '1' || options.query?.view === 'website'))
     || /^\/api\/editor\/organizations\/[^/]+\/(?:reviews|blog\/[^/]+|posts|qa|pages\/[^/]+)$/.test(request)
       && (!request.endsWith('/blog/categories') || Boolean(websiteBlogPost(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''))))
+    || (postDocument && (request === '/api/integrations/social-connections' || request === '/api/dashboard/locations' && options.query?.organization === 'true'
+      || /^\/api\/editor\/organizations\/[^/]+\/posts\/[^/]+$/.test(request)))
     || request === '/api/dashboard/integrations/google-calendar'
   )) {
     const provider = useRequestEvent()?.context.dashboardDocumentProvider as {

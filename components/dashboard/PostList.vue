@@ -72,7 +72,7 @@
 <script setup lang="ts">
 import { formatTimestamp } from '~/utils/timezone'
 import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
-import { normalizePostMediaForForm, usePostEditor } from '~/composables/usePostEditor'
+import { normalizePostMediaForForm, postListKey, usePostEditor } from '~/composables/usePostEditor'
 import { getErrorMessage } from '~/utils/errors'
 
 // The posts index: every post the organization has, or one location's when the
@@ -108,7 +108,7 @@ const isPostsResponse = (value: unknown): value is { posts: ApiRecord[]; page_in
 const statusFilter = computed(() => (activeTab.value === 'all' ? undefined : String(activeTab.value)))
 // No location reads every post; a location reads only that location's. Neither
 // is a guess about where a new post goes.
-const postsKey = computed(() => `dashboard-posts:${organizationId}:${locationId.value ?? 'organization'}:${statusFilter.value ?? 'all'}`)
+const postsKey = computed(() => postListKey(organizationId, locationId.value, statusFilter.value))
 const fetchPage = (cursor?: string) => dashboardApi<{ posts: ApiRecord[]; page_info: { has_more: boolean; next_cursor: string | null } }>(`/api/editor/organizations/${organizationId}/posts`, {
   query: { ...(locationId.value ? { location_id: locationId.value } : {}), ...(statusFilter.value ? { status: statusFilter.value } : {}), ...(cursor ? { cursor } : {}) },
   validate: isPostsResponse,

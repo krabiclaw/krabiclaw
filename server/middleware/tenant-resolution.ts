@@ -26,7 +26,7 @@ import { publicTenantPageSql } from '~/server/utils/content/pages'
 import { buildLoginUrl } from '~/shared/auth/return-target'
 import { BROWSER_ERROR_PATH } from '~/shared/error-telemetry'
 import { dashboardSessionUserQuery, getAuthSession, type DashboardAuthRead } from '~/server/utils/auth'
-import { dashboardOrganizationFrom, getDashboardSession, readDashboardMembership } from '~/server/utils/dashboard-context'
+import { dashboardOrganizationFrom, getDashboardSession, prepareDashboardLocations, readDashboardMembership } from '~/server/utils/dashboard-context'
 import { prepareDashboardWorkspaceAccess, readDashboardWorkspaceAccess } from '~/server/utils/dashboard-context-service'
 import { membershipBySlugQuery, BATCH_VIEWER, withViewer } from '~/server/utils/member-access'
 import { prepareToday } from '~/server/domain/today'
@@ -44,10 +44,12 @@ import { isDocumentOnlyPublicPath } from '~/shared/public-locale-routes'
 import { blogPostCategoriesQuery, prepareBlogList, prepareBlogPost } from '~/server/utils/content/publishing'
 import { articleCategoriesQuery, readArticleCategories } from '~/server/utils/content/article-categories'
 import { isArticleCollection } from '~/utils/article-collections'
-import { preparePostList } from '~/server/utils/post-management'
+import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
+import { prepareSocialConnections, presentSocialConnections } from '~/server/utils/social-publication'
+import { preparePost, preparePostList } from '~/server/utils/post-management'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { qaListQuery, qaPageScopesQuery } from '~/server/utils/location-qa'
-import { rendersWebsiteDocument, websiteBlogPost, websitePageVariant } from '~/utils/dashboard-document'
+import { rendersWebsiteDocument, websiteBlogPost, websitePageVariant, websiteSocialPost } from '~/utils/dashboard-document'
 import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
 import { prepareDashboardCatalog, readDashboardCatalogDocument } from '~/server/utils/dashboard-catalog'
 import { setDashboardSocketScope } from '~/server/utils/dashboard-socket-scope'
@@ -364,7 +366,11 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
   const websiteList = prepareWebsitePanel(managedOrg, websitePanel, query)
   const variantId = websitePageVariant(panel)
   const websiteEditor = variantId && variantId !== 'new' ? prepareTenantPageEditor(variantId) : null
-  const articleId = websiteBlogPost(panel)
+  const postId = website && websiteSocialPost(panel)
+  const post = postId && postId !== 'new' ? preparePost({ sql: BATCH_VIEWER.organization }, postId, BATCH_VIEWER) : null
+  const postLocations = postId ? prepareDashboardLocations(websiteEditorOrganization) : null
+  const postConnections = postId ? prepareSocialConnections(websiteEditorOrganization) : null
+  const articleId = websiteBlogPost(panel) || (postId === 'new' && typeof query.article_id === 'string' ? query.article_id : null)
   const article = articleId && articleId !== 'new' ? prepareBlogPost(articleId, websiteEditorOrganization) : null
   const categories = articleId === 'new'
     ? articleCategoriesQuery(websiteEditorOrganization, isArticleCollection(query.collection) ? query.collection : 'blog')
@@ -414,6 +420,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     ...(websiteEditor?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(article?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(categories ? [withViewer(membership, categories)] : []),
+    ...[...(post?.queries ?? []), ...(postLocations?.queries ?? []), ...(postConnections?.queries ?? [])].map(query => withViewer(membership, query)),
   ]
   return { queries, present }
 
@@ -452,10 +459,25 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
         content.set(`pages/${encodeURIComponent(variantId!)}`, await websiteEditor.read(panelRows.slice(offset), organization, env))
       }
       if (article) {
-        content.set(`blog/${encodeURIComponent(articleId!)}`, { post: await article.read(panelRows.slice(offset), env) })
+        content.set(`blog/${encodeURIComponent(articleId!)}`, { post: await article.read(panelRows.slice(offset, offset + article.queries.length), env) })
         offset += article.queries.length
       }
-      if (categories) content.set('blog/categories', { categories: readArticleCategories(panelRows[offset]!.results) })
+      if (categories) content.set('blog/categories', { categories: readArticleCategories(panelRows[offset++]!.results) })
+      if (post) {
+        const saved = await post.read(panelRows.slice(offset, offset + post.queries.length), env)
+        if (saved) content.set(`posts/${encodeURIComponent(postId!)}`, { success: true, post: saved })
+        offset += post.queries.length
+      }
+      if (postLocations) {
+        content.set('post-locations', { success: true, locations: postLocations.read(panelRows.slice(offset, offset + postLocations.queries.length), organization.id).locations })
+        offset += postLocations.queries.length
+      }
+      if (postConnections) {
+        const saved = postConnections.read(panelRows.slice(offset, offset + postConnections.queries.length), organization.id)
+        content.set('post-connections', saved.connections.some(connection => connection.connected)
+          ? { channels: [], requires_live_validation: true }
+          : await presentSocialConnections(env, organization.id, { dashboardBase: dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null }) }, saved))
+      }
       event.context.dashboardWebsite = { settings: website.read(panelRows.slice(0, website.queries.length)), content }
     }
     setResponseHeader(event, 'cache-control', 'private, no-store')
@@ -665,7 +687,7 @@ export default defineHandler(async (event) => {
   // preview check before authentication ran: six D1 statements and 100-190 ms
   // on a 401. Nothing on these paths reads the resolved tenant; the one shared
   // helper, resolvePublicOrigin, answers the platform origin without it.
-  if (SESSION_SCOPED_API_PREFIXES.some(prefix => tenantPath === prefix || tenantPath.startsWith(`${prefix}/`))) return;
+  if (tenantPath === '/api/integrations/social-connections' || SESSION_SCOPED_API_PREFIXES.some(prefix => tenantPath === prefix || tenantPath.startsWith(`${prefix}/`))) return;
   // `/api/public/**` used to be skipped here because each of those routes
   // carried its own site id in the path. That id was a second answer to "which
   // tenant", arriving beside the host that already knew — and a route reachable

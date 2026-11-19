@@ -12,7 +12,12 @@ export function websiteBlogPost(panel: string) {
   return segment && segment !== 'categories' ? decodeURIComponent(segment) : null
 }
 
+export function websiteSocialPost(panel: string) {
+  const segment = /^\/website\/posts\/([^/]+)(?:\/|$)/.exec(panel)?.[1]
+  return segment ? decodeURIComponent(segment) : null
+}
+
 export function rendersWebsiteDocument(panel: string, query: Record<string, unknown>) {
-  return Boolean(websitePageVariant(panel) || websiteBlogPost(panel)) || /^\/website(?:\/(?:pages|reviews|brand|preferences|blog|posts|qa))?\/?$/.test(panel)
+  return Boolean(websitePageVariant(panel) || websiteBlogPost(panel) || (query.location_id === undefined && websiteSocialPost(panel))) || /^\/website(?:\/(?:pages|reviews|brand|preferences|blog|posts|qa))?\/?$/.test(panel)
     && (!/^\/website\/(?:posts|qa)\/?$/.test(panel) || query.location_id === undefined)
 }

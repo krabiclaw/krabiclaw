@@ -39,7 +39,7 @@ export function prepareTenantPageEditor(variantId: string) {
   }
 }
 
-export async function requireWebsiteAccess(event: H3Event, organizationId: string, statements: BatchQuery[] = []) {
+export async function readWebsiteMember(event: H3Event, organizationId: string, statements: BatchQuery[] = []) {
   const env = cloudflareEnv(event)
   const db = env.DB
   if (!db) throw new HTTPError({ statusCode: 503, message: 'Database unavailable' })
@@ -54,8 +54,13 @@ export async function requireWebsiteAccess(event: H3Event, organizationId: strin
   )
   const organization = dashboardOrganizationFrom(viewer!.results[0])
   if (organization.userId !== session.user.id) throw new Error('Page editor membership does not match the Better Auth session')
-  if (!isOrganizationWideRole(organization.role)) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
   return { env, db, session, organization, userId: session.user.id, rows }
+}
+
+export async function requireWebsiteAccess(event: H3Event, organizationId: string, statements: BatchQuery[] = []) {
+  const context = await readWebsiteMember(event, organizationId, statements)
+  if (!isOrganizationWideRole(context.organization.role)) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
+  return context
 }
 
 export async function readTenantPageEditor(event: H3Event, organizationId: string, variantId: string) {

@@ -7,6 +7,8 @@
       <DashboardResourceLocalization :organization-id="organizationId" resource-type="content_document" :resource-id="String(post.id)" :resource-label="String(post.title || 'Post')" :fields="postLocalizationFields" :language-settings-path="organizationLocalizationSettingsPath" :disabled="busy" />
     </template>
     <UAlert v-if="loadError || editor.error.value || actionError || publicationReadError" class="mb-6" color="error" title="Post could not be completed" :description="loadError || editor.error.value || actionError || publicationReadError || ''" />
+    <UAlert v-if="saveNotice?.description" class="mb-6" color="warning" :title="saveNotice.label" :description="saveNotice.description" />
+    <p v-else-if="saveNotice" class="mb-4 text-sm text-success" role="status">{{ saveNotice.label }}</p>
     <div v-if="!loadError" class="grid items-start gap-10 lg:grid-cols-2">
       <fieldset :disabled="busy || unconfirmedCreation" :inert="busy || unconfirmedCreation || undefined" class="min-w-0 space-y-8">
         <PostMediaFields v-model:media="editor.form.media" :organization-id="organizationId" />
@@ -28,7 +30,7 @@
         <div>
           <h2 class="text-lg font-semibold text-highlighted">Publish to</h2>
           <UAlert v-if="connectionsError" class="mt-4" color="error" title="Social accounts could not be read" :description="connectionsError" />
-          <p v-if="connectionStatus === 'pending'" class="mt-4 text-sm text-muted">Reading social accounts…</p>
+          <p v-if="connectionStatus === 'pending' || connections?.requires_live_validation" class="mt-4 text-sm text-muted">Reading social accounts…</p>
           <ul class="mt-2 divide-y divide-default">
             <li v-for="row in rows" :key="row.channel" class="flex items-start gap-3 py-5">
               <UIcon :name="row.icon" class="mt-0.5 size-5 shrink-0" aria-hidden="true" />
@@ -71,15 +73,15 @@ import DashboardResourceLocalization from '~/components/dashboard/DashboardResou
 import DashboardContentPreview from '~/components/dashboard/DashboardContentPreview.vue'
 import PostMediaFields from '~/components/dashboard/PostMediaFields.vue'
 import MediaGallery from '~/components/MediaGallery.vue'
-import { normalizePostMediaForForm, usePostEditor, type PostMediaFormItem, type PublishOutcome, type PublishTarget, type SocialChannel } from '~/composables/usePostEditor'
+import { normalizePostMediaForForm, postListKey, usePostEditor, type PostMediaFormItem, type PublishOutcome, type PublishTarget, type SocialChannel } from '~/composables/usePostEditor'
 import { articlePostFields, parsePostInput, POST_BODY_MAX, POST_TITLE_MAX, POST_CALL_TO_ACTION_LABEL_MAX } from '~/shared/posts'
 import { isBlogPostResponse } from '~/lib/components/workspace/blog/blog-response-contracts'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
+import { websiteSettingsKey } from '~/composables/useTenantPageDraft'
 
 const route = useRoute()
 const level = useRouteLevel()
 const dashboardApi = useDashboardApi()
-const toast = useToast()
 const dashboard = useDashboardOrganization()
 const organizationId = useDashboardOrganizationId()
 const postId = String(route.params.post_id ?? '')
@@ -99,7 +101,7 @@ const { data: sourceArticle, error: sourceError } = await useAsyncData(`post-sou
   if (!origin) throw createError({ statusCode: 409, statusMessage: 'The website needs a public address before sharing an article' })
   return { article: response.post, url: new URL(response.post.public_path, origin).toString() }
 })
-const { data, error } = await useAsyncData(`dashboard-post:${organizationId}:${postId}`, async () => isNew ? null : dashboardApi(`/api/editor/organizations/${organizationId}/posts/${postId}`, {
+const { data, error } = await useAsyncData(`dashboard-post:${organizationId}:${postId}`, async () => isNew ? null : dashboardApi(`/api/editor/organizations/${organizationId}/posts/${encodeURIComponent(postId)}`, {
   validate: (value): value is { post: ApiRecord } => isRecord(value) && isRecord(value.post) && typeof value.post.id === 'string',
 }))
 if (isNotFoundError(error.value) || isNotFoundError(sourceError.value)) throw createError({ statusCode: 404, statusMessage: 'Post or article not found' })
@@ -140,10 +142,13 @@ const locationChoice = computed({ get: () => editor.form.location_id ?? WHOLE_WE
 const previewMedia = computed(() => editor.form.media.filter((item): item is PostMediaFormItem & { public_url: string } => Boolean(item.asset_id && item.public_url)).map(item => ({ asset_id: item.asset_id, url: item.public_url, poster: item.thumbnail_url ?? undefined, kind: item.kind === 'video' ? 'video' as const : 'image' as const, alt: item.alt_text, description: editor.form.body })))
 
 interface Channel { channel: SocialChannel; connected: boolean; target_id: string | null; target_name: string | null; connection_revision: string | null; problems: Array<{ code: string; message: string }>; connect_url: string }
-const { data: connections, error: connectionFailure, status: connectionStatus, refresh: refreshConnections } = await useAsyncData(
+const { data: connections, error: connectionFailure, status: connectionStatus, refresh: refreshConnections } = await useLazyAsyncData(
   () => `post-publish-targets:${organizationId}:${editor.form.location_id ?? ''}`,
-  () => dashboardApi('/api/integrations/social-connections', { query: { locationId: editor.form.location_id ?? '' }, validate: (value): value is { channels: Channel[] } => isRecord(value) && Array.isArray(value.channels) }),
+  () => dashboardApi('/api/integrations/social-connections', { query: { locationId: editor.form.location_id ?? '' }, validate: (value): value is { channels: Channel[]; requires_live_validation?: true } => isRecord(value) && Array.isArray(value.channels) }),
 )
+onMounted(() => {
+  if (connections.value?.requires_live_validation) void refreshConnections()
+})
 useEventListener(import.meta.client ? window : undefined, 'focus', () => refreshConnections())
 const connectionsError = computed(() => connectionFailure.value ? getErrorMessage(connectionFailure.value, 'Failed to read connections') : null)
 const lastOutcomes = ref<PublishOutcome[]>([])
@@ -171,13 +176,21 @@ const rows = computed(() => {
     }
   })]
 })
-if (isNew && preparedChannel && !selected.value.length && rows.value.find(row => row.channel === preparedChannel)?.selectable) selected.value = [preparedChannel as SocialChannel]
-watch(() => JSON.stringify(connections.value?.channels.map(channel => [channel.channel, channel.target_id, channel.connection_revision, channel.connected, channel.problems])), () => { selected.value = selected.value.filter(channel => channel === 'organization') })
+let initialTargetsRead = false
+watch(() => JSON.stringify(connections.value?.channels.map(channel => [channel.channel, channel.target_id, channel.connection_revision, channel.connected, channel.problems])), (targets) => {
+  if (!targets || connections.value?.requires_live_validation) return
+  if (initialTargetsRead) selected.value = selected.value.filter(channel => channel === 'organization')
+  else if (isNew && preparedChannel && !selected.value.length && rows.value.find(row => row.channel === preparedChannel)?.selectable) {
+    selected.value = [preparedChannel as SocialChannel]
+  }
+  initialTargetsRead = true
+}, { immediate: true })
 function toggle(channel: 'organization' | SocialChannel, checked: boolean) { selected.value = checked ? [...new Set([...selected.value, channel])] : selected.value.filter(item => item !== channel) }
 const committing = ref(false)
 const busy = computed(() => committing.value || editor.saving.value || editor.publishing.value)
 const unconfirmedCreation = computed(() => isNew && draft.value.submitted && !post.value)
 const actionError = ref('')
+const saveNotice = ref<{ label: string; description?: string } | null>(null)
 const publicationReadError = ref('')
 let publicationTimer: ReturnType<typeof setInterval> | undefined
 async function refreshPublicationState() {
@@ -208,6 +221,7 @@ async function commit(publish: boolean) {
   if (busy.value || (publish ? !canPublish.value : !canSave.value)) return
   committing.value = true
   actionError.value = ''
+  saveNotice.value = null
   try {
     const authoredMedia = JSON.stringify(editor.form.media.filter(item => item.asset_id).map(({ asset_id, slot }) => ({ asset_id, slot })))
     const targets: PublishTarget[] = publish ? selected.value.map(channel => {
@@ -234,9 +248,14 @@ async function commit(publish: boolean) {
         selected.value = selected.value.filter(channel => result.outcomes.some(outcome => outcome.channel === channel && outcome.status === 'failed'))
       }
       const failures = result?.outcomes.filter(outcome => !['published', 'already_published'].includes(outcome.status))
-      if (!result || failures?.length) toast.add({ title: 'Post saved', description: editor.error.value || failures?.map(outcome => outcome.message || `${outcome.channel}: ${outcome.status}`).join(' · ') || 'Check the publication results before trying again.', color: 'warning' })
-    } else toast.add({ title: saved.status === 'published' ? 'Changes saved' : 'Draft saved', color: 'success' })
-    await refreshNuxtData()
+      if (!result || failures?.length) saveNotice.value = { label: 'Post saved', description: editor.error.value || failures?.map(outcome => outcome.message || `${outcome.channel}: ${outcome.status}`).join(' · ') || 'Check the publication results before trying again.' }
+    } else saveNotice.value = { label: saved.status === 'published' ? 'Changes saved' : 'Draft saved' }
+    const filters = [undefined, 'draft', 'published']
+    void refreshNuxtData([
+      websiteSettingsKey(String(route.params.org_slug)),
+      ...[...new Set([null, scopeLocationId.value])].flatMap(locationId =>
+        filters.map(status => postListKey(organizationId, locationId, status))),
+    ])
     if (isNew) {
       const { article_id: _articleId, ...query } = route.query
       const navigation = await navigateTo({ path: level.path.value.replace(/\/new$/, `/${String(saved.id)}`), query }, { replace: true })

@@ -2,6 +2,8 @@ import { HTTPError } from 'nitro'
 import { executeBatch, execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { linkedAccountAccessToken, readLinkedAccount, type CloudflareEnv } from '~/server/utils/auth'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
+import { prepareOrganizationPlan } from '~/server/utils/billing-access'
+import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { getPost, postPayloadFingerprint, type Post, type PostMedia } from '~/server/utils/post-management'
@@ -16,7 +18,8 @@ import {
   createMediaContainer, getInstagramAccount, instagramAccessToken, publishContainer, readContainerStatus, readMedia, type InstagramTarget,
 } from '~/server/utils/instagram'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
-import { readIntegration } from '~/server/utils/organization-integrations'
+import { integrationsFromRows, integrationsQuery, readIntegration } from '~/server/utils/organization-integrations'
+import type { OrganizationIntegration } from '~/shared/organization-settings'
 import { isRecord } from '~/server/utils/type-guards'
 import {
   createMessage, discordMessageLink, DiscordError, getMessage, readMessageChannel,
@@ -98,7 +101,10 @@ interface ConnectionRead {
 }
 
 async function readConnection(env: CloudflareEnv, organizationId: string, channel: SocialChannel): Promise<ConnectionRead> {
-  const connection = await readIntegration(env.DB, organizationId, channel)
+  return socialConnection(channel, await readIntegration(env.DB, organizationId, channel))
+}
+
+function socialConnection(channel: SocialChannel, connection: OrganizationIntegration | null): ConnectionRead {
   return {
     channel, connected: Boolean(connection), targetId: connection?.target_id ?? null,
     targetName: connection ? (channel === 'instagram' ? `@${connection.target_name}` : connection.target_name) : null,
@@ -139,10 +145,31 @@ async function discordTargetFor(env: CloudflareEnv, connection: ConnectionRead):
  * what stands in the way, and where a person connects
  * it. Never a token.
  */
+export function prepareSocialConnections(organization: string | { sql: string }) {
+  const plan = prepareOrganizationPlan(organization)
+  return {
+    queries: [plan.query, integrationsQuery(organization)],
+    read([planRows, integrationRows]: D1Result[], organizationId: string) {
+      const integrations = integrationsFromRows(integrationRows!.results)
+      const byChannel = new Map(integrations.map(integration => [integration.provider, integration]))
+      return {
+        entitled: getPlanEntitlements(plan.read(planRows!, organizationId)).managed_service === true,
+        connections: SOCIAL_CHANNELS.map(channel => socialConnection(channel, byChannel.get(channel) ?? null)),
+      }
+    },
+  }
+}
+
 export async function getSocialConnections(env: CloudflareEnv, organizationId: string, links: { dashboardBase: string }) {
-  const entitled = await hasOrganizationEntitlement(env, organizationId, 'managed_service')
-  const channels = await Promise.all(SOCIAL_CHANNELS.map(async (channel) => {
-    const connection = await readConnection(env, organizationId, channel)
+  const plan = prepareSocialConnections(organizationId)
+  const saved = plan.read(await executeBatch(env.DB, plan.queries, { operation: 'Read social publishing destinations' }), organizationId)
+  return presentSocialConnections(env, organizationId, links, saved)
+}
+
+export async function presentSocialConnections(env: CloudflareEnv, organizationId: string, links: { dashboardBase: string },
+  { entitled, connections }: ReturnType<ReturnType<typeof prepareSocialConnections>['read']>) {
+  const channels = await Promise.all(connections.map(async connection => {
+    const { channel } = connection
     const problems: Array<{ code: string; message: string }> = []
     if (!entitled) problems.push({ code: 'growth_plan_required', message: GROWTH_PLAN_REQUIRED })
     if (!connection.connected) problems.push({ code: 'not_connected', message: NOT_CONNECTED[channel] })

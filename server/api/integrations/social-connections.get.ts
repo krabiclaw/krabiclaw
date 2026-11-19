@@ -3,7 +3,6 @@ import { getQuery } from 'nitro/h3'
 import { jsonResponse } from '~/server/utils/api-response'
 import { requireRequestedLocationAccess, requireRequestedOrganizationWideAccess } from '~/server/utils/location-access'
 import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
-import { findOrganizationById } from '~/server/utils/member-access'
 import { getSocialConnections } from '~/server/utils/social-publication'
 
 /**
@@ -16,7 +15,5 @@ export default defineHandler(async (event) => {
   const { env, organization } = query.locationId
     ? await requireRequestedLocationAccess(event, query.locationId, query.organizationId)
     : await requireRequestedOrganizationWideAccess(event, query.organizationId)
-  const record = await findOrganizationById(env, organization.id)
-  if (!record) return jsonResponse({ error: 'Organization not found' }, { status: 404 })
-  return jsonResponse(await getSocialConnections(env, organization.id, { dashboardBase: dashboardOrigin(env, { orgSlug: record.slug, locationSlug: null }) }))
+  return jsonResponse(await getSocialConnections(env, organization.id, { dashboardBase: dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null }) }))
 })

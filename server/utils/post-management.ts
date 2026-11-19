@@ -1,19 +1,19 @@
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { HTTPError } from 'nitro'
-import { createContentDocumentWithBlocks, documentOfRootSql, prepareContentDocumentDeletion, updateContentDocument, type ContentDocumentChanges } from '~/server/utils/content/documents'
+import { createContentDocumentWithBlocks, documentOfRootSql, prepareContentDocumentDeletion, updateContentDocument, type ContentDocumentChanges, type ContentDocumentRow } from '~/server/utils/content/documents'
 import { parsePostInput, PostValidationError, type PostCallToAction, type PostMediaRef, type PostMutation } from '~/shared/posts'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { normalizePostSlug, postPublicPath } from '~/utils/post-slugs'
-import { insertInitialMediaPlacements, groupMediaPlacements, hydrateMediaAssetRefs, mediaPlacementsQuery, readMediaPlacements, type StoredMediaPlacementItem } from '~/server/utils/media-asset-manager'
+import { buildMediaPlacementReplacementQueries, insertInitialMediaPlacements, groupMediaPlacements, hydrateMediaAssetRefs, mediaPlacementsQuery, readMediaPlacements, type StoredMediaPlacementItem } from '~/server/utils/media-asset-manager'
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
-import type { SocialImageSource } from '~/utils/social-metadata'
+import { publicSocialMediaFromPlacements, type SocialImageSource } from '~/utils/social-metadata'
+import { resourceLocationScopeSql, type ViewerTerms } from '~/server/utils/member-access'
 import { loadExactPublicLocalizations, projectLocalizedMediaAlt } from '~/server/utils/public-localization'
 import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS, previewSecretOf } from '~/server/utils/preview-token'
 import { mcpPageInfo, type McpPageInfo } from '~/server/utils/mcp-pagination'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
@@ -88,9 +88,7 @@ export interface Post {
   updated_at: string
 }
 
-interface PostRow {
-  id: string
-  organization_id: string
+interface PostRow extends ContentDocumentRow {
   location_id: string | null
   slug: string
   title: string | null
@@ -107,7 +105,7 @@ interface PostRow {
 }
 
 const POST_COLUMNS = `p.id, p.organization_id, p.location_id, p.slug, p.title, p.summary AS body, p.metadata_json, p.status, p.visibility,
-  p.published_at, p.author_id, p.created_by, u.name AS author_name, p.created_at, p.updated_at`
+  p.published_at, p.author_id, p.created_by, u.name AS author_name, p.created_at, p.updated_at, p.kind, p.row_role, p.root_id, p.locale`
 
 export function recentPostCardsQuery(organization: string | { sql: string }): BatchQuery {
   return {
@@ -129,11 +127,19 @@ function absoluteUrl(origin: string | null, path: string) {
   return new URL(path, origin.endsWith('/') ? origin : `${origin}/`).toString()
 }
 
-async function resolveOrganizationPostOrigins(db: DbClient, env: CloudflareEnv, organizationId: string) {
-  const domain = await queryFirst<{ domain: string; subdomain: string | null; is_public: number }>(db,
-    `SELECT d.domain, o.subdomain, (${publicTenantVisibilitySql('o', false)}) AS is_public
-     FROM organization_domains d JOIN organization o ON o.id = d.organization_id
-     WHERE d.organization_id = ? AND d.role = 'canonical' AND d.status = 'active' AND ${publicTenantVisibilitySql('o', true)}`, [organizationId])
+type PostOriginRow = { domain: string; subdomain: string | null; is_public: number }
+
+function postOriginsQuery(organization: string | { sql: string }): BatchQuery {
+  return {
+    query: `SELECT d.domain, o.subdomain, (${publicTenantVisibilitySql('o', false)}) AS is_public
+      FROM organization_domains d JOIN organization o ON o.id = d.organization_id
+      WHERE d.organization_id = ${typeof organization === 'string' ? '?' : organization.sql}
+        AND d.role = 'canonical' AND d.status = 'active' AND ${publicTenantVisibilitySql('o', true)}`,
+    params: typeof organization === 'string' ? [organization] : [],
+  }
+}
+
+function postOrigins(domain: PostOriginRow | null | undefined, env: CloudflareEnv) {
   const origin = domain ? tenantOrganizationOrigin({
     platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
     freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
@@ -141,6 +147,11 @@ async function resolveOrganizationPostOrigins(db: DbClient, env: CloudflareEnv, 
     canonicalDomain: domain.domain,
   }) : null
   return { publicOrigin: domain?.is_public ? origin : null, previewOrigin: origin }
+}
+
+async function resolveOrganizationPostOrigins(db: DbClient, env: CloudflareEnv, organizationId: string) {
+  const { query, params } = postOriginsQuery(organizationId)
+  return postOrigins(await queryFirst<PostOriginRow>(db, query, params), env)
 }
 
 async function validatePostLocation(db: DbClient, organizationId: string, locationId: string | null) {
@@ -212,27 +223,36 @@ interface PublicationRow {
   updated_at: string
 }
 
-async function loadPublicationRows(db: DbClient, organizationId: string, postIds: string[]) {
-  if (!postIds.length) return new Map<string, PublicationRow[]>()
-  const rows = await queryAll<PublicationRow>(db, `SELECT id, post_id, channel, provider_target_id, state, provider_post_id, provider_permalink,
-      payload_hash, error_code, error_message, published_at, updated_at
-    FROM post_publications WHERE organization_id = ? AND post_id IN (SELECT value FROM json_each(?)) ORDER BY channel`,
-  [organizationId, d1JsonStringSet(postIds)])
-  const byPost = new Map<string, PublicationRow[]>()
-  for (const row of rows) byPost.set(row.post_id, [...(byPost.get(row.post_id) ?? []), row])
-  return byPost
+function preparePostRecords(records: BatchQuery, limit?: number) {
+  const organization = { sql: '(SELECT organization_id FROM post_scope LIMIT 1)' }
+  const owners = { sql: `SELECT id FROM post_scope${limit === undefined ? '' : ' LIMIT ' + limit}` }
+  return {
+    queries: [records, ...[
+      postOriginsQuery(organization),
+      mediaPlacementsQuery({ organizationId: organization, ownerType: 'content_document', owners, includeOrganizationFallback: true }),
+      {
+        query: `SELECT id, post_id, channel, provider_target_id, state, provider_post_id, provider_permalink,
+          payload_hash, error_code, error_message, published_at, updated_at
+          FROM post_publications WHERE organization_id = ${organization.sql} AND post_id IN (${owners.sql}) ORDER BY channel`,
+      },
+    ].map(statement => ({ query: `WITH post_scope AS (${records.query}) ${statement.query}`, params: [...(records.params ?? []), ...(statement.params ?? [])] }))],
+    async read([records, domains, assets, channels]: D1Result[], env: CloudflareEnv) {
+      const rows = records!.results as PostRow[]
+      const page = limit === undefined ? rows : rows.slice(0, limit)
+      if (!page.length) return { posts: [], count: rows.length }
+      return { posts: await attachPostFields(env, page, domains!.results[0] as PostOriginRow | undefined,
+        groupMediaPlacements(assets!.results), channels!.results as PublicationRow[]), count: rows.length }
+    },
+  }
 }
 
-async function attachPostFields(db: DbClient, env: CloudflareEnv, rows: PostRow[]): Promise<Post[]> {
-  if (!rows.length) return []
+async function attachPostFields(env: CloudflareEnv, rows: PostRow[], domain: PostOriginRow | undefined,
+  placements: Map<string, StoredMediaPlacementItem[]>, publicationRows: PublicationRow[]): Promise<Post[]> {
   const organizationId = rows[0]!.organization_id
-  const ids = rows.map(row => row.id)
-  const [origins, media, social, publications] = await Promise.all([
-    resolveOrganizationPostOrigins(db, env, organizationId),
-    loadPostMedia(db, organizationId, ids),
-    loadPublicSocialMedia(db, organizationId, 'content_document', ids),
-    loadPublicationRows(db, organizationId, ids),
-  ])
+  const origins = postOrigins(domain, env)
+  const brand = (placements.get(organizationId) ?? []).filter(item => item.owner_type === 'organization')
+  const publications = new Map<string, PublicationRow[]>()
+  for (const row of publicationRows) publications.set(row.post_id, [...(publications.get(row.post_id) ?? []), row])
   const previewSecret = previewSecretOf(env)
   if (rows.some(row => row.status === 'draft') && !previewSecret) throw new HTTPError({ statusCode: 500, statusMessage: 'Preview signing is not configured' })
   const previewToken = rows.some(row => row.status === 'draft') && previewSecret
@@ -240,14 +260,16 @@ async function attachPostFields(db: DbClient, env: CloudflareEnv, rows: PostRow[
     : null
   return await Promise.all(rows.map(async (row) => {
     const publicPath = postPublicPath(row.slug)
-    const post = { body: row.body, call_to_action: callToActionOf(row.metadata_json), media: media.get(row.id) ?? [] }
+    const items = (placements.get(row.id) ?? []).filter(item => item.owner_type === 'content_document')
+    const post = { body: row.body, call_to_action: callToActionOf(row.metadata_json), media: orderedPostMedia(items) }
+    const { kind: _kind, row_role: _role, root_id: _rootId, locale: _locale, ...fields } = row
     return {
-      ...row,
+      ...fields,
       ...post,
       public_path: publicPath,
       canonical_url: row.status === 'published' ? absoluteUrl(origins.publicOrigin, publicPath) : null,
       preview_url: row.status === 'draft' && previewToken ? absoluteUrl(origins.previewOrigin, `${publicPath}?${PREVIEW_TOKEN_QUERY}=${encodeURIComponent(previewToken)}`) : null,
-      social_image: social.get(row.id)?.social_image ?? null,
+      social_image: publicSocialMediaFromPlacements('content_document', items, brand).social_image,
       publications: await Promise.all((publications.get(row.id) ?? []).map(async publication => ({
         id: publication.id, channel: publication.channel, target_id: publication.provider_target_id,
         state: publication.state, provider_post_id: publication.provider_post_id, public_url: publication.provider_permalink,
@@ -258,16 +280,39 @@ async function attachPostFields(db: DbClient, env: CloudflareEnv, rows: PostRow[
   }))
 }
 
+function postRecordQuery(organization: string | { sql: string }, postId: string, viewer?: ViewerTerms): BatchQuery {
+  return {
+    query: `SELECT ${POST_COLUMNS} FROM content_documents p
+      LEFT JOIN user u ON u.id = COALESCE(p.author_id, p.created_by)
+      WHERE p.kind = 'social_post' AND p.row_role = 'root' AND p.id = ?
+        AND p.organization_id = ${typeof organization === 'string' ? '?' : organization.sql}
+        ${viewer ? 'AND ' + resourceLocationScopeSql(viewer, 'p') : ''} LIMIT 1`,
+    params: [postId, ...(typeof organization === 'string' ? [organization] : [])],
+  }
+}
+
+export function preparePost(organization: string | { sql: string }, postId: string, viewer?: ViewerTerms) {
+  const plan = preparePostRecords(postRecordQuery(organization, postId, viewer))
+  return { queries: plan.queries, async read(rows: D1Result[], env: CloudflareEnv) {
+    return (await plan.read(rows, env)).posts[0] ?? null
+  }, snapshot: readPostSnapshot }
+}
+
+function readPostSnapshot([records, , assets]: D1Result[]) {
+  const document = records!.results[0] as PostRow | undefined
+  if (!document) return null
+  const media = groupMediaPlacements(assets!.results).get(document.id) ?? []
+  return { document, media: orderedPostMedia(media) }
+}
+
 async function readPostRow(db: DbClient, organizationId: string, postId: string) {
-  return await queryFirst<PostRow>(db, `SELECT ${POST_COLUMNS} FROM content_documents p
-    LEFT JOIN user u ON u.id = COALESCE(p.author_id, p.created_by)
-    WHERE p.kind = 'social_post' AND p.row_role = 'root' AND p.id = ? AND p.organization_id = ? LIMIT 1`, [postId, organizationId])
+  const { query, params } = postRecordQuery(organizationId, postId)
+  return queryFirst<PostRow>(db, query, params)
 }
 
 export async function getPost(db: DbClient, env: CloudflareEnv, organizationId: string, postId: string): Promise<Post | null> {
-  const row = await readPostRow(db, organizationId, postId)
-  if (!row) return null
-  return (await attachPostFields(db, env, [row]))[0]!
+  const plan = preparePost(organizationId, postId)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read the post and its publication data' }), env)
 }
 
 type PostListFilter = { status?: string | null; locationId?: string | null }
@@ -321,10 +366,9 @@ export async function listPosts(
   window: { limit: number; offset: number },
   resource: { resource: string },
 ): Promise<{ posts: Post[]; page_info: McpPageInfo }> {
-  const { query, params } = postListQuery(organizationId, filter, window)
-  const rows = await queryAll<PostRow>(db, query, params)
-  const page = rows.slice(0, window.limit)
-  return { posts: await attachPostFields(db, env, page), page_info: mcpPageInfo(window, page.length, rows.length > window.limit, resource) }
+  const plan = preparePostRecords(postListQuery(organizationId, filter, window), window.limit)
+  const { posts, count } = await plan.read(await executeBatch(db, plan.queries, { operation: 'Read the posts and publications' }), env)
+  return { posts, page_info: mcpPageInfo(window, posts.length, count > window.limit, resource) }
 }
 
 /**
@@ -449,38 +493,54 @@ export async function updatePost(
   env: CloudflareEnv,
   organizationId: string,
   postId: string,
-  input: { changes: unknown; expectedUpdatedAt: string },
+  input: { changes: unknown; expectedUpdatedAt: string; media?: unknown; snapshot?: NonNullable<ReturnType<typeof readPostSnapshot>> },
   updatedBy: string,
 ): Promise<Post | null> {
-  const existing = await readPostRow(db, organizationId, postId)
-  if (!existing) return null
+  const plan = input.snapshot ? null : preparePost(organizationId, postId)
+  const snapshot = input.snapshot ?? plan!.snapshot(await executeBatch(db, plan!.queries, { operation: 'Read the post being edited' }))
+  if (!snapshot) return null
+  const { document: existing, media } = snapshot
+  if (existing.id !== postId || existing.organization_id !== organizationId) return null
   if (existing.updated_at !== input.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, statusMessage: 'The post changed since it was read; read it again' })
   const data: PostMutation = parsePostInput(input.changes, 'update')
+  const requested = input.media === undefined ? undefined : parsePostInput({ media: input.media }, 'create').media!
   if (data.slug !== undefined && data.slug !== existing.slug) throw new PostValidationError('A post keeps its saved slug')
   delete data.slug
-  if (!Object.keys(data).length) throw new PostValidationError('Name at least one field to change')
-  const refreshCard = data.title !== undefined || data.body !== undefined || data.location_id !== undefined
+  if (!Object.keys(data).length && requested === undefined) throw new PostValidationError('Name at least one field to change')
+  const changedSlots = (['cover', 'gallery'] as const).filter(slot => requested
+    && JSON.stringify(requested.filter(item => item.slot === slot).map(item => item.asset_id))
+      !== JSON.stringify(media.filter(item => item.slot === slot).map(item => item.asset_id)))
+  const refreshCard = data.title !== undefined || data.body !== undefined || data.location_id !== undefined || changedSlots.includes('cover')
   // A field sent with its existing value does not wait on a publication.
   if (data.title !== undefined && data.title === existing.title) delete data.title
   if (data.body !== undefined && data.body === existing.body) delete data.body
   if (data.call_to_action !== undefined && JSON.stringify(data.call_to_action) === JSON.stringify(callToActionOf(existing.metadata_json))) delete data.call_to_action
-  if (!Object.keys(data).length) {
+  if (data.location_id === existing.location_id) delete data.location_id
+  if (!Object.keys(data).length && !changedSlots.length) {
     if (refreshCard) await refreshSocialCard({ db, env, owner: { owner_type: 'content_document', owner_id: postId }, actorId: updatedBy })
     return await getPost(db, env, organizationId, postId)
   }
   if (data.location_id !== undefined) await validatePostLocation(db, organizationId, data.location_id)
+  const changedMedia = requested?.filter(item => changedSlots.includes(item.slot)) ?? []
+  if (changedMedia.length) await hydrateMediaAssetRefs(db, {
+    organizationId, refs: changedMedia, allowedKinds: ['image', 'video'], fieldName: 'media',
+  })
   const changes: ContentDocumentChanges = { updated_by: updatedBy }
   if (data.title !== undefined) changes.title = data.title
   if (data.body !== undefined) changes.summary = data.body
   if (data.visibility !== undefined) changes.visibility = data.visibility
   if (data.location_id !== undefined) changes.location_id = data.location_id
   if (data.call_to_action) changes.metadata = { call_to_action: data.call_to_action }
-  await updateContentDocument(db, postId, {
+  await updateContentDocument(db, existing, {
     updated_at: input.expectedUpdatedAt, changes,
     additionalQueriesAfter: [
       // Removing the call to action removes the key; json_set would store a JSON null.
       ...(data.call_to_action === null ? [{ query: "UPDATE content_documents SET metadata_json = json_remove(metadata_json, '$.call_to_action') WHERE id = ? AND organization_id = ?", params: [postId, organizationId] }] : []),
-      ...(data.visibility === undefined ? [] : [publicResourceCacheInvalidationQuery(organizationId, 'post-visibility')]),
+      // The document revision also advances on standalone placement edits.
+      ...changedSlots.flatMap(slot => buildMediaPlacementReplacementQueries({
+        organizationId, placement: { owner_type: 'content_document', owner_id: postId, slot },
+        media: changedMedia.filter(item => item.slot === slot),
+      })),
     ],
   })
   // The card draws the title, the words and the location's name.

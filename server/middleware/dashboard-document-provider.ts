@@ -33,6 +33,16 @@ export default defineHandler(event => {
             if (query.view === 'payouts') return readDashboardPayoutsDocument(event, orgSlug, query.after)
             if (query.view !== 'performance') throw new HTTPError({ statusCode: 400, message: 'Earnings performance is required' })
             return readDashboardEarnings(event, query, orgSlug)
+          case '/api/integrations/social-connections':
+            await getDashboardContext(event, { organizationSlug: orgSlug })
+            if (!website?.content.has('post-connections')) throw new HTTPError({ statusCode: 404, message: 'Publishing destinations were not read for this document' })
+            return website.content.get('post-connections')
+          case '/api/dashboard/locations': {
+            await getDashboardContext(event, { organizationSlug: orgSlug })
+            const locations = query.organization === 'true' ? website?.content.get('post-locations') : null
+            if (!locations) throw new HTTPError({ statusCode: 404, message: 'Locations were not read for this document' })
+            return locations
+          }
           case '/api/dashboard/settings':
             if (query.view === 'website') {
               await getDashboardContext(event, { organizationSlug: orgSlug })

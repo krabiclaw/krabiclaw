@@ -1,5 +1,5 @@
 import { listingGrantSql } from '~/server/domain/listing-access'
-import { assignedOperationsRoles, roleMatchesSql, workspaceManagementRoles, workspaceOperationsRoles } from '~/utils/organization-access'
+import { assignedOperationsRoles, roleMatchesSql, rolesAllowing, workspaceManagementRoles, workspaceOperationsRoles } from '~/utils/organization-access'
 import { HTTPError } from 'nitro';
 
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -610,6 +610,17 @@ export async function assertLocationAccess(db: DbClient, input: MemberAccessPrin
   const assigned = await queryFirst<{ id: string }>(db, `SELECT bl.id FROM business_locations bl
     WHERE bl.organization_id = ? AND bl.id = ? AND ${locationMemberSql('bl.organization_id', 'bl.id')}`, [input.organizationId, input.locationId, input.userId])
   if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Location not found or access denied' })
+}
+
+export function resourceLocationScopeSql(viewer: ViewerTerms, alias: string) {
+  const manages = roleMatchesSql(viewer.role!, rolesAllowing({ locations: ['update'] }))
+  const assigned = roleMatchesSql(viewer.role!, rolesAllowing({ locations: ['assigned'] }))
+  const wide = roleMatchesSql(viewer.role!, workspaceManagementRoles)
+  return `((${alias}.location_id IS NULL AND ${wide}) OR EXISTS (
+    SELECT 1 FROM business_locations bl WHERE bl.id = ${alias}.location_id
+      AND bl.organization_id = ${alias}.organization_id
+      AND (${manages} OR (${assigned} AND ${locationMemberSql('bl.organization_id', 'bl.id', viewer.user)}))
+  ))`
 }
 
 /** A resource that may or may not belong to one location (e.g. a review row) — dispatches to assertOrganizationWideAccess when the row's own location_id is null, assertLocationAccess otherwise. Check the target row's location_id, never a caller-supplied param. Media authorization uses its placement owner instead. */
