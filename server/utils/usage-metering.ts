@@ -80,8 +80,9 @@ export async function getUsageSummary(
   organizationId: string,
   since?: string,
 ): Promise<UsageSummaryRow[]> {
+  const provider = "CASE WHEN resource IN ('mcp_operation', 'scheduled_task') AND provider = 'krabiclaw' THEN 'blawby' ELSE provider END"
   const rows = await queryAll<UsageSummaryAggregateRow>(db, `
-    SELECT resource, source, provider, channel,
+    SELECT resource, source, ${provider} AS provider, channel,
            TOTAL(CASE
              WHEN typeof(quantity) = 'integer'
                AND quantity >= 0
@@ -95,7 +96,7 @@ export async function getUsageSummary(
            unit, COUNT(*) AS events
     FROM usage_events
     WHERE organization_id = ? AND provider_occurred_at IS NULL ${since ? 'AND created_at >= ?' : ''}
-    GROUP BY resource, source, provider, channel, unit
+    GROUP BY resource, source, ${provider}, channel, unit
     ORDER BY quantity DESC, resource ASC
   `, since ? [organizationId, since] : [organizationId])
   return rows.map(({ invalid_count: invalidCountValue, ...row }) => {

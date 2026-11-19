@@ -305,7 +305,7 @@ test('a replayed status email sends its recorded content and refuses a supersede
     await db.batch(opening.map(write => db.prepare(write.query).bind(...write.params)))
 
     const queue = captureEvents()
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db, EVENTS: queue.binding, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'Blawby <hello@krabiclaw.com>', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'status-retry-proof', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' }
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db, EVENTS: queue.binding, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'Blawby <hello@blawby.com>', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'status-retry-proof', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' }
     const input = {
       threadId: 'booking-status', organizationId: 'org-status', actorUserId: 'user-status',
       env,
@@ -387,7 +387,7 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
     const queue = captureEvents()
     const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: queue.binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'provider', WHATSAPP_DELIVERY_MODE: 'log_only',
-      STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'Blawby <hello@krabiclaw.com>',
+      STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'Blawby <hello@blawby.com>',
       APNS_KEY_ID: 'PROOFKEY01', APNS_TEAM_ID: 'PROOFTEAM1', APNS_BUNDLE_ID: 'com.krabiclaw.app', APNS_PRIVATE_KEY: pem }
     await applySchema(db)
     for (const statement of [

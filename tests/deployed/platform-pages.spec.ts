@@ -4,7 +4,7 @@ import { testBaseUrl } from '../e2e/test-env'
 
 test('Blawby pricing retains its billing plans after hydration', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' })
-  await page.addInitScript(() => localStorage.setItem('krabiclaw-theme', 'light'))
+  await page.addInitScript(() => localStorage.setItem('blawby-theme', 'light'))
   const baseURL = testBaseUrl()
   const response = await openTenantPage(page, `${baseURL}/pricing`, {})
   expect(response?.status()).toBe(200)

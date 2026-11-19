@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import { bookingReviewDueAt } from '~/server/utils/review-requests'
 import { changedTaskIds, publishChangedJobs, publishEvent, type DomainEvent } from '~/server/events'
 import { recordBookingChangeAnswer } from '~/server/domain/booking-analytics'
@@ -501,7 +502,7 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
     linkToken(env, thread.id, 'configuration-check')
     if (!summary.guestEmail || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) throw new HTTPError({ statusCode: 503, message: 'Guest email delivery is not configured' })
     const unchanged = sourceGuard(thread, before)
-    entry = await appendMessage(db, { guard: { sql: unchanged.query, params: unchanged.params ?? [] }, conversationId: thread.id, authorKind: 'krabiclaw', authorUserId: actorUserId,
+    entry = await appendMessage(db, { guard: { sql: unchanged.query, params: unchanged.params ?? [] }, conversationId: thread.id, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: actorUserId,
       eventName: 'booking_change.requested', dedupeKey: externalId,
       body: `Requested ${destination.label} for ${(await bookingPresentation(db, thread)).formatCount(after.party_size)}${destination.title ? ` at ${destination.title}` : ''}.`,
       payload: { before: sourceSchema.parse(before), after, version: before.version,
@@ -569,7 +570,7 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
     // The move and its record land together: a destination that cannot take
     // the party changes no row, so the entry is not written either.
     const queries: BatchQuery[] = [...await destination.claim(before.recordId, now),
-      ...messageQueries({ id, conversationId: thread.id, authorKind: 'krabiclaw', authorUserId: actor.userId, eventName: 'booking_change.moved',
+      ...messageQueries({ id, conversationId: thread.id, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: actor.userId, eventName: 'booking_change.moved',
         body: `Moved to ${destination.label} for ${(await bookingPresentation(db, thread)).formatCount(after.party_size)}${destination.title ? ` at ${destination.title}` : ''}.`,
         payload, dedupeKey, occurredAt: now, guard: { sql: 'c.organization_id = ? AND changes() = 1', params: [thread.organization_id] } }).queries, {
       // A moved booking is the party it moved with, no longer "this many or more".
@@ -656,7 +657,7 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
     const currentGuard = sourceGuard(thread as GuestThreadRow, current)
     const ownership: BatchQuery = 'buyerUserId' in input ? { query: `EXISTS (SELECT 1 FROM conversations r WHERE r.id=? AND r.user_id=? AND ${CURRENT_GUEST_SQL('r')})`, params: [thread.id, input.buyerUserId] } : { query: '1', params: [] }
     // The guest's answer, by the guest: their account when the conversation has one.
-    const entryInsert = messageQueries({ id, conversationId: thread.id, authorKind: 'krabiclaw', authorUserId: thread.user_id,
+    const entryInsert = messageQueries({ id, conversationId: thread.id, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: thread.user_id,
       eventName: `booking_change.${input.decision === 'accept' ? 'accepted' : 'declined'}`,
       body: `Guest ${input.decision === 'accept' ? 'accepted' : 'declined'} the requested changes.`,
       payload: { requestId: entry.id, booking_id: current.recordId, beforeStatus: current.status, before: { starts_at: current.startsAt, ends_at: current.endsAt, party_size: current.partySize }, after: destination ? { starts_at: destination.startsAt, ends_at: destination.endsAt ?? new Date(Date.parse(destination.startsAt) + Date.parse(current.endsAt) - Date.parse(current.startsAt)).toISOString(), party_size: proposal.after.party_size } : null },

@@ -4,6 +4,7 @@ import { Miniflare } from 'miniflare'
 import { RETENTION_HUB, retentionWakeAt, runDueBusinessWork } from '../../server/domain/due-business-work.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { logMcpToolCallEvent, prepareMcpToolCallEvent } from '../../server/utils/mcp-telemetry.ts'
+import { getUsageSummary, recordUsageEvent } from '../../server/utils/usage-metering.ts'
 import { applySchema } from './support/schema.ts'
 
 // Privacy Policy: MCP tool-call telemetry is deleted 180 days after creation.
@@ -50,6 +51,22 @@ test('MCP telemetry stores only operational facts and the retention wake deletes
     }
     const usage = await db.prepare("SELECT COUNT(*) AS count, SUM(quantity) AS quantity FROM usage_events WHERE organization_id = 'telemetry-site'").first<{ count: number; quantity: number }>()
     assert.deepEqual(usage, { count: 2, quantity: 2 })
+    await recordUsageEvent(db, {
+      organizationId: 'telemetry-site', resource: 'mcp_operation', source: 'public_help',
+      provider: 'krabiclaw', channel: 'tools/call', quantity: 1, unit: 'tool_call', idempotencyKey: 'historical-tool-call',
+    })
+    await logMcpToolCallEvent(db, prepareMcpToolCallEvent({
+      organizationId: 'telemetry-site', requestId: 2, mcpSurface: 'public_help',
+      method: 'tools/call', toolName: 'list_products', status: 'success',
+    }))
+    const emitted = await db.prepare("SELECT provider FROM usage_events WHERE idempotency_key LIKE 'mcp:public_help:%'").first<string>('provider')
+    assert.equal(emitted, 'blawby')
+    const summary = await getUsageSummary(db, 'telemetry-site')
+    assert.deepEqual(summary.filter(row => row.source === 'public_help'), [{
+      resource: 'mcp_operation', source: 'public_help', provider: 'blawby', channel: 'tools/call', quantity: 2, unit: 'tool_call', events: 2,
+    }])
+    assert.equal(summary.find(row => row.source === 'client')?.provider, 'mcp_client')
+
     const metered = await db.prepare("SELECT id FROM mcp_tool_call_events WHERE organization_id = 'telemetry-site'").all<{ id: string }>()
     const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString()
     const insert = db.prepare("INSERT INTO mcp_tool_call_events (id, method, status, created_at) VALUES (?, 'tools/call', 'success', ?)")

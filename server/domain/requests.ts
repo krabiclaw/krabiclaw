@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import { initialConversationParticipants, initialListingParticipants } from '~/server/domain/conversation-participants'
 import { openingMessageQueries } from '~/server/domain/guest-threads/opening'
 import { bookingStatusQuery } from '~/server/domain/bookings'
@@ -560,7 +561,7 @@ export async function cancelBookingRequest(db: DbClient, input: GuestCancellatio
           AND json_extract(payload_json, '$.cancellation.used_at') = ?)`,
         params: [record.version, record.status, ...(input.buyerUserId ? [input.buyerUserId] : []), input.id, input.organizationId, input.now] } }),
     // The one record of the guest's cancellation: Blawby's message, by the guest.
-    ...messageQueries({ conversationId: input.id, authorKind: 'krabiclaw', authorUserId: current.user_id, eventName: 'booking.cancel',
+    ...messageQueries({ conversationId: input.id, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: current.user_id, eventName: 'booking.cancel',
       payload: { action: 'cancel', beforeStatus: record.status, afterStatus: 'cancelled', booking_id: record.id },
       dedupeKey: `booking:${record.id}:guest-cancel`, occurredAt: input.now,
       guard: { sql: "EXISTS (SELECT 1 FROM bookings cancelled WHERE cancelled.id = c.booking_id AND cancelled.status = 'cancelled' AND cancelled.cancelled_at = ?)", params: [input.now] } }).queries,

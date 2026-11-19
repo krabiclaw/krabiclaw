@@ -5,7 +5,8 @@ import { getPlatformOrganization } from '~/server/utils/platform-organization'
 import type { McpToolDefinition } from '~/server/utils/mcp-tools/shared'
 
 /** An entire source-mode Markdown block opts a CMS article into the deployed reference. */
-export const MCP_TOOL_REFERENCE_DIRECTIVE = '<!-- krabiclaw:mcp-tool-reference -->'
+export const MCP_TOOL_REFERENCE_DIRECTIVE = '<!-- blawby:mcp-tool-reference -->'
+const LEGACY_MCP_TOOL_REFERENCE_DIRECTIVE = '<!-- krabiclaw:mcp-tool-reference -->'
 
 interface DocumentationBlock {
   type: string
@@ -188,8 +189,13 @@ export function renderMcpToolReference(tools: McpToolDefinition[]) {
   return lines.join('\n')
 }
 
+function isMcpToolReference(block: DocumentationBlock): boolean {
+  return block.type === 'markdown' && (block.data.markdown === MCP_TOOL_REFERENCE_DIRECTIVE
+    || block.data.markdown === LEGACY_MCP_TOOL_REFERENCE_DIRECTIVE)
+}
+
 export function hasMcpToolReference(blocks: DocumentationBlock[]) {
-  return blocks.some(block => block.type === 'markdown' && block.data.markdown === MCP_TOOL_REFERENCE_DIRECTIVE)
+  return blocks.some(isMcpToolReference)
 }
 
 /** Public projection only: editors retain the directive instead of storing the generated catalog. */
@@ -198,12 +204,12 @@ export function expandMcpDocumentationBlocks<T extends DocumentationBlock>(block
   if (scope.organizationId !== scope.platformOrganizationId || scope.kind !== 'article' || scope.collection !== 'docs') {
     throw new Error('The MCP tool reference directive requires a documentation article in the platform organization')
   }
-  const references = blocks.filter(block => block.type === 'markdown' && block.data.markdown === MCP_TOOL_REFERENCE_DIRECTIVE)
+  const references = blocks.filter(isMcpToolReference)
   if (references.length !== 1 || references[0]!.data.editor_mode !== 'source') {
     throw new Error('A documentation article must use exactly one source-mode MCP tool reference directive')
   }
   if (!markdown.trim()) throw new Error('The generated MCP tool reference is empty')
-  return blocks.map(block => block.type === 'markdown' && block.data.markdown === MCP_TOOL_REFERENCE_DIRECTIVE
+  return blocks.map(block => isMcpToolReference(block)
     ? { ...block, data: { ...block.data, markdown, editor_mode: 'source' } }
     : block)
 }

@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '../../shared/messages-contract.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
@@ -91,7 +92,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     const cleaner = principal('cleaner', 'member', 'm-cleaner')
     const cook = principal('cook', 'member', 'm-cook')
     const taskRow = (key: string) => db.prepare('SELECT * FROM tasks WHERE dedupe_key = ?').bind(key).first<TaskRow>()
-    const automatic = (threadId: string) => db.prepare("SELECT json_extract(payload_json, '$.key') AS key, body FROM messages WHERE conversation_id = ? AND author_kind = 'krabiclaw' ORDER BY sequence").bind(threadId).all<{ key: string; body: string }>().then(result => result.results)
+    const automatic = (threadId: string) => db.prepare("SELECT json_extract(payload_json, '$.key') AS key, body FROM messages WHERE conversation_id = ? AND author_kind = ? ORDER BY sequence").bind(threadId, PLATFORM_MESSAGE_AUTHOR_KIND).all<{ key: string; body: string }>().then(result => result.results)
     // The caller's team conversations, each as its conversation screen reads it.
     const teamThreads = async (access: MemberAccessPrincipal) => Promise.all((await db.prepare(`SELECT c.id FROM conversations c JOIN conversation_participants seat ON seat.conversation_id = c.id
       WHERE c.organization_id = ? AND c.kind = 'team' AND seat.user_id = ? ORDER BY c.last_message_at DESC, c.id DESC`).bind(ORG, access.userId).all<{ id: string }>()).results.map(row => readTeamThread(db, access, row.id)))

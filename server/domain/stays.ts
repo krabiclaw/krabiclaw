@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import { listingGrantSql, listingLevelSql } from '~/server/domain/listing-access'
 import { bookingReviewDueAt, historicalNoShowAtSql } from '~/server/utils/review-requests'
 import { changedTaskIds, publishEvent, type DomainEvent, type EventsEnv } from '~/server/events'
@@ -3530,7 +3531,7 @@ async function cancelUnpaidStayRequest(db: DbClient, env: StayMutationEnv, organ
     } }),
     ...stayNightReleaseQueries(stay, organizationId, now),
     ...messageQueries({
-      conversationId: stay.conversation_id, authorKind: buyerUserId ? 'guest' : 'krabiclaw', authorUserId: buyerUserId ?? null,
+      conversationId: stay.conversation_id, authorKind: buyerUserId ? 'guest' : PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: buyerUserId ?? null,
       eventName: 'booking.cancel', body: buyerUserId ? 'The guest withdrew their stay request.' : 'The stay request expired.',
       occurredAt: now, dedupeKey: `booking:${stay.id}:${reason}`,
       guard: { sql: "EXISTS (SELECT 1 FROM bookings b WHERE b.id=c.booking_id AND b.organization_id=c.organization_id AND b.version=? AND b.updated_at=? AND b.cancellation_reason=?)",

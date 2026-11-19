@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KINDS } from "../../shared/messages-contract"
 import type { OrganizationSettings } from '../../shared/organization-settings'
 import { INTEGRATION_PROVIDERS, NONPROFIT_STATUS_CANONICAL } from '../../shared/organization-settings'
 import type { MediaCategory } from '~/shared/media-placement-contract'
@@ -202,9 +203,9 @@ export const conversation_guest_invites = sqliteTable("conversation_guest_invite
 ]);
 
 // One message in one conversation, in `sequence` order. Its author is a person
-// (author_user_id: a member, or the guest's Better Auth user) or Blawby
-// (`krabiclaw`): an automatic message, a booking's opening, a relayed Airbnb
-// Support message, or an event (event_name: a cancellation, a change, a
+// (author_user_id: a member, or the guest's Better Auth user) or Blawby.
+// Blawby records automatic messages, booking openings, relayed Airbnb Support
+// messages, and events (event_name: a cancellation, a change, a
 // payment, a review), which names the person who caused it in author_user_id
 // when one did. Unread counts every message from someone else.
 // channel: where it was written or relayed (web, email, whatsapp, airbnb).
@@ -217,7 +218,7 @@ export const messages = sqliteTable("messages", {
 	organization_id: text().notNull(),
 	conversation_id: text().notNull(),
 	sequence: integer().notNull(),
-	author_kind: text({ enum: ["guest", "member", "krabiclaw"] }).notNull(),
+	author_kind: text({ enum: ["guest", "member", ...PLATFORM_MESSAGE_AUTHOR_KINDS] }).notNull(),
 	author_user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
 	channel: text({ enum: ["web", "email", "whatsapp", "airbnb"] }),
 	body: text(),

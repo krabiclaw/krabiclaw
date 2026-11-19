@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '../../shared/messages-contract.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
@@ -234,7 +235,7 @@ test('a guest change request lands once in the stay conversation, survives a rel
     // A repeated webhook or feed run records nothing twice and alerts nobody twice.
     assert.deepEqual(await runAlterationRequestFeed(db, env), { recorded: 0, reconciled: 0 })
     const [request, ...extra] = await requests(db, stay.conversation_id)
-    assert.deepEqual([request && { author_kind: request.author_kind, channel: request.channel, event: request.event }, extra], [{ author_kind: 'krabiclaw', channel: 'airbnb', event: 'alt-1' }, []])
+    assert.deepEqual([request && { author_kind: request.author_kind, channel: request.channel, event: request.event }, extra], [{ author_kind: PLATFORM_MESSAGE_AUTHOR_KIND, channel: 'airbnb', event: 'alt-1' }, []])
     assert.deepEqual(await alerts(db, request!.id), [{ purpose: 'owner_alert', channel: 'email', status: 'sent' }])
     const guestMessage = await firstGuestMessage(db, stay.conversation_id)
     assert.equal(typeof guestMessage, 'string')
@@ -275,7 +276,7 @@ test('a guest change request lands once in the stay conversation, survives a rel
     const accepted = await answer(stay.id, request!.id, 'accept_change')
     assert.equal(accepted.status, 204, await accepted.text())
     assert.deepEqual(channex.resolutions, [{ id: 'alt-1', body: { resolution: { accept: 'accept' } } }])
-    assert.deepEqual(await decision(db, request!.id), { event_name: 'booking_change.accepted', author_kind: 'krabiclaw', author_user_id: OWNER, body: 'Accepted the guest’s change on Airbnb.' })
+    assert.deepEqual(await decision(db, request!.id), { event_name: 'booking_change.accepted', author_kind: PLATFORM_MESSAGE_AUTHOR_KIND, author_user_id: OWNER, body: 'Accepted the guest’s change on Airbnb.' })
     // Airbnb's confirmed revision is the change: landed and acknowledged, the stay now as the guest asked.
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-14', adults: 3, total_minor: 60_000, version: 2 })
     assert.deepEqual(channex.acked, ['rev-1', 'rev-2'])

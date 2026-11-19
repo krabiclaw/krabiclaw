@@ -22,7 +22,7 @@ const TOPIC = 'topic-product-news'
 const PROVIDER_ENV = {
   EMAIL_DELIVERY_MODE: 'provider',
   RESEND_API_KEY: 're_controlled_fake_resend',
-  EMAIL_FROM: 'Blawby <hello@krabiclaw.com>',
+  EMAIL_FROM: 'Blawby <hello@blawby.com>',
   RESEND_PRODUCT_NEWS_SEGMENT_ID: SEGMENT,
   RESEND_PRODUCT_NEWS_TOPIC_ID: TOPIC,
   NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
@@ -189,7 +189,7 @@ async function runtimeWithSchema() {
 
 const emailEvent = (type: string, emailId: string, extra: Record<string, unknown> = {}) => ({
   type, created_at: '2026-09-27T00:00:00.000Z',
-  data: { email_id: emailId, created_at: '2026-09-27T00:00:00.000Z', from: 'hello@krabiclaw.com', to: ['guest@provider-proof.com'], subject: 'Proof', message_id: '<proof@resend.provider-proof.com>', ...extra },
+  data: { email_id: emailId, created_at: '2026-09-27T00:00:00.000Z', from: 'hello@blawby.com', to: ['guest@provider-proof.com'], subject: 'Proof', message_id: '<proof@resend.provider-proof.com>', ...extra },
 }) as Parameters<typeof applyResendEmailEvent>[2]
 
 /** A member reply these tests expect to complete reports nothing; a report fails the test with its error. */
@@ -220,7 +220,7 @@ test('email purpose controls Resend unsubscribe headers and invalid required sta
   const [sent] = resend.calls
   assert.equal(sent!.idempotencyKey, 'guest-thread-email:proof')
   assert.deepEqual(sent!.body, {
-    from: 'Proof Cafe <hello@krabiclaw.com>', to: ['guest@provider-proof.com'], reply_to: 'reply@proof.example',
+    from: 'Proof Cafe <hello@blawby.com>', to: ['guest@provider-proof.com'], reply_to: 'reply@proof.example',
     subject: 'Proof subject', html: '<p>Proof</p>', text: 'Proof',
   })
 
@@ -240,7 +240,7 @@ test('email purpose controls Resend unsubscribe headers and invalid required sta
     const messageId = `email-${resend.calls.length + 1}`
     assert.deepEqual(await sendEmail(PROVIDER_ENV, { ...input, emailPurpose, idempotencyKey: `guest-thread-email:${emailPurpose}` }), { status: 'sent', messageId })
     assert.deepEqual(resend.calls.at(-1)!.body, {
-      from: 'Proof Cafe <hello@krabiclaw.com>', to: ['guest@provider-proof.com'], reply_to: 'reply@proof.example',
+      from: 'Proof Cafe <hello@blawby.com>', to: ['guest@provider-proof.com'], reply_to: 'reply@proof.example',
       subject: 'Proof subject', html: '<p>Proof</p>', text: 'Proof',
       headers: { 'List-Unsubscribe': '<https://proof.example/api/public/notifications/unsubscribe?token=t>', 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
     })
@@ -275,7 +275,7 @@ test('email purpose controls Resend unsubscribe headers and invalid required sta
     ...input, idempotencyKey: 'guest-thread-email:threaded', inReplyTo: '<parent@proof.example>', references: ['<root@proof.example>', '<parent@proof.example>'],
   }), { status: 'sent', messageId: 'email-4' })
   assert.deepEqual(resend.calls.at(-1)!.body, {
-    from: 'Proof Cafe <hello@krabiclaw.com>', to: ['guest@provider-proof.com'], reply_to: 'reply@proof.example',
+    from: 'Proof Cafe <hello@blawby.com>', to: ['guest@provider-proof.com'], reply_to: 'reply@proof.example',
     subject: 'Proof subject', html: '<p>Proof</p>', text: 'Proof',
     headers: { 'In-Reply-To': '<parent@proof.example>', References: '<root@proof.example> <parent@proof.example>' },
   })
@@ -729,7 +729,7 @@ test('an article is announced once as a native Broadcast whose id is stored befo
     await seedUsers(db)
     const published = new Date(Date.now() - 60_000).toISOString()
     for (const statement of [
-      "INSERT INTO organization (id, name, slug, subdomain, theme_id, status, default_currency, timezone) VALUES ('org-platform', 'Blawby', 'krabiclaw', 'krabiclaw', 'krabiclaw-theme-v1', 'active', 'USD', 'UTC')",
+      "INSERT INTO organization (id, name, slug, subdomain, theme_id, status, default_currency, timezone) VALUES ('org-platform', 'Blawby', 'platform', 'blawby', 'blawby-theme-v1', 'active', 'USD', 'UTC')",
       "INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('locale-platform-en', 'org-platform', 'en', 1, 'published')",
       `INSERT INTO content_documents (id, organization_id, kind, row_role, locale, title, slug, summary, status, visibility, published_at, first_published_at, metadata_json)
        VALUES ('article-proof', 'org-platform', 'article', 'root', 'en', 'Proof article', 'proof-article', 'Why proof matters', 'published', 'listed', '${published}', '${published}', '{"collection":"blog"}')`,
@@ -749,7 +749,7 @@ test('an article is announced once as a native Broadcast whose id is stored befo
     const creates = resend.calls.filter(call => call.method === 'POST' && call.path === '/broadcasts')
     assert.equal(creates.length, 1)
     const draft = creates[0]!.body as Record<string, string>
-    assert.deepEqual([draft.segment_id, draft.topic_id, draft.subject, draft.from, draft.send], [SEGMENT, TOPIC, 'Proof article', 'Blawby <hello@krabiclaw.com>', undefined])
+    assert.deepEqual([draft.segment_id, draft.topic_id, draft.subject, draft.from, draft.send], [SEGMENT, TOPIC, 'Proof article', 'Blawby <hello@blawby.com>', undefined])
     assert.ok(draft.html.includes('{{{RESEND_UNSUBSCRIBE_URL}}}'))
     // The article's own text is the email, read in the order it was written,
     // with the repeated title dropped and the site link made absolute.

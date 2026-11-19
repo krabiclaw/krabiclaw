@@ -56,6 +56,6 @@ export function catalogFingerprint(tools: McpCatalogToolSnapshot[]) {
 
 export function catalogMeta(tools: McpCatalogToolSnapshot[]) {
   return {
-    'krabiclaw/catalogFingerprint': catalogFingerprint(tools),
+    'blawby/catalogFingerprint': catalogFingerprint(tools),
   }
 }

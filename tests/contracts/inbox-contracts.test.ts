@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '../../shared/messages-contract.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -156,7 +157,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
 
     // An automatic message already sent, the guest's change request, filing the conversation away and back, a payment, and a reply Airbnb refused.
     const stay = (await db.prepare("SELECT b.id, b.version, b.user_id FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE c.id = ?").bind(threadId).first<{ id: string; version: number; user_id: string | null }>())!
-    await appendMessage(db, { id: 'automatic-contract', conversationId: threadId, authorKind: 'krabiclaw', authorUserId: null, channel: 'airbnb', body: 'Your door code is 1106. Garage D is unlocked.',
+    await appendMessage(db, { id: 'automatic-contract', conversationId: threadId, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null, channel: 'airbnb', body: 'Your door code is 1106. Garage D is unlocked.',
       eventName: 'thread.scheduled_message', dedupeKey: 'automatic-contract', occurredAt: NOW })
     await db.prepare(`INSERT INTO scheduled_guest_messages (id, organization_id, product_id, booking_id, template_id, template_title, template_version, body, due_at, timezone, status, message_id, sent_at, created_at, updated_at)
       VALUES ('scheduled-contract', ?, ?, ?, NULL, 'Check-in instructions', 1, 'Your door code is 1106. Garage D is unlocked.', ?, 'America/Denver', 'sent', 'automatic-contract', ?, ?, ?)`)
@@ -164,7 +165,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     assert.deepEqual(await runAlterationRequestFeed(db, env, PROPERTY), { recorded: 1, reconciled: 0 })
     for (const archived of [true, false]) assert.deepEqual(await archiveConversation(db, { organizationId: ORG, conversationId: threadId, userId: OWNER, archived }), { archived })
     // A payment the conversation records as Blawby's event, as payments/notifications.ts writes it.
-    await appendMessage(db, { conversationId: threadId, authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: 'Payment received\nAmount: $450.00',
+    await appendMessage(db, { conversationId: threadId, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null, eventName: 'payment.payment_captured', body: 'Payment received\nAmount: $450.00',
       payload: { payment_id: 'contract-payment', status: 'succeeded', amount: 45000, currency: 'USD' }, dedupeKey: 'financial-operation:contract', occurredAt: NOW })
     const refused = await sendGuestThreadReply(db, { threadId, organizationId: ORG, body: 'Check-in is from 4 PM.', actorUserId: OWNER, idempotencyKey: 'contract-reply', env })
     assert.equal(refused.ok, false)

@@ -231,7 +231,7 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
     data: [
       `From: Owner <${from}>`, `To: ${memberReplyTo}`, `Subject: Re: ${ownerAlerts[0]!.message.subject}`, `Message-ID: ${messageId}`, ...headers,
       `Date: ${new Date().toUTCString()}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8', '',
-      ownerBody, '', `On ${new Date().toUTCString()} Blawby <hello@krabiclaw.com> wrote:`, `> ${body}`, '',
+      ownerBody, '', `On ${new Date().toUTCString()} Blawby <hello@blawby.com> wrote:`, `> ${body}`, '',
     ].join('\r\n'),
   })
   const ownerMessageId = `<${randomUUID()}@e2e.example.test>`

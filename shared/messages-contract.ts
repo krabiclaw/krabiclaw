@@ -1,5 +1,13 @@
 import type { GuestThreadDeliveryChannel, GuestThreadDeliveryStatus, InboxPhoto, InboxThreadKind } from '~/server/domain/guest-threads/types'
 
+export const PLATFORM_MESSAGE_AUTHOR_KIND = 'blawby'
+export const PLATFORM_MESSAGE_AUTHOR_KINDS = [PLATFORM_MESSAGE_AUTHOR_KIND, 'krabiclaw'] as const
+export const PLATFORM_MESSAGE_AUTHOR_KINDS_SQL = PLATFORM_MESSAGE_AUTHOR_KINDS.map(value => `'${value}'`).join(', ')
+
+export function isPlatformMessageAuthor(value: string): value is typeof PLATFORM_MESSAGE_AUTHOR_KINDS[number] {
+  return PLATFORM_MESSAGE_AUTHOR_KINDS.some(author => author === value)
+}
+
 export type ConversationViewerRole = 'guest' | 'member'
 
 export function guestConversationPath(orgSlug: string, conversationId: string): string {

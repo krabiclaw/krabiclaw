@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '../../shared/messages-contract.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
@@ -73,7 +74,7 @@ test('unread is a message from someone else after your read position, the same c
     assert.deepEqual(await surfaces(OWNER), [])
 
     // Blawby's messages count as unread: an event in the conversation (here a payment) is unread to the business and the guest.
-    await appendMessage(db, { conversationId: 'booking-conversation', authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: 'Payment received' })
+    await appendMessage(db, { conversationId: 'booking-conversation', authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null, eventName: 'payment.payment_captured', body: 'Payment received' })
     assert.deepEqual(await surfaces(OWNER), ['booking-conversation'])
     assert.equal(await guestUnread(GUEST), 1)
     // A business reply is the guest's to read; the member who wrote it has read it.
@@ -106,7 +107,7 @@ test('unread is a message from someone else after your read position, the same c
     await markConversationUnread(db, { organizationId: ORG, conversationId: 'team', userId: OWNER })
     assert.deepEqual(await surfaces(OWNER), ['team'])
     await markConversationRead(db, { organizationId: ORG, conversationId: 'team', userId: OWNER })
-    await appendMessage(db, { conversationId: 'team', authorKind: 'krabiclaw', authorUserId: null, body: 'The turnover starts at 11:00' })
+    await appendMessage(db, { conversationId: 'team', authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null, body: 'The turnover starts at 11:00' })
     assert.deepEqual([await surfaces(OWNER), await surfaces(CLEANER)], [['team'], ['team']])
     // The guest conversation is the business's, never the cleaner's.
     assert.equal((await listConversations(db, ORG, { userId: CLEANER })).some(row => row.kind !== 'team'), false)

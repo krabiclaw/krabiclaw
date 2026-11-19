@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KINDS_SQL, isPlatformMessageAuthor } from '~/shared/messages-contract'
 import { HTTPError } from 'nitro'
 import { queryFirst, type DbClient } from '~/server/db'
 import { MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, messageHasContentSql, messageRole, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
@@ -12,7 +13,7 @@ const channelGuestNameSql = (conversationId: string) => `SELECT trim(json_extrac
 
 /** The alert projects only its message and the prior messages it can quote. */
 export async function guestMessageAlertWindow(db: DbClient, entry: MessageRow, guest: GuestRequest, business: string, historyLimit: number) {
-  const filter = `(m.author_kind <> 'krabiclaw' OR m.event_name IN ('${OPENING_EVENT}', '${SCHEDULED_MESSAGE_EVENT}', '${MIRRORED_EVENT}'))
+  const filter = `(m.author_kind NOT IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL}) OR m.event_name IN ('${OPENING_EVENT}', '${SCHEDULED_MESSAGE_EVENT}', '${MIRRORED_EVENT}'))
     AND (${messageHasContentSql('m')} OR json_array_length(m.payload_json, '$.unshownFiles') > 0)`
   const [history, anchor, sender] = await Promise.all([
     readConversationHistory(db, entry.conversation_id, filter, { before: entry.sequence, limit: historyLimit }),
@@ -43,7 +44,7 @@ export async function guestMessageAlertWindow(db: DbClient, entry: MessageRow, g
  */
 function actorLabel(entry: Pick<MessageRow, 'author_kind' | 'author_user_id' | 'event_name' | 'id'>, role: MessageRow['author_kind'], mirrored: boolean, actorNames: Map<string, string>, business: string): string | null {
   // The host's Airbnb messages are the business's side, whoever typed them on Airbnb.
-  if (mirrored) return entry.author_kind === 'krabiclaw' ? 'Airbnb' : entry.author_kind === 'member' ? business : null
+  if (mirrored) return isPlatformMessageAuthor(entry.author_kind) ? 'Airbnb' : entry.author_kind === 'member' ? business : null
   if (entry.event_name === SCHEDULED_MESSAGE_EVENT) return 'Scheduled message'
   // The booking's own message, written with the record: no one on the team said it.
   if (entry.event_name === OPENING_EVENT) return null
@@ -53,6 +54,6 @@ function actorLabel(entry: Pick<MessageRow, 'author_kind' | 'author_user_id' | '
     if (!name?.trim()) throw new HTTPError({ statusCode: 500, message: 'The message author has no account name', data: { code: 'INVALID_GUEST_THREAD_ENTRY', field: 'author_user_id', entry_id: entry.id } })
     return name
   }
-  if (role === 'krabiclaw') return null
+  if (isPlatformMessageAuthor(role)) return null
   return 'Deleted account'
 }

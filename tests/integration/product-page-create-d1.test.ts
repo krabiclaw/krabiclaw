@@ -31,7 +31,7 @@ async function boot(plan: 'growth' | null) {
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' } as CloudflareEnv
     await applySchema(db)
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
-      VALUES (?, 'Legal Services', 'legal-services', 'legal-services', '{}', 'blawby-theme-v1', 'USD', 'active', 'active', 'flat', 'service', ?, 'America/New_York')`).bind(ORG, NOW).run()
+      VALUES (?, 'Legal Services', 'legal-services', 'legal-services', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'service', ?, 'America/New_York')`).bind(ORG, NOW).run()
     await db.prepare("INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('canonical-domain', ?, 'legal-services.proof.example', 'custom', 'canonical', 'active')").bind(ORG).run()
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner', 'owner@proof.example', 0, 0, 0)").bind(ACTOR.actorId).run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('member-owner', ?, ?, 'owner')").bind(ORG, ACTOR.actorId).run()

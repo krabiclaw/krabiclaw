@@ -814,13 +814,13 @@ function buildAuth(env: CloudflareEnv) {
           // Explicit issuer so oauthProvider's getOAuthServerConfig advertises the
           // same value as authorization_servers in /.well-known/oauth-protected-resource.
           // Without this, oauth-provider falls back to ctx.context.baseURL
-          // (https://krabiclaw.com/api/auth) but jwt() signs with options.baseURL
-          // (https://krabiclaw.com) — the mismatch causes ChatGPT to reject the connector.
+          // (https://blawby.com/api/auth) but jwt() signs with options.baseURL
+          // (https://blawby.com) — the mismatch causes ChatGPT to reject the connector.
           issuer: authBaseUrl,
         },
       }),
       anonymous({
-        generateRandomEmail: () => `anon-${crypto.randomUUID()}@customers.krabiclaw.local`,
+        generateRandomEmail: () => `anon-${crypto.randomUUID()}@customers.blawby.local`,
         // The anonymous user is deleted by the plugin right after this returns,
         // and every domain FK to it is ON DELETE SET NULL. Everything that
         // identifies the person moves to the real user first, in one batch.

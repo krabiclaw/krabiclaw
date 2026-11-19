@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '../../shared/messages-contract.ts'
 import assert from 'node:assert/strict'
 import test, { mock } from 'node:test'
 import { H3 } from 'nitro/h3'
@@ -199,7 +200,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       return Response.json({ id: key })
     })
     try {
-      const providerEnv = { ...env, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'Proof <hello@krabiclaw.com>' }
+      const providerEnv = { ...env, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'Proof <hello@blawby.com>' }
       const send = () => sendReviewRequestForBooking(providerEnv, db, 'retry-metadata-record')
       // Resend's answer with the email id sends the invitation; a sent invitation is not due again.
       const first = await send()
@@ -215,12 +216,12 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     // A historic no-show still disqualifies an invitation already on record.
     const lessonToken = await tokenFor('lesson')
     assert.ok(await getReviewRequestByToken(db, lessonToken))
-    await appendMessage(db, { conversationId: T.lesson!, authorKind: 'krabiclaw', authorUserId: 'owner',
+    await appendMessage(db, { conversationId: T.lesson!, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: 'owner',
       eventName: 'booking.no_show', body: 'Marked as a no-show', occurredAt: at(-HOUR) })
     assert.equal(await getReviewRequestByToken(db, lessonToken), null)
     const stayToken = await tokenFor('cottage')
     assert.ok(await getReviewRequestByToken(db, stayToken))
-    await appendMessage(db, { conversationId: T.cottage!, authorKind: 'krabiclaw', authorUserId: 'owner',
+    await appendMessage(db, { conversationId: T.cottage!, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: 'owner',
       eventName: 'stay.no_show', body: 'Marked as a no-show', occurredAt: at(-HOUR) })
     assert.equal(await getReviewRequestByToken(db, stayToken), null)
 

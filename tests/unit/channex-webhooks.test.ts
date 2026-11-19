@@ -71,10 +71,10 @@ test('a wrong secret is named without echoing it, and a missing global webhook i
     assert.deepEqual(report.differences.slice(-1), ['x-channex-webhook-secret does not match CHANNEX_WEBHOOK_SECRET'])
     assert.doesNotMatch(JSON.stringify(report), /rotated-secret|webhook-secret"/)
 
-    const global = { origin: 'https://staging.krabiclaw.com/', secret: 'webhook-secret', propertyId: null }
+    const global = { origin: 'https://staging.blawby.com/', secret: 'webhook-secret', propertyId: null }
     assert.deepEqual(await ensureChannexWebhook(env, global, false), { action: 'would_create', id: null, differences: ['no webhook'] })
     assert.deepEqual(await ensureChannexWebhook(env, global, true), { action: 'created', id: 'hook-new', differences: ['no webhook'] })
-    assert.partialDeepStrictEqual(channex.writes, [{ method: 'POST', path: '/webhooks', body: { webhook: { callback_url: callback, property_id: null, is_global: true } } }])
+    assert.partialDeepStrictEqual(channex.writes, [{ method: 'POST', path: '/webhooks', body: { webhook: { callback_url: 'https://staging.blawby.com/api/integrations/channex/webhook', property_id: null, is_global: true } } }])
     assert.equal((await ensureChannexWebhook(env, global, false)).action, 'unchanged')
   })
 })
@@ -84,5 +84,36 @@ test('two webhooks for one callback and scope are refused', async () => {
   webhooks.push({ ...webhooks[1]!, id: 'hook-2' })
   await withFetch(fakeChannex(webhooks), async () => {
     await assert.rejects(ensureChannexWebhook(env, target, true), /2 webhooks for .* \(property-1\): hook-1, hook-2/)
+  })
+})
+
+test('a legacy callback moves to the Blawby host without creating a second webhook', async () => {
+  const channex = fakeChannex(listed())
+  const current = { ...target, origin: 'https://staging.blawby.com' }
+  await withFetch(channex, async () => {
+    const plan = await ensureChannexWebhook(env, current, false)
+    assert.equal(plan.action, 'would_update')
+    assert.equal(plan.id, 'hook-1')
+    assert.ok(plan.differences.includes('callback_url uses the legacy Blawby platform host'))
+    assert.deepEqual(channex.writes, [])
+    assert.equal((await ensureChannexWebhook(env, current, true)).id, 'hook-1')
+    assert.partialDeepStrictEqual(channex.writes, [{ method: 'PUT', path: '/webhooks/hook-1', body: { webhook: {
+      callback_url: 'https://staging.blawby.com/api/integrations/channex/webhook', property_id: 'property-1', is_global: false,
+    } } }])
+    assert.equal((await ensureChannexWebhook(env, current, true)).action, 'unchanged')
+  })
+})
+
+test('two webhook aliases in one property scope are refused before any write', async () => {
+  const webhooks = listed()
+  const current = { ...target, origin: 'https://staging.blawby.com' }
+  const legacy = webhooks[1]!
+  webhooks.push({ ...legacy, id: 'hook-current', attributes: {
+    ...legacy.attributes as Record<string, unknown>, callback_url: 'https://staging.blawby.com/api/integrations/channex/webhook',
+  } })
+  const channex = fakeChannex(webhooks)
+  await withFetch(channex, async () => {
+    await assert.rejects(ensureChannexWebhook(env, current, true), /2 webhooks.*hook-1, hook-current/)
+    assert.deepEqual(channex.writes, [])
   })
 })

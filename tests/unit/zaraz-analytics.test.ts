@@ -14,7 +14,9 @@ test('reconciliation removes duplicate GA senders and gates pageviews without a 
       AllTracks: { ...tool.actions.AllTracks, blockingTriggers: ['krabiclaw-native-pageview'] },
     },
   } },
-    triggers: { AllTracks: { loadRules: [] }, 'krabiclaw-native-pageview': { loadRules: [] } }, historyChange: true }
+    triggers: { AllTracks: { loadRules: [
+      { id: 'kc-exclude-native-pageview', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: '^krabiclaw_native_pageview$' },
+    ] }, 'krabiclaw-native-pageview': { loadRules: [] } }, historyChange: true }
   const input = { platformOrigin: 'https://example.com', tenants: [{ organizationId: 'platform', measurementId: 'G-TEST', hostnames: ['example.com'] }] }
   assert.equal(reconcileZarazAnalyticsConfig(config, input).removedAnalyticsTools, 1)
   assert.equal(config.historyChange, false)
@@ -25,14 +27,14 @@ test('reconciliation removes duplicate GA senders and gates pageviews without a 
   assert.deepEqual(config.tools['ga-tenant-platform']!.actions.AllPageviews!.blockingTriggers, [])
   assert.deepEqual(config.tools['ga-tenant-platform']!.actions.AllTracks!.blockingTriggers, [])
   assert.deepEqual(config.triggers['ga-tenant-platform']!.loadRules, [
-    { id: 'kc-native-pageview', match: '{{ client.__zarazTrack }}', op: 'EQUALS', value: 'krabiclaw_native_pageview' },
+    { id: 'kc-native-pageview', match: '{{ client.__zarazTrack }}', op: 'MATCH_REGEX', value: '^(?:blawby_native_pageview|krabiclaw_native_pageview)$' },
     { id: 'kc-tenant-hostname', match: '{{ system.page.url.hostname }}', op: 'MATCH_REGEX', value: '^(example\\.com)$' },
   ])
   assert.equal(config.triggers['blawby-native-pageview']!.system, undefined)
   assert.equal(config.triggers['krabiclaw-native-pageview'], undefined)
   assert.deepEqual(config.tools['unrelated-ga']!.actions.AllPageviews!.firingTriggers, ['blawby-native-pageview'])
   assert.deepEqual(config.tools['unrelated-ga']!.actions.AllTracks!.blockingTriggers, ['blawby-native-pageview'])
-  assert.deepEqual(config.triggers.AllTracks!.loadRules, [{ id: 'kc-exclude-native-pageview', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: '^krabiclaw_native_pageview$' }])
+  assert.deepEqual(config.triggers.AllTracks!.loadRules, [{ id: 'kc-exclude-native-pageview', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: '^(?:blawby_native_pageview|krabiclaw_native_pageview)$' }])
   assert.equal(reconcileZarazAnalyticsConfig(config, input).updated, false)
 })
 
@@ -61,15 +63,15 @@ test('a blank platform zone inherits the linked tool’s events and withdraws it
   assert.equal(config.settings?.ecommerce, true)
   assert.deepEqual(config.triggers.AllTracks!.loadRules, [
     ...platformTemplate.allTracks.loadRules,
-    { id: 'kc-exclude-native-pageview', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: '^krabiclaw_native_pageview$' },
+    { id: 'kc-exclude-native-pageview', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: '^(?:blawby_native_pageview|krabiclaw_native_pageview)$' },
   ])
   assert.deepEqual(config.triggers['ga-tenant-platform']!.loadRules, [
-    { id: 'kc-native-pageview', match: '{{ client.__zarazTrack }}', op: 'EQUALS', value: 'krabiclaw_native_pageview' },
+    { id: 'kc-native-pageview', match: '{{ client.__zarazTrack }}', op: 'MATCH_REGEX', value: '^(?:blawby_native_pageview|krabiclaw_native_pageview)$' },
     { id: 'kc-tenant-hostname', match: '{{ system.page.url.hostname }}', op: 'MATCH_REGEX', value: '^(blawby\\.com)$' },
   ])
   assert.deepEqual(config.triggers['ga-tenant-platform-tracks']!.loadRules, [
     ...platformTemplate.allTracks.loadRules,
-    { id: 'kc-exclude-native-pageview', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: '^krabiclaw_native_pageview$' },
+    { id: 'kc-exclude-native-pageview', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: '^(?:blawby_native_pageview|krabiclaw_native_pageview)$' },
     { id: 'kc-tenant-hostname', match: '{{ system.page.url.hostname }}', op: 'MATCH_REGEX', value: '^(blawby\\.com)$' },
   ])
   assert.equal(reconcileZarazAnalyticsConfig(config, input).updated, false)

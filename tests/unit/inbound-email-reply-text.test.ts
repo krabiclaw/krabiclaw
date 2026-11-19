@@ -49,7 +49,7 @@ test('an Outlook reply keeps only the new text', () => {
     'Sounds good, see you then.',
     '',
     '________________________________',
-    'From: Ember & Slice <hello@krabiclaw.com>',
+    'From: Ember & Slice <hello@blawby.com>',
     'Sent: Thursday, September 24, 2026 7:16 PM',
     'To: guest@example.com',
     'Subject: Re: Your reservation',
@@ -62,9 +62,9 @@ test('an Outlook reply keeps only the new text', () => {
 test('an HTML-only Gmail reply keeps only the new text', () => {
   const html = `<div dir="ltr">Wtf</div><br>
 <div class="gmail_quote">
-  <div dir="ltr" class="gmail_attr">On Thu, Sep 24, 2026 at 7:16 PM Ember &amp; Slice &lt;hello@krabiclaw.com&gt; wrote:<br></div>
+  <div dir="ltr" class="gmail_attr">On Thu, Sep 24, 2026 at 7:16 PM Ember &amp; Slice &lt;hello@blawby.com&gt; wrote:<br></div>
   <blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex">
-    <p>Yo heads up</p><img alt="Blawby" src="https://krabiclaw.com/logo.png"><p>Reply from Ember &amp; Slice</p>
+    <p>Yo heads up</p><img alt="Blawby" src="https://blawby.com/platform/blawby.svg"><p>Reply from Ember &amp; Slice</p>
   </blockquote>
 </div>`
   assert.equal(guestReplyText({ html }), 'Wtf')
