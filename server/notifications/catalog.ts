@@ -59,7 +59,7 @@ export interface CatalogEntry {
 
 const restaurant = 'Ember & Slice'
 const studio = 'Pottery House Krabi'
-const inbox = 'https://demo.krabiclaw.com/dashboard/ember-slice/messages/preview-1'
+const inbox = 'https://blawby.com/dashboard/ember-slice/messages/preview-1'
 
 // A restaurant's table booking: the booking messages in the reservation's words.
 const reservation = {
@@ -94,13 +94,13 @@ const stay = {
   guestName: 'Mina', guestEmail: 'mina@example.com', guestPhone: '+1 415 555 0134', homeName: 'Cedar Loft',
   checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', stayDates: { checkIn: '2026-11-06', checkOut: '2026-11-09' },
   arrival: '6:00 PM', nights: '3', guests: '2 adults',
-  organizationName: 'Pinecone Stays', heroImageUrl: null, replyUrl: 'https://demo.krabiclaw.com/dashboard/pinecone-stays/messages/preview-1',
+  organizationName: 'Pinecone Stays', heroImageUrl: null, replyUrl: 'https://blawby.com/dashboard/pinecone-stays/messages/preview-1',
   channel: null,
 }
 const stayBooked = { ...stay, total: '$645.00', paid: '$645.00', balance: null, overlap: false, notes: 'We will bring our dog if that is fine.' }
 const stayCancelled = { ...stay, refund: '$322.50' }
 // A member looking after the home opens the stay itself.
-const stayPreviewUrl = 'https://demo.krabiclaw.com/dashboard/pinecone-stays/bookings/preview-1'
+const stayPreviewUrl = 'https://blawby.com/dashboard/pinecone-stays/bookings/preview-1'
 // A stay Airbnb sent opens the stay: it has a conversation only once the guest writes.
 const airbnbStay = { ...stay, guestName: 'Jamie Rivera', guestEmail: null, guestPhone: null, channel: 'Airbnb', replyUrl: stayPreviewUrl }
 const airbnbBooked = { ...airbnbStay, total: '$1,284.00', paid: null, balance: null, overlap: false, notes: null }
@@ -135,7 +135,7 @@ const guestVisit = {
   notes: 'Window seat.',
   contactPhone: '+1 555 000 0000',
   contactEmail: 'hello@emberslice.example',
-  receiptUrl: 'https://demo.krabiclaw.com/bookings/confirmed?id=preview',
+  receiptUrl: 'https://blawby.com/bookings/confirmed?id=preview',
   heroImageUrl: sampleCover,
 }
 
@@ -145,7 +145,7 @@ const payment = {
   amount: 10000,
   currency: 'USD' as const,
   productTitle: 'Pottery Wheel Class',
-  action: { url: 'https://demo.krabiclaw.com/dashboard/pottery-house/earnings', label: 'View payment' },
+  action: { url: 'https://blawby.com/dashboard/pottery-house/earnings', label: 'View payment' },
 }
 
 // Preview data only: these show native statuses, not qualified financial sends.
@@ -168,7 +168,7 @@ const guestPayments: GuestPaymentNotificationEvent[] = [
   { ...payment, kind: 'payment_captured', action: { url: 'https://pay.stripe.com/receipts/preview', label: 'View receipt' } },
   ...(['payment_failed', 'refund_pending', 'refund_succeeded', 'refund_failed', 'refund_canceled'] as const).map(kind => ({
     ...payment, kind, amount: kind === 'payment_failed' ? payment.amount : 5000,
-    action: { url: 'https://demo.krabiclaw.com/account', label: 'View purchase' },
+    action: { url: 'https://blawby.com/account', label: 'View purchase' },
   })),
 ]
 
@@ -317,7 +317,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     message: ownerAlert(reviewReceivedMessage({
       authorName: 'Alex Carter', rating: 5,
       content: 'The wood-fired pizza was outstanding and the team could not have been kinder.',
-      organizationName: restaurant, reviewsUrl: `https://demo.krabiclaw.com${reviewEditorPath('ember-slice', 'review-ember-alex')}`,
+      organizationName: restaurant, reviewsUrl: `https://blawby.com${reviewEditorPath('ember-slice', 'review-ember-alex')}`,
     })),
   },
   {
@@ -356,7 +356,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     whatsappTemplate: 'domain_update',
     message: domainUpdateMessage({
       event: 'synced', domain: 'www.emberslice.com', status: 'active', error: null, records: [], apexNote: null,
-      dashboardUrl: 'https://demo.krabiclaw.com/dashboard/ember-slice/website/domains',
+      dashboardUrl: 'https://blawby.com/dashboard/ember-slice/website/domains',
     }),
   },
   {
@@ -368,9 +368,9 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
       event: 'added', domain: 'www.emberslice.com', status: 'pending', error: null, apexNote: 'Forward emberslice.com to https://www.emberslice.com',
       records: [
         { type: 'TXT', name: '_cf-custom-hostname.www.emberslice.com', value: '6f1c2a9e-preview-ownership', purpose: 'ownership' },
-        { type: 'CNAME', name: 'www', value: 'sites.krabiclaw.com', purpose: 'traffic' },
+        { type: 'CNAME', name: 'www', value: 'customers.blawby.com', purpose: 'traffic' },
       ],
-      dashboardUrl: 'https://demo.krabiclaw.com/dashboard/ember-slice/website/domains',
+      dashboardUrl: 'https://blawby.com/dashboard/ember-slice/website/domains',
     }),
   },
   {
@@ -381,8 +381,8 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     message: domainUpdateMessage({
       event: 'synced', domain: 'www.emberslice.com', status: 'failed', apexNote: null,
       error: 'The CNAME record for www.emberslice.com points to another provider.',
-      records: [{ type: 'CNAME', name: 'www', value: 'sites.krabiclaw.com', purpose: 'traffic' }],
-      dashboardUrl: 'https://demo.krabiclaw.com/dashboard/ember-slice/website/domains',
+      records: [{ type: 'CNAME', name: 'www', value: 'customers.blawby.com', purpose: 'traffic' }],
+      dashboardUrl: 'https://blawby.com/dashboard/ember-slice/website/domains',
     }),
   },
 
@@ -392,8 +392,8 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     title: 'Operator — a business finished onboarding',
     message: onboardingCompletedMessage({
       organizationName: studio, ownerName: 'Priya Shah', ownerEmail: 'priya@example.com',
-      siteUrl: 'https://pottery-house.krabiclaw.com/',
-      viewCustomerUrl: 'https://krabiclaw.com/dashboard/krabiclaw/platform-accounts?user=preview-user&organization=preview-organization',
+      siteUrl: 'https://www.potteryhousekrabi.com/',
+      viewCustomerUrl: 'https://blawby.com/dashboard/krabiclaw/platform-accounts?user=preview-user&organization=preview-organization',
     }),
   },
 
@@ -404,8 +404,8 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     message: ownerWelcomeMessage({
       organizationName: studio,
       ownerName: 'Priya Shah',
-      siteUrl: 'https://pottery-house.krabiclaw.com/',
-      dashboardUrl: 'https://krabiclaw.com/dashboard/pottery-house',
+      siteUrl: 'https://www.potteryhousekrabi.com/',
+      dashboardUrl: 'https://blawby.com/dashboard/pottery-house',
       vertical: 'experience',
     }),
   },
@@ -417,8 +417,8 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     message: ownerWelcomeMessage({
       organizationName: 'The Olive Branch',
       ownerName: 'Marco Rossi',
-      siteUrl: 'https://olive-branch.krabiclaw.com/',
-      dashboardUrl: 'https://krabiclaw.com/dashboard/olive-branch',
+      siteUrl: 'https://olive-branch.blawby.com/',
+      dashboardUrl: 'https://blawby.com/dashboard/olive-branch',
       vertical: 'restaurant',
     }),
   },
@@ -430,8 +430,8 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     message: ownerWelcomeMessage({
       organizationName: 'Pinecone Stays',
       ownerName: 'Sarah Jenkins',
-      siteUrl: 'https://pinecone-stays.krabiclaw.com/',
-      dashboardUrl: 'https://krabiclaw.com/dashboard/pinecone-stays',
+      siteUrl: 'https://pinecone-stays.blawby.com/',
+      dashboardUrl: 'https://blawby.com/dashboard/pinecone-stays',
       vertical: 'lodging',
     }),
   },
@@ -443,8 +443,8 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     message: ownerWelcomeMessage({
       organizationName: 'North Carolina Legal Services',
       ownerName: 'Robert Vance',
-      siteUrl: 'https://nclegal.krabiclaw.com/',
-      dashboardUrl: 'https://krabiclaw.com/dashboard/nclegal',
+      siteUrl: 'https://www.northcarolinalegalservices.org/',
+      dashboardUrl: 'https://blawby.com/dashboard/nclegal',
       vertical: 'service',
     }),
   },
@@ -456,25 +456,25 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     message: contentReportedMessage({
       organizationName: 'Pinecone Stays', reporter: 'Priya Shah (priya@example.com)', subject: 'conversation', blocked: true,
       reason: 'Harassing messages', excerpt: 'You will regret this. I know where you live.',
-      reviewUrl: 'https://krabiclaw.com/dashboard/krabiclaw/platform-reports',
+      reviewUrl: 'https://blawby.com/dashboard/krabiclaw/platform-reports',
     }),
   },
 
   // Guest and account mail — email only.
-  { id: 'auth-verify', audience: 'guest', title: 'Sign-up — verify your email', message: verifyEmailMessage({ verificationUrl: 'https://krabiclaw.com/api/auth/verify-email?token=preview' }) },
-  { id: 'auth-reset', audience: 'guest', title: 'Sign-in — reset your password', message: resetPasswordMessage({ resetUrl: 'https://krabiclaw.com/reset-password?token=preview' }) },
-  { id: 'organization-invite', audience: 'guest', title: 'Invitee — organization invitation', message: organizationInviteMessage({ organizationName: studio, inviterName: 'Priya Shah', role: 'Admin', inviteUrl: 'https://demo.krabiclaw.com/accept-invitation/preview', expires: 'Nov 8, 2026, 2:00 PM UTC' }) },
+  { id: 'auth-verify', audience: 'guest', title: 'Sign-up — verify your email', message: verifyEmailMessage({ verificationUrl: 'https://blawby.com/api/auth/verify-email?token=preview' }) },
+  { id: 'auth-reset', audience: 'guest', title: 'Sign-in — reset your password', message: resetPasswordMessage({ resetUrl: 'https://blawby.com/reset-password?token=preview' }) },
+  { id: 'organization-invite', audience: 'guest', title: 'Invitee — organization invitation', message: organizationInviteMessage({ organizationName: studio, inviterName: 'Priya Shah', role: 'Admin', inviteUrl: 'https://blawby.com/accept-invitation/preview', expires: 'Nov 8, 2026, 2:00 PM UTC' }) },
   { id: 'guest-reservation-received', audience: 'guest', title: 'Guest — table reservation confirmed', message: guestBookingReceivedMessage({ ...guestVisit, productTitle: 'Main Dining Room table', status: 'confirmed', wording: 'reservation' }) },
   { id: 'guest-reservation-cancelled', audience: 'guest', title: 'Guest — table reservation cancelled', message: guestBookingCancelledMessage({ ...guestVisit, productTitle: 'Main Dining Room table', wasConfirmed: true, wording: 'reservation' }) },
   { id: 'guest-booking-received', audience: 'guest', title: 'Guest — booking request sent', message: guestBookingReceivedMessage({ ...guestVisit, guestName: 'Mina Park', organizationName: studio, productTitle: 'Pottery Wheel Class', date: 'Mon, Jul 20, 2026', time: '10:00 AM', status: 'pending', wording: 'booking' }) },
-  { id: 'guest-stay-confirmed', audience: 'guest', title: 'Guest — stay confirmed', message: guestStayConfirmedMessage({ guestName: 'Mina Park', organizationName: 'Pinecone Stays', organizationLogoUrl: sampleLogo, homeName: 'Cedar Loft', heroImageUrl: sampleCover, checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', nights: '3', guests: '2 adults', total: '$645.00', receiptUrl: 'https://demo.krabiclaw.com/bookings/stay?id=preview', checkInInstructions: 'The lockbox is to the left of the front door. Your code arrives the morning of check-in.', contactPhone: '+1 415 555 0100', contactEmail: 'hello@example.com' }) },
+  { id: 'guest-stay-confirmed', audience: 'guest', title: 'Guest — stay confirmed', message: guestStayConfirmedMessage({ guestName: 'Mina Park', organizationName: 'Pinecone Stays', organizationLogoUrl: sampleLogo, homeName: 'Cedar Loft', heroImageUrl: sampleCover, checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', nights: '3', guests: '2 adults', total: '$645.00', receiptUrl: 'https://blawby.com/bookings/stay?id=preview', checkInInstructions: 'The lockbox is to the left of the front door. Your code arrives the morning of check-in.', contactPhone: '+1 415 555 0100', contactEmail: 'hello@example.com' }) },
   { id: 'guest-booking-cancelled', audience: 'guest', title: 'Guest — booking cancelled', message: guestBookingCancelledMessage({ ...guestVisit, guestName: 'Mina Park', organizationName: studio, productTitle: 'Pottery Wheel Class', date: 'Mon, Jul 20, 2026', time: '10:00 AM', wasConfirmed: false, wording: 'booking' }) },
   { id: 'guest-contact-received', audience: 'guest', title: 'Guest — message sent', message: guestContactReceivedMessage({ guestName: 'Jordan Lee', organizationName: restaurant, organizationLogoUrl: sampleLogo, subject: 'General', productTitle: 'Pottery Wheel Class', message: 'Hi, do you have vegan options and parking nearby?', consentAcknowledged: true }) },
   { id: 'guest-thread-reply', audience: 'guest', title: 'Guest — a reply from the business', message: guestThreadReplyMessage({ organizationName: restaurant, organizationLogoUrl: sampleLogo, body: 'Hi Jordan,\n\nYes — we have a full vegan menu, and there is street parking on Soi 3 right outside. See you Tuesday!' }) },
   { id: 'guest-thread-status', audience: 'guest', title: 'Guest — reservation status changed', message: guestThreadStatusMessage({ organizationName: restaurant, organizationLogoUrl: sampleLogo, heading: `Your reservation at ${restaurant} is confirmed`, body: 'Your reservation is confirmed: Tue, Jul 14, 2026 at 7:00 PM for 2 guests.', actionUrl: guestVisit.receiptUrl, actionLabel: 'Manage your reservation' }) },
-  { id: 'guest-booking-change-proposal', audience: 'guest', title: 'Guest — booking change proposed', message: bookingChangeProposalMessage({ guestName: 'Mina Park', organizationName: studio, organizationLogoUrl: sampleLogo, heading: 'Please review changes to your booking', intro: 'Your host has requested changes. Your booking stays exactly as it is until you accept, and the link below expires in 7 days.', rows: [['Location', 'Main Studio'], ['When', 'Tue, Jul 21, 2026 at 2:00 PM'], ['Guests', '2']], actionUrl: 'https://demo.krabiclaw.com/booking-changes/preview', actionLabel: 'Review the changes' }) },
-  { id: 'guest-review-request', audience: 'guest', title: 'Guest — review request', message: reviewRequestMessage({ guestName: 'Alex Carter', organizationName: restaurant, locationName: 'Main Dining Room', visitAt: 'Tue, Jul 14, 2026 at 7:00 PM', partySize: '2 guests', reviewUrl: 'https://demo.krabiclaw.com/review-submit?token=preview', organizationLogoUrl: sampleLogo, productKind: 'table' }) },
-  { id: 'article-announcement', audience: 'owner', title: 'Blawby news — new article', message: articleAnnouncementMessage({ title: 'Turning walk-ins into repeat guests', summary: 'Three things the best-performing Blawby sites do after a guest leaves.', bodyMarkdown: '## Say thank you the same day\n\nA short note while the meal is still fresh brings guests back more often than any discount.\n\n## Ask for the review\n\n- Send the link once\n- Make it one tap\n\n## Invite them back\n\nTell them what is new next month, and [show them the menu](https://krabiclaw.com).', coverImageUrl: null, articleUrl: 'https://krabiclaw.com/blog/operations/preview' }) },
+  { id: 'guest-booking-change-proposal', audience: 'guest', title: 'Guest — booking change proposed', message: bookingChangeProposalMessage({ guestName: 'Mina Park', organizationName: studio, organizationLogoUrl: sampleLogo, heading: 'Please review changes to your booking', intro: 'Your host has requested changes. Your booking stays exactly as it is until you accept, and the link below expires in 7 days.', rows: [['Location', 'Main Studio'], ['When', 'Tue, Jul 21, 2026 at 2:00 PM'], ['Guests', '2']], actionUrl: 'https://blawby.com/booking-changes/preview', actionLabel: 'Review the changes' }) },
+  { id: 'guest-review-request', audience: 'guest', title: 'Guest — review request', message: reviewRequestMessage({ guestName: 'Alex Carter', organizationName: restaurant, locationName: 'Main Dining Room', visitAt: 'Tue, Jul 14, 2026 at 7:00 PM', partySize: '2 guests', reviewUrl: 'https://blawby.com/review-submit?token=preview', organizationLogoUrl: sampleLogo, productKind: 'table' }) },
+  { id: 'article-announcement', audience: 'owner', title: 'Blawby news — new article', message: articleAnnouncementMessage({ title: 'Turning walk-ins into repeat guests', summary: 'Three things the best-performing Blawby sites do after a guest leaves.', bodyMarkdown: '## Say thank you the same day\n\nA short note while the meal is still fresh brings guests back more often than any discount.\n\n## Ask for the review\n\n- Send the link once\n- Make it one tap\n\n## Invite them back\n\nTell them what is new next month, and [show them the menu](https://blawby.com).', coverImageUrl: null, articleUrl: 'https://blawby.com/blog/operations/preview' }) },
   ...ownerPayments.map((event) => {
     const message = ownerPaymentMessage({ ...event, action: event.action ?? payment.action })
     return { id: `owner-${event.kind}`, audience: 'owner' as const, title: `Owner — ${message.title}`, message }
@@ -485,7 +485,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     { kind: 'changed', plan: 'Business', previousPlan: 'Growth' },
     { kind: 'ending', plan: 'Business', date: 'Dec 10, 2026' },
   ] as const).map((input) => {
-    const message = ownerAlert(subscriptionPlanMessage({ ...input, organizationName: studio, action: { url: 'https://demo.krabiclaw.com/dashboard/pottery-house/billing', label: 'Open Plan and billing' } }))
+    const message = ownerAlert(subscriptionPlanMessage({ ...input, organizationName: studio, action: { url: 'https://blawby.com/dashboard/pottery-house/billing', label: 'Open Plan and billing' } }))
     return { id: `owner-plan-${input.kind}`, audience: 'owner' as const, title: `Owner — ${message.title}`, message }
   }),
 ]
