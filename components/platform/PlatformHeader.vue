@@ -180,6 +180,8 @@ const SOLUTION_ITEMS = [
 ] as const
 
 const PRIMARY_ITEMS = [
+  { label: 'AI agent', to: '/plugin' },
+  { label: 'Integrations', to: '/integrations' },
   { label: 'Products', to: '/products' },
   { label: 'Pricing', to: '/pricing' },
   { label: 'Templates', to: '/templates' },
@@ -189,7 +191,6 @@ const PRIMARY_ITEMS = [
 const COLLAPSED_LINKS = [...PRIMARY_ITEMS, { label: 'Blog', to: '/blog' }] as const
 
 const MORE_ITEMS = [
-  { label: 'MCP', to: '/plugin' },
   { label: 'About', to: '/about' },
   { label: 'Help center', to: '/help' },
 ] as const

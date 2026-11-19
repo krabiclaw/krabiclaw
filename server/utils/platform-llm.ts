@@ -426,7 +426,7 @@ export function buildLlmsTxt(
   const lines = [
     `# ${options.title || 'Blawby'}`,
     '',
-    `> ${options.intro || 'Blawby is an AI website and business platform for restaurants, experiences, lodging, and law firms. Lodging businesses can publish home listings and take direct stay bookings. Public docs and the platform blog are available as HTML and Markdown mirrors.'}`,
+    `> ${options.intro || 'Run your business from your favorite AI app with Blawby. Blawby is the business AI agent for restaurants, experiences, lodging, and law firms, connecting requests in ChatGPT, Claude, and compatible AI apps to business records and actions. Public docs and the platform blog are available as HTML and Markdown mirrors.'}`,
     '',
     'Prefer the Markdown URLs below when you need compact machine-readable context. Canonical HTML URLs remain the source for public citation and browsing.',
     '',

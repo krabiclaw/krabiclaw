@@ -30,11 +30,11 @@ export function renderPlansMarkdown(plans: Plan[], origin: string): string {
     lines.push(`## ${plan.name}`)
     lines.push(`- **Price**: ${priceLabel}`)
     const betaHomes = betaSpotsLeft > 0 ? ` (beta price; ${nextHomePrice()} per home per month once the beta spots are taken)` : ''
-    lines.push(`- **Homes**: ${monthlyPrice ? `${homePrice()}${betaHomes}` : `${BASIC_HOMES} included`}. A home is a place to stay.`)
+    lines.push(`- **Listings**: ${monthlyPrice ? `${homePrice()}${betaHomes}` : `${BASIC_HOMES} included`}. A listing is a place to stay.`)
     if (plan.id === BUSINESS_PLAN_ID) {
       lines.push(`- **Payments fees**: ${PAYMENTS_FEE}.`)
     }
-    if (monthlyPrice) lines.push('- **Billing**: Homes and fees are billed on your subscription invoice at the end of each month.')
+    if (monthlyPrice) lines.push('- **Billing**: Listings and fees are billed on your subscription invoice at the end of each month.')
     lines.push(`- **Tagline**: ${plan.tagline}`)
 
     if (plan.limits) {

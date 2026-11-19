@@ -31,11 +31,11 @@
     <section class="templates-more">
       <div>
         <p class="templates-eyebrow">A familiar way to make it yours</p>
-        <h2>Your website.<br>Your AI assistant.</h2>
+        <h2>Your business.<br>Your AI agent.</h2>
       </div>
       <div class="templates-more__copy">
-        <p>Choose your template, add your story, and keep it current from the dashboard or a connected AI assistant. Blawby works with ChatGPT, Claude, and other compatible MCP clients.</p>
-        <NuxtLink to="/plugin" class="templates-link">Explore AI connections <span aria-hidden="true">↗</span></NuxtLink>
+        <p>Choose your template, add your story, and run your business from the dashboard or your favorite AI app. Blawby connects ChatGPT, Claude, and other compatible AI apps to your business records and supported actions.</p>
+        <NuxtLink to="/plugin" class="templates-link">Explore AI agent <span aria-hidden="true">↗</span></NuxtLink>
         <NuxtLink to="/pricing" class="templates-more__pricing">Compare plans and what’s included →</NuxtLink>
       </div>
     </section>

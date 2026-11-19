@@ -11,7 +11,7 @@
             </span>
           </NuxtLink>
           <p class="mt-3.5 max-w-75 text-[13px] leading-relaxed text-muted">
-            Websites for restaurants, experiences, lodging, and law firms. Manage yours with your AI assistant or the dashboard.
+            Run your business from your favorite AI app with Blawby. The business AI agent for restaurants, experiences, lodging, and law firms.
           </p>
         </div>
 
@@ -48,7 +48,8 @@ const COLUMNS = [
   {
     title: 'Product',
     links: [
-      { label: 'MCP', to: '/plugin' },
+      { label: 'AI agent', to: '/plugin' },
+      { label: 'Integrations', to: '/integrations' },
       { label: 'Products', to: '/products' },
       { label: 'Pricing', to: '/pricing' },
       { label: 'Templates', to: '/templates' },
