@@ -1209,8 +1209,14 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
     assert.ok(Number.isFinite(editMetrics.phases.auth_session))
     assert.ok(Number.isFinite(editMetrics.phases.stay_queue_send))
     const changed = await getStay(db, manager, saved.booking_id)
-    assert.deepEqual([changed.guest_name, changed.check_in_date, changed.check_out_date, changed.version],
-      ['Edited guest', date(31), date(33), persisted.version + 1])
+    assert.deepEqual([changed.guest_name, changed.guest_email, changed.check_in_date, changed.check_out_date, changed.version],
+      ['Edited guest', 'direct-guest@example.test', date(31), date(33), persisted.version + 1])
+    for (const guest_email of [null, '', '   ']) {
+      const refused = await hostRequest('PATCH', `/api/dashboard/bookings/${saved.booking_id}`, { version: changed.version, guest_email })
+      assert.equal(refused.status, 422, await refused.clone().text())
+      assert.partialDeepStrictEqual(await refused.json(), { data: { code: 'GUEST_EMAIL_REQUIRED', field: 'guest_email' } })
+    }
+    assert.deepEqual(await getStay(db, manager, saved.booking_id), changed)
     assert.equal(await claims(saved.booking_id), 2)
 
     const [created, edited] = await Promise.all([

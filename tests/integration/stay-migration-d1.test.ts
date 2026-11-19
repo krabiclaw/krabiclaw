@@ -18,9 +18,9 @@ const ORG = 'migration-org'
 const OWNER = 'migration-owner'
 const NOW = '2026-11-05T12:00:00.000Z'
 const access: StayAccess = { organizationId: ORG, actorId: OWNER, manage: true }
-const columns = { source_id: 'Reservation ID', source_listing: 'Listing', guest_name: 'Guest name', check_in_date: 'Check-in', check_out_date: 'Check-out', adults: 'Adults', total: 'Total price', currency: 'Currency', status: 'Status', channel: 'Channel', payment_status: 'Payment status' } as const
+const columns = { source_id: 'Reservation ID', source_listing: 'Listing', guest_name: 'Guest name', check_in_date: 'Check-in', check_out_date: 'Check-out', adults: 'Adults', total: 'Total price', currency: 'Currency', status: 'Status', channel: 'Channel', payment_status: 'Payment status', guest_email: 'Guest email' } as const
 const header = Object.values(columns).join(',')
-const row = (id: string, start: string, end: string, extra: string[] = []) => [id, '70 0C', 'Dylan from 1A', start, end, '1', '3700.00', 'USD', 'New', 'Hostaway Direct', 'Unpaid', ...extra].join(',')
+const row = (id: string, start: string, end: string, email = 'dylan@example.test', channel = 'Hostaway Direct') => [id, '70 0C', 'Dylan from 1A', start, end, '1', '3700.00', 'USD', 'New', channel, 'Unpaid', email].join(',')
 function input(productId: string, csv = `${header}\n${row('67459976', '2026-10-10', '2026-12-24')}`): MigrationInput {
   return { csv, columns, date_format: 'iso', decimal_format: 'dot', homes: { '70 0C': productId }, blocks: [], blocks_reviewed: [productId], overrides: {} }
 }
@@ -110,13 +110,35 @@ test('the authenticated migration route scopes discovery and writes to the selec
     assert.equal((await request(member, '')).status, 403)
     const owner = await login(OWNER)
     assert.equal((await request(owner, '', undefined, 'another-business')).status, 404)
-    const source = input(home.id)
+    const source = {
+      ...input(home.id, `${header}\n${row('67459976', '2026-10-10', '2026-12-24', '')}\n${row('airbnb-stay', '2026-12-27', '2026-12-30', '', 'Airbnb')}`),
+      overrides: { 'airbnb-stay': { channel_booking_id: 'HMTESTAIRBNB' } },
+    }
     const previewResponse = await request(owner, '/preview', source)
     assert.equal(previewResponse.status, 200)
-    const preview = await previewResponse.json() as { fingerprint: string }
-    const imported = await request(owner, '/import', { ...source, fingerprint: preview.fingerprint })
+    const preview = await previewResponse.json() as Awaited<ReturnType<typeof previewStayMigration>>
+    assert.equal(preview.can_import, false)
+    assert.partialDeepStrictEqual(preview.rows[0], { state: 'needs_attention', issues: ['Guest email is missing; choose its column or enter a correction'] })
+    assert.partialDeepStrictEqual(preview.rows[1], { state: 'ready', stay: { channel: 'airbnb', guest_email: null } })
+    const refused = await request(owner, '/import', { ...source, fingerprint: preview.fingerprint })
+    assert.equal(refused.status, 409)
+    assert.partialDeepStrictEqual(await refused.json(), { data: { code: 'MIGRATION_NEEDS_ATTENTION' } })
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM bookings').first('n'), 0)
+
+    const corrected = { ...source, overrides: { ...source.overrides, '67459976': { guest_email: ' dylan@example.test ' } } }
+    const correctedResponse = await request(owner, '/preview', corrected)
+    assert.equal(correctedResponse.status, 200)
+    const correctedPreview = await correctedResponse.json() as Awaited<ReturnType<typeof previewStayMigration>>
+    assert.equal(correctedPreview.can_import, true)
+    const imported = await request(owner, '/import', { ...corrected, fingerprint: correctedPreview.fingerprint })
     assert.equal(imported.status, 200, await imported.clone().text())
-    const persisted = await db.prepare("SELECT b.product_id, json_extract(r.payload_json, '$.guest.name') AS guest_name FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking' WHERE b.idempotency_key = 'hostaway:67459976'").first()
-    assert.deepEqual(persisted, { product_id: home.id, guest_name: 'Dylan from 1A' })
+    const persisted = await db.prepare(`SELECT b.product_id, b.channel, b.channel_booking_id,
+      json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email
+      FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking'
+      WHERE b.idempotency_key IN ('hostaway:67459976', 'hostaway:airbnb-stay') ORDER BY b.idempotency_key`).all()
+    assert.deepEqual(persisted.results, [
+      { product_id: home.id, channel: 'direct', channel_booking_id: null, guest_name: 'Dylan from 1A', guest_email: 'dylan@example.test' },
+      { product_id: home.id, channel: 'airbnb', channel_booking_id: 'HMTESTAIRBNB', guest_name: 'Dylan from 1A', guest_email: null },
+    ])
   } finally { await runtime.dispose() }
 })
