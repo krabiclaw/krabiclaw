@@ -13,6 +13,8 @@ export const PLATFORM_SITEMAP_ROUTES = [
   '/blog',
   '/docs',
   '/help',
+  '/login',
+  '/signup',
   '/templates',
   '/templates/blawby',
   '/templates/saya',
@@ -31,9 +33,7 @@ export const PRIVATE_EXACT_ROUTES = new Set([
   ...TENANT_NON_INDEXABLE_EXACT_PATHS,
   '/accept-invitation',
   '/forgot-password',
-  '/login',
   '/reset-password',
-  '/signup',
 ])
 
 // Paths that only a customer site answers. `/experiences` is not among them:

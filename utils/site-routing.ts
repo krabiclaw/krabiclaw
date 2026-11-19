@@ -54,10 +54,10 @@ export const CUSTOMER_SITE: PublicSiteDefinition = {
   layout: 'tenant',
   sitemap: {
     // Authored pages are listed from published documents, never assumed from a business type.
-    exactPaths: ['/', '/menu', '/products', '/experiences', '/stays', '/contact', '/blog', '/docs', '/locations', '/reservations', '/posts', '/photos', '/qa', '/reviews'],
+    exactPaths: ['/', '/services', '/menu', '/products', '/experiences', '/stays', '/contact', '/blog', '/docs', '/locations', '/reservations', '/posts', '/photos', '/qa', '/reviews'],
     dynamicPrefixes: ['/blog/', '/docs/', '/services/', '/experiences/', '/stays/', '/locations/', '/posts/'],
   },
-  nonIndexableExactPaths: ['/contact/confirmed', '/bookings/cancel', '/bookings/confirmed'],
+  nonIndexableExactPaths: ['/contact/confirmed', '/bookings/cancel', '/bookings/confirmed', '/login', '/signup', '/forgot-password', '/reset-password', '/accept-invitation'],
   pageDocuments: {
     recipes: {
       home: '/', about: '/about', contact: '/contact', reservations: '/reservations',
@@ -107,10 +107,10 @@ export const PLATFORM_SITE: PublicSiteDefinition = {
     // page documents now, and the platform sitemap reads them from
     // content_documents (see server/plugins/sitemap.ts). What remains is the
     // set of code-owned platform routes that hold no document.
-    exactPaths: ['/blog', '/docs', '/help', '/posts', '/signup', '/templates', '/templates/blawby', '/templates/saya'],
+    exactPaths: ['/blog', '/docs', '/help', '/login', '/posts', '/signup', '/templates', '/templates/blawby', '/templates/saya'],
     dynamicPrefixes: ['/blog/', '/docs/', '/posts/'],
   },
-  nonIndexableExactPaths: ['/login', '/forgot-password', '/reset-password', '/accept-invitation'],
+  nonIndexableExactPaths: ['/forgot-password', '/reset-password', '/accept-invitation'],
   // Blawby's own marketing pages are ordinary page documents on the
   // platform site, read by the same loader every customer site uses (#903).
   // The routes that are not editorial — /blog, /docs, /help, /templates —

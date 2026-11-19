@@ -57,14 +57,15 @@ import { buildPostLoginUrl, validatedInternalPath } from '~/shared/auth/return-t
 
 definePageMeta({ layout: 'access', auth: false })
 // A page about the business: its image is the organization's.
-const { social_image: organizationSocialImage } = useTenantOrganization().organization
+const { site, social_image: organizationSocialImage } = useTenantOrganization().organization
+const isPlatform = site.slug === 'platform'
 useSocialMetadata({
   schema: false,
   path: '/signup',
   socialImage: organizationSocialImage,
   title: 'Create your account',
   description: 'Create a free Blawby account and build your business site through ChatGPT.',
-  discoverability: 'private',
+  discoverability: isPlatform ? 'listed' : 'private',
 })
 
 const route = useRoute()
