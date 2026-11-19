@@ -205,7 +205,7 @@ const router = useRouter()
 const orgSlug = String(route.params.org_slug)
 const api = useDashboardApi()
 const pane = useDashboardPane()
-const todayKey = today(getLocalTimeZone()).toString()
+const todayKey = today(useDashboardOrganization().organization.value?.timezone ?? getLocalTimeZone()).toString()
 if (Object.hasOwn(route.query, 'from') && (typeof route.query.from !== 'string' || !isValidCalendarDate(route.query.from))) throw createError({ statusCode: 400, statusMessage: `Choose a valid first ${words.unit}.` })
 const from = computed(() => typeof route.query.from === 'string' ? route.query.from : todayKey)
 const search = computed(() => typeof route.query.q === 'string' ? route.query.q : '')
@@ -275,7 +275,8 @@ const { data, error, status, refresh, clear } = await useAsyncData<HomesPayload 
     return payload
   },
   {
-    getCachedData(key, _nuxtApp, ctx) {
+    getCachedData(key, app, ctx) {
+      if (app.isHydrating) return app.payload.data[key]
       if (ctx.cause !== 'initial') return undefined
       const held = realtime.held.get(key)
       return isHomesPayload(held) || isPlacesPayload(held) ? held : undefined

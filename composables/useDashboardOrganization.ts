@@ -29,6 +29,7 @@ export interface DashboardOrganization {
   onboarding_status: string
   effective_plan: string
   default_currency: string
+  timezone: string
   media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string | null; presentation: LogoPresentation | null }>
   /** The modules this organization has (resolveCmsCapabilities); whether a screen exists reads this. */
   features: ProductFeature[]
@@ -84,6 +85,7 @@ const isDashboardOrganization = (value: unknown): value is DashboardOrganization
   && typeof value.status === 'string'
   && typeof value.onboarding_status === 'string'
   && typeof value.default_currency === 'string'
+  && typeof value.timezone === 'string'
   && Array.isArray(value.features) && value.features.every(feature => typeof feature === 'string')
   && isMediaList(value.media)
   && (value.media as Array<Record<string, unknown>>).every(item => item.presentation === null || (isRecord(item.presentation) && LOGO_SHAPES.includes(item.presentation.shape as LogoPresentation['shape'])))

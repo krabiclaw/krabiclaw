@@ -1,3 +1,6 @@
+import type { H3Event } from 'nitro'
+import { requireOrganizationAccess } from '~/server/utils/location-access'
+import { memberCalendarCoverage } from '~/server/domain/member-scheduling'
 import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import type { GoogleCalendarIntegration } from '~/shared/organization-settings'
 import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -439,4 +442,13 @@ export async function drainCalendarCleanup(env: CloudflareEnv, organizationId: s
   const result = await runCalendarCleanupJobs(env, limit, defaultProvider(env), organizationId)
   if (result.failed) throw new Error(`${result.failed} retained Google Calendar cleanup jobs failed`)
   if (result.checked === limit) await publishEvent(env, { type: 'calendar.cleanup', organization_id: organizationId })
+}
+
+export async function readGoogleCalendarSettings(event: H3Event, organizationId: string, includeCoverage: boolean) {
+  const { db, organization } = await requireOrganizationAccess(event, organizationId)
+  const connection = await readCalendarConnection(db, organization.id)
+  if (!includeCoverage) return connection
+  const coverage = connection.calendar && connection.calendar.status !== 'disabled'
+    ? await memberCalendarCoverage(db, organization.membership) : null
+  return { ...connection, coverage }
 }

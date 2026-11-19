@@ -1,6 +1,6 @@
 import { TENANT_TYPES, type TenantType } from '../../utils/tenant-routing.ts'
 import { TENANT_NON_INDEXABLE_EXACT_PATHS } from '../../utils/site-routing.ts'
-import { isEnvironmentTenantAliasHost } from './tenant-hosts.ts'
+import { isEnvironmentTenantAliasHost, isStagingPlatformHost } from './tenant-hosts.ts'
 import { isDemoHost, isDemoOrganization } from '../../shared/demo.ts'
 
 /**
@@ -84,7 +84,7 @@ export function isTenantOnlySeoPath(pathname: string): boolean {
 
 export function isNonIndexableHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/\.$/, '')
-  return host === 'staging.krabiclaw.com'
+  return isStagingPlatformHost(host)
     || isDemoHost(host)
     || isEnvironmentTenantAliasHost(host)
     || host.endsWith('.pages.dev')

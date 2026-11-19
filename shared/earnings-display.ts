@@ -40,11 +40,13 @@ export function isPayoutItem(value:unknown):value is PayoutItem {
  return record(value)&&typeof value.payment_id==='string'&&typeof value.title==='string'&&(value.image_url===null||typeof value.image_url==='string')&&Number.isSafeInteger(value.amount)&&isCurrencyCode(value.currency)
   &&[value.starts_at,value.ends_at,value.timezone,value.name].every(field=>field===null||typeof field==='string')
 }
-export interface PayoutDetail { id:string; amount:number; currency:string; status:string; arrival_date:number; bank:{bank_name:string|null;last4:string}|null; items:PayoutItem[] }
+export interface PayoutDetail { id:string; amount:number; currency:string; status:string; arrival_date:number; bank:{bank_name:string|null;last4:string}|null; items:PayoutItem[]; failure_code:string|null; failure_message:string|null }
 export function isPayoutDetail(value:unknown):value is PayoutDetail {
  return record(value)&&typeof value.id==='string'&&Number.isSafeInteger(value.amount)&&isCurrencyCode(value.currency)&&typeof value.status==='string'&&Number.isSafeInteger(value.arrival_date)
   &&(value.bank===null||(record(value.bank)&&(value.bank.bank_name===null||typeof value.bank.bank_name==='string')&&typeof value.bank.last4==='string'))
   &&Array.isArray(value.items)&&value.items.every(isPayoutItem)
+  &&(value.failure_code===null||typeof value.failure_code==='string')
+  &&(value.failure_message===null||typeof value.failure_message==='string')
 }
 /** Stripe's payout list rows, as the Earnings and Paid screens read them. */
 export interface PayoutRow { id:string; amount:number; currency:string; status:string; arrival_date:number }

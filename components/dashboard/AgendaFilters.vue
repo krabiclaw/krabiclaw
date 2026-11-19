@@ -54,7 +54,7 @@ const open = ref(false)
 const { organization } = useDashboardOrganization()
 const assigneeLabel = computed(() => organization.value ? getVerticalCopy(organization.value.vertical).assigneeLabel : 'Assigned team member')
 
-const { data: members, error: membersError } = await useMemberSchedulingList(() => props.organizationId)
+const { data: members, error: membersError } = await useMemberSchedulingList(() => props.organizationId, true)
 
 // A person is their face and a branch its picture, as the rows that list them draw it.
 const locationOptions = computed(() => [

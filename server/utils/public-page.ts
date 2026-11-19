@@ -37,7 +37,7 @@ import {
 import { recordRequestPhase } from "~/server/utils/request-metrics";
 import { isNonProductionHost } from "~/server/utils/tenant-hosts";
 import { loadPublicBase } from "~/server/utils/public-base";
-import { appendPublicShellQueries, buildPublicShellPayload, readPublicExperiences } from "~/server/utils/public-shell-query";
+import { buildPublicShellPayload, readPublicExperiences, readPublicShellRows } from "~/server/utils/public-shell-query";
 import { publicLocationSql } from "~/server/utils/public-locations";
 import { isPublicMenuProduct, isPublicPagePayload } from '~/utils/public-resource-contracts'
 import type { LocalizedResourceType } from '~/server/utils/localization-registry'
@@ -357,7 +357,6 @@ async function loadPublicPageSource(
 
   // Build batch — one subrequest to D1 for all inline queries
   const batchStmts: BatchQuery[] = [];
-  let idxLoc = -1;
   let idxReviews = -1;
   let idxFullReviews = -1,
     idxReviewAggregate = -1,
@@ -377,8 +376,6 @@ async function loadPublicPageSource(
   const previewMenu = previewRestaurant && page === 'menu'
   const productKind = page === 'experiences' ? 'experience' : page === 'menu' ? 'dish'
     : page === 'stays' ? 'stay' : page === 'reservations' ? 'table' : undefined
-  const shellIndexes = appendPublicShellQueries(batchStmts, orgId, previewRestaurant);
-  if (needsLocations) idxLoc = shellIndexes.locations;
 
   if (includeProducts) {
     idxProductMedia = push(
@@ -468,9 +465,13 @@ async function loadPublicPageSource(
   );
 
   options.signal?.throwIfAborted();
+  const routePagePath = routeSourcePath(page)
+  // Site-wide menu and Reviews have a known route before the page batch runs.
+  const builtInRepresentations = (page === 'menu' || page === 'reviews') && !locationSlug && !blogSlug && !requestedDatasets.has('content')
   const experiences = readPublicExperiences(event, db, orgId, env)
-  const [batchResults, shellExperiences, canonical, sourceCollections] = await Promise.all([
-    executeBatch(db, batchStmts),
+  const [batchResults, { results: shellResults, indexes: shellIndexes }, shellExperiences, canonical, sourceCollections, routeRepresentations] = await Promise.all([
+    batchStmts.length ? executeBatch(db, batchStmts) : [],
+    readPublicShellRows(event, db, orgId, previewRestaurant),
     experiences,
     includeProducts
       ? (productKind === 'experience'
@@ -486,12 +487,18 @@ async function loadPublicPageSource(
           ]).then(collections => collections.flat())
         : listCollections(db, { organizationId: orgId })
       : [],
+    builtInRepresentations ? listPublicLocaleRepresentations(env, db, {
+      organizationId: orgId,
+      sourcePath: routePagePath ?? '/',
+      publishedLocaleRoute: Boolean(routePagePath),
+      sourceLocale: source,
+    }) : null,
   ])
   options.signal?.throwIfAborted();
 
   // Extract batch results by tracked index
-  const locRows = idxLoc >= 0
-    ? batchResults[idxLoc] as { results: Record<string, unknown>[] }
+  const locRows = needsLocations
+    ? shellResults[shellIndexes.locations] as { results: Record<string, unknown>[] }
     : { results: [] as Record<string, unknown>[] };
   const reviewRows =
     idxReviews >= 0
@@ -513,7 +520,6 @@ async function loadPublicPageSource(
     idxQa >= 0
       ? (batchResults[idxQa] as { results: Record<string, unknown>[] })
       : { results: [] as Record<string, unknown>[] };
-  const routePagePath = routeSourcePath(page)
   // Which paths carry a tenant page document is declared once, per site.
   const site = resolvePublicSite({ themeId: organization.theme_id})
   const locationDocumentPath = locationRow && page === 'location'
@@ -558,12 +564,12 @@ async function loadPublicPageSource(
     publishedLocaleRoute: !representationResource && !representationDocumentId && Boolean(routePagePath),
     sourceLocale: source,
   })
-  const sourceShell = buildPublicShellPayload(organization, batchResults, shellIndexes, shellExperiences, { localizations: localizedLocale ? publicLocalizations : undefined })
+  const sourceShell = buildPublicShellPayload(organization, shellResults, shellIndexes, shellExperiences, { localizations: localizedLocale ? publicLocalizations : undefined })
   const [tenantPage, ownRepresentations] = await Promise.all([
     contentPagePath ? getPublicTenantPageForPath(env, db, organizationId, contentPagePath, tenantPageOptions) : null,
     // A location or article route names its own representations; a page
     // document route reads them off the document once it has loaded.
-    representationResource || !contentPagePath ? readLocaleRepresentations() : null,
+    routeRepresentations ?? (representationResource || !contentPagePath ? readLocaleRepresentations() : null),
   ])
   // These complete built-in routes may display an optional CMS content overlay.
   // The route remains valid when that optional overlay has no translated page.
@@ -616,7 +622,7 @@ async function loadPublicPageSource(
   let products: PublicProduct[] = []
   let collections: Collection[] = sourceCollections
   if (includeProducts) {
-    const locationCapabilityRows = (batchResults[shellIndexes.locations] as { results: Record<string, unknown>[] })?.results ?? []
+    const locationCapabilityRows = (shellResults[shellIndexes.locations] as { results: Record<string, unknown>[] })?.results ?? []
     const activeLocationIds = new Set(locationCapabilityRows.map(location => String(location.id)))
     const productMediaRows = (batchResults[idxProductMedia] as { results: ProductMediaRow[] })?.results ?? []
     const mediaByProduct = new Map<string, ProductMediaRow[]>()

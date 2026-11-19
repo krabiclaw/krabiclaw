@@ -21,7 +21,7 @@ import { credentialCookie } from "./utils/e2e-auth.mjs";
 
 const BASE_URL = process.argv.includes("--base-url")
   ? process.argv[process.argv.indexOf("--base-url") + 1]
-  : (process.env.MCP_BASE_URL ?? "https://staging.krabiclaw.com");
+  : (process.env.MCP_BASE_URL ?? "https://staging.blawby.com");
 
 const MCP_URL = `${BASE_URL}/api/mcp`;
 const TOKEN_URL = `${BASE_URL}/api/auth/oauth2/token`;

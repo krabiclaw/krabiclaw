@@ -4,19 +4,23 @@
     Payout ID, then a card per booking the payout carried — pictures, what,
     when, and its total — with Details opening the record.
   -->
-  <DashboardLeafPanel id="earnings-payout" :title="detail ? paymentMoney(detail.amount, detail.currency) : 'Payout'" :lead="detail ? `${payoutStatusLabel(detail.status)} · ${payoutDate(detail.arrival_date, { month: 'long', day: 'numeric', year: 'numeric' })}` : ''" :footer="false" :error="error ? getErrorMessage(error, 'Payout request failed') : ''">
+  <DashboardLeafPanel id="earnings-payout" :title="detail ? paymentMoney(detail.amount, detail.currency) : 'Payout'" :lead="detail ? (detail.status === 'failed' ? (detail.failure_message ? `Failed · ${detail.failure_message}` : 'Failed') : `${payoutStatusLabel(detail.status)} · ${payoutDate(detail.arrival_date, { month: 'long', day: 'numeric', year: 'numeric' })}`) : ''" :footer="false" :error="error ? getErrorMessage(error, 'Payout request failed') : ''">
     <template v-if="detail">
       <div class="flex flex-col items-center py-4">
         <span class="relative flex size-20 items-center justify-center rounded-full bg-elevated ring ring-default">
           <UIcon name="i-lucide-landmark" class="size-9 text-highlighted" />
           <UIcon v-if="detail.status === 'paid'" name="i-lucide-circle-check" class="absolute -bottom-1 -right-1 size-7 rounded-full bg-default text-success" />
+          <UIcon v-else-if="detail.status === 'failed'" name="i-lucide-circle-alert" class="absolute -bottom-1 -right-1 size-7 rounded-full bg-default text-error" />
         </span>
         <p class="mt-4 text-3xl font-semibold text-highlighted">{{ paymentMoney(detail.amount, detail.currency) }}</p>
       </div>
 
       <UCard as="section" variant="subtle">
         <dl class="divide-y divide-default">
-          <div class="py-4 first:pt-0"><dt class="text-base font-semibold text-highlighted">{{ payoutStatusLabel(detail.status) }}</dt><dd class="mt-1 text-base text-muted">{{ payoutDate(detail.arrival_date, { month: 'long', day: 'numeric', year: 'numeric' }) }}</dd></div>
+          <div class="py-4 first:pt-0">
+            <dt class="text-base font-semibold text-highlighted">{{ payoutStatusLabel(detail.status) }}</dt>
+            <dd class="mt-1 text-base text-muted">{{ detail.status === 'failed' ? (detail.failure_message || 'Payout failed') : payoutDate(detail.arrival_date, { month: 'long', day: 'numeric', year: 'numeric' }) }}</dd>
+          </div>
           <div v-if="detail.bank" class="py-4"><dt class="text-base font-semibold text-highlighted">Bank account</dt><dd class="mt-1 text-base text-muted">{{ detail.bank.bank_name ?? 'Bank account' }}, ••••{{ detail.bank.last4 }} ({{ detail.currency }})</dd></div>
           <div class="py-4 last:pb-0"><dt class="text-base font-semibold text-highlighted">Payout ID</dt><dd class="mt-1 break-all text-base text-muted">{{ detail.id }}</dd></div>
         </dl>

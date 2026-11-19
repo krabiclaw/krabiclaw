@@ -1,4 +1,4 @@
-name = "krabiclaw"
+name = "blawby"
 main = ".output/server/index.mjs"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat_v2", "nodejs_compat_populate_process_env", "global_fetch_strictly_public", "web_socket_auto_reply_to_close"]
@@ -117,8 +117,8 @@ MCP_DIAGNOSTICS_ENABLED = "true"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v27"
-database_id = "e2e1b8cf-9246-4cfa-bced-548f1ffca0c4"
+database_name = "blawby-production-v28"
+database_id = "737276b7-41f7-4e05-8c6c-dc575b8d8e2a"
 migrations_dir = "migrations"
 remote = false
 
@@ -137,14 +137,14 @@ deleted_classes = ["GuestThreadCommandObject"]
 # What a write announces, delivered by Cloudflare to whatever reacts (server/events.ts). No timer looks for it.
 [[queues.producers]]
 binding = "EVENTS"
-queue = "krabiclaw-events"
+queue = "blawby-events"
 
 [[queues.consumers]]
-queue = "krabiclaw-events"
+queue = "blawby-events"
 max_batch_size = 10
 max_batch_timeout = 1
 max_retries = 5
-dead_letter_queue = "krabiclaw-events-dlq"
+dead_letter_queue = "blawby-events-dlq"
 
 # Airbnb sync and disconnect steps (server/integrations/channex/airbnb-sync.ts): one delivery at a time,
 # so a repeated delivery reads the stage the earlier one saved and never sends the same Channex create twice.
@@ -162,7 +162,7 @@ dead_letter_queue = "blawby-airbnb-sync-dlq"
 
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
-bucket_name = "krabiclaw-media"
+bucket_name = "blawby-media"
 remote = false
 
 [[kv_namespaces]]
@@ -185,7 +185,7 @@ enabled = true
 
 # Stable staging environment — uses dedicated non-production data/resources.
 # Tenant aliases stay at the first subdomain level (for example,
-# pottery-house-staging.krabiclaw.com), which is covered by the zone certificate.
+# pottery-house-staging.blawby.com), which is covered by the zone certificate.
 # The more-specific environment route wins over production's broad wildcard.
 # `nuxt dev` only. Wrangler's platform proxy runs an empty script, so a Durable
 # Object bound to a class in this Worker never resolves there; the class is
@@ -223,20 +223,20 @@ WHATSAPP_DELIVERY_MODE = "provider"
 
 [[env.dev.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v27"
-database_id = "e2e1b8cf-9246-4cfa-bced-548f1ffca0c4"
+database_name = "blawby-production-v28"
+database_id = "737276b7-41f7-4e05-8c6c-dc575b8d8e2a"
 migrations_dir = "migrations"
 remote = false
 
 [[env.dev.durable_objects.bindings]]
 name = "GUEST_INBOX_HUBS"
 class_name = "GuestInboxHubObject"
-script_name = "krabiclaw-guest-inbox-hub"
+script_name = "blawby-guest-inbox-hub"
 
 # The platform proxy uses the dev registry to reach the queue consumer in the local inbox hub Worker.
 [[env.dev.queues.producers]]
 binding = "EVENTS"
-queue = "krabiclaw-events-local"
+queue = "blawby-events-local"
 
 # Airbnb sync and disconnect steps (server/integrations/channex/airbnb-sync.ts): one delivery at a time,
 # so a repeated delivery reads the stage the earlier one saved and never sends the same Channex create twice.
@@ -246,7 +246,7 @@ queue = "blawby-airbnb-sync-local"
 
 [[env.dev.r2_buckets]]
 binding = "MEDIA_BUCKET"
-bucket_name = "krabiclaw-media"
+bucket_name = "blawby-media"
 remote = false
 
 [[env.dev.kv_namespaces]]
@@ -262,7 +262,10 @@ remote = true
 binding = "IMAGES"
 
 [env.staging]
+name = "blawby-staging"
 routes = [
+  { pattern = "staging.blawby.com/*", zone_name = "blawby.com" },
+  { pattern = "*-staging.blawby.com/*", zone_name = "blawby.com" },
   { pattern = "staging.krabiclaw.com/*", zone_name = "krabiclaw.com" },
   { pattern = "*-staging.krabiclaw.com/*", zone_name = "krabiclaw.com" }
 ]
@@ -294,13 +297,13 @@ APNS_BUNDLE_ID = "com.krabiclaw.app"
 # Web push (VAPID). The public key is what browsers subscribe with; VAPID_PRIVATE_KEY is its secret.
 NUXT_PUBLIC_VAPID_PUBLIC_KEY = "BK_xrjKKq-juVkp961DdsBtXYnf38NvPsSHUN0gESru1OCtvWjXukSFzDZTY2qDIV4RtDpl4_qvoNfcc0fwaMTo"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
-BETTER_AUTH_URL = "https://staging.krabiclaw.com"
-NUXT_PUBLIC_PLATFORM_DOMAIN = "https://staging.krabiclaw.com"
-MEDIA_BASE_URL = "https://staging.krabiclaw.com/__media"
+BETTER_AUTH_URL = "https://staging.blawby.com"
+NUXT_PUBLIC_PLATFORM_DOMAIN = "https://staging.blawby.com"
+MEDIA_BASE_URL = "https://staging.blawby.com/__media"
 NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN = "https://blawby.com"
 NUXT_PUBLIC_APP_NAME = "Blawby"
-NUXT_PUBLIC_SITE_URL = "https://staging.krabiclaw.com"
-NUXT_PUBLIC_HELP_URL = "https://staging.krabiclaw.com/help"
+NUXT_PUBLIC_SITE_URL = "https://staging.blawby.com"
+NUXT_PUBLIC_HELP_URL = "https://staging.blawby.com/help"
 NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 # Staging runs on a copy of production's rows and has no Zaraz zone of its own;
 # reconciling would rewrite production's tags. Production leaves this unset.
@@ -314,8 +317,8 @@ E2E_ALLOW_DEV_ROUTES = "true"
 
 [[env.staging.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-staging-v27"
-database_id = "8acf5e8f-e55f-46a3-87e3-f7967f25c4c2"
+database_name = "blawby-staging-v28"
+database_id = "c6237771-99ed-4c38-b05e-d886b986da4c"
 migrations_dir = "migrations"
 remote = false
 
@@ -334,14 +337,14 @@ deleted_classes = ["GuestThreadCommandObject"]
 # What a write announces, delivered by Cloudflare to whatever reacts (server/events.ts). No timer looks for it.
 [[env.staging.queues.producers]]
 binding = "EVENTS"
-queue = "krabiclaw-events-staging"
+queue = "blawby-events-staging"
 
 [[env.staging.queues.consumers]]
-queue = "krabiclaw-events-staging"
+queue = "blawby-events-staging"
 max_batch_size = 10
 max_batch_timeout = 1
 max_retries = 5
-dead_letter_queue = "krabiclaw-events-staging-dlq"
+dead_letter_queue = "blawby-events-staging-dlq"
 
 # Airbnb sync and disconnect steps (server/integrations/channex/airbnb-sync.ts): one delivery at a time,
 # so a repeated delivery reads the stage the earlier one saved and never sends the same Channex create twice.
@@ -359,7 +362,7 @@ dead_letter_queue = "blawby-airbnb-sync-staging-dlq"
 
 [[env.staging.r2_buckets]]
 binding = "MEDIA_BUCKET"
-bucket_name = "krabiclaw-media-staging"
+bucket_name = "blawby-media-staging"
 remote = false
 
 [[env.staging.kv_namespaces]]
@@ -417,8 +420,8 @@ WHATSAPP_DELIVERY_MODE = "log_only"
 
 [[env.e2e.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v27"
-database_id = "e2e1b8cf-9246-4cfa-bced-548f1ffca0c4"
+database_name = "blawby-production-v28"
+database_id = "737276b7-41f7-4e05-8c6c-dc575b8d8e2a"
 migrations_dir = "migrations"
 remote = false
 
@@ -437,10 +440,10 @@ deleted_classes = ["GuestThreadCommandObject"]
 # What a write announces, delivered by Cloudflare to whatever reacts (server/events.ts). No timer looks for it.
 [[env.e2e.queues.producers]]
 binding = "EVENTS"
-queue = "krabiclaw-events-local"
+queue = "blawby-events-local"
 
 [[env.e2e.queues.consumers]]
-queue = "krabiclaw-events-local"
+queue = "blawby-events-local"
 max_batch_size = 10
 max_batch_timeout = 1
 max_retries = 5
@@ -460,7 +463,7 @@ max_concurrency = 1
 
 [[env.e2e.r2_buckets]]
 binding = "MEDIA_BUCKET"
-bucket_name = "krabiclaw-media"
+bucket_name = "blawby-media"
 remote = false
 
 [[env.e2e.kv_namespaces]]

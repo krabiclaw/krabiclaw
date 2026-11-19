@@ -160,10 +160,10 @@ function normalizeStay(source: Record<string, string>, home: StayHome, sourceId:
   }
   const name = readCell(source, 'guest_name')
   if (name.length > 200 || (source.notes?.length ?? 0) > 2000) throw new Error('Guest names are limited to 200 characters and notes to 2,000')
-  const email = source.guest_email || null
+  const channel = channelValue(readCell(source, 'channel'))
+  const email = channel === 'direct' ? readCell(source, 'guest_email') : source.guest_email?.trim() || null
   if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) throw new Error('Guest email is not a valid email address')
   if (source.guest_phone && !toE164(source.guest_phone)) throw new Error('Guest phone needs its country calling code')
-  const channel = channelValue(readCell(source, 'channel'))
   const confirmation = source.channel_booking_id || null
   if (channel !== 'direct' && !confirmation) throw new Error('A channel booking needs its actual channel confirmation code, not its Hostaway ID')
   return {

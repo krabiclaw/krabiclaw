@@ -323,7 +323,7 @@ const apiBase = props.personalScope ? '/api/account' : '/api/dashboard'
 const realtime = props.personalScope ? null : useDashboardInvalidations()
 const { filters, signature: filterSignature, query: filterQuery } = useAgendaFilters()
 
-const timeZone = getLocalTimeZone()
+const timeZone = props.personalScope ? getLocalTimeZone() : (useDashboardOrganization().organization.value?.timezone ?? getLocalTimeZone())
 const todayDate = today(timeZone)
 const todayKey = todayDate.toString()
 
@@ -340,9 +340,9 @@ const VIEWS: Record<CalendarView, { label: string; icon: string }> = {
   places: { label: 'Places', icon: 'i-lucide-rows-4' },
 }
 const homesView = !props.personalScope && !props.sessionProduct && props.hasHomes
-const placesView = !props.personalScope && !props.sessionProduct && props.hasPlaces
+const placesView = computed(() => !props.personalScope && !props.sessionProduct && props.hasPlaces)
 // A business with homes opens on its multi-home grid, as Airbnb's and Hostaway's multi-calendars do; a view in the URL still wins.
-const view = ref<CalendarView>(route.query.view === 'list' || route.query.view === 'year' || (homesView && route.query.view === 'homes') || (placesView && route.query.view === 'places') ? route.query.view : homesView ? 'homes' : 'month')
+const view = ref<CalendarView>(route.query.view === 'list' || route.query.view === 'year' || (homesView && route.query.view === 'homes') || (placesView.value && route.query.view === 'places') ? route.query.view : homesView ? 'homes' : 'month')
 const gridView = computed(() => view.value === 'homes' || view.value === 'places')
 const searchLabel = computed(() => view.value === 'homes' ? 'Search homes' : view.value === 'places' ? 'Search places' : 'Search bookings')
 const routeMonth = typeof route.query.month === 'string' && /^\d{4}-\d{2}$/.test(route.query.month) ? route.query.month : null
@@ -353,7 +353,7 @@ const shownYear = ref(shownMonth.value.year)
 const monthKey = computed(() => monthKeyOf(shownMonth.value))
 
 const viewItems = computed(() => [
-  (Object.keys(VIEWS) as CalendarView[]).filter(key => (key !== 'homes' || homesView) && (key !== 'places' || placesView)).map(key => ({
+  (Object.keys(VIEWS) as CalendarView[]).filter(key => (key !== 'homes' || homesView) && (key !== 'places' || placesView.value)).map(key => ({
     label: VIEWS[key].label,
     icon: VIEWS[key].icon,
     type: 'checkbox' as const,
@@ -741,8 +741,23 @@ if (organizationId) provide(calendarSessionsKey, {
   },
 })
 
-// The period on screen is read before the level renders; others as they are shown.
-await ensureLoaded(neededKeys())
+// Carry the first scoped agenda into hydration before letting the grid and the
+// day panel mount. Subsequent date and filter changes use the same reader.
+const app = useNuxtApp()
+const initialKeys = neededKeys()
+if (initialKeys.length && (import.meta.server || app.isHydrating) && !props.personalScope) {
+  const { data: initial } = await useAsyncData(`calendar-agenda:${route.fullPath.split('#')[0]}`, async () => {
+    await ensureLoaded(initialKeys)
+    return { blocks: [...calendarData.value.values()], locations: locations.value, kinds: availableKinds.value }
+  })
+  if (initial.value) {
+    calendarData.value = new Map(initial.value.blocks.map(block => [block.key, block]))
+    locations.value = initial.value.locations
+    availableKinds.value = initial.value.kinds
+  }
+} else {
+  await ensureLoaded(initialKeys)
+}
 
 // The URL says which view and which month; the data follows the period.
 watch([view, monthKey, shownYear], () => {

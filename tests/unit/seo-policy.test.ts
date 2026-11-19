@@ -11,6 +11,8 @@ test('isNonIndexableHost classifies staging, cloudflare previews, and demo showc
 
   // Staging and previews
   assert.equal(isNonIndexableHost('staging.krabiclaw.com'), true)
+  assert.equal(isNonIndexableHost('staging.blawby.com'), true)
+  assert.equal(isNonIndexableHost('pottery-house-staging.blawby.com'), true)
   assert.equal(isNonIndexableHost('pottery-house-staging.krabiclaw.com'), true)
   assert.equal(isNonIndexableHost('preview.pages.dev'), true)
   assert.equal(isNonIndexableHost('app.workers.dev'), true)

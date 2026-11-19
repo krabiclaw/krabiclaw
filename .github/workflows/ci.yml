@@ -140,15 +140,15 @@ jobs:
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY_TEST }}
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET_STAGING }}
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
-      NUXT_PUBLIC_PLATFORM_DOMAIN: https://staging.krabiclaw.com
+      NUXT_PUBLIC_PLATFORM_DOMAIN: https://staging.blawby.com
       NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://blawby.com
       NUXT_PUBLIC_APP_NAME: Blawby
-      NUXT_PUBLIC_SITE_URL: https://staging.krabiclaw.com
-      NUXT_PUBLIC_HELP_URL: https://staging.krabiclaw.com/help
+      NUXT_PUBLIC_SITE_URL: https://staging.blawby.com
+      NUXT_PUBLIC_HELP_URL: https://staging.blawby.com/help
       NUXT_PUBLIC_WHATSAPP_NUMBER: "16197200000"
-      BETTER_AUTH_URL: https://staging.krabiclaw.com
-      MCP_BASE_URL: https://staging.krabiclaw.com
-      PLAYWRIGHT_PREVIEW_URL: https://staging.krabiclaw.com
+      BETTER_AUTH_URL: https://staging.blawby.com
+      MCP_BASE_URL: https://staging.blawby.com
+      PLAYWRIGHT_PREVIEW_URL: https://staging.blawby.com
       PLAYWRIGHT_WORKERS: "2"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -238,10 +238,10 @@ jobs:
           EXPECTED_NUXT_BUILD_ID: ${{ steps.nuxt_build.outputs.id }}
         run: >-
           node scripts/wait-for-nuxt-deployment.mjs
-          https://pottery-house-staging.krabiclaw.com
-          https://kikuzuki-krabi-thailand-staging.krabiclaw.com
-          https://ncls-staging.krabiclaw.com
-          https://staging.krabiclaw.com
+          https://pottery-house-staging.blawby.com
+          https://kikuzuki-krabi-thailand-staging.blawby.com
+          https://ncls-staging.blawby.com
+          https://staging.blawby.com
       - &adopt_outstanding_work
         name: Adopt outstanding work
         env:

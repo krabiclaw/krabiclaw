@@ -60,7 +60,7 @@ const dashboardApi = useDashboardApi()
 const recentOrRead = useInsightsRead()
 const isIndex = (value: unknown): value is InsightsIndex => insightsIndexSchema.safeParse(value).success
 
-const { data, error } = await useAsyncData(
+const { data, error } = await useLazyAsyncData(
   () => `insights-index:${String(route.params.org_slug)}`,
   () => recentOrRead(`index:${String(route.params.org_slug)}`, () => dashboardApi<InsightsIndex>('/api/dashboard/insights', { validate: isIndex }), isIndex),
 )

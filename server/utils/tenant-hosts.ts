@@ -10,9 +10,11 @@ export interface TenantHostEnv {
 const PAGES_DEV_HOST = 'krabiclaw.pages.dev'
 export const LEGACY_FREE_SITE_HOST = 'krabiclaw.com'
 export const BLAWBY_FREE_SITE_HOST = 'blawby.com'
+const STAGING_PLATFORM_HOST = 'staging.blawby.com'
+const LEGACY_STAGING_PLATFORM_HOST = 'staging.krabiclaw.com'
 
 const ENVIRONMENT_PLATFORM_HOST_PATTERN = /^(staging)\.(.+)$/
-const ENVIRONMENT_TENANT_ALIAS_HOST_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?-staging\.krabiclaw\.com$/
+const ENVIRONMENT_TENANT_ALIAS_HOST_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?-staging\.(?:blawby|krabiclaw)\.com$/
 const TENANT_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
 
 // Strip protocol, path, and port so config values (which may be
@@ -32,12 +34,14 @@ export function hostnameOf(host: string): string {
 
 export function getPlatformHosts(env: TenantHostEnv): string[] {
   const freeSiteHost = normalizeHost(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
+  const platformHost = normalizeHost(env.NUXT_PUBLIC_PLATFORM_DOMAIN)
   return Array.from(new Set([
     'localhost',
     '127.0.0.1',
     freeSiteHost,
     freeSiteHost === BLAWBY_FREE_SITE_HOST ? LEGACY_FREE_SITE_HOST : '',
-    normalizeHost(env.NUXT_PUBLIC_PLATFORM_DOMAIN),
+    platformHost,
+    platformHost === STAGING_PLATFORM_HOST ? LEGACY_STAGING_PLATFORM_HOST : '',
   ].filter((value): value is string => Boolean(value))))
 }
 
@@ -47,6 +51,11 @@ export function isPlatformHost(host: string, env: TenantHostEnv): boolean {
     return true
   }
   return getPlatformHosts(env).includes(hostname)
+}
+
+export function isStagingPlatformHost(host: string): boolean {
+  const hostname = hostnameOf(host).toLowerCase().replace(/\.$/, '')
+  return hostname === STAGING_PLATFORM_HOST || hostname === LEGACY_STAGING_PLATFORM_HOST
 }
 
 export function isEnvironmentTenantAliasHost(host: string): boolean {
@@ -73,7 +82,10 @@ export function environmentTenantAliasSlug(host: string, env: TenantHostEnv): st
 
   const [, environment, rootDomain] = match
   if (!environment || !rootDomain) return null
-  const suffix = `-${environment}.${rootDomain}`
+  const legacySuffix = `-${environment}.${LEGACY_FREE_SITE_HOST}`
+  const suffix = platformHost === STAGING_PLATFORM_HOST && hostname.endsWith(legacySuffix)
+    ? legacySuffix
+    : `-${environment}.${rootDomain}`
   if (!hostname.endsWith(suffix)) return null
 
   const slug = hostname.slice(0, -suffix.length)
@@ -101,7 +113,7 @@ export function usesTenantHeader(host: string): boolean {
 export function isNonProductionHost(host: string): boolean {
   const hostname = hostnameOf(host).toLowerCase().replace(/\.$/, '')
   if (usesTenantHeader(hostname)) return true
-  if (hostname === 'staging.krabiclaw.com') return true
+  if (isStagingPlatformHost(hostname)) return true
   if (/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.trycloudflare\.com$/.test(hostname)) return true
   return isEnvironmentTenantAliasHost(hostname)
 }
