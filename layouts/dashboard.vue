@@ -19,7 +19,8 @@ const nuxt = useNuxtApp()
 const route = useRoute()
 // Keep the shell mounted when navigating from a private dashboard document.
 const document = useState('dashboard:server-document', () => (import.meta.server || nuxt.isHydrating)
-  && /^\/dashboard\/[^/]+\/(?:bookings\/[^/]+|products)\/?$/.test(route.path))
+  && typeof route.params.org_slug === 'string'
+  && /^\/dashboard\/[^/]+(?:\/(?:bookings\/[^/]+|products))?\/?$/.test(route.path))
 const wrapper = document.value ? 'div' : ClientOnly
 
 // The shell reads the theme breakpoints during setup, so the document must

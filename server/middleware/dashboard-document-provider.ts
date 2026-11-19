@@ -4,6 +4,7 @@ import { loadDashboardCatalog } from '~/server/utils/dashboard-catalog'
 import { dashboardBookingDetails } from '~/server/utils/dashboard-bookings'
 import { loadDashboardContext } from '~/server/utils/dashboard-context-service'
 import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
+import { readDashboardToday } from '~/server/utils/dashboard-today'
 import { oncePerRequest } from '~/server/utils/request-scope'
 
 export default defineHandler(event => {
@@ -17,6 +18,7 @@ export default defineHandler(event => {
       setHeader(event, 'cache-control', 'private, no-store')
       return finalizeRequestMetrics(event, 'dashboard-catalog-ssr', await loadDashboardCatalog(event, orgSlug))
     }),
+    today: (orgSlug: string) => oncePerRequest(event, `dashboard-today:${orgSlug}`, () => readDashboardToday(event, orgSlug)),
     booking: (orgSlug: string, bookingId: string) => oncePerRequest(event, `dashboard-reservation:${orgSlug}:${bookingId}`, async () => {
       setHeader(event, 'cache-control', 'private, no-store')
       return finalizeRequestMetrics(event, 'dashboard-reservation-ssr', await dashboardBookingDetails(event, { orgSlug, bookingId }))

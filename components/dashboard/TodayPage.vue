@@ -124,6 +124,12 @@ const { data, pending, error: loadError, refresh } = await useAsyncData(
   todayKey,
   async (_app, { signal }): Promise<{ business: BusinessToday | null; visits: TodayCard[] }> => {
     if (!props.personalScope) {
+      if (import.meta.server) {
+        const provider = useRequestEvent()?.context.dashboardDocumentProvider as { today: (orgSlug: string) => Promise<unknown> } | undefined
+        const business = await provider?.today(orgSlug.value)
+        if (!isBusinessToday(business)) throw createError({ statusCode: 502, statusMessage: 'Invalid Today response' })
+        return { business, visits: [] }
+      }
       const key = todayKey()
       realtime.held.take(key)
       const reading = realtime.held.begin(key, businessChanged)
@@ -140,7 +146,8 @@ const { data, pending, error: loadError, refresh } = await useAsyncData(
     return { business: null, visits: agenda.items.filter(item => item.day_key > localDateAt(now, item.timezone)).map(item => agendaToTodayCard(item, { resolved_at: now.toISOString() })) }
   },
   {
-    getCachedData(key, _app, ctx) {
+    getCachedData(key, app, ctx) {
+      if (app.isHydrating) return app.payload.data[key]
       if (props.personalScope || ctx.cause !== 'initial') return undefined
       const business = realtime.held.get(key)
       return isBusinessToday(business) ? { business, visits: [] } : undefined
