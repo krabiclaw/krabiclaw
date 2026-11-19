@@ -1,5 +1,5 @@
 import { useLocalStorage } from '@vueuse/core'
-import { toValue, type MaybeRefOrGetter } from 'vue'
+import { computed, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import { isRecord } from '~/utils/api-clients'
 import { authClient } from '~/lib/auth-client'
 import { isValidInstant, isValidTimezone } from '~/utils/timezone'
@@ -86,5 +86,17 @@ export function isSuggestedReplies(value: unknown): value is { generation_id: st
 /** Suggested replies are each person's choice for one workspace in this browser; on until turned off. */
 export function useSuggestedReplies(organizationId: MaybeRefOrGetter<string | null>) {
   const session = authClient.useSession()
-  return useLocalStorage(() => `krabiclaw.suggested-replies.${session.value.data?.user.id ?? 'signed-out'}.${toValue(organizationId)}`, true)
+  const scope = computed(() => `${session.value.data?.user.id ?? 'signed-out'}.${toValue(organizationId)}`)
+  const key = computed(() => `blawby.suggested-replies.${scope.value}`)
+  if (import.meta.client) {
+    // Move the saved value before VueUse reads or writes defaults for this scope.
+    watch(scope, (value) => {
+      const legacyKey = `krabiclaw.suggested-replies.${value}`
+      const saved = window.localStorage.getItem(legacyKey)
+      if (saved === null) return
+      if (window.localStorage.getItem(key.value) === null) window.localStorage.setItem(key.value, saved)
+      window.localStorage.removeItem(legacyKey)
+    }, { immediate: true, flush: 'sync' })
+  }
+  return useLocalStorage(key, true)
 }
