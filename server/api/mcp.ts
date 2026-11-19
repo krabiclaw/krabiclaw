@@ -331,8 +331,28 @@ export default defineHandler(async (event) => {
   const baseUrl = cfEnv.BETTER_AUTH_URL?.replace(/\/$/, "");
   if (!baseUrl) throw new HTTPError({ status: 500, statusText: "BETTER_AUTH_URL is required" });
 
-  const allowedHostnames = [new URL(baseUrl).hostname, ...localhostAllowedHostnames()];
-  const allowedOriginHostnames = [new URL(baseUrl).hostname, ...localhostAllowedOrigins()];
+  const baseHostname = new URL(baseUrl).hostname;
+  const platformHostname = cfEnv.NUXT_PUBLIC_PLATFORM_DOMAIN
+    ? new URL(cfEnv.NUXT_PUBLIC_PLATFORM_DOMAIN).hostname
+    : undefined;
+  const siteHostname = cfEnv.NUXT_PUBLIC_SITE_URL
+    ? new URL(cfEnv.NUXT_PUBLIC_SITE_URL).hostname
+    : undefined;
+
+  const allowedHostnames = Array.from(new Set([
+    baseHostname,
+    ...(platformHostname ? [platformHostname] : []),
+    ...(siteHostname ? [siteHostname] : []),
+    ...localhostAllowedHostnames(),
+  ]));
+  const allowedOriginHostnames = Array.from(new Set([
+    baseHostname,
+    ...(platformHostname ? [platformHostname] : []),
+    ...(siteHostname ? [siteHostname] : []),
+    "chatgpt.com",
+    "claude.ai",
+    ...localhostAllowedOrigins(),
+  ]));
   // Nitro's TypedServerRequest structurally differs from the Workers-typed
   // Request these SDK helpers expect (an optional vs. required `cache`
   // field) despite both being the same object at runtime.
@@ -343,7 +363,12 @@ export default defineHandler(async (event) => {
   if (rejectedOrigin) return rejectedOrigin;
   if (webRequest.method !== "POST") return mcpHandler.fetch(webRequest);
 
-  const tenantAuthOptions = { audiences: [`${baseUrl}/api/mcp`], requiredScopes: ["tenant"] };
+  const platformOrigin = cfEnv.NUXT_PUBLIC_PLATFORM_DOMAIN?.replace(/\/$/, "");
+  const tenantAudiences = Array.from(new Set([
+    `${baseUrl}/api/mcp`,
+    ...(platformOrigin ? [`${platformOrigin}/api/mcp`] : []),
+  ]));
+  const tenantAuthOptions = { audiences: tenantAudiences, requiredScopes: ["tenant"] };
   const runtimeDeps = {
     resourceUrl,
     authDescription: TENANT_AUTH_DESCRIPTION,
