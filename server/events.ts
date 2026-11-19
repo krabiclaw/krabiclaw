@@ -126,7 +126,10 @@ export async function consumeEvent(env: CloudflareEnv, event: DomainEvent): Prom
   }
   if (event.type === 'deployment.adopt_pending_work') {
     const { enqueueOutstandingWork } = await import('~/server/domain/due-business-work')
+    const { reconcileZarazAnalytics } = await import('~/server/utils/zaraz-analytics')
     await enqueueOutstandingWork(env)
+    // Domain migrations run before the Worker and do not dispatch dashboard domain events.
+    await reconcileZarazAnalytics(env, env.DB)
     return
   }
   if (event.type === 'domain.check_requested') {
