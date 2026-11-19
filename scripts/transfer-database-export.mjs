@@ -32,14 +32,19 @@ register('../tests/unit/support/alias-hooks.mjs', import.meta.url)
 const DECLARED_ORGANIZATION_ROLES = new Set(Object.keys(organizationRoles))
 
 const MIGRATIONS_DIRECTORY = 'migrations'
+const PREVIOUS_EPOCH_DIRECTORY = 'migrations-history/v27'
 const hash = value => createHash('sha256').update(value).digest('hex')
 const qi = value => `"${value.replaceAll('"', '""')}"`
 const assert = (condition, message) => { if (!condition) throw new Error(message) }
 
-function migrationChainSql() {
-  const migrations = readdirSync(resolve(MIGRATIONS_DIRECTORY))
+function migrationFiles(directory) {
+  return readdirSync(resolve(directory))
     .filter(name => /^\d{4}_.+\.sql$/u.test(name))
     .sort()
+}
+
+function migrationChainSql() {
+  const migrations = migrationFiles(MIGRATIONS_DIRECTORY)
   assert(migrations[0] === '0000_baseline.sql', 'Migration chain must start with migrations/0000_baseline.sql')
   return migrations.map(name => readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8')).join('\n')
 }
@@ -76,7 +81,7 @@ function comparisonDatabase(path) {
   try { comparison = new Database(original.serialize()) } finally { original.close() }
   const expected = new Database(':memory:')
   try {
-    const files = readdirSync(resolve(MIGRATIONS_DIRECTORY)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
+    const files = migrationFiles(MIGRATIONS_DIRECTORY)
     const hasManifest = existsSync(`${path}.manifest.json`)
     const recorded = hasManifest ? JSON.parse(readFileSync(`${path}.manifest.json`, 'utf8')) : null
     if (hasManifest) {
@@ -420,12 +425,12 @@ export const SCHEMA_OBJECTS_QUERY = "SELECT type, name, sql FROM sqlite_schema W
 export async function transferDatabaseExport(sourcePath, targetPath, { payloadPath = null, withoutJwks = false, deltaFrom = null } = {}) {
   assert(!existsSync(targetPath), `Target already exists: ${targetPath}`)
   assert(!deltaFrom || payloadPath, 'A delta is a payload; pass --payload with --delta-from')
-  const files = readdirSync(resolve(MIGRATIONS_DIRECTORY)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
+  const files = migrationFiles(MIGRATIONS_DIRECTORY)
   assert(files[0] === '0000_baseline.sql', 'Migration chain must start with migrations/0000_baseline.sql')
   const baseSql = readFileSync(resolve(MIGRATIONS_DIRECTORY, files[0]), 'utf8')
   const schemaSql = migrationChainSql()
   const source = openDatabase(resolve(sourcePath))
-  const stage = new Database(':memory:')
+  let stage
   // The target holds customer and credential rows during preflight. Create it
   // privately before SQLite opens it, including when --out keeps the file.
   writeFileSync(targetPath, '', { flag: 'wx', mode: 0o600 })
@@ -442,9 +447,20 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     const applied = new Set(ledger)
     assert(applied.size === ledger.length, 'Source migration ledger contains duplicate filenames')
     assert(ledger[0] === '0000_baseline.sql', 'Source migration ledger must start with 0000_baseline.sql')
-    assert(ledger.every(name => files.includes(name)), 'Source migration ledger names files outside the current migration chain; no rows were copied')
-    stage.exec(ledger.map(name => readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8')).join('\n'))
-    assert(sameSchema(source, stage), 'Source schema differs from its recorded migration stage; no rows were copied')
+    const sourceChain = [MIGRATIONS_DIRECTORY, PREVIOUS_EPOCH_DIRECTORY].find(directory => {
+      const migrations = migrationFiles(directory)
+      if (!ledger.every((name, index) => name === migrations[index])) return false
+      const candidate = new Database(':memory:')
+      try {
+        candidate.exec(ledger.map(name => readFileSync(resolve(directory, name), 'utf8')).join('\n'))
+        if (!sameSchema(source, candidate)) return false
+        stage = candidate
+        return true
+      } finally {
+        if (stage !== candidate) candidate.close()
+      }
+    })
+    assert(sourceChain && stage, 'Source schema differs from its recorded migration stage; no rows were copied')
     stage.pragma('foreign_keys = OFF')
     const sourceTables = tableNames(source)
     for (const table of sourceTables) {
@@ -455,7 +471,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       for (const row of rows) insert.run(...tableColumns.map(name => row[name]))
       assert(digest(rows, tableColumns) === digest(stage.prepare(`SELECT * FROM ${qi(table)}`).all(), tableColumns), `${table}: copy differs`)
     }
-    for (const name of files.filter(name => !applied.has(name))) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
+    for (const name of migrationFiles(sourceChain).slice(ledger.length)) stage.exec(readFileSync(resolve(sourceChain, name), 'utf8'))
     const unsupported = stage.prepare('SELECT organization_id, id, kind FROM products ORDER BY organization_id, id').all().filter(row => !PRODUCT_KINDS.includes(row.kind))
     assert(unsupported.length === 0, `Unsupported offerings: ${unsupported.map(row => `${row.organization_id}/${row.id} (${row.kind})`).join(', ')}; no rows were copied`)
     const names = tableNames(stage)
@@ -488,7 +504,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     return manifest
   } finally {
     source.close()
-    stage.close()
+    stage?.close()
     target.close()
   }
 }
