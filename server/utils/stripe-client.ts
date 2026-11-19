@@ -16,7 +16,7 @@ export function createStripeClient(secretKey: string, purpose: 'canonical' | 'pa
   })
   if (requestDb) {
     stripe.on('request', () => recordRequestExternalCall(requestDb, 'stripe'))
-    stripe.on('response', response => recordDatabaseRequestPhase(requestDb, 'stripe_responses', performance.now() - response.elapsed))
+    stripe.on('response', (response: { elapsed: number }) => recordDatabaseRequestPhase(requestDb, 'stripe_responses', performance.now() - response.elapsed))
   }
   return stripe
 }
