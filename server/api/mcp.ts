@@ -333,16 +333,12 @@ export default defineHandler(async (event) => {
     baseHostname,
     ...(platformHostname ? [platformHostname] : []),
     ...(siteHostname ? [siteHostname] : []),
-    "krabiclaw.com",
-    "blawby.com",
     ...localhostAllowedHostnames(),
   ]));
   const allowedOriginHostnames = Array.from(new Set([
     baseHostname,
     ...(platformHostname ? [platformHostname] : []),
     ...(siteHostname ? [siteHostname] : []),
-    "krabiclaw.com",
-    "blawby.com",
     "chatgpt.com",
     "claude.ai",
     ...localhostAllowedOrigins(),
@@ -361,8 +357,6 @@ export default defineHandler(async (event) => {
   const tenantAudiences = Array.from(new Set([
     `${baseUrl}/api/mcp`,
     ...(platformOrigin ? [`${platformOrigin}/api/mcp`] : []),
-    "https://krabiclaw.com/api/mcp",
-    "https://blawby.com/api/mcp",
   ]));
   const tenantAuthOptions = { audiences: tenantAudiences, requiredScopes: ["tenant"] };
   const runtimeDeps = {

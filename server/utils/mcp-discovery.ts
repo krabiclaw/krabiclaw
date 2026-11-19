@@ -47,12 +47,19 @@ export interface AiCatalog {
   }>
 }
 
+function resolveBaseUrl(env: CloudflareEnv): string {
+  const url = (env.BETTER_AUTH_URL ?? env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? env.NUXT_PUBLIC_SITE_URL)?.replace(/\/$/, '')
+  if (!url) throw new Error('BETTER_AUTH_URL is required')
+  return url
+}
+
 export function buildMcpServerCard(env: CloudflareEnv): McpServerCard {
-  const baseUrl = (env.BETTER_AUTH_URL ?? env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? 'https://krabiclaw.com').replace(/\/$/, '')
+  const baseUrl = resolveBaseUrl(env)
+  const appName = env.NUXT_PUBLIC_APP_NAME ?? 'Blawby'
   return {
     version: '1.0',
     serverInfo: {
-      name: 'krabiclaw-mcp',
+      name: `${appName.toLowerCase()}-mcp`,
       version: 'phase-5',
       description: 'Manage website content, offerings, stays, reservations, inquiries, and legal consultations.',
     },
@@ -74,8 +81,8 @@ export function buildMcpServerCard(env: CloudflareEnv): McpServerCard {
 }
 
 export function buildAgentCard(env: CloudflareEnv): AgentCard {
-  const baseUrl = (env.BETTER_AUTH_URL ?? env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? 'https://krabiclaw.com').replace(/\/$/, '')
-  const appName = env.NUXT_PUBLIC_APP_NAME ?? (baseUrl.includes('blawby') ? 'Blawby' : 'KrabiClaw')
+  const baseUrl = resolveBaseUrl(env)
+  const appName = env.NUXT_PUBLIC_APP_NAME ?? 'Blawby'
   return {
     schemaVersion: '1.0',
     name: appName,
@@ -95,17 +102,19 @@ export function buildAgentCard(env: CloudflareEnv): AgentCard {
 }
 
 export function buildAiCatalog(env: CloudflareEnv): AiCatalog {
-  const baseUrl = (env.BETTER_AUTH_URL ?? env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? 'https://krabiclaw.com').replace(/\/$/, '')
+  const baseUrl = resolveBaseUrl(env)
+  const appName = env.NUXT_PUBLIC_APP_NAME ?? 'Blawby'
+  const serverName = `${appName.toLowerCase()}-mcp`
   return {
     specVersion: '1.0',
     entries: [
       {
-        identifier: 'urn:mcp:server:krabiclaw-mcp',
+        identifier: `urn:mcp:server:${serverName}`,
         type: 'application/mcp-server-card+json',
         url: `${baseUrl}/api/mcp/server-card`,
       },
       {
-        identifier: 'urn:agent:card:krabiclaw-mcp',
+        identifier: `urn:agent:card:${serverName}`,
         type: 'application/agent-card+json',
         url: `${baseUrl}/.well-known/agent-card.json`,
       },
