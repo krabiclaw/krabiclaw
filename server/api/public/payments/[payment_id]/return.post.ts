@@ -1,7 +1,7 @@
 import { defineHandler } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 import { cloudflareEnv, jsonResponse, readRequiredBody } from '~/server/utils/api-response'
-import { ensureInteractionUser } from '~/server/utils/auth'
+import { ensureInteractionUser, getAuthSession } from '~/server/utils/auth'
 import { completePaymentReturn, type preparePaymentReturn } from '~/server/domain/payments/intent'
 import { assertExactCanonicalLocale, readPublicOrganizationLanguage, readPublicSourceLocale } from '~/server/utils/localization'
 
@@ -20,5 +20,6 @@ export default defineHandler(async (event) => {
     return readPublicOrganizationLanguage(event, env.DB, organizationId, assertExactCanonicalLocale(body.locale), source)
   } : undefined
   return jsonResponse(await completePaymentReturn(env.DB, env, organizationId, paymentId, body.claim, async () => (await ensureInteractionUser(event, env)).id,
-    prepared?.paymentId === paymentId ? prepared : undefined, receiptLanguage), { headers: { 'cache-control': 'private, no-store' } })
+    prepared?.paymentId === paymentId ? prepared : undefined, receiptLanguage,
+    async () => (await getAuthSession(event, env))?.user.id), { headers: { 'cache-control': 'private, no-store' } })
 })

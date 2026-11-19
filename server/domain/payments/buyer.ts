@@ -147,6 +147,18 @@ export function buyerRequestActivityFromRows(rows: unknown[]): string | null {
   return accountActivityPath(activity.kind, activity.id)
 }
 export async function tokenHash(token:string):Promise<string>{return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token)))).map(v=>v.toString(16).padStart(2,'0')).join('')}
+
+export function originalCheckoutClaim(paymentId: string, userId: string, hash: string, now: string) {
+ const queries: BatchQuery[] = [
+  {query:`UPDATE payments SET claimed_at=?,claimed_user_id=?
+    WHERE id=? AND buyer_user_id=? AND return_token_hash=? AND return_expires_at>? AND claimed_at IS NULL AND captured_amount>0`,
+   params:[now,userId,paymentId,userId,hash,now]},
+  {query:`SELECT 1 AS claimed FROM payments WHERE id=? AND buyer_user_id=? AND return_token_hash=?
+    AND return_expires_at>? AND claimed_at IS NOT NULL AND captured_amount>0`, params:[paymentId,userId,hash,now]},
+ ]
+ return { queries, read: ([, owner]: D1Result[]) => owner?.results.length === 1 }
+}
+
 /** Hidden Checkout-return proof, accepted only after native Stripe verification. */
 export async function claimCheckoutReturn(db:DbClient,userId:string,token:string,payment?:Pick<Payment,'id'|'buyer_user_id'|'captured_amount'|'claimed_at'|'return_token_hash'|'return_expires_at'>,
  receipt?: { queries: BatchQuery[]; read: (rows: D1Result[]) => Promise<void> }) {
@@ -167,12 +179,10 @@ export async function claimCheckoutReturn(db:DbClient,userId:string,token:string
  if(claim.claimed_at)return readReceipt()
  // The original buyer already owns the booking, its conversation and the hold.
  if(claim.buyer_user_id===userId){
-  const mark={query:`UPDATE payments SET claimed_at=?,claimed_user_id=?
-    WHERE id=? AND buyer_user_id=? AND return_token_hash=? AND return_expires_at>? AND claimed_at IS NULL AND captured_amount>0`,
-    params:[now,userId,claim.payment_id,userId,hash,now]}
-  const [marked, owner, ...rows]=await executeBatch(db,[mark,{query:available,params},...receipt?.queries ?? []],
+  const plan=originalCheckoutClaim(claim.payment_id,userId,hash,now)
+  const [marked, owner, ...rows]=await executeBatch(db,[...plan.queries,...receipt?.queries ?? []],
     {operation:'Claim checkout and read guest receipt'})
-  if(marked?.meta.changes!==1 && !(owner?.results[0] as { claimed_at?: string | null } | undefined)?.claimed_at)throw unavailable()
+  if(!plan.read([marked!,owner!]))throw unavailable()
   if(receipt)await receipt.read(rows)
   return response
  }

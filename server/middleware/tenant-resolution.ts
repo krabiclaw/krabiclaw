@@ -49,7 +49,7 @@ import { parseDate } from '@internationalized/date'
 import { prepareDashboardEarningsDocument } from '~/server/utils/dashboard-earnings'
 import { PUBLIC_CONFIG_COLUMNS, type PublicConfigRow } from '~/server/utils/organization-config'
 import { publicTenantRedirectQuery, type PublicTenantRedirect } from '~/server/utils/public-redirects'
-import { prepareBookingCreation, preparePublicTimedQuote, type PublicTimedQuoteRead } from '~/server/domain/product-bookings'
+import { prepareBookingCreation, preparePublicTimedQuote, timedBookingConversationId, type PublicTimedQuoteRead } from '~/server/domain/product-bookings'
 import { preparePublicProductAvailability, type PublicAvailabilityRead } from '~/server/utils/public-session-booking'
 import { preparePaymentHandoff, preparePaymentReturn } from '~/server/domain/payments/intent'
 import { prepareGuestBookingReceipt, type GuestReceiptRead } from '~/server/utils/guest-booking-receipt'
@@ -157,7 +157,10 @@ async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain:
       event.context.checkoutBody = body
       if (bookingSlug) {
         const idempotencyKey = typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : ''
-        const plan = prepareBookingCreation(tenantScope, { slug: bookingSlug, body, idempotencyKey }, null, false)
+        const organizationId = typeof body.organization_id === 'string' && body.organization_id.length <= 200 ? body.organization_id : ''
+        const replay = organizationId && idempotencyKey.length > 0 && idempotencyKey.length <= 200
+          ? { organizationId, threadId: await timedBookingConversationId(organizationId, idempotencyKey) } : undefined
+        const plan = prepareBookingCreation(tenantScope, { slug: bookingSlug, body, idempotencyKey, replay }, null, false)
         const [hostRows, ...rows] = await executeBatch(db, [host, ...plan.queries], { operation: 'Read public booking creation facts' })
         const tenant = hostRows?.results[0] as TenantRow | undefined
         if (tenant?.status === 'active' && tenant.onboarding_status === 'active') {

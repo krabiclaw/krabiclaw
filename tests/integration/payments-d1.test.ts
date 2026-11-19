@@ -1302,9 +1302,18 @@ test('a redirect that Stripe captures returns to the guest site and settles one 
 
   // Stripe sends the guest back before the success webhook arrives.
   statuses.redirect = 'succeeded'
-  const receipt = await completePaymentReturn(db, env, ORG, 'redirect', claim, async () => 'guest')
+  const trace = new H3Event(new Request(origin + '/api/public/payments/redirect/return'))
+  const requestDb = instrumentD1(trace, db.withSession('first-primary'), db)
+  const returnPayment = (client: typeof requestDb) => completePaymentReturn(client, { ...env, DB: client }, ORG, 'redirect', claim,
+   async () => 'guest', undefined, async () => ({ locale: 'en', source: true }), async () => 'guest')
+  const receipt = await returnPayment(requestDb)
   assert.equal(receipt.state, 'paid')
   if (receipt.state !== 'paid' || receipt.kind !== 'booking') throw new Error('Expected a booking receipt')
+  assert.equal(receipt.booking?.status, 'confirmed')
+  assert.deepEqual(receipt.booking?.paid, { amount: 10000, currency: 'USD' })
+  const { batchRoundTrips, singleStatementRoundTrips } = getRequestDataMetrics(trace)
+  // This provider session reads the attorney's availability and its older purchase reads two attribution rows.
+  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 1, singleStatementRoundTrips: 5 })
   const response = await request('/api/public/booking-requests/' + receipt.conversation_id, { headers: { authorization: `Bearer ${receipt.cancellation_token}` } })
   assert.equal(response.status, 200)
   const { booking } = await response.json() as { booking: { status: string } }
@@ -1313,10 +1322,11 @@ test('a redirect that Stripe captures returns to the guest site and settles one 
   const deliver = (id: string, event = `evt_${id}`) => processPaymentEvent(db, stripe, { id: event, type: 'payment_intent.succeeded', account: 'acct_seller', livemode: false,
    data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as unknown as Stripe.Event, env)
   await deliver('redirect')
-  assert.deepEqual(await completePaymentReturn(db, env, ORG, 'redirect', claim, async () => 'guest'), receipt)
+  assert.deepEqual(await returnPayment(db), receipt)
   const booked = await requirePayment(db, ORG, 'redirect')
   assert.ok(booked.subject_id)
   assert.equal(booked.captured_amount, 10000)
+  assert.equal(booked.claimed_user_id, 'guest')
 
   const capture = events.take('payment.captured')
   assert.ok(capture, 'a settled redirect queues the captured payment')

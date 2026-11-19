@@ -347,6 +347,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
         {
           method: 'POST',
           body: {
+            organization_id: context.value.organizationId,
             idempotency_key: checkoutRequestKey.value,
             product_session_id: session.id,
             product_variant_id: selectedVariantId.value,

@@ -297,8 +297,24 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
 type BookingOrganization = { id: string; slug: string; default_currency: string; vertical: string | null; source_locale: string | null;
   locale_status: string | null; policy_type: string | null; confirmation_mode: unknown }
 
+type BookingReplay = { id: string; status: string; fingerprint: string | null; completed: number | null; creation_status: string | null; product_session_id: string; product_variant_id: string; party_size: number }
+
+export function timedBookingConversationId(organizationId: string, idempotencyKey: string, operator = false) {
+  return hashIdentifier(JSON.stringify(operator ? [organizationId, idempotencyKey] : ['website-booking', organizationId, idempotencyKey]))
+}
+
+function bookingReplayQuery(organization: BatchQuery, threadId: string): BatchQuery {
+  return { query: `SELECT b.id, b.status, b.product_session_id, b.product_variant_id, b.party_size,
+    json_extract(r.payload_json, '$.provenance.fingerprint') AS fingerprint,
+    json_extract(r.payload_json, '$.provenance.followups_completed') AS completed,
+    json_extract(r.payload_json, '$.provenance.creation_status') AS creation_status
+    FROM conversations r JOIN bookings b ON b.id=r.booking_id AND b.organization_id=r.organization_id
+    WHERE r.organization_id=${organization.query} AND r.id=?`, params: [...organization.params ?? [], threadId] }
+}
+
 export function prepareBookingCreation(organization: BatchQuery, input: {
   slug?: string; productId?: string; body: Record<string, unknown>; idempotencyKey: string
+  replay?: { organizationId: string; threadId: string }
 }, membership: BatchQuery | null, includeStayHome: boolean) {
   const offeringQuery = bookingOfferingQuery(organization, input)
   const organizationQuery: BatchQuery = { query: `
@@ -312,6 +328,7 @@ export function prepareBookingCreation(organization: BatchQuery, input: {
     : bookingParameter(input.productId)
   const reads = [organizationQuery, offeringQuery]
   if (includeStayHome) reads.push(stayCreationHomeQuery(organization, product, input.body.check_in_date, input.idempotencyKey))
+  if (input.replay) reads.push(bookingReplayQuery(organization, input.replay.threadId))
   const now = new Date().toISOString()
   if (!selection.failure) {
     const terms = timedBookingQueries(organization, product, selection)
@@ -324,11 +341,13 @@ export function prepareBookingCreation(organization: BatchQuery, input: {
       const member = membership ? results.shift()!.results[0] : undefined
       const [orgRows, offeringRows] = results.splice(0, 2)
       const home = includeStayHome ? results.shift()!.results[0] as StayCreationHome | undefined : undefined
+      const replay = input.replay ? { ...input.replay, row: results.shift()!.results[0] as BookingReplay | undefined } : undefined
       const [attempts, seller, ...timed] = results
       return {
         member, home, organization: orgRows!.results[0] as BookingOrganization | undefined,
         offering: offeringRows!.results[0] as BookingOffering | undefined,
         checkoutAttempt: attempts?.results[0] as CheckoutAttempt | undefined,
+        replay,
         seller: seller?.results,
         timed: selection.failure ? null : { ...timedBookingFrom(timed.slice(0, 3)), calendar: timed.slice(3), now },
       }
@@ -425,10 +444,14 @@ async function createBookingFrom(event: H3Event, env: CloudflareEnv, context: Bo
   const { sessionId, requestedVariantId, partySize } = selection
   const pageEventId = readPageEventId(body.page_event_id)
 
-  const threadId = await hashIdentifier(JSON.stringify(operator ? [organizationId, idempotencyKey] : ['website-booking', organizationId, idempotencyKey]))
+  const threadId = await timedBookingConversationId(organizationId, idempotencyKey, Boolean(operator))
   const fingerprint = await hashIdentifier(JSON.stringify({ slug, sessionId, requestedVariantId, partySize, guestName, guestEmail, phone: normalizedGuestPhone, notes, answers: formAnswersFingerprint(body.answers), source: operator?.source ?? 'website', externalReference: operator?.externalReference ?? null, guestAcknowledgement: operator?.guestAcknowledgement ?? true }))
-  const replay = async () => {
-    const existing = await queryFirst<{ id: string; status: string; fingerprint: string | null; completed: number | null; creation_status: string | null; product_session_id: string; product_variant_id: string; party_size: number }>(db, `SELECT b.id, b.status, b.product_session_id, b.product_variant_id, b.party_size, json_extract(r.payload_json, '$.provenance.fingerprint') AS fingerprint, json_extract(r.payload_json, '$.provenance.followups_completed') AS completed, json_extract(r.payload_json, '$.provenance.creation_status') AS creation_status FROM conversations r JOIN bookings b ON b.id = r.booking_id AND b.organization_id = r.organization_id WHERE b.organization_id = ? AND r.id = ?`, [organizationId, threadId])
+  const replay = async (fresh = false) => {
+    const booking = bookingReplayQuery(bookingParameter(organizationId), threadId)
+    const prepared = facts.replay
+    const existing = !fresh && prepared?.organizationId === organizationId && prepared.threadId === threadId
+      ? prepared.row
+      : await queryFirst<BookingReplay>(db, booking.query, booking.params)
     if (!existing) return null
     if (existing.fingerprint !== fingerprint) return creationResult({ error: 'Idempotency key was reused with different booking details', code: 'idempotency_conflict' }, { status: 409 })
     if (!existing.completed) {
@@ -568,7 +591,7 @@ async function createBookingFrom(event: H3Event, env: CloudflareEnv, context: Bo
     })
   } catch (error) {
     // Nothing to roll back: the batch either applied whole or not at all.
-    const existing = await replay()
+    const existing = await replay(true)
     if (existing) return existing
     if (!(error instanceof CapacityUnavailableError)) throw error
     return creationResult({ error: 'This session just filled up. Please pick another time.', code: 'capacity_unavailable' }, { status: 409 })

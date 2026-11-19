@@ -7,7 +7,7 @@ import { execute, executeBatch, queryFirst, type BatchQuery, type DbClient } fro
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { paymentsStripe, paymentsStripeKeys, validatedSurchargeBasisPoints } from '~/server/utils/stripe-connect'
-import { claimCheckoutReturn, tokenHash } from './buyer'
+import { claimCheckoutReturn, originalCheckoutClaim, tokenHash } from './buyer'
 import { approvedStayBooking, type Payment } from './index'
 import { isStayPurchase, type PaymentReview } from './checkout'
 import { PRICE_TAX_BEHAVIORS, type Price } from '~/shared/prices'
@@ -424,11 +424,29 @@ async function paymentReceipt(env: CloudflareEnv, payment: Payment, receipt: Che
 
 /** Read the receipt, settling a successful payment if the provider redirect beat the webhook. */
 export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, buyer: () => Promise<string>,
-  prepared?: { plan: Awaited<ReturnType<typeof preparePaymentReturn>>; row: unknown }, receiptLanguage?: () => Promise<{ locale: string; source: boolean }>): Promise<PaymentReturn> {
+  prepared?: { plan: Awaited<ReturnType<typeof preparePaymentReturn>>; row: unknown }, receiptLanguage?: () => Promise<{ locale: string; source: boolean }>,
+  sessionBuyer?: () => Promise<string | undefined>): Promise<PaymentReturn> {
   const now = new Date().toISOString()
   const initial = prepared ? prepared.plan.read(prepared.row) : await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
   let payment: Payment = initial
   let hold = initial.checkout_hold ? JSON.parse(initial.checkout_hold) as CheckoutHold : null
+  let userId: string | undefined
+  let committedReceipt: { id: string; token: string; booking: GuestBookingReceipt } | undefined
+  let language: Awaited<ReturnType<NonNullable<typeof receiptLanguage>>> | undefined
+  async function visitReceipt(id: string, token: string) {
+    if (!receiptLanguage) throw new Error('Guest receipt requires a website language')
+    const selected = language ??= await receiptLanguage()
+    const plan = await prepareGuestBookingReceipt({ query: '?', params: [organizationId] }, id, token,
+      selected.source ? undefined : selected.locale)
+    return {
+      queries: plan.queries,
+      async read(rows: D1Result[]) {
+        const booking = await plan.read(db, env, organizationId, selected.locale, selected.source, rows)
+        if (!booking) throw new Error('Paid booking is missing its guest receipt')
+        return booking
+      },
+    }
+  }
   // Reconciliation writes captured_amount only after it verifies Stripe's succeeded intent.
   if (payment.captured_amount <= 0) {
     const stripe = paymentsStripe(env, Boolean(payment.livemode))
@@ -454,12 +472,22 @@ export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, or
         || payment.captured_amount !== intent.amount_received || payment.currency !== intent.currency.toUpperCase()
         || Boolean(payment.livemode) !== intent.livemode) throw new Error('Stored capture does not match Stripe')
     } else {
-      const { settlement } = await reconcilePaymentIntent(db, stripe, payment, intent, env, hold)
+      const visitId = hold?.session_id && hold.status === 'active' ? hold.conversation_id : null
+      if (visitId && receiptLanguage && sessionBuyer) userId = await sessionBuyer()
+      const originalBuyer = visitId && userId && userId === payment.buyer_user_id
+        ? originalCheckoutClaim(payment.id, userId, await tokenHash(claim), new Date().toISOString()) : null
+      const cancellation = visitId && originalBuyer ? await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', visitId) : null
+      const visit = visitId && cancellation ? await visitReceipt(visitId, cancellation.token) : null
+      const { settlement } = await reconcilePaymentIntent(db, stripe, payment, intent, env, hold,
+        originalBuyer && visit ? [...originalBuyer.queries, ...visit.queries] : undefined)
       if (!settlement) throw new Error('Succeeded Stripe intent did not return a recorded settlement')
       payment = settlement.payment
       hold = settlement.hold
       if (payment.subject_type === 'booking' && !payment.subject_id) {
         throw new HTTPError({ statusCode: 409, statusMessage: 'Payment was received, but the booking could not be confirmed', data: { code: 'payment_booking_unconfirmed' } })
+      }
+      if (originalBuyer && visitId && cancellation && visit && settlement.receiptRows && originalBuyer.read(settlement.receiptRows)) {
+        committedReceipt = { id: visitId, token: cancellation.token, booking: await visit.read(settlement.receiptRows.slice(originalBuyer.queries.length)) }
       }
     }
   }
@@ -467,21 +495,19 @@ export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, or
   const snapshot = snapshotOf(payment)
   const receipt = await paymentReceipt(env, payment, hold)
   if (snapshot.approval) return receipt
-  const userId = await buyer()
   if (receipt.state === 'paid' && receipt.kind === 'booking' && receiptLanguage) {
-    const language = await receiptLanguage()
-    const plan = await prepareGuestBookingReceipt({ query: '?', params: [organizationId] }, receipt.conversation_id, receipt.cancellation_token,
-      language.source ? undefined : language.locale)
-    await claimCheckoutReturn(db, userId, claim, payment, {
-      queries: plan.queries,
+    if (committedReceipt?.id === receipt.conversation_id && committedReceipt.token === receipt.cancellation_token) {
+      return { ...receipt, booking: committedReceipt.booking }
+    }
+    const visit = await visitReceipt(receipt.conversation_id, receipt.cancellation_token)
+    await claimCheckoutReturn(db, userId ?? await buyer(), claim, payment, {
+      queries: visit.queries,
       async read(rows) {
-        const booking = await plan.read(db, env, organizationId, language.locale, language.source, rows)
-        if (!booking) throw new Error('Paid booking is missing its guest receipt')
-        receipt.booking = booking
+        receipt.booking = await visit.read(rows)
       },
     })
   } else {
-    await claimCheckoutReturn(db, userId, claim, payment)
+    await claimCheckoutReturn(db, userId ?? await buyer(), claim, payment)
   }
   return receipt
 }
