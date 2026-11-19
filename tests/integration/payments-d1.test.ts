@@ -123,18 +123,32 @@ test('guest table cancellation refunds until 24 hours before the start, through 
     const paid = await paidTable(db, env, key)
     const input = { ...paid, ...(credential === 'buyer' ? { buyerUserId: 'verified' } : { tokenHash: `${key}-token-hash` }), now: policy.now }
     const originalFetch = globalThis.fetch
-    let creations = 0
+    const refundKey = `guest-cancelled-booking:${paid.bookingId}`
+    const replay = credential === 'token' && policy.refundable
+    let earlierRefundId: string | null = null
+    const metadataRequests: string[] = []
     const fetchMock = t.mock.method(globalThis, 'fetch', async (request, init) => {
      const url = new URL(request instanceof Request ? request.url : String(request))
      if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
      assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
      if (url.pathname === '/v1/refunds' && init?.method === 'POST') {
-      creations++
       const params = new URLSearchParams(String(init.body))
       assert.equal(params.get('payment_intent'), `pi_${key}`)
       assert.equal(params.has('amount'), false)
-      assert.equal(new Headers(init.headers).get('idempotency-key'), `krabiclaw-refund:${key}:guest-cancelled-booking:${paid.bookingId}`)
-      return Response.json({ id: `re_${key}`, object: 'refund', amount: 10500, currency: 'usd', status: 'succeeded', payment_intent: `pi_${key}`, reason: 'requested_by_customer', metadata: { [credential === 'buyer' ? 'blawby_refund_id' : 'krabiclaw_refund_id']: params.get('metadata[krabiclaw_refund_id]') } })
+      assert.equal(new Headers(init.headers).get('idempotency-key'), `krabiclaw-refund:${key}:${refundKey}`)
+      const field = params.has('metadata[blawby_refund_id]') ? 'blawby_refund_id' : 'krabiclaw_refund_id'
+      const sentId = params.get(`metadata[${field}]`)
+      assert.ok(sentId)
+      metadataRequests.push(field)
+      if (replay && earlierRefundId === null) {
+       earlierRefundId = sentId
+       return Response.json({ error: { type: 'invalid_request_error', message: 'Stripe refund response unavailable' } }, { status: 400 })
+      }
+      if (replay) {
+       assert.equal(sentId, earlierRefundId)
+       if (field === 'blawby_refund_id') return Response.json({ error: { type: 'idempotency_error', message: 'Parameters already used with this key differ' } }, { status: 400 })
+      }
+      return Response.json({ id: `re_${key}`, object: 'refund', amount: 10500, currency: 'usd', status: 'succeeded', payment_intent: `pi_${key}`, reason: 'requested_by_customer', metadata: { [field]: sentId } })
      }
      assert.equal(init?.method, 'GET')
      assert.equal(url.pathname, `/v1/charges/ch_${key}`)
@@ -142,12 +156,13 @@ test('guest table cancellation refunds until 24 hours before the start, through 
     })
     try {
      assert.equal(await seatingRemaining(db), 0)
-     assert.equal((await cancelBookingRequest(db, input))?.changed, true)
+     if (replay) await assert.rejects(() => cancelBookingRequest(db, input), /Stripe refund response unavailable/u)
+     assert.equal((await cancelBookingRequest(db, input))?.changed, !replay)
      assert.deepEqual(await db.prepare('SELECT status,cancellation_reason FROM bookings WHERE id=?').bind(paid.bookingId).first(), { status: 'cancelled', cancellation_reason: 'guest_cancelled' })
      assert.equal(await db.prepare("SELECT json_extract(payload_json,'$.cancellation.used_at') used_at FROM conversations WHERE id=?").bind(paid.id).first('used_at'), policy.now)
      assert.deepEqual(await db.prepare('SELECT refunded_amount FROM payments WHERE id=?').bind(key).first(), { refunded_amount: policy.refundable ? 10500 : 0 })
      assert.deepEqual((await db.prepare('SELECT amount,status,created_by FROM payment_refunds WHERE payment_id=?').bind(key).all()).results, policy.refundable ? [{ amount: 10500, status: 'succeeded', created_by: credential === 'buyer' ? 'verified' : null }] : [])
-     assert.equal(creations, Number(policy.refundable))
+     assert.deepEqual(metadataRequests, !policy.refundable ? [] : replay ? ['blawby_refund_id', 'blawby_refund_id', 'krabiclaw_refund_id'] : ['blawby_refund_id'])
      assert.equal(await seatingRemaining(db), 1)
     } finally { fetchMock.mock.restore() }
    }
@@ -317,7 +332,7 @@ test('an advance notice closes a guest\'s own class cancellation at the notice, 
      // A full remaining refund of the booking's own payment: Stripe decides what is left.
      assert.equal(params.get('payment_intent'), `pi_${key}`)
      assert.equal(params.has('amount'), false)
-     return Response.json({ id: `re_${key}`, object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: `pi_${key}`, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: params.get('metadata[krabiclaw_refund_id]') } })
+     return Response.json({ id: `re_${key}`, object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: `pi_${key}`, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: params.get('metadata[blawby_refund_id]') } })
     }
     return Response.json({ id: `ch_${key}`, object: 'charge', livemode: false, amount: 10000, amount_refunded: 10000, currency: 'usd', payment_intent: `pi_${key}`, billing_details: { email: 'verified@example.com' } })
    })
@@ -1016,7 +1031,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
     assert.equal(handoff.state, 'open')
     assert.deepEqual(handoff.billing_details, { name: 'Guest', email: 'guest@example.com', phone: '+12025550114' })
     assert.deepEqual(await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first(), originalHold)
-    assert.ok(events.take('payment.financial'))
+    assert.equal(events.take('payment.financial'), undefined)
 
     const review = await reviewPayment(db, env, ORG, 'ach-payment', claim, 'pm_achproof123', null)
     assert.equal(review.surcharge, 0)
@@ -1174,7 +1189,7 @@ function fakeStripe(t: TestContext, handle: (url: URL, init: RequestInit | undef
   }
   if (resource === 'payment_intents' && init?.method === 'GET') { calls.read.push(paymentId!); return Response.json(intent()) }
   if (resource === 'charges') return Response.json(charge)
-  if (resource === 'refunds' && init?.method === 'POST') { const paid = new URLSearchParams(String(init.body)).get('payment_intent')!; calls.refund.push(paid); return Response.json({ id: `re_${paid}`, object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: paid, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: new URLSearchParams(String(init.body)).get('metadata[krabiclaw_refund_id]') } }) }
+  if (resource === 'refunds' && init?.method === 'POST') { const paid = new URLSearchParams(String(init.body)).get('payment_intent')!; calls.refund.push(paid); return Response.json({ id: `re_${paid}`, object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: paid, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: new URLSearchParams(String(init.body)).get('metadata[blawby_refund_id]') } }) }
   throw new Error(`Unexpected Stripe request ${init?.method} ${url.pathname}`)
  })
  return calls
@@ -1607,6 +1622,119 @@ test('a payout sent and a payout failed are emailed to the business owner and ad
    { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'admin@krabiclaw-proof.com' },
    { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'owner@krabiclaw-proof.com' },
   ])
+ } finally { await runtime.dispose() }
+})
+
+test('Better Auth trusts billing and connection callbacks from either registered app scheme', async t => {
+ const { runtime, env } = await boot()
+ try {
+  const fetchNetwork = globalThis.fetch
+  t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
+   const url = new URL(request instanceof Request ? request.url : String(request))
+   return (url.hostname === 'api.stripe.com' && publishedCatalogResponse(url)) || fetchNetwork(request, init)
+  })
+  const auth = await createAuth(stripeEnv(env)).$context
+  for (const scheme of ['blawby', 'krabiclaw']) {
+   assert.equal(auth.isTrustedOrigin(`${scheme}://billing/success`), true)
+   assert.equal(auth.isTrustedOrigin(`${scheme}://connections/google-calendar`), true)
+   assert.equal(auth.isTrustedOrigin(`${scheme}://invitation?id=example`), false)
+   assert.equal(auth.isTrustedOrigin(`${scheme}://billing.example/success`), false)
+  }
+  assert.equal(auth.isTrustedOrigin('https://appleid.apple.com'), true)
+ } finally { await runtime.dispose() }
+})
+
+test('the Stripe renewal closes the old meter before delivering usage held for its replacement', { timeout: 120_000 }, async t => {
+ const { db, runtime, env: bootEnv } = await boot()
+ try {
+  const secret = 'whsec_meter_renewal'
+  const env = { ...stripeEnv(bootEnv), STRIPE_WEBHOOK_SECRET: secret, STRIPE_BILLING_METER_MIGRATION: 'true' } as CloudflareEnv
+  const renewal = Math.floor(Date.now() / 1000) - 120
+  const period = { current_period_start: renewal, current_period_end: renewal + 31 * 86400 }
+  const metadata: Record<string, string> = { blawby_meter_renewal: String(renewal) }
+  const contract = {
+   id: 'sub_meter_renewal', customer: 'cus_operating', status: 'active', schedule: null, pending_update: null, cancel_at_period_end: false, cancel_at: null,
+   billing_mode: { type: 'flexible' }, metadata,
+   items: { has_more: false, data: [
+    { id: 'si_base', ...period, price: { id: 'price-base', product: { metadata: { plan_id: 'business' } } } },
+    { id: 'si_ads', ...period, price: { id: 'price-ad_spend', tax_behavior: 'unspecified', product: { metadata: { product_family: 'ad_spend' } } } },
+    { id: 'si_addon', ...period, price: { id: 'price-addon', product: { metadata: {} } } },
+   ] },
+  }
+  await db.prepare("INSERT INTO subscription(id,plan,referenceId,stripeCustomerId,stripeSubscriptionId,status,seats) VALUES('sub-row','business',?,'cus_operating','sub_meter_renewal','active',1)").bind(ORG).run()
+  await db.prepare("INSERT INTO usage_events(id,organization_id,resource,unit,quantity,idempotency_key,provider_occurred_at,created_at,source) VALUES('during-renewal',?,'ad_spend','USD',125,'ads:renewing',?,?,'payments')").bind(ORG,NOW,NOW).run()
+  const realFetch = globalThis.fetch
+  const reported: string[] = []
+  let changes = 0
+  t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
+   const url = new URL(request instanceof Request ? request.url : String(request))
+   if (url.hostname !== 'api.stripe.com') return realFetch(request, init)
+   const catalog = publishedCatalogResponse(url)
+   if (catalog) {
+    const list = await catalog.json() as { data: Array<{ id: string; event_name?: string; recurring?: { meter: string } }> }
+    const additional = url.pathname === '/v1/prices'
+     ? list.data.map(price => ({ ...price, id: `replacement-${price.id}`, tax_behavior: 'unspecified', recurring: { ...price.recurring, meter: `replacement-${price.recurring!.meter}` } }))
+     : url.pathname === '/v1/billing/meters'
+      ? list.data.map(meter => ({ ...meter, id: `replacement-${meter.id}`, event_name: meter.event_name!.replace('krabiclaw_', 'blawby_') }))
+      : []
+    const entries = url.pathname === '/v1/products'
+    ? list.data.map(product => ({ ...product, metadata: { product_family: product.id.slice(5), monthly_price_id: `replacement-price-${product.id.slice(5)}` } }))
+    : list.data
+   return Response.json({ ...list, data: [...entries, ...additional] })
+   }
+   if (url.pathname === '/v1/subscriptions/sub_meter_renewal') {
+    if (init?.method === 'POST') {
+     const form = new URLSearchParams(String(init.body))
+     assert.deepEqual(Object.fromEntries(form), {
+      'items[0][id]': 'si_ads', 'items[0][price]': 'replacement-price-ad_spend',
+      billing_cycle_anchor: 'unchanged', proration_behavior: 'none', 'metadata[blawby_meter_renewed]': String(renewal),
+     })
+     contract.items.data[1]!.price.id = 'replacement-price-ad_spend'
+     metadata.blawby_meter_renewed = String(renewal)
+     changes++
+    }
+    return Response.json(contract)
+   }
+   if (url.pathname === '/v1/billing/meter_events') {
+    const form = new URLSearchParams(String(init?.body))
+    const name = form.get('event_name')!
+    const identifier = form.get('identifier')!
+    assert.equal(form.get('payload[value]'), '125')
+    assert.equal(identifier, new Headers(init?.headers).get('idempotency-key'))
+    if (name.startsWith('blawby_')) assert.equal(changes, 1)
+    reported.push(name)
+    return Response.json({ object: 'billing.meter_event', event_name: name, identifier, timestamp: renewal, payload: {} })
+   }
+   throw new Error(`Unexpected Stripe request ${init?.method} ${url.pathname}`)
+  })
+
+  await assert.rejects(() => deliverPaymentsUsage(db, env, ORG), /not yet activated the replacement meter/)
+  assert.equal(await db.prepare("SELECT delivery_at FROM usage_events WHERE id='during-renewal'").first('delivery_at'), null)
+  const payload = JSON.stringify({ id: 'evt_meter_invoice', object: 'event', type: 'invoice.finalized', data: { object: {
+   id: 'in_renewed', customer: 'cus_operating', billing_reason: 'subscription_cycle', period_end: renewal,
+   parent: { subscription_details: { subscription: contract.id, metadata: { ...metadata } } },
+  } } })
+  const signer = new Stripe('sk_test_signer')
+  const signature = await signer.webhooks.generateTestHeaderStringAsync({ payload, secret })
+  for (let attempt = 0; attempt < 2; attempt++) {
+   const response = await createAuth(env).handler(new Request('https://proof.example/api/auth/stripe/webhook', {
+    method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signature }, body: payload,
+   }))
+   assert.equal(response.status, 200, await response.text())
+  }
+  const delivered = await db.prepare("SELECT delivery_at, error FROM usage_events WHERE id='during-renewal'").first()
+  assert.ok(delivered?.delivery_at)
+  assert.equal(delivered.error, null)
+  assert.deepEqual(reported, ['krabiclaw_ad_spend', 'krabiclaw_ad_spend', 'blawby_ad_spend'])
+  assert.equal(changes, 1)
+
+  // A subscription sold on the replacement price has no renewal marker.
+  delete metadata.blawby_meter_renewal
+  delete metadata.blawby_meter_renewed
+  await db.prepare("INSERT INTO usage_events(id,organization_id,resource,unit,quantity,idempotency_key,provider_occurred_at,created_at,source) VALUES('new-contract',?,'ad_spend','USD',125,'ads:new-contract',?,?,'payments')").bind(ORG,NOW,NOW).run()
+  assert.deepEqual(await deliverPaymentsUsage(db, env, ORG), { delivered: 1 })
+  assert.ok(await db.prepare("SELECT delivery_at FROM usage_events WHERE id='new-contract'").first('delivery_at'))
+  assert.deepEqual(reported.slice(3), ['blawby_ad_spend'])
  } finally { await runtime.dispose() }
 })
 

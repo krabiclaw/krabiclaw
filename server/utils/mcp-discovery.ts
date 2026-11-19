@@ -53,14 +53,19 @@ function resolveBaseUrl(env: CloudflareEnv): string {
   return url
 }
 
+export function mcpServerIdentity(env: CloudflareEnv) {
+  const title = env.NUXT_PUBLIC_APP_NAME ?? 'Blawby'
+  return { name: `${title.toLowerCase()}-mcp`, title, version: 'phase-5' }
+}
+
 export function buildMcpServerCard(env: CloudflareEnv): McpServerCard {
   const baseUrl = resolveBaseUrl(env)
-  const appName = env.NUXT_PUBLIC_APP_NAME ?? 'Blawby'
+  const { name, version } = mcpServerIdentity(env)
   return {
     version: '1.0',
     serverInfo: {
-      name: `${appName.toLowerCase()}-mcp`,
-      version: 'phase-5',
+      name,
+      version,
       description: 'Manage website content, offerings, stays, reservations, inquiries, and legal consultations.',
     },
     transports: [
@@ -103,8 +108,7 @@ export function buildAgentCard(env: CloudflareEnv): AgentCard {
 
 export function buildAiCatalog(env: CloudflareEnv): AiCatalog {
   const baseUrl = resolveBaseUrl(env)
-  const appName = env.NUXT_PUBLIC_APP_NAME ?? 'Blawby'
-  const serverName = `${appName.toLowerCase()}-mcp`
+  const { name: serverName } = mcpServerIdentity(env)
   return {
     specVersion: '1.0',
     entries: [

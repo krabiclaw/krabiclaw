@@ -35,7 +35,7 @@ export function prepareDashboardWorkspaceAccess(organizationId: string | { sql: 
       plan.query,
       organizationFeaturesQuery(organizationId),
       ...(locations ? [
-        hasUnreadQuery(organizationId, { userId }, new Date()),
+        hasUnreadQuery(organizationId, userId, new Date()),
         { query: `SELECT o.id, o.name, o.slug FROM member m JOIN organization o ON o.id = m.organizationId
           WHERE m.userId = ${user} ORDER BY o.name, o.id`, params: typeof userId === 'string' ? [userId] : [] },
         ...locations.queries,

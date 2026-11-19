@@ -32,9 +32,11 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   if (!organization && !await queryFirst(db, 'SELECT organization_id FROM payment_servicing_tenants WHERE organization_id=? AND stripe_account_id=? AND livemode=?', [payment.organization_id, payment.stripe_account_id, payment.livemode])) throw new Error('Payments notification has no tenant or retained servicing identity')
   // A booking or stay paid on the site is alerted to its owner and
   // confirmed to its guest by the visit notification, which states what was
-  // paid. A failure is told here: a bank or pay-later method can fail after the
-  // guest has left the pay page.
+  // paid. A failure is told here only when a booking was committed: an
+  // in-flight checkout decline is resolved on the pay page, not alerted to the
+  // business.
   const checkout = payment.subject_type === 'booking'
+  if (checkout && input.kind === 'payment_failed' && !payment.subject_id) return
   const guestKind = (input.kind.startsWith('refund_') || input.kind === 'payment_failed' || (!checkout && input.kind.startsWith('payment_'))) ? input.kind as GuestPaymentNotificationKind : null
   const ownerAlert = !checkout || input.kind !== 'payment_captured'
   // A deleted merchant and an unclaimed contact have no application audience.

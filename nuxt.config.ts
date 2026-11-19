@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { getIcons } from '@iconify/utils'
 import { visualizer } from 'rollup-plugin-visualizer'
+import { LEGACY_PLATFORM_THEME_STORAGE_KEY, PLATFORM_THEME_STORAGE_KEY } from './shared/platform-theme'
 import { ROBOTS_DISABLED_DIRECTIVE, ROBOTS_ENABLED_DIRECTIVE } from './shared/robots-directive'
 import { localizedPublicRouteAliases } from './build/localized-public-routes'
 import { mountBookingRoutes, nodeAt } from './build/booking-routes'
@@ -106,7 +107,7 @@ export default defineNuxtConfig({
       script: [
         {
           key: 'platform-theme-init',
-          innerHTML: "if(document.documentElement.dataset.theme!=='dark'){const p=localStorage.getItem('krabiclaw-theme')||'system';const d=p==='dark'||(p==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d)}",
+          innerHTML: `if(document.documentElement.dataset.theme!=='dark'){const p=localStorage.getItem('${PLATFORM_THEME_STORAGE_KEY}')??localStorage.getItem('${LEGACY_PLATFORM_THEME_STORAGE_KEY}')??'system';const d=p==='dark'||(p==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d)}`,
         },
       ],
       link: [
@@ -187,7 +188,7 @@ export default defineNuxtConfig({
       freeOrganizationDomain: process.env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN || '',
       appName: process.env.NUXT_PUBLIC_APP_NAME || '',
       siteUrl: process.env.NUXT_PUBLIC_SITE_URL || '',
-      helpUrl: process.env.NUXT_PUBLIC_HELP_URL || 'https://krabiclaw.com/help',
+      helpUrl: process.env.NUXT_PUBLIC_HELP_URL || 'https://blawby.com/help',
       stripePublishableKey: process.env.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '',
       vapidPublicKey: process.env.NUXT_PUBLIC_VAPID_PUBLIC_KEY || '',
 

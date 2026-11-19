@@ -140,12 +140,14 @@ test.describe('OAuth discovery endpoints', () => {
       data: {
         jsonrpc: '2.0', id: 0, method: 'initialize', params: {
           protocolVersion: '2025-06-18', capabilities: {},
-          clientInfo: { name: 'krabiclaw-release-e2e', version: '1.0.0' },
+          clientInfo: { name: 'blawby-release-e2e', version: '1.0.0' },
         }
       },
     })
     expect(initialized.status(), await initialized.text()).toBe(200)
-    expect(await mcpJson(initialized)).toMatchObject({ result: { protocolVersion: '2025-06-18' } })
+    expect(await mcpJson(initialized)).toMatchObject({
+      result: { protocolVersion: '2025-06-18', serverInfo: { name: 'blawby-mcp', title: 'Blawby' } },
+    })
 
     const tools = await request.post(`${baseURL}/api/mcp`, {
       headers: {

@@ -139,7 +139,6 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
     }
   } else if (failed) {
     if (approval) await releaseApprovedStayConfirmation(db, env, payment)
-    await publishPaymentNotification(env, payment, { kind: 'payment_failed', nativeId: intent.id, status: intent.status, amount: intent.amount })
   }
   if (intent.status !== 'succeeded') return { intent }
 

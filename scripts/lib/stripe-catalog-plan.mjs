@@ -655,7 +655,18 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
       ? [...(snapshot.pricesByProduct[existing.id] ?? [])].sort((a, b) => a.id.localeCompare(b.id))
       : []
     const seatPriceId = existing?.metadata?.seat_price_id?.trim()
-    const canonical = existing ? resolveCanonicalPrice(existing, prices, definition, seatPriceId, meterRef) : null
+    const legacyPrice = existing ? resolveCanonicalPrice(existing, prices, definition, seatPriceId, meterRef) : null
+    const replacementDefinition = definition.meter?.replacementEventName
+      ? { ...definition, meter: { ...definition.meter, eventName: definition.meter.replacementEventName } }
+      : null
+    const replacementMeter = replacementDefinition ? canonicalMeter(snapshot, replacementDefinition) : null
+    const replacementPrice = replacementMeter && existing
+      ? resolveCanonicalPrice(existing, prices, replacementDefinition, seatPriceId, replacementMeter.id)
+      : null
+    // The product's offer can move to Blawby while both prices still serve contracts.
+    const canonical = replacementPrice && existing.metadata?.monthly_price_id?.trim() === replacementPrice.id
+      ? replacementPrice
+      : legacyPrice
     const priceRef = canonical
       ? canonical.id
       : { ref: { kind: 'price', planId: definition.planId } }
@@ -691,7 +702,7 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
     if (image) canonicalOperations.push(image)
 
     for (const price of prices) {
-      if (!isRecurringBasePrice(price, seatPriceId) || price.id === canonical?.id) continue
+      if (!isRecurringBasePrice(price, seatPriceId) || price.id === legacyPrice?.id || price.id === replacementPrice?.id) continue
       destructiveOperations.push({ type: 'deactivate_price', productId: existing?.id, priceId: price.id, expected: price })
     }
 

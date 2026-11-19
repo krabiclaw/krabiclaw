@@ -18,6 +18,7 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { quotePaymentsBillingFx, requireBillingFxQuote } from './fx'
 import type { CheckoutStay, StayQuote } from '~/server/domain/stays'
 import type { readCheckoutSeller } from '~/server/utils/billing-access'
+import { createWithStripeMetadata } from './stripe-metadata'
 
 interface CheckoutInputBase {
   organizationId: string
@@ -265,8 +266,9 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   }
   // A signed-in buyer's Customer at this business: the Payment Element offers, saves and removes their cards here only.
   const customer = input.buyerUserId ? await connectedBuyerCustomer(db, stripe, input.buyer ?? input.buyerUserId, connected.stripe_account_id, connected.livemode) : null
+  const stripeAccount = connected.stripe_account_id
   try {
-    const intent = await stripe.paymentIntents.create({
+    const intent = await createWithStripeMetadata(stripe, 'payment', id, Boolean(previous), metadata => stripe.paymentIntents.create({
       amount, currency: price.currency.toLowerCase(),
       ...(customer ? { customer: customer.customerId } : {}),
       // Stripe selects eligible methods from the business's connected configuration.
@@ -276,10 +278,10 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       payment_method_options: { card: { capture_method: 'manual' }, link: { capture_method: 'manual' } },
       application_fee_amount: 0,
       description: projectionTitle,
-      metadata: { krabiclaw_payment_id: id },
+      metadata,
       // Stripe reports, per card, whether a surcharge may apply and how much at most; the amount is set when the buyer confirms.
       ...(surcharge !== null ? { amount_details: { surcharge: { enforce_validation: 'enabled' } } } : {}),
-    } as Stripe.PaymentIntentCreateParams, { stripeAccount: connected.stripe_account_id, idempotencyKey: key })
+    } as Stripe.PaymentIntentCreateParams, { stripeAccount, idempotencyKey: key }))
     if (intent.livemode !== connected.livemode || !intent.client_secret) throw new Error('Stripe returned a PaymentIntent outside the connected mode')
     const linked = await execute(db, 'UPDATE payments SET stripe_payment_intent_id=?,updated_at=? WHERE id=? AND organization_id=?', [intent.id, new Date().toISOString(), id, input.organizationId])
     if (linked.meta.changes !== 1) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })

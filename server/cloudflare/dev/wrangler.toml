@@ -15,10 +15,10 @@ class_name = "GuestInboxHubObject"
 
 [[queues.producers]]
 binding = "EVENTS"
-queue = "krabiclaw-events-local"
+queue = "blawby-events-local"
 
 [[queues.consumers]]
-queue = "krabiclaw-events-local"
+queue = "blawby-events-local"
 max_batch_size = 10
 max_batch_timeout = 1
 max_retries = 5
