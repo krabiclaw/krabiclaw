@@ -116,22 +116,23 @@ function toSocialImageSource(source: SocialMediaSource | null | undefined): Soci
 }
 
 /**
- * A resource's og:image and primary picture prefers the owner's canonical
- * photograph (its own image/hero/cover slot, or first gallery image).
- * When no authentic media exists, it falls back to the organization's
- * `social_share` or generated `social_card`.
+ * Listings and offerings prefer their own photograph in sharing previews.
+ * Other resources use their generated social card when one exists.
  */
 export function resolveSocialImageFromMedia(
   ownerType: MediaPlacementOwnerType,
   ownerMedia: readonly SocialMediaSource[],
   organizationMedia: readonly SocialMediaSource[],
 ): SocialImageSource | null {
+  const socialCard = ownerMedia.find(item => item.slot === 'social_card')
+  if (ownerType !== 'product') return toSocialImageSource(socialCard ?? resolveOwnerPicture(ownerType, ownerMedia, organizationMedia))
+
   const ownPhoto = resolveOwnerPicture(ownerType, ownerMedia, [])
   const ownGallery = ownerMedia.find(item => item.slot === 'gallery' && item.kind !== 'video' && resolveSocialImageUrl(item))
   const picture = ownPhoto
     ?? ownGallery
     ?? resolveOwnerPicture(ownerType, ownerMedia, organizationMedia)
-    ?? ownerMedia.find(item => item.slot === 'social_card')
+    ?? socialCard
   return toSocialImageSource(picture)
 }
 
