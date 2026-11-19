@@ -3516,13 +3516,18 @@ export async function readCheckoutStay(db: DbClient, organizationId: string, sta
 }
 
 /** Channel reservation values by arrival date. A reservation amount is never a bank-transfer record. */
-export async function channelReservationAmounts(db: DbClient, organizationId: string, from: string, until: string) {
+export function channelReservationAmountQuery(organizationId: string, from: string, until: string): BatchQuery {
   // The arrival day is read in each home's clock; SQL narrows by instants a day wider either side.
-  const reservations = await queryAll<{ channel: string; currency: string; total_minor: number; starts_at: string; timezone: string }>(db,
-    `SELECT b.channel, b.currency, b.total_minor, b.starts_at, b.timezone
+  return {
+    query: `SELECT b.channel, b.currency, b.total_minor, b.starts_at, b.timezone
        FROM bookings b
       WHERE b.organization_id = ? AND b.owner = 'channel' AND b.status = 'confirmed' AND b.product_session_id IS NULL AND b.starts_at >= ? AND b.starts_at < ?`,
-    [organizationId, addDays(from, -1), `${addDays(until, 1)}T14:00:00.000Z`])
+    params: [organizationId, addDays(from, -1), `${addDays(until, 1)}T14:00:00.000Z`],
+  }
+}
+
+export function channelReservationAmounts(result: D1Result, from: string, until: string) {
+  const reservations = result.results as Array<{ channel: string; currency: string; total_minor: number; starts_at: string; timezone: string }>
   const totals = new Map<string, { channel: string; currency: string; amount: number; count: number }>()
   for (const reservation of reservations) {
     const arrival = bookingDay(reservation.starts_at, reservation.timezone)
