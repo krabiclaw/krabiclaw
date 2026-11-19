@@ -351,6 +351,8 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     const note = 'Planed the door; it closes now.'
     const fixed = await body<{ task: TaskView }>(await memberContext.request.post(card.done!.path, { data: { note } }), 200)
     expect(fixed.task).toMatchObject({ status: 'done', outcome: { note } })
+    // Read back through the owner's task read, not the completion's answer.
+    expect((await body<{ task: TaskView }>(await page.request.get(`/api/organizations/${ORGANIZATION}/tasks/${repair.id}`), 200)).task).toMatchObject({ status: 'done', outcome: { note } })
     // The owner reads the note in the job's conversation.
     const repairThread = card.to!.split('/').pop()!
     const ownerRead = await body<ConversationPage>(await page.request.get(`/api/messages/${repairThread}`), 200)

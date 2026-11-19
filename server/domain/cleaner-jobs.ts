@@ -239,14 +239,16 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
       const baseKey = jobKey(task)
       // A newer release ends an assignment. A later reactivation is a new post
       // keyed by that message, so retries still announce it once.
-      const postedForAssignment = heldIn && (prep
+      // A repair can come back to someone it left, in the same place's conversation: it is announced again, like prep.
+      const reannounced = prep || task.kind === 'maintenance'
+      const postedForAssignment = heldIn && (reannounced
         ? last && (last[0] === baseKey || last[0].startsWith(`${baseKey}:after:`))
         : postsByThread.get(heldIn)?.has(baseKey))
       if (!postedForAssignment) {
         // A repair reported by a guest carries the photos of their message.
         const photos = task.subject_type === 'message' ? (await queryAll<{ asset_id: string }>(db, `SELECT asset_id FROM media_placements
-          WHERE organization_id = ? AND owner_type = 'message' AND owner_id = ? AND slot = 'attachments' ORDER BY sort_order`, [organizationId, task.subject_id])).map(row => row.asset_id) : []
-        const result = await post(subject, roster.seats, jobKey(task, prep ? last?.[1] : undefined), lines(view), roster.cleaners, heldIn ?? undefined, photos)
+          WHERE organization_id = ? AND owner_type = 'message' AND owner_id = ? AND slot = 'attachments' AND status = 'active' ORDER BY sort_order`, [organizationId, task.subject_id])).map(row => row.asset_id) : []
+        const result = await post(subject, roster.seats, jobKey(task, reannounced ? last?.[1] : undefined), lines(view), roster.cleaners, heldIn ?? undefined, photos)
         threads.set(result.threadId, { subject_id: subject.id, participants_key: targetKey! })
         heldIn = result.threadId
       }

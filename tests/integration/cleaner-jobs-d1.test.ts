@@ -302,6 +302,20 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.deepEqual([finished.author_user_id, finished.photos.length], ['fixer', 1])
     assert.deepEqual((await getTask(db, ownerViewer, ac.id)).outcome?.photos.map(photo => photo.id), finished.photos.map(photo => photo.id))
 
+    // A repair given back to Fran after someone else had it is announced to her again.
+    const { task: hinge } = await createTask(db, ownerViewer, { kind: 'maintenance', title: 'Gate hinge', location_id: 'cabin-site', assigned_member_id: 'm-fixer', idempotency_key: 'hinge' })
+    await runOrganizationJobs(queue, env, db, ORG, at(day(5), '10:00'))
+    const handedOff = await updateTask(db, ownerViewer, hinge.id, { version: hinge.version, assigned_member_id: 'm-admin' })
+    await runOrganizationJobs(queue, env, db, ORG, at(day(5), '10:05'))
+    const handedBack = await updateTask(db, ownerViewer, hinge.id, { version: handedOff.version, assigned_member_id: 'm-fixer' })
+    await runOrganizationJobs(queue, env, db, ORG, at(day(5), '10:10'))
+    const hingePosts = (await automatic(repairThread!.id)).map(message => message.key).filter(key => key.includes(hinge.id))
+    assert.equal(hingePosts.filter(key => key.startsWith(jobKey(hinge))).length, 2, `posts: ${hingePosts.join(', ')}`)
+    // Fran stops doing maintenance: her repairs leave her view, though they stay hers until someone reassigns them.
+    await db.prepare("UPDATE member SET role = 'cleaner' WHERE id = 'm-fixer'").run()
+    await assert.rejects(getTask(db, await taskViewer(principal('fixer', 'cleaner', 'm-fixer')), handedBack.id), { status: 404 })
+    await db.prepare("UPDATE member SET role = 'maintenance' WHERE id = 'm-fixer'").run()
+
     // When Fran leaves, her open repair goes to the owner, found by role even when the owner holds two.
     await db.prepare("UPDATE member SET role = 'owner,maintenance' WHERE id = 'm-owner'").run()
     const { task: leak } = await createTask(db, ownerViewer, { kind: 'maintenance', title: 'Tap drips', location_id: 'cabin-site', assigned_member_id: 'm-fixer', idempotency_key: 'leak' })

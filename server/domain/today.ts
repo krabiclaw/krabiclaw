@@ -210,7 +210,9 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
       if (day === null ? range !== 'today' : range === 'today' ? day > today(work.timezone) : !shows(day, work.timezone)) continue
       if (!work.title) throw new Error(`Maintenance job ${work.id} has no title`)
       const formatCalendarDay = (date: string) => formatCalendarDate(date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })
-      const due = day === null ? null : day === today(work.timezone) ? 'Due today' : day < today(work.timezone) ? `Overdue since ${formatCalendarDay(day)}` : `Due ${formatCalendarDay(day)}`
+      // The deadline is its due day, whichever day it starts.
+      const dueDay = work.due_at ? localDateAt(new Date(work.due_at), work.timezone) : null
+      const due = dueDay === null ? null : dueDay === today(work.timezone) ? 'Due today' : dueDay < today(work.timezone) ? `Overdue since ${formatCalendarDay(dueDay)}` : `Due ${formatCalendarDay(dueDay)}`
       const team = work.team_conversation_id
       add({ id: `task:${work.id}`, noun: 'task', order: [1, at ?? ''], bookings: [], day: day ?? today(work.timezone),
         when: ['Maintenance', due].filter(Boolean).join(' · '),

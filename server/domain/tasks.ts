@@ -371,7 +371,8 @@ export function taskScopeSql(alias: string, who: () => ViewerTerms): string {
     SELECT 1 FROM member m WHERE m.id = ${who().member} AND m.organizationId = ${who().organization} AND m.userId = ${who().user}
     AND (${who().organizationWide} = 1
       OR (${alias}.claim_role IS NULL AND ${alias}.assigned_member_id = m.id
-        AND ${alias}.kind NOT IN ('message_delivery', 'booking_change', 'booking_review'))
+        AND ${alias}.kind NOT IN ('message_delivery', 'booking_change', 'booking_review')
+        AND (${alias}.kind <> 'maintenance' OR ${roleMatchesSql('m.role', ['maintenance'])}))
       OR ((${alias}.assigned_member_id = m.id OR (${alias}.assigned_member_id IS NULL AND ${alias}.status = 'open'))
         AND ${claimAudienceSql(alias, 'm')})
       OR (${alias}.claim_role IS NULL AND ${alias}.kind <> 'maintenance' AND ${roleMatchesSql('m.role', assignedOperationsRoles)}
@@ -793,7 +794,10 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       title = row.title!
       status_line = ['Maintenance', place].filter(Boolean).join(' · ')
       // What the guest said, by first name: the job's people read it without the guest's conversation.
-      if (report?.body) detail = `${report.guest_name ? firstName(report.guest_name) : report.participant ?? 'The guest'} wrote: “${report.body}”`
+      if (report?.body) {
+        const words = report.body.length > REPORT_QUOTE_MAX ? `${report.body.slice(0, REPORT_QUOTE_MAX - 1).trimEnd()}…` : report.body
+        detail = `${report.guest_name ? firstName(report.guest_name) : report.participant ?? 'The guest'} wrote: “${words}”`
+      }
       // The guest's conversation opens for the people who manage the business.
       conversation_id = viewer.manage && report ? report.conversation_id : null
       path = conversation(conversation_id)
@@ -1085,6 +1089,15 @@ export async function getTask(db: DbClient, viewer: TaskViewer, taskId: string, 
 // What people do to tasks.
 // ---------------------------------------------------------------------------
 
+/**
+ * A job's instructions are posted in its conversation with its heading and, for
+ * a repair, the guest's words; they are kept short enough that the whole post
+ * fits a message (team-messages MAX_BODY).
+ */
+const JOB_NOTES_MAX = 3000
+/** How much of a guest's report a repair quotes; the whole message stays in their conversation. */
+const REPORT_QUOTE_MAX = 1000
+
 function text(value: unknown, field: string, max: number, required = false): string | null {
   if (value === undefined || value === null || (typeof value === 'string' && !value.trim() && !required)) {
     if (required) fail(422, 'INVALID_TASK_FIELD', `${field} is required`, field)
@@ -1153,7 +1166,7 @@ export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<
   const maintenance = kind === 'maintenance'
   const key = text(body.idempotency_key, 'idempotency_key', 200, true)!
   const title = text(body.title, 'title', 200, true)!
-  const notes = text(body.notes, 'notes', 5000)
+  const notes = text(body.notes, 'notes', maintenance ? JOB_NOTES_MAX : 5000)
   const startsAt = instant(body.starts_at, 'starts_at'), dueAt = instant(body.due_at, 'due_at')
   if (startsAt && dueAt && startsAt > dueAt) fail(422, 'INVALID_TASK_FIELD', 'starts_at must not be after due_at', 'starts_at')
   const actorId = viewer.principal.userId
@@ -1271,7 +1284,7 @@ export async function updateTask(db: DbClient, viewer: TaskViewer, taskId: strin
   const startsAt = body.starts_at === undefined ? current.starts_at : instant(body.starts_at, 'starts_at')
   const dueAt = body.due_at === undefined ? current.due_at : instant(body.due_at, 'due_at')
   if (startsAt && dueAt && startsAt > dueAt) fail(422, 'INVALID_TASK_FIELD', 'starts_at must not be after due_at', 'starts_at')
-  const notes = body.notes === undefined ? current.notes : text(body.notes, 'notes', 5000)
+  const notes = body.notes === undefined ? current.notes : text(body.notes, 'notes', isJobTask(current) ? JOB_NOTES_MAX : 5000)
   const title = body.title === undefined ? current.title : current.kind === 'custom' || current.kind === 'maintenance' ? text(body.title, 'title', 200, true) : fail(422, 'INVALID_TASK_FIELD', 'This task takes its title from what it is about', 'title')
   const after = { assigned_member_id: assigned, starts_at: startsAt, due_at: dueAt, notes, title }
   const before = { assigned_member_id: current.assigned_member_id, starts_at: current.starts_at, due_at: current.due_at, notes: current.notes, title: current.title }
