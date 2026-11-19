@@ -107,6 +107,8 @@
                   v-for="bar in row.bars"
                   :key="bar.key"
                   :to="bar.to"
+                  :prefetch="Boolean(bar.stayId)"
+                  prefetch-on="interaction"
                   class="z-10 mx-0.5 mt-1 flex h-5 min-w-0 items-center gap-1.5 self-start rounded-full px-2.5 text-xs font-medium text-white sm:mt-1.5 sm:h-7"
                   :style="{ gridRow: 1, gridColumn: `${bar.column} / span ${bar.span}`, backgroundColor: STAY_CHANNEL_COLORS[bar.channel ?? 'direct'] }"
                   :title="reservationRead.error.value?.bookingId === bar.stayId ? reservationRead.error.value?.message : bar.title"
