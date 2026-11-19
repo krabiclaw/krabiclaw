@@ -8,7 +8,7 @@ import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient, type BatchQuery } from '~/server/db'
 import { isRecord } from '~/server/utils/type-guards'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
-import { assertBookingBatchWrite, bookingBatchWriteRefused, CapacityUnavailableError, sessionClaimQuery } from '~/server/utils/availability'
+import { assertBookingBatchWrite, bookingBatchWriteRefused, CapacityUnavailableError, sessionAllocationFactsQuery, sessionClaimQuery, type SessionAllocationInput } from '~/server/utils/availability'
 import { processStripeWebhookEvent } from '~/server/utils/stripe-webhook-events'
 import { paymentsStripe, platformLivemode } from '~/server/utils/stripe-connect'
 import { approvedStayBooking, executeRefund, reconcileRefundState, requirePayment, assertMinorAmount, type Payment } from './index'
@@ -34,6 +34,7 @@ export interface CheckoutHold {
   retained_for_servicing: number
   receipt_conversation_id: string | null
   receipt_cancellation_hash: string | null
+  session_allocation: NonNullable<SessionAllocationInput['saved']> | null
 }
 
 type CapturedPayment = Payment & { retained_without_organization: number }
@@ -43,6 +44,10 @@ export const checkoutHoldSql = `SELECT json_object(
   'id',h.id,'organization_id',h.organization_id,'product_id',h.product_id,'variant_id',h.variant_id,'session_id',h.session_id,
   'location_id',h.location_id,'buyer_user_id',h.buyer_user_id,'conversation_id',h.conversation_id,
   'starts_at',h.starts_at,'ends_at',h.ends_at,'quantity',h.quantity,'status',h.status,'converted_booking_id',h.converted_booking_id,
+  'session_allocation',json(CASE WHEN h.session_id IS NOT NULL AND h.status='active' THEN (
+    SELECT json_object('starts_at',starts_at,'ends_at',ends_at,'location_id',location_id,'timezone',timezone,
+      'status',status,'opening_hours',opening_hours,'special_hours',special_hours,'provider_id',provider_id)
+    FROM (${sessionAllocationFactsQuery('h.organization_id', 'h.product_id', 'h.session_id')})) END),
   'home',json(CASE WHEN h.session_id IS NULL AND h.status <> 'converted'
     THEN (SELECT json_object('location_id',c.location_id,'timezone',l.timezone,'check_in_time',b.check_in_time,'check_out_time',b.check_out_time,
       'variants',json((SELECT json_group_array(v.id) FROM product_variants v WHERE v.organization_id=h.organization_id AND v.product_id=h.product_id)))
@@ -267,7 +272,7 @@ async function saveCheckoutBooking(db: DbClient, env: CloudflareEnv, payment: Pa
  if(hold.session_id){
   if(!hold.conversation_id)throw new Error('Visit hold has no guest conversation')
   if(!hold.variant_id)throw new Error('Booking hold has no offering or session')
-  claim=[await sessionClaimQuery(db,{env,bookingId,organizationId:hold.organization_id,productId:hold.product_id,sessionId:hold.session_id,productVariantId:hold.variant_id,partySize:hold.quantity,userId:hold.buyer_user_id,now,payment: { id: payment.id, startsAt: hold.starts_at, endsAt: hold.ends_at, locationId: hold.location_id },policyJson:policy,answers:frozenAnswers(snapshot),websiteSource:await checkoutWebsiteSource(db,payment,hold.conversation_id)}),
+  claim=[await sessionClaimQuery(db,{env,bookingId,organizationId:hold.organization_id,productId:hold.product_id,sessionId:hold.session_id,saved:hold.session_allocation,productVariantId:hold.variant_id,partySize:hold.quantity,userId:hold.buyer_user_id,now,payment: { id: payment.id, startsAt: hold.starts_at, endsAt: hold.ends_at, locationId: hold.location_id },policyJson:policy,answers:frozenAnswers(snapshot),websiteSource:await checkoutWebsiteSource(db,payment,hold.conversation_id)}),
    assertBookingBatchWrite({ query: 'changes() = 1', params: [] }),
    // The conversation the checkout waited in is the booking's; an operator's checkout records the status the booking was created in.
    {query:`UPDATE conversations SET booking_id=v.id,payload_json=CASE WHEN json_type(payload_json,'$.provenance')='object' THEN json_set(payload_json,'$.provenance.creation_status',v.status) ELSE payload_json END FROM bookings v

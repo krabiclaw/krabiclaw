@@ -4,7 +4,7 @@ import { publishEvent } from '~/server/events'
 import { bookingReviewDueAt } from '~/server/utils/review-requests'
 import { publishConversationEvent, scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
 import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
-import { bookingOpeningInstant, bookingSessionFrom, bookableSessions, slotCalendars, slotReadQueries, CapacityUnavailableError, claimSessionCapacity, paidQuantity, partyPaysOnline, partySizeRefusal, savedBookingOpeningQuery, type ResolvedBookingSession, type SavedBookingOpening } from '~/server/utils/availability'
+import { bookingOpeningInstant, bookableSessions, resolveCalendarOpening, slotCalendars, slotReadQueries, CapacityUnavailableError, claimSessionCapacity, paidQuantity, partyPaysOnline, partySizeRefusal, savedBookingOpeningQuery, type ResolvedBookingSession, type SavedBookingOpening } from '~/server/utils/availability'
 import { cloudflareEnv, cleanString } from '~/server/utils/api-response'
 import { isReservedTestDomain, shouldSendRealEmail } from '~/server/utils/email-delivery'
 import { notifyBookingCreated, raiseSettledFailures } from '~/server/utils/notifications'
@@ -115,10 +115,23 @@ function bookingOfferingQuery(organization: BatchQuery, selector: { slug?: strin
 function timedBookingQueries(organization: BatchQuery, product: BatchQuery, input: { sessionId: string; requestedVariantId: string }): BatchQuery[] {
   const variants = { query: `SELECT id,name FROM product_variants WHERE organization_id=${organization.query} AND product_id=${product.query} AND active=1`,
     params: [...organization.params ?? [], ...product.params ?? []] }
-  return [savedBookingOpeningQuery(organization, product, input.sessionId), variants, timedBookingPricesQuery(organization, {
+  const opening = savedBookingOpeningQuery(organization, product, input.sessionId)
+  return [opening, variants, timedBookingPricesQuery(organization, {
     query: `SELECT id FROM (${variants.query}) WHERE (? = '' OR id=?) LIMIT 1`,
     params: [...variants.params, input.requestedVariantId, input.requestedVariantId],
   })]
+}
+
+function timedCalendarQueries(organization: BatchQuery, product: BatchQuery, opening: BatchQuery, sessionId: string, now: string) {
+  const starts = { query: `COALESCE((SELECT starts_at FROM (${opening.query})), ?)`,
+    params: [...opening.params ?? [], bookingOpeningInstant(sessionId)] }
+  return slotReadQueries({
+    organization: { ...organization, params: organization.params ?? [] },
+    products: { query: `SELECT ${product.query}`, params: product.params ?? [] },
+    fromInstant: starts,
+    toInstant: { query: `strftime('%Y-%m-%dT%H:%M:%fZ', ${starts.query}, '+0.001 seconds')`, params: starts.params },
+    now, scope: 'bookable',
+  })
 }
 
 function timedBookingFrom([opening, variants, prices]: Awaited<ReturnType<typeof executeBatch>>) {
@@ -129,12 +142,13 @@ function timedBookingFrom([opening, variants, prices]: Awaited<ReturnType<typeof
   }
 }
 
-async function timedBookingTerms(db: DbClient, env: CloudflareEnv, input: {
-  organizationId: string; productId: string; sessionId: string; requestedVariantId: string
-  partySize: number; currency: string; actorId: string; now: string
-}, facts: ReturnType<typeof timedBookingFrom>) {
-  const resolved = await bookingSessionFrom(db, { ...input, env }, facts.opening)
-  return timedBookingPriceTerms(input, facts, resolved)
+function timedCalendarFrom(env: CloudflareEnv, productId: string, sessionId: string, opening: SavedBookingOpening | undefined, now: string, rows: D1Result[]) {
+  const starts = bookingOpeningInstant(sessionId, opening)
+  if (!starts) throw new HTTPError({ statusCode: 404, message: 'That session is not open for booking' })
+  const calendar = slotCalendars(env, { fromInstant: starts, toInstant: new Date(Date.parse(starts) + 1).toISOString(),
+    locationId: opening?.location_id, scope: 'bookable', now }, rows).get(productId)
+  if (!calendar) throw new HTTPError({ statusCode: 404, message: 'This product does not take bookings' })
+  return calendar
 }
 
 function timedBookingPriceTerms<T extends Pick<ResolvedBookingSession, 'session' | 'config'>>(
@@ -181,15 +195,8 @@ export function preparePublicTimedQuote(organization: BatchQuery, input: TimedQu
   const queries: BatchQuery[] = [viewer]
   if (!selection.failure) {
     const terms = timedBookingQueries(org, product, selection)
-    const opening = terms[0]!
-    const starts = { query: `COALESCE((SELECT starts_at FROM (${opening.query})), ?)`,
-      params: [...opening.params ?? [], bookingOpeningInstant(selection.sessionId)] }
-    queries.push(...[billing.query, ...terms, ...slotReadQueries({
-      organization: org, products: { query: `SELECT ${product.query}`, params: [] },
-      fromInstant: starts,
-      toInstant: { query: `strftime('%Y-%m-%dT%H:%M:%fZ', ${starts.query}, '+0.001 seconds')`, params: starts.params },
-      now: now.toISOString(), scope: 'bookable',
-    })].map(query => withViewer(viewer, query)))
+    queries.push(...[billing.query, ...terms, ...timedCalendarQueries(org, product, terms[0]!, selection.sessionId, now.toISOString())]
+      .map(query => withViewer(viewer, query)))
   }
   return { queries, read }
 
@@ -201,12 +208,8 @@ export function preparePublicTimedQuote(organization: BatchQuery, input: TimedQu
     if (offering.unit !== 'slot' || offering.on_sale !== 1) throw new HTTPError({ statusCode: 404, message: 'Product not found' })
     if (offering.order_url) throw new HTTPError({ statusCode: 409, message: 'Book this product on its configured external website.', data: { external_url: offering.order_url } })
     const facts = timedBookingFrom(rows.slice(0, 3))
-    const starts = bookingOpeningInstant(selection.sessionId, facts.opening)
-    if (!starts) throw new HTTPError({ statusCode: 404, message: 'That session is not open for booking' })
     const time = now.toISOString()
-    const calendar = slotCalendars(env, { fromInstant: starts, toInstant: new Date(Date.parse(starts) + 1).toISOString(),
-      locationId: facts.opening?.location_id, scope: 'bookable', now: time }, rows.slice(3)).get(offering.id)
-    if (!calendar) throw new HTTPError({ statusCode: 404, message: 'This product does not take bookings' })
+    const calendar = timedCalendarFrom(env, offering.id, selection.sessionId, facts.opening, time, rows.slice(3))
     const opening = bookableSessions(calendar.schedule, (await calendar.places()).sessions, time)
       .find(session => session.id === selection.sessionId)
     if (!opening) throw new HTTPError({ statusCode: 409, message: 'That session is no longer offered. Choose an available time.' })
@@ -294,7 +297,7 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
 type BookingOrganization = { id: string; slug: string; default_currency: string; vertical: string | null; source_locale: string | null;
   locale_status: string | null; policy_type: string | null; confirmation_mode: unknown }
 
-async function readBookingCreation(db: DbClient, organization: BatchQuery, input: {
+export function prepareBookingCreation(organization: BatchQuery, input: {
   slug?: string; productId?: string; body: Record<string, unknown>; idempotencyKey: string
 }, membership: BatchQuery | null, includeStayHome: boolean) {
   const offeringQuery = bookingOfferingQuery(organization, input)
@@ -309,19 +312,35 @@ async function readBookingCreation(db: DbClient, organization: BatchQuery, input
     : bookingParameter(input.productId)
   const reads = [organizationQuery, offeringQuery]
   if (includeStayHome) reads.push(stayCreationHomeQuery(organization, product, input.body.check_in_date, input.idempotencyKey))
-  if (!selection.failure) reads.push(checkoutAttemptQuery(organization, input.idempotencyKey), ...timedBookingQueries(organization, product, selection))
-  const results = await executeBatch(db, membership ? [membership, ...reads.map(read => withViewer(membership, read))] : reads,
-    { operation: 'Read booking creation facts' })
-  const member = membership ? results.shift()!.results[0] : undefined
-  const [orgRows, offeringRows] = results.splice(0, 2)
-  const home = includeStayHome ? results.shift()!.results[0] as StayCreationHome | undefined : undefined
-  const [attempts, ...timed] = results
+  const now = new Date().toISOString()
+  if (!selection.failure) {
+    const terms = timedBookingQueries(organization, product, selection)
+    reads.push(checkoutAttemptQuery(organization, input.idempotencyKey), ...terms,
+      ...timedCalendarQueries(organization, product, terms[0]!, selection.sessionId, now))
+  }
   return {
-    member, home, organization: orgRows!.results[0] as BookingOrganization | undefined, offering: offeringRows!.results[0] as BookingOffering | undefined,
-    checkoutAttempt: attempts?.results[0] as CheckoutAttempt | undefined, timed: selection.failure ? null : timedBookingFrom(timed),
+    queries: membership ? [membership, ...reads.map(read => withViewer(membership, read))] : reads,
+    read(results: D1Result[]) {
+      const member = membership ? results.shift()!.results[0] : undefined
+      const [orgRows, offeringRows] = results.splice(0, 2)
+      const home = includeStayHome ? results.shift()!.results[0] as StayCreationHome | undefined : undefined
+      const [attempts, ...timed] = results
+      return {
+        member, home, organization: orgRows!.results[0] as BookingOrganization | undefined,
+        offering: offeringRows!.results[0] as BookingOffering | undefined,
+        checkoutAttempt: attempts?.results[0] as CheckoutAttempt | undefined,
+        timed: selection.failure ? null : { ...timedBookingFrom(timed.slice(0, 3)), calendar: timed.slice(3), now },
+      }
+    },
   }
 }
 
+export type BookingCreationRead = ReturnType<ReturnType<typeof prepareBookingCreation>['read']>
+
+async function readBookingCreation(db: DbClient, ...input: Parameters<typeof prepareBookingCreation>) {
+  const plan = prepareBookingCreation(...input)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read booking creation facts' }))
+}
 /** The authenticated member creates a booking through the selected offering's inventory. */
 export async function createMemberBooking(event: H3Event, input: {
   body: Record<string, unknown>; operator: Omit<BookingOperator, 'userId'>; financialWritesAllowed?: boolean
@@ -351,7 +370,7 @@ export async function createMemberBooking(event: H3Event, input: {
 }
 
 /** Create a booking or checkout using the offering's canonical inventory unit. */
-export async function createProductBooking(event: H3Event, context: BookingCreationContext) {
+export async function createProductBooking(event: H3Event, context: BookingCreationContext, prepared?: BookingCreationRead) {
   const { organizationId, slug, body } = context
   if (!organizationId || !slug) return creationResult({ error: 'Organization and slug are required' }, { status: 400 })
 
@@ -360,11 +379,11 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   if (!db) return creationResult({ error: 'Database not available' }, { status: 500 })
 
   const idempotencyKey = context.operator?.idempotencyKey ?? (typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : '')
-  const facts = await readBookingCreation(db, bookingParameter(organizationId), { ...context, idempotencyKey }, null, false)
+  const facts = prepared ?? await readBookingCreation(db, bookingParameter(organizationId), { ...context, idempotencyKey }, null, false)
   return createBookingFrom(event, env, context, facts)
 }
 
-async function createBookingFrom(event: H3Event, env: CloudflareEnv, context: BookingCreationContext, facts: Awaited<ReturnType<typeof readBookingCreation>>) {
+async function createBookingFrom(event: H3Event, env: CloudflareEnv, context: BookingCreationContext, facts: BookingCreationRead) {
   const { organizationId, slug, body, operator } = context
   const { organization, offering, checkoutAttempt } = facts
   const db = env.DB
@@ -461,11 +480,11 @@ async function createBookingFrom(event: H3Event, env: CloudflareEnv, context: Bo
   // A restaurant calls a table's guest when plans change, so a table booking needs a phone number.
   if (product.kind === 'table' && !normalizedGuestPhone) return creationResult({ error: 'Please enter your phone number.' }, { status: 400 })
 
-  const now = new Date().toISOString()
   if (!facts.timed) throw new Error('Validated timed selection is missing its booking facts')
-  const terms = await timedBookingTerms(db, env, {
-    ...selection, organizationId, productId: product.id, currency: organization.default_currency, actorId: operator?.userId ?? 'system', now,
-  }, facts.timed)
+  const { now } = facts.timed
+  const calendar = timedCalendarFrom(env, product.id, sessionId, facts.timed.opening, now, facts.timed.calendar)
+  const resolvedOpening = await resolveCalendarOpening(calendar, sessionId, now, operator?.userId ?? 'system')
+  const terms = timedBookingPriceTerms({ ...selection, currency: organization.default_currency, now }, facts.timed, resolvedOpening)
   if (terms.failure) return terms.failure
   const { resolved, variant, config, price, requiresPayment, policy } = terms
   // Freeze the wording the guest answered before any seat claim or checkout.

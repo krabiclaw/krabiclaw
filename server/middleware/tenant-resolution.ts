@@ -8,7 +8,7 @@ import type { H3Event } from 'nitro';
 import { getCookie, getQuery, redirect, setResponseHeader } from 'nitro/h3';
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from "~/server/db";
 import { TENANT_TYPES } from "~/utils/tenant-routing";
-import { cloudflareEnv, isInternalSelfFetch } from "../utils/api-response";
+import { cloudflareEnv, isInternalSelfFetch, readRequiredBody } from "../utils/api-response";
 import {
   BLAWBY_FREE_SITE_HOST, environmentTenantAliasSlug, isNonProductionHost, LEGACY_FREE_SITE_HOST, normalizeHost,
   hostnameOf,
@@ -49,15 +49,16 @@ import { parseDate } from '@internationalized/date'
 import { prepareDashboardEarningsDocument } from '~/server/utils/dashboard-earnings'
 import { PUBLIC_CONFIG_COLUMNS, type PublicConfigRow } from '~/server/utils/organization-config'
 import { publicTenantRedirectQuery, type PublicTenantRedirect } from '~/server/utils/public-redirects'
-import { preparePublicTimedQuote, type PublicTimedQuoteRead } from '~/server/domain/product-bookings'
+import { prepareBookingCreation, preparePublicTimedQuote, type PublicTimedQuoteRead } from '~/server/domain/product-bookings'
 import { preparePublicProductAvailability, type PublicAvailabilityRead } from '~/server/utils/public-session-booking'
-import { preparePaymentHandoff } from '~/server/domain/payments/intent'
+import { preparePaymentHandoff, preparePaymentReturn } from '~/server/domain/payments/intent'
 import { prepareGuestBookingReceipt, type GuestReceiptRead } from '~/server/utils/guest-booking-receipt'
 import { readBearerToken } from '~/server/utils/reservation-cancel-token'
 import { splitLocalePrefix } from '~/utils/tenant-locale-path'
 import { platformLocale } from '~/shared/platform-locales'
 import { publicLocalizationsQuery, type StoredPublicLocalizationRow } from '~/server/utils/public-localization'
 import { preparePublicShellRows, publicDocumentCollectionKind, type PublicDocumentShell } from '~/server/utils/public-shell-query'
+import { isRecord } from '~/server/utils/type-guards'
 
 interface TenantRow extends Omit<PublicBase['organization'], 'theme_id' | 'name'>, Omit<PublicConfigRow, 'default_currency'> {
   id: string;
@@ -132,7 +133,7 @@ function tenantSelectFor(event: H3Event) {
 async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain: string, selection: string, parameters: string[]) {
   const read = tenantSelectFor(event)
   const host = { query: `${read.query}, ${canonicalDomain} AS canonical_domain ${selection} LIMIT 1`, params: [...read.params, ...parameters] }
-  if (event.method !== 'GET' || event.url.searchParams.has(PREVIEW_TOKEN_QUERY) || getCookie(event, PREVIEW_COOKIE_NAME)) {
+  if (event.url.searchParams.has(PREVIEW_TOKEN_QUERY) || getCookie(event, PREVIEW_COOKIE_NAME)) {
     return queryFirst<TenantRow>(db, host.query, host.params)
   }
 
@@ -140,6 +141,43 @@ async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain:
     AND o.status = 'active' AND o.onboarding_status = 'active' LIMIT 1`, params: parameters }
   const tenantScope = { query: `(${authorized.query})`, params: authorized.params }
   const path = normalizedPath(event.url.pathname)
+  if (event.method === 'POST') {
+    const bookingSlug = /^\/api\/public\/products\/([a-zA-Z0-9_-]+)\/book$/.exec(path)?.[1]
+    const returnPaymentId = /^\/api\/public\/payments\/([a-f0-9-]+)\/return$/.exec(path)?.[1]
+    if (bookingSlug || returnPaymentId) {
+      let body: Record<string, unknown>
+      try {
+        const value = await readRequiredBody<unknown>(event)
+        if (!isRecord(value)) throw new HTTPError({ statusCode: 400, message: 'Invalid request body' })
+        body = value
+      } catch (error) {
+        event.context.checkoutBodyError = error
+        return queryFirst<TenantRow>(db, host.query, host.params)
+      }
+      event.context.checkoutBody = body
+      if (bookingSlug) {
+        const idempotencyKey = typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : ''
+        const plan = prepareBookingCreation(tenantScope, { slug: bookingSlug, body, idempotencyKey }, null, false)
+        const [hostRows, ...rows] = await executeBatch(db, [host, ...plan.queries], { operation: 'Read public booking creation facts' })
+        const tenant = hostRows?.results[0] as TenantRow | undefined
+        if (tenant?.status === 'active' && tenant.onboarding_status === 'active') {
+          event.context.bookingCreation = { slug: bookingSlug, facts: plan.read(rows) }
+        }
+        return tenant ?? null
+      }
+      if (returnPaymentId && typeof body.claim === 'string') {
+        const plan = await preparePaymentReturn(tenantScope, returnPaymentId, body.claim)
+        const [hostRows, paymentRows] = await executeBatch(db, [host, plan], { operation: 'Read public payment return' })
+        const tenant = hostRows?.results[0] as TenantRow | undefined
+        if (tenant?.status === 'active' && tenant.onboarding_status === 'active') {
+          event.context.paymentReturn = { paymentId: returnPaymentId, plan, row: paymentRows?.results[0] }
+        }
+        return tenant ?? null
+      }
+    }
+  }
+  if (event.method !== 'GET') return queryFirst<TenantRow>(db, host.query, host.params)
+
   const paymentId = /^\/api\/public\/payments\/([a-f0-9-]+)$/.exec(path)?.[1]
   const claim = getQuery(event).claim
   if (paymentId && typeof claim === 'string') {

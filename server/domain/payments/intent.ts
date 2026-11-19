@@ -422,9 +422,9 @@ async function paymentReceipt(env: CloudflareEnv, payment: Payment, receipt: Che
 }
 
 /** Read the receipt, settling a successful payment if the provider redirect beat the webhook. */
-export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, buyer: () => Promise<string>): Promise<PaymentReturn> {
+export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, buyer: () => Promise<string>, prepared?: { plan: Awaited<ReturnType<typeof preparePaymentReturn>>; row: unknown }): Promise<PaymentReturn> {
   const now = new Date().toISOString()
-  let payment = await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
+  let payment = prepared ? prepared.plan.read(prepared.row) : await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
   // Reconciliation writes captured_amount only after it verifies Stripe's succeeded intent.
   if (payment.captured_amount <= 0) {
     const stripe = paymentsStripe(env, Boolean(payment.livemode))
@@ -457,4 +457,8 @@ export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, or
   if (!snapshot.approval) await claimCheckoutReturn(db, await buyer(), claim, payment)
   const hold = payment.checkout_hold ? JSON.parse(payment.checkout_hold) as CheckoutHold : null
   return paymentReceipt(env, payment, hold)
+}
+
+export function preparePaymentReturn(organization: BatchQuery, paymentId: string, claim: string) {
+  return prepareCheckoutPayment(organization, paymentId, claim, new Date().toISOString(), 'settlement')
 }

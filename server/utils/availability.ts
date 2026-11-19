@@ -1216,9 +1216,11 @@ export async function listScheduleSessions(db: DbClient, input: SlotRange & { en
 
 /** One session: a saved one with its places left, or a time the schedule offers. */
 export async function getScheduleSession(db: DbClient, env: CloudflareEnv, input: SessionSelector): Promise<SessionAvailability> {
-  const found = await findOpening(db, env, input, input.now ?? new Date().toISOString(), 'editor')
-  const places = found && await found.calendar.places()
-  const session = places && (places.recorded.find(row => row.id === input.sessionId) ?? (found.opening && places.place(found.opening.session)))
+  const now = input.now ?? new Date().toISOString()
+  const calendar = await calendarAtOpening(db, env, input, await readSavedBookingOpening(db, input), now, 'editor')
+  const places = await calendar?.places()
+  const opening = calendar && openingInCalendar(calendar, input.sessionId, now)
+  const session = places && (places.recorded.find(row => row.id === input.sessionId) ?? (opening && places.place(opening.session)))
   if (!session) throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found for this offering' })
   return session as SessionAvailability
 }
@@ -1384,24 +1386,25 @@ export function bookingOpeningInstant(sessionId: string, saved?: SavedBookingOpe
 }
 
 /** The offered time a session id names, read through the slot reader at that instant. */
-async function openingAt(db: DbClient, env: CloudflareEnv | null, input: SessionSelector, saved: SavedBookingOpening | undefined, now: string, scope: SlotReadScope) {
+async function calendarAtOpening(db: DbClient, env: CloudflareEnv | null, input: SessionSelector, saved: SavedBookingOpening | undefined, now: string, scope: SlotReadScope) {
   const starts = bookingOpeningInstant(input.sessionId, saved)
   if (!starts) return null
-  const calendar = await readSlotCalendar(db, env, {
+  return readSlotCalendar(db, env, {
     ...input, now, scope, locationId: input.locationId === undefined ? saved?.location_id : input.locationId,
     fromInstant: starts, toInstant: new Date(Date.parse(starts) + 1).toISOString(),
   })
-  const opening = calendar.openings.find(item => item.session.id === input.sessionId)
-  return { calendar, opening: opening && bookableSessions(calendar.schedule, [opening.session as BookableSession], now).length ? opening : null }
 }
 
-async function findOpening(db: DbClient, env: CloudflareEnv | null, input: SessionSelector, now: string, scope: SlotReadScope) {
-  return openingAt(db, env, input, await readSavedBookingOpening(db, input), now, scope)
+function openingInCalendar(calendar: SlotCalendar, sessionId: string, now: string) {
+  const opening = calendar.openings.find(item => item.session.id === sessionId)
+  return opening && bookableSessions(calendar.schedule, [opening.session as BookableSession], now).length ? opening : null
 }
 
 /** Verify a session selector without storing its occurrence. */
 export async function findBookableSession(db: DbClient, input: SessionSelector, scope: 'bookable' | 'editor' = 'bookable'): Promise<SessionFacts | null> {
-  return (await findOpening(db, null, input, input.now ?? new Date().toISOString(), scope))?.opening?.session ?? null
+  const now = input.now ?? new Date().toISOString()
+  const calendar = await calendarAtOpening(db, null, input, await readSavedBookingOpening(db, input), now, scope)
+  return calendar ? openingInCalendar(calendar, input.sessionId, now)?.session ?? null : null
 }
 
 /** Re-derive the exact offered occurrence and prepare its first claim. */
@@ -1415,11 +1418,15 @@ export async function bookingSessionFrom(db: DbClient, input: SessionSelector & 
   env: CloudflareEnv; actorId: string
 }, saved: SavedBookingOpening | undefined, scope: SlotReadScope = 'bookable'): Promise<ResolvedBookingSession> {
   const now = input.now ?? new Date().toISOString()
-  const found = await openingAt(db, input.env, input, saved, now, scope)
-  if (!found) throw new HTTPError({ statusCode: 404, message: 'That session is not open for booking' })
-  const { calendar, opening } = found
+  const calendar = await calendarAtOpening(db, input.env, input, saved, now, scope)
+  if (!calendar) throw new HTTPError({ statusCode: 404, message: 'That session is not open for booking' })
+  return resolveCalendarOpening(calendar, input.sessionId, now, input.actorId)
+}
+
+export async function resolveCalendarOpening(calendar: SlotCalendar, sessionId: string, now: string, actorId: string) {
+  const opening = openingInCalendar(calendar, sessionId, now)
   if (!opening) throw new HTTPError({ statusCode: 409, message: 'That session is no longer offered. Choose an available time.' })
-  return prepareResolvedOpening(calendar.schedule, opening, now, input.actorId, (await calendar.places()).availability)
+  return prepareResolvedOpening(calendar.schedule, opening, now, actorId, (await calendar.places()).availability)
 }
 
 function prepareResolvedOpening(schedule: SlotSchedule, opening: ScheduledOpening, now: string, actorId: string | null, providerAvailability: string): ResolvedBookingSession {
@@ -1480,6 +1487,7 @@ export interface SessionAllocationInput {
   env: CloudflareEnv
   organizationId: string; productId: string; sessionId: string; partySize: number; now: string
   resolved?: ResolvedBookingSession
+  saved?: SessionAllocationFacts | null
   /** Test a proposed allocation without writing its projected session. */
   preview?: boolean
   /** Publication keeps its page when sale is disabled; bookings require active sale by default. */
@@ -1487,6 +1495,15 @@ export interface SessionAllocationInput {
   replacingBookingId?: string | null
   /** The conversation the claim answers, and the key its decision is recorded under: the claim lands only while nobody has answered. */
   requireUndecided?: { requestId: string; organizationId: string; decisionDedupeKey: string } | null
+}
+
+type SessionAllocationFacts = Pick<ProductSession, 'starts_at' | 'ends_at' | 'location_id'> &
+  Pick<SessionLocation, 'opening_hours' | 'special_hours'> & { timezone: string | null; status: string | null; provider_id: string | null }
+
+export function sessionAllocationFactsQuery(organization: string, product: string, session: string) {
+  return `SELECT s.starts_at,s.ends_at,s.location_id,l.timezone,l.status,l.opening_hours,l.special_hours,${providerMemberSql('s')} AS provider_id
+    FROM product_sessions s LEFT JOIN business_locations l ON l.id=s.location_id AND l.organization_id=s.organization_id
+    WHERE s.id=${session} AND s.organization_id=${organization} AND s.product_id=${product} AND s.status='scheduled'`
 }
 
 export async function sessionAllocationPredicate(db: DbClient, input: SessionAllocationInput): Promise<BatchQuery> {
@@ -1501,11 +1518,8 @@ export async function sessionAllocationPredicate(db: DbClient, input: SessionAll
     location = resolved.guard
     availability = resolved.providerAvailability
   } else {
-    const session = await queryFirst<Pick<ProductSession, 'starts_at' | 'ends_at' | 'location_id'> &
-      Pick<SessionLocation, 'opening_hours' | 'special_hours'> & { timezone: string | null; status: string | null; provider_id: string | null }>(db, `
-      SELECT s.starts_at,s.ends_at,s.location_id,l.timezone,l.status,l.opening_hours,l.special_hours,${providerMemberSql('s')} AS provider_id
-      FROM product_sessions s LEFT JOIN business_locations l ON l.id=s.location_id AND l.organization_id=s.organization_id
-      WHERE s.id=? AND s.organization_id=? AND s.product_id=? AND s.status='scheduled'`, [input.sessionId, input.organizationId, input.productId])
+    const session = input.saved === undefined ? await queryFirst<SessionAllocationFacts>(db, sessionAllocationFactsQuery('?', '?', '?'),
+      [input.sessionId, input.organizationId, input.productId]) : input.saved
     if (!session) return { query: '0', params: [] }
     location = { query: 's.location_id IS ? AND s.starts_at=? AND s.ends_at=?', params: [session.location_id, session.starts_at, session.ends_at] }
     if (session.location_id !== null) {
@@ -1585,6 +1599,7 @@ export async function sessionClaimQuery(db: DbClient, input: {
   productId: string
   sessionId: string
   resolved?: ResolvedBookingSession
+  saved?: SessionAllocationFacts | null
   productVariantId: string
   partySize: number
   /** The Better Auth user the booking belongs to. */
