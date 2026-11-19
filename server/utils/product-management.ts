@@ -1,4 +1,3 @@
-import type { CatalogProduct } from '~/server/types/products'
 import { changedTaskIds, publishChangedJobs } from '~/server/events'
 import { isStayAmenityCodes, NEW_HOME_CANCELLATION_POLICIES, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
@@ -60,6 +59,7 @@ function storedQuestions(value: unknown) {
   return { questions, questions_revision: formQuestionsRevision(questions) }
 }
 import type {
+  CatalogProduct,
   Collection,
   CreateCollectionInput,
   CreateProductInput,

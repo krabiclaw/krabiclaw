@@ -3,7 +3,7 @@ import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { HTTPError } from 'nitro';
 
 import type { H3Event } from 'nitro'
-import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { listLocationQa } from '~/server/utils/location-qa'
 import { requireLocationAccess, requireOrganizationAccess, requireProductAccess } from '~/server/utils/location-access'
 import {

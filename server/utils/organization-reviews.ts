@@ -1,6 +1,6 @@
 import { buildPublicReviewAggregate, normalizePublicReviewAggregateRows, type PublicReviewAggregateLocation } from '~/server/utils/public-review-aggregate'
 import { HTTPError } from 'nitro'
-import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '../db/index.ts'
+import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '../db/index.ts'
 import { publicResourceCacheInvalidationQuery } from './public-resource-cache.ts'
 import { loadPublicSocialMedia } from './public-social-image.ts'
 import { groupMediaPlacements, mediaPlacementsQuery } from './media-asset-manager.ts'

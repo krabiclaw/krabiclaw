@@ -1,5 +1,3 @@
-import english from '~/i18n/locales/en'
-
 export const ZARAZ_ANALYTICS_PURPOSE_ID = 'kc_analytics'
 
 // Zaraz owns this cookie: it holds the visitor's answer for every purpose. Its
@@ -9,16 +7,6 @@ export const ZARAZ_CONSENT_COOKIE_NAME = 'kc_analytics_consent'
 // The one optional tool Zaraz loads is Google Analytics; this purpose is its
 // only switch. Blawby's first-party measurement (/api/analytics/track) is
 // not a Zaraz tool and does not read this consent.
-export const ZARAZ_ANALYTICS_PURPOSE = {
-  name: 'Google Analytics',
-  description: `${english.legal.analytics_notice} ${english.legal.analytics_notice_link}.`,
-}
-
-export function zarazConsentModalIntroHtml(platformOrigin: string) {
-  const privacyUrl = new URL('/policies/privacy', platformOrigin)
-  return `${english.legal.analytics_notice} <a href="${privacyUrl.href}">${english.legal.analytics_notice_link}</a>.`
-}
-
 /**
  * The event name the collector sends to Zaraz once the native pageview is accepted. The GA4
  * pageview action fires on a trigger that matches exactly this event and on nothing else, so Google

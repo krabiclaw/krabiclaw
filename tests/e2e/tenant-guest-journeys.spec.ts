@@ -72,6 +72,8 @@ async function chooseFirstAvailableTime(page: Page) {
 }
 
 test('Ember & Slice menu cards retain their links and prices with a compact route payload', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
   const tenant = seededTenant('restaurant')
   const product = tenant.products.margherita!
   const location = tenant.locations.brooklyn!
@@ -87,6 +89,8 @@ test('Ember & Slice menu cards retain their links and prices with a compact rout
   expect(localized?.status()).toBe(200)
   await expect(page.locator('html')).toHaveAttribute('lang', 'th')
   await expect(page.locator('main').getByText('มาร์เกอริต้า', { exact: true }).first()).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--tenant-header-height'))).toMatch(/^\d+(?:\.\d+)?px$/)
+  expect(errors).toEqual([])
 })
 
 test.describe('tenant guest journeys (disposable local/preview data only)', () => {

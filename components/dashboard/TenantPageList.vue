@@ -86,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { tenantPageRows, websiteSettingsKey, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
 import PageTasksModal from '~/components/dashboard/PageTasksModal.vue'
 

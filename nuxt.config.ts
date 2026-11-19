@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path'
 import { getIcons } from '@iconify/utils'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { DOCS_CATEGORY_ART } from './utils/docs-category-art'
-import { LEGACY_PLATFORM_THEME_STORAGE_KEY, PLATFORM_THEME_STORAGE_KEY } from './shared/platform-theme'
+import { LEGACY_PLATFORM_THEME_STORAGE_KEY, PLATFORM_THEME_STORAGE_KEY, readPlatformThemePreference } from './shared/platform-theme'
 import { ROBOTS_DISABLED_DIRECTIVE, ROBOTS_ENABLED_DIRECTIVE } from './shared/robots-directive'
 import { localizedPublicRouteAliases, publicDocumentRouteRules } from './build/localized-public-routes'
 import { mountBookingRoutes, nodeAt } from './build/booking-routes'
@@ -109,7 +109,7 @@ export default defineNuxtConfig({
       script: [
         {
           key: 'platform-theme-init',
-          innerHTML: `if(document.documentElement.dataset.theme!=='dark'){const p=localStorage.getItem('${PLATFORM_THEME_STORAGE_KEY}')??localStorage.getItem('${LEGACY_PLATFORM_THEME_STORAGE_KEY}')??'system';const d=p==='dark'||(p==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d)}`,
+          innerHTML: `if(document.documentElement.dataset.theme!=='dark'){const p=(${readPlatformThemePreference.toString()})(localStorage,'${PLATFORM_THEME_STORAGE_KEY}','${LEGACY_PLATFORM_THEME_STORAGE_KEY}')??'system';const d=p==='dark'||(p==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d)}`,
         },
       ],
       link: [
@@ -241,6 +241,29 @@ export default defineNuxtConfig({
       if (!removed) throw new Error('Japanese font slices are no longer chunk assets; remove this build:manifest hook')
     },
     'app:templates'(app) {
+      app.templates.push({
+        filename: 'public-document-script.mjs',
+        write: true,
+        getContents: async () => {
+          const { build } = await import('vite')
+          const [result] = [await build({
+            configFile: false,
+            logLevel: 'error',
+            build: {
+              write: false,
+              lib: {
+                entry: resolve(import.meta.dirname, 'utils/public-document-entry.ts'),
+                formats: ['iife'],
+                name: 'PublicDocument',
+              },
+            },
+          })].flat()
+          if (!result || !('output' in result)) throw new Error('Expected one public document script')
+          const script = result.output.find(chunk => chunk.type === 'chunk')
+          if (!script || script.type !== 'chunk') throw new Error('Public document script was not built')
+          return `export default ${JSON.stringify(script.code.replace(/<\/script/gi, '<\\/script'))}\n`
+        },
+      })
       const routes = app.templates.find(template => template.filename === 'routes.mjs')
       if (!routes?.getContents) throw new Error('Nuxt route template is unavailable')
       const render = routes.getContents

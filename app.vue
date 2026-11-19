@@ -8,10 +8,9 @@
 </template>
 
 <script setup lang="ts">
-import { browserPageviewTransport, postPublicInteraction } from '~/utils/browser-pageview'
-import { bootPublicDocument, installPublicDocumentControls } from '~/utils/public-document-controls'
-import { ATTRIBUTION_KEYS } from '~/utils/analytics-attribution'
-import { NATIVE_PAGEVIEW_ZARAZ_EVENT, ZARAZ_ANALYTICS_PURPOSE_ID, ZARAZ_CONSENT_COOKIE_NAME } from '~/utils/zaraz-consent'
+import publicDocumentScript from '#build/public-document-script.mjs'
+import { installPublicDocumentControls } from '~/utils/public-document-controls'
+import { ZARAZ_ANALYTICS_PURPOSE_ID, ZARAZ_CONSENT_COOKIE_NAME } from '~/utils/zaraz-consent'
 import { isDocumentOnlyPublicPath } from '~/shared/public-locale-routes'
 import { buildTenantHeadLinks } from '~/utils/tenant-head'
 import { isPublicMenuProduct } from '~/utils/public-resource-contracts'
@@ -22,22 +21,29 @@ const isPlatform = site.slug === 'platform'
 const route = useRoute()
 const isPublicSurface = computed(() => !route.path.startsWith('/dashboard') && !route.path.startsWith('/api'))
 
-const documentConfig = { purpose: ZARAZ_ANALYTICS_PURPOSE_ID, consentCookie: ZARAZ_CONSENT_COOKIE_NAME, gaEvent: NATIVE_PAGEVIEW_ZARAZ_EVENT, attributionKeys: ATTRIBUTION_KEYS, preview: previewAuthorized }
 if (import.meta.server) {
   const path = route.path.replace(/\/$/, '')
   const source = typeof route.params.locale === 'string' ? path.slice(route.params.locale.length + 1) : path
   if (isDocumentOnlyPublicPath(source)) {
-    // These browser functions are self-contained and also run in the hydrated app.
-    const scripts = [installPublicDocumentControls, browserPageviewTransport, postPublicInteraction].map(fn => fn.toString())
+    // Nuxt emits a rule for every app route and locale on noScripts pages.
+    // Warm links between the document-only pages without sending that route tree.
+    useNuxtApp().ssrContext?.head.hooks?.hook('tags:resolve', ({ tags }) => {
+      const hints = tags.find(tag => tag.tag === 'script' && tag.props.type === 'speculationrules')
+      if (!hints) return
+      const where = { or: ['/menu', '/*/menu', '/reviews', '/*/reviews'].map(path => ({ href_matches: `${path}{/}?` })) }
+      hints.innerHTML = JSON.stringify({ prerender: [{ where, eagerness: 'moderate' }] })
+    })
     useHead({ script: [{
-      key: 'public-document-controls', tagPosition: 'bodyClose',
-      innerHTML: `(${bootPublicDocument.toString()})(${scripts.join(',')},${JSON.stringify(documentConfig)})`,
+      key: 'public-document-controls',
+      tagPosition: 'bodyClose',
+      ...(previewAuthorized ? { 'data-preview': '' } : {}),
+      innerHTML: publicDocumentScript,
     }] })
   }
 } else {
   const { trackAnnouncementView, trackAnnouncementCtaClick } = useOrganizationConversionTracking()
   onMounted(() => {
-    installPublicDocumentControls(documentConfig.purpose, documentConfig.consentCookie,
+    installPublicDocumentControls(ZARAZ_ANALYTICS_PURPOSE_ID, ZARAZ_CONSENT_COOKIE_NAME,
       action => (action === 'announcement_view' ? trackAnnouncementView : trackAnnouncementCtaClick)(route.path), true)
   })
 }
