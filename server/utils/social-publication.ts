@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
-import { executeBatch, execute, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { linkedAccountAccessToken, readLinkedAccount, type CloudflareEnv } from '~/server/utils/auth'
+import { executeBatch, execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { readLinkedAccount, type CloudflareEnv } from '~/server/utils/auth'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { prepareOrganizationPlan } from '~/server/utils/billing-access'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
@@ -11,16 +11,15 @@ import { providerCaption } from '~/shared/posts'
 import { MetaGraphError } from '~/server/utils/meta-graph'
 import { buildImageUrl } from '~/server/utils/cloudflare-images'
 import {
-  createUnpublishedPhoto, createVideo, facebookPageToken, finishReel, isFacebookReel, listLinkedFacebookPages,
+  createUnpublishedPhoto, createVideo, facebookPageToken, finishReel, isFacebookReel,
   publishPagePost, readPagePost, readVideo, startReel, uploadReelFromUrl, type FacebookPageTarget,
 } from '~/server/utils/facebook-pages'
 import {
-  createMediaContainer, getInstagramAccount, instagramAccessToken, publishContainer, readContainerStatus, readMedia, type InstagramTarget,
+  createMediaContainer, instagramAccessToken, publishContainer, readContainerStatus, readMedia, type InstagramTarget,
 } from '~/server/utils/instagram'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { integrationsFromRows, integrationsQuery, readIntegration } from '~/server/utils/organization-integrations'
 import type { OrganizationIntegration } from '~/shared/organization-settings'
-import { isRecord } from '~/server/utils/type-guards'
 import {
   createMessage, discordMessageLink, DiscordError, getMessage, readMessageChannel,
   type DiscordFile, type DiscordMessage,
@@ -145,16 +144,28 @@ async function discordTargetFor(env: CloudflareEnv, connection: ConnectionRead):
  * what stands in the way, and where a person connects
  * it. Never a token.
  */
-export function prepareSocialConnections(organization: string | { sql: string }) {
-  const plan = prepareOrganizationPlan(organization)
+export function prepareSocialConnections(organization: string | { sql: string }, scope?: BatchQuery) {
+  const target = scope ? { sql: '(SELECT organization_id FROM social_scope)' } : organization
+  const plan = prepareOrganizationPlan(target)
+  const integrations = integrationsQuery(target)
+  const selections = { query: `SELECT selected.*, EXISTS (SELECT 1 FROM account a WHERE a.id = selected.account_id) AS account_linked FROM (${integrations.query}) selected`, params: integrations.params }
+  const scoped = (query: BatchQuery): BatchQuery => scope ? { query: `WITH social_scope AS (${scope.query}) ${query.query}`, params: [...scope.params ?? [], ...query.params ?? []] } : query
   return {
-    queries: [plan.query, integrationsQuery(organization)],
-    read([planRows, integrationRows]: D1Result[], organizationId: string) {
+    queries: [...(scope ? [scope] : []), scoped(plan.query), scoped(selections)],
+    read(rows: D1Result[], organizationId: string) {
+      const proof = scope ? rows[0]!.results[0] as { organization_id: string; location_id: string | null } | undefined : null
+      if (scope && (!proof || proof.organization_id !== organizationId)) throw new HTTPError({ statusCode: 404, message: 'Publishing scope not found or access denied' })
+      const [planRows, integrationRows] = rows.slice(scope ? 1 : 0)
+      const linked = new Set((integrationRows!.results as { account_id: string; account_linked: number }[]).filter(row => row.account_linked === 1).map(row => row.account_id))
       const integrations = integrationsFromRows(integrationRows!.results)
       const byChannel = new Map(integrations.map(integration => [integration.provider, integration]))
       return {
+        location_id: proof ? proof.location_id : null,
         entitled: getPlanEntitlements(plan.read(planRows!, organizationId)).managed_service === true,
-        connections: SOCIAL_CHANNELS.map(channel => socialConnection(channel, byChannel.get(channel) ?? null)),
+        connections: SOCIAL_CHANNELS.map(channel => {
+          const connection = socialConnection(channel, byChannel.get(channel) ?? null)
+          return { ...connection, account_linked: connection.accountId !== null && linked.has(connection.accountId) }
+        }),
       }
     },
   }
@@ -163,73 +174,30 @@ export function prepareSocialConnections(organization: string | { sql: string })
 export async function getSocialConnections(env: CloudflareEnv, organizationId: string, links: { dashboardBase: string }) {
   const plan = prepareSocialConnections(organizationId)
   const saved = plan.read(await executeBatch(env.DB, plan.queries, { operation: 'Read social publishing destinations' }), organizationId)
-  return presentSocialConnections(env, organizationId, links, saved)
+  return presentSocialConnections(organizationId, links, saved)
 }
 
-export async function presentSocialConnections(env: CloudflareEnv, organizationId: string, links: { dashboardBase: string },
+/** Saved destinations and setup requirements. Provider access is checked by the action using the destination. */
+export function presentSocialConnections(organizationId: string, links: { dashboardBase: string },
   { entitled, connections }: ReturnType<ReturnType<typeof prepareSocialConnections>['read']>) {
-  const channels = await Promise.all(connections.map(async connection => {
+  const channels = connections.map(connection => {
     const { channel } = connection
     const problems: Array<{ code: string; message: string }> = []
     if (!entitled) problems.push({ code: 'growth_plan_required', message: GROWTH_PLAN_REQUIRED })
     if (!connection.connected) problems.push({ code: 'not_connected', message: NOT_CONNECTED[channel] })
-    else if (!connection.accountId || !(await readLinkedAccount(env, connection.accountId))) problems.push({ code: 'account_unlinked', message: `The ${channel} account this connection was made through is no longer linked. Connect it again.` })
-    else {
-      const access = await currentAccessProblem(env, connection)
-      if (access) problems.push(access)
-    }
+    else if (!connection.account_linked) problems.push({ code: 'account_unlinked', message: `The ${channel} account this connection was made through is no longer linked. Connect it again.` })
+    else if (!connection.targetId || !connection.targetName || !connection.revision) problems.push({ code: 'connection_incomplete', message: `The ${CHANNEL_NAMES[channel]} connection is incomplete. Connect it again.` })
     return {
-      channel,
-      connected: connection.connected,
-      target_id: connection.targetId,
-      target_name: connection.targetName,
-      connection_revision: connection.revision,
-      supported_formats: SUPPORTED_FORMATS[channel],
-      supported_operations: SUPPORTED_OPERATIONS[channel],
+      channel, connected: connection.connected, target_id: connection.targetId, target_name: connection.targetName,
+      connection_revision: connection.revision, supported_formats: SUPPORTED_FORMATS[channel], supported_operations: SUPPORTED_OPERATIONS[channel],
       deletion_unavailable_reason: channel === 'instagram' ? 'Meta supports media deletion only with Facebook Login; this account uses Instagram Login. Delete it in Instagram.' : null,
-      problems,
-      connect_url: `${links.dashboardBase}/integrations/${channel}`,
+      problems, connect_url: `${links.dashboardBase}/integrations/${channel}`,
     }
-  }))
+  })
   return { website: { channel: 'organization' as const, target_id: organizationId, label: 'Website' }, channels }
 }
 
 const GROWTH_PLAN_REQUIRED = 'Publishing to Facebook, Instagram and Discord requires the Growth plan.'
-
-/**
- * Whether the saved connection still works, asked of Meta now: Facebook lists
- * the Pages assigned to the linked system user, Instagram reads the account
- * the token belongs to. A rejection from Meta is a connection problem the
- * owner can act on; any other failure is not, and is thrown.
- */
-async function currentAccessProblem(env: CloudflareEnv, connection: ConnectionRead): Promise<{ code: string; message: string } | null> {
-  try {
-    if (connection.channel === 'discord') {
-      // The bot still sees the connected channel as a text or announcement channel.
-      await discordTargetFor(env, connection)
-      return null
-    }
-    if (connection.channel === 'facebook') {
-      const pages = await listLinkedFacebookPages(env, connection.accountId!)
-      if (!pages.some(page => page.id === connection.targetId)) {
-        return { code: 'page_not_assigned', message: `The linked Facebook system user has no assignment for Page ${connection.targetName}. Check its delegated Page access, or connect Facebook again.` }
-      }
-      return null
-    }
-    // Better Auth refreshes the linked account's access token when needed.
-    const account = await getInstagramAccount((await linkedAccountAccessToken(env, connection.accountId!)).accessToken)
-    if (account.id !== connection.targetId) {
-      return { code: 'account_mismatch', message: `The linked Instagram login now belongs to @${account.username}, not ${connection.targetName}. Connect Instagram again.` }
-    }
-    return null
-  } catch (error) {
-    if (error instanceof MetaGraphError || error instanceof DiscordError) return failureOf(error)
-    if (HTTPError.isError(error) && isRecord(error.data) && error.data.code === 'FAILED_TO_GET_ACCESS_TOKEN') {
-      return { code: 'access_token_unavailable', message: `Better Auth could not get an access token for ${CHANNEL_NAMES[connection.channel]}. Reconnect the account and try again.` }
-    }
-    throw error
-  }
-}
 
 /** Resolve exactly the connected target named by the caller. No default channel or account. */
 export async function connectedSocialTarget(env: CloudflareEnv, organizationId: string, target: Extract<PublishTarget, { channel: SocialChannel }>) {

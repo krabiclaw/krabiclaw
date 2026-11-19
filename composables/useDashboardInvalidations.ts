@@ -306,7 +306,7 @@ export function useDashboardInvalidations(): DashboardInvalidationConnection {
 }
 
 /** A CMS index can reuse its last authorized response while its workspace socket is live. */
-export function useWebsiteIndexData<T>(key: MaybeRefOrGetter<string>, read: (signal?: AbortSignal) => Promise<T>, options: { server?: boolean; lazy?: boolean; immediate?: boolean } = {}) {
+export function useWebsiteIndexData<T>(key: MaybeRefOrGetter<string>, read: (signal?: AbortSignal) => Promise<T>, options: { server?: boolean; lazy?: boolean; immediate?: boolean; enabled?: MaybeRefOrGetter<boolean> } = {}) {
   const nuxt = useNuxtApp()
   const realtime = useDashboardInvalidations()
   const cacheKey = (name: string) => `website:${name}`
@@ -320,7 +320,7 @@ export function useWebsiteIndexData<T>(key: MaybeRefOrGetter<string>, read: (sig
     dedupe: 'defer',
     getCachedData(name, app, { cause }) {
       if (cause !== 'initial') return undefined
-      return (app.isHydrating ? app.payload.data[name] : realtime.held.get(cacheKey(name))) as T | undefined
+      return (import.meta.server || app.isHydrating ? app.payload.data[name] : realtime.held.get(cacheKey(name))) as T | undefined
     },
   })
   if (import.meta.client && nuxt.isHydrating) {

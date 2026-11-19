@@ -11,7 +11,7 @@ import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.
 import { isMcpRenderResponse } from '../../server/utils/mcp-render.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { createPost, deletePost, getPost, listPublicSocialPosts, updatePost } from '../../server/utils/post-management.ts'
-import { getSocialConnections, publishPost, reconcilePostPublication, type PublishTarget } from '../../server/utils/social-publication.ts'
+import { connectedSocialTarget, getSocialConnections, publishPost, reconcilePostPublication, type PublishTarget } from '../../server/utils/social-publication.ts'
 import { listChannelPosts, getChannelPost, deleteChannelPost } from '../../server/utils/social-channel-posts.ts'
 import { remainingMetaSubjectData } from '../../server/utils/integration-release.ts'
 import { deleteIntegration, listIntegrations, readIntegration, storeIntegration } from '../../server/utils/organization-integrations.ts'
@@ -304,9 +304,12 @@ test('publication: one result and one external post per target; a failure is the
     assert.deepEqual(await db.prepare('SELECT status, published_at FROM content_documents WHERE id = ?').bind(empty.post.id).first(), { status: 'draft', published_at: null })
 
     await run("UPDATE account SET accessToken = 'deadbeef' WHERE id = 'ig-account'")
+    const readsBeforeConnections = meta.requests.length
     const connections = await getSocialConnections(env, 'org-a', { dashboardBase: 'https://proof.example/dashboard/org-a' })
+    assert.equal(meta.requests.length, readsBeforeConnections, 'Reading saved destinations does not probe providers')
     assert.deepEqual(connections.channels.find(item => item.channel === 'facebook')?.problems, [])
-    assert.deepEqual(connections.channels.find(item => item.channel === 'instagram')?.problems.map(item => item.code), ['access_token_unavailable'])
+    assert.deepEqual(connections.channels.find(item => item.channel === 'instagram')?.problems, [])
+    await assert.rejects(connectedSocialTarget(env, 'org-a', targets.instagram()), (error: unknown) => HTTPError.isError(error) && error.data?.code === 'FAILED_TO_GET_ACCESS_TOKEN')
     await run("UPDATE account SET accessToken = 'ig-token' WHERE id = 'ig-account'")
 
     // Website, Facebook photos and an Instagram carousel in one call.

@@ -565,6 +565,7 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset, resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { parseSitePalette } from '~/shared/site-palette'
 import { getErrorMessage } from '~/utils/errors'
+import { needsWebsiteSettings } from '~/utils/dashboard-document'
 import { businessChanged } from '~/composables/useDashboardInvalidations'
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION } from '~/shared/media-placement-contract'
 import { isTenantPageListResponse, websiteSettingsKey, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
@@ -960,13 +961,14 @@ function resetDraft() {
   originalSignature.value = editorSignature(detailKey.value)
 }
 
-const settingsResourceKey = computed(() => websiteSettingsKey(String(route.params.org_slug)))
+const readsSettings = computed(() => surface.value !== 'settings' || needsWebsiteSettings(route.path.replace(/^\/dashboard\/[^/]+/, '')))
+const settingsResourceKey = computed(() => `${websiteSettingsKey(String(route.params.org_slug))}${readsSettings.value ? '' : ':closed'}`)
 const { data: settingsResource, error: settingsResourceError, refresh: refreshSettingsResource } = await useWebsiteIndexData(settingsResourceKey, () => dashboardApi('/api/dashboard/settings', {
     query: { view: 'website' },
     validate: (value): value is SettingsPageResource => isSettingsResponse(value) && isTenantPageListResponse(value)
       && 'articles' in value && Array.isArray(value.articles) && 'posts' in value && Array.isArray(value.posts)
       && 'source_locale' in value && typeof value.source_locale === 'string',
-  }))
+  }), { enabled: readsSettings })
 const loadedSettings = computed(() => settingsResource.value?.settings ?? null)
 const loadError = computed(() => {
   const error = settingsResourceError.value

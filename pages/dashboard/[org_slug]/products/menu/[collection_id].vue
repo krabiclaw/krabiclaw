@@ -65,6 +65,7 @@ const locationId = useLocationScope()
 
 // The same catalog the list reads, so the Name leaf's draft costs no request.
 const catalog = useProductCatalog(organizationId, locationId)
+await catalog.load
 const collection = computed(() => catalog.collections.value.find(row => row.id === collectionId.value) ?? null)
 
 // ── The collection record ───────────────────────────────

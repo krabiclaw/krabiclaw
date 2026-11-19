@@ -1,4 +1,5 @@
 import { computed, inject, provide, toRaw, toValue, watch, type InjectionKey, type MaybeRefOrGetter } from 'vue'
+import { businessChanged } from '~/composables/useDashboardInvalidations'
 import { slugifyTitle } from '~/utils/post-slugs'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import type { TenantPageBlock, TenantPageType } from '~/utils/tenant-page-blocks'
@@ -176,6 +177,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
 }
 
 function createTenantPageDraft(organizationId: string, pageId: string) {
+  const realtime = useDashboardInvalidations()
   const dashboardApi = useDashboardApi()
   const runtimeConfig = useRuntimeConfig()
   const isNew = computed(() => pageId === 'new')
@@ -184,7 +186,7 @@ function createTenantPageDraft(organizationId: string, pageId: string) {
   const settingsKey = websiteSettingsKey(String(useRoute().params.org_slug))
   const { data: website } = useNuxtData<{ source_locale: string; settings: { subdomain: string | null } }>(settingsKey)
   type SavedPage = { page: TenantPageResponse | null; public_url: string | null; preview_token: string | null }
-  const load = useAsyncData<SavedPage>(key, async () => {
+  const load = useWebsiteIndexData<SavedPage>(key, async () => {
     if (!website.value) throw createError({ statusCode: 500, statusMessage: 'Website settings are unavailable' })
     if (pageId === 'new') return { page: null, public_url: null, preview_token: null }
     return dashboardApi(`/api/editor/organizations/${organizationId}/pages/${encodeURIComponent(pageId)}`, {
@@ -308,6 +310,10 @@ function createTenantPageDraft(organizationId: string, pageId: string) {
       : await dashboardApi<{ page: TenantPageResponse }>(`/api/editor/organizations/${organizationId}/pages`, { method: 'POST', body, validate: isTenantPageResponse })
     if (data.value) data.value = { ...data.value, page: response.page }
     seed(response.page)
+    if (data.value && response.page.id === pageId) {
+      const held = realtime.held.begin(`website:${key}`, businessChanged)
+      realtime.held.hold(held, data.value, Date.now() + 30_000, 16)
+    }
     void refreshNuxtData(settingsKey)
     return response.page
   }

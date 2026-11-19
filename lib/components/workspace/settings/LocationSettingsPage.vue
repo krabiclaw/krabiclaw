@@ -301,7 +301,11 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       const update = (locations: import('~/composables/useDashboardOrganization').DashboardLocation[]) => locations.map(location => location.id === record.id ? { ...location, ...record } : location)
       if (dashboard.state.value) dashboard.state.value.locations = update(dashboard.state.value.locations).filter(location => location.status === 'active')
       for (const [index, cached] of locationLists.entries()) {
-        if (cached.data.value) cached.data.value = { ...cached.data.value, locations: update(cached.data.value.locations).filter(location => index === 1 || location.status === 'active') }
+        if (cached.data.value) {
+          cached.data.value = { ...cached.data.value, locations: update(cached.data.value.locations).filter(location => index === 1 || location.status === 'active') }
+          const held = realtime.held.begin(`website:dashboard-org-locations:${orgSlug}${index === 1 ? ':all' : ''}`, businessChanged)
+          realtime.held.hold(held, cached.data.value, Date.now() + 30_000, 16)
+        }
       }
       if (previousStatus !== record.status) await nuxt.runWithContext(() => Promise.all([dashboard.refresh(), refreshNuxtData([`dashboard-org-locations:${orgSlug}`, `dashboard-org-locations:${orgSlug}:all`])]))
       return true

@@ -1,3 +1,4 @@
+import { businessChanged } from '~/composables/useDashboardInvalidations'
 import { computed, type Ref } from 'vue'
 import type { Collection, CatalogProduct } from '~/server/types/products'
 import { groupProductsByCollection } from '~/utils/product-presentation'
@@ -8,12 +9,13 @@ export type CatalogCollection = Collection & { product_count: number; dish_count
 
 export function useProductCatalog(organizationId: string, locationId: Ref<string | null>, immediate = true, menu = false) {
   const dashboardApi = useDashboardApi()
+  const realtime = useDashboardInvalidations()
   const route = useRoute()
   type Catalog = { collections: CatalogCollection[]; products: CatalogProduct[] }
   const key = computed(() => menu ? `product-catalog:${organizationId}:menu:${locationId.value ?? 'all'}` : `product-catalog:${organizationId}`)
-  const load = useAsyncData(
+  const load = useWebsiteIndexData(
     key,
-    (_app, { signal }) => dashboardApi(`/api/editor/organizations/${organizationId}/products`, {
+    signal => dashboardApi(`/api/editor/organizations/${organizationId}/products`, {
       signal,
       query: { include: 'collections', ...(menu ? { location_id: locationId.value ?? undefined, kind: 'dish' } : {}) },
       validate: (value: unknown): value is Catalog => isRecord(value) && Array.isArray(value.collections) && Array.isArray(value.products),
@@ -22,19 +24,22 @@ export function useProductCatalog(organizationId: string, locationId: Ref<string
   )
   const { data, pending, error } = load
   const menuLocation = typeof route.query.location_id === 'string' ? route.query.location_id : null
-  const related = [
-    useNuxtData<Catalog>(`product-catalog:${organizationId}`).data,
-    ...[...new Set(['all', ...(menuLocation ? [menuLocation] : [])])].map(id => useNuxtData<Catalog>(`product-catalog:${organizationId}:menu:${id}`).data),
+  const relatedKeys = [
+    `product-catalog:${organizationId}`,
+    ...[...new Set(['all', ...(menuLocation ? [menuLocation] : [])])].map(id => `product-catalog:${organizationId}:menu:${id}`),
   ]
+  const related = relatedKeys.map(key => useNuxtData<Catalog>(key).data)
   function updateReads(project: (current: Catalog) => Catalog) {
     const visited = new Map<Catalog, Catalog>()
-    for (const read of [data, ...related]) {
+    for (const [index, read] of [data, ...related].entries()) {
       const current = read.value
       if (!current) continue
       if (!visited.has(current)) visited.set(current, project(current))
       const updated = visited.get(current)!
       visited.set(updated, updated)
       read.value = updated
+      const held = realtime.held.begin(`website:${index === 0 ? key.value : relatedKeys[index - 1]}`, businessChanged)
+      realtime.held.hold(held, updated, Date.now() + 30_000, 16)
     }
   }
 

@@ -33,12 +33,12 @@ export const isCategoryResponse = (value: unknown): value is { category: Dashboa
  * leaf picks from and the Categories list manages. Keyed by the collection, so
  * switching a post between the blog and the docs reads the other list.
  */
-export function useArticleCategories(organizationId: string, collection: MaybeRefOrGetter<ArticleCollection>, enabled: MaybeRefOrGetter<boolean> = true) {
+export function useArticleCategories(organizationId: string, collection: MaybeRefOrGetter<ArticleCollection>, enabled: MaybeRefOrGetter<boolean> = true, categoryId: MaybeRefOrGetter<string | null> = null) {
   const dashboardApi = useDashboardApi()
-  return useAsyncData(
-    () => `article-categories:${organizationId}:${toValue(enabled) ? toValue(collection) : 'inactive'}`,
+  return useWebsiteIndexData(
+    () => `article-categories:${organizationId}:${toValue(enabled) ? toValue(categoryId) ? `category:${toValue(categoryId)}` : toValue(collection) : 'inactive'}`,
     async () => toValue(enabled) ? (await dashboardApi(`/api/editor/organizations/${organizationId}/blog/categories`, {
-      query: { collection: toValue(collection) }, validate: isCategoriesResponse,
+      query: toValue(categoryId) ? { category_id: toValue(categoryId) } : { collection: toValue(collection) }, validate: isCategoriesResponse,
     })).categories : [],
   )
 }

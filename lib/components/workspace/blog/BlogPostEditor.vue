@@ -118,6 +118,7 @@ import { useEventListener } from '@vueuse/core'
 const props = withDefaults(defineProps<{ repository: BlogPostRepository; initialPost: BlogPost | null; organizationId: string; panelId?: string; mediaPickerComponent: Component }>(), {
   panelId: 'blog-post-editor',
 })
+const emit = defineEmits<{ saved: [post: BlogPost] }>()
 const route = useRoute()
 const postId = computed(() => String(route.params.post_id || ''))
 const newArticle = postId.value === 'new'
@@ -176,6 +177,7 @@ watch(() => props.initialPost, (loaded) => {
     loadError.value = getErrorMessage(error, 'Failed to load article.')
   }
 }, { immediate: true })
+watch(post, row => { if (row) emit('saved', row) }, { flush: 'sync' })
 const readsCategories = computed(() => newArticle || section.value === 'category')
 const { data: categories, error: categoriesError, refresh: refreshCategories } = await useArticleCategories(props.organizationId, () => form.collection, readsCategories)
 // Category management opens its existing owner in another tab, leaving this

@@ -447,7 +447,7 @@ import { formatPostalAddress } from '~/utils/postal-address'
 import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
 import { ApiClientError } from '~/utils/api-clients'
 import StayArrivalGuideView from '~/components/booking/StayArrivalGuide.vue'
-import { isStayArrivalGuide, stayCheckInWindow } from '~/shared/stay-arrival'
+import { STAY_ARRIVAL_SECTIONS, isStayArrivalGuide, stayCheckInWindow } from '~/shared/stay-arrival'
 import { businessChanged } from '~/composables/useDashboardInvalidations'
 import type { ProductMutation } from '~/server/utils/product-management'
 import { presentationForProduct } from '~/utils/product-presentation'
@@ -618,7 +618,7 @@ const { data: loaded, error: loadFailure, refresh } = await useWebsiteIndexData<
 )
 
 const product = computed(() => loaded.value?.product ?? null)
-const { locations: allOrganizationLocations, error: locationsError, pending: locationsPending } = await useOrganizationLocations({ includeInactive: true, initial: loaded.value?.locations })
+const { locations: allOrganizationLocations, error: locationsError, pending: locationsPending } = await useOrganizationLocations({ includeInactive: true, initial: loaded.value?.locations, organization_id: loaded.value?.product.organization_id })
 const organizationLocations = computed(() => allOrganizationLocations.value.filter(entry => entry.status === 'active'))
 const location = computed(() => allOrganizationLocations.value.find(entry => entry.id === locationId.value) ?? null)
 const { priceLabel } = useCatalogPrice(computed(() => priceLocationId()), allOrganizationLocations)
@@ -638,8 +638,7 @@ const experienceEditor = computed(() => product.value?.kind === 'experience')
 const legalEditor = computed(() => product.value?.kind === 'service')
 const bookingCopy = computed(() => getVerticalCopy((product.value?.kind ?? form.kind) === 'service' ? 'service' : 'experience', 'en'))
 const summaryCards = computed(() => stayEditor.value || dishEditor.value || experienceEditor.value || legalEditor.value)
-const ARRIVAL_SECTIONS = ['arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'checkout-instructions']
-const arrivalTab = computed(() => stayEditor.value && (route.query.guide === 'arrival' || ARRIVAL_SECTIONS.includes(detailKey.value ?? '')))
+const arrivalTab = computed(() => stayEditor.value && (route.query.guide === 'arrival' || (STAY_ARRIVAL_SECTIONS as readonly string[]).includes(detailKey.value ?? '')))
 async function changeStayTab(value: string | number) {
   if (saving.value || value === (arrivalTab.value ? 'arrival' : 'space')) return
   revert()
@@ -653,8 +652,9 @@ const isArrivalResponse = (value: unknown): value is { home: StayArrivalGuide; m
   isRecord(value) && isStayArrivalGuide(value.home) && typeof value.manage === 'boolean' && value.home.product_id === productId.value
 const isArrivalMutation = (value: unknown): value is { home: StayArrivalGuide; channel_push: SuccessfulChannelPush | null } =>
   isRecord(value) && isStayArrivalGuide(value.home) && value.home.product_id === productId.value && isSuccessfulChannelPush(value.channel_push)
-const { data: arrivalLoaded, error: arrivalFailure, refresh: refreshArrival } = await useAsyncData(
-  () => `dashboard-product-arrival:${organizationId}:${productId.value}:${arrivalTab.value ? 'open' : 'closed'}`,
+const arrivalReadKey = computed(() => `dashboard-product-arrival:${organizationId}:${productId.value}:${arrivalTab.value ? 'open' : 'closed'}`)
+const { data: arrivalLoaded, error: arrivalFailure, refresh: refreshArrival } = await useWebsiteIndexData(
+  arrivalReadKey,
   async () => arrivalTab.value ? await dashboardApi(arrivalUrl(), { validate: isArrivalResponse }) : null,
 )
 const arrivalHome = computed(() => arrivalLoaded.value?.home ?? null)
@@ -694,7 +694,10 @@ async function saveArrival(fields: readonly StayArrivalField[], target?: string)
       body[field] = typeof value === 'string' ? (value.trim() ? (field === 'wifi_password' ? value : value.trim()) : null) : value
     }
     try {
-      await dashboardApi(arrivalUrl(), { method: 'PATCH', body, validate: isArrivalMutation })
+      const saved = await dashboardApi(arrivalUrl(), { method: 'PATCH', body, validate: isArrivalMutation })
+      arrivalLoaded.value = { home: saved.home, manage: arrivalManage.value }
+      const held = realtime.held.begin(`website:${arrivalReadKey.value}`, businessChanged)
+      realtime.held.hold(held, arrivalLoaded.value, Date.now() + 30_000, 16)
     } catch (error) {
       saveError.value = getErrorMessage(error, 'The arrival guide could not be saved')
       // A failed response may follow a committed write. Show the persisted
@@ -707,8 +710,6 @@ async function saveArrival(fields: readonly StayArrivalField[], target?: string)
       }
       return
     }
-    await refreshArrival()
-    if (arrivalFailure.value) throw arrivalFailure.value
     revertArrival()
     await (target ? navigateTo(target) : level.close())
   } catch (error) {
@@ -893,7 +894,7 @@ const stayHasNightlyPrice = computed(() => {
   return row.variants.some(variant => variant.active && selectPrice(variant.prices, { currency, location_id: locationId }))
 })
 const draftStay = computed(() => stayEditor.value && !published.value && !homeLive.value)
-const { quote: homeQuote, quoteError: homeQuoteError, quotePending: homeQuotePending } = useHomesQuote(organizationId, () => homeLive.value ? 0 : 1, () => homeQuoted.value && !arrivalTab.value)
+const { quote: homeQuote, quoteError: homeQuoteError, quotePending: homeQuotePending } = useHomesQuote(organizationId, () => homeLive.value ? 0 : 1, () => homeQuoted.value && !arrivalTab.value, { document: true })
 const homeBilling = computed<{ text: string; billing?: string } | null>(() => {
   if (isNew.value && form.kind === 'stay') return { text: 'A new home is a free draft until it is published or synced with Airbnb.' }
   if (!homeQuoted.value || arrivalTab.value) return null

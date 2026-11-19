@@ -30,7 +30,7 @@
         <div>
           <h2 class="text-lg font-semibold text-highlighted">Publish to</h2>
           <UAlert v-if="connectionsError" class="mt-4" color="error" title="Social accounts could not be read" :description="connectionsError" />
-          <p v-if="connectionStatus === 'pending' || connections?.requires_live_validation" class="mt-4 text-sm text-muted">Reading social accounts…</p>
+          <p v-if="connectionStatus === 'pending'" class="mt-4 text-sm text-muted">Reading social accounts…</p>
           <ul class="mt-2 divide-y divide-default">
             <li v-for="row in rows" :key="row.channel" class="flex items-start gap-3 py-5">
               <UIcon :name="row.icon" class="mt-0.5 size-5 shrink-0" aria-hidden="true" />
@@ -76,6 +76,7 @@ import MediaGallery from '~/components/MediaGallery.vue'
 import { normalizePostMediaForForm, postListKey, usePostEditor, type PostMediaFormItem, type PublishOutcome, type PublishTarget, type SocialChannel } from '~/composables/usePostEditor'
 import { articlePostFields, parsePostInput, POST_BODY_MAX, POST_TITLE_MAX, POST_CALL_TO_ACTION_LABEL_MAX } from '~/shared/posts'
 import { isBlogPostResponse } from '~/lib/components/workspace/blog/blog-response-contracts'
+import { businessChanged } from '~/composables/useDashboardInvalidations'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 import { websiteSettingsKey } from '~/composables/useTenantPageDraft'
 
@@ -88,12 +89,13 @@ const postId = String(route.params.post_id ?? '')
 const isNew = postId === 'new'
 const scopeLocationId = useLocationScope()
 const editor = usePostEditor(organizationId, scopeLocationId)
+const realtime = useDashboardInvalidations()
 const { locations: organizationLocations } = await useOrganizationLocations()
 const sourceArticleId = typeof route.query.article_id === 'string' && route.query.article_id.trim() ? route.query.article_id : null
 if (route.query.article_id !== undefined && !sourceArticleId) throw createError({ statusCode: 400, statusMessage: 'An article ID is required' })
 const preparedChannel = route.query.channel
 if (preparedChannel !== undefined && (typeof preparedChannel !== 'string' || !['facebook', 'instagram', 'discord'].includes(preparedChannel))) throw createError({ statusCode: 400, statusMessage: 'Unsupported prepared channel' })
-const { data: sourceArticle, error: sourceError } = await useAsyncData(`post-source-article:${organizationId}:${sourceArticleId ?? ''}`, async () => {
+const { data: sourceArticle, error: sourceError } = await useWebsiteIndexData(`post-source-article:${organizationId}:${sourceArticleId ?? ''}`, async () => {
   if (!isNew || !sourceArticleId) return null
   const response = await dashboardApi(`/api/editor/organizations/${organizationId}/blog/${encodeURIComponent(sourceArticleId)}`, { validate: isBlogPostResponse })
   if (response.post.status !== 'published' || !response.post.public_path) throw createError({ statusCode: 409, statusMessage: 'Publish the article before preparing a social post' })
@@ -101,13 +103,20 @@ const { data: sourceArticle, error: sourceError } = await useAsyncData(`post-sou
   if (!origin) throw createError({ statusCode: 409, statusMessage: 'The website needs a public address before sharing an article' })
   return { article: response.post, url: new URL(response.post.public_path, origin).toString() }
 })
-const { data, error } = await useAsyncData(`dashboard-post:${organizationId}:${postId}`, async () => isNew ? null : dashboardApi(`/api/editor/organizations/${organizationId}/posts/${encodeURIComponent(postId)}`, {
+const { data, error } = await useWebsiteIndexData(`dashboard-post:${organizationId}:${postId}`, async () => isNew ? null : dashboardApi(`/api/editor/organizations/${organizationId}/posts/${encodeURIComponent(postId)}`, {
   validate: (value): value is { post: ApiRecord } => isRecord(value) && isRecord(value.post) && typeof value.post.id === 'string',
 }))
 if (isNotFoundError(error.value) || isNotFoundError(sourceError.value)) throw createError({ statusCode: 404, statusMessage: 'Post or article not found' })
 const loadError = computed(() => sourceError.value || error.value ? getErrorMessage(sourceError.value ?? error.value, 'The post could not be loaded') : null)
 if (data.value?.post) editor.loadFrom(data.value.post)
 const post = editor.record
+watch(post, row => {
+  if (!row) return
+  const response = { post: row }
+  if (String(row.id) === postId) data.value = response
+  const held = realtime.held.begin(`website:dashboard-post:${organizationId}:${String(row.id)}`, businessChanged)
+  realtime.held.hold(held, response, Date.now() + 30_000, 16)
+}, { flush: 'sync' })
 
 function initialDraft() {
   const source = sourceArticle.value
@@ -142,13 +151,11 @@ const locationChoice = computed({ get: () => editor.form.location_id ?? WHOLE_WE
 const previewMedia = computed(() => editor.form.media.filter((item): item is PostMediaFormItem & { public_url: string } => Boolean(item.asset_id && item.public_url)).map(item => ({ asset_id: item.asset_id, url: item.public_url, poster: item.thumbnail_url ?? undefined, kind: item.kind === 'video' ? 'video' as const : 'image' as const, alt: item.alt_text, description: editor.form.body })))
 
 interface Channel { channel: SocialChannel; connected: boolean; target_id: string | null; target_name: string | null; connection_revision: string | null; problems: Array<{ code: string; message: string }>; connect_url: string }
-const { data: connections, error: connectionFailure, status: connectionStatus, refresh: refreshConnections } = await useLazyAsyncData(
+const { data: connections, error: connectionFailure, status: connectionStatus, refresh: refreshConnections } = await useWebsiteIndexData(
   () => `post-publish-targets:${organizationId}:${editor.form.location_id ?? ''}`,
-  () => dashboardApi('/api/integrations/social-connections', { query: { locationId: editor.form.location_id ?? '' }, validate: (value): value is { channels: Channel[]; requires_live_validation?: true } => isRecord(value) && Array.isArray(value.channels) }),
+  () => dashboardApi('/api/integrations/social-connections', { query: { locationId: editor.form.location_id ?? '' }, validate: (value): value is { channels: Channel[] } => isRecord(value) && Array.isArray(value.channels) }),
+  { lazy: true },
 )
-onMounted(() => {
-  if (connections.value?.requires_live_validation) void refreshConnections()
-})
 useEventListener(import.meta.client ? window : undefined, 'focus', () => refreshConnections())
 const connectionsError = computed(() => connectionFailure.value ? getErrorMessage(connectionFailure.value, 'Failed to read connections') : null)
 const lastOutcomes = ref<PublishOutcome[]>([])
@@ -178,7 +185,7 @@ const rows = computed(() => {
 })
 let initialTargetsRead = false
 watch(() => JSON.stringify(connections.value?.channels.map(channel => [channel.channel, channel.target_id, channel.connection_revision, channel.connected, channel.problems])), (targets) => {
-  if (!targets || connections.value?.requires_live_validation) return
+  if (!targets) return
   if (initialTargetsRead) selected.value = selected.value.filter(channel => channel === 'organization')
   else if (isNew && preparedChannel && !selected.value.length && rows.value.find(row => row.channel === preparedChannel)?.selectable) {
     selected.value = [preparedChannel as SocialChannel]

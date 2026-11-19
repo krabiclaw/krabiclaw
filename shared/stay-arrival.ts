@@ -6,6 +6,8 @@ import { isPublicProvider } from './member-scheduling'
 /** The private fields the listing editor reads from the canonical home response. */
 export type StayArrivalGuide = Pick<StayHome, 'product_id' | 'check_in_method' | 'check_in_instructions' | 'wifi_network' | 'wifi_password' | 'directions' | 'house_manual' | 'checkout_instructions'>
 export type StayArrivalField = Exclude<keyof StayArrivalGuide, 'product_id'>
+export const STAY_ARRIVAL_SECTIONS = ['arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'checkout-instructions'] as const
+
 
 export const STAY_ARRIVAL_TEXT_LIMITS = { check_in_instructions: 5000, wifi_network: 100, wifi_password: 100, directions: 5000, house_manual: 5000 } as const
 export const STAY_CHECKOUT_DETAILS_LIMIT = 500

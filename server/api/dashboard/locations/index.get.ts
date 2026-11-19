@@ -1,10 +1,9 @@
 import { prepareDashboardLocationOverview } from '~/server/utils/dashboard-editor-resources'
-import { dashboardOrgQueryParam, prepareDashboardLocations, readDashboardMemberResources } from '~/server/utils/dashboard-context'
+import { dashboardOrgQueryParam, prepareOrganizationLocations, readDashboardMemberResources } from '~/server/utils/dashboard-context'
 import { defineHandler, HTTPError } from 'nitro'
 import { getQuery } from 'nitro/h3'
 import { jsonResponse } from '~/server/utils/api-response'
 import { BATCH_VIEWER, roleAllows, assertRoleAllows } from '~/server/utils/member-access'
-import { roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import { listDashboardLocationsResource } from '~/server/utils/dashboard-locations-resource'
 
 export default defineHandler(async (event) => {
@@ -22,9 +21,7 @@ export default defineHandler(async (event) => {
   if (organizationScoped) {
     const organizationSlug = dashboardOrgQueryParam(event)
     if (!organizationSlug) throw new HTTPError({ statusCode: 400, message: 'A workspace slug is required' })
-    const plan = prepareDashboardLocations({ sql: BATCH_VIEWER.organization }, {
-      user: BATCH_VIEWER.user, unrestricted: roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ products: ['read'] })),
-    }, query.status === 'all')
+    const plan = prepareOrganizationLocations(BATCH_VIEWER, query.status === 'all')
     const { rows, organization } = await readDashboardMemberResources(event, { slug: organizationSlug }, plan.queries)
     const managesCatalog = await roleAllows({ ...organization, permissions: { products: ['read'] } })
     if (!managesCatalog) await assertRoleAllows({ ...organization, permissions: { products: ['assigned'] } })

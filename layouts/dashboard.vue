@@ -13,7 +13,7 @@
 
 <script setup lang="ts">
 import { ClientOnly } from '#components'
-import { dashboardProductId, rendersDashboardCalendar, rendersWebsiteDocument } from '~/utils/dashboard-document'
+import { dashboardProductId, rendersProductCreation, rendersCatalogEditor, rendersDashboardCalendar, rendersWebsiteDocument } from '~/utils/dashboard-document'
 import '~/assets/css/dashboard.css'
 
 const nuxt = useNuxtApp()
@@ -22,6 +22,8 @@ const route = useRoute()
 const document = useState('dashboard:server-document', () => (import.meta.server || nuxt.isHydrating)
   && typeof route.params.org_slug === 'string'
   && (rendersDashboardCalendar(route.path, route.query)
+    || rendersCatalogEditor(route.path.slice(`/dashboard/${route.params.org_slug}`.length))
+    || rendersProductCreation(route.path.slice(`/dashboard/${route.params.org_slug}`.length), route.query)
     || Boolean(dashboardProductId(route.path.slice(`/dashboard/${route.params.org_slug}`.length)))
     || rendersWebsiteDocument(route.path.slice(`/dashboard/${route.params.org_slug}`.length), route.query)
     || /^\/dashboard\/[^/]+(?:\/(?:bookings\/[^/]+|locations(?:\/.*)?|products|earnings(?:\/(?:performance|payouts))?|integrations(?:\/google-calendar)?))?\/?$/.test(route.path)))

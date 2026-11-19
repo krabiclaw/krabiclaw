@@ -124,11 +124,11 @@ function subtreeHeight(categories: readonly { id: string; parent_id: string | nu
   return 1 + Math.max(0, ...children.map(child => subtreeHeight(categories, child.id)))
 }
 
-export function articleCategoriesQuery(organization: string | { sql: string }, collection: ArticleCollection | { sql: string }): BatchQuery {
+export function articleCategoriesQuery(organization: string | { sql: string }, collection: ArticleCollection | { sql: string; params?: unknown[] }): BatchQuery {
   return {
     query: `${SELECT_CATEGORY} WHERE c.organization_id = ${typeof organization === 'string' ? '?' : organization.sql}
       AND c.collection = ${typeof collection === 'string' ? '?' : collection.sql}`,
-    params: [...(typeof organization === 'string' ? [organization] : []), ...(typeof collection === 'string' ? [collection] : [])],
+    params: [...(typeof organization === 'string' ? [organization] : []), ...(typeof collection === 'string' ? [collection] : collection.params ?? [])],
   }
 }
 

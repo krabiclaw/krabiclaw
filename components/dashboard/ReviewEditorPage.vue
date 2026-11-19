@@ -59,6 +59,7 @@ export const reviewEditorKey = Symbol('review-editor') as InjectionKey<ReviewEdi
 
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
+import { businessChanged } from '~/composables/useDashboardInvalidations'
 import { getErrorMessage } from '~/utils/errors'
 import { REVIEW_CATEGORIES, REVIEW_SUBJECTS } from '~/shared/review-questions'
 
@@ -73,6 +74,7 @@ const locationScope = useLocationScope()
 const route = useRoute()
 const router = useRouter()
 const dashboardApi = useDashboardApi()
+const realtime = useDashboardInvalidations()
 const level = useRouteLevel()
 const organizationId = useDashboardOrganizationId()
 
@@ -119,6 +121,8 @@ async function save() {
     if (data.value) data.value = { reviews: data.value.reviews.map(review => review.id === saved.review_id
       ? { ...review, status: saved.status }
       : review) }
+    const held = realtime.held.begin(`website:dashboard-reviews:${organizationId}:${locationScope.value ?? ''}`, businessChanged)
+    realtime.held.hold(held, data.value, Date.now() + 30_000, 16)
     await level.close()
   } catch (error) {
     errorMessage.value = getErrorMessage(error, 'Review could not be updated')

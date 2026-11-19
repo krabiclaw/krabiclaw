@@ -2656,34 +2656,36 @@ export function prepareCollectionList(input: { organizationId: string | { sql: s
   }
 }
 
-export async function readEditorCatalog(db: DbClient, input: { organizationId: string; assignedUserId?: string; kind?: ProductKind; locationId?: string }) {
+export function prepareEditorCatalog(input: { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope; kind?: ProductKind; locationId?: string }) {
   const { organizationId } = input
   const cards = prepareCatalogOfferings({ ...input, includeDishes: true })
   const collections = prepareCollectionList({ ...input, locationId: undefined })
   const all = organizationProductSelection({ organizationId, assignedUserId: input.assignedUserId })
-  const rows = await executeBatch(db, [
+  const queries = [
     ...cards.queries,
     ...collections.queries,
     {
       query: `SELECT cp.collection_id, count(*) AS product_count, sum(p.kind = 'dish') AS dish_count
         FROM (SELECT p.id, p.kind ${all.selection}) p
-        JOIN collection_products cp ON cp.organization_id = ? AND cp.product_id = p.id GROUP BY cp.collection_id`,
-      params: [...all.params, organizationId],
+        JOIN collection_products cp ON cp.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND cp.product_id = p.id GROUP BY cp.collection_id`,
+      params: [...all.params, ...(typeof organizationId === 'string' ? [organizationId] : [])],
     },
-  ], { operation: 'Read catalog and collections' })
-  const counts = new Map((rows.at(-1)!.results as { collection_id: string; product_count: number; dish_count: number }[])
-    .map(({ collection_id, ...counts }) => [collection_id, counts]))
-  return {
-    collections: collections.read(rows.slice(cards.queries.length, -1)).map(row => ({
-      ...row, product_count: counts.get(row.id)?.product_count ?? 0, dish_count: counts.get(row.id)?.dish_count ?? 0,
-    })),
-    products: cards.read(rows.slice(0, cards.queries.length)).map(({ product, internalName, image }): CatalogProduct => ({
-      id: product.id, name: product.name, kind: product.kind, active: product.active, variants: product.variants,
-      collections: product.collections, locations: product.locations, publications: product.publications, image: image ?? null,
-      stay: internalName === null ? null : { internal_name: internalName },
-      booking: product.booking ? { held_online: product.booking.held_online } : null,
-    })),
-  }
+  ]
+  return { queries, read(rows: D1Result[]) {
+    const counts = new Map((rows.at(-1)!.results as { collection_id: string; product_count: number; dish_count: number }[])
+      .map(({ collection_id, ...counts }) => [collection_id, counts]))
+    return {
+      collections: collections.read(rows.slice(cards.queries.length, -1)).map(row => ({
+        ...row, product_count: counts.get(row.id)?.product_count ?? 0, dish_count: counts.get(row.id)?.dish_count ?? 0,
+      })),
+      products: cards.read(rows.slice(0, cards.queries.length)).map(({ product, internalName, image }): CatalogProduct => ({
+        id: product.id, name: product.name, kind: product.kind, active: product.active, variants: product.variants,
+        collections: product.collections, locations: product.locations, publications: product.publications, image: image ?? null,
+        stay: internalName === null ? null : { internal_name: internalName },
+        booking: product.booking ? { held_online: product.booking.held_online } : null,
+      })),
+    }
+  } }
 }
 
 export async function listCollections(db: DbClient, input: CollectionReadScope): Promise<Collection[]> {

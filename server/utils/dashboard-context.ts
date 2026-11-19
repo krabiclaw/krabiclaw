@@ -1,3 +1,4 @@
+import { roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import type { LocationRecord } from '~/server/utils/location-management'
 import { oncePerRequest } from '~/server/utils/request-scope'
 import { timeRequestPhase } from '~/server/utils/request-metrics'
@@ -297,6 +298,14 @@ export async function getDashboardLocationContext(event: H3Event, locationId: st
   const location = context.rows[0]!.results[0] as DashboardLocationContextRow | undefined
   if (!location) throw new HTTPError({ statusCode: 404, message: 'Location not found or access denied' })
   return { ...context, location }
+}
+
+/** The organization location list uses the same catalog scope on every surface. */
+export function prepareOrganizationLocations(viewer: ViewerTerms, includeInactive = false) {
+  const read = roleMatchesSql(viewer.role!, rolesAllowing({ products: ['read'] }))
+  const assigned = roleMatchesSql(viewer.role!, rolesAllowing({ products: ['assigned'] }))
+  return prepareDashboardLocations({ sql: `CASE WHEN (${read} OR ${assigned}) THEN ${viewer.organization} END` },
+    { user: viewer.user, unrestricted: read }, includeInactive)
 }
 
 export function prepareDashboardLocations(

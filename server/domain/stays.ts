@@ -12,7 +12,7 @@ import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevisio
 import { validateFormAnswers } from '~/server/domain/form-questions'
 import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, STAY_DIRECT_DISCOUNTS, stayChannelCalendarRules, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assignedOperationsRoles, roleMatchesSql } from '~/utils/organization-access'
+import { assignedOperationsRoles, roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import { assertResponsibleMember, assertRoleAllows, assignedMemberSql, BATCH_VIEWER, bookingOperationsScope, roleAllows, withViewer, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
 import { organizationEventQuery, type OrganizationEvent } from '~/server/utils/organization-events'
@@ -49,7 +49,7 @@ import { planHomeMessages, planSourceMessages } from '~/server/domain/scheduled-
 import { listingCalendar } from '~/server/integrations/channex/airbnb-listing'
 import { joinBookingConversationQueries } from '~/server/domain/guest-threads/channel-messages'
 import { toE164 } from '~/utils/phone'
-import { arrangeProductPhotos, productPhotosFromPlacements, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, type MediaPlacementItem } from '~/server/utils/media-placement'
+import { arrangeProductPhotos, productPhotosFromPlacements, readProductPhotos, prepareStayHomeAccessibility, prepareStayPhotoRooms, type MediaPlacementItem } from '~/server/utils/media-placement'
 import { addStayPhotoRoomPlacementsQuery, buildDeleteOwnerPlacementsQuery, deleteMediaAsset, getMediaAsset, groupMediaPlacements, mediaPlacementsQuery, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
 import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
@@ -438,12 +438,18 @@ function channelOwned(stay: Stay, state: 'belongs to' | 'is paid through'): neve
 }
 
 /** The SQL that limits rows to homes this caller may see, and its parameters. */
+function stayHomeMemberScope(alias: string, member: string, role: string, assigned = roleMatchesSql(role, assignedOperationsRoles)) {
+  return `((${assigned} AND EXISTS (SELECT 1 FROM product_booking_configs looked_after
+    WHERE looked_after.organization_id = ${alias}.organization_id AND looked_after.product_id = ${alias}.product_id AND looked_after.assigned_member_id = ${member}))
+    OR ${listingGrantSql(`${alias}.organization_id`, `${alias}.product_id`, member, 'calendar', role)})`
+}
+
 function visibleHomes(access: StayAccess, alias = 'c'): { sql: string; params: string[] } {
   return access.manage ? access.listingId
     ? { sql: `${alias}.product_id = ?`, params: [access.listingId] }
     : { sql: '1 = 1', params: [] } : {
-    sql: `EXISTS (SELECT 1 FROM member m WHERE m.organizationId = ${alias}.organization_id AND m.userId = ? AND ((${access.role ? roleMatchesSql('m.role', assignedOperationsRoles) : '1'} AND EXISTS (SELECT 1 FROM product_booking_configs looked_after WHERE looked_after.organization_id = ${alias}.organization_id AND looked_after.product_id = ${alias}.product_id AND looked_after.assigned_member_id = m.id))
-      OR ${listingGrantSql(`${alias}.organization_id`, `${alias}.product_id`, 'm.id', 'calendar', 'm.role')}))`,
+    sql: `EXISTS (SELECT 1 FROM member m WHERE m.organizationId = ${alias}.organization_id AND m.userId = ?
+      AND ${stayHomeMemberScope(alias, 'm.id', 'm.role', access.role ? undefined : '1')})`,
     params: [access.userId],
   }
 }
@@ -472,20 +478,38 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 }
 
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
-  const homes = await stayHomeRows(db, organizationId, productId, scope)
-  const productIds = homes.map(home => home.product_id)
-  if (!productIds.length) return []
-  const [photos, photoRooms, accessibility] = await Promise.all([
-    readProductPhotos(db, { organizationId, productIds }),
-    readStayPhotoRooms(db, organizationId, productIds),
-    readStayHomeAccessibility(db, organizationId, productIds),
-  ])
-  return homes.map(home => ({
-    ...home,
-    photos: (photos.get(home.product_id) ?? []).map(stayPhoto),
-    photo_rooms: photoRooms.get(home.product_id) ?? [],
-    accessibility: accessibility.get(home.product_id)!,
-  }))
+  const plan = prepareStayHomesRead(organizationId, productId, scope)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read homes and their media' }))
+}
+
+/** The same complete home read serves the domain, API and private document. */
+function prepareStayHomesRead(organizationId: string | { sql: string }, productId: string | null, scope: { sql: string; params: string[] }) {
+  const organization = typeof organizationId === 'string' ? { query: '?', params: [organizationId] } : { query: organizationId.sql, params: [] }
+  const homes = stayHomeQueries(organization, productId, scope)
+  const ids = { query: `SELECT product_id FROM (${homes[0].query})`, params: homes[0].params }
+  const photos = mediaPlacementsQuery({ organizationId, ownerType: 'product', owners: { sql: ids.query, params: ids.params } })
+  const rooms = prepareStayPhotoRooms(organizationId, ids)
+  const accessibility = prepareStayHomeAccessibility(organizationId, ids)
+  return { queries: [...homes, photos, ...rooms.queries, ...accessibility.queries], read([rows, prices, photoRows, ...rest]: D1Result[]): StayHome[] {
+    const homes = stayHomesFrom(rows!.results as Record<string, unknown>[], prices!.results as Array<Price & { product_id: string }>)
+    const productIds = homes.map(home => home.product_id)
+    const photos = productPhotosFromPlacements(groupMediaPlacements(photoRows!.results))
+    const photoRooms = rooms.read(rest.slice(0, rooms.queries.length), productIds)
+    const access = accessibility.read(rest.slice(rooms.queries.length), productIds)
+    return homes.map(home => ({ ...home, photos: (photos.get(home.product_id) ?? []).map(stayPhoto),
+      photo_rooms: photoRooms.get(home.product_id)!, accessibility: access.get(home.product_id)! }))
+  } }
+}
+
+export function prepareStayHomeDocument(productId: string) {
+  const scope = { sql: `(${roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ operations: ['update'] }))}
+    OR ${stayHomeMemberScope('c', BATCH_VIEWER.member, BATCH_VIEWER.role!)})`, params: [] }
+  const plan = prepareStayHomesRead({ sql: BATCH_VIEWER.organization }, productId, scope)
+  return { queries: plan.queries, read(rows: D1Result[]) {
+    const [home] = plan.read(rows)
+    if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
+    return home
+  } }
 }
 
 /** A home's settings and nightly offer, without its photos, rooms and accessibility: what its calendar reads. */
