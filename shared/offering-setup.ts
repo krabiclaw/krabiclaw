@@ -15,7 +15,7 @@ export function offeringReturnTo(value: unknown, orgSlug: string) {
 }
 
 export function withOfferingReturnTo(path: string, returnTo: string) {
-  const url = new URL(path, 'https://krabiclaw.internal')
+  const url = new URL(path, 'https://blawby.internal')
   url.searchParams.set('return_to', returnTo)
   return `${url.pathname}${url.search}${url.hash}`
 }

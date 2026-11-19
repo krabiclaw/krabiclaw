@@ -11,7 +11,7 @@ import { tenantBlogPostPath } from '../../utils/tenant-blog-route.ts'
 import { blockVideo, youTubeVideoId, youTubeWatchUrl } from '../../shared/youtube-video.ts'
 import { getPlatformOrganization } from './platform-organization.ts'
 import { articleCategoryNameSql } from './content/article-categories.ts'
-import { KRABICLAW_BUG_REPORT_URL, KRABICLAW_FEATURE_REQUEST_URL, KRABICLAW_REPOSITORY_URL } from '../../shared/open-source.ts'
+import { BLAWBY_BUG_REPORT_URL, BLAWBY_FEATURE_REQUEST_URL, BLAWBY_REPOSITORY_URL } from '../../shared/open-source.ts'
 
 /** A documentation page: an ordinary site page whose path starts with /docs. */
 interface PlatformLlmDocSummary {
@@ -448,9 +448,9 @@ export function buildLlmsTxt(
       ? []
       : [
           '## Support',
-          `Blawby is open source (AGPL-3.0): ${KRABICLAW_REPOSITORY_URL}. Bugs and feature requests are GitHub issues; assistants acting for a user should give them a prefilled issue link. Issue form fields prefill by query parameter using their ids. Issues are public, so leave out guest names, contact details and payment data.`,
-          `- [Report a bug](${KRABICLAW_BUG_REPORT_URL}): fields \`surface\`, \`site\`, \`what_happened\`, \`expected\`, \`tool_error\`.`,
-          `- [Request a feature](${KRABICLAW_FEATURE_REQUEST_URL}): fields \`need\`, \`today\`, \`site\`.`,
+          `Blawby is open source (AGPL-3.0): ${BLAWBY_REPOSITORY_URL}. Bugs and feature requests are GitHub issues; assistants acting for a user should give them a prefilled issue link. Issue form fields prefill by query parameter using their ids. Issues are public, so leave out guest names, contact details and payment data.`,
+          `- [Report a bug](${BLAWBY_BUG_REPORT_URL}): fields \`surface\`, \`site\`, \`what_happened\`, \`expected\`, \`tool_error\`.`,
+          `- [Request a feature](${BLAWBY_FEATURE_REQUEST_URL}): fields \`need\`, \`today\`, \`site\`.`,
           `- [Account, billing or private matters](${absoluteUrl(origin, '/help')}): not public.`,
           '',
         ]),

@@ -6,8 +6,8 @@ export interface AppReturnTarget {
 export function validatedInternalPath(value: unknown): string | undefined {
   if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return undefined
   try {
-    const resolved = new URL(value, 'https://krabiclaw.internal')
-    return resolved.origin === 'https://krabiclaw.internal'
+    const resolved = new URL(value, 'https://blawby.internal')
+    return resolved.origin === 'https://blawby.internal'
       ? `${resolved.pathname}${resolved.search}${resolved.hash}`
       : undefined
   } catch {
