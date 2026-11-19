@@ -1,14 +1,14 @@
 ---
-name: krabiclaw-publishing
+name: blawby-publishing
 description: Plan and write Blawby feature launch articles from verified facts, an SEO plan and real screenshot/video assets, stage them as CMS drafts for the owner's approval, and distribute them through canonical MCP tools when authorized. Use for Blawby feature launches, blog articles and social distribution.
 ---
 
 # Publishing Blawby news
 
-Read [product-profile.md](../krabiclaw-marketing/product-profile.md) for verified
+Read [product-profile.md](../blawby-marketing/product-profile.md) for verified
 facts and Paul's voice.
 Use [write-help-docs](../write-help-docs/SKILL.md) for customer instructions and
-[krabiclaw-marketing](../krabiclaw-marketing/SKILL.md) for capture, Flow,
+[blawby-marketing](../blawby-marketing/SKILL.md) for capture, Flow,
 HyperFrames, media QA, authorized publishing and private archive cleanup.
 This skill chooses the story, prepares the SEO and editorial foundation, and plans distribution; it does not duplicate those workflows.
 
