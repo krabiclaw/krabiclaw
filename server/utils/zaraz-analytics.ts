@@ -400,9 +400,9 @@ export function reconcileZarazAnalyticsConfig(
   config.tools ||= {}
   const before = stableStringify(config)
   const legacyPageviewKey = 'krabiclaw-native-pageview'
-  if (config.triggers[legacyPageviewKey]) {
-    config.triggers[NATIVE_PAGEVIEW_TRIGGER_KEY] ??= config.triggers[legacyPageviewKey]
-    delete config.triggers[legacyPageviewKey]
+  const { [legacyPageviewKey]: legacyPageviewTrigger, ...currentTriggers } = config.triggers
+  if (legacyPageviewTrigger) {
+    config.triggers = { ...currentTriggers, [NATIVE_PAGEVIEW_TRIGGER_KEY]: currentTriggers[NATIVE_PAGEVIEW_TRIGGER_KEY] ?? legacyPageviewTrigger }
     for (const tool of Object.values(config.tools)) {
       for (const action of Object.values(tool.actions ?? {})) {
         if (action.firingTriggers) {
