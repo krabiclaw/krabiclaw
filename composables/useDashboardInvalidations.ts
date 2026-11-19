@@ -45,7 +45,15 @@ function heldReads(status: Readonly<Ref<DashboardInvalidationStatus>>, reads: Ma
   const live = (read?: HeldRead) => read && 'value' in read && (read.expiresAt === undefined || read.expiresAt > Date.now()) ? read : undefined
   const screen = (key: string) => key.slice(0, key.indexOf(':'))
   return {
-    get: (key: string) => live(reads.get(key))?.value,
+    get(key: string, keepUntil?: number) {
+      const read = live(reads.get(key))
+      if (read && keepUntil !== undefined) {
+        read.expiresAt = keepUntil
+        reads.delete(key)
+        reads.set(key, read)
+      }
+      return read?.value
+    },
     pending: (key: string) => reads.get(key)?.pending,
     current: (read: HeldRead) => reads.get(read.key) === read,
     take(key: string) {
