@@ -5,6 +5,7 @@ import { loadPublicPage } from '~/server/utils/public-page'
 import { loadPublicShell } from '~/server/utils/public-shell'
 import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
 import { getPublicConfig } from '~/server/utils/organization-config'
+import { oncePerRequest } from '~/server/utils/request-scope'
 import { cloudflareEnv } from '~/server/utils/api-response'
 
 export default defineHandler((event) => {
@@ -16,9 +17,11 @@ export default defineHandler((event) => {
     if (options.resourceKind === 'config') {
       const db = cloudflareEnv(event).db
       if (!db) throw new HTTPError({ statusCode: 500, statusMessage: 'Database not available' })
-      return finalizeRequestMetrics(event, 'public-config-ssr', await getPublicConfig(db, options.organizationId, {
-        previewAuthorized: options.organizationId === event.context.organizationId && event.context.previewAuthorized === true,
-      }))
+      const organizationId = options.organizationId
+      const previewAuthorized = organizationId === event.context.organizationId && event.context.previewAuthorized === true
+      const config = await oncePerRequest(event, `public-config:${organizationId}:${previewAuthorized}`, () =>
+        getPublicConfig(db, organizationId, { previewAuthorized }))
+      return finalizeRequestMetrics(event, 'public-config-ssr', config)
     }
     if (options.resourceKind === 'shell') {
       const payload = await loadPublicShell(event, options.organizationId, {

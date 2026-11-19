@@ -1,7 +1,7 @@
 <template>
   <DashboardIndexPanel :id="stay ? 'stay-details' : personalScope ? 'account-booking-details' : 'booking-details'" :title="pageTitle" column="record">
     <template #right>
-      <UButton v-if="recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="soft" :aria-label="stay ? 'Close stay details' : 'Close booking details'" />
+      <UButton v-if="closeTo" :to="closeTo" icon="i-lucide-x" color="neutral" variant="soft" :aria-label="stay ? 'Close stay details' : 'Close booking details'" />
     </template>
     <UAlert v-if="error" color="error" variant="soft" title="Booking details could not be loaded" :description="getErrorMessage(error, 'Booking request failed')" />
     <div v-else class="min-w-0 [overflow-wrap:anywhere]">
@@ -421,7 +421,7 @@ import ChannelMark from '~/lib/components/workspace/messages/ChannelMark.vue'
 import { paymentMoney } from '~/shared/payment-display'
 import { authClient } from '~/lib/auth-client'
 import { NuxtLink } from '#components'
-import { formatCalendarDate, formatTime, formatTimestamp, localDateAt } from '~/utils/timezone'
+import { formatCalendarDate, formatTime, formatTimestamp, isValidCalendarDate, localDateAt } from '~/utils/timezone'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import { getErrorMessage } from '~/utils/errors'
@@ -446,6 +446,14 @@ const props = defineProps<{
 }>()
 const recordLevel = useRouteLevel()
 const route = useRoute()
+const closeTo = computed(() => {
+  const { from, q } = route.query
+  if (!props.personalScope && /^\/dashboard\/[^/]+\/bookings\/[^/]+\/?$/.test(route.path)
+    && typeof from === 'string' && isValidCalendarDate(from)) {
+    return { path: `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/calendar`, query: { from, q } }
+  }
+  return recordLevel.to.value
+})
 const runtimeConfig = useRuntimeConfig()
 const guestManagement = inject(manageReservationGuestsKey)
 const photoArrow = { color: 'neutral', variant: 'solid', size: 'sm', class: 'bg-white text-black hover:bg-white/90 disabled:opacity-0' } as const
@@ -1040,8 +1048,18 @@ async function deletePayment(paymentId: string) {
 async function changeStay(input: { check_in_date: string; check_out_date: string; adults: number; children: number }) {
   const value = detail.value
   if (!value) throw new Error('The stay is not loaded')
-  await dashboardApi(`${dashboardBookingPath(value.booking_id)}/move`, { method: 'POST', validate: isNightBooking, body: { ...input, version: value.version } })
-  await refreshDetails()
+  const revision = accessChangeRevision
+  const { booking: saved } = await dashboardApi(`${dashboardBookingPath(value.booking_id)}/move`, {
+    method: 'POST', validate: isNightBooking, body: { ...input, version: value.version },
+  })
+  const current = managedStay.value
+  if (accessChangeRevision !== revision || !current || current.booking.booking_id !== saved.booking_id) {
+    throw new Error('Reservation access changed while saving.')
+  }
+  if (current.booking.version <= saved.version) {
+    data.value = { ...current, booking: { ...current.booking, ...saved } }
+    realtime.savedReservation.value = saved
+  }
 }
 
 async function cancelStay() {

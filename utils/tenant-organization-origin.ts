@@ -1,4 +1,4 @@
-import { environmentTenantAliasHostname, normalizeHost } from '~/server/utils/tenant-hosts'
+import { BLAWBY_FREE_SITE_HOST, environmentTenantAliasHostname, LEGACY_FREE_SITE_HOST, normalizeHost } from '~/server/utils/tenant-hosts'
 
 /**
  * Where a site lives, from the browser's point of view.
@@ -22,7 +22,9 @@ export function tenantOrganizationOrigin(input: {
   const freeOrganizationHost = input.freeOrganizationDomain.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
   const protocol = input.freeOrganizationDomain.startsWith('http://') ? 'http:' : 'https:'
   const canonicalHost = normalizeHost(input.canonicalDomain)
-  if (canonicalHost && canonicalHost === normalizeHost(input.freeOrganizationDomain)) {
+  const freeSiteHost = normalizeHost(input.freeOrganizationDomain)
+  if (canonicalHost && (canonicalHost === freeSiteHost
+    || (freeSiteHost === BLAWBY_FREE_SITE_HOST && canonicalHost === LEGACY_FREE_SITE_HOST))) {
     return input.platformDomain.replace(/\/$/, '')
   }
 

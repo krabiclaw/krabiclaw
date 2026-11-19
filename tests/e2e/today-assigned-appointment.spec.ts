@@ -191,12 +191,23 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await expect(detail.getByRole('link', { name: 'Hosted by Assigned attorney', exact: true })).toHaveCount(0)
     await dismissPreviewToolbar(page)
     await page.setViewportSize({ width: 390, height: 844 })
-    expect((await page.goto(new URL(bookingPath, baseURL!).toString()))?.status()).toBe(200)
+    const initialReservationReads: string[] = []
+    const watchInitialRead = (request: import('@playwright/test').Request) => {
+      const path = new URL(request.url()).pathname
+      if (path === '/api/dashboard/context' || path === `/api/dashboard/bookings/${bookingId}`) initialReservationReads.push(path)
+    }
+    page.on('request', watchInitialRead)
+    const documentResponse = await page.goto(new URL(bookingPath, baseURL!).toString())
+    expect(documentResponse?.status()).toBe(200)
+    expect(documentResponse?.headers()['cache-control']).toContain('no-store')
+    expect(await documentResponse?.text()).toContain('id="dashboard-panel-booking-details"')
     await expect(page).toHaveURL(new URL(bookingPath, baseURL!).toString())
     // The attorney is the practice area's: the owner reads who handles it and changes it on the practice area.
     const ownerDetail = page.locator('#dashboard-panel-booking-details')
     await expect(ownerDetail.getByRole('heading', { name: 'Hosted by Assigned attorney', exact: true })).toBeVisible()
     await expect(ownerDetail.getByRole('link', { name: 'Hosted by Assigned attorney', exact: true })).toHaveCount(0)
+    expect(initialReservationReads).toEqual([])
+    page.off('request', watchInitialRead)
     await detail.getByRole('link', { name: 'Change consultation', exact: true }).click()
     const change = memberPage.locator('#dashboard-panel-booking-change')
     await expect(change.getByRole('heading', { name: 'Consultation details', exact: true })).toBeVisible()
@@ -225,9 +236,9 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await memberPage.reload()
     await expect(detail.getByText(when({ weekday: 'short', month: 'short', day: 'numeric' }), { exact: true })).toBeVisible()
     const missingId = crypto.randomUUID()
-    const missingRead = memberPage.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/bookings/${missingId}`)
+    const missingRead = await memberContext.request.get(`/api/dashboard/bookings/${missingId}`, { params: { org: SLUG } })
+    expect(await body(missingRead, 404)).not.toHaveProperty('booking')
     await memberPage.goto(`${DASHBOARD}/bookings/${missingId}/change`)
-    expect(await body(await missingRead, 404)).not.toHaveProperty('booking')
     await expect(memberPage.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
     await expect(change).toHaveCount(0)
 

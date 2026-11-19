@@ -3,7 +3,7 @@ import { redirect } from 'nitro/h3'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { buildLoginUrl } from '~/shared/auth/return-target'
-import { isNonProductionHost, normalizeHost } from '~/server/utils/tenant-hosts'
+import { BLAWBY_FREE_SITE_HOST, isNonProductionHost, LEGACY_FREE_SITE_HOST, normalizeHost } from '~/server/utils/tenant-hosts'
 
 // Keep authentication at the private dashboard boundary so external deep links survive sign-in.
 export default defineHandler(async (event) => {
@@ -16,8 +16,10 @@ export default defineHandler(async (event) => {
     || path === '/forgot-password' || /^\/accept-invitation\/[^/]+$/.test(path))) {
     const env = cloudflareEnv(event)
     const authOrigin = env.BETTER_AUTH_URL && new URL(env.BETTER_AUTH_URL)
+    const freeSiteHost = normalizeHost(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
     if (authOrigin && authOrigin.protocol === 'https:' && !isNonProductionHost(authOrigin.hostname)
-      && authOrigin.hostname !== hostname && hostname === normalizeHost(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)) {
+      && authOrigin.hostname !== hostname && (hostname === freeSiteHost
+        || (freeSiteHost === BLAWBY_FREE_SITE_HOST && hostname === LEGACY_FREE_SITE_HOST))) {
       // Start login on the host that receives the OAuth callback and owns the state cookie.
       return redirect(`${authOrigin.origin}${pathname}${search}`, 302)
     }

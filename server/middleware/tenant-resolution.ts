@@ -306,7 +306,8 @@ export default defineHandler(async (event) => {
 
   if (tenant && isSpentSubdomainResolution(tenant)) {
     if (tenant.successorDomain) {
-      return redirect(`https://${tenant.successorDomain}${url.pathname}${url.search}`, 301)
+      const status = event.method === 'GET' || event.method === 'HEAD' ? 301 : 308
+      return redirect(`https://${tenant.successorDomain}${url.pathname}${url.search}`, status)
     }
     throw new HTTPError({ statusCode: 410, statusMessage: 'Gone' })
   }

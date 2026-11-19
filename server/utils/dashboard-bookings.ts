@@ -44,9 +44,9 @@ function bookingPatchChangesStay(body: Record<string, unknown>) {
   return Object.keys(body).some(field => field !== 'version' && field !== 'private_notes')
 }
 
-export async function dashboardBookingContext(event: H3Event, action: 'read' | 'update' = 'read', readPatch?: true) {
-  const { env, db, session, userId, membership, organizationFrom } = await dashboardMemberQuery(event)
-  const bookingId = getRouterParam(event, 'booking_id')
+export async function dashboardBookingContext(event: H3Event, action: 'read' | 'update' = 'read', readPatch?: true, record?: { orgSlug: string; bookingId: string }) {
+  const { env, db, session, userId, membership, organizationFrom } = await dashboardMemberQuery(event, record?.orgSlug)
+  const bookingId = record?.bookingId ?? getRouterParam(event, 'booking_id')
   if (!bookingId) throw new HTTPError({ statusCode: 400, message: 'Booking ID is required' })
   const patch = readPatch ? await readRequiredBody<Record<string, unknown>>(event).then(
     body => ({ body }), (error: unknown) => ({ error }),
@@ -80,8 +80,8 @@ export async function dashboardBookingContext(event: H3Event, action: 'read' | '
   return { db, env, session, userId, organization, principal, access, bookingId, booking, patchBody, stayEdit }
 }
 
-export async function dashboardBookingDetails(event: H3Event) {
-  const context = await dashboardBookingContext(event)
+export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug: string; bookingId: string }) {
+  const context = await dashboardBookingContext(event, 'read', undefined, record)
   const { access, db, organization, userId, bookingId, booking } = context
   if (booking.unit === 'slot') {
     return { booking: await loadStaffBookingDetails(context, bookingId), manage: access.manage }
@@ -101,24 +101,29 @@ export async function dashboardBookingDetails(event: H3Event) {
     const home = { ...house, image_url: mediaStillUrl(photos.get(booking.product_id)?.[0]) }
     return { booking: nightBooking(stay), manage: false as const, home }
   }
-  const [stay, home] = await Promise.all([
+  const conversation = getGuestRequest(db, booking.conversation_id, organization.id, 'booking').then(thread => {
+    if (!thread || thread.booking_id !== bookingId) throw new Error('The booking has no guest conversation')
+    return thread
+  })
+  const [stay, home, canMessageGuest] = await Promise.all([
     getStay(db, access, bookingId),
     readStayReservationHome(db, { organizationId: organization.id, productId: booking.product_id, showLocation: true, showArrival: true }),
+    conversation.then(async thread => !thread.blocked_at && (await guestReplyDestination(db, thread)).channel !== null),
   ])
-  const conversation = await getGuestRequest(db, booking.conversation_id, organization.id, 'booking')
-  if (!conversation) throw new Error('The booking has no guest conversation')
-  const [destination, record, pending_changes] = await Promise.all([
-    guestReplyDestination(db, conversation),
-    getThreadOperationalRecord(db, conversation.id, conversation),
-    stay.channel === 'airbnb' && isChannelManagedStay(stay)
-      ? pendingStayChanges(db, { bookingId, conversationId: conversation.id, organizationId: organization.id, userId })
+  const channelOwned = isChannelManagedStay(stay)
+  const [available_actions, pending_changes] = await Promise.all([
+    stay.request_status
+      ? conversation.then(async thread => {
+          const record = await getThreadOperationalRecord(db, thread.id, thread)
+          if (!record) throw new Error('The conversation has no booking')
+          return requestActions(record, new Date().toISOString())
+        })
+      : stay.status === 'cancelled' || channelOwned ? [] : ['edit', 'cancel'],
+    stay.channel === 'airbnb' && channelOwned
+      ? pendingStayChanges(db, { bookingId, conversationId: booking.conversation_id, organizationId: organization.id, userId })
       : [],
   ])
-  if (!record) throw new Error('The conversation has no booking')
-  const channelOwned = isChannelManagedStay(stay)
-  const actions = requestActions(record, new Date().toISOString())
-  const available_actions = stay.request_status ? actions : stay.status === 'cancelled' || channelOwned ? [] : ['edit', 'cancel']
-  return { booking: { ...nightBooking(stay), available_actions, pending_changes }, manage: true, home: { ...home, image_url: home.photo_urls[0] ?? null }, can_message_guest: destination.channel !== null && !conversation.blocked_at }
+  return { booking: { ...nightBooking(stay), available_actions, pending_changes }, manage: true, home: { ...home, image_url: home.photo_urls[0] ?? null }, can_message_guest: canMessageGuest }
 }
 
 interface BookingListQuery { unit?: unknown; from?: unknown; to?: unknown; product_id?: unknown; include_cancelled?: unknown }

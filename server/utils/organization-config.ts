@@ -32,26 +32,29 @@ export interface OrganizationConfig {
  */
 export type WritableOrganizationConfigKey = Exclude<keyof OrganizationConfig, 'google_analytics_measurement_id' | 'palette'>
 
-export const getConfig = async (
-  db: DbClient,
-  organizationId: string,
-): Promise<OrganizationConfig> => {
-  const row = await queryFirst<Record<keyof OrganizationConfig | 'font_preset_type', unknown>>(db, `
-    SELECT json_extract(settings_json, '$.config.palette') AS palette,
-           json_extract(settings_json, '$.config.font_preset') AS font_preset,
-           json_type(settings_json, '$.config.font_preset') AS font_preset_type,
-           json_extract(settings_json, '$.config.button_shape') AS button_shape,
-           json_extract(settings_json, '$.config.button_casing') AS button_casing,
-           json_extract(settings_json, '$.config.button_color') AS button_color,
-           json_extract(settings_json, '$.config.heading_casing') AS heading_casing,
-           json_extract(settings_json, '$.config.press_email') AS press_email,
-           json_extract(settings_json, '$.config.partnerships_email') AS partnerships_email,
-           json_extract(settings_json, '$.config.catering_email') AS catering_email,
-           json_extract(settings_json, '$.config.careers_email') AS careers_email,
-           (SELECT i.measurement_id FROM organization_integrations i WHERE i.organization_id = organization.id AND i.provider = 'google_analytics') AS google_analytics_measurement_id
-      FROM organization WHERE id = ?
-  `, [organizationId])
+const CONFIG_COLUMNS = `
+  json_extract(o.settings_json, '$.config.palette') AS palette,
+  json_extract(o.settings_json, '$.config.font_preset') AS font_preset,
+  json_type(o.settings_json, '$.config.font_preset') AS font_preset_type,
+  json_extract(o.settings_json, '$.config.button_shape') AS button_shape,
+  json_extract(o.settings_json, '$.config.button_casing') AS button_casing,
+  json_extract(o.settings_json, '$.config.button_color') AS button_color,
+  json_extract(o.settings_json, '$.config.heading_casing') AS heading_casing,
+  json_extract(o.settings_json, '$.config.press_email') AS press_email,
+  json_extract(o.settings_json, '$.config.partnerships_email') AS partnerships_email,
+  json_extract(o.settings_json, '$.config.catering_email') AS catering_email,
+  json_extract(o.settings_json, '$.config.careers_email') AS careers_email,
+  (SELECT i.measurement_id FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'google_analytics') AS google_analytics_measurement_id`
+
+type ConfigRow = Record<keyof OrganizationConfig | 'font_preset_type', unknown>
+
+export const getConfig = async (db: DbClient, organizationId: string): Promise<OrganizationConfig> => {
+  const row = await queryFirst<ConfigRow>(db, `SELECT ${CONFIG_COLUMNS} FROM organization o WHERE o.id = ?`, [organizationId])
   if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
+  return parseConfig(row)
+}
+
+function parseConfig(row: ConfigRow): OrganizationConfig {
   const config: OrganizationConfig = {}
   for (const key of ["press_email","partnerships_email","catering_email","careers_email","google_analytics_measurement_id"] as const) {
     const value = row[key]
@@ -129,13 +132,12 @@ export const deleteConfig = async (
 
 /** Canonical public site settings and announcement, shared by API and SSR. */
 export async function getPublicConfig(db: DbClient, organizationId: string, options: { previewAuthorized?: boolean } = {}) {
-  const organization = await queryFirst<{
-    id: string
+  const organization = await queryFirst<ConfigRow & {
     default_currency: string
     announcement_json: string | null
     announcement_public_url: string | null
   }>(db, `
-    SELECT o.id, o.default_currency,
+    SELECT ${CONFIG_COLUMNS}, o.default_currency,
            json_extract(o.settings_json, '$.config.announcement') AS announcement_json,
            ama.public_url AS announcement_public_url
       FROM organization o
@@ -161,6 +163,6 @@ export async function getPublicConfig(db: DbClient, organizationId: string, opti
       }
     : null
 
-  const config = { ...await getConfig(db, organization.id), default_currency: organization.default_currency }
+  const config = { ...parseConfig(organization), default_currency: organization.default_currency }
   return { success: true, config, announcement }
 }

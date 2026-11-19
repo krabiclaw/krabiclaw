@@ -7,7 +7,7 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { Miniflare } from 'miniflare'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
-import { applyChannelBooking, cancelStay, createStay, deleteStayPayment, getStay, readHomeCalendar, readStayCalendar, readStayHome, recordStayPayment, importStayNights, quoteStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
+import { applyChannelBooking, cancelStay, createStay, deleteStayPayment, getStay, readHomeCalendar, readStayCalendar, readStayHome, recordStayPayment, importStayNights, quoteStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, type GuestStay, type StayAccess, cancelStayAsGuest, createStayRequest, dispatchStayCheckoutDeadlines, readPublicStayHome, type PublicStayCalendar  } from '../../server/domain/stays.ts'
 import { listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { getRequestDataMetrics } from '../../server/utils/request-metrics.ts'
@@ -18,16 +18,17 @@ import guestStayRoute from '../../server/api/public/guest-stays/[activity_id].ge
 import accountCancelRoute from '../../server/api/account/bookings/[booking_id]/cancel.post.ts'
 import accountStayRoute from '../../server/api/account/bookings/[booking_id].get.ts'
 import accountPayRoute from '../../server/api/account/bookings/[booking_id]/pay.post.ts'
+import dashboardBookingDetailsRoute from '../../server/api/dashboard/bookings/[booking_id].get.ts'
 import dashboardBookingCreateRoute from '../../server/api/dashboard/bookings/index.post.ts'
 import dashboardBookingPatchRoute from '../../server/api/dashboard/bookings/[booking_id].patch.ts'
 import paymentHandoffRoute from '../../server/api/public/payments/[payment_id].get.ts'
 import paymentConfirmRoute from '../../server/api/public/payments/[payment_id]/confirm.post.ts'
 import paymentReviewRoute from '../../server/api/public/payments/[payment_id]/review.post.ts'
 import { createProductBooking, notifyProductBookingCreated } from '../../server/domain/product-bookings.ts'
+import publicAvailabilityRoute from '../../server/api/public/products/[slug]/availability.get.ts'
 import publicBookingRoute from '../../server/api/public/products/[slug]/book.post.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getThreadOperationalRecord, requestActions } from '../../server/domain/requests.ts'
-import { cancelStayAsGuest, createStayRequest, dispatchStayCheckoutDeadlines, readPublicStayHome } from '../../server/domain/stays.ts'
 import { projectStripeConnectedAccount, reserveStripeConnectedAccount } from '../../server/utils/stripe-connect.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[payment_id]/return.post.ts'
 import { updateLocation } from '../../server/utils/location-management.ts'
@@ -1148,35 +1149,62 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
     const token = login.headers.get('set-auth-token')
     assert.ok(token)
     const dashboard = new H3()
-    let writeRequest: H3Event | undefined
-    dashboard.use(event => { writeRequest = event })
+    let dashboardEvent: H3Event | undefined
+    dashboard.use(event => {
+      dashboardEvent = event
+      event.context.organizationId = ORG
+    })
+    dashboard.get('/api/public/products/:slug/availability', publicAvailabilityRoute)
+    dashboard.get('/api/dashboard/bookings/:booking_id', dashboardBookingDetailsRoute)
     dashboard.post('/api/dashboard/bookings', dashboardBookingCreateRoute)
     dashboard.patch('/api/dashboard/bookings/:booking_id', dashboardBookingPatchRoute)
-    const hostWrite = (method: 'POST' | 'PATCH', path: string, body: object) => dashboard.request(Object.assign(new Request(`https://proof.example${path}?org=org`, {
+    const hostRequest = (method: 'GET' | 'POST' | 'PATCH', path: string, body?: object, params: Record<string, string> = {}) => dashboard.request(Object.assign(new Request(`https://proof.example${path}?${new URLSearchParams({ org: ORG, ...params })}`, {
       method, headers: { authorization: `Bearer ${token}`, origin: 'https://proof.example', 'content-type': 'application/json' }, body: JSON.stringify(body),
     }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
-    const added = await hostWrite('POST', '/api/dashboard/bookings', {
+    const publicWindow = { from: date(30), to: date(31) }
+    const availability = async () => {
+      const response = await hostRequest('GET', `/api/public/products/${cabin.slug}/availability`, undefined, publicWindow)
+      assert.equal(response.status, 200, await response.clone().text())
+      assert.ok(dashboardEvent)
+      const metrics = getRequestDataMetrics(dashboardEvent)
+      assert.deepEqual([metrics.batchRoundTrips, metrics.singleStatementRoundTrips], [1, 0])
+      const calendar = await response.json() as PublicStayCalendar & { unit: string }
+      assert.equal(calendar.unit, 'nights')
+      return calendar
+    }
+    assert.equal((await availability()).nights.find(night => night.date === publicWindow.from)?.available, true)
+    const added = await hostRequest('POST', '/api/dashboard/bookings', {
       product_id: cabin.id, idempotency_key: 'host-stay-batched-read', check_in_date: date(30), check_out_date: date(31),
       adults: 2, guest_name: 'Direct guest', guest_email: 'direct-guest@example.test', total_minor: 20_000,
     })
     assert.equal(added.status, 201, await added.clone().text())
     const { booking: saved } = await added.json() as { booking: { booking_id: string } }
-    assert.ok(writeRequest)
-    const createMetrics = getRequestDataMetrics(writeRequest)
+    assert.ok(dashboardEvent)
+    const createMetrics = getRequestDataMetrics(dashboardEvent)
     assert.deepEqual([createMetrics.batchRoundTrips, createMetrics.singleStatementRoundTrips], [2, 0])
     assert.ok(Number.isFinite(createMetrics.phases.auth_session))
     assert.ok(Number.isFinite(createMetrics.phases.stay_queue_send))
-    assert.ok(Number.isFinite(createMetrics.phases.cache_queue_send))
+    assert.equal(createMetrics.phases.cache_queue_send, undefined)
     const persisted = await getStay(db, manager, saved.booking_id)
     assert.deepEqual([persisted.status, persisted.check_in_date, persisted.check_out_date], ['confirmed', date(30), date(31)])
     assert.equal(await claims(saved.booking_id), 1)
+    assert.equal((await availability()).nights.find(night => night.date === publicWindow.from)?.available, false)
 
-    const updated = await hostWrite('PATCH', `/api/dashboard/bookings/${saved.booking_id}`, {
+    const details = await hostRequest('GET', `/api/dashboard/bookings/${saved.booking_id}`)
+    assert.equal(details.status, 200, await details.clone().text())
+    const reopened = await details.json()
+    assert.equal(reopened.booking.status, 'confirmed')
+    assert.deepEqual(reopened.booking.available_actions, ['edit', 'cancel'])
+    assert.equal(reopened.can_message_guest, true)
+    const detailMetrics = getRequestDataMetrics(dashboardEvent)
+    assert.equal(detailMetrics.batchRoundTrips + detailMetrics.singleStatementRoundTrips, 6)
+
+    const updated = await hostRequest('PATCH', `/api/dashboard/bookings/${saved.booking_id}`, {
       version: persisted.version, check_in_date: date(31), check_out_date: date(33), guest_name: 'Edited guest',
     })
     assert.equal(updated.status, 200, await updated.clone().text())
-    assert.ok(writeRequest)
-    const editMetrics = getRequestDataMetrics(writeRequest)
+    assert.ok(dashboardEvent)
+    const editMetrics = getRequestDataMetrics(dashboardEvent)
     assert.deepEqual([editMetrics.batchRoundTrips, editMetrics.singleStatementRoundTrips], [2, 0])
     assert.ok(Number.isFinite(editMetrics.phases.auth_session))
     assert.ok(Number.isFinite(editMetrics.phases.stay_queue_send))
@@ -1186,11 +1214,11 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
     assert.equal(await claims(saved.booking_id), 2)
 
     const [created, edited] = await Promise.all([
-      hostWrite('POST', '/api/dashboard/bookings', {
+      hostRequest('POST', '/api/dashboard/bookings', {
         product_id: cabin.id, idempotency_key: 'host-stay-on-channel-night', check_in_date: date(24), check_out_date: date(25),
         adults: 2, guest_name: 'Another guest', guest_email: 'another-guest@example.test', total_minor: 20_000,
       }),
-      hostWrite('PATCH', `/api/dashboard/bookings/${hostStay.id}`, { version: hostStay.version, check_in_date: date(23), check_out_date: date(24) }),
+      hostRequest('PATCH', `/api/dashboard/bookings/${hostStay.id}`, { version: hostStay.version, check_in_date: date(23), check_out_date: date(24) }),
     ])
     for (const result of [created, edited]) {
       assert.equal(result.status, 409, await result.clone().text())

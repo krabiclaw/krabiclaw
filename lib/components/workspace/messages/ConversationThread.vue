@@ -24,7 +24,7 @@
             <p v-else-if="item.type === 'event'" class="my-2 text-center text-xs text-muted">{{ item.text }}</p>
 
             <p v-else-if="item.type === 'reservation'" class="my-2 text-center text-xs text-muted">
-              {{ item.text ? `${item.text} ` : '' }}<NuxtLink :to="item.to" class="font-medium text-highlighted underline underline-offset-4" data-testid="conversation-show-reservation">Show reservation</NuxtLink>
+              {{ item.text ? `${item.text} ` : '' }}<NuxtLink :to="item.to" class="font-medium text-highlighted underline underline-offset-4" prefetch prefetch-on="interaction" data-testid="conversation-show-reservation" :title="reservationRead.error.value?.message" @pointerenter="prefetchReservation(item.to)" @focus="prefetchReservation(item.to)">Show reservation</NuxtLink>
             </p>
 
             <!-- What Blawby says in a team conversation sits in the middle, as Airbnb's own lines and cards do: a job is a card with its Done, a reminder is a line. -->
@@ -136,6 +136,13 @@ import { isScheduledMessageResponse, isSuggestedReplies, useSuggestedReplies } f
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 const props = withDefaults(defineProps<{ threadId: string; personalScope?: boolean; history: ReturnType<typeof useConversation>; reservationTo?: string | null; closing?: boolean }>(), { personalScope: false, closing: false })
+const reservationRead = useDashboardReservationPrefetch()
+const router = useRouter()
+function prefetchReservation(to: string) {
+  if (props.personalScope) return
+  const id = router.resolve(to).params.record_id
+  if (typeof id === 'string') reservationRead.prefetch(id)
+}
 const emit = defineEmits<{ done: [messageId: string] }>()
 
 const dashboard = useDashboardOrganization()
