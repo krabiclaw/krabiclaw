@@ -5,6 +5,7 @@ import { execute, executeBatch, queryAll, queryFirst, type BatchQuery } from '~/
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { canonicalDomainForPair, domainPair, normalizeDomain } from '~/server/utils/domain-shared'
 import { organizationEventQuery } from '~/server/utils/organization-events'
+import { BLAWBY_FREE_SITE_HOST, LEGACY_FREE_SITE_HOST } from '~/server/utils/tenant-hosts'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 export interface DomainEnv {
@@ -107,6 +108,12 @@ const reservedDomains = [
   'ns1', 'ns2', 'mx', 'txt', 'cname', 'a', 'aaaa'
 ]
 
+const blawbyInfrastructureSubdomains = new Set([
+  'agent', 'ai', 'ai-staging', 'api', 'backend-dev', 'customers', 'dashboard-local',
+  'dev', 'downloads', 'local', 'mail', 'media', 'outbound', 'pay', 'reply',
+  'routbound', 'search', 'send', 'staging-api', 'www',
+])
+
 export function platformHostname(env: DomainEnv): string {
   const domain = env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN
   if (!domain) throw new Error('NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN is required')
@@ -127,6 +134,7 @@ function platformDomainCandidates(env: DomainEnv): string[] {
   const domains = values
     .filter((value): value is string => Boolean(value))
     .map((value) => value.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase())
+  if (domains.includes(BLAWBY_FREE_SITE_HOST)) domains.push(LEGACY_FREE_SITE_HOST)
   if (domains.length === 0) throw new Error('NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN or NUXT_PUBLIC_PLATFORM_DOMAIN is required')
   return domains
 }
@@ -179,11 +187,17 @@ export async function isSystemSubdomainSpent(
   db: D1Database,
   subdomain: string,
 ): Promise<boolean> {
-  const domain = `${subdomain}.${platformHostname(env)}`
+  const root = platformHostname(env)
+  const domain = `${subdomain}.${root}`
+  const isBlawbySite = root === BLAWBY_FREE_SITE_HOST
+  if (isBlawbySite && blawbyInfrastructureSubdomains.has(subdomain)) return true
+  const legacyDomain = isBlawbySite ? `${subdomain}.${LEGACY_FREE_SITE_HOST}` : domain
   const spent = await queryFirst<{ domain: string }>(
     db,
-    "SELECT domain FROM organization_domains WHERE domain = ? AND status = 'retired' LIMIT 1",
-    [domain],
+    `SELECT domain FROM organization_domains
+      WHERE status = 'retired' AND (domain = ? OR (domain = ? AND successor_domain IS NOT ?))
+      LIMIT 1`,
+    [domain, legacyDomain, domain],
   )
   return Boolean(spent)
 }

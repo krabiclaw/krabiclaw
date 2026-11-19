@@ -8,6 +8,8 @@ export interface TenantHostEnv {
 }
 
 const PAGES_DEV_HOST = 'krabiclaw.pages.dev'
+export const LEGACY_FREE_SITE_HOST = 'krabiclaw.com'
+export const BLAWBY_FREE_SITE_HOST = 'blawby.com'
 
 const ENVIRONMENT_PLATFORM_HOST_PATTERN = /^(staging)\.(.+)$/
 const ENVIRONMENT_TENANT_ALIAS_HOST_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?-staging\.krabiclaw\.com$/
@@ -29,10 +31,12 @@ export function hostnameOf(host: string): string {
 }
 
 export function getPlatformHosts(env: TenantHostEnv): string[] {
+  const freeSiteHost = normalizeHost(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
   return Array.from(new Set([
     'localhost',
     '127.0.0.1',
-    normalizeHost(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN),
+    freeSiteHost,
+    freeSiteHost === BLAWBY_FREE_SITE_HOST ? LEGACY_FREE_SITE_HOST : '',
     normalizeHost(env.NUXT_PUBLIC_PLATFORM_DOMAIN),
   ].filter((value): value is string => Boolean(value))))
 }

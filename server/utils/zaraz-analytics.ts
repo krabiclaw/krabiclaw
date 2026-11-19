@@ -440,21 +440,33 @@ export async function reconcileZarazAnalytics(
   })) }]
   let platformTemplateKey: string | undefined
   if (platformZone) {
-    if (platformZone === saasZone) throw new Error('CF_PLATFORM_ZARAZ_ZONE_ID must differ from CF_ZONE_ID')
+    const separateZones = platformZone !== saasZone
+    const tenantHosts = zones[0]!.tenants
+    let platformTenants = tenantHosts
+    if (separateZones) {
+      const hostedByPlatformZone = (hostname: string) =>
+        hostname === platformUrl.hostname || hostname.endsWith(`.${platformUrl.hostname}`)
+      const selectHosts = (matches: (hostname: string) => boolean) => tenantHosts
+        .map(tenant => ({ ...tenant, hostnames: tenant.hostnames.filter(matches) }))
+        .filter(tenant => tenant.hostnames.length > 0)
+      platformTenants = selectHosts(hostedByPlatformZone)
+      zones[0]!.tenants = selectHosts(hostname => !hostedByPlatformZone(hostname))
+      zones.push({ id: platformZone, tenants: platformTenants })
+    }
     const platformIds = new Set(rows.filter(row => row.theme_id === PLATFORM_THEME_ID).map(row => row.organization_id))
     if (platformIds.size > 1) throw new Error('More than one linked organization runs the platform site')
     const platformId = [...platformIds][0]
     const analytics = platformId ? tenants.get(platformId) : undefined
     if (platformId && analytics?.measurementId) {
-      platformTemplateKey = tenantKey(platformId)
-      zones.push({ id: platformZone, tenants: [{
+      if (separateZones) platformTemplateKey = tenantKey(platformId)
+      const platformTenant = platformTenants.find(tenant => tenant.organizationId === platformId)
+      if (platformTenant) {
+        platformTenant.hostnames = [...new Set([...platformTenant.hostnames, platformUrl.hostname])].sort()
+      } else platformTenants.push({
         organizationId: platformId,
         measurementId: analytics.measurementId,
         hostnames: [platformUrl.hostname],
-      }] })
-    } else {
-      // A disconnected or unpublished platform has no eligible GA4 tool.
-      zones.push({ id: platformZone, tenants: [] })
+      })
     }
   }
 
