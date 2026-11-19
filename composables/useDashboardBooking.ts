@@ -144,7 +144,7 @@ export function useDashboardReservation(scope: DashboardRequestScope, bookingId:
     return reads!.read(bookingId, signal)
   }, {
     getCachedData(key, app, ctx) {
-      if (app.isHydrating) {
+      if (import.meta.server || app.isHydrating) {
         const payload: unknown = app.payload.data[key]
         return isDashboardBooking(payload) ? payload : undefined
       }
