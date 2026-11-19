@@ -108,3 +108,5 @@ export type GuestReceiptRead = {
   plan: Awaited<ReturnType<typeof prepareGuestBookingReceipt>>
   rows: D1Result[]
 }
+
+export type GuestBookingReceipt = NonNullable<Awaited<ReturnType<Awaited<ReturnType<typeof prepareGuestBookingReceipt>>['read']>>>

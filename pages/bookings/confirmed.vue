@@ -52,7 +52,7 @@
 
 <script setup lang="ts">
 import { formatPhone } from '~/utils/phone'
-import { loadBookingConfirmation, type BookingConfirmation as BookingConfirmationData } from '~/composables/useBookingHandoff'
+import { loadBookingConfirmation, usePaidBookingReceipt, type BookingConfirmation as BookingConfirmationData } from '~/composables/useBookingHandoff'
 import BookingConfirmation from '~/components/booking/BookingConfirmation.vue'
 import { formatTimestamp } from '~/utils/timezone'
 import { paymentMoney } from '~/shared/payment-display'
@@ -66,6 +66,7 @@ const route = useRoute()
 const justCopied = ref(false)
 const { organization } = useTenantOrganization()
 const { id: organizationId, site } = organization
+const paidReceipt = usePaidBookingReceipt()
 
 const confirmation = ref<BookingConfirmationData | null>(null)
 const pending = ref(true)
@@ -101,9 +102,15 @@ const receiptDescription = computed(() => confirmation.value?.status === 'cancel
 
 onMounted(async () => {
   try {
-    if (organizationId) confirmation.value = await loadBookingConfirmation(organizationId, String((organization as ApiValue)?.name ?? ''), {
+    const link = {
       id: typeof route.query.id === 'string' ? route.query.id : '', token: route.hash.slice(1),
-    }, { locale: locale.value, localePath, t })
+    }
+    const prefetched = paidReceipt.value
+    paidReceipt.value = null
+    const booking = prefetched?.organizationId === organizationId && prefetched?.id === link.id
+      && prefetched.token === link.token && prefetched.booking.locale === locale.value ? prefetched.booking : undefined
+    if (organizationId) confirmation.value = await loadBookingConfirmation(organizationId, String((organization as ApiValue)?.name ?? ''), link,
+      { locale: locale.value, localePath, t }, booking)
   } catch (cause) {
     loadError.value = getErrorMessage(cause, t('booking.receipt_failed'))
   } finally {

@@ -1359,11 +1359,14 @@ test('the checkout return reuses a booking the webhook saved while Stripe was re
    return null
   }, { 'webhook-wins': 'succeeded' })
   const stripe = getStripe(env)
-  const receipt = await completePaymentReturn(requestDb, { ...env, DB: requestDb }, ORG, 'webhook-wins', claim, async () => 'guest')
+  const receipt = await completePaymentReturn(requestDb, { ...env, DB: requestDb }, ORG, 'webhook-wins', claim,
+   async () => 'guest', undefined, async () => ({ locale: 'en', source: true }))
   assert.ok(webhook)
   await webhook
   assert.equal(receipt.state, 'paid')
   if (receipt.state !== 'paid' || receipt.kind !== 'booking') throw new Error('Expected a booking receipt')
+  assert.equal(receipt.booking?.status, 'confirmed')
+  assert.deepEqual(receipt.booking?.paid, { amount: 10000, currency: 'USD' })
   const result = await db.prepare(`SELECT b.status,p.captured_amount,p.claimed_user_id FROM bookings b
     JOIN conversations c ON c.booking_id=b.id AND c.organization_id=b.organization_id
     JOIN payments p ON p.subject_id=b.id AND p.organization_id=b.organization_id WHERE c.id=?`).bind(receipt.conversation_id).first()
@@ -1374,7 +1377,7 @@ test('the checkout return reuses a booking the webhook saved while Stripe was re
   assert.ok(events.take('payment.captured'))
   assert.equal(events.take('payment.captured'), undefined)
   const { batchRoundTrips, singleStatementRoundTrips } = getRequestDataMetrics(trace)
-  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 0, singleStatementRoundTrips: 3 })
+  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 1, singleStatementRoundTrips: 2 })
  } finally { await runtime.dispose() }
 })
 

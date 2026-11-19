@@ -7,6 +7,7 @@ import { $fetch } from 'ofetch'
 import { isValidInstant, isValidTimezone } from '~/utils/timezone'
 import { PRODUCT_KINDS, type ProductKind } from '~/shared/product-details'
 import { outsideNotice } from '~/shared/availability-settings'
+import type { GuestBookingReceipt } from '~/server/utils/guest-booking-receipt'
 
 export interface BookingConfirmation {
   type: 'booking'
@@ -52,6 +53,10 @@ export interface BookingConfirmation {
 
 const STORAGE_KEY = 'kc:booking-confirmation'
 
+export function usePaidBookingReceipt() {
+  return useState<{ organizationId: string; id: string; token: string; booking: GuestBookingReceipt } | null>('paid-booking-receipt', () => null)
+}
+
 export function setBookingConfirmation(payload: BookingConfirmation) {
   if (!import.meta.client) return
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
@@ -76,6 +81,7 @@ export async function loadBookingConfirmation(
   organizationName: string,
   link: { id: string; token: string },
   language: { locale: string; localePath: (path: string) => string; t: (key: string) => string },
+  prefetched?: GuestBookingReceipt,
 ): Promise<BookingConfirmation | null> {
   const stored = getBookingConfirmation(organizationId)
   const handoff = stored
@@ -89,12 +95,7 @@ export async function loadBookingConfirmation(
   if (!requestId && !handoff) return null
   if (!requestId || !token) throw new Error(language.t('booking.receipt_missing_description'))
 
-  const response = await $fetch<{ success: true; booking: {
-    kind: 'booking'; status: 'pending' | 'confirmed' | 'cancelled'; name: string; email: string
-    starts_at: string; timezone: string; guests: string; location_id: string | null; product_id: string | null; product_kind: ProductKind | null; product_name: string | null
-    location_name: string | null; location_slug: string | null
-    locale: string; policy_summary: ApiRecord | null; advance_notice_minutes: number | null; can_retry_cancellation: boolean; paid: { amount: number; currency: string } | null; image_url: string | null; manage_url: string | null
-  } }>(`/api/public/booking-requests/${encodeURIComponent(requestId)}`, {
+  const response = prefetched ? { success: true, booking: prefetched } : await $fetch<{ success: true; booking: GuestBookingReceipt }>(`/api/public/booking-requests/${encodeURIComponent(requestId)}`, {
     query: { locale: language.locale },
     headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
   })

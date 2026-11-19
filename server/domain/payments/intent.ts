@@ -20,6 +20,7 @@ import { ownerPicture, type PicturePlacement } from '~/server/notifications/hero
 import { mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
 import type { GuestThreadPayload } from '~/server/domain/requests'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '~/server/utils/reservation-cancel-token'
+import { prepareGuestBookingReceipt, type GuestBookingReceipt } from '~/server/utils/guest-booking-receipt'
 
 /**
  * The payment the buyer confirms on the site: Stripe's Payment Element collects
@@ -388,7 +389,7 @@ export async function confirmPayment(db: DbClient, env: CloudflareEnv, organizat
     }
     throw error
   }
-  const settled = await reconcilePaymentIntent(db, stripe, confirmingPayment, confirmed, env, hold)
+  const { intent: settled } = await reconcilePaymentIntent(db, stripe, confirmingPayment, confirmed, env, hold)
   // Automatic confirmation lets whoever holds this secret confirm the intent, so only a payment that needs the browser gets it. Bank verification happens on Stripe's own page.
   const verifying = settled.next_action?.type === 'verify_with_microdeposits'
   const authenticating = settled.status === 'requires_action' && !verifying
@@ -401,7 +402,7 @@ export async function confirmPayment(db: DbClient, env: CloudflareEnv, organizat
  * unpaid booking's confirmation carries.
  */
 export type PaymentReturn =
-  | { state: 'paid'; kind: 'booking'; conversation_id: string; cancellation_token: string }
+  | { state: 'paid'; kind: 'booking'; conversation_id: string; cancellation_token: string; booking?: GuestBookingReceipt }
   | { state: 'paid'; kind: 'stay'; activity_id: string; receipt_token: string }
   | { state: 'processing' }
   | { state: 'taken' }
@@ -422,13 +423,16 @@ async function paymentReceipt(env: CloudflareEnv, payment: Payment, receipt: Che
 }
 
 /** Read the receipt, settling a successful payment if the provider redirect beat the webhook. */
-export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, buyer: () => Promise<string>, prepared?: { plan: Awaited<ReturnType<typeof preparePaymentReturn>>; row: unknown }): Promise<PaymentReturn> {
+export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, buyer: () => Promise<string>,
+  prepared?: { plan: Awaited<ReturnType<typeof preparePaymentReturn>>; row: unknown }, receiptLanguage?: () => Promise<{ locale: string; source: boolean }>): Promise<PaymentReturn> {
   const now = new Date().toISOString()
-  let payment = prepared ? prepared.plan.read(prepared.row) : await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
+  const initial = prepared ? prepared.plan.read(prepared.row) : await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
+  let payment: Payment = initial
+  let hold = initial.checkout_hold ? JSON.parse(initial.checkout_hold) as CheckoutHold : null
   // Reconciliation writes captured_amount only after it verifies Stripe's succeeded intent.
   if (payment.captured_amount <= 0) {
     const stripe = paymentsStripe(env, Boolean(payment.livemode))
-    const { intent, state } = await readCheckoutIntent(stripe, payment, now)
+    const { intent, state } = await readCheckoutIntent(stripe, initial, now)
     if (intent.livemode !== Boolean(payment.livemode) || stripeMetadataId('payment', intent.metadata) !== payment.id) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
     if (state === 'taken') return { state: 'taken' }
     if (state === 'failed' || state === 'expired') return { state: 'expired' }
@@ -441,22 +445,45 @@ export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, or
     }
     // The webhook can commit while Stripe's response is in flight. Read the
     // same claimed payment and hold before preparing any inventory write.
-    payment = await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
+    const refreshed = await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
+    payment = refreshed
+    hold = refreshed.checkout_hold ? JSON.parse(refreshed.checkout_hold) as CheckoutHold : null
     if (payment.captured_amount > 0) {
       const chargeId = typeof intent.latest_charge === 'string' ? intent.latest_charge : intent.latest_charge?.id
       if (payment.stripe_payment_intent_id !== intent.id || !chargeId || payment.stripe_charge_id !== chargeId
         || payment.captured_amount !== intent.amount_received || payment.currency !== intent.currency.toUpperCase()
         || Boolean(payment.livemode) !== intent.livemode) throw new Error('Stored capture does not match Stripe')
     } else {
-      await reconcilePaymentIntent(db, stripe, payment, intent, env, payment.checkout_hold ? JSON.parse(payment.checkout_hold) as CheckoutHold : null)
-      payment = await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
+      const { settlement } = await reconcilePaymentIntent(db, stripe, payment, intent, env, hold)
+      if (!settlement) throw new Error('Succeeded Stripe intent did not return a recorded settlement')
+      payment = settlement.payment
+      hold = settlement.hold
+      if (payment.subject_type === 'booking' && !payment.subject_id) {
+        throw new HTTPError({ statusCode: 409, statusMessage: 'Payment was received, but the booking could not be confirmed', data: { code: 'payment_booking_unconfirmed' } })
+      }
     }
   }
   // The approval checkout began in the buyer's account; the business's site may have a different browser session.
   const snapshot = snapshotOf(payment)
-  if (!snapshot.approval) await claimCheckoutReturn(db, await buyer(), claim, payment)
-  const hold = payment.checkout_hold ? JSON.parse(payment.checkout_hold) as CheckoutHold : null
-  return paymentReceipt(env, payment, hold)
+  const receipt = await paymentReceipt(env, payment, hold)
+  if (snapshot.approval) return receipt
+  const userId = await buyer()
+  if (receipt.state === 'paid' && receipt.kind === 'booking' && receiptLanguage) {
+    const language = await receiptLanguage()
+    const plan = await prepareGuestBookingReceipt({ query: '?', params: [organizationId] }, receipt.conversation_id, receipt.cancellation_token,
+      language.source ? undefined : language.locale)
+    await claimCheckoutReturn(db, userId, claim, payment, {
+      queries: plan.queries,
+      async read(rows) {
+        const booking = await plan.read(db, env, organizationId, language.locale, language.source, rows)
+        if (!booking) throw new Error('Paid booking is missing its guest receipt')
+        receipt.booking = booking
+      },
+    })
+  } else {
+    await claimCheckoutReturn(db, userId, claim, payment)
+  }
+  return receipt
 }
 
 export function preparePaymentReturn(organization: BatchQuery, paymentId: string, claim: string) {

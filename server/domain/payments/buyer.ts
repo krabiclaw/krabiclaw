@@ -1,6 +1,6 @@
 import {transferBookingGuestSeat} from '~/server/domain/conversation-participants'
 import {HTTPError} from 'nitro'
-import {execute,executeBatch,queryAll,queryFirst,type BatchQuery,type DbClient} from '~/server/db'
+import {executeBatch,queryAll,queryFirst,type BatchQuery,type DbClient} from '~/server/db'
 import {CURRENT_GUEST_SQL} from '~/server/domain/conversations'
 import {loadOwnerPictures} from '~/server/notifications/hero'
 import {accountActivityPath,isAccountActivityItem,isBuyerPaymentEntry,type AccountActivityItem,type AccountActivityKind,type AccountActivityResponse,type BuyerPaymentEntry} from '~/shared/account-activity'
@@ -148,7 +148,8 @@ export function buyerRequestActivityFromRows(rows: unknown[]): string | null {
 }
 export async function tokenHash(token:string):Promise<string>{return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token)))).map(v=>v.toString(16).padStart(2,'0')).join('')}
 /** Hidden Checkout-return proof, accepted only after native Stripe verification. */
-export async function claimCheckoutReturn(db:DbClient,userId:string,token:string,payment?:Pick<Payment,'id'|'buyer_user_id'|'captured_amount'|'claimed_at'|'return_token_hash'|'return_expires_at'>) {
+export async function claimCheckoutReturn(db:DbClient,userId:string,token:string,payment?:Pick<Payment,'id'|'buyer_user_id'|'captured_amount'|'claimed_at'|'return_token_hash'|'return_expires_at'>,
+ receipt?: { queries: BatchQuery[]; read: (rows: D1Result[]) => Promise<void> }) {
  if(!/^[a-f0-9-]{72}$/u.test(token)) throw new HTTPError({statusCode:400,statusMessage:'Invalid Checkout return proof'})
  const hash=await tokenHash(token),now=new Date().toISOString()
  const unavailable=()=>new HTTPError({statusCode:404,statusMessage:'Purchase return proof expired or already used'})
@@ -159,15 +160,20 @@ export async function claimCheckoutReturn(db:DbClient,userId:string,token:string
   : await queryFirst<{payment_id:string;claimed_at:string|null;buyer_user_id:string|null}>(db,available,params)
  if(!claim) throw unavailable()
  const response={payment_id:claim.payment_id,claimed:true}
- if(claim.claimed_at)return response
+ const readReceipt = async () => {
+  if(receipt) await receipt.read(await executeBatch(db,receipt.queries,{operation:'Read claimed guest receipt'}))
+  return response
+ }
+ if(claim.claimed_at)return readReceipt()
  // The original buyer already owns the booking, its conversation and the hold.
  if(claim.buyer_user_id===userId){
-  const marked=await execute(db,`UPDATE payments SET claimed_at=?,claimed_user_id=?
+  const mark={query:`UPDATE payments SET claimed_at=?,claimed_user_id=?
     WHERE id=? AND buyer_user_id=? AND return_token_hash=? AND return_expires_at>? AND claimed_at IS NULL AND captured_amount>0`,
-    [now,userId,claim.payment_id,userId,hash,now])
-  if(marked.meta.changes===1)return response
-  const replay=await queryFirst<{claimed_at:string|null}>(db,available,params)
-  if(!replay?.claimed_at)throw unavailable()
+    params:[now,userId,claim.payment_id,userId,hash,now]}
+  const [marked, owner, ...rows]=await executeBatch(db,[mark,{query:available,params},...receipt?.queries ?? []],
+    {operation:'Claim checkout and read guest receipt'})
+  if(marked?.meta.changes!==1 && !(owner?.results[0] as { claimed_at?: string | null } | undefined)?.claimed_at)throw unavailable()
+  if(receipt)await receipt.read(rows)
   return response
  }
  const conversationId="COALESCE((SELECT conversation_id FROM payment_checkout_holds WHERE payment_id=?),(SELECT c.id FROM conversations c JOIN payments p ON p.subject_id=c.booking_id AND p.subject_type='booking' AND p.organization_id=c.organization_id WHERE p.id=? AND c.kind='booking'))"
@@ -179,10 +185,11 @@ export async function claimCheckoutReturn(db:DbClient,userId:string,token:string
   // The booking's conversation: a session booking's checkout waited in it, a stay's opened with the booking.
   ...transferBookingGuestSeat(claimedConversation,userId,now),
   {query:`UPDATE conversations AS c SET user_id=? WHERE ${claimedConversation.query}`,params:[userId,...claimedConversation.params]},
+  {query:available,params},
+  ...receipt?.queries ?? [],
  ],{operation:'Attach verified Checkout purchase'})
- if(result[0]?.meta.changes!==1){
-  const replay=await queryFirst<{payment_id:string;claimed_at:string|null}>(db,available,params)
-  if(!replay?.claimed_at)throw unavailable()
- }
+ const receiptStart=result.length-(receipt?.queries.length??0)
+ if(result[0]?.meta.changes!==1 && !(result[receiptStart-1]?.results[0] as { claimed_at?: string | null } | undefined)?.claimed_at)throw unavailable()
+ if(receipt)await receipt.read(result.slice(receiptStart))
  return response
 }

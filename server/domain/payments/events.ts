@@ -37,7 +37,9 @@ export interface CheckoutHold {
   session_allocation: NonNullable<SessionAllocationInput['saved']> | null
 }
 
-type CapturedPayment = Payment & { retained_without_organization: number }
+type CapturedPayment = Payment & { retained_without_organization: number; checkout_hold: string | null }
+
+type PaymentReconciliation = { intent: Stripe.PaymentIntent; settlement?: { payment: Payment; hold: CheckoutHold | null } }
 
 /** The checkout record for the payment aliased as p, including its converted receipt if present. */
 export const checkoutHoldSql = `SELECT json_object(
@@ -68,7 +70,7 @@ export async function readCheckoutHold(db: DbClient, payment: Payment) {
 }
 
 /** Provider retrieval, account/mode and frozen money checks precede every conversion. */
-export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,reported:Stripe.PaymentIntent, env:CloudflareEnv, knownHold?: CheckoutHold | null):Promise<Stripe.PaymentIntent> {
+export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,reported:Stripe.PaymentIntent, env:CloudflareEnv, knownHold?: CheckoutHold | null):Promise<PaymentReconciliation> {
   if (reported.livemode !== Boolean(payment.livemode) || reported.currency.toUpperCase() !== payment.currency || stripeMetadataId('payment', reported.metadata) !== payment.id || payment.stripe_payment_intent_id !== reported.id) throw new Error('Stripe PaymentIntent financial identity mismatch')
   // The intent is the one this purchase opened, on this account and mode; what it charged is Stripe's.
   const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
@@ -82,7 +84,7 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
       ((typeof reported.payment_method === 'object' && reported.payment_method?.type === 'us_bank_account') ||
        (typeof reported.latest_charge === 'object' && reported.latest_charge?.payment_method_details?.type === 'us_bank_account')))
   const failed = reported.status === 'requires_payment_method' && reported.last_payment_error
-  if (!debitInitiated && !failed && !['requires_capture', 'succeeded', 'canceled'].includes(reported.status)) return reported
+  if (!debitInitiated && !failed && !['requires_capture', 'succeeded', 'canceled'].includes(reported.status)) return { intent: reported }
 
   let intent = reported
   let hold = payment.subject_type === 'booking' ? knownHold === undefined ? await readCheckoutHold(db, payment) : knownHold : null
@@ -138,7 +140,7 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
     if (approval) await releaseApprovedStayConfirmation(db, env, payment)
     await publishPaymentNotification(env, payment, { kind: 'payment_failed', nativeId: intent.id, status: intent.status, amount: intent.amount })
   }
-  if (intent.status !== 'succeeded') return intent
+  if (intent.status !== 'succeeded') return { intent }
 
   let bookingId = hold?.status === 'converted' ? hold.converted_booking_id : null
   if (intent.application_fee_amount) throw new Error('Direct charges carry no application fee')
@@ -158,7 +160,8 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
          WHERE id=? AND organization_id=? AND captured_amount=0
          RETURNING *, EXISTS (SELECT 1 FROM payment_servicing_tenants s
            WHERE s.organization_id=payments.organization_id AND s.stripe_account_id=payments.stripe_account_id AND s.livemode=payments.livemode
-             AND NOT EXISTS (SELECT 1 FROM organization o WHERE o.id=payments.organization_id)) AS retained_without_organization`,
+             AND NOT EXISTS (SELECT 1 FROM organization o WHERE o.id=payments.organization_id)) AS retained_without_organization,
+           (SELECT (${checkoutHoldSql}) FROM payments p WHERE p.id=payments.id AND p.organization_id=payments.organization_id) AS checkout_hold`,
       params: [charge.id, charge.receipt_url, (intent as Stripe.PaymentIntent & { amount_details?: { surcharge?: { amount?: number } } }).amount_details?.surcharge?.amount ?? 0,
         intent.amount_received, taxAmount, now, payment.id, payment.organization_id] },
       // Usage is billed in the platform's mode only: a demo's test-mode capture on a live platform is never billable volume.
@@ -197,6 +200,7 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
   }
   const [write] = !conversion && !concurrentCapture && captureQueries.length ? await executeBatch(db, captureQueries, { operation: 'Record payment capture' }) : []
   const capture = conversion?.capture ?? write?.results[0] as CapturedPayment | undefined
+  if (capture?.checkout_hold) hold = JSON.parse(capture.checkout_hold) as CheckoutHold
   // Confirm and the Stripe webhook may observe the same capture.
   const recorded = capture ?? concurrentCapture ?? (captureQueries.length ? await requirePayment(db, payment.organization_id, payment.id) : payment)
   if (!matchesCapture(recorded)) throw new Error('Stored capture does not match Stripe')
@@ -214,7 +218,7 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
       intent_created: intent.created, saved_method_id: intent.customer && typeof charge.payment_method === 'string' ? charge.payment_method : null,
       booking,
     })
-    return intent
+    return { intent, settlement: { payment: recorded, hold } }
   }
   if (!bookingId || !hold || keepPaymentOnly || recorded.refunded_amount > 0 || capture?.retained_without_organization) return finish()
   if (hold.session_id === null) return finish({ unit: 'nights', id: bookingId })

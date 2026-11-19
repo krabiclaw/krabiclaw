@@ -31,7 +31,7 @@ import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { HTTPError, type H3Event } from 'nitro'
 import { checkoutAttemptQuery, createPaymentCheckout, type CheckoutAttempt } from '~/server/domain/payments/checkout'
 import { paidOnline } from '~/server/domain/payments'
-import { prepareOrganizationPlan } from '~/server/utils/billing-access'
+import { checkoutSellerFromRows, checkoutSellerQuery, prepareOrganizationPlan } from '~/server/utils/billing-access'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 import { isRecord } from '~/server/utils/type-guards'
 import { createStay, createStayRequest, publicStayHomeFrom, publicStayHomeQueries, publishStayRequest, quoteStayAvailability, stayAccessFor, stayCheckoutPolicy, stayCreationHomeQuery, stayQuoteNightQueries, type StayCreationHome } from '~/server/domain/stays'
@@ -315,7 +315,7 @@ export function prepareBookingCreation(organization: BatchQuery, input: {
   const now = new Date().toISOString()
   if (!selection.failure) {
     const terms = timedBookingQueries(organization, product, selection)
-    reads.push(checkoutAttemptQuery(organization, input.idempotencyKey), ...terms,
+    reads.push(checkoutAttemptQuery(organization, input.idempotencyKey), checkoutSellerQuery(organization), ...terms,
       ...timedCalendarQueries(organization, product, terms[0]!, selection.sessionId, now))
   }
   return {
@@ -324,11 +324,12 @@ export function prepareBookingCreation(organization: BatchQuery, input: {
       const member = membership ? results.shift()!.results[0] : undefined
       const [orgRows, offeringRows] = results.splice(0, 2)
       const home = includeStayHome ? results.shift()!.results[0] as StayCreationHome | undefined : undefined
-      const [attempts, ...timed] = results
+      const [attempts, seller, ...timed] = results
       return {
         member, home, organization: orgRows!.results[0] as BookingOrganization | undefined,
         offering: offeringRows!.results[0] as BookingOffering | undefined,
         checkoutAttempt: attempts?.results[0] as CheckoutAttempt | undefined,
+        seller: seller?.results,
         timed: selection.failure ? null : { ...timedBookingFrom(timed.slice(0, 3)), calendar: timed.slice(3), now },
       }
     },
@@ -527,7 +528,7 @@ async function createBookingFrom(event: H3Event, env: CloudflareEnv, context: Bo
     const checkout = await createPaymentCheckout(db, env, {
       unit: 'slot', organizationId, buyerUserId: userId, buyer, productId: product.id, variantId: productVariantId,
       sessionId: session.id, terms: { resolved, price, title: product.name, taxCode: product.tax_code }, answers, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize, idempotencyKey: checkoutKey,
-      previous: checkoutAttempt,
+      previous: checkoutAttempt, seller: !checkoutAttempt && facts.seller ? checkoutSellerFromRows(facts.seller) : undefined,
       origin: operator ? null : { request: event.req, pageEventId },
       following: paymentId => requestInsertQueries({
         kind: 'booking', id: threadId, organization_id: organizationId, location_id: session.location_id,
