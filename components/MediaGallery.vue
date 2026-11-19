@@ -87,7 +87,7 @@
       <TenantIcon name="squares-2x2" class="size-3.5" />{{ t('site.photos.show_all', { count: items.length }) }}
     </button>
     <!-- Crawlable image elements for all gallery items beyond the initial mosaic -->
-    <div v-if="items.length > 5" class="sr-only" aria-hidden="true">
+    <div v-if="items.length > 5" class="sr-only">
       <img
         v-for="(item, index) in items.slice(5)"
         :key="`${item.url}-${index}`"

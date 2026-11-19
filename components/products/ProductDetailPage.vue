@@ -304,7 +304,7 @@
             <div v-if="priceLabel" class="flex items-center justify-between gap-4">
               <div>
                 <StayPriceSummary v-if="isStay && (stayBooking.quote.value || stayBooking.quotePending.value)" :controller="stayBooking" large />
-                <template v-else-if="isStay && (!stayBooking.checkIn.value || !stayBooking.checkOut.value)">
+                <template v-else-if="isStay && canBook && (!stayBooking.checkIn.value || !stayBooking.checkOut.value)">
                   <span class="tenant-display text-2xl font-bold text-default">
                     {{ t('stay.add_dates_for_prices') }}
                   </span>

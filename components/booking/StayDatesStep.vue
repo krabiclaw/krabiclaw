@@ -119,7 +119,7 @@
         <span v-else>{{ t('stay.add_dates_for_prices') }}</span>
       </div>
       <template v-else>
-        <button type="button" class="flex size-9 items-center justify-center rounded-lg text-muted hover:bg-muted hover:text-default" :aria-label="t('stay.select_dates')">
+        <button type="button" class="flex size-9 items-center justify-center rounded-lg text-muted hover:bg-muted hover:text-default" aria-label="Keyboard navigation" @click="focusCalendarGrid">
           <UIcon name="i-lucide-keyboard" class="size-5" />
         </button>
         <div class="flex items-center gap-4">
@@ -169,6 +169,11 @@ watch(checkIn, (value) => {
   const start = calendarPlaceholder.value.set({ day: 1 })
   if (date.compare(start) < 0 || date.compare(start.add({ months: monthCount.value })) >= 0) calendarPlaceholder.value = date
 })
+function focusCalendarGrid() {
+  const cell = document.querySelector('[data-stay-calendar] [role="gridcell"] button:not([disabled])') as HTMLElement | null
+  cell?.focus()
+}
+
 // The booking controller owns the two endpoints; CalendarRoot owns only the grid and keyboard navigation.
 function selectCalendarDate(value: DateValue | DateValue[] | undefined) {
   const date = (Array.isArray(value) ? value.at(-1) : value)?.toString()

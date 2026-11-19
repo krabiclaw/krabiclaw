@@ -126,9 +126,9 @@ export function resolveSocialImageFromMedia(
   ownerMedia: readonly SocialMediaSource[],
   organizationMedia: readonly SocialMediaSource[],
 ): SocialImageSource | null {
-  const ownSlot = ownerMedia.find(item => (item.slot === 'image' || item.slot === 'hero' || item.slot === 'cover') && item.kind !== 'video' && resolveSocialImageUrl(item))
+  const ownPhoto = resolveOwnerPicture(ownerType, ownerMedia, [])
   const ownGallery = ownerMedia.find(item => item.slot === 'gallery' && item.kind !== 'video' && resolveSocialImageUrl(item))
-  const picture = ownSlot
+  const picture = ownPhoto
     ?? ownGallery
     ?? resolveOwnerPicture(ownerType, ownerMedia, organizationMedia)
     ?? ownerMedia.find(item => item.slot === 'social_card')
