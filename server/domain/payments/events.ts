@@ -1,3 +1,4 @@
+import { stripeMetadataId } from './stripe-metadata'
 import { changedTaskIds, publishChangedJobs, publishEvent, type DomainEvent } from '~/server/events'
 import type Stripe from 'stripe'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -63,7 +64,7 @@ export async function readCheckoutHold(db: DbClient, payment: Payment) {
 
 /** Provider retrieval, account/mode and frozen money checks precede every conversion. */
 export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,reported:Stripe.PaymentIntent, env:CloudflareEnv, knownHold?: CheckoutHold | null):Promise<Stripe.PaymentIntent> {
-  if (reported.livemode !== Boolean(payment.livemode) || reported.currency.toUpperCase() !== payment.currency || reported.metadata.krabiclaw_payment_id !== payment.id || payment.stripe_payment_intent_id !== reported.id) throw new Error('Stripe PaymentIntent financial identity mismatch')
+  if (reported.livemode !== Boolean(payment.livemode) || reported.currency.toUpperCase() !== payment.currency || stripeMetadataId('payment', reported.metadata) !== payment.id || payment.stripe_payment_intent_id !== reported.id) throw new Error('Stripe PaymentIntent financial identity mismatch')
   // The intent is the one this purchase opened, on this account and mode; what it charged is Stripe's.
   const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
   if (!isRecord(snapshot)) throw new Error('Payment has no frozen purchase')
@@ -329,7 +330,7 @@ export function paymentEventKey(event:Pick<Stripe.Event,'id'|'account'|'livemode
 export async function processPaymentEvent(db:DbClient,stripe:Stripe,event:Stripe.Event,env:CloudflareEnv) {
   if(!['payment_intent.','refund.','charge.dispute.','payout.'].some(prefix=>event.type.startsWith(prefix)))return
   const object=event.data.object as {id?:string;metadata?:Record<string,string>|null}
-  const payload=JSON.stringify({id:event.id,type:event.type,account:event.account,livemode:event.livemode,data:{object:{id:object.id,metadata:{krabiclaw_payment_id:object.metadata?.krabiclaw_payment_id}}}})
+  const payload=JSON.stringify({id:event.id,type:event.type,account:event.account,livemode:event.livemode,data:{object:{id:object.id,metadata:{blawby_payment_id:object.metadata?.blawby_payment_id,krabiclaw_payment_id:object.metadata?.krabiclaw_payment_id}}}})
   await processStripeWebhookEvent(db,{id:paymentEventKey(event),type:event.type,payload,processor:'tenant_payments'},async()=>{
     if (!event.account) throw new Error('Tenant payment event requires connected account context')
     const mappings = await queryAll<{organization_id:string;livemode:number}>(db,'SELECT organization_id,livemode FROM stripe_connected_accounts WHERE stripe_account_id=? AND livemode=? UNION SELECT organization_id,livemode FROM payment_servicing_tenants WHERE stripe_account_id=? AND livemode=? LIMIT 2',[event.account,Number(event.livemode),event.account,Number(event.livemode)])
@@ -344,7 +345,7 @@ export async function processPaymentEvent(db:DbClient,stripe:Stripe,event:Stripe
     }
     if (event.type.startsWith('payment_intent.')) {
       const object = event.data.object as Stripe.PaymentIntent
-      const id = object.metadata.krabiclaw_payment_id
+      const id = stripeMetadataId('payment', object.metadata)
       if (!id) return
       const payment = await requirePayment(db,connected.organization_id,id)
       if (payment.stripe_account_id!==event.account || Boolean(payment.livemode)!==event.livemode) throw new Error('Payment event account mismatch')

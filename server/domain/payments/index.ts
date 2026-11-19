@@ -1,3 +1,4 @@
+import { stripeMetadataId } from './stripe-metadata'
 import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
@@ -259,7 +260,7 @@ export async function reconcileRefundState(db:DbClient,stripe:Stripe,payment:Pay
  assertMinorAmount(refund.amount)
  const kind=refund.status==='pending'||refund.status==='requires_action'?'refund_pending':refund.status==='succeeded'?'refund_succeeded':refund.status==='failed'?'refund_failed':refund.status==='canceled'?'refund_canceled':null
  if(!kind)throw new Error('Native refund status is missing or unsupported')
- const matched=await queryFirst<{id:string;amount:number|null}>(db,'SELECT id,amount FROM payment_refunds WHERE payment_id=? AND (stripe_refund_id=? OR id=?)',[payment.id,refund.id,refund.metadata?.krabiclaw_refund_id??''])
+ const matched=await queryFirst<{id:string;amount:number|null}>(db,'SELECT id,amount FROM payment_refunds WHERE payment_id=? AND (stripe_refund_id=? OR id=?)',[payment.id,refund.id,stripeMetadataId('refund', refund.metadata)??''])
  // A partial refund was approved at one amount; a full-remaining one takes whatever Stripe returned.
  if(matched&&matched.amount!==null&&matched.amount!==refund.amount)throw new Error('Native refund amount changed from authorized intent')
  const id=matched?.id??crypto.randomUUID(),now=new Date().toISOString()
