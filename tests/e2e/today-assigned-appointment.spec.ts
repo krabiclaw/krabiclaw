@@ -174,7 +174,10 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     const calendarDocument = await memberPage.goto(`${DASHBOARD}/calendar/${day}`)
     expect(calendarDocument?.status()).toBe(200)
     expect(calendarDocument?.headers()['cache-control']).toContain('no-store')
-    expect(await calendarDocument?.text()).toContain('id="dashboard-panel-calendar-day"')
+    const calendarHtml = await calendarDocument?.text()
+    const dayPanel = 'id="dashboard-panel-calendar-day"'
+    expect(calendarHtml).toContain(dayPanel)
+    expect(calendarHtml?.slice(calendarHtml.indexOf(dayPanel))).toContain(`href="${conversationPath}"`)
     await waitForNuxtHydration(memberPage)
     expect(dayReads).toEqual([])
     memberPage.off('request', watchDayRead)
