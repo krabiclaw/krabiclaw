@@ -95,7 +95,7 @@ const userInitials = computed(() => (user.value?.name ?? '')
   .slice(0, 2)
   .map(part => part[0]?.toUpperCase() ?? '')
   .join('') || '?')
-const selectedPlan = computed(() => new URL(props.to, 'https://krabiclaw.internal').searchParams.get('plan'))
+const selectedPlan = computed(() => new URL(props.to, 'https://blawby.internal').searchParams.get('plan'))
 const postLoginUrl = computed(() => buildPostLoginUrl({ plan: selectedPlan.value ?? undefined }))
 
 const accountMenu = ref<HTMLDetailsElement | null>(null)

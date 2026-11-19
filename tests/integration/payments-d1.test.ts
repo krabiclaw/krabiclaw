@@ -1560,6 +1560,25 @@ test('a payout sent and a payout failed are emailed to the business owner and ad
  } finally { await runtime.dispose() }
 })
 
+test('Better Auth trusts billing and connection callbacks from either registered app scheme', async t => {
+ const { runtime, env } = await boot()
+ try {
+  const fetchNetwork = globalThis.fetch
+  t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
+   const url = new URL(request instanceof Request ? request.url : String(request))
+   return (url.hostname === 'api.stripe.com' && publishedCatalogResponse(url)) || fetchNetwork(request, init)
+  })
+  const auth = await createAuth(stripeEnv(env)).$context
+  for (const scheme of ['blawby', 'krabiclaw']) {
+   assert.equal(auth.isTrustedOrigin(`${scheme}://billing/success`), true)
+   assert.equal(auth.isTrustedOrigin(`${scheme}://connections/google-calendar`), true)
+   assert.equal(auth.isTrustedOrigin(`${scheme}://invitation?id=example`), false)
+   assert.equal(auth.isTrustedOrigin(`${scheme}://billing.example/success`), false)
+  }
+  assert.equal(auth.isTrustedOrigin('https://appleid.apple.com'), true)
+ } finally { await runtime.dispose() }
+})
+
 test('the Stripe renewal closes the old meter before delivering usage held for its replacement', { timeout: 120_000 }, async t => {
  const { db, runtime, env: bootEnv } = await boot()
  try {

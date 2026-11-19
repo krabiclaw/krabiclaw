@@ -11,7 +11,7 @@
             </span>
           </NuxtLink>
           <p class="mt-3.5 max-w-75 text-[13px] leading-relaxed text-muted">
-            Websites for restaurants, experiences, lodging, and law firms. Manage yours with your AI assistant or the dashboard.
+            Run your business from your favorite AI app with Blawby. The business AI agent for restaurants, experiences, lodging, and law firms.
           </p>
         </div>
 
@@ -33,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { KRABICLAW_REPOSITORY_URL } from '~/shared/open-source'
+import { BLAWBY_REPOSITORY_URL } from '~/shared/open-source'
 
 const COLUMNS = [
   {
@@ -48,7 +48,8 @@ const COLUMNS = [
   {
     title: 'Product',
     links: [
-      { label: 'MCP', to: '/plugin' },
+      { label: 'AI agent', to: '/plugin' },
+      { label: 'Integrations', to: '/integrations' },
       { label: 'Products', to: '/products' },
       { label: 'Pricing', to: '/pricing' },
       { label: 'Templates', to: '/templates' },
@@ -66,7 +67,7 @@ const COLUMNS = [
     links: [
       { label: 'Docs', to: '/docs' },
       { label: 'Help center', to: '/help' },
-      { label: 'GitHub', to: KRABICLAW_REPOSITORY_URL },
+      { label: 'GitHub', to: BLAWBY_REPOSITORY_URL },
     ],
   },
 ] as const

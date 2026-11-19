@@ -32,7 +32,8 @@ import { enqueueMcpToolCallEvent, mcpTelemetryMethod, type LogMcpToolCallEventIn
 import { describeErrorForTelemetry } from "~/shared/error-telemetry";
 import { getRequestDataMetrics, recordRequestPhase } from "~/server/utils/request-metrics";
 import { mcpFinancialApprovalErrorResult } from "~/server/utils/mcp-financial-handoff";
-import { KRABICLAW_BUG_REPORT_URL, KRABICLAW_FEATURE_REQUEST_URL } from "~/shared/open-source";
+import { mcpServerIdentity } from "~/server/utils/mcp-discovery";
+import { BLAWBY_BUG_REPORT_URL, BLAWBY_FEATURE_REQUEST_URL } from "~/shared/open-source";
 
 const TENANT_CATALOG_FINGERPRINT = catalogFingerprint(MCP_PUBLIC_TOOLS);
 
@@ -67,7 +68,7 @@ function resolveTenantToolMeta(toolName: string | null): McpToolMeta {
   return { domain: tool?.domain ?? null, isMutating: isMcpMutatingTool(tool) };
 }
 
-const mcpInstructions = (baseUrl: string) => `Manage the selected business. Read current state and preserve unrelated values. Read existing facts before asking questions. Ask only for missing required inputs needed for the requested action; leave unrelated optional settings unchanged. Never invent prices or booking details. Finish website changes and verify returned public URLs. When designing or improving a website: ensure high-impact hero imagery or video, proactively ask the owner for missing branding assets (logo, favicon, social card via set_media; colors and fonts via update_organization_settings), feature bookable offerings or places to stay directly on the homepage (product_grid) rather than bare location cards, include the host or founder's story and portrait on the about page, and add guest reviews (testimonial_grid) and FAQs (faq). Keep menu sections and order; experiences need bookings. Use revision and retry keys, and follow pagination. Publish or message only requested destinations. Payment reports are read-only; financial_action_required means the action remains incomplete. Report tool errors and partial outcomes plainly. Use only tools present in this client's catalog. A missing tool can mean the saved catalog needs refreshing or the selected business lacks access; do not invent a call or claim its action succeeded. Check the active business and permissions. When the client's catalog is stale, ask the user to refresh or reconnect Blawby in the client's connector settings; in ChatGPT, follow ${baseUrl}/docs/refresh-blawby-tools-in-chatgpt in a desktop browser. To report a Blawby bug or request a feature, do not email Blawby: give the user a prefilled ${KRABICLAW_BUG_REPORT_URL} link (fields title, surface, site, what_happened, expected, tool_error) or ${KRABICLAW_FEATURE_REQUEST_URL} link (title, need, today, site) to open. Issues are public; leave out guest names, contact details and payment data. Account, billing and private matters go to ${baseUrl}/help.`;
+const mcpInstructions = (baseUrl: string) => `Manage the selected business. Read current state and preserve unrelated values. Read existing facts before asking questions. Ask only for missing required inputs needed for the requested action; leave unrelated optional settings unchanged. Never invent prices or booking details. Finish website changes and verify returned public URLs. When designing or improving a website: ensure high-impact hero imagery or video, proactively ask the owner for missing branding assets (logo, favicon, social card via set_media; colors and fonts via update_organization_settings), feature bookable offerings or places to stay directly on the homepage (product_grid) rather than bare location cards, include the host or founder's story and portrait on the about page, and add guest reviews (testimonial_grid) and FAQs (faq). Keep menu sections and order; experiences need bookings. Use revision and retry keys, and follow pagination. Publish or message only requested destinations. Payment reports are read-only; financial_action_required means the action remains incomplete. Report tool errors and partial outcomes plainly. Use only tools present in this client's catalog. A missing tool can mean the saved catalog needs refreshing or the selected business lacks access; do not invent a call or claim its action succeeded. Check the active business and permissions. When the client's catalog is stale, ask the user to refresh or reconnect Blawby in the client's connector settings; in ChatGPT, follow ${baseUrl}/docs/refresh-blawby-tools-in-chatgpt in a desktop browser. To report a Blawby bug or request a feature, do not email Blawby: give the user a prefilled ${BLAWBY_BUG_REPORT_URL} link (fields title, surface, site, what_happened, expected, tool_error) or ${BLAWBY_FEATURE_REQUEST_URL} link (title, need, today, site) to open. Issues are public; leave out guest names, contact details and payment data. Account, billing and private matters go to ${baseUrl}/help.`;
 
 // H3's request context follows the SDK's original requestInfo into the factory.
 interface McpFactoryContext {
@@ -91,7 +92,7 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
   const context = factoryContextFrom(ctx);
   const instructions = mcpInstructions(context.baseUrl);
   const mcpServer = new McpServer(
-    { name: "krabiclaw-mcp", title: "Blawby", version: "phase-5" },
+    mcpServerIdentity(context.cfEnv),
     { capabilities: { tools: {}, prompts: {} }, instructions },
   );
   const server = mcpServer.server;
