@@ -1754,13 +1754,13 @@ export async function pushStayHomeChannel(db: DbClient, env: ChannexEnv & GuestI
  * guarded by the version, home and ends the write gives the booking, so a
  * batch whose version-guarded write lost a race changes no claim. A cancelled booking holds none. A long stay is still one statement each.
  */
-function reconcileNightsQueries(organizationId: string, stayId: string, written: { version: number; updated_at: string; product_id: string; starts_at: string; ends_at: string; check_in_date: string; check_out_date: string }, owner: Stay['owner'] = 'app'): BatchQuery[] {
+function reconcileNightsQueries(organizationId: string, stayId: string, written: { version: number; updated_at: string; product_id: string; starts_at: string; ends_at: string; check_in_date: string; check_out_date: string; actual_check_out_date?: string | null }, owner: Stay['owner'] = 'app'): BatchQuery[] {
   const available = stayInventoryAvailable({
     organizationId, productId: written.product_id, checkIn: written.check_in_date, checkOut: written.check_out_date, exceptBookingId: stayId,
   })
   // Two writes from one version both name the next one: the stored time, home and ends say whose write committed.
-  const committed = 'EXISTS (SELECT 1 FROM bookings b WHERE b.organization_id = ? AND b.id = ? AND b.version = ? AND b.updated_at = ? AND b.product_id = ? AND b.starts_at = ? AND b.ends_at = ?'
-  const guard = [organizationId, stayId, written.version, written.updated_at, written.product_id, written.starts_at, written.ends_at]
+  const committed = 'EXISTS (SELECT 1 FROM bookings b WHERE b.organization_id = ? AND b.id = ? AND b.version = ? AND b.updated_at = ? AND b.product_id = ? AND b.starts_at = ? AND b.ends_at = ? AND b.actual_check_out_date IS ?'
+  const guard = [organizationId, stayId, written.version, written.updated_at, written.product_id, written.starts_at, written.ends_at, written.actual_check_out_date ?? null]
   const claimsNights = `${committed} AND b.status <> 'cancelled')`
   return [...(owner === 'app' ? [assertBookingBatchWrite({
     query: `NOT (${claimsNights}) OR (${available.query})`,
@@ -2187,7 +2187,7 @@ export async function releaseStayNights(db: DbClient, env: StayMutationEnv, inpu
     fail(422, 'INVALID_EARLY_CHECKOUT', 'Choose a checkout day after check-in, before the scheduled checkout, and no later than today.', 'actual_check_out_date')
   }
   const version = stay.version + 1
-  const occupied = { ...stay, check_out_date: checkout, updated_at: now, version }
+  const occupied = { ...stay, actual_check_out_date: checkout, check_out_date: checkout, updated_at: now, version }
   const guard = {
     query: 'EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND version = ? AND updated_at = ? AND actual_check_out_date = ?)',
     params: [access.organizationId, stayId, version, now, checkout],
@@ -2968,7 +2968,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     after: { id, product_id: landing, status: booking.cancelled ? 'cancelled' as const : 'confirmed' as const, check_in_date: booking.check_in_date, check_out_date: occupiedCheckout } }
   const turnovers = turnoverTaskQueries({ ...change, now, homes: await readTurnoverHomes(db, change) })
   const nights = reconcileNightsQueries(organizationId, id, {
-    updated_at: now, version, product_id: landing, ...window, check_in_date: booking.check_in_date, check_out_date: occupiedCheckout,
+    updated_at: now, version, product_id: landing, ...window, check_in_date: booking.check_in_date, check_out_date: occupiedCheckout, actual_check_out_date: released,
   }, 'channel')
   const dates = { organizationId, checkIn: booking.check_in_date, checkOut: occupiedCheckout, exceptBookingId: id }
   const availability = stayInventoryAvailable({ ...dates, productId: landing })

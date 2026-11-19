@@ -90,7 +90,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
       accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })),
       address: { address: '1 Cliff Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532' }, latitude: null, longitude: null,
       questions: [], questions_revision: formQuestionsRevision([]), host_profile_published: false,
-      description: '', published: false, live: false, airbnb_listing_id: null, airbnb_editor_url: null, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
+      description: '', published: false, live: false, airbnb_listings: [], airbnb_listing_id: null, airbnb_editor_url: null, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
     const keyedCabin = { ...cabin, idempotency_key: 'a'.repeat(200) }
     const created = await call(owner, 'POST', keyedCabin)

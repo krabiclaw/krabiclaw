@@ -2,7 +2,8 @@
 export const AIRBNB_MAPPINGS = `(
   SELECT l.listing_id, l.channel_id, l.organization_id, l.product_id, i.provider, i.property_id, i.room_type_id,
     COALESCE(l.rate_plan_id, i.rate_plan_id) AS rate_plan_id, l.rate_plan_id AS listing_rate_plan_id,
-    CASE WHEN l.import_stage = 'property' THEN i.import_stage ELSE l.import_stage END AS import_stage,
+    CASE WHEN l.import_stage = 'property' AND i.import_stage = 'complete' THEN 'content'
+      WHEN l.import_stage = 'property' THEN i.import_stage ELSE l.import_stage END AS import_stage,
     l.import_stage AS listing_stage, i.import_stage AS inventory_stage, i.import_property,
     l.import_content, l.import_written, l.enabled, l.created_at, l.updated_at
   FROM product_airbnb_listings l JOIN product_channel_mappings i

@@ -135,7 +135,7 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
   const stopped = [...new Map([...stopListings, ...stopHomeListings].map(mapping => [mapping.listing_id, mapping])).values()]
   if (sync.length + stopped.length > MAX_D1_BATCH_STATEMENTS) fail(422, 'VALIDATION_ERROR', 'Choose fewer listings for this change.', { field: 'stop_listing_ids' })
   const missing = stop.find(listingId => !stopped.some(row => row.listing_id === listingId))
-  if (missing) fail(404, 'IMPORT_NOT_FOUND', 'This home is not imported from your connected Airbnb account', { product_id: missing })
+  if (missing) fail(404, 'IMPORT_NOT_FOUND', 'This listing is not imported from your connected Airbnb accounts.', { listing_id: missing })
   const both = stopped.find(mapping => sync.includes(mapping.listing_id))
   if (both) fail(422, 'VALIDATION_ERROR', 'A listing cannot be synced and stopped at once', { listing_id: both.listing_id })
 

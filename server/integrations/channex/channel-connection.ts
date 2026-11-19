@@ -684,6 +684,7 @@ export class ChannexConnection {
         if (mapping.import_stage === 'complete') await save({ import_stage: 'content' })
         break
       case 'content': {
+        if (mapping.listing_stage === 'property') await save({ import_stage: 'content' })
         // Reads Airbnb and writes the home; nothing is written to Channex.
         // A few photos per call: until all are stored the stage is asked again, keeping the report so far.
         const { report, done, written } = await this.importContent(mapping, channelId, PHOTO_FETCHES_PER_CALL)
@@ -1277,7 +1278,7 @@ export class ChannexConnection {
     if (!mapping) fail(404, 'CHANNEL_MAPPING_NOT_FOUND', 'Prepare this home in Channex before completing setup.')
     const channels = await propertyChannels(this.env, mapping.property_id, channelCode)
     const active = Number(channels.some(channel => mapsActiveRate(channel, mapping.rate_plan_id)))
-    if (!active && await queryFirst(this.db, 'SELECT 1 FROM product_airbnb_listings WHERE organization_id = ? AND product_id = ? AND enabled = 1', [this.organizationId, productId])) return true
+    if (!active && await queryFirst(this.db, 'SELECT 1 FROM product_airbnb_listings WHERE organization_id = ? AND product_id = ? AND enabled = 1', [this.organizationId, productId])) return channelCode === undefined
     if ((channelCode && !active) || mapping.enabled === active) return Boolean(active)
     const [changed] = await executeWithinCapacity(this.env, this.db, this.organizationId, [{
       query: `UPDATE product_channel_mappings SET enabled = ?, import_property = NULL, updated_at = ?
