@@ -1,22 +1,21 @@
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { readIntegration } from '~/server/utils/organization-integrations'
+import { integrationsFromRows, integrationsQuery } from '~/server/utils/organization-integrations'
 import { HTTPError } from 'nitro'
 import { createContentDocumentWithBlocks, documentOfRootSql, prepareContentDocumentDeletion, updateContentDocument, type ContentDocumentChanges, type ContentDocumentRow } from '~/server/utils/content/documents'
 import { parsePostInput, PostValidationError, type PostCallToAction, type PostMediaRef, type PostMutation } from '~/shared/posts'
-import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { normalizePostSlug, postPublicPath } from '~/utils/post-slugs'
-import { buildMediaPlacementReplacementQueries, insertInitialMediaPlacements, groupMediaPlacements, hydrateMediaAssetRefs, mediaPlacementsQuery, readMediaPlacements, type StoredMediaPlacementItem } from '~/server/utils/media-asset-manager'
+import { buildMediaPlacementReplacementQueries, insertInitialMediaPlacements, groupMediaPlacements, hydrateMediaAssetRefs, mediaPlacementsQuery, type StoredMediaPlacementItem } from '~/server/utils/media-asset-manager'
 import { refreshSocialCard } from '~/server/utils/social-card'
-import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
 import { publicSocialMediaFromPlacements, type SocialImageSource } from '~/utils/social-metadata'
 import { resourceLocationScopeSql, type ViewerTerms } from '~/server/utils/member-access'
-import { loadExactPublicLocalizations, projectLocalizedMediaAlt } from '~/server/utils/public-localization'
+import { loadExactPublicLocalizations, projectLocalizedMediaAlt, type ExactPublicLocalization } from '~/server/utils/public-localization'
 import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
 import type { CloudflareEnv } from '~/server/utils/auth'
+import { SOCIAL_POSTS_BLOCK_DEFAULT } from '~/utils/tenant-page-blocks'
 import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS, previewSecretOf } from '~/server/utils/preview-token'
 import { mcpPageInfo, type McpPageInfo } from '~/server/utils/mcp-pagination'
-import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { publicTenantVisibilitySql } from '~/server/utils/public-base'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
@@ -149,10 +148,6 @@ function postOrigins(domain: PostOriginRow | null | undefined, env: CloudflareEn
   return { publicOrigin: domain?.is_public ? origin : null, previewOrigin: origin }
 }
 
-async function resolveOrganizationPostOrigins(db: DbClient, env: CloudflareEnv, organizationId: string) {
-  const { query, params } = postOriginsQuery(organizationId)
-  return postOrigins(await queryFirst<PostOriginRow>(db, query, params), env)
-}
 
 async function validatePostLocation(db: DbClient, organizationId: string, locationId: string | null) {
   if (!locationId) return
@@ -180,10 +175,6 @@ async function allocatePostSlug(db: DbClient, organizationId: string, postId: st
 }
 
 /** Cover, then gallery in order: the one order every surface and provider sees. */
-export async function loadPostMedia(db: DbClient, organizationId: string, postIds: string[]): Promise<Map<string, PostMedia[]>> {
-  const placements = await readMediaPlacements(db, { organizationId, ownerType: 'content_document', ownerIds: postIds })
-  return new Map([...placements].map(([postId, items]) => [postId, orderedPostMedia(items)]))
-}
 
 function orderedPostMedia(items: readonly StoredMediaPlacementItem[]): PostMedia[] {
   return items
@@ -600,6 +591,7 @@ export interface PublicSocialPost {
 interface PublicPostRow {
   id: string
   representation_id: string
+  root_slug: string
   slug: string
   title: string | null
   body: string | null
@@ -613,54 +605,95 @@ interface PublicPostRow {
   location_slug: string | null
 }
 
-async function projectPublicPosts(env: CloudflareEnv, db: DbClient, organizationId: string, rows: PublicPostRow[], locale: string): Promise<PublicSocialPost[]> {
-  if (!rows.length) return []
-  const sourceLocale = await getSourceLocale(db, organizationId)
-  const rootIds = rows.map(row => row.id)
-  const [origins, media, social, publications, localizations, facebook, instagram] = await Promise.all([
-    resolveOrganizationPostOrigins(db, env, organizationId),
-    loadPostMedia(db, organizationId, rootIds),
-    loadPublicSocialMedia(db, organizationId, 'content_document', rows.map(row => row.representation_id)),
-    // A Discord channel's messages are readable only by its members, so the public page names only Meta's public posts.
-    queryAll<{ post_id: string; channel: 'facebook' | 'instagram'; provider_permalink: string | null; provider_target_id: string }>(db, `SELECT post_id, channel, provider_permalink, provider_target_id
-      FROM post_publications WHERE organization_id = ? AND state = 'published' AND channel IN ('facebook', 'instagram') AND post_id IN (SELECT value FROM json_each(?)) ORDER BY channel`,
-    [organizationId, d1JsonStringSet(rootIds)]),
-    locale === sourceLocale ? Promise.resolve(null) : loadExactPublicLocalizations(env, db, organizationId, locale),
-    readIntegration(db, organizationId, 'facebook'),
-    readIntegration(db, organizationId, 'instagram'),
-  ])
-  return rows.map((row) => {
-    const rootAction = callToActionOf(row.root_metadata_json)
-    const localizedLabel = row.representation_id === row.id ? null : callToActionOf(row.metadata_json)?.label ?? null
-    const path = (locale === sourceLocale ? '' : `/${locale}`) + postPublicPath(row.slug)
-    return {
-      id: row.id,
-      slug: row.slug,
-      path,
-      url: absoluteUrl(origins.publicOrigin, path),
-      title: row.title?.trim() ? row.title : null,
-      body: row.body?.trim() ? row.body : null,
-      call_to_action: rootAction ? { label: localizedLabel ?? rootAction.label, url: rootAction.url } : null,
-      media: projectLocalizedMediaAlt((media.get(row.id) ?? []).map(item => ({
-        asset_id: item.asset_id, public_url: item.public_url, thumbnail_url: item.thumbnail_url, kind: item.kind,
-        alt_text: item.alt_text, width: item.width, height: item.height,
-      })), localizations),
-      published_at: row.published_at,
-      location: row.location_id && row.location_title && row.location_slug ? { id: row.location_id, title: row.location_title, slug: row.location_slug } : null,
-      publications: publications.filter(item => item.post_id === row.id).map(item => ({ channel: item.channel, url: item.provider_permalink, account_name: [facebook, instagram].find(connection => connection?.provider === item.channel && connection.target_id === item.provider_target_id)?.target_name ?? null })),
-      social_image: social.get(row.representation_id)?.social_image ?? null,
-      status: row.status,
-      visibility: row.visibility,
-    }
+function preparePublicPostProjection(records: BatchQuery) {
+  const organization = { sql: '(SELECT organization_id FROM post_scope LIMIT 1)' }
+  const media = mediaPlacementsQuery({
+    organizationId: organization, ownerType: 'content_document',
+    owners: { sql: 'SELECT id FROM post_scope UNION SELECT representation_id FROM post_scope' }, includeOrganizationFallback: true,
   })
+  const publications: BatchQuery = { query: `SELECT post_id, channel, provider_permalink, provider_target_id
+    FROM post_publications WHERE organization_id = ${organization.sql} AND state = 'published'
+      AND channel IN ('facebook', 'instagram') AND post_id IN (SELECT id FROM post_scope) ORDER BY channel` }
+  return {
+    queries: [records, ...[postOriginsQuery(organization), media, publications, integrationsQuery(organization)].map(statement => ({
+      query: `WITH post_scope AS (${records.query}) ${statement.query}`,
+      params: [...records.params ?? [], ...statement.params ?? []],
+    }))],
+    read([records, domains, media, publications, integrations]: D1Result[], context: {
+      env: CloudflareEnv; organizationId: string; sourceLocale: string; locale: string; localizations: readonly ExactPublicLocalization[] | null,
+    }) {
+      const rows = records!.results as Array<PublicPostRow & { block_id?: string }>
+      const hosts = postOrigins(domains!.results[0] as PostOriginRow | undefined, context.env)
+      const placements = groupMediaPlacements(media!.results)
+      const integrationsByProvider = new Map(integrationsFromRows(integrations!.results).map(connection => [connection.provider, connection]))
+      const published = publications!.results as Array<{ post_id: string; channel: 'facebook' | 'instagram'; provider_permalink: string | null; provider_target_id: string }>
+      const { sourceLocale, locale, localizations } = context
+      return rows.map((row) => {
+        const rootAction = callToActionOf(row.root_metadata_json)
+        const localizedLabel = row.representation_id === row.id ? null : callToActionOf(row.metadata_json)?.label ?? null
+        const path = (locale === sourceLocale ? '' : `/${locale}`) + postPublicPath(row.slug)
+        return {
+          row,
+          post: {
+            id: row.id,
+            slug: row.slug,
+            path,
+            url: absoluteUrl(hosts.publicOrigin, path),
+            title: row.title?.trim() ? row.title : null,
+            body: row.body?.trim() ? row.body : null,
+            call_to_action: rootAction ? { label: localizedLabel ?? rootAction.label, url: rootAction.url } : null,
+            media: projectLocalizedMediaAlt(orderedPostMedia(placements.get(row.id) ?? []).map(item => ({
+              asset_id: item.asset_id, public_url: item.public_url, thumbnail_url: item.thumbnail_url, kind: item.kind,
+              alt_text: item.alt_text, width: item.width, height: item.height,
+            })), localizations),
+            published_at: row.published_at,
+            location: row.location_id && row.location_title && row.location_slug ? { id: row.location_id, title: row.location_title, slug: row.location_slug } : null,
+            publications: published.filter(item => item.post_id === row.id).map(item => ({ channel: item.channel, url: item.provider_permalink, account_name: (integrationsByProvider.get(item.channel)?.target_id === item.provider_target_id ? integrationsByProvider.get(item.channel)?.target_name : null) ?? null })),
+            social_image: publicSocialMediaFromPlacements('content_document', placements.get(row.representation_id) ?? [], placements.get(context.organizationId) ?? []).social_image,
+            status: row.status,
+            visibility: row.visibility,
+          } satisfies PublicSocialPost,
+        }
+      })
+    },
+  }
 }
 
-const PUBLIC_POST_SELECT = `SELECT root.id, p.id AS representation_id, COALESCE(p.slug, root.slug) AS slug, p.title, p.summary AS body,
+const publicPostSelect = (locale: string, block = false) => `SELECT ${block ? 'block.id AS block_id, ' : ''}
+    root.id, root.organization_id, root.slug AS root_slug, p.id AS representation_id, COALESCE(p.slug, root.slug) AS slug, p.title, p.summary AS body,
     root.metadata_json AS root_metadata_json, p.metadata_json, root.published_at, root.status, root.visibility,
     root.location_id, bl.title AS location_title, bl.slug AS location_slug
   FROM content_documents root
-  JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ?
+  JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ${locale}
   LEFT JOIN business_locations bl ON bl.id = root.location_id AND bl.organization_id = root.organization_id AND bl.status = 'active'`
+
+const listedPostSql = "root.kind = 'social_post' AND root.row_role = 'root' AND root.status = 'published' AND root.visibility = 'listed'"
+
+export function preparePublicPostBlocks(organization: { sql: string }, document: { sql: string }, locale: { sql: string }) {
+  const records = {
+    query: `WITH ranked AS (
+      SELECT selected.*, ROW_NUMBER() OVER (PARTITION BY block_id ORDER BY published_at DESC, id DESC) AS rank
+      FROM (${publicPostSelect(locale.sql, true)}
+        JOIN content_blocks block ON block.document_id = ${document.sql} AND block.type = 'social_posts'
+          AND (NULLIF(json_extract(block.data_json, '$.location_id'), '') IS NULL
+            OR root.location_id = json_extract(block.data_json, '$.location_id'))
+        WHERE root.organization_id = ${organization.sql} AND ${listedPostSql}
+      ) selected
+    )
+    SELECT ranked.* FROM ranked JOIN content_blocks b ON b.id = ranked.block_id
+    WHERE rank <= COALESCE(json_extract(b.data_json, '$.limit'), ${SOCIAL_POSTS_BLOCK_DEFAULT}) + 1 ORDER BY block_id, rank`,
+  }
+  const plan = preparePublicPostProjection(records)
+  return { queries: plan.queries, read(rows: D1Result[], context: Parameters<typeof plan.read>[1]) {
+    const byBlock = new Map<string, PublicSocialPost[]>()
+    for (const { row, post } of plan.read(rows, context)) {
+      const items = byBlock.get(row.block_id!) ?? []
+      items.push(post)
+      byBlock.set(row.block_id!, items)
+    }
+    return byBlock
+  } }
+}
 
 /**
  * The organization's published, listed posts in one locale, newest first, a
@@ -672,13 +705,19 @@ export async function listPublicSocialPosts(
   organizationId: string,
   input: { locale: string; locationId?: string | null; window: { limit: number; offset: number }; resource: string },
 ): Promise<{ posts: PublicSocialPost[]; page_info: McpPageInfo }> {
-  const rows = await queryAll<PublicPostRow>(db, `${PUBLIC_POST_SELECT}
-    WHERE root.kind = 'social_post' AND root.row_role = 'root' AND root.organization_id = ? AND root.status = 'published' AND root.visibility = 'listed'
+  const plan = preparePublicPostProjection({
+    query: `${publicPostSelect('?')} WHERE root.organization_id = ? AND ${listedPostSql}
       ${input.locationId ? 'AND root.location_id = ?' : ''}
-    ORDER BY root.published_at DESC, root.id DESC LIMIT ? OFFSET ?`,
-  [input.locale, organizationId, ...(input.locationId ? [input.locationId] : []), input.window.limit + 1, input.window.offset])
-  const page = rows.slice(0, input.window.limit)
-  return { posts: await projectPublicPosts(env, db, organizationId, page, input.locale), page_info: mcpPageInfo(input.window, page.length, rows.length > input.window.limit, { resource: input.resource }) }
+      ORDER BY root.published_at DESC, root.id DESC LIMIT ? OFFSET ?`,
+    params: [input.locale, organizationId, ...(input.locationId ? [input.locationId] : []), input.window.limit + 1, input.window.offset],
+  })
+  const rows = await executeBatch(db, plan.queries, { operation: 'Read published posts' })
+  const pageInfo = (count: number, more: boolean) => mcpPageInfo(input.window, count, more, { resource: input.resource })
+  if (!rows[0]!.results.length) return { posts: [], page_info: pageInfo(0, false) }
+  const sourceLocale = await getSourceLocale(db, organizationId)
+  const localizations = input.locale === sourceLocale ? null : await loadExactPublicLocalizations(env, db, organizationId, input.locale)
+  const posts = plan.read(rows, { env, organizationId, sourceLocale, locale: input.locale, localizations }).slice(0, input.window.limit).map(item => item.post)
+  return { posts, page_info: pageInfo(posts.length, rows[0]!.results.length > input.window.limit) }
 }
 
 /**
@@ -696,16 +735,18 @@ export async function getPublicSocialPost(
   const organization = await queryFirst<{ id: string }>(db, "SELECT id FROM organization WHERE id = ? AND status = 'active' LIMIT 1", [organizationId])
   if (!organization) return null
   const sourceLocale = await getSourceLocale(db, organizationId)
-  const row = await queryFirst<PublicPostRow>(db, `${PUBLIC_POST_SELECT}
-    WHERE root.kind = 'social_post' AND root.row_role = 'root' AND root.organization_id = ?
+  const plan = preparePublicPostProjection({
+    query: `${publicPostSelect('?')} WHERE root.kind = 'social_post' AND root.row_role = 'root' AND root.organization_id = ?
       AND ${locale === sourceLocale ? 'root.slug = ?' : "p.row_role = 'representation' AND p.path = ?"}
       ${previewAuthorized ? '' : "AND root.status = 'published'"} LIMIT 1`,
-  [locale, organizationId, locale === sourceLocale ? slug : postPublicPath(slug)])
-  if (!row) return null
-  const [post] = await projectPublicPosts(env, db, organizationId, [row], locale)
-  const source = await queryFirst<{ slug: string }>(db, 'SELECT slug FROM content_documents WHERE id = ?', [row.id])
-  const locale_representations = await listPublicLocaleRepresentations(env, db, {
-    organizationId, sourcePath: postPublicPath(source!.slug), documentId: row.id,
+    params: [locale, organizationId, locale === sourceLocale ? slug : postPublicPath(slug)],
   })
-  return { ...post!, locale_representations }
+  const rows = await executeBatch(db, plan.queries, { operation: 'Read published post' })
+  if (!rows[0]!.results.length) return null
+  const localizations = locale === sourceLocale ? null : await loadExactPublicLocalizations(env, db, organizationId, locale)
+  const { row, post } = plan.read(rows, { env, organizationId, sourceLocale, locale, localizations })[0]!
+  const locale_representations = await listPublicLocaleRepresentations(env, db, {
+    organizationId, sourcePath: postPublicPath(row.root_slug), documentId: row.id,
+  })
+  return { ...post, locale_representations }
 }

@@ -469,12 +469,16 @@ export function productPhotosFromPlacements(placements: Map<string, MediaPlaceme
 
 /** Every listing feature is present in catalog order; absence of an answer is explicitly unknown. */
 export async function readStayHomeAccessibility(db: DbClient, organizationId: string, productIds: string[]): Promise<Map<string, StayHomeAccessibility[]>> {
-  const features = Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).filter(isStayHomeAccessibilityFeature)
-  const answers = new Map<string, StayHomeAccessibility[]>(productIds.map(id => [id, features.map(feature => ({ feature, available: null, photo_ids: [] }))]))
-  if (!productIds.length) return answers
-  const ids = d1JsonStringSet(productIds)
-  const [saved, evidence] = await executeBatch(db, [{
-    query: 'SELECT product_id, feature_code, available FROM product_stay_accessibility WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))', params: [organizationId, ids],
+  if (!productIds.length) return new Map()
+  const plan = prepareStayHomeAccessibility(organizationId, { query: 'SELECT value FROM json_each(?)', params: [d1JsonStringSet(productIds)] })
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read listing accessibility' }), productIds)
+}
+
+export function prepareStayHomeAccessibility(organizationId: string | { sql: string }, ids: BatchQuery) {
+  const organization = typeof organizationId === 'string' ? '?' : organizationId.sql
+  const params = [...(typeof organizationId === 'string' ? [organizationId] : []), ...ids.params ?? []]
+  const queries = [{
+    query: `SELECT product_id, feature_code, available FROM product_stay_accessibility WHERE organization_id = ${organization} AND product_id IN (${ids.query})`, params,
   }, {
     query: `SELECT e.owner_id AS product_id, e.slot AS feature_code, e.asset_id,
       EXISTS (SELECT 1 FROM media_assets ma WHERE ma.organization_id = e.organization_id AND ma.id = e.asset_id
@@ -482,47 +486,58 @@ export async function readStayHomeAccessibility(db: DbClient, organizationId: st
       FROM media_placements e LEFT JOIN media_placements mp
         ON mp.organization_id = e.organization_id AND mp.owner_type = 'product' AND mp.owner_id = e.owner_id
         AND mp.asset_id = e.asset_id AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
-      WHERE e.organization_id = ? AND e.owner_type = 'stay_home_accessibility' AND e.owner_id IN (SELECT value FROM json_each(?))
-      ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, e.asset_id`, params: [organizationId, ids],
-  }], { operation: 'Read listing accessibility' })
-  for (const row of saved!.results as Array<{ product_id: string; feature_code: unknown; available: number }>) {
-    const answer = answers.get(row.product_id)?.find(entry => entry.feature === row.feature_code)
-    if (!answer || !isStayHomeAccessibilityFeature(row.feature_code) || (row.available !== 0 && row.available !== 1)) throw new TypeError(`Home ${row.product_id} has invalid accessibility information`)
-    answer.available = row.available === 1
+      WHERE e.organization_id = ${organization} AND e.owner_type = 'stay_home_accessibility' AND e.owner_id IN (${ids.query})
+      ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, e.asset_id`, params,
+  }]
+  return { queries, read }
+
+  function read([saved, evidence]: D1Result[], productIds: string[]) {
+    const features = Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).filter(isStayHomeAccessibilityFeature)
+    const answers = new Map<string, StayHomeAccessibility[]>(productIds.map(id => [id, features.map(feature => ({ feature, available: null, photo_ids: [] }))]))
+    for (const row of saved!.results as Array<{ product_id: string; feature_code: unknown; available: number }>) {
+      const answer = answers.get(row.product_id)?.find(entry => entry.feature === row.feature_code)
+      if (!answer || !isStayHomeAccessibilityFeature(row.feature_code) || (row.available !== 0 && row.available !== 1)) throw new TypeError(`Home ${row.product_id} has invalid accessibility information`)
+      answer.available = row.available === 1
+    }
+    for (const row of evidence!.results as Array<{ product_id: string; feature_code: unknown; asset_id: string; valid: number }>) {
+      const answer = answers.get(row.product_id)?.find(entry => entry.feature === row.feature_code)
+      if (!answer || row.valid !== 1) throw new TypeError(`Home ${row.product_id} has invalid accessibility photo evidence`)
+      if (!answer.photo_ids.includes(row.asset_id)) answer.photo_ids.push(row.asset_id)
+    }
+    for (const [productId, features] of answers) {
+      if (!features.every(isStayHomeAccessibility)) throw new TypeError(`Home ${productId} has incomplete accessibility photo evidence`)
+    }
+    return answers
   }
-  for (const row of evidence!.results as Array<{ product_id: string; feature_code: unknown; asset_id: string; valid: number }>) {
-    const answer = answers.get(row.product_id)?.find(entry => entry.feature === row.feature_code)
-    if (!answer || row.valid !== 1) throw new TypeError(`Home ${row.product_id} has invalid accessibility photo evidence`)
-    if (!answer.photo_ids.includes(row.asset_id)) answer.photo_ids.push(row.asset_id)
-  }
-  for (const [productId, features] of answers) {
-    if (!features.every(isStayHomeAccessibility)) throw new TypeError(`Home ${productId} has incomplete accessibility photo evidence`)
-  }
-  return answers
 }
 
 /** The authored tour; each room follows the Product's deduplicated photo order. */
 export async function readStayPhotoRooms(db: DbClient, organizationId: string, productIds: string[]): Promise<Map<string, StayPhotoRoom[]>> {
-  const rooms = new Map<string, StayPhotoRoom[]>(productIds.map(id => [id, []]))
-  if (!productIds.length) return rooms
-  const ids = d1JsonStringSet(productIds)
-  const [savedRooms, memberships, amenities, accessibility, evidence] = await executeBatch(db, [
+  if (!productIds.length) return new Map()
+  const plan = prepareStayPhotoRooms(organizationId, { query: 'SELECT value FROM json_each(?)', params: [d1JsonStringSet(productIds)] })
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read stay photo rooms' }), productIds)
+}
+
+export function prepareStayPhotoRooms(organizationId: string | { sql: string }, ids: BatchQuery) {
+  const organization = typeof organizationId === 'string' ? '?' : organizationId.sql
+  const params = [...(typeof organizationId === 'string' ? [organizationId] : []), ...ids.params ?? []]
+  const queries = [
     { query: `SELECT id, product_id, type, details_version, sleeping_arrangements, private_attached_bathroom FROM product_stay_photo_rooms
-        WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY type, sort_order, id`, params: [organizationId, ids] },
+        WHERE organization_id = ${organization} AND product_id IN (${ids.query}) ORDER BY type, sort_order, id`, params },
     { query: `SELECT r.product_id, r.id AS room_id, room_photo.asset_id
         FROM product_stay_photo_rooms r JOIN media_placements room_photo
           ON room_photo.organization_id = r.organization_id AND room_photo.owner_type = 'stay_photo_room' AND room_photo.owner_id = r.id
         JOIN media_placements mp ON mp.organization_id = r.organization_id AND mp.owner_type = 'product'
           AND mp.owner_id = r.product_id AND mp.asset_id = room_photo.asset_id AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
         JOIN media_assets ma ON ma.organization_id = mp.organization_id AND ma.id = mp.asset_id AND ma.status = 'active'
-        WHERE r.organization_id = ? AND r.product_id IN (SELECT value FROM json_each(?)) AND room_photo.status = 'active'
-        ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, mp.asset_id`, params: [organizationId, ids] },
+        WHERE r.organization_id = ${organization} AND r.product_id IN (${ids.query}) AND room_photo.status = 'active'
+        ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, mp.asset_id`, params },
     { query: `SELECT a.room_id, a.amenity_code,
         EXISTS (SELECT 1 FROM json_each(c.amenities) WHERE value ->> '$.code' = a.amenity_code AND value ->> '$.available' = 1) AS on_listing
         FROM product_stay_photo_room_amenities a JOIN product_stay_configs c ON c.organization_id = a.organization_id AND c.product_id = a.product_id
-        WHERE a.organization_id = ? AND a.product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
+        WHERE a.organization_id = ${organization} AND a.product_id IN (${ids.query})`, params },
     { query: `SELECT room_id, feature_code, available FROM product_stay_room_accessibility
-        WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
+        WHERE organization_id = ${organization} AND product_id IN (${ids.query})`, params },
     { query: `SELECT r.id AS room_id, e.slot AS feature_code, e.asset_id,
         EXISTS (SELECT 1 FROM media_assets ma WHERE ma.organization_id = e.organization_id AND ma.id = e.asset_id
           AND ma.status = 'active' AND ma.kind = 'image' AND ma.generation_key IS NULL AND length(trim(ma.public_url)) > 0 AND mp.id IS NOT NULL) AS valid
@@ -531,48 +546,53 @@ export async function readStayPhotoRooms(db: DbClient, organizationId: string, p
         LEFT JOIN media_placements mp
           ON mp.organization_id = r.organization_id AND mp.owner_type = 'product' AND mp.owner_id = r.product_id
           AND mp.asset_id = e.asset_id AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
-        WHERE r.organization_id = ? AND r.product_id IN (SELECT value FROM json_each(?))
-        ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, e.asset_id`, params: [organizationId, ids] },
-  ], { operation: 'Read stay photo rooms' })
-  const byId = new Map<string, StayPhotoRoom>()
-  for (const row of savedRooms!.results as Array<{ id: string; product_id: string; type: unknown; details_version: number; sleeping_arrangements: string | null; private_attached_bathroom: number | null }>) {
-    const room = {
-      id: row.id, type: row.type, photo_ids: [], amenities: [], details_version: row.details_version,
-      accessibility: stayRoomAccessibilityFeatures(row.type).map(feature => ({ feature, available: null, photo_ids: [] })),
-      sleeping_arrangements: parseStaySleepingArrangements(row.sleeping_arrangements === null ? null : JSON.parse(row.sleeping_arrangements)),
-      private_attached_bathroom: row.private_attached_bathroom === 1 ? true : row.private_attached_bathroom === 0 ? false : row.private_attached_bathroom,
+        WHERE r.organization_id = ${organization} AND r.product_id IN (${ids.query})
+        ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, e.asset_id`, params },
+  ]
+  return { queries, read }
+
+  function read([savedRooms, memberships, amenities, accessibility, evidence]: D1Result[], productIds: string[]) {
+    const rooms = new Map<string, StayPhotoRoom[]>(productIds.map(id => [id, []]))
+    const byId = new Map<string, StayPhotoRoom>()
+    for (const row of savedRooms!.results as Array<{ id: string; product_id: string; type: unknown; details_version: number; sleeping_arrangements: string | null; private_attached_bathroom: number | null }>) {
+      const room = {
+        id: row.id, type: row.type, photo_ids: [], amenities: [], details_version: row.details_version,
+        accessibility: stayRoomAccessibilityFeatures(row.type).map(feature => ({ feature, available: null, photo_ids: [] })),
+        sleeping_arrangements: parseStaySleepingArrangements(row.sleeping_arrangements === null ? null : JSON.parse(row.sleeping_arrangements)),
+        private_attached_bathroom: row.private_attached_bathroom === 1 ? true : row.private_attached_bathroom === 0 ? false : row.private_attached_bathroom,
+      }
+      if (!isStayPhotoRoom(room)) throw new TypeError(`Photo room ${row.id} has invalid saved room details`)
+      rooms.get(row.product_id)!.push(room)
+      byId.set(row.id, room)
     }
-    if (!isStayPhotoRoom(room)) throw new TypeError(`Photo room ${row.id} has invalid saved room details`)
-    rooms.get(row.product_id)!.push(room)
-    byId.set(row.id, room)
+    for (const row of memberships!.results as Array<{ room_id: string; asset_id: string }>) {
+      const room = byId.get(row.room_id)
+      if (!room) throw new TypeError(`Photo membership has no room ${row.room_id}`)
+      if (!room.photo_ids.includes(row.asset_id)) room.photo_ids.push(row.asset_id)
+    }
+    for (const row of amenities!.results as Array<{ room_id: string; amenity_code: unknown; on_listing: number }>) {
+      const room = byId.get(row.room_id)
+      if (!room || !isStayAmenity(row.amenity_code) || row.on_listing !== 1) throw new TypeError(`Room amenity has no canonical listing fact for room ${row.room_id}`)
+      room.amenities.push(row.amenity_code)
+    }
+    const amenityOrder = stayCodes(STAY_AMENITIES)
+    for (const room of byId.values()) room.amenities = amenityOrder.filter(code => room.amenities.includes(code))
+    for (const row of accessibility!.results as Array<{ room_id: string; feature_code: unknown; available: number }>) {
+      const answer = byId.get(row.room_id)?.accessibility.find(entry => entry.feature === row.feature_code)
+      if (!answer || !isStayRoomAccessibilityFeature(row.feature_code) || (row.available !== 0 && row.available !== 1)) throw new TypeError(`Room ${row.room_id} has invalid accessibility information`)
+      answer.available = row.available === 1
+    }
+    for (const row of evidence!.results as Array<{ room_id: string; feature_code: unknown; asset_id: string; valid: number }>) {
+      const answer = byId.get(row.room_id)?.accessibility.find(entry => entry.feature === row.feature_code)
+      if (!answer || row.valid !== 1) throw new TypeError(`Room ${row.room_id} has invalid accessibility photo evidence`)
+      if (!answer.photo_ids.includes(row.asset_id)) answer.photo_ids.push(row.asset_id)
+    }
+    for (const room of byId.values()) {
+      const roomId = room.id
+      if (!isStayPhotoRoom(room)) throw new TypeError(`Room ${roomId} has incomplete accessibility photo evidence`)
+    }
+    return rooms
   }
-  for (const row of memberships!.results as Array<{ room_id: string; asset_id: string }>) {
-    const room = byId.get(row.room_id)
-    if (!room) throw new TypeError(`Photo membership has no room ${row.room_id}`)
-    if (!room.photo_ids.includes(row.asset_id)) room.photo_ids.push(row.asset_id)
-  }
-  for (const row of amenities!.results as Array<{ room_id: string; amenity_code: unknown; on_listing: number }>) {
-    const room = byId.get(row.room_id)
-    if (!room || !isStayAmenity(row.amenity_code) || row.on_listing !== 1) throw new TypeError(`Room amenity has no canonical listing fact for room ${row.room_id}`)
-    room.amenities.push(row.amenity_code)
-  }
-  const amenityOrder = stayCodes(STAY_AMENITIES)
-  for (const room of byId.values()) room.amenities = amenityOrder.filter(code => room.amenities.includes(code))
-  for (const row of accessibility!.results as Array<{ room_id: string; feature_code: unknown; available: number }>) {
-    const answer = byId.get(row.room_id)?.accessibility.find(entry => entry.feature === row.feature_code)
-    if (!answer || !isStayRoomAccessibilityFeature(row.feature_code) || (row.available !== 0 && row.available !== 1)) throw new TypeError(`Room ${row.room_id} has invalid accessibility information`)
-    answer.available = row.available === 1
-  }
-  for (const row of evidence!.results as Array<{ room_id: string; feature_code: unknown; asset_id: string; valid: number }>) {
-    const answer = byId.get(row.room_id)?.accessibility.find(entry => entry.feature === row.feature_code)
-    if (!answer || row.valid !== 1) throw new TypeError(`Room ${row.room_id} has invalid accessibility photo evidence`)
-    if (!answer.photo_ids.includes(row.asset_id)) answer.photo_ids.push(row.asset_id)
-  }
-  for (const room of byId.values()) {
-    const roomId = room.id
-    if (!isStayPhotoRoom(room)) throw new TypeError(`Room ${roomId} has incomplete accessibility photo evidence`)
-  }
-  return rooms
 }
 
 /** Both inventory totals and room allocations run this after their proposed writes. */

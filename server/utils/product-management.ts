@@ -11,7 +11,7 @@ import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
 import { buildDeleteOwnerPlacementsQuery, buildMediaPlacementReplacementQueries, deleteProductMediaPlacementsQuery, hydrateMediaAssetRefs, groupMediaPlacements, mediaPlacementsQuery, readMediaPlacements, stayAccessibilityEvidenceGuardQueries, stayAccessibilityEvidenceWriteError } from '~/server/utils/media-asset-manager'
-import { isStayBedAllocationConflict, prepareArrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
+import { isStayBedAllocationConflict, prepareArrangeProductPhotos, prepareStayHomeAccessibility, prepareStayPhotoRooms, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
 import { parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
 import { isStayHomeAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
@@ -25,6 +25,7 @@ import { executeWithinCapacity, liveHomeSql, reportBillingUsage } from '~/server
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
+import { checkoutSellerFromRows, checkoutSellerQuery } from '~/server/utils/billing-access'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import {
   assertNoConflictingPrices,
@@ -543,6 +544,46 @@ export function preparePublicProductSelection(organizationId: string | { sql: st
     queries, ids: { query: `SELECT p.id ${selection} AND (p.order_url IS NULL OR p.order_url = '')`, params },
     read: ([products, ...rows]: Awaited<ReturnType<typeof executeBatch>>) =>
       hydrateProductRows((products!.results as Row[]).map(mapProductRow), rows, new Map(), new Map()),
+  }
+}
+
+/** Public page grids name their offerings before reading their relationships and publication readiness. */
+export function preparePublishedOfferingGrid(organization: { sql: string }, predicate: string) {
+  const selection = organizationProductSelection({ organizationId: organization, publishedOnly: true })
+  const selected = `${selection.selection} AND (${predicate})`
+  const { params } = selection
+  const idQuery = (condition?: string) => ({ query: `SELECT p.id ${selected}${condition ? ` AND (${condition})` : ''}`, params })
+  const ids = idQuery()
+  const stays = idQuery("p.kind = 'stay'")
+  const hydration = productHydrationQueries(organization, ids)
+  const rooms = prepareStayPhotoRooms(organization, stays)
+  const accessibility = prepareStayHomeAccessibility(organization, stays)
+  return {
+    ids,
+    queries: [
+      { query: `SELECT ${PRODUCT_COLUMNS} ${selected} ORDER BY p.name, p.id`, params },
+      ...hydration, ...rooms.queries, ...accessibility.queries,
+      bookingScheduleScopesQuery(organization, idQuery("p.order_url IS NULL OR p.order_url = ''")),
+      checkoutSellerQuery({
+        query: `CASE WHEN EXISTS (SELECT 1 ${selected}
+          AND EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id=p.organization_id
+            AND c.product_id=p.id AND c.online_payment_required=1)) THEN ${organization.sql} END`,
+        params,
+      }),
+    ],
+    async read([products, ...rows]: D1Result[], db: DbClient, env: CloudflareEnv, organizationId: string, currency: CurrencyCode | null) {
+      const records = (products!.results as Row[]).map(mapProductRow)
+      const stayIds = records.filter(product => product.kind === 'stay').map(product => product.id)
+      const roomEnd = hydration.length + rooms.queries.length
+      const offers = hydrateProductRows(records, rows,
+        rooms.read(rows.slice(hydration.length, roomEnd), stayIds),
+        accessibility.read(rows.slice(roomEnd), stayIds))
+      const scheduledScopes = scheduleScopesFromRows(rows.at(-2)!.results as BookingScheduleScopeRow[])
+      let setup: ReturnType<typeof readStripeCheckoutSetup> | undefined
+      return publicProductWindow(db, organizationId, offers, undefined, env,
+        () => setup ??= readStripeCheckoutSetup(db, organizationId, env, checkoutSellerFromRows(rows.at(-1)!.results)),
+        false, { currency, scheduledScopes })
+    },
   }
 }
 
