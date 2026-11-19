@@ -8,7 +8,7 @@ import type { MenuPrice, ProductVariant } from '~/server/types/products'
  * Null means the caller omits the price element entirely. There is no
  * "Price on request" stand-in: text nobody supplied is not a price.
  */
-export function formatProductMoney(price: Pick<Price, 'unit_amount' | 'currency'> | null, locale?: string): string | null {
+export function formatProductMoney<T extends Pick<Price, 'unit_amount' | 'currency'>>(price: T | null, locale?: string): string | null {
   return price ? formatMinorAmount(price.unit_amount, price.currency, locale) : null
 }
 

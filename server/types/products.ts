@@ -325,7 +325,7 @@ export type MenuPrice = Pick<Price, 'id' | 'active' | 'currency' | 'location_id'
 export type PublicMenuProduct = Pick<PublicProduct, 'id' | 'name' | 'slug' | 'description' | 'active'
   | 'details' | 'locations' | 'collections' | 'image' | 'order_url' | 'updated_at'> & {
   kind: 'dish'
-  booking: Pick<ProductBookingConfig, 'held_online' | 'duration_minutes'> | null
+  booking: Pick<ProductBookingConfig, 'held_online' | 'duration_minutes' | 'default_capacity'> | null
   page: Pick<NonNullable<Product['page']>, 'path'> | null
   stay: null
   variants: Array<Pick<ProductVariant, 'id' | 'name' | 'active'> & { prices: MenuPrice[] }>

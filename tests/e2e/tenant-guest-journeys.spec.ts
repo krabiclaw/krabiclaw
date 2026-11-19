@@ -82,7 +82,7 @@ test('Ember & Slice menu cards retain their links and prices with a compact rout
   const link = page.locator(`main a[href="/locations/${location.slug}/menu/${product.slug}"]`).first()
   await expect(link).toBeVisible()
   await expect(page.locator('main').getByText(/^\$18(?:\.00)?$/).first()).toBeVisible()
-  await expect(page.locator('script#__NUXT_DATA__')).toContainText('menu_cards')
+  expect(await page.locator('script#__NUXT_DATA__').textContent()).toContain('menu_cards')
   const localized = await openTenantPage(page, origin + '/th/menu', headers)
   expect(localized?.status()).toBe(200)
   await expect(page.locator('html')).toHaveAttribute('lang', 'th')

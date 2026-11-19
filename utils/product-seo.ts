@@ -162,7 +162,7 @@ export const DIETARY_SCHEMA_MAP: Record<string, string> = {
   GF: 'https://schema.org/GlutenFreeDiet',
 }
 
-export function extractDietarySchemaUrls(product: PublicProduct): string[] {
+export function extractDietarySchemaUrls(product: Pick<PublicProduct, 'details'>): string[] {
   const notes = product.details['dietary_notes']
   if (!Array.isArray(notes)) return []
   return notes

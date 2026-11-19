@@ -781,7 +781,7 @@ function menuProduct(product: PublicProduct): PublicMenuProduct {
   return {
     id, kind, name, slug, description, active, locations, collections, image, order_url, updated_at, stay: null,
     details: Object.fromEntries(Object.entries(details).filter(([key]) => ['pricing_note', 'featured', 'dietary_notes'].includes(key))),
-    booking: booking ? { held_online: booking.held_online, duration_minutes: booking.duration_minutes } : null,
+    booking: booking ? { held_online: booking.held_online, duration_minutes: booking.duration_minutes, default_capacity: booking.default_capacity } : null,
     page: page ? { path: page.path } : null,
     variants: variants.map(({ id, name, active, prices }) => ({
       id, name, active,
