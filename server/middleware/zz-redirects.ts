@@ -12,6 +12,8 @@ const platformRedirects: Record<string, string> = {
   '/mcp': '/plugin',
   '/solutions/legal': '/legal',
   '/solutions/review-seo': '/blog/how-to-turn-google-reviews-into-website-faqs-social-posts-and-seo-pages',
+  '/apple-touch-icon.png': '/platform/blawby-180.png',
+  '/favicon.ico': '/platform/blawby.ico',
   '/platform/apple-touch-icon.png': '/platform/blawby-180.png',
   '/platform/favicon.ico': '/platform/blawby.ico',
 }
