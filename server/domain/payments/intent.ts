@@ -184,7 +184,7 @@ export async function paymentHandoff(db: DbClient, env: CloudflareEnv, organizat
   const payment = await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'handoff')
   const keys = paymentsStripeKeys(env, Boolean(payment.livemode))
   if (!keys?.publishableKey) throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe is not configured' })
-  const stripe = createStripeClient(keys.secretKey, 'payments')
+  const stripe = createStripeClient(keys.secretKey, 'payments', env.DB)
   const { intent, state } = await readCheckoutIntent(stripe, payment, now)
   const snapshot = snapshotOf(payment)
   // The methods Stripe resolved for this intent from the business's configuration, with nothing that redirects; the Element offers exactly these.

@@ -136,7 +136,7 @@ export function paymentsStripeKeys(env: CloudflareEnv, livemode: boolean) {
 export function paymentsStripe(env: CloudflareEnv, livemode: boolean): Stripe {
   const keys = paymentsStripeKeys(env, livemode)
   if (!keys) throw new HTTPError({ statusCode: 503, statusMessage: `Stripe ${livemode ? 'live' : 'test'} mode is not configured` })
-  return createStripeClient(keys.secretKey, 'payments')
+  return createStripeClient(keys.secretKey, 'payments', env.DB)
 }
 
 function platformOriginUrl(platformOrigin: string, allowLocalHttp = false): URL {
@@ -427,7 +427,7 @@ async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationI
   const { connected, livemode } = setup
   const keys = livemode === null ? null : paymentsStripeKeys(env, livemode)
   if (!connected?.stripe_account_id || !keys?.methodConfiguration) throw new Error('Ready checkout is missing its Stripe account or payment method configuration')
-  return { ready: true as const, stripe: createStripeClient(keys.secretKey, 'payments'), connected: { ...connected, stripe_account_id: connected.stripe_account_id }, parent: keys.methodConfiguration, handoff }
+  return { ready: true as const, stripe: createStripeClient(keys.secretKey, 'payments', env.DB), connected: { ...connected, stripe_account_id: connected.stripe_account_id }, parent: keys.methodConfiguration, handoff }
 }
 
 /**

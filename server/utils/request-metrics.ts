@@ -19,7 +19,7 @@ export interface RequestDataMetrics {
   phases: Record<string, number>
   transcript?: { finishDispatch?: () => void; firstAppD1Ms?: number }
   resources: Map<string, number>
-  externalCalls: Partial<Record<'google_calendar_free_busy' | 'better_auth_google_refresh', number>>
+  externalCalls: Partial<Record<'google_calendar_free_busy' | 'better_auth_google_refresh' | 'stripe', number>>
   finalized: boolean
   // A telemetry write that failed. It never replaces the operation's own
   // outcome; the request's [data-request] record reports it.

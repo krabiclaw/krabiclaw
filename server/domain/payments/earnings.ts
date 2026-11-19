@@ -1,12 +1,12 @@
 import type { EarningsPerformance, PayoutDetail, PayoutItem } from '~/shared/earnings-display'
 import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
-import { queryAll, queryFirst, type DbClient } from '~/server/db'
+import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { getStripeConnectedAccount, paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { authorizePayments, type FinancialPrincipal, type Payment, type VisiblePayment } from './index'
-import { channelReservationAmounts } from '~/server/domain/stays'
+import { channelReservationAmountQuery, channelReservationAmounts } from '~/server/domain/stays'
 
 /**
  * The Earnings screens as Airbnb draws them: a payment leads with the picture
@@ -64,7 +64,22 @@ export async function paymentPerformance(db: DbClient, principal: FinancialPrinc
   await authorizePayments(principal, 'read')
   if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid year is required', data: { code: 'INVALID_EARNINGS_PERIOD', field: 'year' } })
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !month.startsWith(`${year}-`)) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid month within the requested year is required', data: { code: 'INVALID_EARNINGS_PERIOD', field: 'month' } })
-  const rows = await queryAll<{ month: string; currency: string; paid: number; refunded: number }>(db, `SELECT strftime('%Y-%m', created_at) AS month, currency, SUM(captured_amount) AS paid, SUM(refunded_amount) AS refunded FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? GROUP BY 1, 2 ORDER BY 1`, [principal.organizationId, `${year}-01-01T00:00:00.000Z`, `${year + 1}-01-01T00:00:00.000Z`])
+  const organizationId = principal.organizationId
+  const [monthYear, monthNumber] = month.split('-').map(Number)
+  const monthStart = `${month}-01`
+  const next = new Date(Date.UTC(monthYear!, monthNumber!, 1)).toISOString()
+  const monthEnd = next.slice(0, 10)
+  const [yearResult, monthResult, organization, channel] = await executeBatch(db, [
+    { query: `SELECT strftime('%Y-%m', created_at) AS month, currency, SUM(captured_amount) AS paid, SUM(refunded_amount) AS refunded
+        FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? GROUP BY 1, 2 ORDER BY 1`,
+      params: [organizationId, `${year}-01-01T00:00:00.000Z`, `${year + 1}-01-01T00:00:00.000Z`] },
+    { query: `SELECT id, location_id, price_snapshot_json, captured_amount, refunded_amount
+        FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? AND captured_amount > 0`,
+      params: [organizationId, `${monthStart}T00:00:00.000Z`, next] },
+    { query: 'SELECT default_currency FROM organization WHERE id = ?', params: [organizationId] },
+    channelReservationAmountQuery(organizationId, monthStart, monthEnd),
+  ], { operation: 'Read the earnings period' })
+  const rows = yearResult!.results as Array<{ month: string; currency: string; paid: number; refunded: number }>
   const currencies = [...new Set(rows.map(row => row.currency))]
   if (currencies.length > 1) throw new HTTPError({ statusCode: 409, statusMessage: 'Earnings in more than one currency cannot be charted together', data: { code: 'MULTIPLE_EARNINGS_CURRENCIES', field: 'currency' } })
   const months = Array.from({ length: 12 }, (_, index) => {
@@ -72,10 +87,8 @@ export async function paymentPerformance(db: DbClient, principal: FinancialPrinc
     const row = rows.find(entry => entry.month === key)
     return { month: key, paid: row?.paid ?? 0, refunded: row?.refunded ?? 0 }
   })
-  const [monthYear, monthNumber] = month.split('-').map(Number)
-  const next = new Date(Date.UTC(monthYear!, monthNumber!, 1)).toISOString()
-  const payments = await queryAll<Payment>(db, `SELECT * FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? AND captured_amount > 0`, [principal.organizationId, `${month}-01T00:00:00.000Z`, next])
-  const pictures = await paymentPictures(db, principal.organizationId, payments)
+  const payments = monthResult!.results as Array<Pick<Payment, 'id' | 'location_id' | 'price_snapshot_json' | 'captured_amount' | 'refunded_amount'>>
+  const pictures = await paymentPictures(db, organizationId, payments)
   const byTitle = new Map<string, { title: string; image_url: string | null; paid: number; count: number }>()
   for (const payment of payments) {
     const picture = pictures.get(payment.id)!
@@ -84,9 +97,9 @@ export async function paymentPerformance(db: DbClient, principal: FinancialPrinc
     entry.count += 1
     byTitle.set(picture.title, entry)
   }
-  const currency = currencies[0] ?? (await queryFirst<{ default_currency: string }>(db, 'SELECT default_currency FROM organization WHERE id = ?', [principal.organizationId]))?.default_currency
+  const currency = currencies[0] ?? (organization!.results[0] as { default_currency: string } | undefined)?.default_currency
   if (!currency) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
-  const channel_reservations = await channelReservationAmounts(db, principal.organizationId, `${month}-01`, next.slice(0, 10))
+  const channel_reservations = channelReservationAmounts(channel!, monthStart, monthEnd)
   return { currency, months, items: [...byTitle.values()].sort((a, b) => b.paid - a.paid), channel_reservations }
 }
 
@@ -140,10 +153,13 @@ export async function paymentPayoutDetail(db: DbClient, env: CloudflareEnv, prin
   const { stripe, options } = await connectedStripe(db, env, principal.organizationId)
   const payout = await stripe.payouts.retrieve(payoutId, {}, options)
   const destination = typeof payout.destination === 'string' ? payout.destination : payout.destination?.id
-  const external = destination ? await stripe.accounts.retrieveExternalAccount(options.stripeAccount, destination) : null
-  const bank = external && external.object === 'bank_account' ? { bank_name: external.bank_name ?? null, last4: external.last4 } : null
   if (!destination) throw new HTTPError({ statusCode: 502, statusMessage: 'Stripe payout has no destination', data: { code: 'PAYOUT_DESTINATION_MISSING', field: 'payout.destination' } })
 
+  const [external, items] = await Promise.all([
+    stripe.accounts.retrieveExternalAccount(options.stripeAccount, destination),
+    payoutItems(db, stripe, options, principal.organizationId, payout),
+  ])
+  const bank = external.object === 'bank_account' ? { bank_name: external.bank_name ?? null, last4: external.last4 } : null
   return {
     id: payout.id,
     amount: payout.amount,
@@ -151,7 +167,7 @@ export async function paymentPayoutDetail(db: DbClient, env: CloudflareEnv, prin
     status: payout.status,
     arrival_date: payout.arrival_date,
     bank,
-    items: await payoutItems(db, stripe, options, principal.organizationId, payout),
+    items,
   }
 }
 
