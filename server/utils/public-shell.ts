@@ -18,7 +18,7 @@ import { previewSecretOf, resolvePreviewAuthorization } from '~/server/utils/pre
 import { isNonProductionHost } from '~/server/utils/tenant-hosts'
 import { recordRequestPhase } from '~/server/utils/request-metrics'
 import { isPublicShellPayload } from '~/utils/public-resource-contracts'
-import { assertExactCanonicalLocale, assertPublicOrganizationLanguage, getPersistedSourceLocale } from '~/server/utils/localization'
+import { assertExactCanonicalLocale, assertPublicOrganizationLanguage, readPublicSourceLocale } from '~/server/utils/localization'
 import { isLegalPracticeSite } from '~/utils/site-routing'
 import {
   indexStoredPublicLocalizations,
@@ -86,7 +86,7 @@ export async function loadPublicShellSource(
 
   const [{ organization }, source] = await Promise.all([
     loadPublicBase(event, organizationId, { previewAuthorized }),
-    getPersistedSourceLocale(db, organizationId),
+    readPublicSourceLocale(event, db, organizationId),
   ])
   const sourceLocale = source.locale
   const shellQueries: BatchQuery[] = []

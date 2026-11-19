@@ -46,7 +46,7 @@ import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { hasPublicLocationPages, resolvePublicSite } from '~/utils/site-routing'
 import { isPublicSourceRouteRoot } from '~/shared/public-locale-routes'
 import { siteRendersPageDocumentAt } from '~/shared/tenant-page-paths'
-import { assertPublicOrganizationLanguage, getPersistedSourceLocale } from '~/server/utils/localization'
+import { assertPublicOrganizationLanguage, readPublicSourceLocale } from '~/server/utils/localization'
 import {
   loadExactPublicLocalizations,
   projectExactLocalizedCollection,
@@ -305,7 +305,7 @@ async function loadPublicPageSource(
     if (mutateResponseHeaders) setHeader(event, "x-bootstrap-cache", "SKIP");
   }
 
-  const source = await getPersistedSourceLocale(db, organizationId)
+  const source = await readPublicSourceLocale(event, db, organizationId)
   const sourceLocale = source.locale
   options.signal?.throwIfAborted();
 
