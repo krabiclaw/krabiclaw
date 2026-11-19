@@ -9,7 +9,7 @@ import { entitlingSubscription, getOrganizationEntitlements, planFromSubscriptio
 import { BASIC_HOMES, BILLING_METER_KEYS, isKnownRecurringPlan, type BillingMeterKey } from '~/shared/billing-model'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { createStripeClient } from '~/server/utils/stripe-client'
-import { stripeMeterTransition, reportStripeMeterUsage } from '~/server/utils/stripe-meter-usage'
+import { stripeMeterContract, reportStripeMeterUsage } from '~/server/utils/stripe-meter-usage'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
 import { planSubscriptionItem, readStripeCatalog, recurringPriceAmount, selectMeteredPrices } from '~/server/utils/stripe-catalog'
 import { organizationAccessControl, organizationRoles } from '~/utils/organization-access'
@@ -202,7 +202,7 @@ export async function reportBillingUsage(env: CloudflareEnv, db: DbClient, organ
       ? await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId)
       : undefined
     if (contract && contract.customer !== subscription.stripeCustomerId) throw new Error('The Stripe subscription belongs to a different customer')
-    await reportStripeMeterUsage(stripe, 'homes', subscription.stripeCustomerId, homes, stripeMeterTransition(contract))
+    await reportStripeMeterUsage(stripe, 'homes', subscription.stripeCustomerId, homes, await stripeMeterContract(stripe, env, contract))
   } catch (cause) {
     if (!context?.committed) throw cause
     const reason = cause instanceof Error ? cause.message : String(cause)
