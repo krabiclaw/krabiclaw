@@ -191,7 +191,7 @@ export function readPublicShellRows(
        ORDER BY CASE WHEN r.source = 'google_places' THEN r.original_review_date ELSE r.created_at END DESC, r.id ASC LIMIT 50`,
       params: [organizationId],
     }) - 1
-    const results = await executeBatch(db, queries)
+    const results = await executeBatch(db, queries, { operation: includeReviews ? 'Read public shell and reviews' : 'Read public shell' })
     return { indexes, results }
   })
 }

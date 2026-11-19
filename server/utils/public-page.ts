@@ -463,7 +463,7 @@ async function loadPublicPageSource(
   if (menuCollections) batchStmts.push(...menuCollections.queries)
   const experiences = readPublicExperiences(event, db, orgId, env)
   const [batchResults, { results: shellResults, indexes: shellIndexes }, shellExperiences, canonical, sourceCollections, routeRepresentations] = await Promise.all([
-    batchStmts.length ? executeBatch(db, batchStmts) : [],
+    batchStmts.length ? executeBatch(db, batchStmts, { operation: dishes ? 'Read public menu cards' : 'Read public page data' }) : [],
     readPublicShellRows(event, db, orgId, previewRestaurant, needsGlobalReviews || undefined),
     experiences,
     includeProducts && !dishes
