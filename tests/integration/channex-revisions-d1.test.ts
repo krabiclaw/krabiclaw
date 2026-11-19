@@ -9,7 +9,6 @@ import { applyBookingRevision } from '../../server/integrations/channex/booking-
 import { ChannexConnection } from '../../server/integrations/channex/channel-connection.ts'
 import { startVrboSetup, vrboHomes } from '../../server/integrations/channex/hosted-channel.ts'
 import { captureEvents } from './support/events.ts'
-import { countActiveHomes } from '../../server/utils/billing.ts'
 import { addLocalDays, localDateAt } from '../../utils/timezone.ts'
 import { applySchema } from './support/schema.ts'
 

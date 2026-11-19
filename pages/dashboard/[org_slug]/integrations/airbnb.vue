@@ -471,7 +471,7 @@ async function retryFailed() {
     changes.value = await dashboardApi(`${api}/sync`, {
       method: 'POST',
       body: {
-        sync: current.sync.map(job => ({ listing_id: job.listing_id, ...(job.product_id ? { product_id: job.product_id } : {}), ...(entered.value[job.listing_id] ? { details: entered.value[job.listing_id] } : {}) })),
+        sync: current.sync.map(job => ({ listing_id: job.listing_id, ...(job.product_id ? { product_id: job.product_id } : entered.value[job.listing_id] ? { details: entered.value[job.listing_id] } : {}) })),
         stop_listing_ids: current.stop.map(job => job.listing_id),
       },
       validate: isChanges,
