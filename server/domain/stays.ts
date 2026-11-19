@@ -1966,7 +1966,6 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
       ...reconcileNightsQueries(access.organizationId, id, { updated_at: now, version: 1, product_id: home.product_id, ...window, check_in_date: fields.check_in_date, check_out_date: fields.check_out_date }),
       ...bookingConversationQueries({ organizationId: access.organizationId, bookingId: id, requestId: conversationId, locationId: home.location_id, userId: null, now,
         guest: { name: fields.guest_name, email: fields.guest_email, phone: fields.guest_phone } }),
-      publicResourceCacheInvalidationQuery(access.organizationId, 'guest-thread-create'),
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id,
         context: access.audit, afterState: { ...fields, channel, channel_booking_id: channelBookingId }, ...(imported ? { metadata: { imported } } : {}) }),
       ...(payment ? stayPaymentInsert(access, { id, currency: home.currency, location_id: home.location_id }, payment, `${key}:payment`, now) : []),
