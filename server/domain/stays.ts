@@ -489,7 +489,8 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
 type StayHomeCore = Omit<StayHome, 'photos' | 'photo_rooms' | 'accessibility'>
 
 /** The statements that read homes and their nightly prices, for a caller's batch; `organization` is SQL naming the organization. */
-function stayHomeQueries(organization: BatchQuery, productId: string | null, scope: { sql: string; params: unknown[] }): [BatchQuery, BatchQuery] {
+function stayHomeQueries(organization: BatchQuery, product: string | BatchQuery | null, scope: { sql: string; params: unknown[] }): [BatchQuery, BatchQuery] {
+  const target = typeof product === 'string' ? { query: '?', params: [product] } : product
   return [{
     query: `
     SELECT p.id AS product_id, (SELECT json_group_array(v.id) FROM product_variants v WHERE v.organization_id = c.organization_id AND v.product_id = c.product_id) AS variant_ids, p.updated_at, p.name, c.internal_name, p.description, p.details_json, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
@@ -508,16 +509,16 @@ function stayHomeQueries(organization: BatchQuery, productId: string | null, sco
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
       JOIN organization o ON o.id = c.organization_id
       LEFT JOIN product_channel_mappings m ON m.organization_id = c.organization_id AND m.product_id = c.product_id AND m.provider = 'channex'
-     WHERE c.organization_id = ${organization.query} ${productId !== null ? 'AND c.product_id = ?' : ''} AND ${scope.sql}
+     WHERE c.organization_id = ${organization.query} ${target ? `AND c.product_id IN (${target.query})` : ''} AND ${scope.sql}
      ORDER BY c.internal_name, p.id`,
-    params: [...organization.params!, ...(productId !== null ? [productId] : []), ...scope.params],
+    params: [...organization.params!, ...target?.params ?? [], ...scope.params],
   }, {
     query: `SELECT pr.*, v.product_id FROM prices pr
       JOIN product_variants v ON v.organization_id = pr.organization_id AND v.id = pr.product_variant_id
       JOIN product_stay_configs c ON c.organization_id = v.organization_id AND c.product_id = v.product_id
-     WHERE pr.organization_id = ${organization.query} ${productId ? 'AND v.product_id = ?' : ''} AND v.active = 1 AND pr.stay_date IS NULL AND pr.weekend = 0
+     WHERE pr.organization_id = ${organization.query} ${target ? `AND v.product_id IN (${target.query})` : ''} AND v.active = 1 AND pr.stay_date IS NULL AND pr.weekend = 0
      ORDER BY v.sort_order, v.id`,
-    params: [...organization.params!, ...(productId ? [productId] : [])],
+    params: [...organization.params!, ...target?.params ?? []],
   }]
 }
 
@@ -3022,7 +3023,7 @@ export async function readPublicStayHome(db: DbClient, organizationId: string, p
   return publicStayHomeFrom(rows!, prices!)
 }
 
-export function publicStayHomeQueries(organizationId: string, productId: string) {
+export function publicStayHomeQueries(organizationId: string, productId: string | BatchQuery) {
   return stayHomeQueries({ query: '?', params: [organizationId] }, productId, { sql: PUBLIC_STAY_SQL, params: [] })
 }
 
@@ -3077,7 +3078,11 @@ function publicNight(night: Omit<StayNight, 'channel'>, today: string, lastDepar
 
 /** The bookable nights of [from, to), plus `to` so the guest can select that departure. No claims are shown. */
 export async function readPublicStayCalendar(db: DbClient, organizationId: string, productId: string, input: { from: unknown; to: unknown }): Promise<PublicStayCalendar> {
-  const now = new Date()
+  const read = publicStayCalendarRead(organizationId, { query: '?', params: [productId] }, input, new Date())
+  return read.calendar(await executeBatch(db, read.queries, { operation: 'Read public stay calendar' }))
+}
+
+export function publicStayCalendarRead(organizationId: string, product: BatchQuery, input: { from: unknown; to: unknown }, now: Date) {
   const utcToday = now.toISOString().slice(0, 10)
   // Read the requested nights inside every possible home-local horizon. Once the
   // home supplies its time zone, trim the result to that home's exact horizon.
@@ -3088,21 +3093,23 @@ export async function readPublicStayCalendar(db: DbClient, organizationId: strin
   const start = from && from > earliest ? from : earliest
   const departure = to && to < latest ? to : latest
   const queries = from && to && from < to && start <= departure
-    ? homeNightsQueries({ query: '?', params: [organizationId] }, { query: '?', params: [productId] }, start, addDays(departure, 1), false)
+    ? homeNightsQueries({ query: '?', params: [organizationId] }, product, start, addDays(departure, 1), false)
     : []
-  const [rows, prices, ...nightRows] = await executeBatch(db, [
-    ...publicStayHomeQueries(organizationId, productId), ...queries,
-  ], { operation: 'Read public stay calendar' })
-  const home = publicStayHomeFrom(rows!, prices!)
-  const requested = range(input)
-  const today = homeToday(home.timezone, now)
-  const lastDeparture = addDays(today, STAY_CALENDAR_DAYS)
-  const firstNight = requested.from < today ? today : requested.from
-  const lastNight = requested.to > lastDeparture ? lastDeparture : requested.to
-  const nights = firstNight > lastNight ? [] : homeNightsFrom([home], nightRows, firstNight, addDays(lastNight, 1))[0]!
   return {
-    home: { currency: home.currency, timezone: home.timezone, today, check_in_time: home.check_in_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, base_price_minor: home.base_price_minor },
-    nights: nights.map(night => publicNight(night, today, lastDeparture)),
+    queries: [...publicStayHomeQueries(organizationId, product), ...queries],
+    calendar([rows, prices, ...nightRows]: D1Result[]): PublicStayCalendar {
+      const home = publicStayHomeFrom(rows!, prices!)
+      const requested = range(input)
+      const today = homeToday(home.timezone, now)
+      const lastDeparture = addDays(today, STAY_CALENDAR_DAYS)
+      const firstNight = requested.from < today ? today : requested.from
+      const lastNight = requested.to > lastDeparture ? lastDeparture : requested.to
+      const nights = firstNight > lastNight ? [] : homeNightsFrom([home], nightRows, firstNight, addDays(lastNight, 1))[0]!
+      return {
+        home: { currency: home.currency, timezone: home.timezone, today, check_in_time: home.check_in_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, base_price_minor: home.base_price_minor },
+        nights: nights.map(night => publicNight(night, today, lastDeparture)),
+      }
+    },
   }
 }
 
