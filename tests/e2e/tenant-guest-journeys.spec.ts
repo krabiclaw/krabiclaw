@@ -86,6 +86,7 @@ test('Ember & Slice menu cards retain their links and prices with a compact rout
   const localized = await openTenantPage(page, origin + '/th/menu', headers)
   expect(localized?.status()).toBe(200)
   await expect(page.locator('html')).toHaveAttribute('lang', 'th')
+  await expect(page.locator('main').getByText('มาร์เกอริต้า', { exact: true }).first()).toBeVisible()
 })
 
 test.describe('tenant guest journeys (disposable local/preview data only)', () => {
