@@ -9,18 +9,20 @@
  * always 1), and its metered prices are the plan's `lineItems`: Better Auth's
  * Checkout adds them, its `upgrade` adds and removes the ones that differ
  * between two plans, and a metered item carries no quantity. What they bill is
- * reported to their meters (server/utils/billing-meters.ts) and charged on the
+ * reported to their meters (server/utils/stripe-meter-usage.ts) and charged on the
  * subscription's invoice at the end of the period.
  */
 import type Stripe from 'stripe'
 import type { StripePlan } from '@better-auth/stripe'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
-import { isKnownRecurringPlan, isNewSalePlan, planMeters } from '~/shared/billing-model'
-import { assertStripeCatalogPrice, readStripeCatalog, selectMeteredPrices, selectStripeCatalogPrice } from '~/server/utils/stripe-catalog'
+import { BILLING_METER_KEYS, isKnownRecurringPlan, isNewSalePlan, planMeters } from '~/shared/billing-model'
+import { assertStripeCatalogPrice, readStripeCatalog, selectMeteredPrices, selectStripeCatalogPrice, type MeteredPrices, type StripeCatalog } from '~/server/utils/stripe-catalog'
 
 export async function getBetterAuthStripePlans(stripe: Stripe): Promise<StripePlan[]> {
-  const catalog = await readStripeCatalog(stripe)
-  const metered = selectMeteredPrices(catalog)
+  return plansFromCatalog(await readStripeCatalog(stripe))
+}
+
+function plansFromCatalog(catalog: StripeCatalog, metered = selectMeteredPrices(catalog)): StripePlan[] {
   const plans: StripePlan[] = []
   const planIds = new Set<string>()
 
@@ -54,11 +56,35 @@ export async function getBetterAuthStripePlans(stripe: Stripe): Promise<StripePl
   return plans
 }
 
-export type StripePlanLoader = () => Promise<StripePlan[]>
+export type StripePlanLoader = (existingItems?: ReadonlySet<string>) => Promise<StripePlan[]>
+
+interface PlanSnapshot {
+  plans: StripePlan[]
+  offers: MeteredPrices
+  legacy?: MeteredPrices
+  replacement?: MeteredPrices
+}
+
+function selectContractPlans(snapshot: PlanSnapshot, existingItems?: ReadonlySet<string>): StripePlan[] {
+  const prices = new Map<string, string>()
+  if (existingItems && snapshot.legacy && snapshot.replacement) {
+    for (const key of BILLING_METER_KEYS) {
+      const attached = [snapshot.legacy[key].id, snapshot.replacement[key].id].filter(id => existingItems.has(id))
+      if (attached.length > 1) throw new Error(`The Stripe subscription has two prices for the ${key} meter`)
+      if (attached[0]) prices.set(snapshot.offers[key].id, attached[0])
+    }
+  }
+  return snapshot.plans.map(plan => ({
+    ...plan,
+    ...(plan.lineItems ? { lineItems: plan.lineItems.map(item => ({
+      ...item, ...(typeof item.price === 'string' ? { price: prices.get(item.price) ?? item.price } : {}),
+    })) } : {}),
+  }))
+}
 
 const STRIPE_PLAN_CACHE_TTL_MS = 60_000
-const stripePlanSnapshots = new Map<string, { plans: StripePlan[]; expiresAt: number }>()
-const stripePlanPending = new Map<string, Promise<StripePlan[]>>()
+const stripePlanSnapshots = new Map<string, PlanSnapshot & { expiresAt: number }>()
+const stripePlanPending = new Map<string, Promise<PlanSnapshot>>()
 
 function stripePlanCacheScope(env?: ApiRecord): string {
   const account = typeof env?.STRIPE_ACCOUNT_ID === 'string' && env.STRIPE_ACCOUNT_ID.trim()
@@ -85,26 +111,39 @@ export function createStripePlanLoader(
   ttlMs = STRIPE_PLAN_CACHE_TTL_MS,
   cacheScope = stripePlanCacheScope(env),
 ): StripePlanLoader {
-  return async () => {
-    const key = cacheScope
-    const now = Date.now()
-    const snapshot = stripePlanSnapshots.get(key)
-    if (snapshot && snapshot.expiresAt > now) return copyPlans(snapshot.plans)
-
-    const existing = stripePlanPending.get(key)
-    if (existing) return copyPlans(await existing)
-
-    const refresh = getBetterAuthStripePlans(stripe)
-      .then((plans) => {
-        stripePlanSnapshots.set(key, { plans, expiresAt: Date.now() + ttlMs })
-        return plans
-      })
-      .finally(() => stripePlanPending.delete(key))
-    stripePlanPending.set(key, refresh)
-    return copyPlans(await refresh)
-  }
+  return async existingItems => selectContractPlans(await readStripePlanSnapshot(stripe, env, ttlMs, cacheScope), existingItems)
 }
 
-function copyPlans(plans: StripePlan[]): StripePlan[] {
-  return plans.map(plan => ({ ...plan, ...(plan.lineItems ? { lineItems: plan.lineItems.map(item => ({ ...item })) } : {}) }))
+export async function attachedBlawbyMeters(stripe: Stripe, env: ApiRecord, subscription: Stripe.Subscription) {
+  const { replacement } = await readStripePlanSnapshot(stripe, env)
+  if (subscription.items.has_more || !replacement) throw new Error(`Could not read the meters on Stripe subscription ${subscription.id}`)
+  const priceIds = new Set(subscription.items.data.map(item => item.price.id))
+  return new Set(BILLING_METER_KEYS.filter(key => priceIds.has(replacement[key].id)))
+}
+
+async function readStripePlanSnapshot(
+  stripe: Stripe, env?: ApiRecord, ttlMs = STRIPE_PLAN_CACHE_TTL_MS, cacheScope = stripePlanCacheScope(env),
+): Promise<PlanSnapshot> {
+  const migrateMeters = env?.STRIPE_BILLING_METER_MIGRATION === 'true'
+  const key = `${cacheScope}:${migrateMeters}`
+  const snapshot = stripePlanSnapshots.get(key)
+  if (snapshot && snapshot.expiresAt > Date.now()) return snapshot
+  const pending = stripePlanPending.get(key)
+  if (pending) return pending
+
+  const refresh = readStripeCatalog(stripe)
+    .then((catalog) => {
+      const offers = selectMeteredPrices(catalog)
+      const refreshed = {
+        plans: plansFromCatalog(catalog, offers),
+        offers,
+        legacy: migrateMeters ? selectMeteredPrices(catalog, 'legacy') : undefined,
+        replacement: migrateMeters ? selectMeteredPrices(catalog, 'blawby') : undefined,
+      }
+      stripePlanSnapshots.set(key, { ...refreshed, expiresAt: Date.now() + ttlMs })
+      return refreshed
+    })
+    .finally(() => stripePlanPending.delete(key))
+  stripePlanPending.set(key, refresh)
+  return refresh
 }

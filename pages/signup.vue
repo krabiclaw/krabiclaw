@@ -64,7 +64,7 @@ useSocialMetadata({
   path: '/signup',
   socialImage: organizationSocialImage,
   title: 'Create your account',
-  description: 'Create a free Blawby account and build your business site through ChatGPT.',
+  description: 'Create a free Blawby account. Run your business from your favorite AI app with Blawby.',
   discoverability: isPlatform ? 'listed' : 'private',
 })
 

@@ -35,7 +35,7 @@ function isLowIntentOpening(message: string) {
 
 function buildClarifyingReply() {
   return [
-    'Hi, I can help with docs, setup, billing, domains, ChowBot, or account access.', '', 'Tell me what you need help with and I’ll try to answer first before suggesting a support case.', ].join('\n')
+    'Hi, I can help with docs, setup, billing, domains, or account access.', '', 'Tell me what you need help with and I’ll try to answer first before suggesting a support case.', ].join('\n')
 }
 
 export default defineHandler(async (event) => {
@@ -130,7 +130,7 @@ export default defineHandler(async (event) => {
         : null, }
 
     await enqueueMcpToolCallEvent(env, {
-      mcpSurface: 'public_help', method: 'help/chat', toolName: 'public_help_chowbot', toolDomain: 'support', arguments: {
+      mcpSurface: 'public_help', method: 'help/chat', toolName: 'public_help_chat', toolDomain: 'support', arguments: {
         topic: topic || null, message_length: message.length, history_length: history.length, }, result: {
         escalation: shouldEscalate, suggested_links: suggested_links.length, citations: response.citations.length, }, status: 'success', durationMs: Date.now() - startedAt, })
 
@@ -138,7 +138,7 @@ export default defineHandler(async (event) => {
   } catch (error) {
     if (error instanceof HTTPError && error.data?.code === 'MCP_AUDIT_QUEUE_FAILED') throw error
     await enqueueMcpToolCallEvent(env, {
-      mcpSurface: 'public_help', method: 'help/chat', toolName: 'public_help_chowbot', toolDomain: 'support', arguments: {
+      mcpSurface: 'public_help', method: 'help/chat', toolName: 'public_help_chat', toolDomain: 'support', arguments: {
         topic: topic || null, message_length: message.length, history_length: history.length, }, status: 'error', errorMessage: error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAt, })
     console.error('Public help agent failed:', error)
     return jsonResponse({ error: 'Failed to answer support question' }, { status: 500 })

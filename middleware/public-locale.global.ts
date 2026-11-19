@@ -67,15 +67,14 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const event = useRequestEvent()
   const organizationId = event?.context.organizationId as string | null | undefined
   if (!event || !organizationId) return
-  const [{ cloudflareEnv }, { queryFirst }, { assertPublicOrganizationLanguage, getPersistedSourceLocale }] = await Promise.all([
+  const [{ cloudflareEnv }, { readPublicOrganizationLanguage, readPublicSourceLocale }] = await Promise.all([
     import('~/server/utils/api-response'),
-    import('~/server/db'),
     import('~/server/utils/localization'),
   ])
   const env = cloudflareEnv(event)
   const db = env.db
   if (!db) throw createError({ statusCode: 503, statusMessage: 'Database unavailable' })
-  const source = await getPersistedSourceLocale(db, organizationId)
+  const source = await readPublicSourceLocale(event, db, organizationId)
   sourceLocale.value = source.locale
   const sourceCatalog = platformLocale(source.locale)
   if (!sourceCatalog) throw createError({ statusCode: 500, statusMessage: 'Organization primary language is unavailable' })
@@ -91,19 +90,12 @@ export default defineNuxtRouteMiddleware(async (to) => {
     return
   }
   if (candidate === source.locale) throw createError({ statusCode: 404, statusMessage: 'Primary language routes are unprefixed' })
-  const locale = await queryFirst<{ locale: string }>(db, `
-    SELECT locale
-      FROM organization_locales
-     WHERE organization_id = ? AND locale = ? AND is_source = 0 AND status = 'published'
-     LIMIT 1
-  `, [organizationId, candidate])
-  if (!locale) throw createError({ statusCode: 404, statusMessage: 'Language is not enabled for this organization' })
-  const language = await assertPublicOrganizationLanguage(db, organizationId, locale.locale)
+  const language = await readPublicOrganizationLanguage(event, db, organizationId, candidate, source)
   if (!language.platform_messages) {
     throw createError({ statusCode: 503, statusMessage: 'Published platform locale messages are unavailable' })
   }
   const messages = language.platform_messages
-  state.value = locale.locale
+  state.value = language.locale
   useState<Record<string, string> | null>('platform-locale-messages', () => null).value = messages
-  setAppLocale(locale.locale, messages)
+  setAppLocale(language.locale, messages)
 })

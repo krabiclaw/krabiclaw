@@ -5,7 +5,7 @@ import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain
 import { appendMessage, markConversationRead, markConversationUnread } from '../../server/domain/conversations.ts'
 import { loadConversationPage } from '../../server/domain/conversation-history.ts'
 import { setListingAccess } from '../../server/domain/conversation-participants.ts'
-import { archiveConversation, listConversations, readGuestInbox, readWorkspaceInbox, unreadBadge } from '../../server/domain/guest-threads/repository.ts'
+import { archiveConversation, listConversations, readGuestInbox, readGuestUnreadCount, readWorkspaceInbox, unreadBadge } from '../../server/domain/guest-threads/repository.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { joinedMemberPrincipal, listOrganizationNotificationMembers } from '../../server/utils/member-access.ts'
 import { applySchema } from './support/schema.ts'
@@ -44,6 +44,7 @@ test('unread is a message from someone else after your read position, the same c
       const inbox = await readGuestInbox(db, { userId, mailbox: 'current' })
       const unread = inbox.threads.filter(row => row.unread).length
       assert.equal(inbox.has_unread, unread > 0, 'the dot is the rows marked unread')
+      assert.equal(await readGuestUnreadCount(db, userId), unread, 'the older iOS count uses the same unread rows')
       return unread
     }
     /** Every surface's reading of one person's unread state, which must agree. */

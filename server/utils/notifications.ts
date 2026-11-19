@@ -184,6 +184,8 @@ interface ReviewRequestNotificationInput extends OrganizationContext {
   partySize: string
   partyLabel?: string
   reviewUrl: string
+  productKind?: ProductKind
+  productTitle?: string | null
   /** The account whose preference governs the email, if the booking is linked. */
   userId: string | null
   /** The invitation's message in the visit's conversation, which this email is the receipt of. */
@@ -1093,24 +1095,32 @@ export async function notifyReviewRequest(
     partyLabel: opts.partyLabel,
     reviewUrl: opts.reviewUrl,
     organizationLogoUrl: logoUrl,
+    productKind: opts.productKind,
+    productTitle: opts.productTitle,
   })
   const origin = platformOrigin(env)
   const encodedToken = encodeURIComponent(reviewToken)
-  const unsubscribe = opts.userId
-    ? await buildUnsubscribeUrls(env, { userId: opts.userId, category: message.category }, message.emailPurpose)
-    : {
-        pageUrl: `${origin}/unsubscribe?reviewToken=${encodedToken}`,
-        oneClickUrl: `${origin}/api/public/review-requests/opt-out?token=${encodedToken}`,
-      }
-  if (!unsubscribe) throw new Error('Review requests require email unsubscribe links')
-  const email = await renderNotificationEmail(message, { platformDomain, unsubscribeUrl: unsubscribe.pageUrl })
+  const unsubscribe = message.emailPurpose === 'transactional'
+    ? null
+    : opts.userId
+      ? await buildUnsubscribeUrls(env, { userId: opts.userId, category: message.category }, message.emailPurpose)
+      : {
+          pageUrl: `${origin}/unsubscribe?reviewToken=${encodedToken}`,
+          oneClickUrl: `${origin}/api/public/review-requests/opt-out?token=${encodedToken}`,
+        }
+  if (message.emailPurpose !== 'transactional' && !unsubscribe) throw new Error('Review requests require email unsubscribe links')
+  const email = await renderNotificationEmail(message, {
+    platformDomain,
+    unsubscribeUrl: unsubscribe?.pageUrl ?? null,
+    preferencesUrl: opts.userId ? `${origin}/dashboard/account/profile/notifications` : null,
+  })
 
   await sendEmailNotification(env, db, {
     ...opts,
     to: opts.email,
     replyAs: { kind: 'guest' },
     template: 'booking_thank_you_review_request',
-    title: `How was your visit to ${restaurant}?`,
+    title: message.title,
     delivery: { conversationId: opts.delivery.conversationId, subject: { messageId: opts.delivery.messageId }, purpose: 'status_update', idempotencyKey: recorded?.id ?? `review-request:${opts.requestId}` },
     payload: {
       request_id: opts.requestId,
@@ -1120,13 +1130,13 @@ export async function notifyReviewRequest(
       visit_at: opts.visitAt,
       party_size: opts.partySize,
       review_url: opts.reviewUrl,
-      unsubscribe_url: unsubscribe.pageUrl,
+      unsubscribe_url: unsubscribe?.pageUrl ?? '',
       organization_name: restaurant,
     },
-    unsubscribeUrl: unsubscribe.pageUrl,
-    unsubscribeOneClickUrl: unsubscribe.oneClickUrl,
+    unsubscribeUrl: unsubscribe?.pageUrl ?? null,
+    unsubscribeOneClickUrl: unsubscribe?.oneClickUrl ?? null,
     email: {
-      subject: `How was your visit to ${restaurant}?`,
+      subject: message.title,
       ...email,
     },
   })

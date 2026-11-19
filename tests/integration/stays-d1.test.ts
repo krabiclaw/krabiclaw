@@ -644,7 +644,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
       assert.equal(`${init?.method} ${url.pathname}`, 'POST /v1/refunds')
       refunds++
       const form = new URLSearchParams(String(init?.body))
-      nativeRefund = { id: 're_site_stay', object: 'refund', amount: Number(form.get('amount') ?? 45_000), currency: 'usd', status: 'succeeded', payment_intent: form.get('payment_intent'), reason: form.get('reason'), metadata: { krabiclaw_refund_id: form.get('metadata[krabiclaw_refund_id]') } }
+      nativeRefund = { id: 're_site_stay', object: 'refund', amount: Number(form.get('amount') ?? 45_000), currency: 'usd', status: 'succeeded', payment_intent: form.get('payment_intent'), reason: form.get('reason'), metadata: { krabiclaw_refund_id: form.get('metadata[blawby_refund_id]') } }
       return Response.json(nativeRefund)
     })
     const accountCancel = (cookie: string, version: number) => {
@@ -758,7 +758,7 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
       application_fee_amount: null, latest_charge: null as typeof charge | null, payment_method: null as string | null,
       last_payment_error: null as { type: string; code: string; message: string } | null,
       hooks: { inputs: { tax: { calculation: null as string | null } } },
-      metadata: { krabiclaw_payment_id: '' } }
+      metadata: { blawby_payment_id: '' } }
     let bookingId = ''
     let activity = ''
     let approvedPayUrl = ''
@@ -798,7 +798,8 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
         assert.equal(init?.method, 'POST')
         const params = new URLSearchParams(String(init?.body))
         assert.equal(params.get('amount'), String(subtotal))
-        paymentIntent.metadata.krabiclaw_payment_id = params.get('metadata[krabiclaw_payment_id]')!
+        assert.equal(params.has('metadata[krabiclaw_payment_id]'), false)
+        paymentIntent.metadata.blawby_payment_id = params.get('metadata[blawby_payment_id]')!
         intentCount++
       } else if (url.pathname === '/v1/customers' && init?.method === 'POST') {
         assert.equal(new URLSearchParams(String(init.body)).get('email'), 'ana@example.com')
@@ -869,7 +870,7 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
         paymentIntent.status = 'requires_capture'
       } else if (url.pathname.endsWith('/capture')) {
         assert.equal(await db.prepare('SELECT status FROM bookings WHERE id=?').bind(bookingId).first('status'), 'confirmed')
-        assert.deepEqual(await db.prepare('SELECT subject_id,captured_amount FROM payments WHERE id=?').bind(paymentIntent.metadata.krabiclaw_payment_id).first(),
+        assert.deepEqual(await db.prepare('SELECT subject_id,captured_amount FROM payments WHERE id=?').bind(paymentIntent.metadata.blawby_payment_id).first(),
           { subject_id: bookingId, captured_amount: 0 })
         paymentIntent.amount_received = expected
         paymentIntent.status = 'succeeded'
@@ -951,7 +952,7 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
     assert.equal(rejected.status, 400, await rejected.clone().text())
     assert.equal((await read()).payment_processing, false)
     assert.equal(await db.prepare(`SELECT h.expires_at=p.checkout_expires_at AS deadline_restored
-      FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id WHERE p.id=?`).bind(paymentIntent.metadata.krabiclaw_payment_id).first('deadline_restored'), 1)
+      FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id WHERE p.id=?`).bind(paymentIntent.metadata.blawby_payment_id).first('deadline_restored'), 1)
     t.mock.timers.setTime(Date.now() + 1)
     const declinedReview = await call(`${paymentPath}/review`, { claim, payment_method_id: 'pm_declined' })
     assert.equal(declinedReview.status, 200, await declinedReview.clone().text())
@@ -961,7 +962,7 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
     assert.equal(afterDecline.booking.request_status, 'awaiting_payment')
     assert.equal(afterDecline.payment_processing, false)
     assert.equal(await db.prepare(`SELECT h.expires_at=p.checkout_expires_at AS deadline_restored
-      FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id WHERE p.id=?`).bind(paymentIntent.metadata.krabiclaw_payment_id).first('deadline_restored'), 1)
+      FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id WHERE p.id=?`).bind(paymentIntent.metadata.blawby_payment_id).first('deadline_restored'), 1)
     t.mock.timers.setTime(Date.now() + 1)
     const review = await call(`${paymentPath}/review`, { claim, payment_method_id: 'pm_card' })
     assert.equal(review.status, 200, await review.clone().text())
@@ -1197,7 +1198,8 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
     assert.deepEqual(reopened.booking.available_actions, ['edit', 'cancel'])
     assert.equal(reopened.can_message_guest, true)
     const detailMetrics = getRequestDataMetrics(dashboardEvent)
-    assert.equal(detailMetrics.batchRoundTrips + detailMetrics.singleStatementRoundTrips, 6)
+    assert.deepEqual([detailMetrics.batchRoundTrips, detailMetrics.singleStatementRoundTrips], [1, 0],
+      'the scoped access lookup and reservation share one batch')
 
     const updated = await hostRequest('PATCH', `/api/dashboard/bookings/${saved.booking_id}`, {
       version: persisted.version, check_in_date: date(31), check_out_date: date(33), guest_name: 'Edited guest',

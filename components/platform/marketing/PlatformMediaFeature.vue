@@ -70,7 +70,6 @@ function route(url: string) { return isInternalRoute(url) ? localePath(url) : ur
 const CLIENTS = [
   { name: 'ChatGPT', icon: 'simple-icons:openai', color: '#000000' },
   { name: 'Claude', icon: 'simple-icons:claude', color: '#D97757' },
-  { name: 'MCP', icon: 'simple-icons:modelcontextprotocol', color: '#000000' },
 ] as const
 
 const title = computed(() => blockTextOrNull(props.block.data.title))

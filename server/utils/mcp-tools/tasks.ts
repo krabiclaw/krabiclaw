@@ -7,7 +7,7 @@ import { NOT_HANDLED, optionalString, requiredString, type McpExecutorContext } 
 const text = { type: 'string' }, nullableText = { type: ['string', 'null'] }
 const instant = { type: 'string', format: 'date-time', description: 'An instant with Z or a numeric offset.' }
 const person = { type: 'object', properties: { type: { type: 'string', enum: ['member'] }, id: text, name: text, initial: text, you: { type: 'boolean' } }, required: ['type', 'id', 'name', 'initial', 'you'] }
-export const TASK_VIEW_SCHEMA = { type: 'object', properties: {
+const task = { type: 'object', properties: {
   id: text, kind: { type: 'string', enum: [...TASK_KINDS] }, status: { type: 'string', enum: ['open', 'done', 'skipped', 'cancelled'] }, version: { type: 'integer' },
   image_url: nullableText,
   status_line: nullableText, title: text, when: nullableText, detail: nullableText, error: nullableText,
@@ -18,7 +18,6 @@ export const TASK_VIEW_SCHEMA = { type: 'object', properties: {
   product_id: nullableText, location_id: nullableText, booking_id: nullableText, product_session_id: text, conversation_id: nullableText,
   can: { type: 'object', properties: { complete: { type: 'boolean' }, skip: { type: 'boolean' }, reopen: { type: 'boolean' }, assign: { type: 'boolean' }, edit: { type: 'boolean' } }, required: ['complete', 'skip', 'reopen', 'assign', 'edit'] },
 }, required: ['id', 'kind', 'status', 'version', 'image_url', 'status_line', 'title', 'when', 'detail', 'error', 'person', 'assignee', 'sheet', 'starts_at', 'due_at', 'timezone', 'notes', 'action', 'path', 'product_id', 'location_id', 'booking_id', 'conversation_id', 'can'] }
-const task = TASK_VIEW_SCHEMA
 const taskResult = { type: 'object', properties: { task }, required: ['task'] }
 const opportunity = { type: 'object', properties: { id: text, status_line: text, title: text, detail: text, icon: text, path: text, product_id: nullableText, location_id: nullableText,
   conversation_id: { type: ['string', 'null'], description: 'The guest conversation a welcome is sent in; null for a setup item.' },

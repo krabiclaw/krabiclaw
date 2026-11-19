@@ -8,6 +8,7 @@ import EmailSection from './blocks/EmailSection'
 import EmailActions from './blocks/EmailActions'
 import EmailQuote from './blocks/EmailQuote'
 import { light, layout, type } from './tokens'
+import { appendEmailUtms } from './utm'
 import type { NotificationEmailPurpose, NotificationMessage } from '~/server/notifications/messages'
 
 const heading: CSSProperties = { color: light.text, fontWeight: '700', margin: '28px 0 0' }
@@ -63,7 +64,25 @@ export const NotificationEmail = defineComponent({
   },
   setup(props) {
     return () => {
-      const message = props.message
+      const originalMessage = props.message
+      const campaign = originalMessage.category || originalMessage.emailPurpose || 'notification'
+      const utmBase = { source: 'blawby', medium: 'email', campaign }
+
+      const message: NotificationMessage = {
+        ...originalMessage,
+        primaryAction: originalMessage.primaryAction
+          ? {
+              ...originalMessage.primaryAction,
+              url: appendEmailUtms(originalMessage.primaryAction.url, { ...utmBase, content: 'primary_cta' }),
+            }
+          : undefined,
+        secondaryAction: originalMessage.secondaryAction
+          ? {
+              ...originalMessage.secondaryAction,
+              url: appendEmailUtms(originalMessage.secondaryAction.url, { ...utmBase, content: 'secondary_cta' }),
+            }
+          : undefined,
+      }
       const hero = message.hero
       return h(EmailFrame, {
         locale: message.locale,
@@ -74,6 +93,7 @@ export const NotificationEmail = defineComponent({
         preferencesUrl: props.preferencesUrl,
         unsubscribeUrl: message.emailPurpose === 'transactional' ? null : props.unsubscribeUrl,
         platformDomain: props.platformDomain,
+        campaign,
       }, () => [
         hero ? h(EmailHero, { src: hero.imageUrl, alt: hero.alt }) : null,
 

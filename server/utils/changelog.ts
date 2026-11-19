@@ -1,4 +1,4 @@
-import { KRABICLAW_REPOSITORY } from '../../shared/open-source.ts'
+import { BLAWBY_REPOSITORY } from '../../shared/open-source.ts'
 
 export const DEFAULT_CHANGELOG_LIMIT = 50
 export const MAX_CHANGELOG_LIMIT = 100
@@ -120,7 +120,7 @@ export async function getRecentChanges(options: GetRecentChangesOptions): Promis
 
   while (true) {
     const response = await fetchImpl(
-      `https://api.github.com/repos/${KRABICLAW_REPOSITORY}/pulls?state=closed&sort=updated&direction=desc&per_page=${perPage}&page=${page}`,
+      `https://api.github.com/repos/${BLAWBY_REPOSITORY}/pulls?state=closed&sort=updated&direction=desc&per_page=${perPage}&page=${page}`,
       {
         headers: {
           Authorization: `Bearer ${githubToken}`,

@@ -18,9 +18,9 @@ export function buildTenantHeadLinks(options: TenantHeadLinkOptions): HeadLink[]
     // The SVG is the canonical symbol and stays crisp at every tab size; the
     // ICO is only here for browsers that do not take an SVG favicon.
     return [
-      { key: 'app-icon-svg', rel: 'icon', type: 'image/svg+xml', href: '/platform/blawby.svg' },
-      { key: 'app-icon', rel: 'icon', href: '/platform/blawby.ico' },
-      { key: 'app-icon-apple', rel: 'apple-touch-icon', href: '/platform/blawby-180.png' },
+      { key: 'app-icon-svg', rel: 'icon', type: 'image/svg+xml', href: '/platform/blawby.svg?v=2' },
+      { key: 'app-icon', rel: 'icon', href: '/platform/blawby.ico?v=2' },
+      { key: 'app-icon-apple', rel: 'apple-touch-icon', href: '/platform/blawby-180.png?v=2' },
     ]
   }
 

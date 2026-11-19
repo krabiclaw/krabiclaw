@@ -19,6 +19,7 @@ export interface TenantOrganizationInfo {
   name: string
   theme_id: string
   vertical: string
+  has_payment_account?: boolean
   site: PublicSiteDefinition
   fontPreset: OrganizationFontPreset
   palette: SitePalette | null

@@ -20,19 +20,24 @@ write.
 | Team | Paul (Founder & Product), Julia (Design & Customer Operations), Kaze (Payments Engineering), Rich (Legal Counsel & Office Cheerleader). First names only. |
 | Approvals | Paul: launch. Julia: creative. Kaze: billing accuracy. Rich: legal and policy claims. |
 
+## Positioning
+
+Sitewide positioning: **“Run your business from your favorite AI app with Blawby.”**
+Blawby is the business AI agent. The customer works in ChatGPT, Claude, or another compatible AI app; Blawby connects their request to business records and supported actions. Connected services such as Airbnb, Google Calendar, social accounts, and analytics are integrations. “Your business’s second brain” describes the business context Blawby uses. MCP belongs in setup instructions and technical documentation.
+
 ## What Blawby does
 
 Blawby runs the website, bookings, payments and messaging for restaurants,
 experience operators, law firms and lodging hosts. Owners manage it from the
-dashboard or from Claude and ChatGPT through one MCP service, with the same
+dashboard or from Claude, ChatGPT, and compatible AI apps, with the same
 permissions either way.
 
 - Every business gets a website on its own brand, with pages, menus or
   offerings, locations, media and translations.
 - Law firms take consultation requests, booked against each attorney's working
   hours and Google Calendar busy times.
-- Lodging hosts manage homes, nightly availability and prices, stays and guest
-  conversations. Airbnb connects through Channex. Vrbo connects by calendar
+- Lodging hosts manage listings, nightly availability and prices, stays and guest
+  conversations. Airbnb connects through Channex (requires Business plan). Vrbo connects by calendar
   link only: occupied dates, not prices, guest details or messages.
 - The iOS app is a free companion for hosts and teams.
 

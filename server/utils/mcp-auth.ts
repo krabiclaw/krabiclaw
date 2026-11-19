@@ -42,7 +42,7 @@ export interface McpUserContext {
   sessionId?: string | null
   impersonatedBy?: string | null
   oauthClaims?: Pick<JWTPayload, 'jti' | 'iat' | 'exp'>
-  // Only populated for session-based auth (ChowBot/dashboard) — bearer-token
+  // Only populated for dashboard session auth — bearer-token
   // auth (e.g. ChatGPT connector) has no browser session to read this from.
   activeOrganizationId?: string
 }

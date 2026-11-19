@@ -68,7 +68,7 @@ async function boot() {
   await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, assigned_member_id, created_by, updated_by)
     VALUES (?, ?, 'slot', 120, 10, 'business', 'class-host', ?, ?)`).bind(PRODUCT, ORG, ACTOR, ACTOR).run()
   const env = { ...await runtime.getBindings<CloudflareEnv>(), EVENTS: captureEvents().binding, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
-    STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
+    STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://blawby.test' } as CloudflareEnv
   return { runtime, db, env }
 }
 
@@ -432,7 +432,7 @@ test('concurrent claims cannot exceed capacity, and variants share one pool', { 
 test('required online collection needs Payments setup as well as entitlement, while disabling remains available', { timeout: 120_000 }, async () => {
   const { runtime, db } = await boot()
   const scope = { organizationId: ORG, productId: PRODUCT, actorId: ACTOR }
-  const env = { DB: db, STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', STRIPE_PAYMENTS_METHOD_CONFIGURATION: 'pmc_local_proof', NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_local_proof', BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
+  const env = { DB: db, STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', STRIPE_PAYMENTS_METHOD_CONFIGURATION: 'pmc_local_proof', NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_local_proof', BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://blawby.test' } as CloudflareEnv
   try {
     const before = await db.prepare('SELECT online_payment_required, updated_at FROM product_booking_configs WHERE product_id = ?').bind(PRODUCT).first()
     const invalidations = await db.prepare('SELECT COUNT(*) FROM public_resource_cache_invalidations').first('COUNT(*)')

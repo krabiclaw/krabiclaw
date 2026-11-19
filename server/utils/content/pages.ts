@@ -1091,14 +1091,25 @@ export function publicTenantPageSql(root: string): string {
 }
 
 export async function listPublishedTenantPagePaths(db: DbClient, organizationId: string, locale?: string | null) {
-  const resolvedLocale = await resolveLocale(db, organizationId, locale)
-  return await queryAll<{ id: string; path: string; title: string; summary: string | null; sort_order: number; updated_at: string }>(db, `
+  return readPublishedTenantPagePaths(db, organizationId, await resolveLocale(db, organizationId, locale))
+}
+
+export function readPublishedTenantPagePaths(db: DbClient, organizationId: string, locale: string) {
+  const { query, params } = publishedTenantPagePathsQuery(organizationId, locale)
+  return queryAll<PublishedTenantPagePath>(db, query, params)
+}
+
+type PublishedTenantPagePath = { id: string; path: string; title: string; summary: string | null; sort_order: number; updated_at: string }
+
+export function publishedTenantPagePathsQuery(organizationId: string | { sql: string }, locale: string | { sql: string }) {
+  return { query: `
     SELECT v.id, v.path, v.title, v.summary, p.sort_order, v.updated_at
       FROM content_documents v JOIN content_documents p ON p.id = COALESCE(v.root_id, v.id)
-     WHERE v.row_role IN ('root','representation') AND v.kind = 'page' AND v.organization_id = ? AND v.locale = ?
+     WHERE v.row_role IN ('root','representation') AND v.kind = 'page'
+       AND v.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND v.locale = ${typeof locale === 'string' ? '?' : locale.sql}
        AND ${publicTenantPageSql('p')}
      ORDER BY v.path ASC
-  `, [organizationId, resolvedLocale])
+  `, params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...(typeof locale === 'string' ? [locale] : [])] }
 }
 
 export async function getTenantPageById(db: DbClient, variantId: string, scope?: TenantPageScope) {

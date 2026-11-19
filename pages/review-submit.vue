@@ -24,6 +24,23 @@
         <UStepper ref="stepper" v-model="step" :items="steps" :linear="true" disabled class="mt-10" data-testid="review-steps">
           <template #ratings>
             <div class="space-y-8 pt-8">
+              <div v-if="requestData.location.google_review_url" class="rounded-xl border border-default bg-elevated p-5" data-testid="review-google-prompt">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <p class="font-semibold text-highlighted">Review us on Google Maps</p>
+                    <p class="mt-1 text-sm text-muted">Prefer to share your review on Google? It takes less than a minute.</p>
+                  </div>
+                  <UButton
+                    label="Open Google Maps"
+                    color="neutral"
+                    variant="outline"
+                    class="shrink-0 self-start sm:self-center"
+                    data-testid="review-google-button"
+                    @click="openGoogleReview"
+                  />
+                </div>
+              </div>
+
               <div>
                 <p id="overall-rating-label" class="text-base font-semibold text-highlighted">Overall</p>
                 <UInputRating v-model="rating" size="xl" class="mt-3" aria-labelledby="overall-rating-label" data-testid="review-overall-rating">
@@ -384,21 +401,34 @@ async function submitReview() {
   }
 }
 
+async function openGoogleReview() {
+  const googleUrl = requestData.value?.location?.google_review_url
+  if (!googleUrl) return
+
+  window.open(googleUrl, '_blank', 'noopener')
+  try {
+    await publicApiMutation('/api/public/review-requests/google-click', {
+      method: 'POST',
+      body: { token: token.value },
+      validate: (v): v is { recorded: true } => isRecord(v) && v.recorded === true,
+    })
+  } catch (error) {
+    submitError.value = (error as { data?: { error?: string } })?.data?.error || 'Could not record Google review click.'
+  }
+}
+
 async function copyAndOpenGoogle() {
   const googleUrl = requestData.value?.location?.google_review_url
   if (!googleUrl) return
 
-  // The new tab must open inside the click; a popup blocker refuses one that
-  // opens after the clipboard promise settles. Copy afterwards.
-  window.open(googleUrl, '_blank', 'noopener')
   const reviewText = [title.value, content.value].filter(Boolean).join('\n\n')
-  if (!reviewText || !navigator.clipboard?.writeText) return
-  try {
-    await navigator.clipboard.writeText(reviewText)
-    copyButtonLabel.value = 'Copied! Google Maps is open in a new tab'
-  } catch {
-    copyButtonLabel.value = 'Could not copy — Google Maps is open in a new tab'
+  if (reviewText && navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(reviewText).then(
+      () => { copyButtonLabel.value = 'Copied! Google Maps is open in a new tab' },
+      () => { copyButtonLabel.value = 'Could not copy — Google Maps is open in a new tab' },
+    )
   }
+  await openGoogleReview()
 }
 
 async function optOut() {

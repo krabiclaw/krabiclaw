@@ -24,6 +24,14 @@ test('a signed-in reader sees an empty inbox until a message arrives and loses w
     const member = await acceptOrganizationInvitation(reader, origin, invitationId)
     const workspaceParams = { organization_id: organizationId }
     const inbox = (request: APIRequestContext) => request.get('/api/messages', { params: { ...workspaceParams, mailbox: 'current' } })
+    const nativeUnread = () => reader.get('/api/messages/unread-count', { params: workspaceParams })
+    const guestUnread = await reader.get('/api/messages/unread-count')
+    expect(guestUnread.status(), await guestUnread.text()).toBe(200)
+    const guestInbox = await reader.get('/api/messages', { params: { mailbox: 'current', limit: 1 } })
+    expect(guestInbox.status(), await guestInbox.text()).toBe(200)
+    const guestCount = (await guestUnread.json() as { count: number }).count
+    expect(Number.isSafeInteger(guestCount)).toBe(true)
+    expect(guestCount > 0).toBe((await guestInbox.json() as { has_unread: boolean }).has_unread)
     const empty = await inbox(reader)
     expect(empty.status(), await empty.text()).toBe(200)
     expect(await empty.json()).toMatchObject({ threads: [], has_unread: false })
@@ -37,6 +45,9 @@ test('a signed-in reader sees an empty inbox until a message arrives and loses w
     const seeded = await inbox(reader)
     expect(seeded.status(), await seeded.text()).toBe(200)
     expect(await seeded.json()).toMatchObject({ threads: [{ id: conversationId, preview: message, unread: true }], has_unread: true })
+    const unread = await nativeUnread()
+    expect(unread.status(), await unread.text()).toBe(200)
+    expect(await unread.json()).toEqual({ unread: { all: 1, guests: 0, support: 0, team: 1 } })
     const session = await reader.get('/api/auth/get-session')
     expect(session.status(), await session.text()).toBe(200)
     const { session: { id: sessionId } } = await session.json() as { session: { id: string } }
@@ -80,6 +91,8 @@ test('a signed-in reader sees an empty inbox until a message arrives and loses w
     const removed = await inbox(reader)
     expect(removed.status(), await removed.text()).toBe(404)
     expect(await removed.json()).toMatchObject({ data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
+    const unreadAfterRemoval = await nativeUnread()
+    expect(unreadAfterRemoval.status(), await unreadAfterRemoval.text()).toBe(404)
     const stillSignedIn = await reader.get('/api/auth/get-session')
     expect(stillSignedIn.status(), await stillSignedIn.text()).toBe(200)
     expect(await stillSignedIn.json()).toMatchObject({ session: { id: sessionId }, user: { id: fixture.id } })

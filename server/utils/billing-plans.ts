@@ -76,8 +76,7 @@ const STARTER_PLAN: Plan = {
   features: [
     'Free Blawby ChatGPT app — build & edit your site by chatting',
     'Bookings, ticketed experiences & consultation requests',
-    'Home listings, nightly rates & stay calendars',
-    'Airbnb connection for listing imports, stays & availability',
+    'Listings, nightly rates & stay calendars',
     'Arrival guides, automatic guest messages & send later',
     'iPhone companion app — no extra subscription',
     'Email notifications for reservations & bookings',

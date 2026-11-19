@@ -1,6 +1,5 @@
 import { HTTPError, defineHandler  } from 'nitro';
 
-import { LODGING_PAGE_SUMMARY } from '~/config/platform-knowledge'
 import { cloudflareEnv, textResponse } from '~/server/utils/api-response'
 import {
   buildLlmsTxt, buildTenantBlogLinkEntries, buildPlatformBlogLinkEntries, buildPlatformDocLinkEntries, listPublishedTenantBlogPostsForLlm, listPublishedPlatformBlogPostsForLlm, listPublishedDocsForLlm, resolvePublicOrigin, } from '~/server/utils/platform-llm'
@@ -77,11 +76,12 @@ export default defineHandler(async (event) => {
       {
         coreHeading: 'Platform & Solutions',
         coreLinks: [
-          { title: 'Blawby Model Context Protocol (MCP)', path: '/plugin', description: 'Manage websites, menus, stay availability, and bookings directly via Claude Desktop, ChatGPT, or compatible MCP clients.' },
+          { title: 'AI agent (Blawby)', path: '/plugin', description: 'Run your business from ChatGPT, Claude, or compatible AI apps with Blawby.' },
+          { title: 'Integrations', path: '/integrations', description: 'Connected business services for calendars, reservations, stays, listings, and analytics.' },
           { title: 'Pricing & Plans', path: '/pricing', description: 'Published plans, included features, and payment pricing.' },
-          { title: 'Law firms (Blawby)', path: '/legal', description: 'Law firm websites, practice areas, and legal consultation requests.' },
+          { title: 'Law firms (Blawby)', path: '/legal', description: 'Law firm websites, practice areas, attorney profiles, and legal consultation requests.' },
           { title: 'Restaurants (Saya)', path: '/restaurants', description: 'Restaurant websites, menus, and table reservations.' },
-          { title: 'Lodging & Stays (PMS)', path: '/lodging', description: LODGING_PAGE_SUMMARY },
+          { title: 'Lodging & Stays (PMS)', path: '/lodging', description: 'Lodging websites, listings, nightly availability, direct bookings, and Airbnb synchronization.' },
           { title: 'Experiences', path: '/experiences', description: 'Experience websites, dated sessions, and ticketed bookings.' },
         ],
       },

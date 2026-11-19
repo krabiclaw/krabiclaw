@@ -89,7 +89,7 @@ export async function dashboardFetch<T>(
   if (import.meta.server && (!options.method || options.method === 'GET') && (
     request === '/api/dashboard/agenda' || request === '/api/dashboard/bookings/calendar'
     || (request === '/api/dashboard/stay-homes' && options.query?.view === 'calendar')
-    || (request === '/api/dashboard/payments' && options.query?.view === 'performance')
+    || (request === '/api/dashboard/payments' && (options.query?.view === 'performance' || options.query?.view === 'payouts'))
     || (request === '/api/dashboard/settings' && options.query?.connections === '1')
     || request === '/api/dashboard/integrations/google-calendar'
   )) {

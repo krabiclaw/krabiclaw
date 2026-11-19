@@ -22,7 +22,7 @@
                 <span class="size-2 rounded-full bg-primary/70 animate-pulse [animation-delay:120ms]" />
                 <span class="size-2 rounded-full bg-primary/40 animate-pulse [animation-delay:240ms]" />
               </span>
-              <span>ChowBot is thinking…</span>
+              <span>Blawby Support is thinking…</span>
             </div>
           </template>
 
@@ -95,7 +95,7 @@
       <div class="mx-auto w-full max-w-3xl px-4 pb-4 sm:px-6">
         <UChatPrompt
           v-model="input"
-          placeholder="Ask ChowBot anything..."
+          placeholder="Ask Blawby Support…"
           variant="naked"
           :disabled="isLoading"
           :maxrows="6"
@@ -116,7 +116,7 @@
         </UChatPrompt>
 
         <p class="mt-2 text-center text-xs text-muted">
-          ChowBot can make mistakes.
+          AI responses can contain mistakes.
         </p>
       </div>
     </div>
@@ -196,7 +196,7 @@ type HelpChatMessage = {
   metadata: HelpChatMetadata
 }
 
-const supportIntro = 'Hello, I\'m ChowBot from Blawby. I can search docs, product guidance, pricing, and support answers, and if you are still blocked I\'ll help send it to support.'
+const supportIntro = 'Hi, I’m Blawby Support. I can search docs, product guidance, pricing, and support answers, and if you are still blocked I\'ll help send it to support.'
 
 const input = ref('')
 const nextMessageId = ref(1)

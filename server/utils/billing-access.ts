@@ -1,8 +1,7 @@
 import type { Subscription } from '@better-auth/stripe'
-import { and, asc, eq, exists, getTableColumns, inArray } from 'drizzle-orm'
 import { HTTPError } from 'nitro'
-import { createDb, type DbClient } from '~/server/db'
-import { organization, payment_servicing_tenants, stripe_connected_accounts, subscription } from '~/server/db/schema'
+import { executeBatch, queryAll, type BatchQuery, type DbClient } from '~/server/db'
+import type { stripe_connected_accounts } from '~/server/db/schema'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
 
@@ -80,33 +79,44 @@ export async function readOrganizationSubscriptions(
 
 /** Better Auth's polymorphic subscription reference has no adapter relation to these seller tables. */
 export async function readCheckoutSeller(db: DbClient, organizationId: string) {
-  const connection = '$client' in db ? db : createDb(db)
-  const rows = await connection.select({
-    slug: organization.slug,
-    subdomain: organization.subdomain,
-    stripeCustomerId: organization.stripeCustomerId,
-    servicing: exists(connection.select({ organizationId: payment_servicing_tenants.organization_id })
-      .from(payment_servicing_tenants).where(eq(payment_servicing_tenants.organization_id, organization.id))),
-    account: getTableColumns(stripe_connected_accounts),
-    subscription: {
-      id: subscription.id,
-      referenceId: subscription.referenceId,
-      plan: subscription.plan,
-      status: subscription.status,
-      periodEnd: subscription.periodEnd,
-      stripeCustomerId: subscription.stripeCustomerId,
-      stripeSubscriptionId: subscription.stripeSubscriptionId,
-    },
-  })
-    .from(organization)
-    .leftJoin(stripe_connected_accounts, eq(stripe_connected_accounts.organization_id, organization.id))
-    .leftJoin(subscription, and(eq(subscription.referenceId, organization.id), inArray(subscription.status, ENTITLING_STATUSES)))
-    .where(eq(organization.id, organizationId))
-    .orderBy(asc(subscription.id))
-  const seller = rows[0]
+  const { query, params } = checkoutSellerQuery({ query: '?', params: [organizationId] })
+  return checkoutSellerFromRows(await queryAll(db, query, params))
+}
+
+export function checkoutSellerQuery(organization: BatchQuery): BatchQuery {
+  return {
+    query: `SELECT a.*, o.id AS seller_id, o.slug AS seller_slug, o.subdomain AS seller_subdomain,
+      o.stripeCustomerId AS seller_customer_id,
+      EXISTS (SELECT 1 FROM payment_servicing_tenants ps WHERE ps.organization_id=o.id) AS servicing,
+      s.id AS subscription_id, s.plan AS subscription_plan, s.status AS subscription_status, s.periodEnd AS period_end,
+      s.stripeCustomerId AS subscription_customer_id, s.stripeSubscriptionId AS subscription_stripe_id
+      FROM organization o LEFT JOIN stripe_connected_accounts a ON a.organization_id=o.id
+      LEFT JOIN subscription s ON s.referenceId=o.id AND s.status IN (${ENTITLING_STATUSES.map(() => '?').join(', ')})
+      WHERE o.id=${organization.query} ORDER BY s.id`,
+    params: [...ENTITLING_STATUSES, ...organization.params ?? []],
+  }
+}
+
+export function checkoutSellerFromRows(rows: unknown[]) {
+  type Row = typeof stripe_connected_accounts.$inferSelect & {
+    seller_id: string; seller_slug: string; seller_subdomain: string | null; seller_customer_id: string | null; servicing: number
+    subscription_id: string | null; subscription_plan: string; subscription_status: string; period_end: number | null
+    subscription_customer_id: string | null; subscription_stripe_id: string | null
+  }
+  const sellerRows = rows as Row[]
+  const seller = sellerRows[0]
   if (!seller) return null
-  const current = entitlingSubscription(organizationId, rows.flatMap(row => row.subscription ? [row.subscription] : []))
-  return { ...seller, subscription: current, plan: subscriptionPlan(current) }
+  const current = entitlingSubscription(seller.seller_id, sellerRows.flatMap(row => row.subscription_id ? [{
+    id: row.subscription_id, referenceId: row.seller_id, plan: row.subscription_plan, status: row.subscription_status,
+    periodEnd: row.period_end === null ? null : new Date(row.period_end * 1000),
+    stripeCustomerId: row.subscription_customer_id, stripeSubscriptionId: row.subscription_stripe_id,
+  }] : []))
+  const { seller_id, seller_slug, seller_subdomain, seller_customer_id, servicing,
+    subscription_id: _subscriptionId, subscription_plan: _plan, subscription_status: _status,
+    period_end: _periodEnd, subscription_customer_id: _customerId, subscription_stripe_id: _stripeId, ...account } = seller
+  return { organizationId: seller_id, slug: seller_slug, subdomain: seller_subdomain,
+    stripeCustomerId: seller_customer_id, servicing: Boolean(servicing), account: account.id ? account : null,
+    subscription: current, plan: subscriptionPlan(current) }
 }
 
 /**
@@ -139,7 +149,7 @@ function subscriptionPlan(current: EntitlementRow | null): string {
 
 export function planFromSubscriptions(
   organizationId: string,
-  rows: Subscription[],
+  rows: EntitlementRow[],
   now = new Date(),
 ): string {
   return subscriptionPlan(entitlingSubscription(organizationId, rows, now))
@@ -163,9 +173,28 @@ export async function getOrganizationPlan(
   organizationId: string,
   now = new Date(),
 ): Promise<string> {
-  const plan = (await getOrganizationPlans(env, [organizationId], now)).get(organizationId)
-  if (!plan) throw new Error(`Organization ${organizationId} plan could not be resolved`)
-  return plan
+  const plan = prepareOrganizationPlan(organizationId, now)
+  const [result] = await executeBatch(env.DB, [plan.query], { operation: 'Read the organization plan' })
+  return plan.read(result!)
+}
+
+export function prepareOrganizationPlan(organizationId: string | { sql: string }, now = new Date()) {
+  const query = {
+    query: `SELECT id, referenceId, plan, status, periodEnd FROM subscription
+      WHERE referenceId = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND status IN (${ENTITLING_STATUSES.map(() => '?').join(', ')})`,
+    params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...ENTITLING_STATUSES],
+  }
+  return {
+    query,
+    read(result: D1Result, resolvedId?: string) {
+      const id = resolvedId ?? (typeof organizationId === 'string' ? organizationId : null)
+      if (!id?.trim()) throw new Error('An organization ID is required for the plan read')
+      const rows = result.results as (Omit<EntitlementRow, 'periodEnd'> & { periodEnd: number | null })[]
+      return planFromSubscriptions(id, rows.map(row => ({
+        ...row, periodEnd: row.periodEnd === null ? null : new Date(row.periodEnd * 1000),
+      })), now)
+    },
+  }
 }
 
 export async function getOrganizationEntitlements(

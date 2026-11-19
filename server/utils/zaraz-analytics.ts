@@ -80,7 +80,7 @@ const LOCK_STALE_MS = 60_000
 const LOCK_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000]
 const TENANT_KEY_PREFIX = 'ga-tenant-'
 // Not under TENANT_KEY_PREFIX: it is shared by every GA4 tool and outlives any one tenant's.
-const NATIVE_PAGEVIEW_TRIGGER_KEY = 'krabiclaw-native-pageview'
+const NATIVE_PAGEVIEW_TRIGGER_KEY = 'blawby-native-pageview'
 const GOOGLE_VENDOR_NAME = 'Google Analytics'
 const GOOGLE_VENDOR_POLICY_URL = 'https://policies.google.com/privacy'
 
@@ -182,26 +182,47 @@ function configureZarazConsentManagement(config: ZarazConfig, platformOrigin: st
   }
 }
 
-function makeHostBlockTrigger(name: string, hostnames: string[]): ZarazTrigger {
+function makeTenantPageviewTrigger(name: string, hostnames: string[]): ZarazTrigger {
   return {
     name,
-    loadRules: [{
-      match: '{{ system.page.url.hostname }}',
-      op: 'NOT_MATCH_REGEX',
-      value: tenantPageLocationRegex(hostnames),
-    }],
+    description: 'Fires when the Blawby collector reports a recorded native pageview on matching hosts',
+    loadRules: [
+      { id: 'kc-native-pageview', match: '{{ client.__zarazTrack }}', op: 'EQUALS', value: NATIVE_PAGEVIEW_ZARAZ_EVENT },
+      { id: 'kc-tenant-hostname', match: '{{ system.page.url.hostname }}', op: 'MATCH_REGEX', value: tenantPageLocationRegex(hostnames) },
+    ],
+    excludeRules: [],
   }
 }
 
-function firingTriggersForAction(action: ZarazAction): string[] {
-  // A page view is sent to GA only when the collector reports that the native pageview was accepted;
-  // Zaraz's own automatic pageview trigger (page load and history changes) never fires it.
-  if (action.actionType === 'pageview') return [NATIVE_PAGEVIEW_TRIGGER_KEY]
-  if (action.actionType === 'event') return ['AllTracks']
-  return action.firingTriggers?.length ? action.firingTriggers : ['Pageview']
+function makeTenantTracksTrigger(name: string, hostnames: string[], baseAllTracks?: ZarazTrigger): ZarazTrigger {
+  const baseRules = (baseAllTracks?.loadRules && Array.isArray(baseAllTracks.loadRules) && baseAllTracks.loadRules.length)
+    ? baseAllTracks.loadRules
+    : [
+        { id: 'rul1', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: '^__zaraz.*' },
+        { id: 'rul2', match: '{{ client.__zarazEcommerce }}', op: 'NOT_MATCH_REGEX', value: 'true' },
+        { id: 'pgv2', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: '^Pageview$' },
+        { id: 'kc-exclude-native-pageview', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: `^${NATIVE_PAGEVIEW_ZARAZ_EVENT}$` },
+      ]
+  return {
+    name,
+    description: 'All zaraz.track() calls on matching hosts',
+    loadRules: [
+      ...baseRules.filter(rule => rule.id !== 'kc-tenant-hostname'),
+      { id: 'kc-tenant-hostname', match: '{{ system.page.url.hostname }}', op: 'MATCH_REGEX', value: tenantPageLocationRegex(hostnames) },
+    ],
+    excludeRules: [],
+  }
 }
 
-function scopeActionsToTrigger(actions: Record<string, ZarazAction> | undefined, blockingTriggers: string[]) {
+function firingTriggersForAction(action: ZarazAction, pageviewKey: string, tracksKey: string): string[] {
+  // A page view is sent to GA only when the collector reports that the native pageview was accepted;
+  // Zaraz's own automatic pageview trigger (page load and history changes) never fires it.
+  if (action.actionType === 'pageview') return [pageviewKey]
+  if (action.actionType === 'event') return [tracksKey]
+  return action.firingTriggers?.length ? action.firingTriggers : [pageviewKey]
+}
+
+function scopeActionsToTrigger(actions: Record<string, ZarazAction> | undefined, pageviewKey: string, tracksKey: string) {
   const source = actions && Object.keys(actions).length
     ? actions
     : { AllPageviews: { actionType: 'pageview', firingTriggers: [], enabled: true } }
@@ -209,8 +230,8 @@ function scopeActionsToTrigger(actions: Record<string, ZarazAction> | undefined,
     key,
     {
       ...action,
-      firingTriggers: firingTriggersForAction(action),
-      blockingTriggers,
+      firingTriggers: firingTriggersForAction(action, pageviewKey, tracksKey),
+      blockingTriggers: [],
       enabled: action.enabled !== false,
     },
   ]))
@@ -238,7 +259,14 @@ function zarazFieldMap(value: unknown): Record<string, string | boolean> {
 function upsertGa4Tool(
   config: ZarazConfig,
   key: string,
-  input: { name: string; measurementId: string; triggerKey: string; existing?: ZarazTool; template?: ZarazTool },
+  input: {
+    name: string
+    measurementId: string
+    pageviewTriggerKey: string
+    tracksTriggerKey: string
+    existing?: ZarazTool
+    template?: ZarazTool
+  },
 ) {
   const existing = input.existing
   const template = input.template ?? (existing?.defaultFields ? existing : ga4ToolTemplate(config))
@@ -257,11 +285,8 @@ function upsertGa4Tool(
     defaultPurpose: ZARAZ_ANALYTICS_PURPOSE_ID,
     vendorName: GOOGLE_VENDOR_NAME,
     vendorPolicyUrl: GOOGLE_VENDOR_POLICY_URL,
-    // The template is another GA4 tool, usually the platform's; its tool-level
-    // blocking trigger must not travel with it, or the tenant tool is blocked
-    // on the tenant's own hosts (Zaraz debug on NCLS, 2026-09-27).
-    blockingTriggers: [input.triggerKey],
-    actions: scopeActionsToTrigger(existing?.actions ?? template?.actions, [input.triggerKey]),
+    blockingTriggers: [],
+    actions: scopeActionsToTrigger(existing?.actions ?? template?.actions, input.pageviewTriggerKey, input.tracksTriggerKey),
   }
 }
 
@@ -287,26 +312,33 @@ function upsertTenantZarazAnalytics(
     allTracks.loadRules.push({ id: 'kc-exclude-native-pageview', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: `^${NATIVE_PAGEVIEW_ZARAZ_EVENT}$` })
   }
   const key = tenantKey(input.organizationId)
-  config.triggers[key] = makeHostBlockTrigger(`Block non-tenant hosts (${input.organizationId})`, input.hostnames)
+  const tracksKey = `${key}-tracks`
+  config.triggers[key] = makeTenantPageviewTrigger(`Tenant native pageview accepted (${input.organizationId})`, input.hostnames)
+  config.triggers[tracksKey] = makeTenantTracksTrigger(`Tenant tracks (${input.organizationId})`, input.hostnames, allTracks)
   upsertGa4Tool(config, key, {
     name: `Tenant GA4 (${input.organizationId})`,
     measurementId: input.measurementId,
-    triggerKey: key,
+    pageviewTriggerKey: key,
+    tracksTriggerKey: tracksKey,
     existing: config.tools[key],
     template,
   })
 }
 
-function removeUndesiredAnalyticsConfig(config: ZarazConfig, desiredKeys: Set<string>): number {
+function removeUndesiredAnalyticsConfig(
+  config: ZarazConfig,
+  desiredToolKeys: Set<string>,
+  desiredTriggerKeys: Set<string>,
+): number {
   let removedTools = 0
   for (const key of Object.keys(config.tools ?? {})) {
-    if ((key === 'ga-platform' || key.startsWith(TENANT_KEY_PREFIX)) && isGa4Tool(config.tools[key]) && !desiredKeys.has(key)) {
+    if ((key === 'ga-platform' || key.startsWith(TENANT_KEY_PREFIX)) && isGa4Tool(config.tools[key]) && !desiredToolKeys.has(key)) {
       Reflect.deleteProperty(config.tools, key)
       removedTools += 1
     }
   }
   for (const key of Object.keys(config.triggers ?? {})) {
-    if ((key === 'ga-platform' || key.startsWith(TENANT_KEY_PREFIX)) && !desiredKeys.has(key)) {
+    if ((key === 'ga-platform' || key.startsWith(TENANT_KEY_PREFIX)) && !desiredTriggerKeys.has(key)) {
       Reflect.deleteProperty(config.triggers, key)
     }
   }
@@ -367,7 +399,26 @@ export function reconcileZarazAnalyticsConfig(
   config.triggers ||= {}
   config.tools ||= {}
   const before = stableStringify(config)
-  const desiredKeys = new Set(input.tenants.map(tenant => tenantKey(tenant.organizationId)))
+  const legacyPageviewKey = 'krabiclaw-native-pageview'
+  const { [legacyPageviewKey]: legacyPageviewTrigger, ...currentTriggers } = config.triggers
+  if (legacyPageviewTrigger) {
+    config.triggers = { ...currentTriggers, [NATIVE_PAGEVIEW_TRIGGER_KEY]: currentTriggers[NATIVE_PAGEVIEW_TRIGGER_KEY] ?? legacyPageviewTrigger }
+    for (const tool of Object.values(config.tools)) {
+      for (const action of Object.values(tool.actions ?? {})) {
+        if (action.firingTriggers) {
+          action.firingTriggers = action.firingTriggers.map(key => key === legacyPageviewKey ? NATIVE_PAGEVIEW_TRIGGER_KEY : key)
+        }
+        if (action.blockingTriggers) {
+          action.blockingTriggers = action.blockingTriggers.map(key => key === legacyPageviewKey ? NATIVE_PAGEVIEW_TRIGGER_KEY : key)
+        }
+      }
+    }
+  }
+  const desiredToolKeys = new Set(input.tenants.map(tenant => tenantKey(tenant.organizationId)))
+  const desiredTriggerKeys = new Set(input.tenants.flatMap(tenant => {
+    const k = tenantKey(tenant.organizationId)
+    return [k, `${k}-tracks`]
+  }))
 
   // The product page's ecommerce events (Product Viewed, Checkout Started)
   // reach the GA4 tools' ecommerce action only when the zone enables Zaraz's
@@ -380,7 +431,7 @@ export function reconcileZarazAnalyticsConfig(
   for (const tenant of input.tenants) {
     upsertTenantZarazAnalytics(config, tenant, input.platformTemplate?.tool)
   }
-  const removedAnalyticsTools = removeUndesiredAnalyticsConfig(config, desiredKeys)
+  const removedAnalyticsTools = removeUndesiredAnalyticsConfig(config, desiredToolKeys, desiredTriggerKeys)
 
   return {
     configuredTenants: input.tenants.length,

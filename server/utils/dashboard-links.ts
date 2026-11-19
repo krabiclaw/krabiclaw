@@ -1,9 +1,5 @@
 import type { InsightsPageId } from '~/shared/insights'
 export { bookingEditorPath, guestConversationPath } from '~/shared/messages-contract'
-// Shared registry for dashboard deep-links, used by both the client/tenant
-// MCP (server/utils/mcp-tools) and ChowBot's own tool executor
-// (server/utils/chowbot-agent.ts) — two otherwise-separate tool-calling
-// implementations that should still produce identical dashboard URLs.
 export const DASHBOARD_DESTINATIONS = {
   'settings.billing': 'billing',
   'settings.members': 'team',

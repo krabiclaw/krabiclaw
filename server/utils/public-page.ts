@@ -18,7 +18,7 @@ import {
   normalizePublicReviewAggregateRows,
 } from "~/server/utils/public-review-aggregate";
 import { getPublicTenantPageForPath, type PublicTenantPage } from "~/server/utils/public-tenant-pages";
-import { listCollections, listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
+import { listCollections, listOrganizationProducts, prepareOrganizationDishRead, prepareCollectionList, publicProduct } from '~/server/utils/product-management'
 import { previewSecretOf, resolvePreviewAuthorization } from "~/server/utils/preview-token";
 import {
   toResolvedMediaAsset,
@@ -37,7 +37,7 @@ import {
 import { recordRequestPhase } from "~/server/utils/request-metrics";
 import { isNonProductionHost } from "~/server/utils/tenant-hosts";
 import { loadPublicBase } from "~/server/utils/public-base";
-import { buildPublicShellPayload, readPublicExperiences, readPublicShellRows } from "~/server/utils/public-shell-query";
+import { buildPublicShellPayload, publicDocumentCollectionKind, publicProductMediaQuery, readPublicShellRows } from "~/server/utils/public-shell-query";
 import { publicLocationSql } from "~/server/utils/public-locations";
 import { isPublicMenuProduct, isPublicPagePayload } from '~/utils/public-resource-contracts'
 import type { LocalizedResourceType } from '~/server/utils/localization-registry'
@@ -46,9 +46,11 @@ import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { hasPublicLocationPages, resolvePublicSite } from '~/utils/site-routing'
 import { isPublicSourceRouteRoot } from '~/shared/public-locale-routes'
 import { siteRendersPageDocumentAt } from '~/shared/tenant-page-paths'
-import { assertPublicOrganizationLanguage, readPublicSourceLocale } from '~/server/utils/localization'
+import { publicTenantLocaleNames, readPublicOrganizationLanguage, readPublicSourceLocale } from '~/server/utils/localization'
 import {
   loadExactPublicLocalizations,
+  indexStoredPublicLocalizations,
+  preloadedPublicLocalizations,
   projectExactLocalizedCollection,
   projectExactLocalizedResource,
   projectLocalizedMediaAlt,
@@ -314,11 +316,12 @@ async function loadPublicPageSource(
   options.signal?.throwIfAborted();
 
   const orgId = organization.id;
-  const language = await assertPublicOrganizationLanguage(db, orgId, locale ?? sourceLocale, source)
+  const language = await readPublicOrganizationLanguage(event, db, orgId, locale ?? sourceLocale, source)
   const localizedLocale = language.source ? null : language.locale
   let publicLocalizations: ExactPublicLocalization[] = []
   if (localizedLocale) {
-    publicLocalizations = await loadExactPublicLocalizations(env, db, orgId, localizedLocale)
+    const stored = preloadedPublicLocalizations(event, orgId, localizedLocale)
+    publicLocalizations = stored ? indexStoredPublicLocalizations(stored) : await loadExactPublicLocalizations(env, db, orgId, localizedLocale)
   }
 
   const localizedLocationId = localizedLocale && locationSlug
@@ -357,7 +360,6 @@ async function loadPublicPageSource(
 
   // Build batch — one subrequest to D1 for all inline queries
   const batchStmts: BatchQuery[] = [];
-  let idxReviews = -1;
   let idxFullReviews = -1,
     idxReviewAggregate = -1,
     idxPhotos = -1,
@@ -377,35 +379,12 @@ async function loadPublicPageSource(
   const productKind = page === 'experiences' ? 'experience' : page === 'menu' ? 'dish'
     : page === 'stays' ? 'stay' : page === 'reservations' ? 'table' : undefined
 
-  if (includeProducts) {
-    idxProductMedia = push(
-      `SELECT ma.*, mp.owner_id AS product_id, mp.slot, mp.sort_order
-         FROM media_placements mp
-         JOIN media_assets ma ON ma.id = mp.asset_id
-          AND ma.organization_id = mp.organization_id
-          AND ma.status = 'active'
-        WHERE mp.organization_id = ?
-          AND mp.owner_type = 'product' AND ${menuCards ? "mp.slot = 'image'" : "mp.slot IN ('image', 'gallery')"} AND mp.status = 'active'
-          ${productKind ? 'AND EXISTS (SELECT 1 FROM products p WHERE p.id = mp.owner_id AND p.organization_id = mp.organization_id AND p.kind = ?)' : ''}
-        ORDER BY mp.owner_id, mp.slot, mp.sort_order, mp.id`,
-      [orgId, ...(productKind ? [productKind] : [])],
-    )
+  const sharedCollection = !locationSlug && (menuCards || (page === 'reservations' && includeProducts))
+    ? publicDocumentCollectionKind(`/${page}`) : undefined
+  if (includeProducts && !sharedCollection) {
+    const media = publicProductMediaQuery(orgId, productKind, menuCards)
+    idxProductMedia = push(media.query, media.params ?? [])
   }
-
-
-  if (needsGlobalReviews)
-    idxReviews = push(
-      `SELECT r.id, r.author_name, r.rating, r.content, r.created_at, r.source,
-              r.original_review_date, r.original_reference, r.google_review_metadata,
-              r.owner_reply, r.owner_reply_at, r.location_id, bl.title AS location_title,
-              ${publicReviewLocationProtectedSql('r')} AS is_stay_location
-       FROM reviews r
-       LEFT JOIN business_locations bl ON bl.id = r.location_id
-       WHERE r.organization_id = ? AND r.status = 'approved'
-       ORDER BY CASE WHEN r.source = 'google_places' THEN r.original_review_date ELSE r.created_at END DESC, r.id ASC LIMIT 50`,
-      [organizationId],
-    );
-
 
   if (locationId && requestedDatasets.has("reviews"))
     idxFullReviews = push(
@@ -468,18 +447,23 @@ async function loadPublicPageSource(
   const routePagePath = routeSourcePath(page)
   // Site-wide menu and Reviews have a known route before the page batch runs.
   const builtInRepresentations = (page === 'menu' || page === 'reviews') && !locationSlug && !blogSlug && !requestedDatasets.has('content')
-  const experiences = readPublicExperiences(event, db, orgId, env)
-  const [batchResults, { results: shellResults, indexes: shellIndexes }, shellExperiences, canonical, sourceCollections, routeRepresentations] = await Promise.all([
-    batchStmts.length ? executeBatch(db, batchStmts) : [],
-    readPublicShellRows(event, db, orgId, previewRestaurant),
-    experiences,
-    includeProducts
+  const dishes = menuCards && !sharedCollection ? prepareOrganizationDishRead(orgId, !previewMenu) : null
+  const dishStart = batchStmts.length
+  if (dishes) batchStmts.push(...dishes.queries)
+  const menuCollections = dishes && !locationId ? prepareCollectionList({ organizationId: orgId }) : null
+  const collectionStart = batchStmts.length
+  if (menuCollections) batchStmts.push(...menuCollections.queries)
+  const shellRead = readPublicShellRows(event, db, organization, language.locale, previewRestaurant, needsGlobalReviews || undefined, sharedCollection)
+  const [batchResults, { results: shellResults, indexes: shellIndexes, collection: collectionRead, experiences: shellExperiences }, canonical, sourceCollections, routeRepresentations] = await Promise.all([
+    batchStmts.length ? executeBatch(db, batchStmts, { operation: dishes ? 'Read location menu cards' : 'Read public page data' }) : [],
+    shellRead,
+    includeProducts && !dishes && !sharedCollection
       ? (productKind === 'experience'
-          ? experiences
+          ? shellRead.then(rows => rows.experiences)
           : listOrganizationProducts(db, { organizationId: orgId, kind: productKind, publishedOnly: !previewMenu, env }))
         .then(products => products.map(publicProduct))
       : [],
-    includeProducts
+    includeProducts && !menuCollections && !sharedCollection
       ? locationId
         ? Promise.all([
             listCollections(db, { organizationId: orgId, locationId: null }),
@@ -491,6 +475,7 @@ async function loadPublicPageSource(
       organizationId: orgId,
       sourcePath: routePagePath ?? '/',
       publishedLocaleRoute: Boolean(routePagePath),
+      publishedLocales: publicTenantLocaleNames(event, orgId),
       sourceLocale: source,
     }) : null,
   ])
@@ -501,8 +486,8 @@ async function loadPublicPageSource(
     ? shellResults[shellIndexes.locations] as { results: Record<string, unknown>[] }
     : { results: [] as Record<string, unknown>[] };
   const reviewRows =
-    idxReviews >= 0
-      ? (batchResults[idxReviews] as { results: Record<string, unknown>[] })
+    needsGlobalReviews && shellIndexes.reviews !== undefined
+      ? (shellResults[shellIndexes.reviews] as { results: Record<string, unknown>[] })
       : { results: [] as Record<string, unknown>[] };
   const fullReviewRows =
     idxFullReviews >= 0
@@ -529,7 +514,10 @@ async function loadPublicPageSource(
     ? locationDocumentPath
     : page ? site.pageDocuments.recipes[page] ?? null
     : null
+  const publishedPaths = shellResults[shellIndexes.pageLinks!]?.results as { path: string }[] | undefined
   const contentPagePath = requestedDatasets.has('content') ? documentPath : null
+  const missingReservedPage = !isPreviewAuthorized && contentPagePath === '/reservations'
+    && publishedPaths && !publishedPaths.some(entry => entry.path === contentPagePath)
   const tenantPageOptions = {
     locale,
     preview: isPreviewAuthorized,
@@ -562,11 +550,12 @@ async function loadPublicPageSource(
     resource: representationResource,
     documentId: representationDocumentId,
     publishedLocaleRoute: !representationResource && !representationDocumentId && Boolean(routePagePath),
+    publishedLocales: publicTenantLocaleNames(event, orgId),
     sourceLocale: source,
   })
   const sourceShell = buildPublicShellPayload(organization, shellResults, shellIndexes, shellExperiences, { localizations: localizedLocale ? publicLocalizations : undefined })
   const [tenantPage, ownRepresentations] = await Promise.all([
-    contentPagePath ? getPublicTenantPageForPath(env, db, organizationId, contentPagePath, tenantPageOptions) : null,
+    contentPagePath && !missingReservedPage ? getPublicTenantPageForPath(env, db, organizationId, contentPagePath, tenantPageOptions) : null,
     // A location or article route names its own representations; a page
     // document route reads them off the document once it has loaded.
     routeRepresentations ?? (representationResource || !contentPagePath ? readLocaleRepresentations() : null),
@@ -620,11 +609,11 @@ async function loadPublicPageSource(
   })()
 
   let products: PublicProduct[] = []
-  let collections: Collection[] = sourceCollections
+  let collections: Collection[] = collectionRead?.collections ?? (menuCollections ? menuCollections.read(batchResults.slice(collectionStart)) : sourceCollections)
   if (includeProducts) {
     const locationCapabilityRows = (shellResults[shellIndexes.locations] as { results: Record<string, unknown>[] })?.results ?? []
     const activeLocationIds = new Set(locationCapabilityRows.map(location => String(location.id)))
-    const productMediaRows = (batchResults[idxProductMedia] as { results: ProductMediaRow[] })?.results ?? []
+    const productMediaRows = (collectionRead?.media ?? batchResults[idxProductMedia]?.results ?? []) as ProductMediaRow[]
     const mediaByProduct = new Map<string, ProductMediaRow[]>()
     for (const row of productMediaRows) {
       const rows = mediaByProduct.get(row.product_id) ?? []
@@ -635,7 +624,9 @@ async function loadPublicPageSource(
     // reassemble variants, prices and collections from its own SQL — the
     // catalog has one reader and a projection that disagreed with it is
     // exactly the drift this replaces.
-    products = canonical.filter(product => product.locations.some(location => (location.published || previewMenu)
+    const selectedProducts = collectionRead?.products.map(publicProduct)
+      ?? (dishes ? dishes.read(batchResults.slice(dishStart, collectionStart)).map(publicProduct) : canonical)
+    products = selectedProducts.filter(product => product.locations.some(location => (location.published || previewMenu)
       && activeLocationIds.has(location.location_id) && (!locationSlug || location.location_id === locationId))
       || (!locationSlug && (product.kind === 'stay' || Boolean(product.order_url || product.booking?.held_online)))).map((product) => {
       const media = mediaByProduct.get(product.id) ?? []

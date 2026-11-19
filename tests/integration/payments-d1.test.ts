@@ -39,13 +39,14 @@ import { getStripe } from '../../server/utils/billing.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { approveRefundAuthorization, requirePayment } from '../../server/domain/payments/index.ts'
 import { paymentTransactionDestination } from '../../server/domain/payments/earnings.ts'
-import { completePaymentReturn, reviewPayment, confirmPayment, paymentHandoff, requireClaimedPayment } from '../../server/domain/payments/intent.ts'
+import { completePaymentReturn, reviewPayment, confirmPayment, paymentHandoff, preparePaymentReturn, requireClaimedPayment } from '../../server/domain/payments/intent.ts'
 import { reconcilePaymentIntent, processPaymentEvent } from '../../server/domain/payments/events.ts'
 import { mcpFinancialApprovalErrorResult } from '../../server/utils/mcp-financial-handoff.ts'
 import { handlePaymentsTools } from '../../server/utils/mcp-tools/payments.ts'
 import { NOT_HANDLED } from '../../server/utils/mcp-tools/execution.ts'
 import { resolveOrganizationMembership } from '../../server/utils/member-access.ts'
 import { getRequestDataMetrics, instrumentD1 } from '../../server/utils/request-metrics.ts'
+import { openPaymentReturnDocument, paymentReturnDocumentGuard, sealPaymentReturnDocument } from '../../server/utils/payment-return-document.ts'
 import type { McpOrganizationContext } from '../../server/utils/mcp-auth.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { applySchema } from './support/schema.ts'
@@ -122,18 +123,32 @@ test('guest table cancellation refunds until 24 hours before the start, through 
     const paid = await paidTable(db, env, key)
     const input = { ...paid, ...(credential === 'buyer' ? { buyerUserId: 'verified' } : { tokenHash: `${key}-token-hash` }), now: policy.now }
     const originalFetch = globalThis.fetch
-    let creations = 0
+    const refundKey = `guest-cancelled-booking:${paid.bookingId}`
+    const replay = credential === 'token' && policy.refundable
+    let earlierRefundId: string | null = null
+    const metadataRequests: string[] = []
     const fetchMock = t.mock.method(globalThis, 'fetch', async (request, init) => {
      const url = new URL(request instanceof Request ? request.url : String(request))
      if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
      assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
      if (url.pathname === '/v1/refunds' && init?.method === 'POST') {
-      creations++
       const params = new URLSearchParams(String(init.body))
       assert.equal(params.get('payment_intent'), `pi_${key}`)
       assert.equal(params.has('amount'), false)
-      assert.equal(new Headers(init.headers).get('idempotency-key'), `krabiclaw-refund:${key}:guest-cancelled-booking:${paid.bookingId}`)
-      return Response.json({ id: `re_${key}`, object: 'refund', amount: 10500, currency: 'usd', status: 'succeeded', payment_intent: `pi_${key}`, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: params.get('metadata[krabiclaw_refund_id]') } })
+      assert.equal(new Headers(init.headers).get('idempotency-key'), `krabiclaw-refund:${key}:${refundKey}`)
+      const field = params.has('metadata[blawby_refund_id]') ? 'blawby_refund_id' : 'krabiclaw_refund_id'
+      const sentId = params.get(`metadata[${field}]`)
+      assert.ok(sentId)
+      metadataRequests.push(field)
+      if (replay && earlierRefundId === null) {
+       earlierRefundId = sentId
+       return Response.json({ error: { type: 'invalid_request_error', message: 'Stripe refund response unavailable' } }, { status: 400 })
+      }
+      if (replay) {
+       assert.equal(sentId, earlierRefundId)
+       if (field === 'blawby_refund_id') return Response.json({ error: { type: 'idempotency_error', message: 'Parameters already used with this key differ' } }, { status: 400 })
+      }
+      return Response.json({ id: `re_${key}`, object: 'refund', amount: 10500, currency: 'usd', status: 'succeeded', payment_intent: `pi_${key}`, reason: 'requested_by_customer', metadata: { [field]: sentId } })
      }
      assert.equal(init?.method, 'GET')
      assert.equal(url.pathname, `/v1/charges/ch_${key}`)
@@ -141,12 +156,13 @@ test('guest table cancellation refunds until 24 hours before the start, through 
     })
     try {
      assert.equal(await seatingRemaining(db), 0)
-     assert.equal((await cancelBookingRequest(db, input))?.changed, true)
+     if (replay) await assert.rejects(() => cancelBookingRequest(db, input), /Stripe refund response unavailable/u)
+     assert.equal((await cancelBookingRequest(db, input))?.changed, !replay)
      assert.deepEqual(await db.prepare('SELECT status,cancellation_reason FROM bookings WHERE id=?').bind(paid.bookingId).first(), { status: 'cancelled', cancellation_reason: 'guest_cancelled' })
      assert.equal(await db.prepare("SELECT json_extract(payload_json,'$.cancellation.used_at') used_at FROM conversations WHERE id=?").bind(paid.id).first('used_at'), policy.now)
      assert.deepEqual(await db.prepare('SELECT refunded_amount FROM payments WHERE id=?').bind(key).first(), { refunded_amount: policy.refundable ? 10500 : 0 })
      assert.deepEqual((await db.prepare('SELECT amount,status,created_by FROM payment_refunds WHERE payment_id=?').bind(key).all()).results, policy.refundable ? [{ amount: 10500, status: 'succeeded', created_by: credential === 'buyer' ? 'verified' : null }] : [])
-     assert.equal(creations, Number(policy.refundable))
+     assert.deepEqual(metadataRequests, !policy.refundable ? [] : replay ? ['blawby_refund_id', 'blawby_refund_id', 'krabiclaw_refund_id'] : ['blawby_refund_id'])
      assert.equal(await seatingRemaining(db), 1)
     } finally { fetchMock.mock.restore() }
    }
@@ -316,7 +332,7 @@ test('an advance notice closes a guest\'s own class cancellation at the notice, 
      // A full remaining refund of the booking's own payment: Stripe decides what is left.
      assert.equal(params.get('payment_intent'), `pi_${key}`)
      assert.equal(params.has('amount'), false)
-     return Response.json({ id: `re_${key}`, object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: `pi_${key}`, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: params.get('metadata[krabiclaw_refund_id]') } })
+     return Response.json({ id: `re_${key}`, object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: `pi_${key}`, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: params.get('metadata[blawby_refund_id]') } })
     }
     return Response.json({ id: `ch_${key}`, object: 'charge', livemode: false, amount: 10000, amount_refunded: 10000, currency: 'usd', payment_intent: `pi_${key}`, billing_details: { email: 'verified@example.com' } })
    })
@@ -503,7 +519,7 @@ test('Checkout proof attaches ownership without exposing merchant financial data
   // Another business's site cannot complete this business's payment.
   await assert.rejects(()=>completePaymentReturn(db,env,'another-org','claim',token,async()=>'verified'),error=>error instanceof HTTPError&&error.statusCode===404)
   // An anonymous checkout's purchase passes to the account that proves it.
-  await db.prepare("INSERT INTO user(id,name,email,isAnonymous) VALUES('anon-buyer','Guest','anon-buyer@customers.krabiclaw.local',1)").run()
+  await db.prepare("INSERT INTO user(id,name,email,isAnonymous) VALUES('anon-buyer','Guest','anon-buyer@customers.blawby.test',1)").run()
   await db.prepare("UPDATE payments SET buyer_user_id='anon-buyer' WHERE id='claim'").run()
   assert.deepEqual(await claimCheckoutReturn(db,'verified',token),{payment_id:'claim',claimed:true})
   const originalClaim=await db.prepare('SELECT return_token_hash,return_expires_at AS expires_at,claimed_at,claimed_user_id FROM payments WHERE return_token_hash=?').bind(hash).first()
@@ -1015,7 +1031,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
     assert.equal(handoff.state, 'open')
     assert.deepEqual(handoff.billing_details, { name: 'Guest', email: 'guest@example.com', phone: '+12025550114' })
     assert.deepEqual(await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first(), originalHold)
-    assert.ok(events.take('payment.financial'))
+    assert.equal(events.take('payment.financial'), undefined)
 
     const review = await reviewPayment(db, env, ORG, 'ach-payment', claim, 'pm_achproof123', null)
     assert.equal(review.surcharge, 0)
@@ -1130,7 +1146,7 @@ async function confirmable(db: D1Database, id: string, holdExpires: string, chec
  const provenance = { source: 'website', external_reference: null, actor_user_id: null, idempotency_key: `checkout-${id}`, fingerprint: `fingerprint-${id}`, guest_acknowledgement: true, creation_kind: 'checkout' as const, creation_status: 'pending' as const, followups_completed: false }
  const threadId = `request-${id}`
  const cancellation = await createReplayableReservationCancelToken(CHECKOUT_REPLY_SECRET, threadId)
- const opening = { id: threadId, kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: { ...threadPayloadForGuest({ name: 'Guest', email: 'buyer@krabiclaw-proof.com' }), provenance,
+ const opening = { id: threadId, kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: { ...threadPayloadForGuest({ name: 'Guest', email: 'buyer@mail-fixture.blawby.com' }), provenance,
   cancellation: { token_hash: await hashReservationCancelToken(cancellation.token), expires_at: cancellation.expiresAt, used_at: null } }, created_at: NOW }
  await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
  await db.prepare("UPDATE payments SET return_token_hash=?,return_expires_at='2099-01-01T00:00:00.000Z',review_json=? WHERE id=?").bind(await tokenHash(claim), JSON.stringify({ payment_method_id: 'pm_proof', subtotal: 10000, tax: 0, tax_included: 0, surcharge: 0, total: 10000, reviewed_at: NOW }), id).run()
@@ -1158,11 +1174,11 @@ function fakeStripe(t: TestContext, handle: (url: URL, init: RequestInit | undef
   const [, , resource, id, action] = url.pathname.split('/')
   const paymentId = id?.replace(/^(pi|ch)_/u, '')
   const charge = { id: `ch_${paymentId}`, object: 'charge', livemode: false, amount: 10000, currency: 'usd', created: 1_790_000_000,
-   payment_intent: `pi_${paymentId}`, receipt_url: 'https://pay.stripe.com/receipts/proof', billing_details: { email: 'buyer@krabiclaw-proof.com' } }
+   payment_intent: `pi_${paymentId}`, receipt_url: 'https://pay.stripe.com/receipts/proof', billing_details: { email: 'buyer@mail-fixture.blawby.com' } }
   const intent = () => ({ id: `pi_${paymentId}`, object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000,
    amount_received: statuses[paymentId!] === 'succeeded' ? 10000 : 0, status: statuses[paymentId!], client_secret: `pi_${paymentId}_secret`,
    payment_method: 'pm_proof', latest_charge: ['succeeded', 'requires_capture'].includes(statuses[paymentId!]!) ? charge : null,
-   cancellation_reason: cancellations.get(paymentId!) ?? null, last_payment_error: null, metadata: { krabiclaw_payment_id: paymentId } })
+   cancellation_reason: cancellations.get(paymentId!) ?? null, last_payment_error: null, metadata: { [paymentId === 'authenticating' ? 'blawby_payment_id' : 'krabiclaw_payment_id']: paymentId } })
   if (resource === 'payment_intents' && action === 'confirm') { calls.confirm.push(paymentId!); return Response.json(intent()) }
   if (resource === 'payment_intents' && action === 'capture') { calls.capture.push(paymentId!); statuses[paymentId!] = 'succeeded'; return Response.json(intent()) }
   if (resource === 'payment_intents' && action === 'cancel') {
@@ -1173,7 +1189,7 @@ function fakeStripe(t: TestContext, handle: (url: URL, init: RequestInit | undef
   }
   if (resource === 'payment_intents' && init?.method === 'GET') { calls.read.push(paymentId!); return Response.json(intent()) }
   if (resource === 'charges') return Response.json(charge)
-  if (resource === 'refunds' && init?.method === 'POST') { const paid = new URLSearchParams(String(init.body)).get('payment_intent')!; calls.refund.push(paid); return Response.json({ id: `re_${paid}`, object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: paid, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: new URLSearchParams(String(init.body)).get('metadata[krabiclaw_refund_id]') } }) }
+  if (resource === 'refunds' && init?.method === 'POST') { const paid = new URLSearchParams(String(init.body)).get('payment_intent')!; calls.refund.push(paid); return Response.json({ id: `re_${paid}`, object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: paid, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: new URLSearchParams(String(init.body)).get('metadata[blawby_refund_id]') } }) }
   throw new Error(`Unexpected Stripe request ${init?.method} ${url.pathname}`)
  })
  return calls
@@ -1202,7 +1218,7 @@ function resendOutbox(t: TestContext): string[] {
 /** The business's owner and administrator, who hear about its payouts and plan; its member does not. */
 async function ownersAndAdmins(db: D1Database) {
  for (const role of ['owner', 'admin']) {
-  await db.prepare('INSERT INTO user(id,name,email,emailVerified) VALUES(?,?,?,1)').bind(role, role, `${role}@krabiclaw-proof.com`).run()
+  await db.prepare('INSERT INTO user(id,name,email,emailVerified) VALUES(?,?,?,1)').bind(role, role, `${role}@mail-fixture.blawby.com`).run()
   await db.prepare('INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES(?,?,?,?,1)').bind(`${role}-member`, ORG, role, role).run()
  }
 }
@@ -1256,7 +1272,7 @@ test('a card is authorized, booked, then captured, and an expired payment window
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
   assert.deepEqual(calls.capture, ['direct'])
   statuses.authenticating = 'requires_capture'
-  const event = { id: 'evt_authorized', type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_authenticating', metadata: { krabiclaw_payment_id: 'authenticating' } } } } as unknown as Stripe.Event
+  const event = { id: 'evt_authorized', type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_authenticating', metadata: { blawby_payment_id: 'authenticating' } } } } as unknown as Stripe.Event
   await processPaymentEvent(db, stripe, event, env)
   assert.deepEqual(bookedWhenCaptured, { direct: 1, authenticating: 1 })
   assert.equal((await requirePayment(db, ORG, 'authenticating')).captured_amount, 10000)
@@ -1302,9 +1318,18 @@ test('a redirect that Stripe captures returns to the guest site and settles one 
 
   // Stripe sends the guest back before the success webhook arrives.
   statuses.redirect = 'succeeded'
-  const receipt = await completePaymentReturn(db, env, ORG, 'redirect', claim, async () => 'guest')
+  const trace = new H3Event(new Request(origin + '/api/public/payments/redirect/return'))
+  const requestDb = instrumentD1(trace, db.withSession('first-primary'), db)
+  const returnPayment = (client: typeof requestDb) => completePaymentReturn(client, { ...env, DB: client }, ORG, 'redirect', claim,
+   async () => 'guest', undefined, async () => ({ locale: 'en', source: true }), async () => 'guest')
+  const receipt = await returnPayment(requestDb)
   assert.equal(receipt.state, 'paid')
   if (receipt.state !== 'paid' || receipt.kind !== 'booking') throw new Error('Expected a booking receipt')
+  assert.equal(receipt.booking?.status, 'confirmed')
+  assert.deepEqual(receipt.booking?.paid, { amount: 10000, currency: 'USD' })
+  const { batchRoundTrips, singleStatementRoundTrips } = getRequestDataMetrics(trace)
+  // This provider session reads the attorney's availability and its older purchase reads two attribution rows.
+  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 1, singleStatementRoundTrips: 4 })
   const response = await request('/api/public/booking-requests/' + receipt.conversation_id, { headers: { authorization: `Bearer ${receipt.cancellation_token}` } })
   assert.equal(response.status, 200)
   const { booking } = await response.json() as { booking: { status: string } }
@@ -1313,10 +1338,11 @@ test('a redirect that Stripe captures returns to the guest site and settles one 
   const deliver = (id: string, event = `evt_${id}`) => processPaymentEvent(db, stripe, { id: event, type: 'payment_intent.succeeded', account: 'acct_seller', livemode: false,
    data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as unknown as Stripe.Event, env)
   await deliver('redirect')
-  assert.deepEqual(await completePaymentReturn(db, env, ORG, 'redirect', claim, async () => 'guest'), receipt)
+  assert.deepEqual(await returnPayment(db), receipt)
   const booked = await requirePayment(db, ORG, 'redirect')
   assert.ok(booked.subject_id)
   assert.equal(booked.captured_amount, 10000)
+  assert.equal(booked.claimed_user_id, 'guest')
 
   const capture = events.take('payment.captured')
   assert.ok(capture, 'a settled redirect queues the captured payment')
@@ -1338,6 +1364,60 @@ test('a redirect that Stripe captures returns to the guest site and settles one 
   assert.equal((await holdOf(db, 'taken'))?.status, 'released')
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
   assert.deepEqual([calls.capture, calls.cancel, calls.refund], [[], [], ['pi_taken']])
+ } finally { await runtime.dispose() }
+})
+
+test('the checkout return reuses a booking the webhook saved while Stripe was responding', { timeout: 120_000 }, async t => {
+ const { db, runtime, env: bootEnv, events } = await boot()
+ try {
+  const env = stripeEnv(bootEnv)
+  await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
+  const claim = await confirmable(db, 'webhook-wins', inMinutes(15))
+  const host = 'payments.localhost'
+  const language = { locale: 'en', source: true }
+  const plan = await preparePaymentReturn({ query: '?', params: [ORG] }, 'webhook-wins', claim)
+  const row = await db.prepare(plan.query).bind(...plan.params).first()
+  const sealed = await sealPaymentReturnDocument(env.BETTER_AUTH_SECRET, host, claim, row, language)
+  assert.ok(sealed)
+  assert.equal(await openPaymentReturnDocument(env.BETTER_AUTH_SECRET, 'other.localhost', 'webhook-wins', claim, sealed), null)
+  const document = await openPaymentReturnDocument(env.BETTER_AUTH_SECRET, host, 'webhook-wins', claim, sealed)
+  assert.ok(document)
+  const tenant = { query: "SELECT id FROM organization WHERE subdomain=? AND status='active'", params: ['payments'] }
+  const unauthorized = paymentReturnDocumentGuard({ ...tenant, params: ['krabiclaw'] }, document)
+  await assert.rejects(db.batch([db.prepare(unauthorized.query).bind(...unauthorized.params ?? [])]), /PAYMENT_RETURN_DOCUMENT_STALE/)
+  const trace = new H3Event(new Request('http://payments.localhost/api/public/payments/webhook-wins/return'))
+  const requestDb = instrumentD1(trace, db.withSession('first-primary'), db)
+  let webhook: Promise<void> | undefined
+  const calls = fakeStripe(t, async (url, init) => {
+   if (!webhook && init?.method === 'GET' && url.pathname === '/v1/payment_intents/pi_webhook-wins') {
+    webhook = processPaymentEvent(db, stripe, { id: 'evt_webhook_wins', type: 'payment_intent.succeeded', account: 'acct_seller',
+     livemode: false, data: { object: { id: 'pi_webhook-wins', metadata: { krabiclaw_payment_id: 'webhook-wins' } } } } as unknown as Stripe.Event, env)
+    await webhook
+   }
+   return null
+  }, { 'webhook-wins': 'succeeded' })
+  const stripe = getStripe(env)
+  const receipt = await completePaymentReturn(requestDb, { ...env, DB: requestDb }, ORG, 'webhook-wins', claim,
+   async () => 'guest', undefined, async () => language, async () => 'guest',
+   { ...document, userId: 'guest', guard: paymentReturnDocumentGuard(tenant, document) })
+  assert.ok(webhook)
+  await webhook
+  assert.equal(receipt.state, 'paid')
+  if (receipt.state !== 'paid' || receipt.kind !== 'booking') throw new Error('Expected a booking receipt')
+  assert.equal(receipt.booking?.status, 'confirmed')
+  assert.deepEqual(receipt.booking?.paid, { amount: 10000, currency: 'USD' })
+  const result = await db.prepare(`SELECT b.status,p.captured_amount,p.claimed_user_id FROM bookings b
+    JOIN conversations c ON c.booking_id=b.id AND c.organization_id=b.organization_id
+    JOIN payments p ON p.subject_id=b.id AND p.organization_id=b.organization_id WHERE c.id=?`).bind(receipt.conversation_id).first()
+  assert.deepEqual(result, { status: 'confirmed', captured_amount: 10000, claimed_user_id: 'guest' })
+  assert.equal((await holdOf(db, 'webhook-wins'))?.status, 'converted')
+  assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
+  assert.deepEqual(calls.refund, [])
+  assert.ok(events.take('payment.captured'))
+  assert.equal(events.take('payment.captured'), undefined)
+  const { batchRoundTrips, singleStatementRoundTrips } = getRequestDataMetrics(trace)
+  // This fixture reads the provider and legacy attribution while preparing the guarded batch.
+  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 1, singleStatementRoundTrips: 3 })
  } finally { await runtime.dispose() }
 })
 
@@ -1525,8 +1605,8 @@ test('a payout sent and a payout failed are emailed to the business owner and ad
   await deliver('paid')
   const mail = sentMail(emails)
   assert.deepEqual(mail.map(sent => [sent.subject, String(sent.to)]).sort(), [
-   ['Payout failed', 'admin@krabiclaw-proof.com'], ['Payout failed', 'owner@krabiclaw-proof.com'],
-   ['Payout paid', 'admin@krabiclaw-proof.com'], ['Payout paid', 'owner@krabiclaw-proof.com'],
+   ['Payout failed', 'admin@mail-fixture.blawby.com'], ['Payout failed', 'owner@mail-fixture.blawby.com'],
+   ['Payout paid', 'admin@mail-fixture.blawby.com'], ['Payout paid', 'owner@mail-fixture.blawby.com'],
   ], 'owners and admins hear; the business\'s member does not')
   for (const sent of mail) {
    assert.match(sent.html, /\$250\.00 USD/u)
@@ -1537,11 +1617,124 @@ test('a payout sent and a payout failed are emailed to the business owner and ad
   // Each send is recorded as sent by Resend, to the person it went to.
   const receipts = (await db.prepare("SELECT provider, status, json_extract(email_json, '$.message.subject') subject, json_extract(email_json, '$.message.to') recipient FROM guest_thread_deliveries WHERE channel = 'email' ORDER BY subject, recipient").all()).results
   assert.deepEqual(receipts, [
-   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'admin@krabiclaw-proof.com' },
-   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'owner@krabiclaw-proof.com' },
-   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'admin@krabiclaw-proof.com' },
-   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'owner@krabiclaw-proof.com' },
+   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'admin@mail-fixture.blawby.com' },
+   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'owner@mail-fixture.blawby.com' },
+   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'admin@mail-fixture.blawby.com' },
+   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'owner@mail-fixture.blawby.com' },
   ])
+ } finally { await runtime.dispose() }
+})
+
+test('Better Auth trusts billing and connection callbacks from either registered app scheme', async t => {
+ const { runtime, env } = await boot()
+ try {
+  const fetchNetwork = globalThis.fetch
+  t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
+   const url = new URL(request instanceof Request ? request.url : String(request))
+   return (url.hostname === 'api.stripe.com' && publishedCatalogResponse(url)) || fetchNetwork(request, init)
+  })
+  const auth = await createAuth(stripeEnv(env)).$context
+  for (const scheme of ['blawby', 'krabiclaw']) {
+   assert.equal(auth.isTrustedOrigin(`${scheme}://billing/success`), true)
+   assert.equal(auth.isTrustedOrigin(`${scheme}://connections/google-calendar`), true)
+   assert.equal(auth.isTrustedOrigin(`${scheme}://invitation?id=example`), false)
+   assert.equal(auth.isTrustedOrigin(`${scheme}://billing.example/success`), false)
+  }
+  assert.equal(auth.isTrustedOrigin('https://appleid.apple.com'), true)
+ } finally { await runtime.dispose() }
+})
+
+test('the Stripe renewal closes the old meter before delivering usage held for its replacement', { timeout: 120_000 }, async t => {
+ const { db, runtime, env: bootEnv } = await boot()
+ try {
+  const secret = 'whsec_meter_renewal'
+  const env = { ...stripeEnv(bootEnv), STRIPE_WEBHOOK_SECRET: secret, STRIPE_BILLING_METER_MIGRATION: 'true' } as CloudflareEnv
+  const renewal = Math.floor(Date.now() / 1000) - 120
+  const period = { current_period_start: renewal, current_period_end: renewal + 31 * 86400 }
+  const metadata: Record<string, string> = { blawby_meter_renewal: String(renewal) }
+  const contract = {
+   id: 'sub_meter_renewal', customer: 'cus_operating', status: 'active', schedule: null, pending_update: null, cancel_at_period_end: false, cancel_at: null,
+   billing_mode: { type: 'flexible' }, metadata,
+   items: { has_more: false, data: [
+    { id: 'si_base', ...period, price: { id: 'price-base', product: { metadata: { plan_id: 'business' } } } },
+    { id: 'si_ads', ...period, price: { id: 'price-ad_spend', tax_behavior: 'unspecified', product: { metadata: { product_family: 'ad_spend' } } } },
+    { id: 'si_addon', ...period, price: { id: 'price-addon', product: { metadata: {} } } },
+   ] },
+  }
+  await db.prepare("INSERT INTO subscription(id,plan,referenceId,stripeCustomerId,stripeSubscriptionId,status,seats) VALUES('sub-row','business',?,'cus_operating','sub_meter_renewal','active',1)").bind(ORG).run()
+  await db.prepare("INSERT INTO usage_events(id,organization_id,resource,unit,quantity,idempotency_key,provider_occurred_at,created_at,source) VALUES('during-renewal',?,'ad_spend','USD',125,'ads:renewing',?,?,'payments')").bind(ORG,NOW,NOW).run()
+  const realFetch = globalThis.fetch
+  const reported: string[] = []
+  let changes = 0
+  t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
+   const url = new URL(request instanceof Request ? request.url : String(request))
+   if (url.hostname !== 'api.stripe.com') return realFetch(request, init)
+   const catalog = publishedCatalogResponse(url)
+   if (catalog) {
+    const list = await catalog.json() as { data: Array<{ id: string; event_name?: string; recurring?: { meter: string } }> }
+    const additional = url.pathname === '/v1/prices'
+     ? list.data.map(price => ({ ...price, id: `replacement-${price.id}`, tax_behavior: 'unspecified', recurring: { ...price.recurring, meter: `replacement-${price.recurring!.meter}` } }))
+     : url.pathname === '/v1/billing/meters'
+      ? list.data.map(meter => ({ ...meter, id: `replacement-${meter.id}`, event_name: meter.event_name!.replace('krabiclaw_', 'blawby_') }))
+      : []
+    const entries = url.pathname === '/v1/products'
+    ? list.data.map(product => ({ ...product, metadata: { product_family: product.id.slice(5), monthly_price_id: `replacement-price-${product.id.slice(5)}` } }))
+    : list.data
+   return Response.json({ ...list, data: [...entries, ...additional] })
+   }
+   if (url.pathname === '/v1/subscriptions/sub_meter_renewal') {
+    if (init?.method === 'POST') {
+     const form = new URLSearchParams(String(init.body))
+     assert.deepEqual(Object.fromEntries(form), {
+      'items[0][id]': 'si_ads', 'items[0][price]': 'replacement-price-ad_spend',
+      billing_cycle_anchor: 'unchanged', proration_behavior: 'none', 'metadata[blawby_meter_renewed]': String(renewal),
+     })
+     contract.items.data[1]!.price.id = 'replacement-price-ad_spend'
+     metadata.blawby_meter_renewed = String(renewal)
+     changes++
+    }
+    return Response.json(contract)
+   }
+   if (url.pathname === '/v1/billing/meter_events') {
+    const form = new URLSearchParams(String(init?.body))
+    const name = form.get('event_name')!
+    const identifier = form.get('identifier')!
+    assert.equal(form.get('payload[value]'), '125')
+    assert.equal(identifier, new Headers(init?.headers).get('idempotency-key'))
+    if (name.startsWith('blawby_')) assert.equal(changes, 1)
+    reported.push(name)
+    return Response.json({ object: 'billing.meter_event', event_name: name, identifier, timestamp: renewal, payload: {} })
+   }
+   throw new Error(`Unexpected Stripe request ${init?.method} ${url.pathname}`)
+  })
+
+  await assert.rejects(() => deliverPaymentsUsage(db, env, ORG), /not yet activated the replacement meter/)
+  assert.equal(await db.prepare("SELECT delivery_at FROM usage_events WHERE id='during-renewal'").first('delivery_at'), null)
+  const payload = JSON.stringify({ id: 'evt_meter_invoice', object: 'event', type: 'invoice.finalized', data: { object: {
+   id: 'in_renewed', customer: 'cus_operating', billing_reason: 'subscription_cycle', period_end: renewal,
+   parent: { subscription_details: { subscription: contract.id, metadata: { ...metadata } } },
+  } } })
+  const signer = new Stripe('sk_test_signer')
+  const signature = await signer.webhooks.generateTestHeaderStringAsync({ payload, secret })
+  for (let attempt = 0; attempt < 2; attempt++) {
+   const response = await createAuth(env).handler(new Request('https://proof.example/api/auth/stripe/webhook', {
+    method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signature }, body: payload,
+   }))
+   assert.equal(response.status, 200, await response.text())
+  }
+  const delivered = await db.prepare("SELECT delivery_at, error FROM usage_events WHERE id='during-renewal'").first()
+  assert.ok(delivered?.delivery_at)
+  assert.equal(delivered.error, null)
+  assert.deepEqual(reported, ['krabiclaw_ad_spend', 'krabiclaw_ad_spend', 'blawby_ad_spend'])
+  assert.equal(changes, 1)
+
+  // A subscription sold on the replacement price has no renewal marker.
+  delete metadata.blawby_meter_renewal
+  delete metadata.blawby_meter_renewed
+  await db.prepare("INSERT INTO usage_events(id,organization_id,resource,unit,quantity,idempotency_key,provider_occurred_at,created_at,source) VALUES('new-contract',?,'ad_spend','USD',125,'ads:new-contract',?,?,'payments')").bind(ORG,NOW,NOW).run()
+  assert.deepEqual(await deliverPaymentsUsage(db, env, ORG), { delivered: 1 })
+  assert.ok(await db.prepare("SELECT delivery_at FROM usage_events WHERE id='new-contract'").first('delivery_at'))
+  assert.deepEqual(reported.slice(3), ['blawby_ad_spend'])
  } finally { await runtime.dispose() }
 })
 
@@ -1573,7 +1766,7 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
    const url = new URL(request instanceof Request ? request.url : String(request))
    if (url.hostname === 'api.resend.com' && init?.method === 'POST') {
     const mail = JSON.parse(String(init.body)) as { subject: string; to: string[] }
-    if (refuseEndingOwnerEmail && mail.subject === 'Your Business plan will not renew' && mail.to.includes('owner@krabiclaw-proof.com')) {
+    if (refuseEndingOwnerEmail && mail.subject === 'Your Business plan will not renew' && mail.to.includes('owner@mail-fixture.blawby.com')) {
      refuseEndingOwnerEmail = false
      return Response.json({ name: 'internal_server_error', message: 'Plan email temporarily unavailable' }, { status: 500 })
     }
@@ -1604,7 +1797,7 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
   await deliver({ id: 'evt_checkout_created', type: 'customer.subscription.created', data: { object: trialing } })
   assert.equal(emails.length, 0, 'the Checkout subscription has one start notice on completion')
   await deliver({ id: 'evt_checkout', type: 'checkout.session.completed', data: { object: { id: 'cs_plan', object: 'checkout.session', mode: 'subscription', subscription: 'sub_plan', client_reference_id: ORG, metadata: { subscriptionId: 'sub-row', referenceId: ORG } } } })
-  assert.deepEqual(subjects(), [['Your new plan: Growth', 'admin@krabiclaw-proof.com'], ['Your new plan: Growth', 'owner@krabiclaw-proof.com']])
+  assert.deepEqual(subjects(), [['Your new plan: Growth', 'admin@mail-fixture.blawby.com'], ['Your new plan: Growth', 'owner@mail-fixture.blawby.com']])
   const started = sentMail(emails)[0]!.html
   assert.match(started, /Payments is on Growth\./u)
   assert.match(started, /Free trial ends/u)
@@ -1618,7 +1811,7 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
   // A renewal changes the subscription without changing its plan.
   await deliver({ id: 'evt_renewed', type: 'customer.subscription.updated', data: { object: subscription('business'), previous_attributes: { latest_invoice: 'in_previous' } } })
   assert.equal(emails.length, 4)
-  assert.deepEqual(subjects().slice(2), [['Your plan changed to Business', 'admin@krabiclaw-proof.com'], ['Your plan changed to Business', 'owner@krabiclaw-proof.com']])
+  assert.deepEqual(subjects().slice(2), [['Your plan changed to Business', 'admin@mail-fixture.blawby.com'], ['Your plan changed to Business', 'owner@mail-fixture.blawby.com']])
   assert.match(sentMail(emails)[2]!.html, /Payments moved from Growth to Business\./u)
 
   // A trial set to end sends a notice too. Stripe retries only the failed delivery.
@@ -1630,7 +1823,7 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
   await deliver(ending)
   assert.equal(emails.length, 6)
   const notRenewing = sentMail(emails).slice(4)
-  assert.deepEqual(notRenewing.map(sent => [sent.subject, String(sent.to)]).sort(), [['Your Business plan will not renew', 'admin@krabiclaw-proof.com'], ['Your Business plan will not renew', 'owner@krabiclaw-proof.com']])
+  assert.deepEqual(notRenewing.map(sent => [sent.subject, String(sent.to)]).sort(), [['Your Business plan will not renew', 'admin@mail-fixture.blawby.com'], ['Your Business plan will not renew', 'owner@mail-fixture.blawby.com']])
   assert.match(notRenewing[0]!.html, /Business stays on until Oct 21, 2026\. After that, Payments is on Basic\./u)
 
   // Read back apart from the sends: Better Auth's subscription, and each email Resend accepted.
