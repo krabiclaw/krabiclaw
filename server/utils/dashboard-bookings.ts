@@ -83,10 +83,7 @@ export async function dashboardBookingContext(event: H3Event, action: 'read' | '
 }
 
 export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug: string; bookingId: string }) {
-  return loadDashboardBookingDetails(await dashboardBookingContext(event, 'read', undefined, record))
-}
-
-export async function loadDashboardBookingDetails(context: Awaited<ReturnType<typeof dashboardBookingContext>>) {
+  const context = await dashboardBookingContext(event, 'read', undefined, record)
   const { access, db, organization, userId, bookingId, booking } = context
   if (booking.unit === 'slot') {
     return { booking: await loadStaffBookingDetails(context, bookingId), manage: access.manage }
