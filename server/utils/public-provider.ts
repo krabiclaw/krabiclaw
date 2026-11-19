@@ -1,13 +1,21 @@
 import { HTTPError } from 'nitro'
-import { queryAll, queryFirst, type DbClient } from '~/server/db'
+import { queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { findBookableSession } from '~/server/utils/availability'
 import { PUBLISHED_PROFILE_SQL, type PublicProvider } from '~/shared/member-scheduling'
 
 /** The published profile of a host member, when it has one. */
+export function publishedHostProfilesQuery(organizationId: string, member: BatchQuery): BatchQuery {
+  return {
+    query: `SELECT ms.public_name name, ms.public_photo_url photo_url, ms.public_bio bio
+      FROM member_scheduling ms WHERE ms.organization_id = ? AND ${PUBLISHED_PROFILE_SQL}
+        AND ms.member_id IN (${member.query})`,
+    params: [organizationId, ...member.params ?? []],
+  }
+}
+
 function publishedHostProfiles(db: DbClient, organizationId: string, memberId: string): Promise<PublicProvider[]> {
-  return queryAll<PublicProvider>(db, `SELECT ms.public_name name, ms.public_photo_url photo_url, ms.public_bio bio
-    FROM member_scheduling ms WHERE ms.organization_id=? AND ${PUBLISHED_PROFILE_SQL} AND ms.member_id=?`,
-  [organizationId, memberId])
+  const { query, params } = publishedHostProfilesQuery(organizationId, { query: 'SELECT ?', params: [memberId] })
+  return queryAll<PublicProvider>(db, query, params)
 }
 
 /**

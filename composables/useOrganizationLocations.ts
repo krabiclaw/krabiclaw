@@ -1,16 +1,11 @@
 import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 import { dashboardFetch } from '~/composables/dashboardFetch'
 
-/**
- * Every location the organization has, read once and shared by key: Locations
- * lists them, Catalog scopes by them, and a product names where it is offered.
- * The dashboard context carries no locations outside a location's own route,
- * so they are read for the whole organization here.
- */
-export async function useOrganizationLocations(options: { includeInactive?: boolean } = {}) {
+/** The shared location resource also consumes the product editor's authorized batch. */
+export async function useOrganizationLocations(options: { includeInactive?: boolean; initial?: DashboardLocation[] } = {}) {
   const route = useRoute()
   const orgSlug = computed(() => String(route.params.org_slug || ''))
-  const { data, error, pending } = await useAsyncData(
+  const load = useAsyncData(
     () => `dashboard-org-locations:${orgSlug.value}${options.includeInactive ? ':all' : ''}`,
     () => dashboardFetch<{ success: true; locations: DashboardLocation[] }>('/api/dashboard/locations', { orgSlug: orgSlug.value }, {
       query: { organization: 'true', status: options.includeInactive ? 'all' : undefined },
@@ -18,14 +13,20 @@ export async function useOrganizationLocations(options: { includeInactive?: bool
         isRecord(value) && value.success === true && Array.isArray(value.locations),
     }),
     {
+      immediate: options.initial === undefined,
       watch: [orgSlug],
       getCachedData(cacheKey, nuxtApp) {
-        if (nuxtApp.isHydrating) {
-          return nuxtApp.payload.data[cacheKey] as { success: true; locations: DashboardLocation[] } | undefined
-        }
+        const hydrated = nuxtApp.payload.data[cacheKey] as { success: true; locations: DashboardLocation[] } | undefined
+        if (nuxtApp.isHydrating && hydrated !== undefined) return hydrated
       },
     },
   )
+  if (options.initial !== undefined) {
+    load.clear()
+    load.data.value = { success: true, locations: options.includeInactive ? options.initial : options.initial.filter(location => location.status === 'active') }
+    load.status.value = 'success'
+  }
+  const { data, error, pending } = await load
   const locations = computed(() => data.value?.locations ?? [])
   return { locations, error, pending }
 }

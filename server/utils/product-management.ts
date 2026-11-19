@@ -416,9 +416,9 @@ function hydrateProductRows(
  * so the caller must say which site's imagery it wants. There is no "the
  * product's image" independent of a site, and no default site is assumed.
  */
-export async function hydrateProductMedia(db: DbClient, organizationId: string, products: Product[]): Promise<Product[]> {
+export async function hydrateProductMedia(db: DbClient, organizationId: string, products: Product[], loaded?: Awaited<ReturnType<typeof loadPublicSocialMedia>>): Promise<Product[]> {
   if (!products.length) return products
-  const placements = await loadPublicSocialMedia(db, organizationId, 'product', products.map(product => product.id))
+  const placements = loaded ?? await loadPublicSocialMedia(db, organizationId, 'product', products.map(product => product.id))
   return products.map((product) => {
     const socialMedia = placements.get(product.id) ?? { media: [], social_image: null }
     return {
@@ -435,46 +435,58 @@ export async function hydrateProductMedia(db: DbClient, organizationId: string, 
 // Reads
 // ---------------------------------------------------------------------------
 
-export async function getProduct(db: DbClient, organizationId: string, productId: string): Promise<Product> {
-  const plan = prepareProductRead(organizationId, {
+export function prepareOrganizationProduct(organizationId: string, productId: string) {
+  return prepareProductRead(organizationId, {
     query: `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id = ? AND p.id = ?`, params: [organizationId, productId],
   })
+}
+
+export async function getProduct(db: DbClient, organizationId: string, productId: string): Promise<Product> {
+  const plan = prepareOrganizationProduct(organizationId, productId)
   const [product] = plan.read(await executeBatch(db, plan.queries, { operation: 'Read product' }))
   return product ?? notFound()
 }
 
-/** The saved routes a guest may open, shared by MCP and both dashboard editor scopes. */
-export async function productPublicPresentation(db: DbClient, env: CloudflareEnv, organizationId: string, product: Product) {
-  const siteProduct = product.kind === 'experience' || product.kind === 'stay'
-  const path = siteProduct ? presentationForProduct(product).productPath('', product.slug) : product.page?.path ?? null
+/** Publication links participate in the caller's product batch. Readiness retains its domain check. */
+export function prepareProductPublicPresentation(organizationId: string, productId: string) {
   const originPlan = preparePublicTenantOrigin(organizationId)
-  // Publication, address and location links describe the same saved product.
-  const [readiness, page, [published, originRow, locations]] = await Promise.all([
-    product.kind === 'experience' || product.kind === 'stay' || product.booking
-      ? productBookingReadiness(db, organizationId, product, { env }) : null,
-    !siteProduct && product.page ? resolvePublishedTenantPageIdentity(db, organizationId, product.page.path) : null,
-    executeBatch(db, [{
+  return {
+    queries: [{
       query: `SELECT p.id FROM products p
         JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
         WHERE p.organization_id = ? AND p.id = ? AND ${PUBLIC_PRODUCT_SQL}`,
-      params: [organizationId, product.id],
-    }, ...originPlan.queries, ...(product.kind === 'dish' ? [{
+      params: [organizationId, productId],
+    }, ...originPlan.queries, {
       query: `SELECT l.id, l.slug FROM business_locations l
         JOIN product_locations pl ON pl.organization_id = l.organization_id AND pl.location_id = l.id
-        WHERE l.organization_id = ? AND pl.product_id = ? AND l.status = 'active' AND pl.published = 1`,
-      params: [organizationId, product.id],
-    }] : [])], { operation: 'Read product publication and links' }),
-  ])
-  const origin = published!.results.length ? originPlan.read([originRow!], env) : null
-  const publicPath = siteProduct ? path && (!readiness || readiness.ready) ? path : null
-    : page && page.id === product.page?.id && page.product_id === product.id ? page.path : null
-  const publicUrls: Record<string, string> = {}
-  if (origin && product.kind === 'dish') {
-    for (const location of locations!.results as { id: string; slug: string }[]) {
-      publicUrls[location.id] = new URL(presentationForProduct(product).productPath(location.slug, product.slug), origin).toString()
-    }
+        JOIN products p ON p.organization_id = pl.organization_id AND p.id = pl.product_id
+        WHERE l.organization_id = ? AND pl.product_id = ? AND p.kind = 'dish' AND l.status = 'active' AND pl.published = 1`,
+      params: [organizationId, productId],
+    }],
+    async read([published, originRow, locations]: D1Result[], db: DbClient, env: CloudflareEnv, product: Product, organizationCurrency?: string | null) {
+      const siteProduct = product.kind === 'experience' || product.kind === 'stay'
+      const path = siteProduct ? presentationForProduct(product).productPath('', product.slug) : product.page?.path ?? null
+      const [readiness, page] = await Promise.all([
+        product.kind === 'experience' || product.kind === 'stay' || product.booking
+          ? productBookingReadiness(db, organizationId, product, { env, ...(organizationCurrency === undefined ? {} : { currency: checkedOrganizationCurrency(organizationId, organizationCurrency) }) }) : null,
+        !siteProduct && product.page ? resolvePublishedTenantPageIdentity(db, organizationId, product.page.path) : null,
+      ])
+      const origin = published!.results.length ? originPlan.read([originRow!], env) : null
+      const publicPath = siteProduct ? path && (!readiness || readiness.ready) ? path : null
+        : page && page.id === product.page?.id && page.product_id === product.id ? page.path : null
+      const publicUrls: Record<string, string> = {}
+      if (origin && product.kind === 'dish') for (const location of locations!.results as { id: string; slug: string }[]) {
+        publicUrls[location.id] = new URL(presentationForProduct(product).productPath(location.slug, product.slug), origin).toString()
+      }
+      return { readiness, publicUrl: origin && publicPath ? new URL(publicPath, origin).toString() : null, publicUrls }
+    },
   }
-  return { readiness, publicUrl: origin && publicPath ? new URL(publicPath, origin).toString() : null, publicUrls }
+}
+
+/** The saved routes a guest may open, shared by MCP and both dashboard editor scopes. */
+export async function productPublicPresentation(db: DbClient, env: CloudflareEnv, organizationId: string, product: Product) {
+  const plan = prepareProductPublicPresentation(organizationId, product.id)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read product publication and links' }), db, env, product)
 }
 
 export async function listProducts(db: DbClient, organizationId: string): Promise<Product[]> {
@@ -2615,18 +2627,18 @@ function collectionRows(rows: Row[], images: Awaited<ReturnType<typeof readMedia
 
 interface CollectionReadScope { organizationId: string; locationId?: string | null; assignedUserId?: string; collectionIds?: readonly string[] }
 
-export function prepareCollectionList(input: { organizationId: string | { sql: string }; locationId?: string | null; assignedUserId?: OfferingReadScope; collectionIds?: readonly string[] }) {
+export function prepareCollectionList(input: { organizationId: string | { sql: string }; locationId?: string | null; assignedUserId?: OfferingReadScope; collectionIds?: readonly string[] | BatchQuery }) {
   const assignment = input.assignedUserId ? assignedOfferingCondition(input.assignedUserId) : null
   const org = typeof input.organizationId === 'string' ? '?' : input.organizationId.sql
   const selection = `
     FROM collections
     WHERE organization_id = ${org}
       AND (? = 0 OR location_id IS ?)
-      ${input.collectionIds ? 'AND id IN (SELECT value FROM json_each(?))' : ''}
+      ${input.collectionIds ? `AND id IN (${Array.isArray(input.collectionIds) ? 'SELECT value FROM json_each(?)' : (input.collectionIds as BatchQuery).query})` : ''}
       ${assignment ? `AND (${assignment.unrestricted} OR EXISTS (SELECT 1 FROM collection_products cp JOIN products p ON p.id = cp.product_id AND p.organization_id = cp.organization_id
         WHERE cp.collection_id = collections.id AND cp.organization_id = collections.organization_id AND (${assignment.sql})))` : ''}
   `
-  const params = [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...(input.collectionIds ? [d1JsonArray(input.collectionIds)] : []), ...assignment?.params ?? []]
+  const params = [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...(input.collectionIds ? Array.isArray(input.collectionIds) ? [d1JsonArray(input.collectionIds)] : (input.collectionIds as BatchQuery).params ?? [] : []), ...assignment?.params ?? []]
   return {
     queries: [
       { query: `SELECT * ${selection} ORDER BY sort_order, name, id`, params },

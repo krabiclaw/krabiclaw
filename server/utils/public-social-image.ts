@@ -77,32 +77,40 @@ export function organizationSocialMediaFromJson(mediaJson: string) {
   return publicSocialMediaFromPlacements('organization', placements, placements)
 }
 
-export async function loadPublicSocialMedia(
-  db: DbClient,
+export function preparePublicSocialMedia(
   organizationId: string,
   ownerType: MediaPlacementOwnerType,
   ownerIds: readonly string[],
-): Promise<Map<string, PublicSocialMedia>> {
-  if (!ownerIds.length) return new Map()
+) {
   const uniqueOwnerIds = [...new Set(ownerIds)]
   // The organization's placements are read for its `social_share`, which is
   // the picture of an owner that has none of its own — never its logo.
-  const [placements, privacy] = await executeBatch(db, [
-    mediaPlacementsQuery({ organizationId, ownerType, owners: uniqueOwnerIds, includeOrganizationFallback: true }),
-    ...(ownerType === 'business_location' ? [{ query: `
-      SELECT bl.id, ${publicLocationProtectedSql('bl')} AS is_stay_location FROM business_locations bl
-       WHERE bl.organization_id = ? AND bl.id IN (SELECT value FROM json_each(?))
-    `, params: [organizationId, d1JsonStringSet(uniqueOwnerIds)] }] : []),
-  ], { operation: 'Read public media and sharing image' })
-  const ownerPlacements = groupMediaPlacements(placements!.results)
-  const organizationMedia = (ownerPlacements.get(organizationId) ?? []).filter(item => item.owner_type === 'organization')
-  const locationPrivacy = new Map((privacy?.results as { id: string; is_stay_location: number }[] | undefined ?? [])
-    .map(location => [location.id, location]))
-  return new Map(uniqueOwnerIds.map((ownerId): [string, PublicSocialMedia] => {
-    const media = (ownerPlacements.get(ownerId) ?? []).filter(item => item.owner_type === ownerType)
-    if (ownerType !== 'business_location') return [ownerId, publicSocialMediaFromPlacements(ownerType, media, organizationMedia)]
-    const source = locationPrivacy.get(ownerId)
-    if (!source) throw new Error('Location social image privacy context is unavailable')
-    return [ownerId, publicLocationSocialMediaFromPlacements(source, media, organizationMedia)]
-  }))
+  return {
+    queries: [
+      mediaPlacementsQuery({ organizationId, ownerType, owners: uniqueOwnerIds, includeOrganizationFallback: true }),
+      ...(ownerType === 'business_location' ? [{ query: `
+        SELECT bl.id, ${publicLocationProtectedSql('bl')} AS is_stay_location FROM business_locations bl
+         WHERE bl.organization_id = ? AND bl.id IN (SELECT value FROM json_each(?))
+      `, params: [organizationId, d1JsonStringSet(uniqueOwnerIds)] }] : []),
+    ],
+    read([placements, privacy]: D1Result[]): Map<string, PublicSocialMedia> {
+      const ownerPlacements = groupMediaPlacements(placements!.results)
+      const organizationMedia = (ownerPlacements.get(organizationId) ?? []).filter(item => item.owner_type === 'organization')
+      const locationPrivacy = new Map((privacy?.results as { id: string; is_stay_location: number }[] | undefined ?? [])
+        .map(location => [location.id, location]))
+      return new Map(uniqueOwnerIds.map((ownerId): [string, PublicSocialMedia] => {
+        const media = (ownerPlacements.get(ownerId) ?? []).filter(item => item.owner_type === ownerType)
+        if (ownerType !== 'business_location') return [ownerId, publicSocialMediaFromPlacements(ownerType, media, organizationMedia)]
+        const source = locationPrivacy.get(ownerId)
+        if (!source) throw new Error('Location social image privacy context is unavailable')
+        return [ownerId, publicLocationSocialMediaFromPlacements(source, media, organizationMedia)]
+      }))
+    },
+  }
+}
+
+export async function loadPublicSocialMedia(db: DbClient, organizationId: string, ownerType: MediaPlacementOwnerType, ownerIds: readonly string[]): Promise<Map<string, PublicSocialMedia>> {
+  if (!ownerIds.length) return new Map()
+  const plan = preparePublicSocialMedia(organizationId, ownerType, ownerIds)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read public media and sharing image' }))
 }

@@ -1,5 +1,5 @@
-import { presentDashboardOffering } from '~/server/utils/dashboard-offering'
-import { hasPublishedHost } from '~/server/utils/public-provider'
+import { prepareDashboardOffering } from '~/server/utils/dashboard-offering'
+import { publishedHostProfilesQuery } from '~/server/utils/public-provider'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { HTTPError } from 'nitro';
 
@@ -20,10 +20,10 @@ import {
 } from '~/server/utils/member-access'
 import { getMediaAsset, listMediaAssets } from '~/server/utils/media-asset-manager'
 import { getDashboardLocationContext } from '~/server/utils/dashboard-context'
-import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
+import { loadPublicSocialMedia, preparePublicSocialMedia } from '~/server/utils/public-social-image'
 import { parseLocationPayload } from '~/server/utils/location-payload'
 import type { Product } from '~/server/types/products'
-import { getProduct, hydrateProductMedia, listCollections, productPublicPresentation, summarizeLocationProducts } from '~/server/utils/product-management'
+import { hydrateProductMedia, prepareOrganizationProduct, prepareProductPublicPresentation, summarizeLocationProducts } from '~/server/utils/product-management'
 import { readWebsiteMember, requireWebsiteAccess } from '~/server/utils/tenant-pages-api'
 import { prepareBlogList } from '~/server/utils/content/publishing'
 import { isArticleCollection } from '~/utils/article-collections'
@@ -229,51 +229,66 @@ export async function loadDashboardBlogPosts(
 }
 
 export async function loadDashboardProduct(
-  event: H3Event,
-  organizationId: string,
-  locationId: string | null,
-  productId: string,
-  editor = false,
+  event: H3Event, organizationId: string, locationId: string | null, productId: string, editor = false,
 ) {
-  const { env, db, organization } = await requireProductAccess(event, organizationId, productId)
-  const product = await getProduct(db, organization.id, productId)
-  return presentDashboardProduct({ env, db, organization }, product, locationId, editor)
+  const context = await requireProductAccess(event, organizationId, productId)
+  const record = prepareOrganizationProduct(context.organization.id, productId)
+  const metadata = await prepareDashboardProductMetadata(context, productId, editor)
+  const rows = await executeBatch(context.db, [...record.queries, ...metadata.queries], { operation: 'Read product editor' })
+  const product = record.read(rows.slice(0, record.queries.length))[0]
+  if (!product) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
+  return metadata.read(rows.slice(record.queries.length), product, locationId)
 }
 
 export async function presentDashboardProduct(
-  { env, db, organization }: Pick<Awaited<ReturnType<typeof requireProductAccess>>, 'env' | 'db' | 'organization'>,
+  context: Pick<Awaited<ReturnType<typeof requireProductAccess>>, 'env' | 'db' | 'organization'>,
   product: Product, locationId: string | null, editor = false,
 ) {
+  const plan = await prepareDashboardProductMetadata(context, product.id, editor)
+  return plan.read(await executeBatch(context.db, plan.queries, { operation: 'Read saved product editor' }), product, locationId)
+}
+
+async function prepareDashboardProductMetadata(
+  context: Pick<Awaited<ReturnType<typeof requireProductAccess>>, 'env' | 'db' | 'organization'>,
+  productId: string, editor: boolean,
+) {
+  const { env, db, organization } = context
   const organizationId = organization.id
-  // The catalog is organization-owned, so being offered here is what makes
-  // this location's editor the right place to open it.
-  if (locationId !== null && !product.locations.some(entry => entry.location_id === locationId)) {
-    throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found at this location' })
-  }
-  // Both editor scopes show the same organization-owned media as the catalog.
   const canPreview = await roleAllows({ organizationId, role: organization.member_role, permissions: { content: ['read'] } })
-  const [[hydrated], { publicUrl, publicUrls }, hostProfilePublished, collections, previewToken] = await Promise.all([
-    hydrateProductMedia(db, organization.id, [product]),
-    productPublicPresentation(db, env, organization.id, product),
-    product.stay ? hasPublishedHost(db, organization.id, product.stay) : null,
-    editor && product.kind === 'stay' && product.collections.length ? listCollections(db, {
-      organizationId, collectionIds: product.collections.map(entry => entry.collection_id),
-    }) : [],
-    editor && canPreview && isOrganizationWideRole(organization.member_role) && ['dish', 'experience', 'service'].includes(product.kind)
-      ? editorPreviewToken(env.PREVIEW_SECRET, organizationId) : null,
-  ])
-  const offering = editor && product.kind !== 'stay' ? await presentDashboardOffering({ env, db, organization }, hydrated!, locationId) : null
-  let previewUrl: string | null = null
-  if (product.kind === 'stay' && organization.subdomain && canPreview) {
-    const origin = tenantOrganizationOrigin({
-      platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
-      freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
-      subdomain: organization.subdomain,
-    })
-    if (!origin) throw new Error('Listing preview has no configured site address')
-    const url = new URL(presentationForProduct(product).productPath('', product.slug), origin)
-    url.searchParams.set(PREVIEW_TOKEN_QUERY, await editorPreviewToken(env.PREVIEW_SECRET, organizationId))
-    previewUrl = url.toString()
+  const media = preparePublicSocialMedia(organizationId, 'product', [productId])
+  const links = prepareProductPublicPresentation(organizationId, productId)
+  const navigation = editor ? await prepareDashboardOffering(context, productId) : null
+  const mediaEnd = media.queries.length
+  const linksEnd = mediaEnd + links.queries.length
+  const navigationEnd = linksEnd + (navigation?.queries.length ?? 0)
+  return {
+    queries: [...media.queries, ...links.queries, ...navigation?.queries ?? [], publishedHostProfilesQuery(organizationId, {
+      query: "SELECT assigned_member_id FROM product_booking_configs WHERE organization_id = ? AND product_id = ? AND unit = 'nights'",
+      params: [organizationId, productId],
+    })],
+    async read(rows: D1Result[], product: Product, locationId: string | null) {
+      if (locationId !== null && !product.locations.some(entry => entry.location_id === locationId)) {
+        throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found at this location' })
+      }
+      const [hydrated] = await hydrateProductMedia(db, organizationId, [product], media.read(rows.slice(0, mediaEnd)))
+      const { publicUrl, publicUrls } = await links.read(rows.slice(mediaEnd, linksEnd), db, env, product, organization.default_currency)
+      const details = navigation?.read(rows.slice(linksEnd, navigationEnd), hydrated!, locationId)
+      const hostProfilePublished = product.stay ? rows[navigationEnd]!.results.length > 0 : null
+      const previewToken = editor && canPreview && isOrganizationWideRole(organization.member_role) && ['dish', 'experience', 'service'].includes(product.kind)
+        ? await editorPreviewToken(env.PREVIEW_SECRET, organizationId) : null
+      let previewUrl: string | null = null
+      if (product.kind === 'stay' && organization.subdomain && canPreview) {
+        const origin = tenantOrganizationOrigin({ platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
+          freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '', subdomain: organization.subdomain })
+        if (!origin) throw new Error('Listing preview has no configured site address')
+        const url = new URL(presentationForProduct(product).productPath('', product.slug), origin)
+        url.searchParams.set(PREVIEW_TOKEN_QUERY, await editorPreviewToken(env.PREVIEW_SECRET, organizationId))
+        previewUrl = url.toString()
+      }
+      return { success: true as const, product: hydrated!,
+        ...(editor ? { collections: product.stay ? details!.collections : [], preview_token: previewToken, locations: details!.locations } : {}),
+        public_url: publicUrl, public_urls: publicUrls, preview_url: previewUrl, host_profile_published: hostProfilePublished,
+        offering: details?.offering ?? null }
+    },
   }
-  return { success: true as const, product: hydrated!, ...(editor ? { collections, preview_token: previewToken } : {}), public_url: publicUrl, public_urls: publicUrls, preview_url: previewUrl, host_profile_published: hostProfilePublished, offering }
 }

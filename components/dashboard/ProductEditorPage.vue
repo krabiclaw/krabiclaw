@@ -516,9 +516,7 @@ const managesCatalog = computed(() => {
   const role = dashboard.organization.value?.role
   return Boolean(role) && authClient.organization.checkRolePermission({ role: role as keyof typeof organizationRoles, permissions: { products: ['update'] } })
 })
-const { locations: allOrganizationLocations, error: locationsError, pending: locationsPending } = await useOrganizationLocations({ includeInactive: true })
-const organizationLocations = computed(() => allOrganizationLocations.value.filter(entry => entry.status === 'active'))
-const location = computed(() => allOrganizationLocations.value.find(entry => entry.id === locationId.value) ?? null)
+
 
 // The words follow the product's kind: a class is an experience whatever the
 // site sells otherwise. Until a kind is loaded or chosen there are no words for
@@ -531,7 +529,6 @@ const itemLabel = computed(() => presentation.value?.itemLabel ?? 'Product')
 const rawCurrency = dashboard.organization.value?.default_currency
 if (!isCurrencyCode(rawCurrency)) throw createError({ statusCode: 500, statusMessage: 'Unsupported organization currency' })
 const currency = rawCurrency
-const { priceLabel } = useCatalogPrice(computed(() => priceLocationId()), allOrganizationLocations)
 
 // ── Which leaf is open ──────────────────────────────────
 
@@ -594,8 +591,10 @@ watch(editorKey, () => {
 
 const isOne = (value: unknown): value is { success: true, product: Product } =>
   isRecord(value) && value.success === true && isRecord(value.product) && typeof value.product.id === 'string' && Boolean(value.product.id.trim())
-const isProductRead = (value: unknown): value is { success: true; product: Product; collections: Collection[]; preview_token: string | null; public_url: string | null; public_urls: Record<string, string>; preview_url: string | null; host_profile_published: boolean | null; offering: CatalogScreen | null } =>
-  isOne(value) && 'offering' in value && (value.offering === null || isRecord(value.offering) && Array.isArray(value.offering.rows))
+const isProductRead = (value: unknown): value is { success: true; product: Product; collections: Collection[]; preview_token: string | null; public_url: string | null; public_urls: Record<string, string>; preview_url: string | null; host_profile_published: boolean | null; offering: CatalogScreen | null; locations: DashboardLocation[] } =>
+  isOne(value) && 'locations' in value && Array.isArray(value.locations)
+  && value.locations.every(location => isRecord(location) && typeof location.id === 'string' && typeof location.slug === 'string')
+  && 'offering' in value && (value.offering === null || isRecord(value.offering) && Array.isArray(value.offering.rows))
   && 'collections' in value && Array.isArray(value.collections)
   && 'preview_token' in value && (value.preview_token === null || typeof value.preview_token === 'string')
   && 'public_url' in value && (value.public_url === null || typeof value.public_url === 'string')
@@ -608,7 +607,7 @@ const isMutation = (value: unknown): value is { success: true; product: ProductM
 
 // The product in this scope, read before the level renders. Keyed by location
 // and product, so a scope change reads that location's prices and settings.
-type ProductEditorRead = { collections: Collection[]; product: Product; previewToken: string | null; previewUrl: string | null; publicUrl: string | null; publicUrls: Record<string, string>; hostProfilePublished: boolean | null; offering: CatalogScreen | null } | null
+type ProductEditorRead = { collections: Collection[]; product: Product; previewToken: string | null; previewUrl: string | null; publicUrl: string | null; publicUrls: Record<string, string>; hostProfilePublished: boolean | null; offering: CatalogScreen | null; locations: DashboardLocation[] } | null
 const productReadKey = computed(() => `dashboard-product:${organizationId}:${locationScope.value ?? 'organization'}:${productId.value}`)
 const { data: loaded, error: loadFailure, refresh } = await useWebsiteIndexData<ProductEditorRead>(
   productReadKey,
@@ -618,12 +617,17 @@ const { data: loaded, error: loadFailure, refresh } = await useWebsiteIndexData<
     const path = `/api/editor/organizations/${organizationId}${id ? `/locations/${encodeURIComponent(id)}` : ''}/products/${encodeURIComponent(productId.value)}`
     const response = await dashboardApi(path, { validate: isProductRead, signal, query: { editor: '1' } })
     if (locationScope.value === 'online' && !response.product.booking?.held_online) throw createError({ statusCode: 404, statusMessage: 'This product is not held online' })
-    return { collections: response.collections, product: response.product, previewToken: response.preview_token, previewUrl: response.preview_url, publicUrl: response.public_url, publicUrls: response.public_urls, hostProfilePublished: response.host_profile_published, offering: response.offering }
+    return { collections: response.collections, product: response.product, previewToken: response.preview_token, previewUrl: response.preview_url, publicUrl: response.public_url, publicUrls: response.public_urls, hostProfilePublished: response.host_profile_published, offering: response.offering, locations: response.locations }
   },
 
 )
 
 const product = computed(() => loaded.value?.product ?? null)
+const { locations: allOrganizationLocations, error: locationsError, pending: locationsPending } = await useOrganizationLocations({ includeInactive: true, initial: loaded.value?.locations })
+const organizationLocations = computed(() => allOrganizationLocations.value.filter(entry => entry.status === 'active'))
+const location = computed(() => allOrganizationLocations.value.find(entry => entry.id === locationId.value) ?? null)
+const { priceLabel } = useCatalogPrice(computed(() => priceLocationId()), allOrganizationLocations)
+
 const stayLocation = computed(() => allOrganizationLocations.value.find(entry => entry.id === product.value?.stay?.location_id) ?? null)
 const stayLocationError = computed(() => {
   if (!product.value?.stay) return null
@@ -800,22 +804,12 @@ const loadError = computed(() => (loadFailure.value && !isNotFoundError(loadFail
 const editVersion = ref<string | null>(null)
 
 async function patchProduct(body: Record<string, unknown>, idempotencyKey?: string) {
-  const current = loaded.value
-  if (current?.product.kind === 'stay') {
-    const { product: saved } = await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
-      method: 'PATCH', body, ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}), validate: isMutation,
-    })
-    const { image, gallery, media, social_image } = current.product
-    return { success: true as const, product: { ...saved, image, gallery, media, social_image },
-      collections: current.collections, preview_token: current.previewToken, preview_url: current.previewUrl,
-      public_url: current.publicUrl, public_urls: current.publicUrls, host_profile_published: current.hostProfilePublished, offering: current.offering }
-  }
   return dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
     method: 'PATCH', body, query: { editor: '1', location_id: locationId.value ?? undefined },
     ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
     validate: (value): value is { success: true; product: ProductMutation;
       collections: Collection[]; preview_token: string | null; preview_url: string | null; public_url: string | null;
-      public_urls: Record<string, string>; host_profile_published: boolean | null; offering: CatalogScreen | null } => isProductRead(value) && isMutation(value),
+      public_urls: Record<string, string>; host_profile_published: boolean | null; offering: CatalogScreen | null; locations: DashboardLocation[] } => isProductRead(value) && isMutation(value),
   })
 }
 
@@ -1773,7 +1767,7 @@ async function commit(concern?: ProductConcern) {
       const saved = savedEditor.product
       loaded.value = { product: saved, collections: savedEditor.collections, previewToken: savedEditor.preview_token,
         previewUrl: savedEditor.preview_url, publicUrl: savedEditor.public_url,
-        publicUrls: savedEditor.public_urls, hostProfilePublished: savedEditor.host_profile_published, offering: savedEditor.offering }
+        publicUrls: savedEditor.public_urls, hostProfilePublished: savedEditor.host_profile_published, offering: savedEditor.offering, locations: savedEditor.locations }
       applyProduct(saved)
       editVersion.value = saved.updated_at
       const held = realtime.held.begin(`website:${productReadKey.value}`, businessChanged)
