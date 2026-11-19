@@ -9,13 +9,20 @@
 
 <script setup lang="ts">
 import { buildTenantHeadLinks } from '~/utils/tenant-head'
+import { isPublicMenuProduct } from '~/utils/public-resource-contracts'
 
 const { organization } = useTenantOrganization()
 const { site } = organization
 const isPlatform = site.slug === 'platform'
 
 const organizationShell = isPlatform ? null : useOrganizationShellState()
-if (import.meta.server) await organizationShell?.ready
+if (import.meta.server && organizationShell) {
+  const page = String(useRoute().name).replace(/^localized-/, '')
+  const content = page === 'menu'
+    ? usePublicPageData({ datasets: ['menu_cards'], validateProduct: isPublicMenuProduct })
+    : page === 'reviews' ? usePublicPageData() : undefined
+  await Promise.all([organizationShell.ready, content])
+}
 if (organizationShell?.error.value) throw createError(organizationShell.error.value)
 useHead(() => {
   const verification = organizationShell?.search_console_verification.value ?? organizationShell?.config.value.search_console_verification
