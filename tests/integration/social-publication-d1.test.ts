@@ -220,7 +220,7 @@ async function setUp() {
   const run = (sql: string) => db.prepare(sql).run()
   for (const organization of ['org-a', 'org-b']) {
     await run(`INSERT INTO organization (id, name, slug, subdomain, status, onboarding_status, default_currency, timezone) VALUES ('${organization}', '${organization}', '${organization}', '${organization}', 'active', 'active', 'USD', 'UTC')`)
-    await run(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('domain-${organization}', '${organization}', '${organization}.krabiclaw.test', 'subdomain', 'canonical', 'active')`)
+    await run(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('domain-${organization}', '${organization}', '${organization}.blawby.test', 'subdomain', 'canonical', 'active')`)
     await run(`INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('${organization}-en', '${organization}', 'en', 1, 'published')`)
     await run(`INSERT INTO subscription (id, plan, referenceId, status) VALUES ('sub-${organization}', 'growth', '${organization}', 'active')`)
   }

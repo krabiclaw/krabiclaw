@@ -157,7 +157,7 @@ export async function prepareD1SeedFile(seedPath, maxStatementBytes = DEFAULT_MA
     return { ...normalized, path: seedPath, cleanup: async () => {} }
   }
 
-  const directory = await mkdtemp(join(tmpdir(), 'krabiclaw-d1-seed-'))
+  const directory = await mkdtemp(join(tmpdir(), 'blawby-d1-seed-'))
   const path = join(directory, basename(seedPath))
   await writeFile(path, normalized.sql, 'utf8')
   return {

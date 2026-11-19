@@ -519,7 +519,7 @@ test('Checkout proof attaches ownership without exposing merchant financial data
   // Another business's site cannot complete this business's payment.
   await assert.rejects(()=>completePaymentReturn(db,env,'another-org','claim',token,async()=>'verified'),error=>error instanceof HTTPError&&error.statusCode===404)
   // An anonymous checkout's purchase passes to the account that proves it.
-  await db.prepare("INSERT INTO user(id,name,email,isAnonymous) VALUES('anon-buyer','Guest','anon-buyer@customers.krabiclaw.local',1)").run()
+  await db.prepare("INSERT INTO user(id,name,email,isAnonymous) VALUES('anon-buyer','Guest','anon-buyer@customers.blawby.test',1)").run()
   await db.prepare("UPDATE payments SET buyer_user_id='anon-buyer' WHERE id='claim'").run()
   assert.deepEqual(await claimCheckoutReturn(db,'verified',token),{payment_id:'claim',claimed:true})
   const originalClaim=await db.prepare('SELECT return_token_hash,return_expires_at AS expires_at,claimed_at,claimed_user_id FROM payments WHERE return_token_hash=?').bind(hash).first()
@@ -1146,7 +1146,7 @@ async function confirmable(db: D1Database, id: string, holdExpires: string, chec
  const provenance = { source: 'website', external_reference: null, actor_user_id: null, idempotency_key: `checkout-${id}`, fingerprint: `fingerprint-${id}`, guest_acknowledgement: true, creation_kind: 'checkout' as const, creation_status: 'pending' as const, followups_completed: false }
  const threadId = `request-${id}`
  const cancellation = await createReplayableReservationCancelToken(CHECKOUT_REPLY_SECRET, threadId)
- const opening = { id: threadId, kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: { ...threadPayloadForGuest({ name: 'Guest', email: 'buyer@krabiclaw-proof.com' }), provenance,
+ const opening = { id: threadId, kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: { ...threadPayloadForGuest({ name: 'Guest', email: 'buyer@blawby-proof.test' }), provenance,
   cancellation: { token_hash: await hashReservationCancelToken(cancellation.token), expires_at: cancellation.expiresAt, used_at: null } }, created_at: NOW }
  await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
  await db.prepare("UPDATE payments SET return_token_hash=?,return_expires_at='2099-01-01T00:00:00.000Z',review_json=? WHERE id=?").bind(await tokenHash(claim), JSON.stringify({ payment_method_id: 'pm_proof', subtotal: 10000, tax: 0, tax_included: 0, surcharge: 0, total: 10000, reviewed_at: NOW }), id).run()
@@ -1174,7 +1174,7 @@ function fakeStripe(t: TestContext, handle: (url: URL, init: RequestInit | undef
   const [, , resource, id, action] = url.pathname.split('/')
   const paymentId = id?.replace(/^(pi|ch)_/u, '')
   const charge = { id: `ch_${paymentId}`, object: 'charge', livemode: false, amount: 10000, currency: 'usd', created: 1_790_000_000,
-   payment_intent: `pi_${paymentId}`, receipt_url: 'https://pay.stripe.com/receipts/proof', billing_details: { email: 'buyer@krabiclaw-proof.com' } }
+   payment_intent: `pi_${paymentId}`, receipt_url: 'https://pay.stripe.com/receipts/proof', billing_details: { email: 'buyer@blawby-proof.test' } }
   const intent = () => ({ id: `pi_${paymentId}`, object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000,
    amount_received: statuses[paymentId!] === 'succeeded' ? 10000 : 0, status: statuses[paymentId!], client_secret: `pi_${paymentId}_secret`,
    payment_method: 'pm_proof', latest_charge: ['succeeded', 'requires_capture'].includes(statuses[paymentId!]!) ? charge : null,
@@ -1218,7 +1218,7 @@ function resendOutbox(t: TestContext): string[] {
 /** The business's owner and administrator, who hear about its payouts and plan; its member does not. */
 async function ownersAndAdmins(db: D1Database) {
  for (const role of ['owner', 'admin']) {
-  await db.prepare('INSERT INTO user(id,name,email,emailVerified) VALUES(?,?,?,1)').bind(role, role, `${role}@krabiclaw-proof.com`).run()
+  await db.prepare('INSERT INTO user(id,name,email,emailVerified) VALUES(?,?,?,1)').bind(role, role, `${role}@blawby-proof.test`).run()
   await db.prepare('INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES(?,?,?,?,1)').bind(`${role}-member`, ORG, role, role).run()
  }
 }
@@ -1605,8 +1605,8 @@ test('a payout sent and a payout failed are emailed to the business owner and ad
   await deliver('paid')
   const mail = sentMail(emails)
   assert.deepEqual(mail.map(sent => [sent.subject, String(sent.to)]).sort(), [
-   ['Payout failed', 'admin@krabiclaw-proof.com'], ['Payout failed', 'owner@krabiclaw-proof.com'],
-   ['Payout paid', 'admin@krabiclaw-proof.com'], ['Payout paid', 'owner@krabiclaw-proof.com'],
+   ['Payout failed', 'admin@blawby-proof.test'], ['Payout failed', 'owner@blawby-proof.test'],
+   ['Payout paid', 'admin@blawby-proof.test'], ['Payout paid', 'owner@blawby-proof.test'],
   ], 'owners and admins hear; the business\'s member does not')
   for (const sent of mail) {
    assert.match(sent.html, /\$250\.00 USD/u)
@@ -1617,10 +1617,10 @@ test('a payout sent and a payout failed are emailed to the business owner and ad
   // Each send is recorded as sent by Resend, to the person it went to.
   const receipts = (await db.prepare("SELECT provider, status, json_extract(email_json, '$.message.subject') subject, json_extract(email_json, '$.message.to') recipient FROM guest_thread_deliveries WHERE channel = 'email' ORDER BY subject, recipient").all()).results
   assert.deepEqual(receipts, [
-   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'admin@krabiclaw-proof.com' },
-   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'owner@krabiclaw-proof.com' },
-   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'admin@krabiclaw-proof.com' },
-   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'owner@krabiclaw-proof.com' },
+   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'admin@blawby-proof.test' },
+   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'owner@blawby-proof.test' },
+   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'admin@blawby-proof.test' },
+   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'owner@blawby-proof.test' },
   ])
  } finally { await runtime.dispose() }
 })
@@ -1766,7 +1766,7 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
    const url = new URL(request instanceof Request ? request.url : String(request))
    if (url.hostname === 'api.resend.com' && init?.method === 'POST') {
     const mail = JSON.parse(String(init.body)) as { subject: string; to: string[] }
-    if (refuseEndingOwnerEmail && mail.subject === 'Your Business plan will not renew' && mail.to.includes('owner@krabiclaw-proof.com')) {
+    if (refuseEndingOwnerEmail && mail.subject === 'Your Business plan will not renew' && mail.to.includes('owner@blawby-proof.test')) {
      refuseEndingOwnerEmail = false
      return Response.json({ name: 'internal_server_error', message: 'Plan email temporarily unavailable' }, { status: 500 })
     }
@@ -1797,7 +1797,7 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
   await deliver({ id: 'evt_checkout_created', type: 'customer.subscription.created', data: { object: trialing } })
   assert.equal(emails.length, 0, 'the Checkout subscription has one start notice on completion')
   await deliver({ id: 'evt_checkout', type: 'checkout.session.completed', data: { object: { id: 'cs_plan', object: 'checkout.session', mode: 'subscription', subscription: 'sub_plan', client_reference_id: ORG, metadata: { subscriptionId: 'sub-row', referenceId: ORG } } } })
-  assert.deepEqual(subjects(), [['Your new plan: Growth', 'admin@krabiclaw-proof.com'], ['Your new plan: Growth', 'owner@krabiclaw-proof.com']])
+  assert.deepEqual(subjects(), [['Your new plan: Growth', 'admin@blawby-proof.test'], ['Your new plan: Growth', 'owner@blawby-proof.test']])
   const started = sentMail(emails)[0]!.html
   assert.match(started, /Payments is on Growth\./u)
   assert.match(started, /Free trial ends/u)
@@ -1811,7 +1811,7 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
   // A renewal changes the subscription without changing its plan.
   await deliver({ id: 'evt_renewed', type: 'customer.subscription.updated', data: { object: subscription('business'), previous_attributes: { latest_invoice: 'in_previous' } } })
   assert.equal(emails.length, 4)
-  assert.deepEqual(subjects().slice(2), [['Your plan changed to Business', 'admin@krabiclaw-proof.com'], ['Your plan changed to Business', 'owner@krabiclaw-proof.com']])
+  assert.deepEqual(subjects().slice(2), [['Your plan changed to Business', 'admin@blawby-proof.test'], ['Your plan changed to Business', 'owner@blawby-proof.test']])
   assert.match(sentMail(emails)[2]!.html, /Payments moved from Growth to Business\./u)
 
   // A trial set to end sends a notice too. Stripe retries only the failed delivery.
@@ -1823,7 +1823,7 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
   await deliver(ending)
   assert.equal(emails.length, 6)
   const notRenewing = sentMail(emails).slice(4)
-  assert.deepEqual(notRenewing.map(sent => [sent.subject, String(sent.to)]).sort(), [['Your Business plan will not renew', 'admin@krabiclaw-proof.com'], ['Your Business plan will not renew', 'owner@krabiclaw-proof.com']])
+  assert.deepEqual(notRenewing.map(sent => [sent.subject, String(sent.to)]).sort(), [['Your Business plan will not renew', 'admin@blawby-proof.test'], ['Your Business plan will not renew', 'owner@blawby-proof.test']])
   assert.match(notRenewing[0]!.html, /Business stays on until Oct 21, 2026\. After that, Payments is on Basic\./u)
 
   // Read back apart from the sends: Better Auth's subscription, and each email Resend accepted.

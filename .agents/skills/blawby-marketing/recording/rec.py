@@ -5,7 +5,7 @@ cursor moves with cliclick so the recording shows it. Run work goes in
 REC_DIR (default ./recording-run): clips/<name>.mov, screenshots, scratch JS.
 
     import rec
-    rec.open_window("https://krabiclaw.com/dashboard/...")  # once; sets rec.W
+    rec.open_window("https://blawby.com/dashboard/...")  # once; sets rec.W
     rec.start("scene-a"); rec.click("Connect Google Ads"); rec.stop()
 """
 import json, os, signal, subprocess, time

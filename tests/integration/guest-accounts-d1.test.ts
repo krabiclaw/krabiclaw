@@ -15,8 +15,8 @@ test('a verified account gathers the guest identities that used only its email, 
     await db.prepare("INSERT INTO organization(id,name,slug,subdomain,status, default_currency, timezone) VALUES('pottery','Pottery','pottery','pottery','active', 'USD', 'UTC'),('kikuzuki','Kikuzuki','kikuzuki','kikuzuki','active', 'USD', 'UTC')").run()
     const users: Array<[string, string, number, number]> = [
       ['jane', 'Jane@Example.com', 1, 0], ['unverified', 'sam@example.com', 0, 0],
-      ['guest-pottery', 'anon-1@customers.krabiclaw.local', 0, 1], ['guest-kikuzuki', 'anon-2@customers.krabiclaw.local', 0, 1],
-      ['guest-shared', 'anon-3@customers.krabiclaw.local', 0, 1], ['guest-sam', 'anon-4@customers.krabiclaw.local', 0, 1],
+      ['guest-pottery', 'anon-1@customers.blawby.test', 0, 1], ['guest-kikuzuki', 'anon-2@customers.blawby.test', 0, 1],
+      ['guest-shared', 'anon-3@customers.blawby.test', 0, 1], ['guest-sam', 'anon-4@customers.blawby.test', 0, 1],
     ]
     for (const [id, email, verified, anonymous] of users) await db.prepare('INSERT INTO user(id,name,email,"emailVerified","isAnonymous") VALUES(?,?,?,?,?)').bind(id, id, email, verified, anonymous).run()
     const request = (id: string, organization: string, user: string, email: string, kind = 'booking') => db.batch([

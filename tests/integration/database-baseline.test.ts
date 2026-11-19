@@ -60,7 +60,7 @@ test('moving free sites preserves existing links and custom primary domains', ()
 
 test('snapshot payload preserves destination signing keys for refreshes and carries source keys for replacements', async () => {
   const { writePayload } = await import('../../scripts/transfer-database-export.mjs')
-  const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-signing-transfer-'))
+  const directory = mkdtempSync(join(tmpdir(), 'blawby-signing-transfer-'))
   const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
   const schema = journal.entries.map(entry => readFileSync(`migrations/${entry.tag}.sql`, 'utf8')).join('\n')
   const source = new Database(':memory:')
