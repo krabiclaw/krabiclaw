@@ -11,7 +11,7 @@ import { isValidTimezone } from '~/utils/timezone'
 import { ORGANIZATION_FONT_PRESETS, isOrganizationFontPreset, resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { purgeOrganizationCaches, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import type { UpdateOrganizationSettingsRequest } from '~/server/types/organization'
-import { integrationSummary, listIntegrations } from '~/server/utils/organization-integrations'
+import { integrationSummary, integrationsFromRows, integrationsQuery, listIntegrations } from '~/server/utils/organization-integrations'
 import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 import { buildSingleMediaPlacementQueries, hydrateMediaAssetRefs, readMediaPlacements } from '~/server/utils/media-asset-manager'
@@ -92,12 +92,13 @@ const INTEGRATION_LOCATIONS_JSON = `(SELECT json_group_array(json_object('id', i
                      WHERE bl.organization_id = organization.id AND bl.status = 'active' ORDER BY bl.title, bl.id))`
 
 export async function loadConnectionSummary(db: DbClient, env: CloudflareEnv, organizationId: string) {
-  const [organization, integrations] = await Promise.all([
-    queryFirst<{ locations_json: string }>(db, `SELECT ${INTEGRATION_LOCATIONS_JSON} AS locations_json FROM organization WHERE id = ?`, [organizationId]),
-    listIntegrations(db, organizationId),
-  ])
-  if (!organization) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
-  return integrationsSummary(db, env, organizationId, integrations, JSON.parse(organization.locations_json) as IntegrationLocation[])
+  const [business, linked] = await executeBatch(db, [
+    { query: `SELECT ${INTEGRATION_LOCATIONS_JSON} AS locations_json FROM organization WHERE id = ?`, params: [organizationId] },
+    integrationsQuery(organizationId),
+  ], { operation: 'Read Connections and locations' })
+  const organization = business!.results[0] as { locations_json: string } | undefined
+  if (!organization) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
+  return integrationsSummary(db, env, organizationId, integrationsFromRows(linked!.results), JSON.parse(organization.locations_json) as IntegrationLocation[])
 }
 
 export async function loadSettingsPayload(

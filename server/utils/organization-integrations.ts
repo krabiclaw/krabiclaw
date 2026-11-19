@@ -41,8 +41,17 @@ export async function readIntegration(db: DbClient, organizationId: string, prov
   return row ? project(row) : null
 }
 
+export function integrationsQuery(organizationId: string) {
+  return { query: `SELECT ${COLUMNS} FROM organization_integrations WHERE organization_id = ? AND status IS NOT 'setting_up' ORDER BY provider`, params: [organizationId] }
+}
+
+export function integrationsFromRows(rows: unknown[]): OrganizationIntegration[] {
+  return (rows as Row[]).map(project)
+}
+
 export async function listIntegrations(db: DbClient, organizationId: string): Promise<OrganizationIntegration[]> {
-  return (await queryAll<Row>(db, `SELECT ${COLUMNS} FROM organization_integrations WHERE organization_id = ? AND status IS NOT 'setting_up' ORDER BY provider`, [organizationId])).map(project)
+  const { query, params } = integrationsQuery(organizationId)
+  return integrationsFromRows(await queryAll(db, query, params))
 }
 
 /** The organizations connected through one linked account. */

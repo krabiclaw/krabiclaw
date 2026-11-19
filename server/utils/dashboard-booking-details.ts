@@ -183,17 +183,16 @@ async function bookingContext(event: H3Event, organizationSlug?: string | null):
 /** Whose booking: the business that hosts it, or the account that currently owns it. */
 type BookingScope = { organizationId: string; buyerUserId?: undefined } | { buyerUserId: string; organizationId?: undefined }
 
-async function loadBookingRow(
-  db: DbClient,
+function bookingRowQuery(
   scope: BookingScope,
   type: DashboardBookingType,
   bookingId: string,
   lookup: 'booking' | 'conversation' = 'conversation',
-): Promise<BookingRow | null> {
+) {
   // When, for how many and against what all live on the booking the thread
   // refers to, not on the thread. The thread carries the conversation and the
   // guest.
-  return queryFirst<BookingRow>(db, `SELECT record.id AS booking_id, record.version, r.organization_id, s.name AS organization_name, s.vertical,
+  return { query: `SELECT record.id AS booking_id, record.version, r.organization_id, s.name AS organization_name, s.vertical,
     record.assigned_member_id, record.policy_json, record.product_kind, record.location_id,
     l.slug AS location_slug, l.title AS location_title, l.address AS location_address,
     l.latitude AS location_latitude, l.longitude AS location_longitude, l.maps_url AS location_maps_url,
@@ -216,7 +215,12 @@ async function loadBookingRow(
     LEFT JOIN member_scheduling ms ON ms.organization_id = record.organization_id AND ms.member_id = record.assigned_member_id
     LEFT JOIN member host_member ON host_member.organizationId = record.organization_id AND host_member.id = record.assigned_member_id
     LEFT JOIN user u ON u.id = host_member.userId
-    WHERE ${lookup === 'booking' ? 'record.id' : 'r.id'} = ? AND record.product_session_id IS NOT NULL AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${CURRENT_GUEST_SQL('r')}` : 'r.organization_id = ?'}`, [bookingId, type, scope.buyerUserId ?? scope.organizationId])
+    WHERE ${lookup === 'booking' ? 'record.id' : 'r.id'} = ? AND record.product_session_id IS NOT NULL AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${CURRENT_GUEST_SQL('r')}` : 'r.organization_id = ?'}`, params: [bookingId, type, scope.buyerUserId ?? scope.organizationId] }
+}
+
+async function loadBookingRow(db: DbClient, ...input: Parameters<typeof bookingRowQuery>) {
+  const { query, params } = bookingRowQuery(...input)
+  return queryFirst<BookingRow>(db, query, params)
 }
 
 async function assertBookingAccess(context: BookingAccessContext, row: BookingRow, action: 'read' | 'update' = 'read') {
@@ -258,13 +262,25 @@ export async function loadDashboardPurchaseDetails(event: H3Event, paymentId: st
   return composePurchaseDetails(db, env, { organizationId: organization.id }, paymentId)
 }
 
-export async function loadStaffBookingDetails(context: BookingAccessContext, bookingId: string): Promise<DashboardBookingDetails> {
+type BookingDetailScope = Pick<BookingRow, 'booking_id' | 'conversation_id' | 'organization_id' | 'location_id' | 'product_id' | 'product_kind'>
+type BookingDetailReader = { env: CloudflareEnv; canReadPayments: boolean; buyerUserId?: undefined }
+  | { buyerUserId: string; env: CloudflareEnv; canReadPayments?: undefined }
+
+export async function loadStaffBookingDetails(context: BookingAccessContext, scope: BookingDetailScope): Promise<DashboardBookingDetails> {
   const { db, env, organization } = context
-  const row = await loadBookingRow(db, { organizationId: organization.id }, 'booking', bookingId, 'booking')
+  const canReadPayments = await roleAllows({ organizationId: organization.id, role: organization.role, permissions: { payments: ['read'] } })
+  const reader = { env, canReadPayments }
+  const [primary, ...facts] = await executeBatch(db, [
+    bookingRowQuery({ organizationId: organization.id }, 'booking', scope.booking_id, 'booking'),
+    ...bookingDetailFacts(scope, reader),
+  ], { operation: 'Read the staff reservation' })
+  const row = primary!.results[0] as BookingRow | undefined
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   await assertBookingAccess(context, row)
-  const canReadPayments = await roleAllows({ organizationId: organization.id, role: organization.role, permissions: { payments: ['read'] } })
-  return composeBookingDetails(db, row, 'booking', { env, canReadPayments })
+  if (row.location_id !== scope.location_id || row.product_id !== scope.product_id || row.product_kind !== scope.product_kind || row.conversation_id !== scope.conversation_id) {
+    throw new HTTPError({ statusCode: 409, message: 'The booking changed while it was being loaded' })
+  }
+  return composeBookingDetails(db, row, 'booking', reader, facts)
 }
 
 /**
@@ -295,19 +311,7 @@ export async function loadBuyerBookingDetails(
   return composeBookingDetails(db, row, type, { env, buyerUserId: userId })
 }
 
-async function composeBookingDetails(
-  db: DbClient,
-  row: BookingRow,
-  type: DashboardBookingType,
-  reader: { env: CloudflareEnv; canReadPayments: boolean; buyerUserId?: undefined } | { buyerUserId: string; env: CloudflareEnv; canReadPayments?: undefined },
-): Promise<DashboardBookingDetails> {
-  if (row.location_id !== null && !row.location_title) throw new HTTPError({ statusCode: 500, message: 'The booking location is missing its title' })
-  const { location_latitude: latitude, location_longitude: longitude, location_maps_url, location_address, location_title,
-    policy_json: _policy, answers_json, cancellation_used_at: _cancellation, private_notes, host_json, ...booking } = row
-  const address = parsePostalAddress(location_address)
-  const pinFailure = coordinatesFailure({ latitude, longitude })
-  if (pinFailure) throw new HTTPError({ statusCode: 500, message: pinFailure.error, data: { code: 'INVALID_STORED_LOCATION', field: pinFailure.field } })
-
+function bookingDetailFacts(row: BookingDetailScope, reader: BookingDetailReader) {
   // A table may move to the business's tables at any of its locations; anything else stays where it is.
   const locationSelection = row.product_kind === 'table' ? {
     query: `SELECT DISTINCT l.id, l.title
@@ -315,10 +319,10 @@ async function composeBookingDetails(
          JOIN products p ON p.id = pl.product_id AND p.organization_id = l.organization_id AND p.kind = 'table'
          JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
         WHERE l.organization_id = ? ORDER BY l.title`, params: [row.organization_id],
-  } : { query: 'SELECT ? AS id, ? AS title WHERE ? IS NOT NULL', params: [row.location_id, location_title, row.location_id] }
+  } : { query: 'SELECT id, title FROM business_locations WHERE organization_id = ? AND id = ?', params: [row.organization_id, row.location_id] }
   const resourceId = row.product_kind === 'table' ? row.location_id : row.product_id
   const canReadPayments = Boolean(reader.buyerUserId || reader.canReadPayments)
-  const [places, placeMedia, photos, locale, proposal, review, receipt] = await executeBatch(db, [
+  return [
     locationSelection,
     mediaPlacementsQuery({ organizationId: row.organization_id, ownerType: 'business_location', includeOrganizationFallback: true,
       owners: { sql: `SELECT id FROM (${locationSelection.query})`, params: locationSelection.params } }),
@@ -329,7 +333,26 @@ async function composeBookingDetails(
     { query: 'SELECT first_sent_at, submitted_at, revoked_at, expires_at FROM review_requests WHERE booking_id = ? AND ? = 1 ORDER BY created_at DESC LIMIT 1',
       params: [row.booking_id, Number(!reader.buyerUserId)] },
     ...(canReadPayments ? [paymentReceiptsQuery(row.organization_id, { bookingId: row.booking_id }, reader.buyerUserId)] : []),
-  ], { operation: 'Read reservation locations, media and display facts' })
+  ]
+}
+
+async function composeBookingDetails(
+  db: DbClient,
+  row: BookingRow,
+  type: DashboardBookingType,
+  reader: BookingDetailReader,
+  facts?: Awaited<ReturnType<typeof executeBatch>>,
+): Promise<DashboardBookingDetails> {
+  if (row.location_id !== null && !row.location_title) throw new HTTPError({ statusCode: 500, message: 'The booking location is missing its title' })
+  const { location_latitude: latitude, location_longitude: longitude, location_maps_url, location_address, location_title,
+    policy_json: _policy, answers_json, cancellation_used_at: _cancellation, private_notes, host_json, ...booking } = row
+  const address = parsePostalAddress(location_address)
+  const pinFailure = coordinatesFailure({ latitude, longitude })
+  if (pinFailure) throw new HTTPError({ statusCode: 500, message: pinFailure.error, data: { code: 'INVALID_STORED_LOCATION', field: pinFailure.field } })
+
+  const resourceId = row.product_kind === 'table' ? row.location_id : row.product_id
+  const [places, placeMedia, photos, locale, proposal, review, receipt] = facts
+    ?? await executeBatch(db, bookingDetailFacts(row, reader), { operation: 'Read reservation locations, media and display facts' })
   const visibleLocations = places!.results as { id: string; title: string }[]
   const locationPictures = ownerPicturesFromRows(row.organization_id, 'business_location', visibleLocations.map(location => location.id), placeMedia!.results)
   const resourcePhotos = resourcePhotoUrls(row.product_kind, resourceId ? groupMediaPlacements(photos!.results).get(resourceId) ?? [] : [])

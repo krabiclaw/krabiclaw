@@ -186,16 +186,18 @@ export function participantLabel(request: GuestRequest): string {
   return request.payload.guest.name
 }
 
+export function guestRequestQuery(id: string, organizationId?: string, kind?: GuestRequestKind): BatchQuery {
+  return { query: `SELECT r.* FROM conversations r WHERE r.id = ? AND r.kind IN ('contact', 'booking')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}`, params: [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : [])] }
+}
+
 export async function getGuestRequest(db: DbClient, id: string, organizationId?: string, kind?: GuestRequestKind): Promise<GuestRequest | null> {
-  const row = await queryFirst<Record<string, unknown>>(db, `SELECT r.* FROM conversations r WHERE r.id = ? AND r.kind IN ('contact', 'booking')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}`, [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : [])])
+  const { query, params } = guestRequestQuery(id, organizationId, kind)
+  const row = await queryFirst<Record<string, unknown>>(db, query, params)
   return row ? validateGuestRequest(db, row) : null
 }
 
-/** Parse the conversation row already returned by a scoped read and validate its channel association. */
-export async function validateGuestRequest(db: DbClient, row: Record<string, unknown> | ConversationRow): Promise<GuestRequest> {
-  const request = parseGuestRequest(row)
-  if (request.kind === 'booking' && request.payload.participant) {
-    const mapped = await queryFirst(db, `SELECT 1 FROM conversations r
+export function guestRequestMappingQuery(id: string, organizationId: string): BatchQuery {
+  return { query: `SELECT 1 FROM conversations r
       LEFT JOIN bookings b ON b.id = r.booking_id AND b.organization_id = r.organization_id
       LEFT JOIN channel_threads ct ON ct.conversation_id = r.id AND ct.organization_id = r.organization_id
       LEFT JOIN product_stay_configs c ON c.organization_id = ct.organization_id AND c.product_id = ct.product_id
@@ -203,7 +205,15 @@ export async function validateGuestRequest(db: DbClient, row: Record<string, unk
         (ct.conversation_id IS NULL AND b.owner = 'channel')
         OR (c.product_id IS NOT NULL AND (CASE WHEN b.id IS NULL THEN c.location_id = r.location_id
           ELSE ct.product_id = b.product_id END))
-      )`, [request.id, request.organization_id])
+      )`, params: [id, organizationId] }
+}
+
+/** Parse the conversation row already returned by a scoped read and validate its channel association. */
+export async function validateGuestRequest(db: DbClient, row: Record<string, unknown> | ConversationRow, mappingExists?: boolean): Promise<GuestRequest> {
+  const request = parseGuestRequest(row)
+  if (request.kind === 'booking' && request.payload.participant) {
+    const { query, params } = guestRequestMappingQuery(request.id, request.organization_id)
+    const mapped = mappingExists ?? Boolean(await queryFirst(db, query, params))
     if (!mapped) throw new HTTPError({ statusCode: 500, message: 'Channel conversation has no matching home mapping', data: { code: 'CHANNEL_THREAD_MAPPING_INVALID', field: 'conversation_id' } })
   }
   return request
@@ -264,11 +274,12 @@ export function bookedRecordGuard(record: Pick<BookedRecord, 'organization_id' |
   return { query: `EXISTS (SELECT 1 FROM ${BOOKING_RECORDS_SQL} br WHERE br.organization_id = ? AND br.id = ? AND br.fingerprint = ?)`, params: [record.organization_id, record.id, record.fingerprint] }
 }
 
-export async function getThreadOperationalRecord(db: DbClient, requestId: string, authorized?: Pick<ConversationRow, 'kind' | 'booking_id' | 'organization_id'>): Promise<ThreadOperationalRecord | null> {
-  if (authorized?.kind === 'contact') return null
+type ThreadOperationalRow = Omit<ThreadOperationalRecord, 'party_size_is_minimum' | 'payment_processing'> & { party_size_is_minimum: number; payment_processing: number }
+
+export function threadOperationalRecordQuery(requestId: string, authorized?: Pick<ConversationRow, 'kind' | 'booking_id' | 'organization_id'>): BatchQuery {
   const conversationRef = authorized ? '?' : 'owner.id'
   const now = new Date().toISOString()
-  const record = authorized?.booking_id === null ? null : await queryFirst<Omit<ThreadOperationalRecord, 'party_size_is_minimum' | 'payment_processing'> & { party_size_is_minimum: number; payment_processing: number }>(db, `
+  return { query: `
     SELECT br.unit, br.id, br.status, br.party_size, br.party_size_is_minimum, br.starts_at, br.ends_at, br.timezone, br.location_id, br.product_id, br.product_kind, br.product_name, br.product_internal_name,
            br.assigned_member_id, br.organization_id, br.user_id, br.version, br.respond_by, ${stayRequestPayBySql(conversationRef)} AS pay_by,
            CASE WHEN br.status='pending' AND br.respond_by IS NOT NULL THEN NOT (${noStayRequestPaymentInFlightSql(conversationRef)}) ELSE 0 END AS payment_processing,
@@ -276,8 +287,20 @@ export async function getThreadOperationalRecord(db: DbClient, requestId: string
       FROM ${authorized ? `${BOOKING_RECORDS_SQL} br` : `conversations owner JOIN ${BOOKING_RECORDS_SQL} br ON br.id = owner.booking_id AND br.organization_id = owner.organization_id`}
      WHERE ${authorized ? 'br.id = ? AND br.organization_id = ?' : "owner.id = ? AND owner.kind = 'booking'"}
      LIMIT 1
-  `, authorized ? [requestId, requestId, now, authorized.booking_id, authorized.organization_id] : [now, requestId])
-  if (record) return { ...record, party_size_is_minimum: Number(record.party_size_is_minimum) === 1, payment_processing: record.payment_processing === 1 }
+  `, params: authorized ? [requestId, requestId, now, authorized.booking_id, authorized.organization_id] : [now, requestId] }
+}
+
+export function threadOperationalRecordFromRow(record: unknown): ThreadOperationalRecord | null {
+  if (!record) return null
+  const row = record as ThreadOperationalRow
+  return { ...row, party_size_is_minimum: Number(row.party_size_is_minimum) === 1, payment_processing: row.payment_processing === 1 }
+}
+
+export async function getThreadOperationalRecord(db: DbClient, requestId: string, authorized?: Pick<ConversationRow, 'kind' | 'booking_id' | 'organization_id'>): Promise<ThreadOperationalRecord | null> {
+  if (authorized?.kind === 'contact') return null
+  const { query, params } = threadOperationalRecordQuery(requestId, authorized)
+  const record = authorized?.booking_id === null ? null : threadOperationalRecordFromRow(await queryFirst(db, query, params))
+  if (record) return record
   const request = await queryFirst<{ kind: GuestRequestKind; uncaptured_checkout: number | null }>(db, `
     SELECT r.kind,
       (json_extract(r.payload_json, '$.provenance.creation_kind') = 'checkout'

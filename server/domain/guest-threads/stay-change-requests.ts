@@ -247,20 +247,30 @@ export async function respondToStayChangeRequest(db: DbClient, env: AnswerEnv, i
 }
 
 /** A channel decides when its request closes. Until its recorded answer arrives, show it on the authorized stay. */
-export async function pendingStayChanges(db: DbClient, input: { bookingId: string; conversationId: string; organizationId: string; userId: string }) {
+export function pendingStayChangesQuery(input: { bookingId: string; conversationId: string; organizationId: string; userId: string }) {
   const access = conversationAccessSql('c', input)
-  const entries = await queryAll<Pick<MessageRow, 'id' | 'payload_json'>>(db, `SELECT proposal.id, proposal.payload_json
+  return { query: `SELECT proposal.id, proposal.payload_json
     FROM conversations c JOIN messages proposal ON proposal.conversation_id = c.id
     WHERE c.id = ? AND c.organization_id = ? AND c.booking_id = ? AND ${access.sql}
       AND proposal.event_name = 'booking_change.requested' AND proposal.dedupe_key GLOB ?
       AND NOT EXISTS (SELECT 1 FROM messages decision WHERE decision.conversation_id = c.id AND decision.dedupe_key = 'booking-change-decision:' || proposal.id)
-    ORDER BY proposal.sequence DESC`, [input.conversationId, input.organizationId, input.bookingId, ...access.params, `${PREFIX}*`])
+    ORDER BY proposal.sequence DESC`, params: [input.conversationId, input.organizationId, input.bookingId, ...access.params, `${PREFIX}*`] }
+}
+
+export async function pendingStayChanges(db: DbClient, input: { bookingId: string; conversationId: string; organizationId: string; userId: string }) {
+  const { query, params } = pendingStayChangesQuery(input)
+  const entries = await queryAll<Pick<MessageRow, 'id' | 'payload_json'>>(db, query, params)
   if (!entries.length) return []
   const { locale } = await getPersistedSourceLocale(db, input.organizationId)
+  return pendingStayChangesFromRows(entries, input.bookingId, locale)
+}
+
+export function pendingStayChangesFromRows(rows: unknown[], bookingId: string, locale: string) {
+  const entries = rows as Pick<MessageRow, 'id' | 'payload_json'>[]
   const side = (terms: Terms) => ({ dates: nightsLabel(terms, locale), guests: terms.adults + terms.children, total: formatMinorAmount(terms.total_minor, terms.currency, locale) })
   return entries.map(entry => {
     const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
-    if (proposal.stay_id !== input.bookingId) throw new Error(`Change request ${entry.id} does not match its stay`)
+    if (proposal.stay_id !== bookingId) throw new Error(`Change request ${entry.id} does not match its stay`)
     return { id: entry.id, requested_by: proposal.initiated_by, before: side(proposal.before), after: side(proposal.after) }
   })
 }

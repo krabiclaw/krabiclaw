@@ -8,10 +8,12 @@ import { dashboardMemberQuery, dashboardOrgQueryParam, getDashboardMemberContext
 import { cloudflareEnv, readRequiredBody } from '~/server/utils/api-response'
 import { assignedMemberSql, BATCH_VIEWER, joinedMemberPrincipal, memberAccessPrincipal, membershipBySlugQuery, withViewer } from '~/server/utils/member-access'
 import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
-import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
-import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
-import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
+import { BOOKING_RECORDS_SQL, guestRequestMappingQuery, guestRequestQuery, requestActions, threadOperationalRecordFromRow, threadOperationalRecordQuery, validateGuestRequest, type BookedRecord } from '~/server/domain/requests'
+import { guestReplyAccountQuery, guestReplyDestination, type GuestReplyAccount } from '~/server/domain/guest-threads/operations'
+import { pendingStayChangesFromRows, pendingStayChangesQuery } from '~/server/domain/guest-threads/stay-change-requests'
 import { calendarStays, canReleaseStayNights, dashboardStayEditQueries, prepareStayReservationHome, stayAccessFor, stayCalendarOf, stayCalendarQueries, stayDetailFrom, stayDetailQuery, type StayHome, type StayNight, type StayReservationHome } from '~/server/domain/stays'
+import { guestThreadChannelQuery, parseGuestThreadChannel, type GuestThreadChannelRow } from '~/server/domain/guest-threads/channel-messages'
+import { sourceLocaleFromRows, sourceLocaleQuery } from '~/server/utils/localization'
 import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
 import { loadStaffBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
@@ -55,7 +57,7 @@ export async function dashboardBookingContext(event: H3Event, action: 'read' | '
   const changesStay = patchBody ? bookingPatchChangesStay(patchBody) : false
   const stayQueries = changesStay ? dashboardStayEditQueries({ query: BATCH_VIEWER.organization }, bookingId, patchBody?.check_in_date) : []
   const [memberResult, bookingResult, stayResult, homeResult] = await executeBatch(db, [membership, withViewer(membership, {
-    query: `SELECT b.unit, c.id AS conversation_id, c.location_id AS conversation_location_id, b.status, b.respond_by, b.product_id,
+    query: `SELECT b.unit, c.id AS conversation_id, c.location_id AS conversation_location_id, b.status, b.respond_by, b.product_id, b.location_id, b.product_kind,
         (${roleMatchesSql(BATCH_VIEWER.role!, assignedOperationsRoles)} AND ${assignedMemberSql('b', BATCH_VIEWER.user)}) AS assigned,
         ${listingGrantSql('b.organization_id', 'b.product_id', BATCH_VIEWER.member, 'details', BATCH_VIEWER.role)} AS granted,
         ${listingGrantSql('b.organization_id', 'b.product_id', BATCH_VIEWER.member, 'update', BATCH_VIEWER.role)} AS operates
@@ -67,7 +69,7 @@ export async function dashboardBookingContext(event: H3Event, action: 'read' | '
   const organization = organizationFrom(memberResult?.results[0])
   const principal = memberAccessPrincipal(organization, { env, event })
   const workspace = await stayAccessFor(principal)
-  const booking = bookingResult?.results[0] as Pick<BookedRecord, 'unit' | 'status' | 'respond_by' | 'product_id'>
+  const booking = bookingResult?.results[0] as Pick<BookedRecord, 'unit' | 'status' | 'respond_by' | 'product_id' | 'location_id' | 'product_kind'>
     & { conversation_id: string; conversation_location_id: string | null; assigned: number; granted: number; operates: number } | undefined
   const hasReadAccess = booking?.granted || booking?.assigned || workspace.manage
   const hasUpdateAccess = booking?.operates || booking?.assigned || workspace.manage
@@ -86,7 +88,7 @@ export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug
   const context = await dashboardBookingContext(event, 'read', undefined, record)
   const { access, db, organization, userId, bookingId, booking } = context
   if (booking.unit === 'slot') {
-    return { booking: await loadStaffBookingDetails(context, bookingId), manage: access.manage }
+    return { booking: await loadStaffBookingDetails(context, { ...booking, booking_id: bookingId, organization_id: organization.id }), manage: access.manage }
   }
   if (!access.manage) {
     const [stayRows, houseRows, media] = await executeBatch(db, [
@@ -106,30 +108,38 @@ export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug
     const home = { ...house, image_url: mediaStillUrl(photos.get(booking.product_id)?.[0]) }
     return { booking: nightBooking(stay), manage: false as const, home }
   }
-  const conversation = getGuestRequest(db, booking.conversation_id, organization.id, 'booking').then(thread => {
-    if (!thread || thread.booking_id !== bookingId) throw new Error('The booking has no guest conversation')
-    return thread
-  })
-  const homeRead = prepareStayReservationHome({ organizationId: organization.id, productId: booking.product_id, showLocation: true, showArrival: true })
-  const [[stayRows, ...homeRows], canMessageGuest] = await Promise.all([
-    executeBatch(db, [stayDetailQuery(access, bookingId), ...homeRead.queries], { operation: 'Read the stay reservation and home' }),
-    conversation.then(async thread => !thread.blocked_at && (await guestReplyDestination(db, thread)).channel !== null),
-  ])
+  const conversationId = booking.conversation_id
+  const organizationId = organization.id
+  const homeRead = prepareStayReservationHome({ organizationId, productId: booking.product_id, showLocation: true, showArrival: true })
+  const [stayRows, threadRows, mapping, channelRows, accountRows, operations, changes, locale, ...homeRows] = await executeBatch(db, [
+    stayDetailQuery(access, bookingId),
+    guestRequestQuery(conversationId, organizationId, 'booking'),
+    guestRequestMappingQuery(conversationId, organizationId),
+    guestThreadChannelQuery(conversationId, organizationId),
+    guestReplyAccountQuery({ query: 'SELECT user_id FROM conversations WHERE id = ? AND organization_id = ?', params: [conversationId, organizationId] }),
+    threadOperationalRecordQuery(conversationId, { kind: 'booking', booking_id: bookingId, organization_id: organizationId }),
+    pendingStayChangesQuery({ bookingId, conversationId, organizationId, userId }),
+    sourceLocaleQuery(organizationId),
+    ...homeRead.queries,
+  ], { operation: 'Read the managed stay reservation' })
   const stay = stayDetailFrom(access, stayRows!.results[0])
   const home = homeRead.read(homeRows)
+  const threadRow = threadRows!.results[0] as Record<string, unknown> | undefined
+  if (!threadRow) throw new Error('The booking has no guest conversation')
+  const thread = await validateGuestRequest(db, threadRow, Boolean(mapping!.results.length))
+  if (thread.booking_id !== bookingId) throw new Error('The booking has no guest conversation')
+  const channel = channelRows!.results[0] as GuestThreadChannelRow | undefined
+  const account = (accountRows!.results[0] as GuestReplyAccount | undefined) ?? null
+  const canMessageGuest = !thread.blocked_at && (await guestReplyDestination(db, thread, channel ? parseGuestThreadChannel(channel) : null, account)).channel !== null
+
   const channelOwned = isChannelManagedStay(stay)
-  const [available_actions, pending_changes] = await Promise.all([
-    canReleaseStayNights(stay) ? ['release_nights'] : stay.request_status
-      ? conversation.then(async thread => {
-          const record = await getThreadOperationalRecord(db, thread.id, thread)
-          if (!record) throw new Error('The conversation has no booking')
-          return requestActions(record, new Date().toISOString())
-        })
-      : stay.status === 'cancelled' || channelOwned ? [] : ['edit', 'cancel'],
-    stay.channel === 'airbnb' && channelOwned
-      ? pendingStayChanges(db, { bookingId, conversationId: booking.conversation_id, organizationId: organization.id, userId })
-      : [],
-  ])
+  const record = stay.request_status ? threadOperationalRecordFromRow(operations!.results[0]) : null
+  if (stay.request_status && !record) throw new Error('The conversation has no booking')
+  const available_actions = record ? requestActions(record, new Date().toISOString())
+    : stay.status === 'cancelled' || channelOwned ? [] : ['edit', 'cancel']
+  const pending_changes = stay.channel === 'airbnb' && channelOwned && changes!.results.length
+    ? pendingStayChangesFromRows(changes!.results, bookingId, sourceLocaleFromRows(organizationId, locale!.results).locale)
+    : []
   return { booking: { ...nightBooking(stay), available_actions, pending_changes }, manage: true, home: { ...home, image_url: home.photo_urls[0] ?? null }, can_message_guest: canMessageGuest }
 }
 
