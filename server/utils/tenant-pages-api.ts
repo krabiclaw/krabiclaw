@@ -8,26 +8,16 @@ import { BATCH_VIEWER, isOrganizationWideRole, membershipByIdQuery, withViewer }
 import { createPreviewToken, PREVIEW_TOKEN_TTL_MS, previewSecretOf } from '~/server/utils/preview-token'
 import { roleMatchesSql, workspaceManagementRoles } from '~/utils/organization-access'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
-import { requireOrganizationAccess } from '~/server/utils/location-access'
 
-export async function requireTenantPageWriteAccess(event: H3Event, organizationId: string) {
-  // Site-wide access, asserted once. This used to ask for context access and then
-  // for organization-wide access, which is two reads of the same member row for
-  // one answer: organization-wide is the stricter of the two — context passes on
-  // any of its assigned locations; organization-wide requires an org-wide role —
-  // so anything the context check would refuse, this refuses too, with the same
-  // 404.
-  const { env, db, organization, session } = await requireOrganizationAccess(event, organizationId)
-  return { env, db, organization, userId: session.user.id }
+const managedOrganization = {
+  sql: `CASE WHEN ${roleMatchesSql(BATCH_VIEWER.role!, workspaceManagementRoles)} THEN ${BATCH_VIEWER.organization} END`,
 }
 
-export function prepareTenantPageEditor(variantId: string, env: CloudflareEnv) {
-  const plan = prepareTenantPageEditorSnapshot(variantId, {
-    sql: `CASE WHEN ${roleMatchesSql(BATCH_VIEWER.role!, workspaceManagementRoles)} THEN ${BATCH_VIEWER.organization} END`,
-  }, true)
+export function prepareTenantPageEditor(variantId: string) {
+  const plan = prepareTenantPageEditorSnapshot(variantId, managedOrganization, true)
   return {
     queries: plan.queries,
-    async read(rows: D1Result[], organization: DashboardOrganizationRow) {
+    async read(rows: D1Result[], organization: DashboardOrganizationRow, env: CloudflareEnv) {
       if (!isOrganizationWideRole(organization.role)) return null
       const snapshot = plan.read(rows)
       if (!snapshot) return null
@@ -49,12 +39,11 @@ export function prepareTenantPageEditor(variantId: string, env: CloudflareEnv) {
   }
 }
 
-export async function readTenantPageEditor(event: H3Event, organizationId: string, variantId: string) {
+export async function requireTenantPageWriteAccess(event: H3Event, organizationId: string, statements: BatchQuery[] = []) {
   const env = cloudflareEnv(event)
   const db = env.DB
   if (!db) throw new HTTPError({ statusCode: 503, message: 'Database unavailable' })
-  const plan = prepareTenantPageEditor(variantId, env)
-  const queries = (membership: BatchQuery) => [membership, ...plan.queries.map(query => withViewer(membership, query))]
+  const queries = (membership: BatchQuery) => [membership, ...statements.map(query => withViewer(membership, query))]
   const auth: DashboardAuthRead = {
     queries: token => queries(membershipByIdQuery(organizationId, dashboardSessionUserQuery(token))),
   }
@@ -65,7 +54,22 @@ export async function readTenantPageEditor(event: H3Event, organizationId: strin
   )
   const organization = dashboardOrganizationFrom(viewer!.results[0])
   if (organization.userId !== session.user.id) throw new Error('Page editor membership does not match the Better Auth session')
-  const result = await plan.read(rows, organization)
+  if (!isOrganizationWideRole(organization.role)) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
+  return { env, db, organization, userId: session.user.id, rows }
+}
+
+export async function readTenantPageEditor(event: H3Event, organizationId: string, variantId: string) {
+  const plan = prepareTenantPageEditor(variantId)
+  const { rows, organization, env } = await requireTenantPageWriteAccess(event, organizationId, plan.queries)
+  const result = await plan.read(rows, organization, env)
   if (!result) throw new HTTPError({ statusCode: 404, message: 'Tenant page variant not found' })
   return result
+}
+
+export async function readTenantPageUpdate(event: H3Event, organizationId: string, variantId: string) {
+  const plan = prepareTenantPageEditorSnapshot(variantId, managedOrganization)
+  const context = await requireTenantPageWriteAccess(event, organizationId, plan.queries)
+  const snapshot = plan.read(context.rows)
+  if (!snapshot) throw new HTTPError({ statusCode: 404, message: 'Tenant page variant not found' })
+  return { ...context, snapshot }
 }

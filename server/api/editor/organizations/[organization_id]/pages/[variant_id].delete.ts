@@ -1,7 +1,6 @@
 import { defineHandler } from 'nitro';
 import { getRouterParam } from 'nitro/h3';
 import { jsonResponse, readStrictBody } from '~/server/utils/api-response'
-import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
 import { requireTenantPageWriteAccess } from '~/server/utils/tenant-pages-api'
 import { deleteTenantPage } from '~/server/utils/content/pages'
 
@@ -17,5 +16,5 @@ export default defineHandler(async (event) => {
   const payload = await deleteTenantPage(db, variantId, {
     scope: { organizationId }, expectedUpdatedAt: body.updated_at, env,
   })
-  return jsonResponse(finalizeRequestMetrics(event, 'editor-tenant-page-delete', payload))
+  return jsonResponse(payload)
 })

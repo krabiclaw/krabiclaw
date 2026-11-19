@@ -1,4 +1,4 @@
-import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { purgeOrganizationKvCache } from '~/server/utils/edge-cache'
 import { normalizeHost, type TenantHostEnv } from '~/server/utils/tenant-hosts'
@@ -125,12 +125,12 @@ export async function putPublicResourceCache(
  */
 export async function purgeOrganizationCaches(db: DbClient, kv: KVNamespace, organizationId: string, env: TenantHostEnv): Promise<void> {
   const freeOrganizationDomain = normalizeHost(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
-  const [domains, organizations] = await Promise.all([
-    queryAll<{ domain: string }>(db, "SELECT domain FROM organization_domains WHERE organization_id = ? AND status = 'active'", [organizationId]),
-    queryAll<{ subdomain: string | null; theme_id: string }>(db, 'SELECT subdomain, theme_id FROM organization WHERE id = ? LIMIT 1', [organizationId]),
-  ])
-  const hostnames = new Set<string>(domains.map(domain => domain.domain))
-  const organization = organizations[0]
+  const [domains, sites] = await executeBatch(db, [
+    { query: "SELECT domain FROM organization_domains WHERE organization_id = ? AND status = 'active'", params: [organizationId] },
+    { query: 'SELECT subdomain, theme_id FROM organization WHERE id = ? LIMIT 1', params: [organizationId] },
+  ], { operation: 'Read the changed site and its domains' })
+  const hostnames = new Set((domains!.results as Array<{ domain: string }>).map(domain => domain.domain))
+  const organization = sites!.results[0] as { subdomain: string | null; theme_id: string } | undefined
   if (organization?.subdomain && freeOrganizationDomain) hostnames.add(`${organization.subdomain}.${freeOrganizationDomain}`)
   if (organization?.theme_id === PLATFORM_THEME_ID) {
     // The platform's configured apex can move without changing the hosted

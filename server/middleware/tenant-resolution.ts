@@ -361,7 +361,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
   const websitePanel = website ? panel.split('/')[2] : undefined
   const websiteList = prepareWebsitePanel(managedOrg, websitePanel, query)
   const variantId = websitePageVariant(panel)
-  const websiteEditor = variantId && variantId !== 'new' ? prepareTenantPageEditor(variantId, env) : null
+  const websiteEditor = variantId && variantId !== 'new' ? prepareTenantPageEditor(variantId) : null
   const catalogRead = { products: ['read'] } as const
   const catalogRoles = [...rolesAllowing({ products: ['read'] }), ...rolesAllowing({ products: ['assigned'] })]
   const catalog = panel === '/products' && query.view !== 'menu' && query.view !== 'section'
@@ -435,7 +435,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
       event.context.dashboardWebsite = {
         settings: website.read(panelRows.slice(0, website.queries.length)),
         content: websiteEditor
-          ? { endpoint: `pages/${encodeURIComponent(variantId!)}`, value: await websiteEditor.read(panelRows.slice(website.queries.length), organization) }
+          ? { endpoint: `pages/${encodeURIComponent(variantId!)}`, value: await websiteEditor.read(panelRows.slice(website.queries.length), organization, env) }
           : websiteList?.read(panelRows.slice(website.queries.length), organization.id),
       }
     }

@@ -1029,7 +1029,7 @@ export async function deleteTenantPage(db: DbClient, variantId: string, input: {
   return { deleted: prepared.deleted }
 }
 
-export async function updateTenantPage(db: DbClient, variantId: string, input: { userId: string | null; data: TenantPageEditorInput; scope: TenantPageScope; env: CloudflareEnv }) {
+export async function updateTenantPage(db: DbClient, variantId: string, input: { userId: string | null; data: TenantPageEditorInput; scope: TenantPageScope; env: CloudflareEnv; snapshot?: Awaited<ReturnType<typeof readTenantPageSnapshot>> }) {
   // A complete editor snapshot states the saved path and the title to write.
   if (typeof input.data.path !== 'string' || !input.data.path.trim()) badRequest('path is required')
   if (typeof input.data.title !== 'string' || !input.data.title.trim()) badRequest('title is required')
@@ -1043,7 +1043,8 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   // recipe into `recipe is required for recipe pages`.
   if (!input.data.page_type) badRequest('page_type is required')
   if (input.data.recipe === undefined) badRequest('recipe is required, and may be null')
-  const { row, blocks: currentBlocks } = await readTenantPageSnapshot(db, variantId, input.scope)
+  const { row, blocks: currentBlocks } = input.snapshot ?? await readTenantPageSnapshot(db, variantId, input.scope)
+  if (row.id !== variantId || row.organization_id !== input.scope.organizationId) notFound('Tenant page variant not found')
   if (input.data.path !== row.path) badRequest('A page keeps its saved path')
   if (!input.data.updated_at || row.updated_at !== input.data.updated_at) conflict('Tenant page content was updated by another writer')
   const identity = await canonicalTenantPageIdentity(db, row, {
