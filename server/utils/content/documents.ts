@@ -772,7 +772,7 @@ export async function getContentBlocksForDocument(db: DbClient, documentId: stri
 
 export async function updateContentDocument(
   db: DbClient,
-  documentId: string,
+  documentId: string | ContentDocumentRow,
   input: {
     updated_at: string
     blocks?: ContentBlockInput[]
@@ -783,7 +783,7 @@ export async function updateContentDocument(
     additionalQueriesAfter?: BatchQuery[]
   },
 ) {
-  const document = await getContentDocumentById(db, documentId)
+  const document = typeof documentId === 'string' ? await getContentDocumentById(db, documentId) : documentId
   if (!document) notFound('Content document not found')
   if (document.updated_at !== input.updated_at) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Content document was updated by another writer' })

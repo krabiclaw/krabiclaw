@@ -1,5 +1,5 @@
 import type { StayDetail } from '~/server/domain/stays'
-import { computed, inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type InjectionKey, type Ref, type ShallowRef } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, toValue, watch, type InjectionKey, type MaybeRefOrGetter, type Ref, type ShallowRef } from 'vue'
 import { isDashboardInvalidation, type DashboardInvalidation } from '~/shared/dashboard-invalidations'
 import type { ConversationPage } from '~/shared/messages-contract'
 
@@ -301,4 +301,41 @@ export function useDashboardInvalidations(): DashboardInvalidationConnection {
   const connection = inject(dashboardInvalidationKey, null)
   if (!connection) throw new Error('Dashboard invalidations require the dashboard layout')
   return connection
+}
+
+/** A CMS index can reuse its last authorized response while its workspace socket is live. */
+export function useWebsiteIndexData<T>(key: MaybeRefOrGetter<string>, read: () => Promise<T>) {
+  const nuxt = useNuxtApp()
+  const realtime = useDashboardInvalidations()
+  const cacheKey = (name: string) => `website:${name}`
+  const request = useAsyncData(key, async () => {
+    const entry = realtime.held.begin(cacheKey(toValue(key)), businessChanged)
+    const value = await read()
+    realtime.held.hold(entry, value, Date.now() + 30_000, 16)
+    return value
+  }, {
+    dedupe: 'defer',
+    getCachedData(name, app, { cause }) {
+      if (cause !== 'initial') return undefined
+      return (app.isHydrating ? app.payload.data[name] : realtime.held.get(cacheKey(name))) as T | undefined
+    },
+  })
+  if (import.meta.client && nuxt.isHydrating) {
+    const name = toValue(key)
+    const value = nuxt.payload.data[name] as T | undefined
+    const hold = () => {
+      if (value === undefined || toValue(key) !== name || request.data.value !== value) return
+      const entry = realtime.held.begin(cacheKey(name), businessChanged)
+      realtime.held.hold(entry, value, Date.now() + 30_000, 16)
+    }
+    if (realtime.status.value === 'open') hold()
+    else if (value !== undefined) {
+      const stop = watch(realtime.status, status => {
+        if (status !== 'open' && status !== 'failed') return
+        stop()
+        if (status === 'open') hold()
+      }, { flush: 'sync' })
+    }
+  }
+  return request
 }

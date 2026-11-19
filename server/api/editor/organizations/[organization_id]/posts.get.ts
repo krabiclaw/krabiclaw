@@ -2,7 +2,8 @@ import { defineHandler } from 'nitro'
 import { getQuery, getRouterParam } from 'nitro/h3'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
-import { listPosts } from '~/server/utils/post-management'
+import { preparePostList } from '~/server/utils/post-management'
+import { executeBatch } from '~/server/db'
 import { PostValidationError } from '~/shared/posts'
 import { assertResourceAccess, memberAccessPrincipal } from '~/server/utils/member-access'
 import { loadMemberOrganizationRow } from '~/server/utils/location-access'
@@ -32,11 +33,11 @@ export default defineHandler(async (event) => {
   await assertResourceAccess(db, { ...memberAccessPrincipal(organization.membership, { env, event }), resourceLocationId: locationId })
   const resource = { resource: `posts:${organization.id}:${status ?? ''}:${locationId ?? ''}` }
   try {
-    const page = await listPosts(db, env, organization.id, { status, locationId }, mcpPageWindow({
+    const list = preparePostList(organization.id, { status, locationId }, mcpPageWindow({
       ...(typeof query.limit === 'string' ? { limit: Number(query.limit) } : {}),
       ...(typeof query.cursor === 'string' ? { cursor: query.cursor } : {}),
-    }, resource), resource)
-    return jsonResponse({ success: true, ...page })
+    }, resource))
+    return jsonResponse({ success: true, ...list.read(await executeBatch(db, list.queries, { operation: 'Read posts index' }), resource) })
   } catch (error) {
     if (error instanceof PostValidationError) return jsonResponse({ error: error.message }, { status: 400 })
     throw error

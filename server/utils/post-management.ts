@@ -6,7 +6,7 @@ import { parsePostInput, PostValidationError, type PostCallToAction, type PostMe
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { normalizePostSlug, postPublicPath } from '~/utils/post-slugs'
-import { insertInitialMediaPlacements, hydrateMediaAssetRefs, readMediaPlacements, type StoredMediaPlacementItem } from '~/server/utils/media-asset-manager'
+import { insertInitialMediaPlacements, groupMediaPlacements, hydrateMediaAssetRefs, mediaPlacementsQuery, readMediaPlacements, type StoredMediaPlacementItem } from '~/server/utils/media-asset-manager'
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
 import type { SocialImageSource } from '~/utils/social-metadata'
@@ -108,6 +108,16 @@ interface PostRow {
 
 const POST_COLUMNS = `p.id, p.organization_id, p.location_id, p.slug, p.title, p.summary AS body, p.metadata_json, p.status, p.visibility,
   p.published_at, p.author_id, p.created_by, u.name AS author_name, p.created_at, p.updated_at`
+
+export function recentPostCardsQuery(organization: string | { sql: string }): BatchQuery {
+  return {
+    query: `SELECT p.id, p.title, p.status, p.published_at, count(*) OVER () AS total
+      FROM content_documents p
+      WHERE p.kind = 'social_post' AND p.row_role = 'root' AND p.organization_id = ${typeof organization === 'string' ? '?' : organization.sql}
+      ORDER BY p.updated_at DESC, p.id DESC LIMIT 3`,
+    params: typeof organization === 'string' ? [organization] : [],
+  }
+}
 
 function callToActionOf(metadataJson: string): PostCallToAction | null {
   const metadata = JSON.parse(metadataJson) as { call_to_action?: PostCallToAction | null }
@@ -260,6 +270,45 @@ export async function getPost(db: DbClient, env: CloudflareEnv, organizationId: 
   return (await attachPostFields(db, env, [row]))[0]!
 }
 
+type PostListFilter = { status?: string | null; locationId?: string | null }
+
+function postListQuery(organizationId: string | { sql: string }, filter: PostListFilter, window: { limit: number; offset: number }): BatchQuery {
+  if (filter.status && filter.status !== 'draft' && filter.status !== 'published') throw new PostValidationError('status must be draft or published')
+  return { query: `SELECT ${POST_COLUMNS} FROM content_documents p
+    LEFT JOIN user u ON u.id = COALESCE(p.author_id, p.created_by)
+    WHERE p.kind = 'social_post' AND p.row_role = 'root' AND p.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql}
+      ${filter.status ? 'AND p.status = ?' : ''} ${filter.locationId ? 'AND p.location_id = ?' : ''}
+    ORDER BY p.updated_at DESC, p.id DESC LIMIT ? OFFSET ?`, params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...(filter.status ? [filter.status] : []), ...(filter.locationId ? [filter.locationId] : []), window.limit + 1, window.offset] }
+}
+
+export function preparePostList(organizationId: string | { sql: string }, filter: PostListFilter, window: { limit: number; offset: number }) {
+  const list = postListQuery(organizationId, filter, window)
+  const owners = { sql: `SELECT id FROM (${list.query}) LIMIT ${window.limit}`, params: list.params ?? [] }
+  const organization = typeof organizationId === 'string' ? '?' : organizationId.sql
+  return {
+    queries: [list, mediaPlacementsQuery({ organizationId, ownerType: 'content_document', owners, slot: 'cover' }), {
+      query: `SELECT post_id, channel, state FROM post_publications
+        WHERE organization_id = ${organization} AND state = 'published' AND post_id IN (${owners.sql}) ORDER BY post_id, channel`,
+      params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...owners.params],
+    }],
+    read([listed, covers, published]: D1Result[], resource: { resource: string }) {
+      const rows = listed!.results as PostRow[]
+      const media = groupMediaPlacements(covers!.results)
+      const publications = new Map<string, Array<{ channel: string; state: string }>>()
+      for (const { post_id, channel, state } of published!.results as { post_id: string; channel: string; state: string }[]) {
+        const group = publications.get(post_id) ?? []
+        group.push({ channel, state })
+        publications.set(post_id, group)
+      }
+      const posts = rows.slice(0, window.limit).map(({ id, title, body, status, visibility, author_name, updated_at, published_at }) => ({
+        id, title, body, status, visibility, author_name, updated_at, published_at,
+        media: orderedPostMedia(media.get(id) ?? []), publications: publications.get(id) ?? [],
+      }))
+      return { posts, page_info: mcpPageInfo(window, posts.length, rows.length > window.limit, resource) }
+    },
+  }
+}
+
 /**
  * One page of an organization's posts, newest change first, read from the
  * database a page at a time. There is no lifetime ceiling.
@@ -272,13 +321,8 @@ export async function listPosts(
   window: { limit: number; offset: number },
   resource: { resource: string },
 ): Promise<{ posts: Post[]; page_info: McpPageInfo }> {
-  if (filter.status && filter.status !== 'draft' && filter.status !== 'published') throw new PostValidationError('status must be draft or published')
-  const rows = await queryAll<PostRow>(db, `SELECT ${POST_COLUMNS} FROM content_documents p
-    LEFT JOIN user u ON u.id = COALESCE(p.author_id, p.created_by)
-    WHERE p.kind = 'social_post' AND p.row_role = 'root' AND p.organization_id = ?
-      ${filter.status ? 'AND p.status = ?' : ''} ${filter.locationId ? 'AND p.location_id = ?' : ''}
-    ORDER BY p.updated_at DESC, p.id DESC LIMIT ? OFFSET ?`,
-  [organizationId, ...(filter.status ? [filter.status] : []), ...(filter.locationId ? [filter.locationId] : []), window.limit + 1, window.offset])
+  const { query, params } = postListQuery(organizationId, filter, window)
+  const rows = await queryAll<PostRow>(db, query, params)
   const page = rows.slice(0, window.limit)
   return { posts: await attachPostFields(db, env, page), page_info: mcpPageInfo(window, page.length, rows.length > window.limit, resource) }
 }

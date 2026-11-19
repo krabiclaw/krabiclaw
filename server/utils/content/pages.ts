@@ -25,15 +25,15 @@ import {
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { refreshSocialCard } from '~/server/utils/social-card'
-import { assertExactCanonicalLocale, getPersistedSourceLocale } from '~/server/utils/localization'
+import { assertExactCanonicalLocale, getPersistedSourceLocale, sourceLocaleFromRows, sourceLocaleQuery } from '~/server/utils/localization'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
-import { buildSingleMediaPlacementQueries, insertInitialMediaPlacements, hydrateMediaAssetRefs } from '~/server/utils/media-asset-manager'
+import { buildSingleMediaPlacementQueries, groupMediaPlacements, insertInitialMediaPlacements, hydrateMediaAssetRefs, mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
 import { isSingleMediaPlacement } from '~/shared/media-placement-contract'
 import { getMediaPlacements } from '~/server/utils/media-placement'
 import { assertLocationGridSupported, loadOrganizationSite } from '~/server/utils/content/publishing'
-import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
+import { resolveSocialImageFromMedia } from '~/utils/social-metadata'
 import { siteAllowsPageDocumentAt, sitePageDocumentPaths } from '~/shared/tenant-page-paths'
-import { hasPublicLocationPages, isPublicLocationPath, type PublicSiteDefinition } from '~/utils/site-routing'
+import { hasPublicLocationPages, isPublicLocationPath, resolvePublicSite, type PublicSiteDefinition } from '~/utils/site-routing'
 import { CLAIMED_PUBLIC_ROUTES } from '#claimed-public-routes'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import { creationRequestHash, organizationEventQuery } from '~/server/utils/organization-events'
@@ -359,11 +359,12 @@ async function canonicalTenantPageIdentity(
   row: Pick<PageRepresentationRow, 'organization_id' | 'locale' | 'page_type' | 'recipe'>,
   input: { pageType: TenantPageType; recipe: string | null },
 ): Promise<{ pageType: TenantPageType; recipe: string | null }> {
+  const recipe = input.recipe?.trim() || null
+  if (input.pageType === row.page_type && recipe === row.recipe) return { pageType: input.pageType, recipe }
   const source = await queryFirst<{ is_source: number } | null>(db, `
     SELECT is_source FROM organization_locales WHERE organization_id = ? AND locale = ? LIMIT 1
   `, [row.organization_id, row.locale])
-  const recipe = input.recipe?.trim() || null
-  if (!source?.is_source && (input.pageType !== row.page_type || recipe !== row.recipe)) {
+  if (!source?.is_source) {
     badRequest('A translated tenant-page variant must use the source page identity')
   }
   return { pageType: input.pageType, recipe }
@@ -400,30 +401,48 @@ export interface PageTask {
 }
 
 export async function listTenantPages(db: DbClient, organizationId: string, opts: { locale?: string | null } = {}) {
-  const locale = await resolveLocale(db, organizationId, opts.locale)
-  const rows = await queryAll<PageRepresentationRow & { section_count: number }>(db, [
+  const plan = prepareTenantPages(organizationId, opts.locale)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read website pages and images' }), organizationId).pages
+}
+
+export function prepareTenantPages(organizationId: string | { sql: string }, requestedLocale?: string | null) {
+  const org = typeof organizationId === 'string' ? '?' : organizationId.sql
+  const orgParams = typeof organizationId === 'string' ? [organizationId] : []
+  const locale = requestedLocale?.trim() ? assertExactCanonicalLocale(requestedLocale) : null
+  const representations = `row_role IN ('root','representation') AND kind = 'page' AND organization_id = ${org}
+    AND locale = ${locale ? '?' : `(SELECT locale FROM organization_locales WHERE organization_id = ${org} AND is_source = 1)`}`
+  const params = [...orgParams, ...(locale ? [locale] : orgParams)]
+  const pages = [
     'SELECT v.id, COALESCE(v.root_id, v.id) AS page_id, v.organization_id, v.locale, v.path,',
     '       v.title, v.summary, p.product_id,',
     `       json_extract(p.metadata_json, '$.page_type') AS page_type, json_extract(p.metadata_json, '$.recipe') AS recipe, p.sort_order, v.updated_at,`,
     '       (SELECT COUNT(*) FROM content_blocks cb WHERE cb.document_id = v.id) AS section_count',
     `  FROM content_documents v JOIN content_documents p ON p.id = COALESCE(v.root_id, v.id) AND p.row_role = 'root' AND p.kind = 'page'`,
-    ` WHERE v.row_role IN ('root','representation') AND v.kind = 'page' AND v.organization_id = ? AND v.locale = ? ORDER BY p.sort_order ASC, v.title ASC`,
-  ].join('\n'), [organizationId, locale])
+    ` WHERE v.id IN (SELECT id FROM content_documents WHERE ${representations}) ORDER BY p.sort_order ASC, v.title ASC`,
+  ].join('\n')
+  const queries = [
+    locale ? { query: `SELECT locale FROM organization_locales WHERE organization_id = ${org} AND locale = ?`, params: [...orgParams, locale] } : sourceLocaleQuery(organizationId),
+    { query: `SELECT theme_id FROM organization WHERE id = ${org}`, params: orgParams },
+    { query: pages, params },
+    mediaPlacementsQuery({ organizationId, ownerType: 'content_document', owners: {
+      sql: `SELECT id FROM content_documents WHERE ${representations} AND path <> '/'`, params,
+    } }),
+    mediaPlacementsQuery({ organizationId, ownerType: 'organization', owners: { sql: `SELECT ${org}`, params: orgParams } }),
+  ]
+  return { queries, read }
 
-  // Canonical OG image resolution matching public-tenant-pages.ts:
-  // The home page has no card of its own: it is the organization's page, and its image is the organization's.
-  // Non-home pages read from content_document.
-  const nonHomeDocIds = rows.filter(r => r.path !== '/').map(r => r.id)
-  const [{ site }, pageMedia, orgMedia] = await Promise.all([
-    loadOrganizationSite(db, organizationId),
-    loadPublicSocialMedia(db, organizationId, 'content_document', nonHomeDocIds),
-    loadPublicSocialMedia(db, organizationId, 'organization', [organizationId]),
-  ])
-  const orgSocialImage = orgMedia.get(organizationId)?.social_image ?? null
+  function read([locales, organization, documents, placements, organizationPlacements]: D1Result[], id: string) {
+    const source_locale = locale
+      ? (locales!.results[0] as { locale: string } | undefined)?.locale ?? notFound('Locale is not configured for this organization')
+      : sourceLocaleFromRows(id, locales!.results).locale
+    const siteRow = organization!.results[0] as { theme_id: string } | undefined
+    if (!siteRow) notFound('Organization not found')
+    const fixedPaths = sitePageDocumentPaths(resolvePublicSite({ themeId: siteRow.theme_id }))
+    const rows = documents!.results as (PageRepresentationRow & { section_count: number })[]
+    const media = groupMediaPlacements(placements!.results)
+    const orgMedia = groupMediaPlacements(organizationPlacements!.results).get(id) ?? []
 
-  return rows.map(row => {
-    const social = row.path === '/' ? orgSocialImage : pageMedia.get(row.id)?.social_image ?? null
-    return {
+    return { source_locale, pages: rows.map(row => ({
       id: row.id,
       page_id: row.page_id,
       locale: row.locale,
@@ -434,15 +453,16 @@ export async function listTenantPages(db: DbClient, organizationId: string, opts
       sort_order: row.sort_order,
       updated_at: row.updated_at,
       section_count: row.section_count ?? 0,
-      image_url: social?.url ?? null,
+      image_url: (row.path === '/'
+        ? resolveSocialImageFromMedia('organization', orgMedia, orgMedia)
+        : resolveSocialImageFromMedia('content_document', media.get(row.id) ?? [], orgMedia))?.url ?? null,
       product_id: row.product_id,
-      removable: !sitePageDocumentPaths(site).includes(normalizeTenantPagePath(row.path)),
-    }
-  })
+      removable: !fixedPaths.includes(normalizeTenantPagePath(row.path)),
+    })) }
+  }
 }
 
-export async function listPageTasks(db: DbClient, organizationId: string, opts: { locale?: string | null } = {}): Promise<PageTask[]> {
-  const pages = await listTenantPages(db, organizationId, opts)
+export function pageTasks(pages: Awaited<ReturnType<typeof listTenantPages>>): PageTask[] {
   const tasks: PageTask[] = []
 
   // Pages that are empty, or a main page without a photo.
@@ -1065,7 +1085,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
     params: [metadata.pageType, metadata.recipe, sortOrder, input.userId,
       row.page_id, input.scope.organizationId, variantId],
   }
-  await updateContentDocument(db, variantId, {
+  await updateContentDocument(db, document, {
     blocks: blocksChanged ? blocksAsInputs(blocks) : undefined, updated_at: input.data.updated_at,
     actorId: input.userId, changedFields,
     additionalQueriesAfter: [...placementQueries, updateVariant, updatePage, ...bindingQueries,

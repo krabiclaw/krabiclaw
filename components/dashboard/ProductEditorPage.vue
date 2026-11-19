@@ -591,12 +591,12 @@ watch(editorKey, () => {
   photoError.value = null
 })
 
-const isCollectionList = (value: unknown): value is { collections: Collection[] } =>
-  isRecord(value) && Array.isArray(value.collections)
 const isOne = (value: unknown): value is { success: true, product: Product } =>
   isRecord(value) && value.success === true && isRecord(value.product) && typeof value.product.id === 'string' && Boolean(value.product.id.trim())
-const isProductRead = (value: unknown): value is { success: true; product: Product; public_url: string | null; public_urls: Record<string, string>; preview_url: string | null; host_profile_published: boolean | null } =>
-  isOne(value) && 'public_url' in value && (value.public_url === null || typeof value.public_url === 'string')
+const isProductRead = (value: unknown): value is { success: true; product: Product; collections: Collection[]; preview_token: string | null; public_url: string | null; public_urls: Record<string, string>; preview_url: string | null; host_profile_published: boolean | null } =>
+  isOne(value) && 'collections' in value && Array.isArray(value.collections)
+  && 'preview_token' in value && (value.preview_token === null || typeof value.preview_token === 'string')
+  && 'public_url' in value && (value.public_url === null || typeof value.public_url === 'string')
   && 'preview_url' in value && (value.preview_url === null || typeof value.preview_url === 'string')
   && 'host_profile_published' in value && (value.host_profile_published === null || typeof value.host_profile_published === 'boolean')
   && 'public_urls' in value && isRecord(value.public_urls) && Object.values(value.public_urls).every(url => typeof url === 'string')
@@ -610,27 +610,13 @@ type ProductEditorRead = { collections: Collection[]; product: Product; previewT
 const productReadKey = computed(() => `dashboard-product:${organizationId}:${locationScope.value ?? 'organization'}:${productId.value}`)
 const { data: loaded, error: loadFailure, refresh } = await useAsyncData<ProductEditorRead>(
   productReadKey,
-  async (nuxtApp): Promise<ProductEditorRead> => {
+  async (_app, { signal }): Promise<ProductEditorRead> => {
     if (isNew.value) return null
     const id = locationId.value
-    const [collectionResponse, productResponse] = await Promise.all([
-      // Every collection, site-wide and per location: membership is the
-      // product's, wherever the grouping lives.
-      dashboardApi(`/api/editor/organizations/${organizationId}/collections`, { validate: isCollectionList }),
-      dashboardApi(id ? `/api/editor/organizations/${organizationId}/locations/${encodeURIComponent(id)}/products/${encodeURIComponent(productId.value)}` : `/api/editor/organizations/${organizationId}/products/${encodeURIComponent(productId.value)}`, { validate: isProductRead }),
-    ])
-    if (locationScope.value === 'online' && !productResponse.product.booking?.held_online) throw createError({ statusCode: 404, statusMessage: 'This product is not held online' })
-    // The preview token is site-wide: a writer's re-read keeps the one this
-    // product already has, so a save never waits on minting another.
-    const current = nuxtApp.payload.data[productReadKey.value] as ProductEditorRead | undefined
-    const kept = current?.product.id === productResponse.product.id ? current.previewToken : null
-    let previewToken: string | null = kept
-    if (kept === null && canPreview.value && ['dish', 'experience', 'service'].includes(productResponse.product.kind)) {
-      const response = await dashboardApi(`/api/editor/organizations/${organizationId}/context`, { validate: isRecord })
-      if (!isRecord(response.context) || typeof response.context.preview_token !== 'string' || !response.context.preview_token) throw new Error('The product preview could not be loaded.')
-      previewToken = response.context.preview_token
-    }
-    return { collections: collectionResponse.collections, product: productResponse.product, previewToken, previewUrl: productResponse.preview_url, publicUrl: productResponse.public_url, publicUrls: productResponse.public_urls, hostProfilePublished: productResponse.host_profile_published }
+    const path = `/api/editor/organizations/${organizationId}${id ? `/locations/${encodeURIComponent(id)}` : ''}/products/${encodeURIComponent(productId.value)}`
+    const response = await dashboardApi(path, { validate: isProductRead, signal, query: { editor: '1' } })
+    if (locationScope.value === 'online' && !response.product.booking?.held_online) throw createError({ statusCode: 404, statusMessage: 'This product is not held online' })
+    return { collections: response.collections, product: response.product, previewToken: response.preview_token, previewUrl: response.preview_url, publicUrl: response.public_url, publicUrls: response.public_urls, hostProfilePublished: response.host_profile_published }
   },
   {
     getCachedData(cacheKey, nuxtApp, ctx) {
@@ -1652,54 +1638,37 @@ async function save(target?: string, concern?: ProductConcern) {
 async function commit(concern?: ProductConcern) {
   const id = locationId.value
   const removesOnlineScope = locationScope.value === 'online' && (concern === 'location' && !form.held_online || concern === 'enabled' && !form.bookable)
-  let ordinaryDraft: { version: string | null; values: ProductForm } | null = null
-  const bookingDraft: Partial<ProductForm> | null = concern === 'enabled' ? { bookable: form.bookable, ...(form.bookable ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, ...(product.value?.kind === 'table' ? { booking_duration: form.booking_duration, seating_interval: form.seating_interval } : {}) } : {}) }
-    : concern === 'duration' ? { booking_duration: form.booking_duration }
-    : concern === 'seatings' ? { booking_duration: form.booking_duration, seating_interval: form.seating_interval }
-    : concern === 'capacity' ? { booking_capacity: form.booking_capacity }
-    : concern === 'confirmation' ? { confirmation_mode: form.confirmation_mode }
-    : concern === 'notice' ? { advance_notice_minutes: form.advance_notice_minutes }
-    : concern === 'assignment' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id }
-    : concern === 'payment' ? { online_payment_required: form.online_payment_required, payment_basis: form.payment_basis, payment_min_party_size: form.payment_min_party_size }
-    : concern === 'party' ? { party_size_min: form.party_size_min, party_size_max: form.party_size_max }
-    : concern === 'guest-terms' ? { minimum_guest_age: form.minimum_guest_age, accessibility_contact_required: form.accessibility_contact_required }
-    : concern === 'location' ? { held_online: form.held_online }
-    : null
+  const submitted = !isNew.value && baselineFormSnapshot.value ? cloneFnJSON(form) : null
+  const baseline = submitted ? JSON.parse(baselineFormSnapshot.value!) as ProductForm : null
+  const draftVersion = editVersion.value
   const scheduleDraft = typeof concern === 'number' ? schedule.value.map(slot => ({ ...slot })) : null
-  const bookingVersion = bookingDraft || scheduleDraft ? editVersion.value : null
-  const publicationDraft = concern === 'publication-visibility' ? form.published : concern === 'publication-availability' ? form.active : null
-  const propertyDraft = !isNew.value && editorKey.value === 'property-type' ? {
-    stay_property_type_group: form.stay_property_type_group,
-    stay_property_type: form.stay_property_type,
-    stay_listing_type: form.stay_listing_type,
-    stay_total_floors: form.stay_total_floors,
-    stay_listing_floor: form.stay_listing_floor,
-    stay_year_built: form.stay_year_built,
-    stay_property_size: form.stay_property_size,
-    stay_property_size_unit: form.stay_property_size_unit,
-  } : null
-  const arrivalTimeDraft = concern === 'arrival-time' ? { check_in_time: form.check_in_time, check_in_end_time: form.check_in_end_time, check_out_time: form.check_out_time } : null
-  const safetyDraft = isSafetyConcern(concern) ? { keys: staySafetySectionKeys(concern), details: { ...form.details }, answers: form.stay_amenity_answers.map(answer => ({ ...answer })) } : null
-  const locationDetailKey = editorKey.value === 'location' ? STAY_LOCATION_DETAIL_KEYS.find(key => key === route.params.field) : undefined
-  const locationDraft = locationDetailKey ? { key: locationDetailKey, value: form.details[locationDetailKey] } : null
-  const houseRulesDraft = concern === 'house-rules' || concern === 'additional-rules' || concern === 'arrival-time' && editorKey.value === 'house-rules' ? {
-    details: { ...form.details },
-    max_guests: Number(form.max_guests) !== product.value?.stay?.max_guests ? form.max_guests : null,
-  } : null
-  function restoreHouseRules(includeAdditional: boolean) {
-    if (!houseRulesDraft) return
-    for (const key of includeAdditional ? STAY_HOUSE_RULE_DETAIL_KEYS : mainHouseRuleKeys) {
-      const value = houseRulesDraft.details[key]
+  const bookingEdit = concern !== undefined && (typeof concern === 'number' || ![
+    'publication-visibility', 'publication-availability', 'house-rules', 'additional-rules', 'arrival-time',
+  ].includes(concern) && !isSafetyConcern(concern))
+  const keepVersion = bookingEdit || concern === undefined && (!stayEditor.value || ['description', 'attributes', 'internal-name', 'name'].includes(editorKey.value ?? ''))
+  const preserveMainRules = editorKey.value === 'house-rules' && (concern === 'additional-rules' || concern === 'arrival-time')
+  function restoreDetails(keys: readonly string[]) {
+    if (!submitted) return
+    for (const key of keys) {
+      const value = submitted.details[key]
       if (value === undefined) Reflect.deleteProperty(form.details, key)
       else form.details[key] = value
     }
-    if (houseRulesDraft.max_guests !== null) form.max_guests = houseRulesDraft.max_guests
+  }
+  function restoreDraft() {
+    if (!submitted || !baseline) return
+    for (const key of Object.keys(submitted) as Array<keyof ProductForm>) {
+      if (key !== 'details' && JSON.stringify(submitted[key]) !== JSON.stringify(baseline[key])) Object.assign(form, { [key]: submitted[key] })
+    }
+    restoreDetails([...new Set([...Object.keys(submitted.details), ...Object.keys(baseline.details)])].filter(key =>
+      JSON.stringify(submitted.details[key]) !== JSON.stringify(baseline.details[key])))
+    if (scheduleDraft) schedule.value = scheduleDraft
+    if (keepVersion) editVersion.value = draftVersion
   }
   saving.value = true
   saveError.value = null
   try {
-    let savedInternalName: ProductMutation | undefined
-    if (!isNew.value && concern === undefined && (!stayEditor.value || editorKey.value === 'description' || editorKey.value === 'attributes' || editorKey.value === 'internal-name' || editorKey.value === 'name')) ordinaryDraft = { version: editVersion.value, values: cloneFnJSON(form) }
+    let savedStay: ProductMutation | undefined
     if (isNew.value) {
       // A service is created with the page that shows it, in one write: the
       // name is the page's first title, the server gives it a free
@@ -1771,7 +1740,8 @@ async function commit(concern?: ProductConcern) {
     } else if (concern === 'publication-availability') {
       await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, { method: 'PATCH', body: { active: form.active }, validate: isMutation })
     } else if (concern === 'house-rules' || concern === 'additional-rules' || concern === 'arrival-time' || isSafetyConcern(concern)) {
-      await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, { method: 'PATCH', body: payload(concern), validate: isMutation })
+      const { product: saved } = await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, { method: 'PATCH', body: payload(concern), validate: isMutation })
+      if (saved.kind === 'stay') savedStay = saved
     } else if (concern !== undefined) {
       await saveBooking(concern)
     } else if (editorKey.value === 'locations') {
@@ -1787,7 +1757,7 @@ async function commit(concern?: ProductConcern) {
         ...(attempt ? { headers: { 'Idempotency-Key': attempt.key } } : {}),
       })
       if (attempt) stayDefaultAttempt.value = null
-      if (editorKey.value === 'internal-name') savedInternalName = saved
+      if (saved.kind === 'stay' && ['internal-name', 'description', 'property-type', 'rooms', 'amenities', 'cancellation', 'availability', 'guests'].includes(editorKey.value ?? '')) savedStay = saved
     }
     if (removesOnlineScope) {
       const result = await navigateTo({ path: route.path, query: { ...route.query, location_id: undefined }, hash: route.hash }, { replace: true })
@@ -1797,15 +1767,15 @@ async function commit(concern?: ProductConcern) {
         closeTo.value = router.resolve({ path: destination.path, query: { ...destination.query, location_id: undefined }, hash: destination.hash }).fullPath
       }
     }
-    if (savedInternalName) {
+    if (savedStay) {
       const current = loaded.value
-      if (!current?.product.stay || !savedInternalName.stay || savedInternalName.id !== current.product.id) {
+      if (!current?.product.stay || !savedStay.stay || savedStay.id !== current.product.id) {
         throw new Error('The saved listing does not match this editor.')
       }
       const { image, gallery, media, social_image } = current.product
-      loaded.value = { ...current, product: { ...savedInternalName, image, gallery, media, social_image } }
-      editVersion.value = savedInternalName.updated_at
-      const { id, stay: { internal_name: label } } = savedInternalName
+      loaded.value = { ...current, product: { ...savedStay, image, gallery, media, social_image } }
+      editVersion.value = savedStay.updated_at
+      const { id, stay: { internal_name: label } } = savedStay
       for (const view of catalogViews) {
         const catalog = view.value
         if (catalog) view.value = { ...catalog, screen: { ...catalog.screen, rows: catalog.screen.rows.map(row => row.id === id ? { ...row, label } : row) } }
@@ -1814,10 +1784,11 @@ async function commit(concern?: ProductConcern) {
       await reload()
     }
     if (product.value) loadForm(product.value)
-    if (concern === 'additional-rules' || concern === 'arrival-time') restoreHouseRules(false)
-    // A booking write changes what the schedule is: its start times, whether the
-    // product has a calendar at all, or the time zone an online one runs in.
-    if (concern !== undefined && concern !== 'publication-visibility' && concern !== 'publication-availability' && concern !== 'house-rules' && concern !== 'additional-rules' && concern !== 'arrival-time' && !isSafetyConcern(concern)) await reloadSchedule()
+    if (preserveMainRules && submitted) {
+      restoreDetails(mainHouseRuleKeys)
+      if (baseline && submitted.max_guests !== baseline.max_guests) form.max_guests = submitted.max_guests
+    }
+    if (bookingEdit) await reloadSchedule()
     if (!closeTo.value || router.resolve(closeTo.value).fullPath !== router.currentRoute.value.fullPath) {
       const result = await (closeTo.value ? navigateTo(closeTo.value) : level.close())
       if (isNavigationFailure(result)) throw result
@@ -1831,46 +1802,13 @@ async function commit(concern?: ProductConcern) {
       creationSubmitted.value = false
       createKey.value = crypto.randomUUID()
     }
-    if (ordinaryDraft || bookingDraft || scheduleDraft || locationDraft || safetyDraft || arrivalTimeDraft || houseRulesDraft || propertyDraft || publicationDraft !== null || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
+    if (submitted || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
       try {
         await reload()
         if (scheduleDraft) await reloadSchedule()
       } catch (readError) { saveError.value += ` ${getErrorMessage(readError, 'The saved listing could not be read again')}` }
+      restoreDraft()
     }
-    if (ordinaryDraft) {
-      const draft = ordinaryDraft.values
-      if (editorKey.value === 'attributes' || editorKey.value === 'price') form.details = draft.details
-      if (editorKey.value === 'price') form.variants = draft.variants
-      if (editorKey.value === 'internal-name') form.internal_name = draft.internal_name
-      if (editorKey.value === 'name') form.name = draft.name
-      if (editorKey.value === 'description') { form.description = draft.description; form.details = draft.details }
-      if (editorKey.value === 'order-url') form.order_url = draft.order_url
-      if (editorKey.value === 'kind') form.kind = draft.kind
-      if (editorKey.value === 'locations') form.locations = draft.locations
-      editVersion.value = ordinaryDraft.version
-    }
-    if (bookingDraft) Object.assign(form, bookingDraft)
-    if (scheduleDraft) schedule.value = scheduleDraft
-    if (bookingDraft || scheduleDraft) editVersion.value = bookingVersion
-    // A failed response may follow a committed write. Saved summaries
-    // re-read it, while the failed leaf retains the choice it submitted.
-    if (concern === 'publication-visibility' && publicationDraft !== null) form.published = publicationDraft
-    if (concern === 'publication-availability' && publicationDraft !== null) form.active = publicationDraft
-    if (propertyDraft) Object.assign(form, propertyDraft)
-    if (arrivalTimeDraft) Object.assign(form, arrivalTimeDraft)
-    if (locationDraft) {
-      if (locationDraft.value === undefined) Reflect.deleteProperty(form.details, locationDraft.key)
-      else form.details[locationDraft.key] = locationDraft.value
-    }
-    if (safetyDraft) {
-      if (concern === 'devices') form.stay_amenity_answers = safetyDraft.answers
-      for (const key of safetyDraft.keys) {
-        const value = safetyDraft.details[key]
-        if (value === undefined) Reflect.deleteProperty(form.details, key)
-        else form.details[key] = value
-      }
-    }
-    restoreHouseRules(concern === 'additional-rules')
   } finally {
     saving.value = false
   }

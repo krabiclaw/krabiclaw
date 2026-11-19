@@ -155,15 +155,25 @@ export function queueOrganizationSocialCardRefresh(organizationId: string): { id
   }] }
 }
 
-function readOrganizationSocialCardRefresh(db: DbClient, organizationId: string) {
-  return queryFirst<{ id: string; reason: string; status: 'pending' | 'processing' | 'processed' | 'failed'; last_error: string | null }>(db, `
+type SocialCardRefreshRow = { id: string; reason: string; status: 'pending' | 'processing' | 'processed' | 'failed'; last_error: string | null }
+
+export function organizationSocialCardRefreshQuery(organizationId: string | { sql: string }): BatchQuery {
+  return { query: `
     SELECT id, reason, status, last_error FROM public_resource_cache_invalidations
-    WHERE organization_id = ? AND reason LIKE ? ORDER BY rowid DESC LIMIT 1
-  `, [organizationId, `${SOCIAL_CARD_REFRESH_PREFIX}%`])
+    WHERE organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND reason LIKE ? ORDER BY rowid DESC LIMIT 1
+  `, params: [...(typeof organizationId === 'string' ? [organizationId] : []), `${SOCIAL_CARD_REFRESH_PREFIX}%`] }
+}
+
+function readOrganizationSocialCardRefresh(db: DbClient, organizationId: string) {
+  const { query, params } = organizationSocialCardRefreshQuery(organizationId)
+  return queryFirst<SocialCardRefreshRow>(db, query, params)
 }
 
 export async function loadOrganizationSocialCardRefresh(db: DbClient, organizationId: string): Promise<OrganizationSocialCardRefresh | null> {
-  const row = await readOrganizationSocialCardRefresh(db, organizationId)
+  return organizationSocialCardRefresh(await readOrganizationSocialCardRefresh(db, organizationId))
+}
+
+export function organizationSocialCardRefresh(row?: SocialCardRefreshRow | null): OrganizationSocialCardRefresh | null {
   if (!row) return null
   return {
     id: row.id,

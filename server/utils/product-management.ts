@@ -1,3 +1,4 @@
+import type { CatalogProduct } from '~/server/types/products'
 import { changedTaskIds, publishChangedJobs } from '~/server/events'
 import { isStayAmenityCodes, NEW_HOME_CANCELLATION_POLICIES, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
@@ -498,11 +499,11 @@ async function publicProductWindow(db: DbClient, organizationId: string, product
 }
 
 interface ProductListInput {
-  organizationId: string; kind?: ProductKind; featured?: boolean; publishedOnly?: boolean; bookableOnly?: boolean; assignedUserId?: string; window?: { limit: number; offset: number }; env?: CloudflareEnv; paymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>
+  organizationId: string; productIds?: readonly string[]; kind?: ProductKind; featured?: boolean; publishedOnly?: boolean; bookableOnly?: boolean; assignedUserId?: string; window?: { limit: number; offset: number }; env?: CloudflareEnv; paymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>
 }
 
 interface OrganizationProductListInput extends ProductListInput {
-  productIds?: readonly string[]
+  locationId?: string
 }
 
 export interface ProductListResult {
@@ -517,13 +518,15 @@ function productListCounts(rows: readonly { kind: ProductKind; count?: number }[
 }
 
 /** Editable catalogue pages read one extra row. Public readiness and counts precede pagination. */
-function organizationProductSelection(input: Omit<OrganizationProductListInput, 'organizationId' | 'assignedUserId'> & { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope }) {
+function organizationProductSelection(input: Omit<OrganizationProductListInput, 'organizationId' | 'assignedUserId' | 'locationId'> & { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope; locationId?: string | { sql: string; params: unknown[] } }) {
   const assignment = input.assignedUserId ? assignedOfferingCondition(input.assignedUserId) : null
   const org = typeof input.organizationId === 'string' ? '?' : input.organizationId.sql
+  const location = input.locationId
   const selection = `FROM products p
     LEFT JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
-    WHERE p.organization_id = ${org} AND (? = 0 OR (${PUBLIC_PRODUCT_SQL}))${input.productIds ? ' AND p.id IN (SELECT value FROM json_each(?))' : ''}${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${assignment ? ` AND (${assignment.unrestricted} OR (${assignment.sql}))` : ''}`
+    WHERE p.organization_id = ${org} AND (? = 0 OR (${PUBLIC_PRODUCT_SQL}))${location ? ` AND EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = ${typeof location === 'string' ? '?' : location.sql})` : ''}${input.productIds ? ' AND p.id IN (SELECT value FROM json_each(?))' : ''}${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${assignment ? ` AND (${assignment.unrestricted} OR (${assignment.sql}))` : ''}`
   const params = [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.publishedOnly ? 1 : 0,
+    ...(typeof location === 'string' ? [location] : location?.params ?? []),
     ...(input.productIds ? [d1JsonArray(input.productIds)] : []),
     ...(input.kind ? [input.kind] : []),
     ...(input.featured === undefined ? [] : [Number(input.featured)]),
@@ -531,13 +534,8 @@ function organizationProductSelection(input: Omit<OrganizationProductListInput, 
   return { selection, params }
 }
 
-/** Menu cards use the canonical product projection without waiting for product IDs in JavaScript. */
-export function prepareOrganizationDishRead(organizationId: string | { sql: string }, publishedOnly: boolean) {
-  return preparePublicProductSelection(organizationId, 'dish', publishedOnly)
-}
-
-export function preparePublicProductSelection(organizationId: string | { sql: string }, kind: 'dish' | 'experience' | 'table', publishedOnly: boolean) {
-  const { selection, params } = organizationProductSelection({ organizationId, kind, publishedOnly })
+export function preparePublicProductSelection(organizationId: string | { sql: string }, kind: 'dish' | 'experience' | 'table', publishedOnly: boolean, locationId?: string | { sql: string; params: unknown[] }) {
+  const { selection, params } = organizationProductSelection({ organizationId, kind, publishedOnly, locationId })
   const relationships = productHydrationQueries(organizationId, { query: `SELECT p.id ${selection}`, params }).slice(0, 7)
   // These products cannot carry stay settings.
   const queries = [{ query: `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id`, params }, ...relationships]
@@ -561,13 +559,12 @@ export function preparePublicExperiences(scope: string | { sql: string }) {
 }
 
 /** Catalog cards need offering facts, prices and one image. The editor reads the complete product. */
-export function prepareCatalogOfferings(input: { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope; kind?: ProductKind; locationId?: string }) {
+export function prepareCatalogOfferings(input: { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope; kind?: ProductKind; locationId?: string; includeDishes?: boolean }) {
   const { organizationId } = input
-  const base = organizationProductSelection(input)
-  const selection = `${base.selection} AND p.kind <> 'dish'${input.locationId ? ' AND EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = ?)' : ''}`
-  const params = [...base.params, ...(input.locationId ? [input.locationId] : [])]
+  const { selection: base, params } = organizationProductSelection(input)
+  const selection = input.includeDishes ? base : `${base} AND p.kind <> 'dish'`
   const ids = { query: `SELECT p.id ${selection}`, params }
-  const relationships = productHydrationQueries(organizationId, ids).slice(0, 7)
+  const relationships = productHydrationQueries(organizationId, ids).slice(0, 6)
   const queries = [
     { query: `SELECT ${PRODUCT_COLUMNS}, c.internal_name AS stay_internal_name FROM (
       SELECT ${PRODUCT_COLUMNS} ${selection}
@@ -628,8 +625,9 @@ export async function listLocationProducts(db: DbClient, input: ProductListInput
     JOIN product_locations pl ON pl.product_id = p.id AND pl.organization_id = p.organization_id
     ${published ? `JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
       AND (${PUBLIC_PRODUCT_SQL})` : ''}
-    WHERE p.organization_id = ? AND pl.location_id = ?${published ? ' AND pl.published = 1' : ''}${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${input.assignedUserId ? ` AND (${ASSIGNED_SERVICE_SQL})` : ''}`
+    WHERE p.organization_id = ? AND pl.location_id = ?${input.productIds ? ' AND p.id IN (SELECT value FROM json_each(?))' : ''}${published ? ' AND pl.published = 1' : ''}${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${input.assignedUserId ? ` AND (${ASSIGNED_SERVICE_SQL})` : ''}`
   const params = [input.organizationId, input.locationId,
+    ...(input.productIds ? [d1JsonArray(input.productIds)] : []),
     ...(input.kind ? [input.kind] : []),
     ...(input.featured === undefined ? [] : [Number(input.featured)]),
     ...(input.assignedUserId ? [input.assignedUserId] : [])]
@@ -2556,19 +2554,20 @@ function collectionRows(rows: Row[], images: Awaited<ReturnType<typeof readMedia
   }))
 }
 
-interface CollectionReadScope { organizationId: string; locationId?: string | null; assignedUserId?: string }
+interface CollectionReadScope { organizationId: string; locationId?: string | null; assignedUserId?: string; collectionIds?: readonly string[] }
 
-export function prepareCollectionList(input: { organizationId: string | { sql: string }; locationId?: string | null; assignedUserId?: OfferingReadScope }) {
+export function prepareCollectionList(input: { organizationId: string | { sql: string }; locationId?: string | null; assignedUserId?: OfferingReadScope; collectionIds?: readonly string[] }) {
   const assignment = input.assignedUserId ? assignedOfferingCondition(input.assignedUserId) : null
   const org = typeof input.organizationId === 'string' ? '?' : input.organizationId.sql
   const selection = `
     FROM collections
     WHERE organization_id = ${org}
       AND (? = 0 OR location_id IS ?)
+      ${input.collectionIds ? 'AND id IN (SELECT value FROM json_each(?))' : ''}
       ${assignment ? `AND (${assignment.unrestricted} OR EXISTS (SELECT 1 FROM collection_products cp JOIN products p ON p.id = cp.product_id AND p.organization_id = cp.organization_id
         WHERE cp.collection_id = collections.id AND cp.organization_id = collections.organization_id AND (${assignment.sql})))` : ''}
   `
-  const params = [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...assignment?.params ?? []]
+  const params = [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...(input.collectionIds ? [d1JsonArray(input.collectionIds)] : []), ...assignment?.params ?? []]
   return {
     queries: [
       { query: `SELECT * ${selection} ORDER BY sort_order, name, id`, params },
@@ -2577,6 +2576,36 @@ export function prepareCollectionList(input: { organizationId: string | { sql: s
     ],
     read: ([rows, media]: Awaited<ReturnType<typeof executeBatch>>) =>
       collectionRows(rows!.results as Row[], groupMediaPlacements(media!.results)),
+  }
+}
+
+export async function readEditorCatalog(db: DbClient, input: { organizationId: string; assignedUserId?: string; kind?: ProductKind; locationId?: string }) {
+  const { organizationId } = input
+  const cards = prepareCatalogOfferings({ ...input, includeDishes: true })
+  const collections = prepareCollectionList({ ...input, locationId: undefined })
+  const all = organizationProductSelection({ organizationId, assignedUserId: input.assignedUserId })
+  const rows = await executeBatch(db, [
+    ...cards.queries,
+    ...collections.queries,
+    {
+      query: `SELECT cp.collection_id, count(*) AS product_count, sum(p.kind = 'dish') AS dish_count
+        FROM (SELECT p.id, p.kind ${all.selection}) p
+        JOIN collection_products cp ON cp.organization_id = ? AND cp.product_id = p.id GROUP BY cp.collection_id`,
+      params: [...all.params, organizationId],
+    },
+  ], { operation: 'Read catalog and collections' })
+  const counts = new Map((rows.at(-1)!.results as { collection_id: string; product_count: number; dish_count: number }[])
+    .map(({ collection_id, ...counts }) => [collection_id, counts]))
+  return {
+    collections: collections.read(rows.slice(cards.queries.length, -1)).map(row => ({
+      ...row, product_count: counts.get(row.id)?.product_count ?? 0, dish_count: counts.get(row.id)?.dish_count ?? 0,
+    })),
+    products: cards.read(rows.slice(0, cards.queries.length)).map(({ product, internalName, image }): CatalogProduct => ({
+      id: product.id, name: product.name, kind: product.kind, active: product.active, variants: product.variants,
+      collections: product.collections, locations: product.locations, publications: product.publications, image: image ?? null,
+      stay: internalName === null ? null : { internal_name: internalName },
+      booking: product.booking ? { held_online: product.booking.held_online } : null,
+    })),
   }
 }
 
@@ -2707,7 +2736,7 @@ function collectionProductsWrites(organizationId: string, collectionId: string, 
 
 export async function setCollectionProducts(db: DbClient, input: {
   organizationId: string; collectionId: string; productIds: string[]; expectedProductIds?: string[]; moveTo?: SetCollectionProductsInput['move_to']; actor: Actor
-}): Promise<void> {
+}) {
   const productIds = collectionProductIds(input.productIds, 'product_ids', PRODUCT_LIMITS.collectionProducts)
   const expected = input.expectedProductIds === undefined ? undefined : collectionProductIds(input.expectedProductIds, 'expected_product_ids', PRODUCT_LIMITS.collectionProducts)
   const move = input.moveTo
@@ -2748,6 +2777,10 @@ export async function setCollectionProducts(db: DbClient, input: {
     if (/collection_products_sort_order_check|FOREIGN KEY constraint failed/.test(error instanceof Error ? error.message : String(error))) collectionProductsChanged(input.collectionId, error)
     throw error
   })
+  return [
+    { collection_id: input.collectionId, product_ids: productIds },
+    ...(targetId && targetIds ? [{ collection_id: targetId, product_ids: targetIds }] : []),
+  ]
 }
 
 export async function reorderCollections(db: DbClient, input: {

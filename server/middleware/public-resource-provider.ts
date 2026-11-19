@@ -1,7 +1,7 @@
 import { HTTPError, defineHandler  } from 'nitro';
 
 import type { PublicResourceProvider } from '~/utils/public-resource-provider'
-import { loadPublicPage } from '~/server/utils/public-page'
+import { readPublicRoute } from '~/server/utils/public-route'
 import { loadPublicShell } from '~/server/utils/public-shell'
 import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
 import { getPublicConfig, publicConfigFromRow, type PublicConfigRow } from '~/server/utils/organization-config'
@@ -30,8 +30,7 @@ export default defineHandler((event) => {
         mutateResponseHeaders: false, signal: options.signal, })
       return finalizeRequestMetrics(event, 'public-shell-ssr', payload)
     }
-    const payload = await loadPublicPage(event, options.organizationId, options.query, {
-      mutateResponseHeaders: false, signal: options.signal, })
+    const payload = await readPublicRoute(event, options.organizationId, options.query, { signal: options.signal })
     return finalizeRequestMetrics(event, 'public-page-ssr', payload)
   }
   event.context.publicResourceProvider = provider

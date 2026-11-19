@@ -1,3 +1,4 @@
+import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { readDashboardAgenda } from '~/server/utils/dashboard-agenda-reader'
 import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
 import { readDashboardEarnings, readDashboardPayoutsDocument } from '~/server/utils/dashboard-earnings'
@@ -18,6 +19,7 @@ export default defineHandler(event => {
     read: (orgSlug: string, resource: string, query: Record<string, unknown>) => {
       const key = JSON.stringify(Object.entries(query).sort(([left], [right]) => left.localeCompare(right)))
       return oncePerRequest(event, `dashboard-document:${orgSlug}:${resource}:${key}`, async () => {
+        const website = event.context.dashboardWebsite as { settings: unknown; content?: { endpoint: string; value: unknown } } | undefined
         switch (resource) {
           case '/api/dashboard/agenda':
             return readDashboardAgenda(event, query, orgSlug)
@@ -32,10 +34,23 @@ export default defineHandler(event => {
             if (query.view !== 'performance') throw new HTTPError({ statusCode: 400, message: 'Earnings performance is required' })
             return readDashboardEarnings(event, query, orgSlug)
           case '/api/dashboard/settings':
+            if (query.view === 'website') {
+              await getDashboardContext(event, { organizationSlug: orgSlug })
+              if (!website) throw new HTTPError({ statusCode: 500, message: 'Website settings were not read for this document' })
+              return website.settings
+            }
             return readDashboardConnectionsDocument(event, orgSlug)
           case '/api/dashboard/integrations/google-calendar':
             return readCalendarSettingsDocument(event, orgSlug)
           default:
+            if (resource.startsWith('/api/editor/')) {
+              const { organization } = await getDashboardContext(event, { organizationSlug: orgSlug })
+              const content = website?.content
+              if (!content || resource !== `/api/editor/organizations/${organization.id}/${content.endpoint}`) {
+                throw new HTTPError({ statusCode: 404, message: 'Website content was not read for this document' })
+              }
+              return content.value
+            }
             throw new HTTPError({ statusCode: 500, message: 'Dashboard document resource is unavailable' })
         }
       })

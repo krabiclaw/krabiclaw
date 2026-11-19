@@ -54,6 +54,7 @@ import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { readLocalizedFormQuestions } from '~/server/domain/form-questions'
 import { setPublicConsultationMode } from '~/server/utils/professional-services'
 import { isLodgingConfirmationMode } from '~/shared/lodging-booking'
+import { websitePreferencesRows } from '~/shared/organization-settings'
 import { loadSettingsPayload, updateOrganizationSettingsFields } from '~/server/utils/organization-settings'
 import type { UpdateOrganizationSettingsRequest } from '~/server/types/organization'
 import { blankBlogLocalizedText, blogLocalizedTextFields, initialBlogEditorBlocks, type EditorContentBlock, readBlogLocalizedText, writeBlogLocalizedText } from '~/utils/blog-editor'
@@ -572,22 +573,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         statusRow, row('pages', 'Pages'), row('website-blog', 'Blog'), row('website-posts', 'Social posts'), booking,
         row('website-brand', 'Brand', settings.name ?? undefined), row('website-reviews', 'Reviews'), row('website-qa', 'Q&A'), row('website-preferences', 'Preferences'),
       ] }
-      if (view === 'website-preferences') {
-        const site = `/dashboard/${encodeURIComponent(organization.slug)}/website`
-        const preferences = `${site}/preferences`
-        const link = (id: string, item: CatalogRow, icon: string, path = `${preferences}/${id}`): CatalogRow => ({ ...item, id, icon, to: path })
-        const currency = settings.default_currency
-        const currencyIcon = currency === 'EUR' ? 'euro' : currency === 'GBP' ? 'pound-sterling' : currency === 'JPY' || currency === 'CNY' ? 'japanese-yen' : 'dollar-sign'
-        return { title: 'Preferences', fields: [], rows: [
-          { ...link('status', statusRow, 'i-lucide-eye'), status: settings.status === 'active' ? 'success' : 'neutral' },
-          link('localization', row('languages', 'Languages', 'Languages the site is published in'), 'i-lucide-languages'),
-          link('domains', row('website-domains', 'Domains', settings.public_url ?? 'Not connected'), 'i-lucide-globe-2'),
-          link('currency', row('website-currency', 'Currency', currency), `i-lucide-${currencyIcon}`),
-          link('booking', booking, 'i-lucide-calendar-check', `${site}/booking`),
-          link('reviews', row('website-review-settings', 'Review settings', 'Approval and visibility'), 'i-lucide-star'),
-          row('website-seo', 'Search engine optimization'),
-        ] }
-      }
+      if (view === 'website-preferences') return { title: 'Preferences', fields: [], rows: websitePreferencesRows(organization.slug, settings) }
       return { title: bookingTitle, fields: [], rows: [
         ...(lodging || settings.consultation_mode ? [row('website-booking-mode', 'Confirmation', booking.summary)] : []),
         ...(lodging ? [row('payout-method', 'How you get paid', 'Manage your Stripe account and payouts')] : []),
@@ -1552,7 +1538,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     const descriptor = view === 'website-brand-field' ? descriptors.find(item => item.key === query.field) ?? missing('Brand setting not found') : null
     const logoSlot = descriptor?.key === 'logo' || descriptor?.key === 'logo_dark' ? descriptor.key : null
     const logo = logoSlot ? settings.media.find(item => item.slot === logoSlot) : null
-    const presentation = logo && 'presentation' in logo ? logo.presentation : ORIGINAL_LOGO_PRESENTATION
+    const presentation = logo?.presentation ?? ORIGINAL_LOGO_PRESENTATION
     const announcementMedia = announcement ? settings.media.find(item => item.slot === 'announcement') : null
     const fields = announcement ? [
       field('enabled', 'Show announcement', 'toggle', settings.announcement?.enabled === true),

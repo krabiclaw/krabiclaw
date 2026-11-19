@@ -3,6 +3,7 @@ import { requireTenantPageWriteAccess } from '~/server/utils/tenant-pages-api'
 import { getTenantPageById, resolvePublishedTenantPageIdentity } from '~/server/utils/content/pages'
 import { resolvePublicTenantOrigin } from '~/server/utils/public-base'
 import { listPublicLocaleRepresentations, resolvePublicDocumentSourcePath } from '~/server/utils/public-locale-representations'
+import { createPreviewToken, PREVIEW_TOKEN_TTL_MS, previewSecretOf } from '~/server/utils/preview-token'
 
 export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organization_id')
@@ -14,11 +15,18 @@ export default defineHandler(async (event) => {
     resolvePublicTenantOrigin(db, env, organizationId),
     resolvePublishedTenantPageIdentity(db, organizationId, page.path, page.locale),
   ])
-  const sourcePath = await resolvePublicDocumentSourcePath(db, organizationId, page.page_id)
-  const representations = origin && published?.id === page.id
-    ? await listPublicLocaleRepresentations(env, db, { organizationId, sourcePath, documentId: page.page_id }) : []
-  const representation = representations.find(item => item.locale === page.locale)
-  return jsonResponse({ page, public_url: origin && representation ? new URL(representation.route_path, origin).toString() : null })
+  let public_url: string | null = null
+  if (origin && published?.id === page.id) {
+    if (page.id === page.page_id) public_url = new URL(page.path, origin).toString()
+    else {
+      const sourcePath = await resolvePublicDocumentSourcePath(db, organizationId, page.page_id)
+      const representations = await listPublicLocaleRepresentations(env, db, { organizationId, sourcePath, documentId: page.page_id })
+      const representation = representations.find(item => item.locale === page.locale)
+      if (representation) public_url = new URL(representation.route_path, origin).toString()
+    }
+  }
+  const secret = previewSecretOf(env)
+  return jsonResponse({ page, public_url, preview_token: secret ? await createPreviewToken(secret, organizationId, Date.now() + PREVIEW_TOKEN_TTL_MS) : null })
 })
 import { defineHandler } from 'nitro';
 import { getRouterParam } from 'nitro/h3';

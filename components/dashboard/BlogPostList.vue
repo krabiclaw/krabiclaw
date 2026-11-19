@@ -142,32 +142,10 @@ async function fetchFirst(): Promise<BlogPage> {
   }
   return { posts, page_info: info }
 }
-const { data, error, status, refresh } = await useAsyncData(
+const { data, error, status, refresh } = await useWebsiteIndexData(
   () => `dashboard-blog-posts:${organizationId}:${orderedCollection.value ?? statusFilter.value ?? 'all'}`,
   fetchFirst,
-  {
-    getCachedData(cacheKey, nuxtApp, ctx) {
-      if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-      return nuxtApp.payload.data[cacheKey] as { posts: BlogPost[]; page_info: { has_more: boolean; next_cursor: string | null } } | undefined
-    },
-  },
 )
-
-if (import.meta.client) {
-  onMounted(() => {
-    const key = `dashboard-blog-posts:${organizationId}:${orderedCollection.value ?? statusFilter.value ?? 'all'}`
-    if (useNuxtApp().payload.data[key]) {
-      void refresh()
-    }
-  })
-  watch(activeTab, async () => {
-    await nextTick()
-    const key = `dashboard-blog-posts:${organizationId}:${orderedCollection.value ?? statusFilter.value ?? 'all'}`
-    if (useNuxtApp().payload.data[key]) {
-      void refresh()
-    }
-  })
-}
 
 const moreError = ref<unknown>(null)
 const loadError = computed(() => {

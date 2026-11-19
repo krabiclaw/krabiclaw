@@ -130,8 +130,9 @@ const { title: newTitle, firstStep, saveLabel, saveDisabled, save: saveLeaf } = 
   commit,
 })
 
-const isCollectionCreated = (value: unknown): value is { collection: { id: string } } =>
+const isCollectionSaved = (value: unknown): value is { collection: Collection } =>
   isRecord(value) && isRecord(value.collection) && typeof value.collection.id === 'string'
+  && typeof value.collection.name === 'string' && typeof value.collection.sort_order === 'number'
 
 async function commit() {
   if (saving.value) return
@@ -141,15 +142,15 @@ async function commit() {
   let committed = false
   try {
     const endpoint = `/api/editor/organizations/${organizationId}/collections`
-    if (isNew.value) {
-      const created = await dashboardApi(endpoint, { method: 'POST', body: { name: form.name.trim(), location_id: locationId.value }, validate: isCollectionCreated })
-      createdId = created.collection.id
-    } else {
-      await dashboardApi(`${endpoint}/${collectionId.value}`, { method: 'PATCH', body: level.child.value === 'description' ? { description: form.description.trim() || null } : { name: form.name.trim() }, validate: isRecord })
-    }
+    const { collection: saved } = isNew.value
+      ? await dashboardApi(endpoint, { method: 'POST', body: { name: form.name.trim(), location_id: locationId.value }, validate: isCollectionSaved })
+      : await dashboardApi(`${endpoint}/${collectionId.value}`, { method: 'PATCH', body: level.child.value === 'description' ? { description: form.description.trim() || null } : { name: form.name.trim() }, validate: isCollectionSaved })
     committed = true
-    if (createdId) form.name = ''
-    await catalog.refresh()
+    if (isNew.value) {
+      createdId = saved.id
+      form.name = ''
+    }
+    catalog.applyCollections([saved])
     if (createdId) await navigateTo(router.resolve({ path: collectionPath.value.replace(/\/new$/, `/${createdId}`), query: route.query }).fullPath, { replace: true })
     else await level.close()
   } catch (error) {

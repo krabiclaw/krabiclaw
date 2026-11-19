@@ -5,9 +5,6 @@
       Manage pages and add sections. Guests and clients will only see content you publish.
     </p>
 
-    <!-- Error alert if loading fails -->
-    <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="loadError" />
-
     <!-- Airbnb Parity: Task Banner (amber dot, "View your tasks", opens Page tasks modal) -->
     <button
       v-if="tasks.length > 0"
@@ -23,14 +20,9 @@
       <UIcon name="i-lucide-chevron-right" class="size-5 text-muted shrink-0" />
     </button>
 
-    <!-- Loading spinner -->
-    <div v-if="status === 'pending' && !listItems.length" class="flex min-h-48 items-center justify-center">
-      <UIcon name="i-lucide-loader-circle" class="size-6 animate-spin text-muted" />
-    </div>
-
     <!-- Empty State -->
     <div
-      v-else-if="!listItems.length"
+      v-if="!listItems.length"
       class="rounded-3xl border border-dashed border-default p-10 text-center"
     >
       <UIcon name="i-lucide-file-text" class="size-10 text-muted mx-auto mb-3" />
@@ -95,37 +87,15 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { getErrorMessage } from '~/utils/errors'
-import { isTenantPageListResponse, tenantPageRows, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
+import { tenantPageRows, websiteSettingsKey, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
 import PageTasksModal from '~/components/dashboard/PageTasksModal.vue'
 
-const dashboardApi = useDashboardApi()
-const organizationId = useDashboardOrganizationId()
 const level = useRouteLevel()
 
 const tasksModalOpen = ref(false)
 const dismissedTaskIds = ref<Set<string>>(new Set())
 
-const { data, error, status, refresh } = await useAsyncData(
-  `tenant-pages-${organizationId}`,
-  () => dashboardApi<{ pages: TenantPageListRow[]; tasks?: PageTask[] }>(`/api/editor/organizations/${organizationId}/pages`, { validate: isTenantPageListResponse }),
-  {
-    getCachedData(cacheKey, nuxtApp, ctx) {
-      if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-      return nuxtApp.payload.data[cacheKey] as { pages: TenantPageListRow[]; tasks?: PageTask[] } | undefined
-    },
-  },
-)
-
-if (import.meta.client) {
-  onMounted(() => {
-    if (useNuxtApp().payload.data[`tenant-pages-${organizationId}`]) {
-      void refresh()
-    }
-  })
-}
-
-const loadError = computed(() => (error.value ? getErrorMessage(error.value, 'Failed to load pages') : null))
+const { data } = useNuxtData<{ pages: TenantPageListRow[]; tasks?: PageTask[] }>(websiteSettingsKey(String(useRoute().params.org_slug)))
 
 const listItems = computed(() => tenantPageRows(data.value?.pages ?? []).map(row => ({
   ...row,

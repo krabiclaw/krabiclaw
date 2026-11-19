@@ -1,16 +1,16 @@
 import { HTTPError } from 'nitro';
 
 import { jsonResponse } from '~/server/utils/api-response'
-import { loadPublicPage } from '~/server/utils/public-page'
+import { readPublicRoute } from '~/server/utils/public-route'
 import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
 
 export default defineHandler(async (event) => {
   const organizationId = event.context.organizationId as string | null | undefined
   if (!organizationId) throw new HTTPError({ statusCode: 400, statusMessage: 'organizationId required' })
   const query = getQuery(event)
-  const payload = await loadPublicPage(
+  const payload = await readPublicRoute(
     event, organizationId, Object.fromEntries(Object.entries(query).map(([key, value]) => [
-      key, typeof value === 'string' ? value : undefined, ])), )
+      key, typeof value === 'string' ? value : undefined, ])), { api: true })
   return jsonResponse(finalizeRequestMetrics(event, 'public-page', payload))
 })
 import { defineHandler } from 'nitro';

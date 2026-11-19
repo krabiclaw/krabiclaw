@@ -36,7 +36,15 @@ import { readPublicSourceLocale, sourceLocaleQuery } from '~/server/utils/locali
 import { roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import { calendarCoverageQuery } from '~/server/domain/member-scheduling'
 import { calendarConnectionQuery, calendarSettingsFromRows, readCalendarSettingsDocument } from '~/server/utils/google-calendar'
-import { prepareConnectionSummary } from '~/server/utils/organization-settings'
+import { prepareConnectionSummary, prepareWebsiteSettings } from '~/server/utils/organization-settings'
+import { prepareOrganizationReviews } from '~/server/utils/organization-reviews'
+import { preparePublicLocationDocument } from '~/server/utils/public-route'
+import { isDocumentOnlyPublicPath } from '~/shared/public-locale-routes'
+import { prepareBlogList } from '~/server/utils/content/publishing'
+import { preparePostList } from '~/server/utils/post-management'
+import { mcpPageWindow } from '~/server/utils/mcp-pagination'
+import { qaListQuery, qaPageScopesQuery } from '~/server/utils/location-qa'
+import { rendersWebsiteDocument } from '~/utils/dashboard-document'
 import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
 import { prepareDashboardCatalog, readDashboardCatalogDocument } from '~/server/utils/dashboard-catalog'
 import { setDashboardSocketScope } from '~/server/utils/dashboard-socket-scope'
@@ -123,7 +131,9 @@ const TENANT_SELECT_SQL = `SELECT ${publicBaseColumns('o')},
 
 function tenantSelectFor(event: H3Event) {
   const path = normalizedPath(event.url.pathname)
-  if (!['GET', 'HEAD'].includes(event.method) || !/^\/(?:[A-Za-z-]+\/)?(?:menu|reviews|reservations|pay\/[^/]+|bookings\/(?:confirmed|stay))$/.test(path)) {
+  const document = isDocumentOnlyPublicPath(splitLocalePrefix(path).sourcePath)
+    || /^\/(?:[A-Za-z-]+\/)?(?:reservations|pay\/[^/]+|bookings\/(?:confirmed|stay))$/.test(path)
+  if (!['GET', 'HEAD'].includes(event.method) || !document) {
     return { query: TENANT_SELECT_SQL, params: [] }
   }
   const redirect = publicTenantRedirectQuery({ sql: 'o.id' }, path)
@@ -244,11 +254,12 @@ async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain:
 
   const routing = splitLocalePrefix(path)
   const requestedLocale = routing.localeSegment && platformLocale(routing.localeSegment)?.locale
-  const sourcePath = requestedLocale ? routing.sourcePath : path
+  const sourcePath = (requestedLocale ? routing.sourcePath : path).replace(/\/$/, '') || '/'
   const collectionKind = publicDocumentCollectionKind(sourcePath)
   const includeReviews = sourcePath === '/reviews'
+  const locationRoute = /^\/locations\/([a-z0-9_-]+)\/(menu|reviews)$/.exec(sourcePath)
   const privateCheckout = /^\/(?:pay\/[^/]+|bookings\/(?:confirmed|stay))$/.test(sourcePath)
-  if (!collectionKind && !includeReviews && !privateCheckout) {
+  if (!collectionKind && !includeReviews && !locationRoute && !privateCheckout) {
     return queryFirst<TenantRow>(db, host.query, host.params)
   }
 
@@ -256,11 +267,14 @@ async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain:
   const locale = { sql: `(SELECT locale FROM organization_locales WHERE organization_id = ${organization.sql} AND is_source = 1)` }
   const plan = preparePublicShellRows(organization, requestedLocale || locale, { collectionKind, includeReviews, previewMenu: false })
   const localizations = requestedLocale ? [publicLocalizationsQuery(organization, requestedLocale)] : []
+  const location = locationRoute ? preparePublicLocationDocument(organization, {
+    slug: locationRoute[1]!, page: locationRoute[2]!, locale: requestedLocale || undefined,
+  }) : null
   const returningId = /^\/pay\/([a-f0-9-]+)$/.exec(sourcePath)?.[1]
   const returnPlan = returningId && typeof claim === 'string' && /^[a-f0-9-]{72}$/u.test(claim)
     ? await preparePaymentReturn(tenantScope, returningId, claim) : null
   const [hostRows, ...results] = await executeBatch(db, [
-    host, ...[...plan.queries, ...localizations].map(query => withViewer(authorized, query)),
+    host, ...[...plan.queries, ...localizations, ...location?.queries ?? []].map(query => withViewer(authorized, query)),
     ...(returnPlan ? [returnPlan] : []),
   ], {
     operation: 'Read the public tenant document',
@@ -277,6 +291,7 @@ async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain:
         organizationId: tenant.id, locale: requestedLocale,
         rows: results[plan.queries.length]!.results as StoredPublicLocalizationRow[],
       }
+      if (location) event.context.publicLocationDocument = location.read(results.slice(plan.queries.length + localizations.length), tenant.id)
       if (returnPlan && typeof claim === 'string') {
         const resolvedLocale = requestedLocale || source[0]!.locale
         event.context.paymentReturnDocument = await sealPaymentReturnDocument(cloudflareEnv(event).BETTER_AUTH_SECRET,
@@ -343,6 +358,9 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
       admin: roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ members: ['read'] })) }),
   ] : null
   const query = getQuery(event)
+  const website = rendersWebsiteDocument(panel, query) ? prepareWebsiteSettings(managedOrg, env) : null
+  const websitePanel = website ? panel.split('/')[2] : undefined
+  const websiteList = prepareWebsitePanel(managedOrg, websitePanel, query)
   const catalogRead = { products: ['read'] } as const
   const catalogRoles = [...rolesAllowing({ products: ['read'] }), ...rolesAllowing({ products: ['assigned'] })]
   const catalog = panel === '/products' && query.view !== 'menu' && query.view !== 'section'
@@ -383,6 +401,8 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     ...(booking?.queries ?? []),
     ...(calendar ? [calendar, ...agenda?.queries ?? []] : []),
     ...(earnings?.queries ?? []),
+    ...(website?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(websiteList?.queries.map(query => withViewer(membership, query)) ?? []),
   ]
   return { queries, present }
 
@@ -409,10 +429,40 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
       if (agenda) await agenda.apply(event, panelRows.slice(1), { env, organization })
     }
     if (earnings && panelRows[2]?.results.length) earnings.apply(event, panelRows, organization)
+    if (website && (viewer as { organization_wide: number }).organization_wide === 1) {
+      event.context.dashboardWebsite = {
+        settings: website.read(panelRows.slice(0, website.queries.length)),
+        content: websiteList?.read(panelRows.slice(website.queries.length), organization.id),
+      }
+    }
     setResponseHeader(event, 'cache-control', 'private, no-store')
     await setDashboardSocketScope(event, env, { slug, organizationId: organization.id, sessionId: session.session.id, userId })
     return tenant
   }
+}
+
+function prepareWebsitePanel(organization: { sql: string }, panel: string | undefined, query: Record<string, unknown>) {
+  if (panel === 'reviews') {
+    const reviews = prepareOrganizationReviews(organization, { locationId: typeof query.location_id === 'string' ? query.location_id.trim() : null })
+    return { queries: reviews.queries, read: (rows: D1Result[], id: string) => ({ endpoint: 'reviews', value: { reviews: reviews.read(rows, id) } }) }
+  }
+  if (panel === 'blog') {
+    const list = prepareBlogList(organization, null, mcpPageWindow({}, { resource: '' }), null)
+    return { queries: list.queries, read: (rows: D1Result[], id: string) => ({ endpoint: 'blog/posts', value: list.read(rows, { resource: `blog-posts:${id}::` }) }) }
+  }
+  if (panel === 'posts') {
+    const list = preparePostList(organization, {}, mcpPageWindow({}, { resource: '' }))
+    return { queries: list.queries, read: (rows: D1Result[], id: string) => ({
+      endpoint: 'posts', value: { success: true, ...list.read(rows, { resource: `posts:${id}::` }) },
+    }) }
+  }
+  if (panel === 'qa') {
+    return {
+      queries: [qaListQuery(organization, null, 'en', false, typeof query.page_path === 'string' ? query.page_path : null), qaPageScopesQuery(organization)],
+      read: ([questions, scopes]: D1Result[]) => ({ endpoint: 'qa', value: { qa: questions!.results, page_scopes: scopes!.results } }),
+    }
+  }
+  return null
 }
 
 function publicTenantMedia(tenant: Pick<TenantRow, 'media_json'>) {

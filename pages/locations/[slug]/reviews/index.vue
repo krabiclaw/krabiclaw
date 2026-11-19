@@ -69,18 +69,18 @@
         </div>
       </section>
 
-      <!-- Filter chips — only shown when there are reviews to filter -->
-      <TenantFilterTabs
-        v-if="reviews.length > 0"
-        v-model="activeFilter"
-        :tabs="filters"
-      >
-        <template #extra>
-          <span class="ml-auto text-[10px] tabular-nums text-muted/50">{{ filtered.length }}</span>
-        </template>
-      </TenantFilterTabs>
+      <nav v-if="reviews.length" id="review-filters" class="tenant-container flex flex-wrap items-center gap-2 py-3">
+        <NuxtLink
+          v-for="filter in filters"
+          :key="filter.key"
+          :to="filterTo(filter.key)"
+          :aria-current="activeFilter === filter.key ? 'true' : undefined"
+          :class="activeFilter === filter.key ? 'bg-inverted text-inverted' : 'hover:bg-muted'"
+          class="rounded-full px-4 py-2 text-sm"
+        >{{ filter.label }}</NuxtLink>
+        <span class="ml-auto text-xs tabular-nums text-muted">{{ filtered.length }}</span>
+      </nav>
 
-      <!-- Review list -->
       <section class="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8">
         <!-- Aggregate-only: verified Google rating exists, but no individual review rows yet -->
         <div v-if="reviews.length === 0 && aggregate?.rating" class="flex flex-col items-center justify-center rounded-3xl border border-dashed border-default py-20 text-center">
@@ -106,12 +106,9 @@
         <div v-else-if="filtered.length === 0" class="rounded-3xl border border-dashed border-default p-14 text-center">
           <div class="tenant-display tenant-italic text-2xl text-default">{{ t('site.reviews_page.no_match_title') }}</div>
           <p class="mt-2 text-sm text-muted">{{ t('site.reviews_page.no_match_desc') }}</p>
-          <button
-            class="mt-6 rounded-full border border-default px-5 py-2.5 text-sm transition hover:bg-muted"
-            @click="activeFilter = 'recent'"
-          >
+          <NuxtLink :to="filterTo('recent')" class="mt-6 inline-block rounded-full border border-default px-5 py-2.5 text-sm transition hover:bg-muted">
             {{ t('site.reviews_page.reset_filter') }}
-          </button>
+          </NuxtLink>
         </div>
 
         <div v-else class="flex flex-col gap-8">
@@ -145,7 +142,8 @@ const filters = computed(() => [
   { key: 'lowest', label: t('site.reviews_page.lowest_rated') },
   { key: 'photos', label: t('site.reviews_page.with_photos') }
 ])
-const activeFilter = ref('recent')
+const activeFilter = computed(() => filters.value.find(filter => filter.key === route.query.sort)?.key ?? 'recent')
+const filterTo = (key: string) => ({ path: route.path, query: { ...route.query, sort: key === 'recent' ? undefined : key }, hash: '#review-filters' })
 const reviewMedia = (review: ApiRecord, slot: string) => Array.isArray(review.media)
   ? review.media.filter((item: ApiRecord) => item.slot === slot)
   : []

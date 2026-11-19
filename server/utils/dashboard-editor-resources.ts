@@ -1,32 +1,30 @@
 import { hasPublishedHost } from '~/server/utils/public-provider'
-import { getSourceLocale } from '~/server/utils/organization-locales'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { HTTPError } from 'nitro';
 
 import type { H3Event } from 'nitro'
-import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import { getOrganizationEntitlements } from '~/server/utils/billing-access'
+import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { listLocationQa } from '~/server/utils/location-qa'
 import { requireLocationAccess, requireOrganizationAccess, requireProductAccess } from '~/server/utils/location-access'
 import {
   assertLocationAccess,
   assertResourceAccess,
   memberAccessPrincipal,
+  isOrganizationWideRole,
   roleAllows,
 } from '~/server/utils/member-access'
 import { getMediaAsset, listMediaAssets } from '~/server/utils/media-asset-manager'
 import { getDashboardLocationContext } from '~/server/utils/dashboard-context'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
 import { parseLocationPayload } from '~/server/utils/location-payload'
-import { getProduct, hydrateProductMedia, productPublicPresentation, summarizeLocationProducts } from '~/server/utils/product-management'
+import { getProduct, hydrateProductMedia, listCollections, productPublicPresentation, summarizeLocationProducts } from '~/server/utils/product-management'
 import { requireBlogAccess } from '~/server/utils/blog-access'
-import { getBlogPost, listBlogPosts } from '~/server/utils/content/publishing'
+import { getBlogPost, prepareBlogList } from '~/server/utils/content/publishing'
 import { isArticleCollection } from '~/utils/article-collections'
 import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS } from '~/server/utils/preview-token'
 import { catalogLabel, catalogSummary, presentationForProduct } from '~/utils/product-presentation'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 import { resolveOrganizationCmsCapabilities } from '~/server/utils/cms-capabilities'
-import { getEditablePages } from '~/config/content-registry'
 
 import { catalogPath, locationEditorPath } from '~/server/utils/dashboard-links'
 import { formatPostalAddress } from '~/utils/postal-address'
@@ -34,63 +32,11 @@ import { formatPhone } from '~/utils/phone'
 import { getTodayHoursLabel } from '~/shared/reservation-hours'
 import type { CatalogRow } from '~/shared/catalog-screen'
 
-interface EditorLocationRow {
-  id: string
-  slug: string
-  title: string
-  status: 'active' | 'inactive'
-}
-
 async function editorPreviewToken(secret: unknown, organizationId: string) {
   if (typeof secret !== 'string' || !secret) {
     throw new HTTPError({ statusCode: 500, statusMessage: 'PREVIEW_SECRET is required for editor previews' })
   }
   return await createPreviewToken(secret, organizationId, Date.now() + PREVIEW_TOKEN_TTL_MS)
-}
-
-export async function loadDashboardEditorContext(event: H3Event, organizationId: string) {
-  const { env, db, organization } = await requireOrganizationAccess(event, organizationId)
-  if (!organization.vertical) throw new HTTPError({ statusCode: 500, statusMessage: 'Organization vertical is not configured' })
-
-  // requireOrganizationAccess(event, organizationId) has already
-  // authorized this caller (location-access.ts), so asserting again here only
-  // bought a second read of the same member row.
-  const [locationRows, entitlements, source_locale] = await Promise.all([
-    queryAll<EditorLocationRow>(db, `
-      SELECT id, slug, title, status
-        FROM business_locations
-       WHERE organization_id = ?  AND status = 'active'
-       ORDER BY title ASC
-    `, [organization.id]),
-    getOrganizationEntitlements(env, organization.id),
-    getSourceLocale(db, organization.id),
-  ])
-  const locations = locationRows
-  const preview_token = await editorPreviewToken(env.PREVIEW_SECRET, organizationId)
-  const { vertical, site } = resolveOrganizationCmsCapabilities(organization.vertical, organization.theme_id, null)
-  return {
-    success: true as const,
-    context: {
-      source_locale,
-      organization: {
-        id: organization.id,
-        name: organization.name,
-        subdomain: organization.subdomain,
-        status: organization.status,
-        onboarding_status: organization.onboarding_status,
-        vertical,
-        site,
-        entitlements,
-      },
-      locations,
-      scopes: [
-        { id: null, label: 'Brand-wide', type: 'brand' as const },
-        ...locations.map(location => ({ id: location.id, label: location.title, type: 'location' as const })),
-      ],
-      preview_token,
-      editable_pages: getEditablePages(vertical, site),
-    },
-  }
 }
 
 export async function loadDashboardLocationQa(
@@ -257,13 +203,14 @@ export async function loadDashboardBlogPosts(
   organizationId: string,
   input: { status?: string | null; collection?: string | null; limit?: number; cursor?: string },
 ) {
-  const { env, db } = await requireBlogAccess(event, organizationId)
+  const { db } = await requireBlogAccess(event, organizationId)
   const collection = input.collection ?? null
   if (collection !== null && !isArticleCollection(collection)) throw new HTTPError({ statusCode: 400, statusMessage: 'collection must be blog or docs' })
   const resource = { resource: `blog-posts:${organizationId}:${input.status ?? ''}:${collection ?? ''}` }
-  return await listBlogPosts(db, organizationId, input.status, env, mcpPageWindow({
+  const list = prepareBlogList(organizationId, input.status, mcpPageWindow({
     ...(input.limit === undefined ? {} : { limit: input.limit }), ...(input.cursor ? { cursor: input.cursor } : {}),
-  }, resource), resource, collection)
+  }, resource), collection)
+  return list.read(await executeBatch(db, list.queries, { operation: 'Read blog index' }), resource)
 }
 
 export async function loadDashboardBlogPost(
@@ -282,6 +229,7 @@ export async function loadDashboardProduct(
   organizationId: string,
   locationId: string | null,
   productId: string,
+  editor = false,
 ) {
   const { env, db, organization } = await requireProductAccess(event, organizationId, productId)
   const product = await getProduct(db, organization.id, productId)
@@ -291,15 +239,19 @@ export async function loadDashboardProduct(
     throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found at this location' })
   }
   // Both editor scopes show the same organization-owned media as the catalog.
-  const [hydrated] = await hydrateProductMedia(db, organization.id, [product])
-  const [{ publicUrl, publicUrls }, hostProfilePublished] = await Promise.all([
-    productPublicPresentation(db, env, organization.id, hydrated!),
+  const canPreview = await roleAllows({ organizationId, role: organization.member_role, permissions: { content: ['read'] } })
+  const [[hydrated], { publicUrl, publicUrls }, hostProfilePublished, collections, previewToken] = await Promise.all([
+    hydrateProductMedia(db, organization.id, [product]),
+    productPublicPresentation(db, env, organization.id, product),
     product.stay ? hasPublishedHost(db, organization.id, product.stay) : null,
+    editor && product.kind === 'stay' && product.collections.length ? listCollections(db, {
+      organizationId, collectionIds: product.collections.map(entry => entry.collection_id),
+    }) : [],
+    editor && canPreview && isOrganizationWideRole(organization.member_role) && ['dish', 'experience', 'service'].includes(product.kind)
+      ? editorPreviewToken(env.PREVIEW_SECRET, organizationId) : null,
   ])
   let previewUrl: string | null = null
-  if (product.kind === 'stay' && organization.subdomain && await roleAllows({
-    organizationId, role: organization.member_role, permissions: { content: ['read'] },
-  })) {
+  if (product.kind === 'stay' && organization.subdomain && canPreview) {
     const origin = tenantOrganizationOrigin({
       platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
       freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
@@ -310,5 +262,5 @@ export async function loadDashboardProduct(
     url.searchParams.set(PREVIEW_TOKEN_QUERY, await editorPreviewToken(env.PREVIEW_SECRET, organizationId))
     previewUrl = url.toString()
   }
-  return { success: true as const, product: hydrated!, public_url: publicUrl, public_urls: publicUrls, preview_url: previewUrl, host_profile_published: hostProfilePublished }
+  return { success: true as const, product: hydrated!, ...(editor ? { collections, preview_token: previewToken } : {}), public_url: publicUrl, public_urls: publicUrls, preview_url: previewUrl, host_profile_published: hostProfilePublished }
 }

@@ -113,30 +113,11 @@ const fetchPage = (cursor?: string) => dashboardApi<{ posts: ApiRecord[]; page_i
   query: { ...(locationId.value ? { location_id: locationId.value } : {}), ...(statusFilter.value ? { status: statusFilter.value } : {}), ...(cursor ? { cursor } : {}) },
   validate: isPostsResponse,
 })
-const { data, error, status, refresh } = await useAsyncData(
+const { data, error, status, refresh } = await useWebsiteIndexData(
   postsKey,
   () => fetchPage(),
-  {
-    getCachedData(cacheKey, nuxtApp, ctx) {
-      if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-      return nuxtApp.payload.data[cacheKey] as { posts: ApiRecord[]; page_info: { has_more: boolean; next_cursor: string | null } } | undefined
-    },
-  },
 )
 
-if (import.meta.client) {
-  onMounted(() => {
-    if (useNuxtApp().payload.data[postsKey.value]) {
-      void refresh()
-    }
-  })
-  watch(activeTab, async () => {
-    await nextTick()
-    if (useNuxtApp().payload.data[postsKey.value]) {
-      void refresh()
-    }
-  })
-}
 /** A path in this list's scope: the explicit location rides along. */
 const scoped = (path: string) => router.resolve({ path, query: { location_id: route.query.location_id } }).fullPath
 

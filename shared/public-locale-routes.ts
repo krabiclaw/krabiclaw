@@ -1,3 +1,10 @@
+export const DOCUMENT_ONLY_PUBLIC_PATHS = ['/menu', '/reviews', '/locations/:slug/menu', '/locations/:slug/reviews'] as const
+
+export function isDocumentOnlyPublicPath(path: string): boolean {
+  const source = path.replace(/\/$/, '')
+  return DOCUMENT_ONLY_PUBLIC_PATHS.some(pattern => new RegExp(`^${pattern.replace(':slug', '[^/]+')}$`).test(source))
+}
+
 export const PUBLIC_SOURCE_ROUTE_ROOTS = new Set([
   'about', 'article', 'blog', 'booking-changes', 'bookings', 'contact', 'docs', 'experiences', 'help', 'locations',
   'donate', 'menu', 'photos', 'policies', 'posts', 'pricing', 'privacy', 'products',

@@ -1,7 +1,7 @@
 import type { UpdateProductInput } from '~/server/types/products'
 import { jsonResponse, readRequiredBody, rethrowHttpError } from '~/server/utils/api-response'
 import { requireProductAccess } from '~/server/utils/location-access'
-import { requireOrganizationProduct, updateProduct } from '~/server/utils/product-management'
+import { updateProduct } from '~/server/utils/product-management'
 import { defineHandler } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 
@@ -12,10 +12,6 @@ export default defineHandler(async (event) => {
   try {
     const body = await readRequiredBody<UpdateProductInput>(event)
     const { env, db, session, organization } = await requireProductAccess(event, organizationId, productId, body as unknown as Record<string, unknown>)
-    // Authorizing this site does not authorize a product id in the path: the
-    // catalog is organization-wide, and an editor scoped to one site must not
-    // reach another site's product through it.
-    await requireOrganizationProduct(db, { organizationId: organization.id, productId })
     const idempotencyKey = event.req.headers.get('idempotency-key')?.trim()
     if (idempotencyKey !== undefined && (!idempotencyKey || idempotencyKey.length > 200)) {
       return jsonResponse({ error: 'Idempotency-Key must be 1 to 200 characters', code: 'VALIDATION_ERROR', field: 'idempotency_key' }, { status: 400 })

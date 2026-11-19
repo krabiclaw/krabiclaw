@@ -33,7 +33,9 @@ const props = defineProps<{
   active: 'overview' | 'menu' | 'products' | 'experiences' | 'posts' | 'reviews' | 'photos' | 'qa' | 'contact'
 }>()
 
-const { location } = await usePublicPageData({ lazy: false })
+const shell = useOrganizationShellState()
+await shell.ready
+const location = computed(() => shell.locations.value.find(place => place.slug === props.locationSlug))
 const { localePath, t } = useI18n()
 
 const SECTION_TABS: Array<{ key: PublicLocationSection, label: string }> = [

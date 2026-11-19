@@ -155,7 +155,7 @@
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-medium text-highlighted">{{ article.title }}</p>
                 <p class="truncate text-xs text-muted mt-0.5">
-                  {{ articleSubtitle(article) }}
+                  {{ contentSubtitle(article) }}
                 </p>
               </div>
             </div>
@@ -197,20 +197,12 @@
               class="flex items-center gap-3.5"
             >
               <span class="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#F7F7F7] dark:bg-neutral-800">
-                <img
-                  v-if="post.cover_image_url"
-                  :src="post.cover_image_url"
-                  alt=""
-                  class="size-full object-cover"
-                  loading="lazy"
-                  decoding="async"
-                />
-                <UIcon v-else name="i-lucide-megaphone" class="size-5 text-muted opacity-70" />
+                <UIcon name="i-lucide-megaphone" class="size-5 text-muted opacity-70" />
               </span>
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-medium text-highlighted">{{ post.title }}</p>
                 <p class="truncate text-xs text-muted mt-0.5">
-                  {{ postSubtitle(post) }}
+                  {{ contentSubtitle(post) }}
                 </p>
               </div>
             </div>
@@ -283,7 +275,6 @@
         </div>
       </div>
 
-      <UAlert v-if="preferencesError" color="error" variant="soft" :description="getErrorMessage(preferencesError, 'Preferences could not be loaded')" />
       <EditorNavigationList :groups="navigationGroups" :active-item="detailKey" />
 
       <!-- Airbnb Parity: Featured Brand ("About the business") card -->
@@ -572,10 +563,9 @@ import { parseSitePalette } from '~/shared/site-palette'
 import { getErrorMessage } from '~/utils/errors'
 import { ORIGINAL_LOGO_PRESENTATION } from '~/shared/media-placement-contract'
 import PageTasksModal from '~/components/dashboard/PageTasksModal.vue'
-import { isTenantPageListResponse, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
+import { isTenantPageListResponse, websiteSettingsKey, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
 import { getVerticalLabel } from '~/utils/vertical-copy'
-import type { BlogPost } from '~/lib/components/workspace/blog/types'
-import type { CatalogScreen } from '~/shared/catalog-screen'
+import { websitePreferencesRows } from '~/shared/organization-settings'
 
 const props = withDefaults(defineProps<{ surface?: 'brand' | 'settings' | 'preferences' }>(), { surface: 'settings' })
 const surface = computed(() => props.surface)
@@ -602,8 +592,24 @@ const level = useRouteLevel()
 
 const organizationId = useDashboardOrganizationId()
 
+interface ContentCard {
+  id: string
+  title: string | null
+  status: string
+  published_at: string | null
+  total: number
+  cover?: { public_url: string | null; thumbnail_url: string | null } | null
+  category?: { name: string } | null
+}
+
 interface SettingsPageResource {
-  settings: { success: boolean; settings: OrganizationSettingsResponse }
+  success: boolean
+  settings: OrganizationSettingsResponse
+  pages: TenantPageListRow[]
+  tasks?: PageTask[]
+  articles: ContentCard[]
+  posts: ContentCard[]
+  source_locale: string
 }
 
 const isSettingsResponse = (value: unknown): value is { success: boolean; settings: OrganizationSettingsResponse } =>
@@ -710,14 +716,9 @@ const isBookingActive = computed(() => route.path.startsWith(`${settingsPath.val
 const pageTasksModalOpen = ref(false)
 const dismissedPageTaskIds = ref<Set<string>>(new Set())
 
-const { data: pagesResource } = await useAsyncData(
-  `tenant-pages-summary:${String(organizationId)}`,
-  () => dashboardApi<{ pages: TenantPageListRow[]; tasks?: PageTask[] }>(`/api/editor/organizations/${organizationId}/pages`, { validate: isTenantPageListResponse }),
-)
-
-const pagesList = computed(() => pagesResource.value?.pages ?? [])
+const pagesList = computed(() => settingsResource.value?.pages ?? [])
 const pageTasks = computed<PageTask[]>(() => {
-  const all = pagesResource.value?.tasks ?? []
+  const all = settingsResource.value?.tasks ?? []
   return all.filter(t => !dismissedPageTaskIds.value.has(t.id))
 })
 
@@ -751,72 +752,19 @@ const isPagesActive = computed(() => route.path.startsWith(pagesPath.value))
 const isBlogActive = computed(() => route.path.startsWith(blogPath.value))
 const isPostsActive = computed(() => route.path.startsWith(postsPath.value))
 
-const isBlogSummaryResponse = (value: unknown): value is { posts: BlogPost[] } =>
-  isRecord(value) && Array.isArray(value.posts)
+const blogPreviewItems = computed(() => settingsResource.value?.articles ?? [])
+const blogRemainingCount = computed(() => Math.max(0, (blogPreviewItems.value[0]?.total ?? 0) - 3))
 
-interface PostSummaryItem {
-  id: string
-  title: string
-  status: string
-  published_at?: string | null
-  cover_image_url?: string | null
-  channels?: string[]
-}
-
-const isPostsSummaryResponse = (value: unknown): value is { posts: PostSummaryItem[] } =>
-  isRecord(value) && Array.isArray(value.posts)
-
-const { data: blogResource } = await useAsyncData(
-  `tenant-blog-summary:${String(organizationId)}`,
-  () => dashboardApi<{ posts: BlogPost[] }>(`/api/editor/organizations/${organizationId}/blog/posts`, {
-    query: { limit: 50 },
-    validate: isBlogSummaryResponse,
-  }).catch(() => ({ posts: [] })),
-)
-
-const { data: postsResource } = await useAsyncData(
-  `tenant-posts-summary:${String(organizationId)}`,
-  () => dashboardApi<{ posts: PostSummaryItem[] }>(`/api/editor/organizations/${organizationId}/posts`, {
-    query: { limit: 50 },
-    validate: isPostsSummaryResponse,
-  }).catch(() => ({ posts: [] })),
-)
-
-const blogPreviewItems = computed(() => blogResource.value?.posts?.slice(0, 3) ?? [])
-const blogRemainingCount = computed(() => Math.max(0, (blogResource.value?.posts?.length ?? 0) - 3))
-
-const postPreviewItems = computed(() => postsResource.value?.posts?.slice(0, 3) ?? [])
-const postRemainingCount = computed(() => Math.max(0, (postsResource.value?.posts?.length ?? 0) - 3))
+const postPreviewItems = computed(() => settingsResource.value?.posts ?? [])
+const postRemainingCount = computed(() => Math.max(0, (postPreviewItems.value[0]?.total ?? 0) - 3))
 
 const reviewsPath = computed(() => dashboard.organizationPaths.value?.reviews ?? `${organizationDashboardPath.value}/website/reviews`)
 
-function articleSubtitle(article: BlogPost) {
-  const parts: string[] = []
-  if (article.status === 'draft') parts.push('Draft')
-  else if (article.published_at) {
-    parts.push('Published')
-    parts.push(new Date(article.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))
-  } else {
-    parts.push('Published')
-  }
-  if (article.category?.name) parts.push(article.category.name)
-  return parts.join(' · ')
-}
-
-function postSubtitle(post: PostSummaryItem) {
-  const parts: string[] = []
-  if (post.status === 'draft') parts.push('Draft')
-  else if (post.published_at) {
-    parts.push('Published')
-    parts.push(new Date(post.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))
-  } else {
-    parts.push('Published')
-  }
-  const channels = Array.isArray(post.channels) ? post.channels.filter((c): c is string => typeof c === 'string' && c.length > 0) : []
-  const firstChannel = channels[0]
-  if (channels.length === 1 && firstChannel) parts.push(firstChannel)
-  else if (channels.length > 1) parts.push(`${channels.length} channels`)
-  return parts.join(' · ')
+function contentSubtitle(card: ContentCard) {
+  const date = card.published_at
+    ? new Date(card.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : null
+  return [card.status === 'draft' ? 'Draft' : 'Published', date, card.category?.name].filter(Boolean).join(' · ')
 }
 
 const settingsItems = computed<EditorNavigationItem[]>(() => [])
@@ -882,17 +830,8 @@ const brandYearsActive = computed(() => {
   return Math.max(1, diff)
 })
 
-const { data: preferences, error: preferencesError, refresh: refreshPreferences } = await useAsyncData(
-  `website-preferences:${organizationId}:${surface.value}`,
-  () => surface.value === 'preferences'
-    ? dashboardApi('/api/dashboard/offering', {
-        query: { view: 'website-preferences' },
-        validate: (value): value is CatalogScreen => isRecord(value) && Array.isArray(value.rows)
-          && value.rows.every(row => isRecord(row) && typeof row.id === 'string' && typeof row.label === 'string'),
-      })
-    : Promise.resolve(null),
-)
-const preferencesItems = computed(() => (preferences.value?.rows ?? []).filter(row => row.to))
+const preferencesItems = computed(() => loadedSettings.value
+  ? websitePreferencesRows(String(route.params.org_slug), loadedSettings.value).filter(row => row.to) : [])
 
 const navigationGroups = computed(() => {
   if (surface.value === 'brand') return [{ id: 'brand', items: brandItems.value }]
@@ -1006,19 +945,21 @@ function resetDraft() {
   originalSignature.value = editorSignature(detailKey.value)
 }
 
-const settingsResourceKey = computed(() => `dashboard-organization-settings:${String(route.params.org_slug)}`)
-const { data: settingsResource, error: settingsResourceError, refresh: refreshSettingsResource } = await useAsyncData<SettingsPageResource>(settingsResourceKey, async () => {
-  const [settings] = await Promise.all([
-    dashboardApi<{ success: boolean; settings: OrganizationSettingsResponse }>('/api/dashboard/settings', { validate: isSettingsResponse }),
-  ])
-  return { settings }
+const settingsResourceKey = computed(() => websiteSettingsKey(String(route.params.org_slug)))
+const { data: settingsResource, error: settingsResourceError, refresh: refreshSettingsResource } = await useWebsiteIndexData(settingsResourceKey, () => dashboardApi('/api/dashboard/settings', {
+    query: { view: 'website' },
+    validate: (value): value is SettingsPageResource => isSettingsResponse(value) && isTenantPageListResponse(value)
+      && 'articles' in value && Array.isArray(value.articles) && 'posts' in value && Array.isArray(value.posts)
+      && 'source_locale' in value && typeof value.source_locale === 'string',
+  }))
+const loadedSettings = computed(() => settingsResource.value?.settings ?? null)
+const loadError = computed(() => {
+  const error = settingsResourceError.value
+  return error ? getErrorMessage(error, 'Failed to load website') : null
 })
-// The saved settings are what the request answered; the form is the draft seeded from each answer.
-const loadedSettings = computed(() => settingsResource.value?.settings.settings ?? null)
-const loadError = computed(() => settingsResourceError.value ? getErrorMessage(settingsResourceError.value, 'Failed to load organization settings') : null)
 watch(settingsResource, (resource) => {
   if (!resource) return
-  fillForm(resource.settings.settings)
+  fillForm(resource.settings)
   originalSignature.value = editorSignature(detailKey.value)
 }, { immediate: true })
 watch(detailKey, () => resetDraft())
@@ -1027,12 +968,9 @@ async function patchSettings(body: Record<string, unknown>) {
   const response = await dashboardApi<{ success: boolean; settings: OrganizationSettingsResponse }>('/api/dashboard/settings', { method: 'PATCH', body, validate: isSettingsResponse })
   // Website and Brand read the same settings resource; writing the response
   // through it keeps the other list's rows on the saved values.
-  settingsResource.value = { settings: response }
+  if (settingsResource.value) settingsResource.value = { ...settingsResource.value, settings: response.settings }
   await dashboard.refresh()
-  if (surface.value === 'preferences') {
-    await refreshPreferences()
-    if (preferencesError.value) throw preferencesError.value
-  }
+
 }
 async function refreshSettings() {
   await refreshSettingsResource()

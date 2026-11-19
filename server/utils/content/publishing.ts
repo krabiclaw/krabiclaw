@@ -388,6 +388,20 @@ function validateBlogCommon(input: Partial<PlatformBlogCreateInput>, operation: 
  */
 const ARTICLE_ORDER_SQL = (alias: string) => `${alias}.sort_order, ${alias}.published_at IS NULL, ${alias}.published_at DESC, ${alias}.created_at DESC, ${alias}.id DESC`
 
+export function recentArticleCardsQuery(organization: string | { sql: string }): BatchQuery {
+  return {
+    query: `SELECT p.id, p.title, p.status, p.published_at, ${ARTICLE_CATEGORY_SELECT}, ${COVER_SELECT}, count(*) OVER () AS total
+      FROM content_documents p ${articleCategoryJoinSql('p')} ${coverJoinSql('p')}
+      WHERE p.kind = 'article' AND p.row_role = 'root' AND p.organization_id = ${typeof organization === 'string' ? '?' : organization.sql}
+      ORDER BY ${ARTICLE_ORDER_SQL('p')} LIMIT 3`,
+    params: typeof organization === 'string' ? [organization] : [],
+  }
+}
+
+export function recentArticleCards(rows: unknown[]) {
+  return (rows as (ApiRecord & { total: number })[]).map(row => attachArticleCategory(attachCoverMedia(row)))
+}
+
 /**
  * A site's published, listed articles in one collection and one language — the
  * public read of what list_blog_posts returns, in the same order. A translated
@@ -475,12 +489,9 @@ export async function reorderArticles(db: DbClient, organizationId: string, coll
   }
 }
 
-export async function listBlogPosts(
-  db: DbClient, organizationId: string, status: string | null | undefined, env: CloudflareEnv | undefined,
-  window: { limit: number; offset: number }, resource: { resource: string }, collection: ArticleCollection | null = null,
-): Promise<{ posts: ApiRecord[]; page_info: McpPageInfo }> {
+function blogListQuery(organizationId: string | { sql: string }, status: string | null | undefined, window: { limit: number; offset: number }, collection: ArticleCollection | null): BatchQuery {
   if (status && status !== 'draft' && status !== 'published') badRequest('status must be draft or published')
-  const rows = await queryAll<ApiRecord>(db, `SELECT
+  return { query: `SELECT
       p.id, p.title, p.slug, p.summary AS excerpt, (p.metadata_json ->> '$.collection') AS collection, ${ARTICLE_CATEGORY_SELECT}, p.status, p.visibility,
       p.seo_keywords, p.sort_order,
       ${COVER_SELECT},
@@ -490,10 +501,28 @@ export async function listBlogPosts(
     LEFT JOIN user u ON u.id = p.author_id
     ${coverJoinSql('p')}
     ${articleCategoryJoinSql('p')}
-    WHERE p.kind = 'article' AND p.row_role = 'root' AND p.organization_id = ? ${status ? 'AND p.status = ?' : ''}
+    WHERE p.kind = 'article' AND p.row_role = 'root' AND p.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} ${status ? 'AND p.status = ?' : ''}
       ${collection ? "AND (p.metadata_json ->> '$.collection') = ?" : ''}
-    ORDER BY ${ARTICLE_ORDER_SQL('p')} LIMIT ? OFFSET ?`,
-  [organizationId, ...(status ? [status] : []), ...(collection ? [collection] : []), window.limit + 1, window.offset])
+    ORDER BY ${ARTICLE_ORDER_SQL('p')} LIMIT ? OFFSET ?`, params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...(status ? [status] : []), ...(collection ? [collection] : []), window.limit + 1, window.offset] }
+}
+
+export function prepareBlogList(organizationId: string | { sql: string }, status: string | null | undefined, window: { limit: number; offset: number }, collection: ArticleCollection | null) {
+  return {
+    queries: [blogListQuery(organizationId, status, window, collection)],
+    read([listed]: D1Result[], resource: { resource: string }) {
+      const rows = listed!.results as ApiRecord[]
+      const posts = rows.slice(0, window.limit).map(record => attachArticleCategory(attachCoverMedia(record)))
+      return { posts, page_info: mcpPageInfo(window, posts.length, rows.length > window.limit, resource) }
+    },
+  }
+}
+
+export async function listBlogPosts(
+  db: DbClient, organizationId: string, status: string | null | undefined, env: CloudflareEnv | undefined,
+  window: { limit: number; offset: number }, resource: { resource: string }, collection: ArticleCollection | null = null,
+): Promise<{ posts: ApiRecord[]; page_info: McpPageInfo }> {
+  const { query, params } = blogListQuery(organizationId, status, window, collection)
+  const rows = await queryAll<ApiRecord>(db, query, params)
   const page = rows.slice(0, window.limit)
   const context = await resolveTenantContext(db, organizationId, env)
   const posts = await Promise.all(page.map((record) => {

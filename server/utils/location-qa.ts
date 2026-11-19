@@ -108,13 +108,17 @@ function normalizeQaInput(input: UpdateQaInput, creating = false) {
   return normalized
 }
 
+export function qaPageScopesQuery(organization: string | { sql: string }): BatchQuery {
+  return { query: `
+    SELECT DISTINCT scope_path AS page_path FROM content_documents
+    WHERE kind = 'qa' AND row_role = 'root' AND organization_id = ${typeof organization === 'string' ? '?' : organization.sql}
+      AND location_id IS NULL AND scope_path IS NOT NULL ORDER BY page_path ASC
+  `, params: typeof organization === 'string' ? [organization] : [] }
+}
+
 export function listQaPageScopes(db: DbClient, organizationId: string) {
-  return queryAll<{ page_path: string }>(db, `
-    SELECT DISTINCT scope_path AS page_path
-    FROM content_documents
-    WHERE kind = 'qa' AND row_role = 'root' AND organization_id = ? AND location_id IS NULL AND scope_path IS NOT NULL
-    ORDER BY page_path ASC
-  `, [organizationId])
+  const { query, params } = qaPageScopesQuery(organizationId)
+  return queryAll<{ page_path: string }>(db, query, params)
 }
 
 /**
@@ -125,20 +129,25 @@ export function listQaPageScopes(db: DbClient, organizationId: string) {
  */
 export async function listQa(db: DbClient, organizationId: string, locationId: string | null, publishedOnly = false, pagePath?: string | null, locale?: string, qaId?: string | null) {
   locale ??= (await getPersistedSourceLocale(db, organizationId)).locale
+  const { query, params } = qaListQuery(organizationId, locationId, locale, publishedOnly, pagePath, qaId)
+  return queryAll<QaDocument>(db, query, params)
+}
+
+export function qaListQuery(organizationId: string | { sql: string }, locationId: string | null, locale: string, publishedOnly = false, pagePath?: string | null, qaId?: string | null): BatchQuery {
   const scope = qaId
     ? { clause: 'root.id = ?', params: [qaId] as unknown[] }
     : scopeSql(locationId, pagePath)
-  return queryAll<QaDocument>(db, `
+  return { query: `
     SELECT p.id, p.organization_id, root.location_id, root.scope_path AS page_path,
       p.title AS question, p.summary AS answer, (root.metadata_json ->> '$.question_author') AS question_author,
       (root.metadata_json ->> '$.question_date') AS question_date, (root.metadata_json ->> '$.answer_author') AS answer_author,
       (root.metadata_json ->> '$.answer_date') AS answer_date, (root.metadata_json ->> '$.is_owner_answer') AS is_owner_answer,
       (root.metadata_json ->> '$.upvote_count') AS upvote_count, root.source, root.status, root.sort_order, p.created_at, p.updated_at
     FROM content_documents root JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ?
-    WHERE root.row_role = 'root' AND root.kind = 'qa' AND root.organization_id = ?
+    WHERE root.row_role = 'root' AND root.kind = 'qa' AND root.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql}
       AND ${scope.clause.replace(/\b(location_id|scope_path)\b/g, 'root.$1')}${publishedOnly ? " AND root.status = 'published'" : ''}
     ORDER BY root.sort_order, is_owner_answer DESC, upvote_count DESC, p.created_at
-  `, [locale, organizationId, ...scope.params])
+  `, params: [locale, ...(typeof organizationId === 'string' ? [organizationId] : []), ...scope.params] }
 }
 
 export function faqBlockSource(block: { type: string; data: Record<string, unknown> }): FaqBlockSource | null {

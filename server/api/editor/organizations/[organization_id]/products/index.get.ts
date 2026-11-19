@@ -1,9 +1,9 @@
 import { jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
 import { requireOrganizationMembership } from '~/server/utils/location-access'
 import { roleAllows, assertRoleAllows } from '~/server/utils/member-access'
-import { hydrateProductMedia, listOrganizationProducts } from '~/server/utils/product-management'
+import { hydrateProductMedia, listOrganizationProducts, readEditorCatalog } from '~/server/utils/product-management'
 import { defineHandler } from 'nitro'
-import { getRouterParam } from 'nitro/h3'
+import { getQuery, getRouterParam } from 'nitro/h3'
 
 export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organization_id')
@@ -15,6 +15,17 @@ export default defineHandler(async (event) => {
     // The same photographs the location list attaches, so a row looks the same in every scope.
     const managesCatalog = await roleAllows({ ...organization.membership, permissions: { products: ['read'] } })
     if (!managesCatalog) await assertRoleAllows({ ...organization.membership, permissions: { products: ['assigned'] } })
+    const query = getQuery(event)
+    if (query.include === 'collections') {
+      if (query.location_id !== undefined && (typeof query.location_id !== 'string' || !query.location_id.trim())) {
+        return jsonResponse({ error: 'Invalid location_id' }, { status: 400 })
+      }
+      const data = await readEditorCatalog(db, {
+        organizationId: organization.id, assignedUserId: managesCatalog ? undefined : organization.user_id,
+        kind: query.kind === 'dish' ? 'dish' : undefined, locationId: query.location_id,
+      })
+      return jsonResponse({ success: true, ...data, organization_id: organizationId })
+    }
     const products = await hydrateProductMedia(db, organization.id, await listOrganizationProducts(db, { organizationId: organization.id, assignedUserId: managesCatalog ? undefined : organization.user_id }))
     return jsonResponse({ success: true, products, organization_id: organizationId })
   } catch (error) {

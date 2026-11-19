@@ -13,7 +13,7 @@
 
 <script setup lang="ts">
 import { ClientOnly } from '#components'
-import { rendersDashboardCalendar } from '~/utils/dashboard-document'
+import { rendersDashboardCalendar, rendersWebsiteDocument } from '~/utils/dashboard-document'
 import '~/assets/css/dashboard.css'
 
 const nuxt = useNuxtApp()
@@ -22,10 +22,29 @@ const route = useRoute()
 const document = useState('dashboard:server-document', () => (import.meta.server || nuxt.isHydrating)
   && typeof route.params.org_slug === 'string'
   && (rendersDashboardCalendar(route.path, route.query)
+    || rendersWebsiteDocument(route.path.slice(`/dashboard/${route.params.org_slug}`.length), route.query)
     || /^\/dashboard\/[^/]+(?:\/(?:bookings\/[^/]+|products|earnings(?:\/(?:performance|payouts))?|integrations(?:\/google-calendar)?))?\/?$/.test(route.path)))
 const wrapper = document.value ? 'div' : ClientOnly
 
-// The shell reads the theme breakpoints during setup, so the document must
-// load this stylesheet before running the dashboard entry script.
-useHead({ link: import.meta.dev ? [] : [{ rel: 'stylesheet', href: '/_nuxt/surfaces/dashboard.css' }] })
+if (import.meta.client && 'serviceWorker' in navigator) {
+  usePwaInstall()
+  void navigator.serviceWorker.register('/sw.js', { scope: '/dashboard/' }).catch((error) => {
+    nuxt.callHook('vue:error', error, null, 'dashboard-service-worker-registration')
+  })
+}
+
+useHead({
+  meta: [
+    { name: 'mobile-web-app-capable', content: 'yes' },
+    { name: 'apple-mobile-web-app-capable', content: 'yes' },
+    { name: 'apple-mobile-web-app-status-bar-style', content: 'default' },
+    { name: 'apple-mobile-web-app-title', content: 'Blawby' },
+  ],
+  link: [
+    { rel: 'manifest', href: '/manifest.webmanifest' },
+    { rel: 'apple-touch-icon', href: '/platform/blawby-180.png' },
+    // The shell reads theme breakpoints during setup.
+    ...(import.meta.dev ? [] : [{ rel: 'stylesheet' as const, href: '/_nuxt/surfaces/dashboard.css' }]),
+  ],
+})
 </script>

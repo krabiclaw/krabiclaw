@@ -90,7 +90,8 @@ export async function dashboardFetch<T>(
     request === '/api/dashboard/agenda' || request === '/api/dashboard/bookings/calendar'
     || (request === '/api/dashboard/stay-homes' && options.query?.view === 'calendar')
     || (request === '/api/dashboard/payments' && (options.query?.view === 'performance' || options.query?.view === 'payouts'))
-    || (request === '/api/dashboard/settings' && options.query?.connections === '1')
+    || (request === '/api/dashboard/settings' && (options.query?.connections === '1' || options.query?.view === 'website'))
+    || /^\/api\/editor\/organizations\/[^/]+\/(?:reviews|blog\/posts|posts|qa)$/.test(request)
     || request === '/api/dashboard/integrations/google-calendar'
   )) {
     const provider = useRequestEvent()?.context.dashboardDocumentProvider as {
