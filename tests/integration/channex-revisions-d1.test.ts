@@ -409,14 +409,11 @@ test('a standalone home provisions one Channex inventory and opens Vrbo only aft
 })
 
 test('early Airbnb checkout releases room availability and keeps the provider stay through a later revision', { timeout: 120_000 }, async () => {
-  const { runtime, db, env, queue, productId } = await boot()
+  const { runtime, db, env, queue } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
   try {
-    await db.prepare(`INSERT INTO product_airbnb_listings (organization_id, product_id, listing_id, channel_id, rate_plan_id, import_stage, enabled)
-      VALUES (?, ?, 'listing-2', 'chan-2', 'rate-2', 'complete', 1)`).bind(ORG, productId).run()
-    assert.equal(await countActiveHomes(db, ORG), 2)
     const today = localDateAt(new Date(), 'America/Denver')
     const arrival = addLocalDays(today, -2)
     const departure = addLocalDays(today, 2)

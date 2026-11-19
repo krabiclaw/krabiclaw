@@ -926,6 +926,10 @@ test('a connected backup merges into the same room across accounts and keeps bil
     const ratePlan = backup.channel.ratePlans[0]!.rate_plan_id
     assert.equal(primary.ratePlans.get(ratePlan)?.room_type_id, inventory.room_type_id)
     assert.equal(primary.ratePlans.get(ratePlan)?.property_id, inventory.property_id)
+    assert.deepEqual(
+      [primary.ratePlans.get(ratePlan)?.parent_rate_plan_id, primary.ratePlans.get(ratePlan)?.inherit_stop_sell, primary.ratePlans.get(ratePlan)?.inherit_rate],
+      [inventory.rate_plan_id, true, false],
+    )
     assert.equal(primary.restrictionsByRate.get(ratePlan)?.get(addDays(today(), 1)), '129.00')
     assert.equal(primary.availability[arrival], 0)
     assert.equal(await countActiveHomes(db, ORG), 2)

@@ -599,18 +599,18 @@ export class ChannexConnection {
     if (matches.length > 1) fail(409, 'PROVIDER_STATE_AMBIGUOUS', 'More than one Channex rate plan matches this listing.')
     const plan = matches[0] ?? await channexCreate(this.env, '/rate_plans', { rate_plan: {
       property_id: propertyId, room_type_id: roomId, title, currency: details.currency,
+      parent_rate_plan_id: string(inventory.rate_plan_id, 'rate_plan_id'),
+      inherit_stop_sell: true, inherit_rate: false, inherit_closed_to_arrival: false, inherit_closed_to_departure: false,
+      inherit_min_stay_arrival: false, inherit_min_stay_through: false, inherit_max_stay: false,
+      inherit_max_sell: false, inherit_max_availability: false, inherit_availability_offset: false,
       rate_mode: 'manual', sell_mode: 'per_room', min_stay_arrival: details.minimum_nights,
       options: [{ occupancy: details.default_occupancy, is_primary: true, rate: details.nightly_rate }],
     } }, 'rate_plan')
-    const [calendar, closedNights] = await Promise.all([
-      listingCalendar(this.env, row.channel_id, listingId, home.timezone),
-      queryAll<{ date: string }>(this.db, 'SELECT date FROM product_nights WHERE organization_id = ? AND product_id = ? AND closed = 1', [this.organizationId, productId]),
-    ])
-    const closed = new Set(closedNights.map(night => night.date))
+    const calendar = await listingCalendar(this.env, row.channel_id, listingId, home.timezone)
     const digits = currencyFractionDigits(details.currency)
     const receipt = await channexRequest(this.env, '/restrictions', 'POST', { values: calendar.map(night => ({
       property_id: propertyId, rate_plan_id: plan.id, date_from: night.date, date_to: night.date,
-      rate: (minorUnits(night.rate, details.currency) / 10 ** digits).toFixed(digits), stop_sell: closed.has(night.date), min_stay_arrival: night.minStay, max_stay: night.maxStay,
+      rate: (minorUnits(night.rate, details.currency) / 10 ** digits).toFixed(digits), min_stay_arrival: night.minStay, max_stay: night.maxStay,
       closed_to_arrival: night.closedToArrival, closed_to_departure: night.closedToDeparture,
     })) })
     const refused = ariRefusals(receipt, 'restrictions', calendar.map(night => night.date))

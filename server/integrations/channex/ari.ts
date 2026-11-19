@@ -455,16 +455,11 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
   }
   const review = (date: string, detail: string) => { if (outcomes.get(date)?.state !== 'pending') outcomes.set(date, { state: 'needs_review', detail }) }
 
-  const additionalRates = await queryAll<{ rate_plan_id: string }>(db, `SELECT rate_plan_id FROM product_airbnb_listings
-    WHERE organization_id = ? AND product_id = ? AND rate_plan_id IS NOT NULL AND enabled = 1`, [organizationId, home.product_id])
   const requests = [
     ['restrictions', changes.filter(change => change.restrictions.length), (batch: typeof changes) => channexRequest(env, '/restrictions', 'POST', { values: [
       ...dateRanges(batch.map(change => ({
         date: change.row.date, change: Object.fromEntries(change.restrictions.map(field => [field, change.values[field]])),
       }))).map(range => ({ property_id: mapping.property_id, rate_plan_id: mapping.rate_plan_id, ...range })),
-      ...additionalRates.flatMap(plan => dateRanges(batch.filter(change => change.restrictions.includes('stop_sell')).map(change => ({
-        date: change.row.date, change: { stop_sell: change.values.stop_sell },
-      }))).map(range => ({ property_id: mapping.property_id, rate_plan_id: plan.rate_plan_id, ...range }))),
     ] }),
     (change: typeof changes[number]) => { for (const field of change.restrictions) Object.assign(confirmed.get(change.row.date)!, { [field]: change.values[field] }) }],
     ['availability', changes.filter(change => change.availability), (batch: typeof changes) => channexRequest(env, '/availability', 'POST', { values: dateRanges(batch.map(change => ({
