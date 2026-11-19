@@ -141,7 +141,7 @@ jobs:
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET_STAGING }}
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
       NUXT_PUBLIC_PLATFORM_DOMAIN: https://staging.krabiclaw.com
-      NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://krabiclaw.com
+      NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://blawby.com
       NUXT_PUBLIC_APP_NAME: Blawby
       NUXT_PUBLIC_SITE_URL: https://staging.krabiclaw.com
       NUXT_PUBLIC_HELP_URL: https://staging.krabiclaw.com/help
@@ -283,7 +283,7 @@ jobs:
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
       NUXT_PUBLIC_PLATFORM_DOMAIN: https://blawby.com
-      NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://krabiclaw.com
+      NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://blawby.com
       NUXT_PUBLIC_APP_NAME: Blawby
       NUXT_PUBLIC_SITE_URL: https://blawby.com
       NUXT_PUBLIC_HELP_URL: https://blawby.com/help
@@ -362,7 +362,7 @@ jobs:
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
       NUXT_PUBLIC_PLATFORM_DOMAIN: https://blawby.com
-      NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://krabiclaw.com
+      NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://blawby.com
       NUXT_PUBLIC_APP_NAME: Blawby
       NUXT_PUBLIC_SITE_URL: https://blawby.com
       NUXT_PUBLIC_HELP_URL: https://blawby.com/help

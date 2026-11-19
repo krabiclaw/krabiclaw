@@ -22,6 +22,42 @@ test('the migration chain applies from zero and builds every table the schema de
   }
 })
 
+test('moving free sites preserves existing links and custom primary domains', () => {
+  const database = new Database(':memory:')
+  database.pragma('foreign_keys = ON')
+  try {
+    const { entries } = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+    const migration = '0021_move_free_sites_to_blawby'
+    for (const { tag } of entries.slice(0, entries.findIndex(({ tag }) => tag === migration))) {
+      database.exec(readFileSync(`migrations/${tag}.sql`, 'utf8'))
+    }
+    database.exec(`
+      INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone)
+        VALUES ('free', 'Free Site', 'free', 'free', 'USD', 'UTC'),
+               ('custom', 'Custom Site', 'custom', 'custom', 'USD', 'UTC');
+      INSERT INTO organization_domains (id, organization_id, domain, type, role, status, dns_target)
+        VALUES ('free-site', 'free', 'free.krabiclaw.com', 'subdomain', 'canonical', 'active', 'krabiclaw.com'),
+               ('custom-site', 'custom', 'custom.krabiclaw.com', 'subdomain', 'secondary', 'active', 'krabiclaw.com'),
+               ('www', 'custom', 'www.example.com', 'custom', 'canonical', 'active', 'customers.krabiclaw.com');
+    `)
+    database.transaction(() => database.exec(readFileSync(`migrations/${migration}.sql`, 'utf8')))()
+    assert.deepEqual(database.prepare(`SELECT id, domain, role, dns_target FROM organization_domains
+      WHERE status = 'active' ORDER BY id`).all(), [
+      { id: 'custom-site', domain: 'custom.blawby.com', role: 'secondary', dns_target: 'blawby.com' },
+      { id: 'free-site', domain: 'free.blawby.com', role: 'canonical', dns_target: 'blawby.com' },
+      { id: 'www', domain: 'www.example.com', role: 'canonical', dns_target: 'customers.krabiclaw.com' },
+    ])
+    assert.deepEqual(database.prepare(`SELECT domain, successor_domain, former_organization_id FROM organization_domains
+      WHERE status = 'retired' ORDER BY domain`).all(), [
+      { domain: 'custom.krabiclaw.com', successor_domain: 'custom.blawby.com', former_organization_id: 'custom' },
+      { domain: 'free.krabiclaw.com', successor_domain: 'free.blawby.com', former_organization_id: 'free' },
+    ])
+    assert.deepEqual(database.pragma('foreign_key_check'), [])
+  } finally {
+    database.close()
+  }
+})
+
 test('snapshot payload preserves destination signing keys for refreshes and carries source keys for replacements', async () => {
   const { writePayload } = await import('../../scripts/transfer-database-export.mjs')
   const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-signing-transfer-'))

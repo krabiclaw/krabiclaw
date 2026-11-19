@@ -44,6 +44,7 @@ import { integrationsThroughAccount } from '~/server/utils/organization-integrat
 import { publishAccessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { reconcileResponsibilities } from '~/server/utils/member-access'
 import { publishEvent } from '~/server/events'
+import { BLAWBY_FREE_SITE_HOST, LEGACY_FREE_SITE_HOST } from '~/server/utils/tenant-hosts'
 
 type IntegrationCallbackContext = GenericEndpointContext['context'] & { integrationAccountId?: string }
 
@@ -279,7 +280,8 @@ function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Requ
   const authOrigin = normalizeOrigin(env.BETTER_AUTH_URL)
   const platformOrigin = normalizeOrigin(env.NUXT_PUBLIC_PLATFORM_DOMAIN)
   const freeOrganizationOrigin = normalizeOrigin(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
-  for (const origin of [authOrigin, platformOrigin, freeOrganizationOrigin, wildcardOrigin(freeOrganizationOrigin)]) {
+  const legacyFreeOrigin = freeOrganizationOrigin === `https://${BLAWBY_FREE_SITE_HOST}` ? `https://${LEGACY_FREE_SITE_HOST}` : null
+  for (const origin of [authOrigin, platformOrigin, freeOrganizationOrigin, wildcardOrigin(freeOrganizationOrigin), legacyFreeOrigin, wildcardOrigin(legacyFreeOrigin)]) {
     if (origin) origins.add(origin)
   }
   // The iPhone app opens Stripe Checkout with its own session and takes the
