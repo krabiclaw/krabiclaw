@@ -581,15 +581,17 @@ export async function getContentBlock(db: DbClient, blockId: string) {
   return { ...block, data: outlined!.data, media: outlined!.media }
 }
 
+export function contentBlocksQuery(documentId: string): BatchQuery {
+  return {
+    query: `SELECT id, document_id, source_block_id, parent_block_id, type, position, level, data_json, created_at, updated_at
+      FROM content_blocks WHERE document_id = ? ORDER BY position ASC, created_at ASC`,
+    params: [documentId],
+  }
+}
+
 export async function listBlocksForDocument(db: DbClient, documentId: string) {
-  return await queryAll<ContentBlockRow>(
-    db,
-    `SELECT id, document_id, source_block_id, parent_block_id, type, position, level, data_json, created_at, updated_at
-     FROM content_blocks
-     WHERE document_id = ?
-     ORDER BY position ASC, created_at ASC`,
-    [documentId],
-  ) ?? []
+  const { query, params } = contentBlocksQuery(documentId)
+  return await queryAll<ContentBlockRow>(db, query, params)
 }
 
 /**

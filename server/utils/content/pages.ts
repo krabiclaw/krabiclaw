@@ -2,15 +2,15 @@ import { HTTPError } from 'nitro';
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import {
+  contentBlocksQuery,
   formatBlockOutline,
   getContentDocumentById,
-  getContentEditorSnapshotForDocument,
-  listBlocksForDocument,
   prepareContentDocumentDeletion,
   prepareContentDocumentUpdate,
   prepareContentDocumentWithBlocks,
   updateContentDocument,
   type ContentBlockInput,
+  type ContentBlockRow,
   type ContentDocumentInput } from '~/server/utils/content/documents'
 import {
   normalizeTenantPageBlocks,
@@ -178,18 +178,17 @@ async function tenantPagePlacementQueries(
   organizationId: string,
   blocks: TenantPageBlock[],
   now?: string,
+  saved?: readonly TenantPageBlock[],
 ): Promise<BatchQuery[]> {
   if (!blocks.length) return []
   const queries: BatchQuery[] = []
-  const existingRows = await queryAll<{ id: string }>(db, `
+  const ids = blocks.map(block => block.id)
+  const placementsByBlock = saved
+    ? new Map(saved.map(block => [block.id, block.media]))
+    : await getMediaPlacements(db, { organizationId, ownerType: 'content_block', ownerIds: ids })
+  const existingBlockIds = new Set(saved ? saved.map(block => block.id) : (await queryAll<{ id: string }>(db, `
     SELECT id FROM content_blocks WHERE id IN (SELECT value FROM json_each(?))
-  `, [d1JsonStringSet(blocks.map(block => block.id))])
-  const existingBlockIds = new Set(existingRows.map(row => row.id))
-  const existingPlacements = await getMediaPlacements(db, {
-    organizationId,
-    ownerType: 'content_block',
-    ownerIds: blocks.map(block => block.id),
-  })
+  `, [d1JsonStringSet(ids)])).map(row => row.id))
   for (const block of blocks) {
     const bySlot = new Map<string, typeof block.media>()
     for (const item of block.media) {
@@ -199,7 +198,7 @@ async function tenantPagePlacementQueries(
     }
     if (existingBlockIds.has(block.id)) {
       const currentBySlot = new Map<string, string[]>()
-      for (const item of existingPlacements.get(block.id) ?? []) {
+      for (const item of placementsByBlock.get(block.id) ?? []) {
         const ids = currentBySlot.get(item.slot) ?? []
         ids.push(item.asset_id)
         currentBySlot.set(item.slot, ids)
@@ -260,26 +259,6 @@ export function preserveOmittedBlockMedia(value: unknown, existingBlocks: Tenant
       : rawBlock
   })
 }
-
-async function attachTenantPageMedia(db: DbClient, organizationId: string, blocks: TenantPageBlock[]): Promise<TenantPageBlock[]> {
-  const placements = await getMediaPlacements(db, { organizationId, ownerType: 'content_block', ownerIds: blocks.map(block => block.id) })
-  return blocks.map(block => ({
-    ...block,
-    media: (placements.get(block.id) ?? []).map(item => ({
-      asset_id: item.asset_id,
-      slot: item.slot,
-      sort_order: item.sort_order,
-      public_url: item.public_url,
-      thumbnail_url: item.thumbnail_url,
-      kind: item.kind,
-      alt_text: item.alt_text,
-      file_name: item.file_name,
-      width: item.width,
-      height: item.height,
-    })),
-  }))
-}
-
 
 export interface TenantPageScope {
   organizationId: string
@@ -504,8 +483,19 @@ function documentOf(row: PageRepresentationRow): TenantPageDocument {
 // Blocks with the media shape the tenant page surfaces use (it carries
 // file_name, which the block editors show as the picker's label).
 async function tenantPageBlocks(db: DbClient, organizationId: string, documentId: string): Promise<TenantPageBlock[]> {
-  const blocks = await listBlocksForDocument(db, documentId)
-  return await attachTenantPageMedia(db, organizationId, blocks.map(formatBlockOutline) as unknown as TenantPageBlock[])
+  const [blocks, media] = await executeBatch(db, [
+    contentBlocksQuery(documentId),
+    mediaPlacementsQuery({ organizationId, ownerType: 'content_block', owners: {
+      sql: 'SELECT id FROM content_blocks WHERE document_id = ?', params: [documentId],
+    } }),
+  ], { operation: 'Read website page blocks and placements' })
+  const placements = groupMediaPlacements(media!.results)
+  return (blocks!.results as ContentBlockRow[]).map(row => ({
+    ...formatBlockOutline(row),
+    media: (placements.get(row.id) ?? []).map(({ asset_id, slot, sort_order, public_url, thumbnail_url, kind, alt_text, file_name, width, height }) => ({
+      asset_id, slot, sort_order, public_url, thumbnail_url, kind, alt_text, file_name, width, height,
+    })),
+  })) as TenantPageBlock[]
 }
 
 export async function getTenantPageForEditor(db: DbClient, variantId: string, scope?: TenantPageScope): Promise<TenantPageDto> {
@@ -1017,13 +1007,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   const document = await getContentDocumentById(db, row.id)
   if (!document) throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page content document not found' })
   if (!input.data.updated_at || document.updated_at !== input.data.updated_at) conflict('Tenant page content was updated by another writer')
-  const currentSnapshot = await getContentEditorSnapshotForDocument(db, document)
-  if (!currentSnapshot) throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page content document not found' })
-  const currentBlocks = await attachTenantPageMedia(
-    db,
-    row.organization_id,
-    currentSnapshot.blocks.map(block => ({ ...block, media: [] })) as TenantPageBlock[],
-  )
+  const currentBlocks = await tenantPageBlocks(db, row.organization_id, row.id)
   const identity = await canonicalTenantPageIdentity(db, row, {
     pageType: input.data.page_type,
     recipe: input.data.recipe ?? null,
@@ -1055,7 +1039,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
     bindingQueries.push({ query: "UPDATE content_documents SET product_id = ? WHERE id = ? AND organization_id = ? AND row_role = 'root'", params: [productId, row.page_id, row.organization_id] })
   }
   const now = new Date().toISOString()
-  const placementQueries = await tenantPagePlacementQueries(db, input.scope.organizationId, blocks, now)
+  const placementQueries = await tenantPagePlacementQueries(db, input.scope.organizationId, blocks, now, currentBlocks)
   const blockValues = (items: TenantPageBlock[]) => blocksAsInputs(items).map(block => ({
     id: block.id, source_block_id: block.source_block_id ?? null, parent_block_id: block.parent_block_id ?? null,
     level: block.level ?? null, type: block.type, data: block.data,
