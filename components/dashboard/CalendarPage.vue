@@ -90,7 +90,7 @@
           variant="soft"
           :title="`${periodLabel} could not be loaded`"
           :description="getErrorMessage(month.cause, 'Calendar request failed')"
-          :actions="[{ label: 'Try again', color: 'neutral', variant: 'soft', onClick: () => loadMonth(monthKey) }]"
+          :actions="[{ label: 'Try again', color: 'neutral', variant: 'soft', onClick: () => loadBlock(monthKey) }]"
         />
 
         <!-- Month: Tailwind's grid. Each cell is the day; at desktop width it lists who is coming, on a phone it shows dots. -->
@@ -186,7 +186,7 @@
             color="error"
             variant="soft"
             :description="getErrorMessage(block.cause, 'Calendar request failed')"
-            :actions="[{ label: 'Try again', color: 'neutral', variant: 'soft', onClick: () => loadMonth(block.key) }]"
+            :actions="[{ label: 'Try again', color: 'neutral', variant: 'soft', onClick: () => loadBlock(block.key) }]"
           />
           <template v-else>
             <div class="mt-6 grid grid-cols-7 text-xs/6 text-muted">
@@ -363,17 +363,17 @@ const viewItems = computed(() => [
 ])
 const locationItems = computed(() => locationOptions.value.map(option => ({ label: option.label, value: option.value, ...(option.imageUrl ? { avatar: { src: option.imageUrl } } : {}) })))
 
-type MonthBlock = { key: string; items: CalendarItem[] } & (
+type CalendarBlock = { key: string; items: CalendarItem[] } & (
   | { status: 'loading' | 'ready' }
   | { status: 'error'; cause: unknown }
 )
-const EMPTY_MONTH: MonthBlock = { key: '', status: 'loading', items: [] }
+const EMPTY_MONTH: CalendarBlock = { key: '', status: 'loading', items: [] }
 
-const monthData = shallowRef(new Map<string, MonthBlock>())
+const calendarData = shallowRef(new Map<string, CalendarBlock>())
 const locations = ref<AgendaLocation[]>([])
 const availableKinds = ref<AgendaKind[]>([])
 const generation = ref(0)
-const month = computed<MonthBlock>(() => monthData.value.get(monthKey.value) ?? EMPTY_MONTH)
+const month = computed<CalendarBlock>(() => calendarData.value.get(monthKey.value) ?? EMPTY_MONTH)
 
 // With one location chosen the tiles say which days it cannot take — its own
 // closures and the weekdays its hours never open. Across every location there
@@ -432,8 +432,8 @@ function isUnavailableKey(key: string): boolean {
   return intervals !== null && intervals.length === 0
 }
 
-function putMonth(block: MonthBlock): void {
-  monthData.value = new Map(monthData.value).set(block.key, block)
+function putBlock(block: CalendarBlock): void {
+  calendarData.value = new Map(calendarData.value).set(block.key, block)
 }
 function monthKeyOf(date: CalendarDate): string {
   return `${date.year}-${String(date.month).padStart(2, '0')}`
@@ -463,7 +463,7 @@ const scheduledDays = computed(() => monthDays.value.filter(dayKey => itemsOn(da
 const yearKeys = computed(() => Array.from({ length: 12 }, (_, index) => `${shownYear.value}-${String(index + 1).padStart(2, '0')}`))
 const yearMonths = computed(() => yearKeys.value.map((key) => {
   const first = firstOf(key)
-  const block = monthData.value.get(key) ?? { ...EMPTY_MONTH, key }
+  const block = calendarData.value.get(key) ?? { ...EMPTY_MONTH, key }
   return { ...block, label: formatCalendarDate(first.toString(), 'en', { month: 'long' }), days: cellsOf(first) }
 }))
 
@@ -480,11 +480,12 @@ const isAgendaPayload = (value: unknown): value is AgendaPayload =>
 
 const places = (count: number) => `${count} ${count === 1 ? 'place' : 'places'}`
 
-async function loadMonth(key: string, signal?: AbortSignal): Promise<void> {
-  const first = firstOf(key)
-  const last = first.add({ months: 1 }).subtract({ days: 1 })
+async function loadBlock(key: string, signal?: AbortSignal): Promise<void> {
+  const dayOnly = key.length === 10
+  const first = dayOnly ? parseDate(key) : firstOf(key)
+  const last = dayOnly ? first : first.add({ months: 1 }).subtract({ days: 1 })
   const requested = generation.value
-  putMonth({ key, status: 'loading', items: [] })
+  putBlock({ key, status: 'loading', items: [] })
   try {
     const product = sessionProduct.value
     if (product) {
@@ -513,41 +514,49 @@ async function loadMonth(key: string, signal?: AbortSignal): Promise<void> {
           to: router.resolve({ path: `${level.path.value}/sessions/${session.id}`, query: { product_id: product.id, location_id: session.location_id ? productLocations.value.some(entry => entry.id === session.location_id) ? session.location_id : undefined : product.booking?.held_online ? 'online' : undefined, date: dayKey, month: key } }).fullPath,
         }]
       })
-      putMonth({ key, status: 'ready', items })
+      putBlock({ key, status: 'ready', items })
       return
     }
     const payload = await dashboardApi<AgendaPayload>(`${apiBase}/agenda`, {
       query: { from: first.toString(), to: last.toString(), ...filterQuery.value },
       validate: isAgendaPayload,
+      signal,
     })
     if (requested !== generation.value) return
     locations.value = payload.locations
     availableKinds.value = payload.available_kinds
-    putMonth({ key, status: 'ready', items: payload.items })
+    putBlock({ key, status: 'ready', items: payload.items })
   } catch (cause) {
     if (requested !== generation.value) return
-    putMonth({ key, status: 'error', cause, items: [] })
+    putBlock({ key, status: 'error', cause, items: [] })
   }
 }
 
-// A month that is there and not failed is left alone; a failed one is asked for again.
+// An existing month can serve its days. The homes and places grids only need
+// one day when there is no matching month already loaded.
+function dayReadKey(date: string) {
+  const key = date.slice(0, 7)
+  const block = calendarData.value.get(key)
+  return gridView.value && (!block || block.status === 'error') ? date : key
+}
+
 async function ensureLoaded(keys: string[]): Promise<void> {
-  await Promise.all(keys.filter(key => monthData.value.get(key)?.status !== 'ready' && monthData.value.get(key)?.status !== 'loading').map(key => loadMonth(key)))
+  await Promise.all(keys.filter(key => calendarData.value.get(key)?.status !== 'ready' && calendarData.value.get(key)?.status !== 'loading').map(key => loadBlock(key)))
 }
 function neededKeys(): string[] {
   const months = view.value === 'year' ? yearKeys.value : gridView.value ? [] : [monthKey.value]
-  const opened = openDay.value?.slice(0, 7)
+  const opened = openDay.value ? dayReadKey(openDay.value) : null
   return opened && !months.includes(opened) ? [...months, opened] : months
 }
 async function resetMonths(): Promise<void> {
   generation.value += 1
-  monthData.value = new Map()
+  calendarData.value = new Map()
   await ensureLoaded(neededKeys())
 }
 
 const itemsByDay = computed(() => {
   const groups = new Map<string, CalendarItem[]>()
-  for (const block of monthData.value.values()) {
+  for (const block of calendarData.value.values()) {
     for (const item of block.items) {
       const days = [item.day_key]
       if (item.kind === 'stay' && item.ends_at) {
@@ -588,7 +597,7 @@ provide(calendarDayKey, {
   location: chosenLocation,
   refreshLocation,
   read(date) {
-    const block = monthData.value.get(date.slice(0, 7)) ?? EMPTY_MONTH
+    const block = calendarData.value.get(dayReadKey(date)) ?? EMPTY_MONTH
     const items = sessionProduct.value ? itemsOn(date) : itemsByDay.value.get(date) ?? []
     return { items: block.status === 'ready' ? items : [], status: block.status,
       error: block.status === 'error' ? block.cause : null }
@@ -724,9 +733,9 @@ if (organizationId) provide(calendarSessionsKey, {
     // Invalidate old reads; an explicit native signal also prevents the shared
     // transport from coalescing this required readback with a pre-write GET.
     generation.value += 1
-    monthData.value = new Map()
-    await loadMonth(monthKey.value, new AbortController().signal)
-    const saved = monthData.value.get(monthKey.value)
+    calendarData.value = new Map()
+    await loadBlock(monthKey.value, new AbortController().signal)
+    const saved = calendarData.value.get(monthKey.value)
     if (saved?.status === 'error') throw saved.cause
     if (saved?.status !== 'ready') throw new Error('The saved availability could not be read back')
   },

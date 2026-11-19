@@ -44,16 +44,18 @@ const isProduct = (value: unknown): value is Product => isRecord(value) && typeo
 type Homes = { homes: Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone'>[]; manage: boolean }
 const isHomes = (value: unknown): value is Homes => isRecord(value) && typeof value.manage === 'boolean' && Array.isArray(value.homes)
   && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && typeof home.internal_name === 'string' && typeof home.timezone === 'string' && isValidTimezone(home.timezone))
-const { data: homes, error: homesError } = await useAsyncData(
-  () => `calendar-homes:${String(route.params.org_slug)}`,
-  () => dashboard.hasFeature('stays') ? api('/api/dashboard/stay-homes', { validate: isHomes }) : Promise.resolve(null),
-)
-// Whether the Places view has rows: one day of the places calendar names every restaurant location, experience and consultation.
+// The available views can be decided in parallel.
 const todayKey = today(getLocalTimeZone()).toString()
-const { data: places, error: placesError } = await useAsyncData(
-  () => `calendar-places:${String(route.params.org_slug)}`,
-  () => api('/api/dashboard/bookings/calendar', { query: { unit: 'slot', from: todayKey, to: parseDate(todayKey).add({ days: 1 }).toString() }, validate: (value): value is { places: unknown[] } => isRecord(value) && Array.isArray(value.places) }),
-)
+const [{ data: homes, error: homesError }, { data: places, error: placesError }] = await Promise.all([
+  useAsyncData(
+    () => `calendar-homes:${String(route.params.org_slug)}`,
+    () => dashboard.hasFeature('stays') ? api('/api/dashboard/stay-homes', { validate: isHomes }) : Promise.resolve(null),
+  ),
+  useAsyncData(
+    () => `calendar-places:${String(route.params.org_slug)}`,
+    () => api('/api/dashboard/bookings/calendar', { query: { unit: 'slot', from: todayKey, to: parseDate(todayKey).add({ days: 1 }).toString() }, validate: (value): value is { places: unknown[] } => isRecord(value) && Array.isArray(value.places) }),
+  ),
+])
 const knownHome = computed(() => homes.value?.homes.find(home => home.product_id === productId.value))
 const { data: scoped, error: productError, pending } = await useAsyncData(
   () => `calendar-offering:${organizationId}:${productId.value ?? ''}:${Boolean(knownHome.value)}`,
