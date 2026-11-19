@@ -4,7 +4,8 @@ import { guestInboxTarget } from '~/server/cloudflare/guest-inbox-events'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { createAuth } from '~/server/utils/auth'
 import { requireFinancialBrowserOrAppRequest } from '~/server/utils/financial-browser'
-import { organizationBySlug, resolveMembership } from '~/server/utils/member-access'
+import { membershipBySlugQuery } from '~/server/utils/member-access'
+import { queryFirst } from '~/server/db'
 
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
@@ -20,11 +21,12 @@ export default defineHandler(async (event) => {
   let organizationId: string | null = null
   if (!personal) {
     if (scope !== undefined || typeof org !== 'string' || !org) throw new HTTPError({ statusCode: 400, message: 'A workspace or account scope is required' })
-    const organization = await organizationBySlug(env, org, event)
-    if (!organization || !await resolveMembership(env, { organizationId: organization.id, userId: session.user.id }, event)) {
+    const { query, params } = membershipBySlugQuery(org, session.user.id)
+    const membership = await queryFirst<{ organization_id: string }>(env.DB, query, params)
+    if (!membership) {
       throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
     }
-    organizationId = organization.id
+    organizationId = membership.organization_id
   }
   const headers = {
     upgrade: 'websocket',

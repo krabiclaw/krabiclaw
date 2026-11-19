@@ -206,11 +206,15 @@ export async function memberAvailabilityJson(db: DbClient, env: CloudflareEnv, o
 /** The connection summary counts selected calendars without fetching each member's free/busy report. */
 export async function memberCalendarCoverageQuery(membership: ResolvedMembership) {
  const admin = await roleAllows({ ...membership, permissions: { members: ['read'] } })
+ return calendarCoverageQuery({ organization: '?', user: '?', admin: '?' }, [membership.organizationId, Number(admin), membership.userId])
+}
+
+export function calendarCoverageQuery(viewer: { organization: string; user: string; admin: string }, params: unknown[] = []) {
  return { query: `
   SELECT count(*) AS members, count(*) FILTER (WHERE json_array_length(s.calendar_ids_json) > 0) AS checking
     FROM member m JOIN user u ON u.id = m.userId
     LEFT JOIN member_scheduling s ON s.member_id = m.id AND s.organization_id = m.organizationId
-   WHERE m.organizationId = ? AND (? = 1 OR m.userId = ?)`, params: [membership.organizationId, Number(admin), membership.userId] }
+   WHERE m.organizationId = ${viewer.organization} AND (${viewer.admin} = 1 OR m.userId = ${viewer.user})`, params }
 }
 
 export async function memberCalendarCoverage(db: DbClient, membership: ResolvedMembership) {

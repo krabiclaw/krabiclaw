@@ -50,9 +50,16 @@ type Noun = keyof typeof NOUNS
 /** A card as it is built: what it counts as, where it sorts, the bookings it stands for and the local day it is on. */
 interface Card extends TodayItem { noun: Noun; order: [number, string]; bookings: string[]; day: string }
 
-export async function readToday(db: DbClient, input: { slug: string; userId: string; range: Range; now: Date; staffAccessWrites?: boolean;
-  native?: { env: CloudflareEnv; event: H3Event; query: TaskListQuery } }) {
-  const { range, now, staffAccessWrites = true, native } = input
+type TodayReadInput = { slug: string; userId: string; range: Range; now: Date; staffAccessWrites?: boolean;
+  native?: { env: CloudflareEnv; event: H3Event; query: TaskListQuery } }
+
+export async function readToday(db: DbClient, input: TodayReadInput) {
+  const plan = prepareToday(db, input)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read Today' }))
+}
+
+export function prepareToday(db: DbClient, input: TodayReadInput) {
+  const { range, now, staffAccessWrites = true } = input
   const utcDay = now.toISOString().slice(0, 10)
   const from = utcDay, to = range === 'today' ? utcDay : addLocalDays(utcDay, UPCOMING_RESERVATION_DAYS + 1)
   const wideFrom = `${addLocalDays(from, -1)}T00:00:00.000Z`, wideTo = `${addLocalDays(to, 1)}T23:59:59.999Z`
@@ -62,7 +69,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   // What only an owner or admin reads: a member's statements name no organization and read nothing.
   const managed = { sql: `CASE WHEN ${BATCH_VIEWER.organizationWide} = 1 THEN ${org} END` }
   const management = { sql: `CASE WHEN ${roleMatchesSql(BATCH_VIEWER.role!, workspaceManagementRoles)} THEN ${org} END` }
-  const [viewerResult, recordResult, workResult, productResult, locationResult, welcomeResult, factResult, unpricedResult, assigneeResult, listingResult] = await executeBatch(db, [
+  const queries = [
     membership,
     withViewer(membership, bookedRecordsInRange(BATCH_VIEWER, { from, to, pending: range === 'today', includePayments: true })),
     withViewer(membership, openWorkQuery(BATCH_VIEWER, to)),
@@ -76,7 +83,16 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
     ...setupQueries(range === 'today' ? management : { sql: 'NULL' }, { now }).map(query => withViewer(membership, query)),
     withViewer(membership, taskAssigneesQuery(managed)),
     ...(staffAccessWrites ? [withViewer(membership, staffListingsQuery(managed.sql, '(SELECT vertical FROM viewer)'))] : []),
-  ], { operation: 'Read Today' })
+  ]
+  return { queries, read: (results: D1Result[]) => presentToday(db, results, input) }
+}
+
+async function presentToday(
+  db: DbClient,
+  [viewerResult, recordResult, workResult, productResult, locationResult, welcomeResult, factResult, unpricedResult, assigneeResult, listingResult]: D1Result[],
+  input: TodayReadInput,
+) {
+  const { range, now, native, staffAccessWrites = true } = input
   const viewer = viewerResult!.results[0] as { organization_id: string; member_id: string; slug: string; vertical: string | null; role: string;
     organization_wide: number; status: string; onboarding_status: string; subdomain: string | null } | undefined
   if (!viewer) throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })

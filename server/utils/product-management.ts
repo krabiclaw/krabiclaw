@@ -1,7 +1,7 @@
 import { changedTaskIds, publishChangedJobs } from '~/server/events'
 import { isStayAmenityCodes, NEW_HOME_CANCELLATION_POLICIES, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { assertResponsibleMember, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
+import { assertResponsibleMember, ASSIGNED_SERVICE_SQL, assignedOfferingCondition, memberAccessPrincipal, resolveMembership, type OfferingReadScope } from '~/server/utils/member-access'
 import { assertPublishedHost } from '~/server/utils/public-provider'
 import type { PaymentBasis, ProductBookingSetupInput } from '~/server/utils/availability'
 import { HTTPError } from 'nitro'
@@ -257,37 +257,39 @@ function mapPriceRow(row: Row): Price {
  * x collections x details multiplies rows, and reconstructing distinct sets
  * from that product is where duplicate and dropped children come from.
  */
-function productHydrationQueries(organizationId: string, selection: BatchQuery): BatchQuery[] {
+function productHydrationQueries(organizationId: string | { sql: string }, selection: BatchQuery): BatchQuery[] {
+  const org = typeof organizationId === 'string' ? '?' : organizationId.sql
+  const params = [...(typeof organizationId === 'string' ? [organizationId] : []), ...selection.params ?? []]
   return [
     { query: `SELECT id, product_id, name, sku, active, sort_order FROM product_variants
-      WHERE organization_id = ? AND product_id IN (${selection.query}) ORDER BY sort_order, id`, params: [organizationId, ...selection.params ?? []] },
+      WHERE organization_id = ${org} AND product_id IN (${selection.query}) ORDER BY sort_order, id`, params },
     // Variants first, then each one's prices by index. Joined the other way
     // the planner walked every price of the site and re-read the product list
     // for each: 184,000 rows for one 365-dish menu.
     { query: `SELECT pr.* FROM product_variants v
       CROSS JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
-      WHERE v.organization_id = ? AND v.product_id IN (${selection.query}) AND pr.stay_date IS NULL AND pr.weekend = 0
-      ORDER BY pr.product_variant_id, pr.valid_from_at, pr.id`, params: [organizationId, ...selection.params ?? []] },
+      WHERE v.organization_id = ${org} AND v.product_id IN (${selection.query}) AND pr.stay_date IS NULL AND pr.weekend = 0
+      ORDER BY pr.product_variant_id, pr.valid_from_at, pr.id`, params },
     { query: `SELECT product_id, organization_id, published FROM product_publications
-      WHERE organization_id = ? AND product_id IN (${selection.query}) ORDER BY organization_id`, params: [organizationId, ...selection.params ?? []] },
+      WHERE organization_id = ${org} AND product_id IN (${selection.query}) ORDER BY organization_id`, params },
     { query: `SELECT product_id, location_id, active, published FROM product_locations
-      WHERE organization_id = ? AND product_id IN (${selection.query}) ORDER BY location_id`, params: [organizationId, ...selection.params ?? []] },
+      WHERE organization_id = ${org} AND product_id IN (${selection.query}) ORDER BY location_id`, params },
     { query: `SELECT product_id, collection_id, sort_order FROM collection_products
-      WHERE organization_id = ? AND product_id IN (${selection.query}) ORDER BY collection_id`, params: [organizationId, ...selection.params ?? []] },
+      WHERE organization_id = ${org} AND product_id IN (${selection.query}) ORDER BY collection_id`, params },
     // A session offering's booking; a home's is presented with its stay settings below.
     { query: `SELECT product_id, duration_minutes, seating_interval_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, advance_notice_minutes, questions,
         party_size_min, party_size_max, minimum_guest_age, accessibility_contact_required, payment_basis, payment_min_party_size FROM product_booking_configs
-      WHERE organization_id = ? AND unit = 'slot' AND product_id IN (${selection.query})`, params: [organizationId, ...selection.params ?? []] },
+      WHERE organization_id = ${org} AND unit = 'slot' AND product_id IN (${selection.query})`, params },
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
-      WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (${selection.query})`, params: [organizationId, ...selection.params ?? []] },
+      WHERE organization_id = ${org} AND row_role = 'root' AND kind = 'page' AND product_id IN (${selection.query})`, params },
     // How a home is booked is its booking configuration, presented here with what the home is.
     { query: `SELECT c.product_id, c.internal_name, c.location_id, b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, b.calendar_rules, ${stayWeekendPriceSql('c')} AS weekend_price_minor, c.property_type_group, c.property_type,
         c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
         b.cancellation_policy, b.long_term_cancellation_policy, b.assigned_member_id, b.questions, ${liveHomeSql('p')} AS live
       FROM product_stay_configs c JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id AND b.unit = 'nights'
-      WHERE c.organization_id = ? AND c.product_id IN (${selection.query})`, params: [organizationId, ...selection.params ?? []] },
+      WHERE c.organization_id = ${org} AND c.product_id IN (${selection.query})`, params },
   ]
 }
 
@@ -511,15 +513,17 @@ function productListCounts(rows: readonly { kind: ProductKind; count?: number }[
 }
 
 /** Editable catalogue pages read one extra row. Public readiness and counts precede pagination. */
-function organizationProductSelection(input: OrganizationProductListInput) {
+function organizationProductSelection(input: Omit<OrganizationProductListInput, 'organizationId' | 'assignedUserId'> & { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope }) {
+  const assignment = input.assignedUserId ? assignedOfferingCondition(input.assignedUserId) : null
+  const org = typeof input.organizationId === 'string' ? '?' : input.organizationId.sql
   const selection = `FROM products p
     LEFT JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
-    WHERE p.organization_id = ? AND (? = 0 OR (${PUBLIC_PRODUCT_SQL}))${input.productIds ? ' AND p.id IN (SELECT value FROM json_each(?))' : ''}${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${input.assignedUserId ? ` AND (${ASSIGNED_SERVICE_SQL})` : ''}`
-  const params = [input.organizationId, input.publishedOnly ? 1 : 0,
+    WHERE p.organization_id = ${org} AND (? = 0 OR (${PUBLIC_PRODUCT_SQL}))${input.productIds ? ' AND p.id IN (SELECT value FROM json_each(?))' : ''}${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${assignment ? ` AND (${assignment.unrestricted} OR (${assignment.sql}))` : ''}`
+  const params = [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.publishedOnly ? 1 : 0,
     ...(input.productIds ? [d1JsonArray(input.productIds)] : []),
     ...(input.kind ? [input.kind] : []),
     ...(input.featured === undefined ? [] : [Number(input.featured)]),
-    ...(input.assignedUserId ? [input.assignedUserId] : [])]
+    ...assignment?.params ?? []]
   return { selection, params }
 }
 
@@ -537,7 +541,7 @@ export function prepareOrganizationDishRead(organizationId: string, publishedOnl
 }
 
 /** Catalog cards need offering facts, prices and one image. The editor reads the complete product. */
-export function prepareCatalogOfferings(input: { organizationId: string; assignedUserId?: string; kind?: ProductKind; locationId?: string }) {
+export function prepareCatalogOfferings(input: { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope; kind?: ProductKind; locationId?: string }) {
   const { organizationId } = input
   const base = organizationProductSelection(input)
   const selection = `${base.selection} AND p.kind <> 'dish'${input.locationId ? ' AND EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = ?)' : ''}`
@@ -2520,15 +2524,17 @@ function collectionRows(rows: Row[], images: Awaited<ReturnType<typeof readMedia
 
 interface CollectionReadScope { organizationId: string; locationId?: string | null; assignedUserId?: string }
 
-export function prepareCollectionList(input: CollectionReadScope) {
+export function prepareCollectionList(input: { organizationId: string | { sql: string }; locationId?: string | null; assignedUserId?: OfferingReadScope }) {
+  const assignment = input.assignedUserId ? assignedOfferingCondition(input.assignedUserId) : null
+  const org = typeof input.organizationId === 'string' ? '?' : input.organizationId.sql
   const selection = `
     FROM collections
-    WHERE organization_id = ? 
+    WHERE organization_id = ${org}
       AND (? = 0 OR location_id IS ?)
-      ${input.assignedUserId ? `AND EXISTS (SELECT 1 FROM collection_products cp JOIN products p ON p.id = cp.product_id AND p.organization_id = cp.organization_id
-        WHERE cp.collection_id = collections.id AND cp.organization_id = collections.organization_id AND (${ASSIGNED_SERVICE_SQL}))` : ''}
+      ${assignment ? `AND (${assignment.unrestricted} OR EXISTS (SELECT 1 FROM collection_products cp JOIN products p ON p.id = cp.product_id AND p.organization_id = cp.organization_id
+        WHERE cp.collection_id = collections.id AND cp.organization_id = collections.organization_id AND (${assignment.sql})))` : ''}
   `
-  const params = [input.organizationId, input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...(input.assignedUserId ? [input.assignedUserId] : [])]
+  const params = [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...assignment?.params ?? []]
   return {
     queries: [
       { query: `SELECT * ${selection} ORDER BY sort_order, name, id`, params },

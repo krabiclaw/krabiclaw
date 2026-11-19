@@ -20,10 +20,12 @@ export function resolveOrganizationCmsCapabilities(verticalValue: string, themeI
 
 type OrganizationFeatureRow = { vertical: string; theme_id: string; has_stay_product: number }
 
-export function organizationFeaturesQuery(organizationId: string) {
+export function organizationFeaturesQuery(organizationId: string | { sql: string }) {
   return { query: `SELECT vertical, theme_id,
     EXISTS(SELECT 1 FROM products WHERE organization_id = organization.id AND kind = 'stay') AS has_stay_product
-    FROM organization WHERE id = ?`, params: [organizationId] }
+    FROM organization WHERE id = ${typeof organizationId === 'string' ? '?' : organizationId.sql}`,
+    params: typeof organizationId === 'string' ? [organizationId] : [],
+  }
 }
 
 export function organizationFeaturesFromRow(row: OrganizationFeatureRow | null | undefined): readonly ProductFeature[] {

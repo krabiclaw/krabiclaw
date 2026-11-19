@@ -8,7 +8,7 @@ import type { H3Event } from 'nitro'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { executeBatch, queryFirst, type DbClient } from '~/server/db'
-import { assertOrganizationWideAccess, ASSIGNED_SERVICE_SQL, DASHBOARD_ORGANIZATION_COLUMNS, joinedMembership, memberAccessPrincipal, membershipByIdQuery, membershipBySlugQuery, resolveUserOrganization, type ResolvedMembership } from '~/server/utils/member-access'
+import { assertOrganizationWideAccess, assignedOfferingCondition, DASHBOARD_ORGANIZATION_COLUMNS, joinedMembership, memberAccessPrincipal, membershipByIdQuery, membershipBySlugQuery, resolveUserOrganization, type OfferingReadScope, type ResolvedMembership } from '~/server/utils/member-access'
 
 import { parsePostalAddress } from '~/utils/postal-address'
 import { groupMediaPlacements, mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
@@ -189,7 +189,7 @@ export async function getDashboardMemberContext(event: H3Event, options: Dashboa
   const membership = slug ? membershipBySlugQuery(slug, context.userId)
     : activeId ? membershipByIdQuery(activeId, context.userId) : null
   let row = membership && await (slug && event.req.method === 'GET'
-    ? oncePerRequest(event, `dashboard-membership:${slug}`, () => queryFirst(context.db, membership.query, membership.params))
+    ? readDashboardMembership(event, slug, () => queryFirst(context.db, membership.query, membership.params))
     : queryFirst(context.db, membership.query, membership.params))
   if (!row && options.requireOrganization === false && slug && activeId) {
     const activeMembership = membershipByIdQuery(activeId, context.userId)
@@ -197,6 +197,10 @@ export async function getDashboardMemberContext(event: H3Event, options: Dashboa
   }
   if (!row && options.requireOrganization === false) return { ...context, organization: null }
   return { ...context, organization: dashboardOrganizationFrom(row) }
+}
+
+export function readDashboardMembership(event: H3Event, slug: string, read: () => Promise<unknown>) {
+  return oncePerRequest(event, `dashboard-membership:${slug}`, read)
 }
 
 export function getDashboardSession(event: H3Event, env: ReturnType<typeof cloudflareEnv>) {
@@ -320,15 +324,16 @@ export async function getDashboardLocationContext(event: H3Event, locationId: st
 }
 
 export function prepareDashboardLocations(
-  organizationId: string,
-  assignedUserId?: string,
+  organizationId: string | { sql: string },
+  assignedUserId?: OfferingReadScope,
   includeInactive = false,
   includeLogo = false,
 ) {
-  const params = assignedUserId ? [organizationId, assignedUserId] : [organizationId]
+  const assignment = assignedUserId ? assignedOfferingCondition(assignedUserId) : null
+  const params = [...(typeof organizationId === 'string' ? [organizationId] : []), ...assignment?.params ?? []]
   const visible = `FROM business_locations l
-    WHERE l.organization_id = ? ${includeInactive ? '' : "AND l.status = 'active'"}
-      ${assignedUserId ? `AND (EXISTS (SELECT 1 FROM products p WHERE p.organization_id = l.organization_id AND (${ASSIGNED_SERVICE_SQL})
+    WHERE l.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} ${includeInactive ? '' : "AND l.status = 'active'"}
+      ${assignment ? `AND (${assignment.unrestricted} OR EXISTS (SELECT 1 FROM products p WHERE p.organization_id = l.organization_id AND (${assignment.sql})
         AND (EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = l.id)
           OR EXISTS (SELECT 1 FROM product_sessions ps WHERE ps.organization_id = p.organization_id AND ps.product_id = p.id AND ps.location_id = l.id))))` : ''}`
   type Location = Omit<DashboardLocationRow, 'media' | 'social_image' | 'address'> & { address: string | null; is_stay_location: number }
@@ -337,13 +342,16 @@ export function prepareDashboardLocations(
       ${publicLocationProtectedSql('l')} AS is_stay_location ${visible} ORDER BY l.title ASC`, params },
     mediaPlacementsQuery({ organizationId, ownerType: 'business_location',
       owners: { sql: `SELECT l.id ${visible}`, params }, includeOrganizationFallback: true }),
-    ...(includeLogo ? [mediaPlacementsQuery({ organizationId, ownerType: 'organization', owners: [organizationId], slot: 'logo' })] : []),
+    ...(includeLogo ? [mediaPlacementsQuery({ organizationId, ownerType: 'organization',
+      owners: typeof organizationId === 'string' ? [organizationId] : { sql: `SELECT ${organizationId.sql}` }, slot: 'logo' })] : []),
   ]
   return { queries, read }
 
-  function read([locations, media, logo]: Awaited<ReturnType<typeof executeBatch>>) {
+  function read([locations, media, logo]: Awaited<ReturnType<typeof executeBatch>>, resolvedId?: string) {
+    const id = resolvedId ?? (typeof organizationId === 'string' ? organizationId : null)
+    if (!id) throw new Error('Location read requires the resolved organization')
     const placements = groupMediaPlacements(media!.results)
-    const organizationMedia = (placements.get(organizationId) ?? []).filter(item => item.owner_type === 'organization')
+    const organizationMedia = (placements.get(id) ?? []).filter(item => item.owner_type === 'organization')
     const rows = (locations!.results as Location[]).map(({ is_stay_location, ...location }) => {
       const ownMedia = (placements.get(location.id) ?? []).filter(item => item.owner_type === 'business_location')
       const locationMedia = publicLocationSocialMediaFromPlacements({ is_stay_location }, ownMedia, organizationMedia)
@@ -360,7 +368,7 @@ export function prepareDashboardLocations(
         social_image: locationMedia.social_image,
       }
     })
-    const organizationLogo = groupMediaPlacements(logo?.results ?? []).get(organizationId) ?? []
+    const organizationLogo = groupMediaPlacements(logo?.results ?? []).get(id) ?? []
     const organizationMediaForDashboard = organizationLogo.map(({ asset_id, slot, public_url, thumbnail_url, kind, presentation }) => ({
       asset_id, slot, public_url, thumbnail_url, kind, presentation,
     }))

@@ -514,6 +514,7 @@ function buildAuth(env: CloudflareEnv) {
     basePath: '/api/auth',
     secret: env.BETTER_AUTH_SECRET,
     trustedOrigins: trustedOriginsForAuth(env),
+    advanced: { database: { joins: true } },
     // A phone number is a notification channel a signed-in person verifies, never
     // a way to sign in. The phone plugin's password sign-in and reset are off, and
     // its verify is accepted only as an update of the caller's own number: without
@@ -1078,15 +1079,6 @@ export async function findAuthUsersByIds(env: CloudflareEnv, userIds: Array<stri
 type LinkedAccount = Pick<Account, 'id' | 'userId' | 'providerId' | 'accountId' | 'scope' | 'accessTokenExpiresAt'>
 
 /** Reads a linked account through Better Auth's adapter. Null when it has been unlinked. */
-/** Whose linked account a connection acts through: the provider identity's owner, by name and email. */
-export async function linkedAccountOwner(env: CloudflareEnv, accountId: string): Promise<{ email: string | null; name: string | null } | null> {
-  const account = await readLinkedAccount(env, accountId)
-  if (!account) return null
-  const context = await createAuth(env).$context
-  const user = await context.adapter.findOne<{ email: string | null; name: string | null }>({ model: 'user', where: [{ field: 'id', value: account.userId }], select: ['email', 'name'] })
-  return user ? { email: user.email, name: user.name } : null
-}
-
 export async function readLinkedAccount(env: CloudflareEnv, accountId: string): Promise<LinkedAccount | null> {
   const context = await createAuth(env).$context
   return context.adapter.findOne<LinkedAccount>({

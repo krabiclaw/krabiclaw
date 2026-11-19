@@ -1,7 +1,7 @@
 import type { OrganizationSettings } from '../../shared/organization-settings'
 import { INTEGRATION_PROVIDERS, NONPROFIT_STATUS_CANONICAL } from '../../shared/organization-settings'
 import type { MediaCategory } from '~/shared/media-placement-contract'
-import { sql } from "drizzle-orm"
+import { relations, sql } from "drizzle-orm"
 import { PRODUCT_KINDS } from "../../shared/product-details"
 import { REVIEW_CATEGORY_KEYS, type ReviewCategory } from "../../shared/review-questions"
 import { sqliteTable, sqliteView, integer, text, real, unique, uniqueIndex, index, check, foreignKey, primaryKey } from "drizzle-orm/sqlite-core"
@@ -3075,3 +3075,27 @@ export const member_scheduling = sqliteTable("member_scheduling", {
  foreignKey({ columns: [t.member_id, t.organization_id], foreignColumns: [member.id, member.organizationId] }).onDelete("cascade"),
  check("member_scheduling_hours_check", sql`(${t.timezone} IS NULL AND ${t.weekly_json} IS NULL AND ${t.time_off_json} IS NULL) OR (${t.timezone} IS NOT NULL AND ${t.weekly_json} IS NOT NULL AND ${t.time_off_json} IS NOT NULL)`),
 ]);
+
+// Relations read by Better Auth's Drizzle adapter.
+export const accountRelations = relations(account, ({ one }) => ({
+  user: one(user, { fields: [account.userId], references: [user.id] }),
+}))
+export const sessionRelations = relations(session, ({ one }) => ({
+  user: one(user, { fields: [session.userId], references: [user.id] }),
+}))
+export const memberRelations = relations(member, ({ one }) => ({
+  user: one(user, { fields: [member.userId], references: [user.id] }),
+  organization: one(organization, { fields: [member.organizationId], references: [organization.id] }),
+}))
+export const invitationRelations = relations(invitation, ({ one }) => ({
+  organization: one(organization, { fields: [invitation.organizationId], references: [organization.id] }),
+}))
+export const organizationRelations = relations(organization, ({ many }) => ({
+  members: many(member),
+  invitations: many(invitation),
+}))
+export const userRelations = relations(user, ({ many }) => ({
+  accounts: many(account),
+  sessions: many(session),
+  members: many(member),
+}))

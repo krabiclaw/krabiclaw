@@ -3,7 +3,7 @@ import { d1JsonArray, executeBatch, queryAll } from '~/server/db'
 import { HTTPError, type H3Event } from 'nitro'
 import { getQuery } from 'nitro/h3'
 import { getDashboardMemberContext, prepareDashboardLocations } from '~/server/utils/dashboard-context'
-import { ASSIGNED_SERVICE_SQL, roleAllows, assertRoleAllows, isOrganizationWideRole } from '~/server/utils/member-access'
+import { assignedOfferingCondition, type OfferingReadScope, roleAllows, assertRoleAllows, isOrganizationWideRole } from '~/server/utils/member-access'
 import { prepareCatalogOfferings, prepareCollectionList, listOrganizationProducts, PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
 import { readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { groupProductsByCollection } from '~/utils/product-presentation'
@@ -13,6 +13,7 @@ import { PRICING_NOTE_HANDLE } from '~/shared/product-details'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import type { CatalogRow, CatalogScreen } from '~/shared/catalog-screen'
 import type { Product } from '~/server/types/products'
+import { oncePerRequest } from '~/server/utils/request-scope'
 
 const kinds = [
   { value: 'menu', label: 'Menu' }, { value: 'experience', label: 'Experiences' },
@@ -20,7 +21,11 @@ const kinds = [
   { value: 'table', label: 'Tables' },
 ]
 
-export async function loadDashboardCatalog(event: H3Event, organizationSlug?: string) {
+export function readDashboardCatalogDocument(event: H3Event, slug: string, preloaded?: ReturnType<ReturnType<typeof prepareDashboardCatalog>['read']>) {
+  return oncePerRequest(event, `dashboard-catalog-data:${slug}`, () => loadDashboardCatalog(event, slug, preloaded))
+}
+
+export async function loadDashboardCatalog(event: H3Event, organizationSlug?: string, preloaded?: ReturnType<ReturnType<typeof prepareDashboardCatalog>['read']>) {
   const { db, organization } = await getDashboardMemberContext(event, { organizationSlug })
   if (await roleAllows({ ...organization, permissions: { menu: ['read'] } })) {
     const allowed = await queryAll<{ location_id: string }>(db, `
@@ -50,29 +55,9 @@ export async function loadDashboardCatalog(event: H3Event, organizationSlug?: st
   const query = getQuery(event)
   const kind = kinds.find(item => item.value === query.kind)?.value ?? 'all'
   const isMenu = query.view === 'menu' || query.view === 'section'
-  const offeringRead = !isMenu && kind !== 'menu' ? prepareCatalogOfferings({
-    ...scope, kind: kind === 'all' ? undefined : kind as Product['kind'],
-    locationId: typeof query.location_id === 'string' ? query.location_id : undefined,
-  }) : null
-  const collectionRead = prepareCollectionList(scope)
-  const locationRead = prepareDashboardLocations(organization.id, scope.assignedUserId, true)
-  const [identityRows, ...catalogRows] = await executeBatch(db, [
-    { query: `
-      SELECT p.id, p.kind,
-        EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id) AS has_location,
-        EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = ?) AS at_location,
-        (SELECT json_group_array(cp.collection_id) FROM collection_products cp WHERE cp.organization_id = p.organization_id AND cp.product_id = p.id) AS collection_ids
-      FROM products p WHERE p.organization_id = ?${scope.assignedUserId ? ` AND (${ASSIGNED_SERVICE_SQL})` : ''}`,
-    params: [typeof query.location_id === 'string' ? query.location_id : null, scope.organizationId, ...(scope.assignedUserId ? [scope.assignedUserId] : [])] },
-    ...collectionRead.queries,
-    ...locationRead.queries,
-    ...offeringRead?.queries ?? [],
-  ], { operation: 'Read catalog identities, sections and locations' })
-  const identities = identityRows!.results as { id: string; kind: Product['kind']; has_location: number; at_location: number; collection_ids: string }[]
-  const collections = collectionRead.read(catalogRows.slice(0, collectionRead.queries.length))
-  const offeringStart = collectionRead.queries.length + locationRead.queries.length
-  const { locations } = locationRead.read(catalogRows.slice(collectionRead.queries.length, offeringStart))
-  const offerings = offeringRead?.read(catalogRows.slice(offeringStart)) ?? []
+  const plan = prepareDashboardCatalog(scope, query)
+  const { identities, collections, locations, offerings } = preloaded
+    ?? plan.read(await executeBatch(db, plan.queries, { operation: 'Read catalog identities, sections and locations' }), organization.id)
   const location = locations.find(item => item.id === query.location_id)
   if (query.location_id !== undefined && !location) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
   const products = identities.map(product => ({ ...product, collection_ids: JSON.parse(product.collection_ids) as string[] }))
@@ -184,4 +169,39 @@ export async function loadDashboardCatalog(event: H3Event, organizationSlug?: st
     for (const row of dishRows) row.image = mediaStillUrl(images.get(row.id)?.[0])
   }
   return { screen, filters, kind, can_create, has_stays: offers('stay') }
+}
+
+export function prepareDashboardCatalog(scope: { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope }, query: Record<string, unknown>) {
+  const kind = kinds.find(item => item.value === query.kind)?.value ?? 'all'
+  const isMenu = query.view === 'menu' || query.view === 'section'
+  const offeringRead = !isMenu && kind !== 'menu' ? prepareCatalogOfferings({
+    ...scope, kind: kind === 'all' ? undefined : kind as Product['kind'],
+    locationId: typeof query.location_id === 'string' ? query.location_id : undefined,
+  }) : null
+  const collectionRead = prepareCollectionList(scope)
+  const locationRead = prepareDashboardLocations(scope.organizationId, scope.assignedUserId, true)
+  const assignment = scope.assignedUserId ? assignedOfferingCondition(scope.assignedUserId) : null
+  const org = typeof scope.organizationId === 'string' ? '?' : scope.organizationId.sql
+  const queries = [
+    { query: `
+      SELECT p.id, p.kind,
+        EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id) AS has_location,
+        EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = ?) AS at_location,
+        (SELECT json_group_array(cp.collection_id) FROM collection_products cp WHERE cp.organization_id = p.organization_id AND cp.product_id = p.id) AS collection_ids
+      FROM products p WHERE p.organization_id = ${org}${assignment ? ` AND (${assignment.unrestricted} OR (${assignment.sql}))` : ''}`,
+    params: [typeof query.location_id === 'string' ? query.location_id : null, ...(typeof scope.organizationId === 'string' ? [scope.organizationId] : []), ...assignment?.params ?? []] },
+    ...collectionRead.queries,
+    ...locationRead.queries,
+    ...offeringRead?.queries ?? [],
+  ]
+  return { queries, read }
+
+  function read([identityRows, ...catalogRows]: D1Result[], organizationId: string) {
+    const identities = identityRows!.results as { id: string; kind: Product['kind']; has_location: number; at_location: number; collection_ids: string }[]
+    const collections = collectionRead.read(catalogRows.slice(0, collectionRead.queries.length))
+    const offeringStart = collectionRead.queries.length + locationRead.queries.length
+    const { locations } = locationRead.read(catalogRows.slice(collectionRead.queries.length, offeringStart), organizationId)
+    const offerings = offeringRead?.read(catalogRows.slice(offeringStart)) ?? []
+    return { identities, collections, locations, offerings }
+  }
 }

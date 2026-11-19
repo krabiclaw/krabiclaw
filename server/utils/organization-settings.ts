@@ -11,7 +11,7 @@ import { isValidTimezone } from '~/utils/timezone'
 import { ORGANIZATION_FONT_PRESETS, isOrganizationFontPreset, resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { purgeOrganizationCaches, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import type { UpdateOrganizationSettingsRequest } from '~/server/types/organization'
-import { integrationSummary, integrationsFromRows, integrationsQuery, listIntegrations } from '~/server/utils/organization-integrations'
+import { integrationSummary, integrationsFromRows, integrationsQuery } from '~/server/utils/organization-integrations'
 import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 import { buildSingleMediaPlacementQueries, hydrateMediaAssetRefs, readMediaPlacements } from '~/server/utils/media-asset-manager'
@@ -19,7 +19,7 @@ import { applySitePalettePatch, resolveSitePalette } from '~/shared/site-palette
 import { SITE_RECIPE_KEYS, SITE_RECIPE_OPTIONS, isSiteRecipeValue, parseSiteRecipe } from '~/shared/site-recipe'
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation } from '~/shared/media-placement-contract'
 import { loadOrganizationSocialCardRefresh, refreshSocialCard, queueOrganizationSocialCardRefresh } from '~/server/utils/social-card'
-import { BUSINESS_CURRENCY_FIXED, businessCurrencyFixed, linkedAccountOwner, type CloudflareEnv } from '~/server/utils/auth'
+import { BUSINESS_CURRENCY_FIXED, businessCurrencyFixed, type CloudflareEnv } from '~/server/utils/auth'
 import { prepareFormQuestionsWrite, readFormQuestions } from '~/server/domain/form-questions'
 import { formQuestionsRevision, type FormQuestion } from '~/shared/form-questions'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
@@ -91,14 +91,30 @@ const INTEGRATION_LOCATIONS_JSON = `(SELECT json_group_array(json_object('id', i
                       LEFT JOIN media_assets hma ON hma.organization_id = hmp.organization_id AND hma.id = hmp.asset_id AND hma.status = 'active'
                      WHERE bl.organization_id = organization.id AND bl.status = 'active' ORDER BY bl.title, bl.id))`
 
-export async function loadConnectionSummary(db: DbClient, env: CloudflareEnv, organizationId: string) {
-  const [business, linked] = await executeBatch(db, [
-    { query: `SELECT ${INTEGRATION_LOCATIONS_JSON} AS locations_json FROM organization WHERE id = ?`, params: [organizationId] },
+export async function loadConnectionSummary(db: DbClient, organizationId: string, locations?: IntegrationLocation[]) {
+  const plan = prepareConnectionSummary(organizationId, locations)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read Connections and locations' }))
+}
+
+export function prepareConnectionSummary(organizationId: string | { sql: string }, locations?: IntegrationLocation[]) {
+  const org = typeof organizationId === 'string' ? '?' : organizationId.sql
+  const params = typeof organizationId === 'string' ? [organizationId] : []
+  const queries = [
     integrationsQuery(organizationId),
-  ], { operation: 'Read Connections and locations' })
-  const organization = business!.results[0] as { locations_json: string } | undefined
-  if (!organization) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
-  return integrationsSummary(db, env, organizationId, integrationsFromRows(linked!.results), JSON.parse(organization.locations_json) as IntegrationLocation[])
+    { query: `SELECT a.id AS account_id, u.email, u.name FROM account a JOIN user u ON u.id = a.userId
+      WHERE a.id IN (SELECT i.account_id FROM organization_integrations i WHERE i.organization_id = ${org} AND i.status IS NOT 'setting_up')`, params },
+    { query: `SELECT status, connected_at FROM channex_connections WHERE organization_id = ${org} ORDER BY status = 'connected' DESC, connected_at, id LIMIT 1`, params },
+    ...(locations ? [] : [{ query: `SELECT ${INTEGRATION_LOCATIONS_JSON} AS locations_json FROM organization WHERE id = ${org}`, params }]),
+  ]
+  return { queries, read: ([linked, ownerRows, channels, business]: D1Result[]) => {
+    const organization = business?.results[0] as { locations_json: string } | undefined
+    if (!locations && !organization) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
+    const addressRows = locations ?? JSON.parse(organization!.locations_json) as IntegrationLocation[]
+    const owners = new Map((ownerRows!.results as { account_id: string; email: string | null; name: string | null }[])
+      .map(({ account_id, email, name }) => [account_id, { email, name }]))
+    const channex = channels!.results[0] as { status: string; connected_at: string | null } | undefined
+    return integrationsSummary(integrationsFromRows(linked!.results), addressRows, owners, channex)
+  } }
 }
 
 export async function loadSettingsPayload(
@@ -225,7 +241,7 @@ export async function loadSettingsPayload(
     google_analytics_measurement_id: siteConfig.google_analytics_measurement_id || '',
     // The inquiry form's own questions, and the revision a write or a form names.
     ...await (async () => { const questions = await readFormQuestions(db, { kind: 'inquiry', organizationId }); return { inquiry_questions: questions, inquiry_questions_revision: formQuestionsRevision(questions) } })(),
-    integrations: await integrationsSummary(db, env, organizationId, await listIntegrations(db, organizationId), JSON.parse(updatedOrganization.locations_json) as IntegrationLocation[]),
+    integrations: await loadConnectionSummary(db, organizationId, JSON.parse(updatedOrganization.locations_json) as IntegrationLocation[]),
     vertical: updatedOrganization.vertical,
     reviews_count: Number(updatedOrganization.reviews_count || 0),
     average_rating: Number(updatedOrganization.average_rating || 0),
@@ -254,18 +270,15 @@ interface IntegrationLocation {
  * leaves — names and ids, never a token. Google Maps is per location, so
  * its answer is the locations and which of them name a place.
  */
-async function integrationsSummary(db: DbClient, env: CloudflareEnv, organizationId: string, integrations: Awaited<ReturnType<typeof listIntegrations>>, locations: IntegrationLocation[]) {
-  // Each connection names whose linked account it acts through, read from Better Auth.
-  const owners = new Map(await Promise.all([...new Set(integrations.map(integration => integration.account_id))].map(async id => [id, await linkedAccountOwner(env, id)] as const)))
+function integrationsSummary(
+  integrations: ReturnType<typeof integrationsFromRows>, locations: IntegrationLocation[],
+  owners: Map<string, { email: string | null; name: string | null }>,
+  channex: { status: string; connected_at: string | null } | undefined,
+) {
   const connected = (provider: typeof integrations[number]['provider']) => {
     const summary = integrationSummary(integrations.find(integration => integration.provider === provider) ?? null)
     return summary && { ...summary, connected_through: owners.get(summary.account_id) ?? null }
   }
-  const channex = await queryFirst<{ status: string; connected_at: string | null }>(
-    db,
-    "SELECT status, connected_at FROM channex_connections WHERE organization_id = ? ORDER BY status = 'connected' DESC, connected_at, id LIMIT 1",
-    [organizationId],
-  )
   return {
     google_maps: locations.map(location => ({ ...location, address: formatPostalAddress(parsePostalAddress(location.address)) || null })),
     google_calendar: (() => { const row = integrations.find(row => row.provider === 'google_calendar'); return row ? { account_id: row.account_id, calendar_name: row.target_name, status: row.status, last_error: row.last_error, connected_at: row.created_at, connected_through: owners.get(row.account_id) ?? null } : null })(),

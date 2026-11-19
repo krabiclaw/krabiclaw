@@ -13,6 +13,8 @@ import { publishEvent } from '~/server/events'
 import { scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { z } from 'zod'
+import { oncePerRequest } from '~/server/utils/request-scope'
+import { getDashboardContext } from '~/server/utils/dashboard-context'
 
 export interface CalendarChoice { id: string; summary: string; accessRole: string; description?: string; primary?: boolean }
 export class CalendarSelectionConflict extends Error {}
@@ -178,19 +180,20 @@ export function calendarEvent(subject: CalendarSubject, managementUrl: string | 
     ...(consultation ? { attendees, guestsCanInviteOthers: false, guestsCanModify: false, guestsCanSeeOtherGuests: false } : {}),
   }
 }
-const calendarIntegrationSql = `SELECT account_id, target_id AS calendar_id, target_name AS calendar_name, status, last_error, revision, created_at, updated_at
-  FROM organization_integrations WHERE organization_id=? AND provider='google_calendar' AND status <> 'setting_up'`
+const calendarIntegrationSql = (organization: string) => `SELECT account_id, target_id AS calendar_id, target_name AS calendar_name, status, last_error, revision, created_at, updated_at
+  FROM organization_integrations WHERE organization_id=${organization} AND provider='google_calendar' AND status <> 'setting_up'`
 
 export async function readCalendarIntegration(db: DbClient, organizationId: string): Promise<GoogleCalendarIntegration | null> {
-  return (await queryFirst<GoogleCalendarIntegration>(db, calendarIntegrationSql, [organizationId])) ?? null
+  return (await queryFirst<GoogleCalendarIntegration>(db, calendarIntegrationSql('?'), [organizationId])) ?? null
 }
 
-function calendarConnectionQuery(organizationId: string) {
+export function calendarConnectionQuery(organizationId: string | { sql: string }) {
+  const organization = typeof organizationId === 'string' ? '?' : organizationId.sql
   return {
     query: `SELECT calendar.*, CASE WHEN calendar.status = 'disabled' THEN EXISTS (
-      SELECT 1 FROM google_calendar_event_links WHERE organization_id = ? AND state <> 'deleted'
-    ) ELSE 0 END AS cleanup_pending FROM (${calendarIntegrationSql}) calendar`,
-    params: [organizationId, organizationId],
+      SELECT 1 FROM google_calendar_event_links WHERE organization_id = ${organization} AND state <> 'deleted'
+    ) ELSE 0 END AS cleanup_pending FROM (${calendarIntegrationSql(organization)}) calendar`,
+    params: typeof organizationId === 'string' ? [organizationId, organizationId] : [],
   }
 }
 
@@ -467,10 +470,20 @@ export async function readGoogleCalendarSettings(event: H3Event, organizationId:
 }
 
 export async function readCalendarSettingsForMember(db: DbClient, membership: Parameters<typeof memberCalendarCoverageQuery>[0]) {
-  const [calendarResult, coverageResult] = await executeBatch(db, [
+  return calendarSettingsFromRows(await executeBatch(db, [
     calendarConnectionQuery(membership.organizationId),
     await memberCalendarCoverageQuery(membership),
-  ], { operation: 'Read Google Calendar connection and coverage' })
+  ], { operation: 'Read Google Calendar connection and coverage' }))
+}
+
+export function readCalendarSettingsDocument(event: H3Event, orgSlug: string, preloaded?: ReturnType<typeof calendarSettingsFromRows>) {
+  return oncePerRequest(event, `dashboard-google-calendar:${orgSlug}`, async () => {
+    const { db, organization } = await getDashboardContext(event, { organizationSlug: orgSlug })
+    return preloaded ?? readCalendarSettingsForMember(db, organization)
+  })
+}
+
+export function calendarSettingsFromRows([calendarResult, coverageResult]: D1Result[]) {
   const connection = calendarConnectionFromRow(calendarResult!.results[0] as (GoogleCalendarIntegration & { cleanup_pending: number }) | undefined)
   const coverage = connection.calendar && connection.calendar.status !== 'disabled'
     ? coverageResult!.results[0] as { members: number; checking: number } : null

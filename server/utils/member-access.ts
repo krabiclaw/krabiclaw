@@ -521,11 +521,23 @@ export function locationMemberSql(organizationSql: string, locationSql: string, 
 }
 
 /** The offering's responsibility, using the same member matching. */
-export const ASSIGNED_SERVICE_SQL = `(p.kind = 'service' OR p.kind = 'experience' OR p.kind = 'table') AND EXISTS (
+function assignedServiceSql(user: string) {
+  return `(p.kind = 'service' OR p.kind = 'experience' OR p.kind = 'table') AND EXISTS (
   SELECT 1 FROM product_booking_configs c
   WHERE c.organization_id = p.organization_id AND c.product_id = p.id
-    AND ${assignedMemberSql('c')}
+    AND ${assignedMemberSql('c', user)}
 )`
+}
+
+export const ASSIGNED_SERVICE_SQL = assignedServiceSql('?')
+
+export type OfferingReadScope = string | { user: string; unrestricted: string }
+
+export function assignedOfferingCondition(scope: OfferingReadScope) {
+  return typeof scope === 'string'
+    ? { sql: ASSIGNED_SERVICE_SQL, params: [scope], unrestricted: '0' }
+    : { sql: assignedServiceSql(scope.user), params: [], unrestricted: scope.unrestricted }
+}
 
 export async function assertProductAccess(db: DbClient, input: MemberAccessPrincipal & { productId: string; patch?: Record<string, unknown> }): Promise<void> {
   if (await roleAllows({ ...input, permissions: { products: ['update'] } })) return

@@ -105,7 +105,7 @@ function kindWhere(kind: NonNullable<ListGuestThreadsOptions['kind']>): string {
  * which mailbox, which kind, what was searched, joined to the viewer's own
  * participant row `me`. Params run in SQL order: the `me` join, then the WHERE.
  */
-function inboxScope(organizationId: string | null, opts: ListGuestThreadsOptions, now: string) {
+function inboxScope(organizationId: string | { sql: string } | null, opts: ListGuestThreadsOptions, now: string) {
   if (!organizationId && !opts.buyerAudience) throw new Error('Conversation list requires organization scope')
   if (!opts.userId) throw new Error('Conversation list requires the viewer')
   const params: Array<string | number> = [opts.userId]
@@ -114,7 +114,8 @@ function inboxScope(organizationId: string | null, opts: ListGuestThreadsOptions
   const access = participantGuard('gt', opts.userId, opts.buyerAudience ? 'guest' : 'member')
   let where = access.sql
   params.push(...access.params)
-  if (organizationId) { where += ' AND gt.organization_id = ?'; params.push(organizationId) }
+  if (typeof organizationId === 'string') { where += ' AND gt.organization_id = ?'; params.push(organizationId) }
+  else if (organizationId) where += ` AND gt.organization_id = ${organizationId.sql}`
   if (opts.conversationIds) {
     where += " AND gt.id IN (SELECT value FROM json_each(?))"
     params.push(d1JsonStringSet(opts.conversationIds))
@@ -298,7 +299,7 @@ function previewFrom(message: LatestMessage, context: { guestName: string; viewe
  * the nav's dot: the list's access scope and the one unread statement, without
  * the page's filters.
  */
-export function hasUnreadQuery(organizationId: string | null, opts: Pick<ListGuestThreadsOptions, 'userId' | 'buyerAudience'>, now: Date): BatchQuery {
+export function hasUnreadQuery(organizationId: string | { sql: string } | null, opts: Pick<ListGuestThreadsOptions, 'userId' | 'buyerAudience'>, now: Date): BatchQuery {
   const scope = inboxScope(organizationId, { userId: opts.userId, buyerAudience: opts.buyerAudience, mailbox: 'current' }, now.toISOString())
   const unread = unreadSql('gt', opts.userId)
   return { query: `SELECT EXISTS (SELECT 1 FROM ${scope.from} WHERE ${scope.where} AND ${unread.sql}) AS has_unread`, params: [...scope.params, ...unread.params] }

@@ -41,8 +41,10 @@ export async function readIntegration(db: DbClient, organizationId: string, prov
   return row ? project(row) : null
 }
 
-export function integrationsQuery(organizationId: string) {
-  return { query: `SELECT ${COLUMNS} FROM organization_integrations WHERE organization_id = ? AND status IS NOT 'setting_up' ORDER BY provider`, params: [organizationId] }
+export function integrationsQuery(organizationId: string | { sql: string }) {
+  return { query: `SELECT ${COLUMNS} FROM organization_integrations WHERE organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND status IS NOT 'setting_up' ORDER BY provider`,
+    params: typeof organizationId === 'string' ? [organizationId] : [],
+  }
 }
 
 export function integrationsFromRows(rows: unknown[]): OrganizationIntegration[] {

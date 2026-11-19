@@ -5,8 +5,8 @@ import { PUBLIC_CACHE_REVISION_SQL, publicCacheRevision } from '~/server/utils/e
 
 import { HTTPError, defineHandler  } from 'nitro';
 import type { H3Event } from 'nitro';
-import { redirect, setResponseHeader } from 'nitro/h3';
-import { queryFirst, type DbClient } from "~/server/db";
+import { getQuery, redirect, setResponseHeader } from 'nitro/h3';
+import { executeBatch, queryFirst, type DbClient } from "~/server/db";
 import { TENANT_TYPES } from "~/utils/tenant-routing";
 import { cloudflareEnv, isInternalSelfFetch } from "../utils/api-response";
 import {
@@ -24,6 +24,19 @@ import { parseSiteRecipe } from '~/shared/site-recipe'
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation, type SiteLogo } from '~/shared/media-placement-contract'
 import { publicTenantPageSql } from '~/server/utils/content/pages'
 import { BROWSER_ERROR_PATH } from '~/shared/error-telemetry'
+import { dashboardMemberQuery, getDashboardSession, readDashboardMembership } from '~/server/utils/dashboard-context'
+import { prepareDashboardWorkspaceAccess, readDashboardWorkspaceAccess } from '~/server/utils/dashboard-context-service'
+import { BATCH_VIEWER, withViewer } from '~/server/utils/member-access'
+import { prepareToday } from '~/server/domain/today'
+import { staffAccessWritesEnabled } from '~/server/domain/listing-access'
+import { readDashboardTodayDocument } from '~/server/utils/dashboard-today'
+import { readPublicSourceLocale, sourceLocaleQuery } from '~/server/utils/localization'
+import { roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
+import { calendarCoverageQuery } from '~/server/domain/member-scheduling'
+import { calendarConnectionQuery, calendarSettingsFromRows, readCalendarSettingsDocument } from '~/server/utils/google-calendar'
+import { prepareConnectionSummary } from '~/server/utils/organization-settings'
+import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
+import { prepareDashboardCatalog, readDashboardCatalogDocument } from '~/server/utils/dashboard-catalog'
 
 interface TenantRow {
   id: string;
@@ -82,10 +95,8 @@ const TENANT_SELECT_SQL = `SELECT o.id,
 // Blawby's own tenant is the one active organization running the platform
 // site. Platform hosts differ per environment (localhost, staging, the
 // apex), so the host itself is not the key; the site is.
-async function resolvePlatformTenant(db: DbClient): Promise<TenantRow | null> {
-  return await queryFirst<TenantRow>(
-    db,
-    `
+function platformTenantQuery() {
+  return { query: `
       ${TENANT_SELECT_SQL},
              canonical.domain AS canonical_domain
       FROM organization o
@@ -93,9 +104,61 @@ async function resolvePlatformTenant(db: DbClient): Promise<TenantRow | null> {
         ON canonical.organization_id = o.id AND canonical.role = 'canonical' AND canonical.status = 'active'
       WHERE o.theme_id = ? AND o.status = 'active' AND o.onboarding_status = 'active'
       LIMIT 1
-    `,
-    [PLATFORM_SITE.themeId],
-  )
+    `, params: [PLATFORM_SITE.themeId] }
+}
+
+async function resolvePlatformTenant(db: DbClient): Promise<TenantRow | null> {
+  const { query, params } = platformTenantQuery()
+  return queryFirst<TenantRow>(db, query, params)
+}
+
+async function resolveDashboardTenant(event: H3Event, slug: string, panel: string) {
+  const { db, env, membership, organizationFrom, userId } = await dashboardMemberQuery(event, slug)
+  const host = platformTenantQuery()
+  const locale = sourceLocaleQuery({ sql: '(SELECT id FROM viewer)' })
+  const workspace = prepareDashboardWorkspaceAccess({ sql: BATCH_VIEWER.organization }, userId, true)
+  const today = panel === '' ? prepareToday(db, {
+    slug, userId, now: new Date(), range: event.url.searchParams.get('range') === 'upcoming' ? 'upcoming' : 'today',
+    staffAccessWrites: staffAccessWritesEnabled(env),
+  }) : null
+  const managedOrg = { sql: `CASE WHEN ${BATCH_VIEWER.organizationWide} = 1 THEN ${BATCH_VIEWER.organization} END` }
+  const connections = /^\/integrations(?:\/|$)/.test(panel) ? prepareConnectionSummary(managedOrg) : null
+  const google = panel === '/integrations/google-calendar' ? [
+    calendarConnectionQuery(managedOrg),
+    calendarCoverageQuery({ organization: managedOrg.sql, user: BATCH_VIEWER.user,
+      admin: roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ members: ['read'] })) }),
+  ] : null
+  const query = getQuery(event)
+  const catalogRead = { products: ['read'] } as const
+  const catalogRoles = [...rolesAllowing({ products: ['read'] }), ...rolesAllowing({ products: ['assigned'] })]
+  const catalog = panel === '/products' && query.view !== 'menu' && query.view !== 'section'
+    ? prepareDashboardCatalog({
+      organizationId: { sql: `CASE WHEN ${roleMatchesSql(BATCH_VIEWER.role!, catalogRoles)} THEN ${BATCH_VIEWER.organization} END` },
+      assignedUserId: { user: BATCH_VIEWER.user, unrestricted: roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ products: [...catalogRead.products] })) },
+    }, query) : null
+  const [tenantResult, localeResult, viewerResult, ...rest] = await executeBatch(db, [
+    host, withViewer(host, locale), membership,
+    ...workspace.queries.map(query => withViewer(membership, query)),
+    ...(today?.queries.slice(1) ?? []),
+    ...(connections?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(google?.map(query => withViewer(membership, query)) ?? []),
+    ...(catalog?.queries.map(query => withViewer(membership, query)) ?? []),
+  ], { operation: 'Read the dashboard document' })
+  const tenant = tenantResult!.results[0] as TenantRow | undefined
+  if (!tenant) return null
+  await readPublicSourceLocale(event, db, tenant.id, localeResult!.results)
+  const viewer = viewerResult!.results[0]
+  const organization = organizationFrom(viewer)
+  await readDashboardMembership(event, slug, async () => viewer)
+  await readDashboardWorkspaceAccess(event, { db, env, organization }, true, workspace.read(rest.slice(0, workspace.queries.length), organization.id))
+  const panelRows = rest.slice(workspace.queries.length)
+  if (today) await readDashboardTodayDocument(event, slug, () => today.read([viewerResult!, ...panelRows]))
+  if (connections && (viewer as { organization_wide: number }).organization_wide === 1) {
+    await readDashboardConnectionsDocument(event, slug, connections.read(panelRows))
+    if (google) await readCalendarSettingsDocument(event, slug, calendarSettingsFromRows(panelRows.slice(connections.queries.length)))
+  }
+  if (catalog) await readDashboardCatalogDocument(event, slug, catalog.read(panelRows, organization.id))
+  return tenant
 }
 
 function publicTenantMedia(tenant: Pick<TenantRow, 'media_json'>) {
@@ -296,12 +359,17 @@ export default defineHandler(async (event) => {
   const aliasSlug = environmentTenantAliasSlug(host, env)
   const requestedSlug = previewSlug ?? aliasSlug
   const isPlatformRequest = requestedSlug === null && isPlatformHost(host, env)
+  const workspaceSlug = isPlatformRequest && event.method === 'GET'
+    ? /^\/dashboard\/([a-z0-9-]+)(?:\/|$)/.exec(tenantPath)?.[1] : undefined
+  const workspaceDocument = workspaceSlug && !['account', 'app', 'onboarding', 'select-organization'].includes(workspaceSlug)
+    && await getDashboardSession(event, env)
   const tenant = requestedSlug !== null
     ? env.db && /^[a-z0-9-]+$/.test(requestedSlug)
       ? await resolveRegisteredSubdomainTenant(env.db, requestedSlug)
       : null
     : isPlatformRequest
-      ? env.db ? await resolvePlatformTenant(env.db) : null
+      ? workspaceDocument && workspaceSlug ? await resolveDashboardTenant(event, workspaceSlug, tenantPath.slice(`/dashboard/${workspaceSlug}`.length))
+        : env.db ? await resolvePlatformTenant(env.db) : null
       : await resolveTenant(host, event)
 
   if (tenant && isSpentSubdomainResolution(tenant)) {

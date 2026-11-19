@@ -3,6 +3,7 @@ import {
   dashboardOrgQueryParam,
   getDashboardMemberContext,
   prepareDashboardLocations,
+  type DashboardOrganizationRow,
 } from '~/server/utils/dashboard-context'
 import { executeBatch } from '~/server/db'
 import { prepareOrganizationPlan } from '~/server/utils/billing-access'
@@ -15,22 +16,33 @@ export function readDashboardWorkspaceAccess(
   event: H3Event,
   { db, organization }: Pick<Awaited<ReturnType<typeof getDashboardMemberContext>>, 'db' | 'env' | 'organization'>,
   includeLocations = Boolean(event.context.dashboardDocumentProvider),
+  preloaded?: Awaited<ReturnType<ReturnType<typeof prepareDashboardWorkspaceAccess>['read']>>,
 ) {
   return oncePerRequest(event, `dashboard-workspace-access:${organization.id}:${includeLocations}`, async () => {
-    const plan = prepareOrganizationPlan(organization.id)
-    const locations = includeLocations ? prepareDashboardLocations(organization.id, undefined, false, true) : null
-    const [subscription, featureRows, unread, ...locationRows] = await executeBatch(db, [
-      plan.query,
-      organizationFeaturesQuery(organization.id),
-      ...(locations ? [hasUnreadQuery(organization.id, { userId: organization.userId }, new Date()), ...locations.queries] : []),
-    ], { operation: 'Read dashboard workspace access' })
-    return {
-      effective_plan: plan.read(subscription!),
-      features: organizationFeaturesFromRow(featureRows!.results[0] as Parameters<typeof organizationFeaturesFromRow>[0]),
-      locationData: locations?.read(locationRows),
-      has_unread: locations ? presentHasUnread(unread) : undefined,
-    }
+    if (preloaded) return preloaded
+    const plan = prepareDashboardWorkspaceAccess(organization.id, organization.userId, includeLocations)
+    return plan.read(await executeBatch(db, plan.queries, { operation: 'Read dashboard workspace access' }), organization.id)
   })
+}
+
+export function prepareDashboardWorkspaceAccess(organizationId: string | { sql: string }, userId: string, includeLocations: boolean) {
+  const plan = prepareOrganizationPlan(organizationId)
+  const locations = includeLocations ? prepareDashboardLocations(organizationId, undefined, false, true) : null
+  return {
+    queries: [
+      plan.query,
+      organizationFeaturesQuery(organizationId),
+      ...(locations ? [hasUnreadQuery(organizationId, { userId }, new Date()), ...locations.queries] : []),
+    ],
+    read([subscription, featureRows, unread, ...locationRows]: D1Result[], resolvedId: string) {
+      return {
+        effective_plan: plan.read(subscription!, resolvedId),
+        features: organizationFeaturesFromRow(featureRows!.results[0] as Parameters<typeof organizationFeaturesFromRow>[0]),
+        locationData: locations?.read(locationRows, resolvedId),
+        has_unread: locations ? presentHasUnread(unread) : undefined,
+      }
+    },
+  }
 }
 
 // The scope is the route's `org` query param. No organization is a 400 and one
@@ -52,10 +64,16 @@ export async function loadDashboardContext(
   recordRequestPhase(event, 'context', contextStartedAt)
 
   const resourcesStartedAt = performance.now()
-  const { effective_plan, features, locationData, has_unread } = await readDashboardWorkspaceAccess(event, context, true)
-  const { locations, media } = locationData!
+  const access = await readDashboardWorkspaceAccess(event, context, true)
   recordRequestPhase(event, 'resources', resourcesStartedAt)
+  return presentDashboardContext(organization, access)
+}
 
+export function presentDashboardContext(
+  organization: DashboardOrganizationRow,
+  { effective_plan, features, locationData, has_unread }: Awaited<ReturnType<typeof readDashboardWorkspaceAccess>>,
+) {
+  const { locations, media } = locationData!
   const { memberId, ...business } = organization
   return {
     success: true as const,

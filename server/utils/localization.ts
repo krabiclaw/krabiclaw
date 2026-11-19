@@ -104,9 +104,11 @@ export function assertExactCanonicalLocale(value: unknown): string {
   return canonical
 }
 
-export function sourceLocaleQuery(organizationId: string): BatchQuery {
+export function sourceLocaleQuery(organizationId: string | { sql: string }): BatchQuery {
   return { query: `SELECT id, organization_id, locale, label, is_source, status, created_at, updated_at
-      FROM organization_locales WHERE organization_id = ? AND is_source = 1 ORDER BY id`, params: [organizationId] }
+      FROM organization_locales WHERE organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND is_source = 1 ORDER BY id`,
+    params: typeof organizationId === 'string' ? [organizationId] : [],
+  }
 }
 
 export function sourceLocaleFromRows(organizationId: string, rows: unknown[]): OrganizationLocaleRecord {
@@ -120,8 +122,9 @@ export async function getPersistedSourceLocale(db: DbClient, organizationId: str
   return sourceLocaleFromRows(organizationId, await queryAll(db, query, params))
 }
 
-export function readPublicSourceLocale(event: H3Event, db: DbClient, organizationId: string): Promise<OrganizationLocaleRecord> {
-  return oncePerRequest(event, `public-source-locale:${organizationId}`, () => getPersistedSourceLocale(db, organizationId))
+export function readPublicSourceLocale(event: H3Event, db: DbClient, organizationId: string, results?: unknown[]): Promise<OrganizationLocaleRecord> {
+  return oncePerRequest(event, `public-source-locale:${organizationId}`, async () =>
+    results ? sourceLocaleFromRows(organizationId, results) : getPersistedSourceLocale(db, organizationId))
 }
 
 export function requireSourceLocale(organizationId: string, locale: string | null, status: string | null): string {

@@ -168,18 +168,19 @@ export async function getOrganizationPlan(
   return plan.read(result!)
 }
 
-export function prepareOrganizationPlan(organizationId: string, now = new Date()) {
-  if (!organizationId.trim()) throw new Error('An organization ID is required for the plan read')
+export function prepareOrganizationPlan(organizationId: string | { sql: string }, now = new Date()) {
   const query = {
     query: `SELECT id, referenceId, plan, status, periodEnd FROM subscription
-      WHERE referenceId = ? AND status IN (${ENTITLING_STATUSES.map(() => '?').join(', ')})`,
-    params: [organizationId, ...ENTITLING_STATUSES],
+      WHERE referenceId = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND status IN (${ENTITLING_STATUSES.map(() => '?').join(', ')})`,
+    params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...ENTITLING_STATUSES],
   }
   return {
     query,
-    read(result: D1Result) {
+    read(result: D1Result, resolvedId?: string) {
+      const id = resolvedId ?? (typeof organizationId === 'string' ? organizationId : null)
+      if (!id?.trim()) throw new Error('An organization ID is required for the plan read')
       const rows = result.results as (Omit<EntitlementRow, 'periodEnd'> & { periodEnd: number | null })[]
-      return planFromSubscriptions(organizationId, rows.map(row => ({
+      return planFromSubscriptions(id, rows.map(row => ({
         ...row, periodEnd: row.periodEnd === null ? null : new Date(row.periodEnd * 1000),
       })), now)
     },
