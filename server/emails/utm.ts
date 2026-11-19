@@ -16,6 +16,8 @@ export function appendEmailUtms(rawUrl: string | null | undefined, params: Email
 
   try {
     const url = new URL(trimmed)
+    if (url.pathname.startsWith('/dashboard/')) return rawUrl
+
     if (!url.searchParams.has('utm_source')) {
       url.searchParams.set('utm_source', params.source ?? 'blawby')
     }
