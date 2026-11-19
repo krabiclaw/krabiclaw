@@ -4,8 +4,7 @@ import { HTTPError } from 'nitro';
 
 import type { H3Event } from 'nitro'
 import { executeBatch, queryFirst, type DbClient } from '~/server/db'
-import { listLocationQa } from '~/server/utils/location-qa'
-import { requireLocationAccess, requireOrganizationAccess, requireProductAccess } from '~/server/utils/location-access'
+import { requireOrganizationAccess, requireProductAccess } from '~/server/utils/location-access'
 import {
   assertLocationAccess,
   assertResourceAccess,
@@ -37,15 +36,6 @@ async function editorPreviewToken(secret: unknown, organizationId: string) {
     throw new HTTPError({ statusCode: 500, statusMessage: 'PREVIEW_SECRET is required for editor previews' })
   }
   return await createPreviewToken(secret, organizationId, Date.now() + PREVIEW_TOKEN_TTL_MS)
-}
-
-export async function loadDashboardLocationQa(
-  event: H3Event,
-  organizationId: string,
-  locationId: string,
-) {
-  const { db } = await requireLocationAccess(event, organizationId, locationId)
-  return { qa: await listLocationQa(db, organizationId, locationId) }
 }
 
 export interface DashboardMediaFilters {

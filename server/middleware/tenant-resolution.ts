@@ -48,8 +48,8 @@ import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
 import { prepareSocialConnections, presentSocialConnections } from '~/server/utils/social-publication'
 import { preparePost, preparePostList } from '~/server/utils/post-management'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
-import { qaListQuery, qaPageScopesQuery } from '~/server/utils/location-qa'
-import { rendersWebsiteDocument, websiteBlogPost, websitePageVariant, websiteSocialPost } from '~/utils/dashboard-document'
+import { prepareDashboardQa } from '~/server/utils/location-qa'
+import { rendersWebsiteDocument, websiteBlogPost, websitePageVariant, websiteQuestion, websiteSocialPost } from '~/utils/dashboard-document'
 import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
 import { prepareDashboardCatalog, readDashboardCatalogDocument } from '~/server/utils/dashboard-catalog'
 import { setDashboardSocketScope } from '~/server/utils/dashboard-socket-scope'
@@ -363,7 +363,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
   const query = getQuery(event)
   const website = rendersWebsiteDocument(panel, query) ? prepareWebsiteSettings(managedOrg, env) : null
   const websitePanel = website ? panel.split('/')[2] : undefined
-  const websiteList = prepareWebsitePanel(managedOrg, websitePanel, query)
+  const websiteList = prepareWebsitePanel(managedOrg, websitePanel, query, websiteQuestion(panel))
   const variantId = websitePageVariant(panel)
   const websiteEditor = variantId && variantId !== 'new' ? prepareTenantPageEditor(variantId) : null
   const postId = website && websiteSocialPost(panel)
@@ -447,7 +447,8 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
       if (agenda) await agenda.apply(event, panelRows.slice(1), { env, organization })
     }
     if (earnings && panelRows[2]?.results.length) earnings.apply(event, panelRows, organization)
-    if (website && (viewer as { organization_wide: number }).organization_wide === 1) {
+    const wholeWorkspace = (viewer as { organization_wide: number }).organization_wide === 1
+    if (website && (wholeWorkspace || websitePanel === 'qa' && typeof query.location_id === 'string')) {
       const content = new Map<string, unknown>()
       let offset = website.queries.length
       if (websiteList) {
@@ -478,7 +479,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
           ? { channels: [], requires_live_validation: true }
           : await presentSocialConnections(env, organization.id, { dashboardBase: dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null }) }, saved))
       }
-      event.context.dashboardWebsite = { settings: website.read(panelRows.slice(0, website.queries.length)), content }
+      event.context.dashboardWebsite = { settings: wholeWorkspace ? website.read(panelRows.slice(0, website.queries.length)) : null, content }
     }
     setResponseHeader(event, 'cache-control', 'private, no-store')
     await setDashboardSocketScope(event, env, { slug, organizationId: organization.id, sessionId: session.session.id, userId })
@@ -486,7 +487,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
   }
 }
 
-function prepareWebsitePanel(organization: { sql: string }, panel: string | undefined, query: Record<string, unknown>) {
+function prepareWebsitePanel(organization: { sql: string }, panel: string | undefined, query: Record<string, unknown>, qaId: string | null) {
   if (panel === 'reviews') {
     const reviews = prepareOrganizationReviews(organization, { locationId: typeof query.location_id === 'string' ? query.location_id.trim() : null })
     return { queries: reviews.queries, read: (rows: D1Result[], id: string) => ({ endpoint: 'reviews', value: { reviews: reviews.read(rows, id) } }) }
@@ -501,10 +502,15 @@ function prepareWebsitePanel(organization: { sql: string }, panel: string | unde
       endpoint: 'posts', value: { success: true, ...list.read(rows, { resource: `posts:${id}::` }) },
     }) }
   }
-  if (panel === 'qa') {
+  if (panel === 'qa' && qaId !== 'new') {
+    const location = typeof query.location_id === 'string' ? query.location_id : null
+    const qa = prepareDashboardQa(location, qaId ? { id: qaId } : { ...query, scopes: '1' })
     return {
-      queries: [qaListQuery(organization, null, 'en', false, typeof query.page_path === 'string' ? query.page_path : null), qaPageScopesQuery(organization)],
-      read: ([questions, scopes]: D1Result[]) => ({ endpoint: 'qa', value: { qa: questions!.results, page_scopes: scopes!.results } }),
+      queries: qa.queries,
+      read: (rows: D1Result[]) => ({
+        endpoint: location ? `locations/${location}/qa` : 'qa',
+        value: qa.read(rows),
+      }),
     }
   }
   return null

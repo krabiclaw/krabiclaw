@@ -17,7 +17,13 @@ export function websiteSocialPost(panel: string) {
   return segment ? decodeURIComponent(segment) : null
 }
 
+export function websiteQuestion(panel: string) {
+  const segment = /^\/website\/qa\/([^/]+)(?:\/|$)/.exec(panel)?.[1]
+  return segment ? decodeURIComponent(segment) : null
+}
+
 export function rendersWebsiteDocument(panel: string, query: Record<string, unknown>) {
-  return Boolean(websitePageVariant(panel) || websiteBlogPost(panel) || (query.location_id === undefined && websiteSocialPost(panel))) || /^\/website(?:\/(?:pages|reviews|brand|preferences|blog|posts|qa))?\/?$/.test(panel)
-    && (!/^\/website\/(?:posts|qa)\/?$/.test(panel) || query.location_id === undefined)
+  return Boolean(websitePageVariant(panel) || websiteBlogPost(panel) || websiteQuestion(panel)
+    || (query.location_id === undefined && websiteSocialPost(panel))) || /^\/website(?:\/(?:pages|reviews|brand|preferences|blog|posts|qa))?\/?$/.test(panel)
+    && (!/^\/website\/posts\/?$/.test(panel) || query.location_id === undefined)
 }

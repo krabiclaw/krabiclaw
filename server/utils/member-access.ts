@@ -612,14 +612,17 @@ export async function assertLocationAccess(db: DbClient, input: MemberAccessPrin
   if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Location not found or access denied' })
 }
 
-export function resourceLocationScopeSql(viewer: ViewerTerms, alias: string) {
+export function locationAccessSql(viewer: ViewerTerms, alias: string) {
   const manages = roleMatchesSql(viewer.role!, rolesAllowing({ locations: ['update'] }))
   const assigned = roleMatchesSql(viewer.role!, rolesAllowing({ locations: ['assigned'] }))
+  return `(${manages} OR (${assigned} AND ${locationMemberSql(`${alias}.organization_id`, `${alias}.id`, viewer.user)}))`
+}
+
+export function resourceLocationScopeSql(viewer: ViewerTerms, alias: string) {
   const wide = roleMatchesSql(viewer.role!, workspaceManagementRoles)
   return `((${alias}.location_id IS NULL AND ${wide}) OR EXISTS (
     SELECT 1 FROM business_locations bl WHERE bl.id = ${alias}.location_id
-      AND bl.organization_id = ${alias}.organization_id
-      AND (${manages} OR (${assigned} AND ${locationMemberSql('bl.organization_id', 'bl.id', viewer.user)}))
+      AND bl.organization_id = ${alias}.organization_id AND ${locationAccessSql(viewer, 'bl')}
   ))`
 }
 
